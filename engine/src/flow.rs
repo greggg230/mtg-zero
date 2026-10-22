@@ -298,6 +298,7 @@ impl Game {
             pl.noncreature_cast = 0;
             pl.gained_life = false;
         }
+        self.resolved.clear();
         let pl = &mut self.players[next as usize];
         pl.last_turn = n;
         pl.turns += 1;

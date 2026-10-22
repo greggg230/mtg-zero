@@ -654,6 +654,184 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::ApplyPtPerCount { on, filter, p, t } => {
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let n = self.battlefield.iter().filter(|&&c| self.card_matches(filter, c, &ctx)).count() as i32;
+                let (dp, dt) = ((*p as i32 * n).clamp(-999, 999), (*t as i32 * n).clamp(-999, 999));
+                for c in self.objs_on(f, on) {
+                    let r = self.obj_ref(c);
+                    self.add_effect(Affected::Obj(r), Mod::Pt(dp, dt), crate::layers::Until::EndOfTurn, f.controller);
+                }
+                Flow::Next
+            }
+            Ext::TapOrUntap { on } => {
+                let Some(&c) = self.objs_on(f, on).first() else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Number(0)) => self.tap(c),
+                    Some(Choice::Number(1)) => self.untap(c),
+                    Some(Choice::Pass) => {}
+                    Some(other) => unreachable!("tap/untap answer {other:?}"),
+                    None => {
+                        let opts = vec![
+                            Opt { action: act::NUMBER, choice: Choice::Number(0) },
+                            Opt { action: act::NUMBER + 1, choice: Choice::Number(1) },
+                            Opt { action: act::PASS, choice: Choice::Pass },
+                        ];
+                        self.ask(Task::Run(f.clone()), f.controller, DecisionKind::ChooseMode, opts);
+                        return Flow::Suspend;
+                    }
+                }
+                Flow::Next
+            }
+            Ext::CreateTokensFor { who, token, n } => {
+                if let Some(p) = self.who(f, *who) {
+                    let def = self.db.token_def(*token);
+                    for _ in 0..*n {
+                        self.create_token(def, p, false);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::CreateTokensAttacking { token, n, tapped } => {
+                use crate::game::Step;
+                let def = self.db.token_def(*token);
+                let in_combat = matches!(
+                    self.turn.step,
+                    Step::DeclareAttackers | Step::DeclareBlockers | Step::FirstStrikeDamage | Step::CombatDamage
+                );
+                for k in 0..*n {
+                    let c = self.create_token(def, f.controller, *tapped);
+                    if in_combat && f.controller == self.turn.active && self.objs[c.i()].zone == Zone::Battlefield {
+                        self.objs[c.i()].attacking = true;
+                    }
+                    if k == 0 {
+                        f.made = Some(c);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::GraveyardToBottomRandom { who } => {
+                if let Some(p) = self.who(f, *who) {
+                    let cards = self.players[p as usize].graveyard.clone();
+                    self.put_on_bottom_randomly(p, cards);
+                }
+                Flow::Next
+            }
+            Ext::PileRestBottomRandom => {
+                let pile = std::mem::take(&mut f.pile);
+                if let Some(&c) = pile.first() {
+                    let owner = self.objs[c.i()].owner;
+                    self.put_on_bottom_randomly(owner, pile);
+                }
+                Flow::Next
+            }
+            Ext::DamageFrom { event_obj, amount, tgt, no_lifegain } => {
+                let n = self.amount(f, *amount);
+                let src = if *event_obj {
+                    match f.ev.obj {
+                        Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => {
+                            self.damage_source_of(r.idx)
+                        }
+                        // Gone: its characteristics as a card, last controlled
+                        // by the ability's controller (CR 608.2h, simplified).
+                        Some(r) => crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) },
+                        None => return Flow::Next,
+                    }
+                } else {
+                    self.frame_damage_source(f)
+                };
+                for t in self.targets_of(f, *tgt) {
+                    let dealt = self.deal_damage(src, t, n);
+                    if let (true, Target::Player(p)) = (*no_lifegain && dealt > 0, t) {
+                        self.players[p as usize].cant_gain_life = true;
+                        self.note(|_| format!("P{p} can't gain life for the rest of the game"));
+                    }
+                }
+                Flow::Next
+            }
+            Ext::CounterOrDoubleOnSecond { on } => {
+                let n = match self.resolved.iter_mut().find(|x| x.0 == f.source) {
+                    Some(x) => {
+                        x.1 = x.1.saturating_add(1);
+                        x.1
+                    }
+                    None => {
+                        self.resolved.push((f.source, 1));
+                        1
+                    }
+                };
+                for c in self.objs_on(f, on) {
+                    if n == 2 {
+                        let have = self.counters_on(c, crate::db::Counter::P1P1);
+                        self.add_counters(c, crate::db::Counter::P1P1, have);
+                    } else {
+                        self.add_counters(c, crate::db::Counter::P1P1, 1);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::SacrificeThen { filter, optional, skip } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
+                        self.sacrifice(c);
+                        Flow::Next
+                    }
+                    Some(Choice::Pass) => Flow::Jump(*skip),
+                    Some(other) => unreachable!("sacrifice answer {other:?}"),
+                    None => {
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let mut opts: Vec<Opt> = self
+                            .permanents_of(p)
+                            .filter(|&c| self.card_matches(filter, c, &ctx))
+                            .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                            .collect();
+                        if opts.is_empty() {
+                            return Flow::Jump(*skip);
+                        }
+                        if *optional {
+                            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::Sacrifice, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::MayRemoveCounterThen { skip } => {
+                let Some(&c) = self.objs_on(f, &On::Source).first() else { return Flow::Jump(*skip) };
+                let kinds = self.counters_of(c);
+                match self.answer.take() {
+                    Some(Choice::Number(k)) => {
+                        self.remove_counters(c, kinds[k as usize].0, 1);
+                        Flow::Next
+                    }
+                    Some(Choice::Pass) => Flow::Jump(*skip),
+                    Some(other) => unreachable!("counter answer {other:?}"),
+                    None => {
+                        if kinds.is_empty() {
+                            return Flow::Jump(*skip);
+                        }
+                        let mut opts: Vec<Opt> = (0..kinds.len().min(16))
+                            .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
+                            .collect();
+                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        self.ask(Task::Run(f.clone()), f.controller, DecisionKind::ChooseMode, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::Reflexive { k } => {
+                let base = self.db.def(f.source_def).delayed_base;
+                self.waiting.push(crate::triggers::PendingTrigger {
+                    controller: f.controller,
+                    source: f.source,
+                    source_def: f.source_def,
+                    slot: base + k,
+                    ev: f.ev,
+                });
+                Flow::Next
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

@@ -238,6 +238,14 @@ impl Game {
                 }
             }
             Amount::LkiManaValue => f.x,
+            Amount::EventObjPower => match f.ev.obj {
+                Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => self.power(r.idx),
+                Some(r) => match self.objs[r.idx.i()].lki_power {
+                    Some((inc, p)) if inc == r.inc => p,
+                    _ => 0,
+                },
+                None => 0,
+            },
         }
     }
 

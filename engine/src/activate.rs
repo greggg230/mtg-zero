@@ -218,6 +218,10 @@ impl Game {
                 return false;
             }
         }
+        let in_gy = self.objs[card.i()].zone == Zone::Graveyard;
+        if cost.exile_graveyard as usize > pl.graveyard.len() - in_gy as usize {
+            return false;
+        }
         if mana.is_zero() {
             return true;
         }
@@ -277,6 +281,7 @@ impl Game {
         let n_disc = n_sac + cost.discard as usize;
         let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
         let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
+        let n_gy = n_bounce + cost.exile_graveyard as usize;
         if let Some(ch) = self.answer.take() {
             let Choice::Card(c) = ch else { unreachable!("cost answer {ch:?}") };
             if picked.len() < n_sac {
@@ -326,6 +331,24 @@ impl Game {
                 .collect();
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::BounceCost, opts);
             return;
+        }
+        if picked.len() < n_gy {
+            // Graveyard cards to exile, a set: picked in increasing
+            // position, leaving enough later ones.
+            let gy = &self.players[p as usize].graveyard;
+            let after = picked[n_bounce..].last().map(|c| gy.iter().position(|x| x == c).unwrap() + 1).unwrap_or(0);
+            let still = n_gy - picked.len();
+            let opts: Vec<Opt> = gy
+                .iter()
+                .enumerate()
+                .filter(|&(i, &c)| i >= after && gy.len() - i >= still && c != card)
+                .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
+                .collect();
+            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChooseGraveyardCard, opts);
+            return;
+        }
+        for &c in &picked[n_bounce..n_gy] {
+            self.move_card(c, Zone::Exile, Pos::Top);
         }
         // Permanents returned as a cost leave together.
         let mut bounced: Vec<CardIdx> = picked[n_exile..n_bounce].to_vec();

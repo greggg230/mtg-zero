@@ -68,6 +68,25 @@ fn apply(b: &mut Builder, on: On, mods: Vec<Mod>, until: Until) {
     b.op(Op::Ext(Ext::Apply { on, mods, until }));
 }
 
+/// The IR printing of a predefined token named by an effect ("creates
+/// two Map tokens"), as the IR writes it where a card spells it out.
+const MAP_TOKEN: &str = r#"{"$t": "CardPrinting", "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}", "sacrifice_self": true, "tap_self": true}, "effect": {"$t": "Explore", "target": true}, "sorcery_speed": true}], "card_types": ["Artifact"], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Map", "subtypes": ["Map"], "supertypes": ["Token"], "type_line": "Token Artifact \u2014 Map"}"#;
+
+/// A predefined token by name (CR 111.10).
+pub(crate) fn named_token(l: &mut Lowerer, name: &str) -> Option<u16> {
+    let json = match name {
+        "Map" => MAP_TOKEN,
+        other => {
+            l.unsupported(format!("token({other})"));
+            return None;
+        }
+    };
+    let p: cats::CardPrinting = serde_json::from_str(json).expect("predefined token printing");
+    let cats::CardPrinting::CardPrinting(tp) = &p;
+    let def = super::printing::lower_printing(l, tp);
+    Some(l.token(def))
+}
+
 /// A keyword by its IR spelling (equipment bonuses list them as strings).
 pub(crate) fn kw_by_name(s: &str) -> Option<Kw> {
     Some(match s {
@@ -453,6 +472,23 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             match inner {
                 E::DiscardSelf(nodes::DiscardSelf { amount }) if *amount == 1 => {
                     let at = b.op(Op::Ext(Ext::DiscardThen { skip: 0, optional }));
+                    lower_effect(l, b, then_action);
+                    b.patch(at);
+                }
+                E::SacrificeAPermanent(nodes::SacrificeAPermanent { permanent_filter, another, label }) => {
+                    // "[You may] sacrifice [another] <filter>. If you do, ..."
+                    let _ = label; // display text
+                    let mut f = match permanent_filter {
+                        Some(p) => match super::filter::lower_pred(l, p) {
+                            Some(f) => f,
+                            None => return true,
+                        },
+                        None => Filter::Type(types::PERMANENT),
+                    };
+                    if *another {
+                        f = and(f, not(Filter::Source));
+                    }
+                    let at = b.op(Op::Ext(Ext::SacrificeThen { filter: f, optional, skip: 0 }));
                     lower_effect(l, b, then_action);
                     b.patch(at);
                 }
@@ -906,6 +942,172 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 enums::DelayedStep::End => DelayedWhen::NextEndStep,
             };
             b.op(Op::Ext(Ext::Delay { k, when, about: About::Nothing }));
+        }
+        E::PutPlusOneCountersOnTargetThenGrantKeywordsUEOT(nodes::PutPlusOneCountersOnTargetThenGrantKeywordsUEOT {
+            amount,
+            targets,
+            granted_keywords,
+        }) => {
+            // "Put n +1/+1 counters on target <creature>[; it gains <kws>
+            // until end of turn]."
+            let n = l.int("PutPlusOneCountersOnTargetThenGrantKeywordsUEOT.amount", *amount, 1, 20);
+            let Some(t) = lower_targets(l, b, targets, "PutPlusOneCountersOnTargetThenGrantKeywordsUEOT") else { return true };
+            b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::P1P1, n: Amount::Fixed(n) }));
+            let mods = keyword_mods(l, granted_keywords);
+            if !mods.is_empty() {
+                apply(b, On::Target(t), mods, Until::EndOfTurn);
+            }
+        }
+        E::PumpTargetCreatureByFormulaUEOT(nodes::PumpTargetCreatureByFormulaUEOT {
+            amount,
+            power_sign,
+            toughness_sign,
+            targets,
+        }) => {
+            // "Target creature gets +-X/+-X until end of turn, where X is
+            // <factor> times the number of <permanents> you control."
+            let (filter, factor) = match amount.as_deref() {
+                Some(cats::Formula::Scaled(nodes::Scaled { inner, factor })) => match &**inner {
+                    cats::Formula::CountControlledMatching(nodes::CountControlledMatching { predicate }) => {
+                        (super::filter::lower_pred(l, predicate), l.int("Scaled.factor", *factor, 1, 9))
+                    }
+                    other => {
+                        l.unsupported(format!("Formula:Scaled({})", other.tag()));
+                        return true;
+                    }
+                },
+                Some(cats::Formula::CountControlledMatching(nodes::CountControlledMatching { predicate })) => {
+                    (super::filter::lower_pred(l, predicate), 1)
+                }
+                Some(other) => {
+                    l.unsupported(format!("Formula:{}", other.tag()));
+                    return true;
+                }
+                None => {
+                    l.unsupported("PumpTargetCreatureByFormulaUEOT.amount(missing)");
+                    return true;
+                }
+            };
+            let Some(filter) = filter else { return true };
+            let ps = l.int("PumpTargetCreatureByFormulaUEOT.power_sign", *power_sign, -1, 1);
+            let ts = l.int("PumpTargetCreatureByFormulaUEOT.toughness_sign", *toughness_sign, -1, 1);
+            let Some(t) = lower_targets(l, b, targets, "PumpTargetCreatureByFormulaUEOT") else { return true };
+            let filter = and(filter, Filter::Controller(true));
+            b.op(Op::Ext(Ext::ApplyPtPerCount {
+                on: On::Target(t),
+                filter,
+                p: (ps * factor) as i8,
+                t: (ts * factor) as i8,
+            }));
+        }
+        E::UntapTargetOtherPermanent(nodes::UntapTargetOtherPermanent {}) => {
+            // "Untap another target permanent."
+            let t = b.target(and(Filter::Type(types::PERMANENT), not(Filter::Source)), 1, 1);
+            b.op(Op::Untap { tgt: t });
+        }
+        E::MayTapOrUntapTarget(nodes::MayTapOrUntapTarget { targets }) => {
+            // "You may tap or untap target creature."
+            let Some(t) = lower_targets(l, b, targets, "MayTapOrUntapTarget") else { return true };
+            b.op(Op::Ext(Ext::TapOrUntap { on: On::Target(t) }));
+        }
+        E::TargetPlayerPutsGraveyardOnBottomRandom(nodes::TargetPlayerPutsGraveyardOnBottomRandom { up_to_one }) => {
+            // "[Up to one] target player puts all the cards from their
+            // graveyard on the bottom of their library in a random order."
+            let t = b.target(Filter::Player, if *up_to_one { 0 } else { 1 }, 1);
+            b.op(Op::Ext(Ext::GraveyardToBottomRandom { who: Who::TargetPlayer(t) }));
+        }
+        E::CreateAttackingTokenForEachOpponent(nodes::CreateAttackingTokenForEachOpponent { token_printing }) => {
+            // "For each opponent, create a <token> that's tapped and
+            // attacking that player" (one opponent).
+            let Some(tp) = token_printing else {
+                l.unsupported("CreateAttackingTokenForEachOpponent.token_printing(missing)");
+                return true;
+            };
+            let cats::CardPrinting::CardPrinting(tp) = &**tp;
+            let def = super::printing::lower_printing(l, tp);
+            if !def.token {
+                l.unsupported("CreateAttackingTokenForEachOpponent.token_printing(not a token)");
+            }
+            let token = l.token(def);
+            b.op(Op::Ext(Ext::CreateTokensAttacking { token, n: 1, tapped: true }));
+        }
+        E::DealDamageFromEvent(nodes::DealDamageFromEvent {
+            amount,
+            targets,
+            subject_slot,
+            to_defending_player,
+            no_lifegain_if_player_hit,
+        }) => {
+            // "That creature deals damage equal to its power to any
+            // target" (Pyrogoyf); "it deals that much damage to any other
+            // target" (Screaming Nemesis).
+            l.deny("DealDamageFromEvent.to_defending_player", to_defending_player);
+            let amount = match amount.as_deref() {
+                Some(cats::Formula::EventSubjectPower(nodes::EventSubjectPower {})) => Amount::EventObjPower,
+                Some(cats::Formula::ResolvingDamageAmount(nodes::ResolvingDamageAmount {})) => Amount::EventAmount,
+                Some(other) => {
+                    l.unsupported(format!("Formula:{}", other.tag()));
+                    return true;
+                }
+                None => {
+                    l.unsupported("DealDamageFromEvent.amount(missing)");
+                    return true;
+                }
+            };
+            let event_obj = match subject_slot {
+                None => false,
+                Some(enums::EventSubject::Obj) => true,
+                Some(other) => {
+                    l.unsupported(format!("DealDamageFromEvent.subject_slot({other:?})"));
+                    return true;
+                }
+            };
+            if amount == Amount::EventObjPower && !event_obj {
+                l.unsupported("DealDamageFromEvent.amount(power without a subject)");
+            }
+            let Some(t) = lower_targets(l, b, targets, "DealDamageFromEvent") else { return true };
+            b.op(Op::Ext(Ext::DamageFrom { event_obj, amount, tgt: t, no_lifegain: *no_lifegain_if_player_hit }));
+        }
+        E::PutCounterDoublingOnSecondResolution(nodes::PutCounterDoublingOnSecondResolution { targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "PutCounterDoublingOnSecondResolution") else { return true };
+            b.op(Op::Ext(Ext::CounterOrDoubleOnSecond { on: On::Target(t) }));
+        }
+        E::ReflexiveWhenYouDo(nodes::ReflexiveWhenYouDo { cost, effect, event_player_controls }) => {
+            // "You may <cost>. When you do, <effect>" (CR 603.12): the
+            // effect is a reflexive triggered ability; its targets are
+            // chosen as it is put on the stack.
+            let skip = match cost.as_deref() {
+                Some(E::RemoveACounterFromSelf(nodes::RemoveACounterFromSelf {})) => {
+                    b.op(Op::Ext(Ext::MayRemoveCounterThen { skip: 0 }))
+                }
+                Some(other) => {
+                    l.unsupported(format!("ReflexiveWhenYouDo.cost({})", other.tag()));
+                    return true;
+                }
+                None => {
+                    l.unsupported("ReflexiveWhenYouDo.cost(missing)");
+                    return true;
+                }
+            };
+            let Some(effect) = effect else {
+                l.unsupported("ReflexiveWhenYouDo.effect(missing)");
+                return true;
+            };
+            let mut d = Builder::default();
+            lower_effect(l, &mut d, effect);
+            if *event_player_controls {
+                // "... that player controls": the player dealt combat
+                // damage by a creature you control is your opponent (2p).
+                if d.targets.len() != 1 {
+                    l.unsupported("ReflexiveWhenYouDo.event_player_controls(targets)");
+                } else {
+                    let f = std::mem::replace(&mut d.targets[0].filter, Filter::Any);
+                    d.targets[0].filter = and(f, Filter::Controller(false));
+                }
+            }
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::Reflexive { k }));
+            b.patch(skip);
         }
         E::SacrificeSelfIfEvoked(nodes::SacrificeSelfIfEvoked {}) => {
             // (The "if evoked" is the trigger's: Source(WasEvoked).)

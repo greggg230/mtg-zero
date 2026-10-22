@@ -41,6 +41,10 @@ pub enum Amount {
     SourcePower,
     /// The mana value of the card last remembered (`Ext::RevealTopToHand`).
     LkiManaValue,
+    /// The power of the triggered ability's event object ("its power"):
+    /// now if it is still on the battlefield, else as it last existed there
+    /// (CR 608.2h).
+    EventObjPower,
 }
 
 /// Which objects an `Ext` op acts on.
@@ -190,6 +194,46 @@ pub enum Ext {
     /// +1/+1 counter on the creature, and they may put the card into their
     /// graveyard. Choice: yes/no.
     Explore { on: On },
+    /// Each object of `on` gets +p*N/+t*N until end of turn, N the number
+    /// of permanents matching `filter` as it resolves (locked in, CR
+    /// 608.2h).
+    ApplyPtPerCount { on: On, filter: Filter, p: i8, t: i8 },
+    /// The controller may tap or untap each object of `on`. Choice:
+    /// `NUMBER` 0 = tap, 1 = untap; `PASS` = neither.
+    TapOrUntap { on: On },
+    /// `who` creates n tokens.
+    CreateTokensFor { who: Who, token: u16, n: u8 },
+    /// Create n tokens [tapped] and attacking (CR 508.4: not declared as
+    /// attackers); outside combat, or for a player not attacking, they
+    /// just enter (506.3).
+    CreateTokensAttacking { token: u16, n: u8, tapped: bool },
+    /// `who` puts all the cards from their graveyard on the bottom of
+    /// their library in a random order.
+    GraveyardToBottomRandom { who: Who },
+    /// The rest of the looked-at pile goes on the bottom in a random order.
+    PileRestBottomRandom,
+    /// Damage `amount` to each legal target of requirement `tgt`, dealt by
+    /// the event object ("that creature deals damage") if `event_obj`,
+    /// else the source. With `no_lifegain`, a player dealt damage this way
+    /// can't gain life for the rest of the game.
+    DamageFrom { event_obj: bool, amount: Amount, tgt: u8, no_lifegain: bool },
+    /// Put a +1/+1 counter on each object of `on`; if this is the second
+    /// time this ability (of this source object) resolved this turn,
+    /// double the +1/+1 counters on it instead.
+    CounterOrDoubleOnSecond { on: On },
+    /// "[You may] sacrifice <filter>. If you do, ...": the controller
+    /// sacrifices a permanent they control matching `filter` (or, if
+    /// `optional`, declines), else continues at `skip`. Choice: a
+    /// permanent, or `PASS`.
+    SacrificeThen { filter: Filter, optional: bool, skip: u16 },
+    /// "You may remove a counter from this. When you do, ...": choose a
+    /// kind of counter on the source to remove one of, or decline (or
+    /// none: continue at `skip`). Choice: `NUMBER` k = the k-th kind, or
+    /// `PASS`.
+    MayRemoveCounterThen { skip: u16 },
+    /// A reflexive triggered ability (CR 603.12): delayed ability `k` of
+    /// the source's card triggers now, about the same event.
+    Reflexive { k: u8 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -358,7 +402,7 @@ pub enum Op {
 impl Op {
     /// Does the op read its triggered ability's event?
     pub fn uses_event(&self) -> bool {
-        let amt = |a: &Amount| matches!(a, Amount::EventAmount);
+        let amt = |a: &Amount| matches!(a, Amount::EventAmount | Amount::EventObjPower);
         let who = |w: &Who| matches!(w, Who::EventPlayer);
         match self {
             Op::Ext(Ext::Apply { on, .. })
@@ -372,6 +416,12 @@ impl Op {
             Op::Ext(Ext::Mill { who: w, n }) => who(w) || amt(n),
             Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
             Op::Ext(Ext::AddColorless { n }) => amt(n),
+            Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
+            Op::Ext(Ext::Reflexive { .. }) => true,
+            Op::Ext(Ext::ApplyPtPerCount { on, .. })
+            | Op::Ext(Ext::TapOrUntap { on })
+            | Op::Ext(Ext::CounterOrDoubleOnSecond { on }) => matches!(on, On::EventObj),
+            Op::Ext(Ext::CreateTokensFor { who: w, .. }) | Op::Ext(Ext::GraveyardToBottomRandom { who: w }) => who(w),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {
@@ -393,6 +443,8 @@ impl Op {
             Op::Ext(Ext::JumpUnlessLkiYours { to }) => Some(to),
             Op::Ext(Ext::JumpUnlessAlt { to }) => Some(to),
             Op::Ext(Ext::JumpUnlessMadeYours { to }) => Some(to),
+            Op::Ext(Ext::SacrificeThen { skip, .. }) => Some(skip),
+            Op::Ext(Ext::MayRemoveCounterThen { skip }) => Some(skip),
             _ => None,
         }
     }

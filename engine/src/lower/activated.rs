@@ -144,7 +144,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     l.deny("ActivationCost.tap_permanent_you_control", tap_permanent_you_control);
     l.deny("ActivationCost.tap_permanent_type", tap_permanent_type);
     l.deny("ActivationCost.exile_artifact_from_graveyard", exile_artifact_from_graveyard);
-    l.deny("ActivationCost.exile_cards_from_graveyard", exile_cards_from_graveyard);
     l.deny("ActivationCost.return_unblocked_attacker", return_unblocked_attacker);
     l.deny("ActivationCost.remove_plus_one_counter_from_your_creature", remove_plus_one_counter_from_your_creature);
     l.deny("ActivationCost.sacrifice_food", sacrifice_food);
@@ -176,6 +175,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         discard: *discard_a_card as u8,
         exile_from_hand: None,
         bounce: None,
+        exile_graveyard: l.int("ActivationCost.exile_cards_from_graveyard", *exile_cards_from_graveyard, 0, 20) as u8,
     };
     match from {
         From::Battlefield => {

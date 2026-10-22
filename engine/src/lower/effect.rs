@@ -247,6 +247,8 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 GainPower,
                 /// "If you controlled it, draw n cards."
                 IfYouControlledDraw(i32),
+                /// "Its controller creates n <named> tokens."
+                ControllerTokens(u16, u8),
                 /// "Its controller [may] search their library for a basic
                 /// land card, put it onto the battlefield tapped, then
                 /// shuffle."
@@ -262,6 +264,10 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 })) => Some(Rider::SearchBasic { optional: *optional }),
                 Some(cats::RemovalRider::IfYouControlledItDraw(nodes::IfYouControlledItDraw { amount })) => {
                     Some(Rider::IfYouControlledDraw(l.int("IfYouControlledItDraw.amount", *amount, 1, 9)))
+                }
+                Some(cats::RemovalRider::ControllerCreatesTokens(nodes::ControllerCreatesTokens { token_name, count })) => {
+                    let n = l.int("ControllerCreatesTokens.count", *count, 1, 9) as u8;
+                    super::effect_ext::named_token(l, token_name).map(|t| Rider::ControllerTokens(t, n))
                 }
                 Some(other) => {
                     l.unsupported(format!("RemovalRider:{}", other.tag()));
@@ -313,6 +319,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 None => {}
                 Some(Rider::GainPower) => {
                     b.op(Op::GainLife { who: Who::LkiController, n: Amount::LkiPower });
+                }
+                Some(Rider::ControllerTokens(token, n)) => {
+                    b.op(Op::Ext(crate::program::Ext::CreateTokensFor { who: Who::LkiController, token, n }));
                 }
                 Some(Rider::IfYouControlledDraw(n)) => {
                     let at = b.op(Op::Ext(crate::program::Ext::JumpUnlessLkiYours { to: 0 }));
@@ -635,7 +644,6 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             // "Look at (reveal) the top N cards; put K [matching] of them
             // into your hand [you may]; the rest on the bottom in any order
             // / into your graveyard."
-            l.deny("LookAtTopCardsPutIntoHand.rest_random", rest_random);
             let n = match count {
                 unions::IntOrFormula::Int(n) => l.int("LookAtTopCardsPutIntoHand.count", *n, 1, 20) as u8,
                 unions::IntOrFormula::Formula(f) => {
@@ -656,10 +664,20 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 rest: false,
                 reveal: *reveal_taken,
             });
-            b.op(pile_rest(match rest_zone {
-                enums::RestZone::Bottom => PileDest::Bottom,
-                enums::RestZone::Graveyard => PileDest::Graveyard,
-            }));
+            match (rest_zone, rest_random) {
+                // "... the rest on the bottom of your library in a random
+                // order."
+                (enums::RestZone::Bottom, true) => {
+                    b.op(Op::Ext(crate::program::Ext::PileRestBottomRandom));
+                }
+                (enums::RestZone::Bottom, false) => {
+                    b.op(pile_rest(PileDest::Bottom));
+                }
+                (enums::RestZone::Graveyard, false) => {
+                    b.op(pile_rest(PileDest::Graveyard));
+                }
+                (enums::RestZone::Graveyard, true) => l.unsupported("LookAtTopCardsPutIntoHand.rest_random(graveyard)"),
+            }
         }
         E::TargetPlayerRevealsHandYouChooseDiscard(nodes::TargetPlayerRevealsHandYouChooseDiscard {
             card_filter,
@@ -691,7 +709,6 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             // "Create N <token>" (CR 111.2): the token's definition is
             // lowered like a card's and interned.
             l.deny("CreateToken.each_player", each_player);
-            l.deny("CreateToken.attacking", attacking);
             l.deny("CreateToken.schedule_end_of_combat_sacrifice", schedule_end_of_combat_sacrifice);
             let n = l.int("CreateToken.count", *count, 1, 20) as u8;
             let cats::CardPrinting::CardPrinting(tp) = &**token_printing;
@@ -700,7 +717,11 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 l.unsupported("CreateToken.token_printing(not a token)");
             }
             let token = l.token(def);
-            b.op(Op::CreateToken { token, n, tapped: *tapped });
+            if *attacking {
+                b.op(Op::Ext(crate::program::Ext::CreateTokensAttacking { token, n, tapped: *tapped }));
+            } else {
+                b.op(Op::CreateToken { token, n, tapped: *tapped });
+            }
         }
         E::EachOpponentSacrificesCreature(nodes::EachOpponentSacrificesCreature {}) => {
             // "Each opponent sacrifices a nontoken creature of their choice."

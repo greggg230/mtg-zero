@@ -586,6 +586,8 @@ pub struct Cost {
     /// Return n permanents you control matching the filter to their
     /// owner's hand.
     pub bounce: Option<SacCost>,
+    /// Exile n cards from your graveyard (chosen as the cost is paid).
+    pub exile_graveyard: u8,
 }
 
 /// An alternative cost (CR 118.9): paid instead of the mana cost.

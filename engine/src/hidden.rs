@@ -376,6 +376,34 @@ impl Game {
         self.tidy_clouds();
     }
 
+    /// Cards just put into `owner`'s library in an order nobody knows: the
+    /// owner forgets them (an owner's knowledge is exact or nothing), and
+    /// what another player knew of them becomes "somewhere in that
+    /// library" (a cloud over the library: the owner's own determinize
+    /// keeps them there, so it stays true in every world).
+    pub(crate) fn forget_order(&mut self, owner: PlayerId, cards: &[CardIdx]) {
+        for q in 0..2u8 {
+            if q == owner {
+                continue;
+            }
+            let mut defs = Vec::new();
+            for &c in cards {
+                let o = &mut self.objs[c.i()];
+                if o.known & (1 << q) != 0 {
+                    o.known &= !(1 << q);
+                    insert_sorted(&mut defs, o.def);
+                }
+            }
+            if !defs.is_empty() {
+                self.clouds.push(Cloud { viewer: q, owner, hand: false, library: true, slots: Vec::new(), defs });
+            }
+        }
+        for &c in cards {
+            self.objs[c.i()].known &= !(1 << owner);
+        }
+        self.tidy_clouds();
+    }
+
     /// Merge clouds with intersecting domains (same viewer and owner); drop
     /// empty clouds and clouds over all of the owner's hidden cards (they
     /// say nothing a determinize would not keep anyway).

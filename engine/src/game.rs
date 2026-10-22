@@ -73,6 +73,9 @@ pub struct Obj {
     pub attached: Option<ObjRef>,
     /// It entered as an evoked spell (CR 702.74a).
     pub evoked: bool,
+    /// Last known information of its last time on the battlefield (CR
+    /// 608.2h): (its `inc` there, its power as it left).
+    pub lki_power: Option<(u16, i32)>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -106,6 +109,8 @@ pub struct Player {
     pub noncreature_cast: u8,
     /// Gained life this turn.
     pub gained_life: bool,
+    /// Can't gain life for the rest of the game (Screaming Nemesis).
+    pub cant_gain_life: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -294,6 +299,9 @@ pub struct Game {
     pub(crate) links: Vec<Link>,
     /// Delayed triggered abilities waiting for their moment (CR 603.7).
     pub(crate) delayed: Vec<Delayed>,
+    /// How many times abilities of these objects resolved this turn
+    /// ("if this is the second time this ability has resolved this turn").
+    pub(crate) resolved: Vec<(ObjRef, u8)>,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -361,6 +369,7 @@ impl Game {
             spells_cast: 0,
             noncreature_cast: 0,
             gained_life: false,
+            cant_gain_life: false,
         };
         Game {
             db,
@@ -404,6 +413,7 @@ impl Game {
             leaving: Vec::new(),
             links: Vec::new(),
             delayed: Vec::new(),
+            resolved: Vec::new(),
             batching: false,
             entering_cast: false,
             entering_evoked: false,
@@ -433,6 +443,7 @@ impl Game {
             known: 0,
             attached: None,
             evoked: false,
+            lki_power: None,
         });
         idx
     }
@@ -639,6 +650,7 @@ impl Game {
             }
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
         }
+        let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
         if let Some(list) = self.zone_list(idx, from) {
             let i = list.iter().position(|&c| c == idx).expect("card in its zone list");
             list.remove(i);
@@ -678,6 +690,9 @@ impl Game {
             o.known = if to.is_hidden() { known_before } else { 0b11 };
             o.attached = None;
             o.evoked = to == Zone::Battlefield && std::mem::take(&mut self.entering_evoked);
+            if lki_power.is_some() {
+                o.lki_power = lki_power;
+            }
         }
         self.layers_on_move(idx, old, from, to);
         if from == Zone::Battlefield && self.batching {
@@ -777,6 +792,19 @@ impl Game {
         self.players[p as usize].library = lib;
     }
 
+    /// Put cards on the bottom of `p`'s library in a random order. Nobody
+    /// knows the order (ENGINE.md 10).
+    pub(crate) fn put_on_bottom_randomly(&mut self, p: PlayerId, mut cards: Vec<CardIdx>) {
+        if cards.is_empty() {
+            return;
+        }
+        self.rng.shuffle(&mut cards);
+        for &c in &cards {
+            self.move_card(c, Zone::Library, Pos::Bottom);
+        }
+        self.forget_order(p, &cards);
+    }
+
     /// Tap a permanent (a "becomes tapped" event if it was untapped).
     pub(crate) fn tap(&mut self, idx: CardIdx) {
         if !self.objs[idx.i()].tapped && self.objs[idx.i()].zone == Zone::Battlefield {
@@ -819,7 +847,7 @@ impl Game {
     }
 
     pub(crate) fn gain_life(&mut self, p: PlayerId, n: i32) {
-        if n > 0 {
+        if n > 0 && !self.players[p as usize].cant_gain_life {
             self.players[p as usize].life += n;
             self.players[p as usize].gained_life = true;
         }
