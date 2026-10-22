@@ -440,15 +440,22 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             apply(b, On::Target(t), vec![m], Until::EndOfTurn);
         }
         E::IfYouDo(nodes::IfYouDo { do_action, then_action }) => {
-            // "You may <do>. If you do, <then>": an optional action whose
-            // effect is all-or-nothing here (a discard needs a card).
-            match &**do_action {
+            // "[You may] <do>. If you do, <then>": the action happens or
+            // not (a discard needs a card); `then` only if it did.
+            let (inner, optional) = match &**do_action {
+                E::MayDo(nodes::MayDo { inner, prompt }) => {
+                    let _ = prompt; // display text
+                    (&**inner, true)
+                }
+                other => (other, false),
+            };
+            match inner {
                 E::DiscardSelf(nodes::DiscardSelf { amount }) if *amount == 1 => {
-                    let at = b.op(Op::Ext(Ext::MayDiscard { skip: 0 }));
+                    let at = b.op(Op::Ext(Ext::DiscardThen { skip: 0, optional }));
                     lower_effect(l, b, then_action);
                     b.patch(at);
                 }
-                other => l.unsupported(format!("IfYouDo.do_action({})", other.tag())),
+                other => l.unsupported(format!("IfYouDo.do_action({}{})", if optional { "MayDo:" } else { "" }, other.tag())),
             }
         }
         E::PutPlusOneCounterOnEachOfUpToNTargetCreatures(nodes::PutPlusOneCounterOnEachOfUpToNTargetCreatures { max_n }) => {
@@ -554,6 +561,150 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::Explore(nodes::Explore { target }) => {
             let on = if *target { On::Target(b.target(and(creature(), Filter::Controller(true)), 1, 1)) } else { On::Source };
             b.op(Op::Ext(Ext::Explore { on }));
+        }
+        E::ReturnCardFromGraveyardToBattlefield(nodes::ReturnCardFromGraveyardToBattlefield {
+            card_filter,
+            source,
+            haste,
+            exile_at_next_end_step,
+            lose_life_equal_mv,
+            with_counter,
+            exile_if_it_would_leave,
+            up_to_one,
+        }) => {
+            // "Put/return target <filter> card from a graveyard / your
+            // graveyard onto the battlefield [under your control]."
+            l.deny("ReturnCardFromGraveyardToBattlefield.haste", haste);
+            l.deny("ReturnCardFromGraveyardToBattlefield.exile_at_next_end_step", exile_at_next_end_step);
+            l.deny("ReturnCardFromGraveyardToBattlefield.with_counter", with_counter);
+            l.deny("ReturnCardFromGraveyardToBattlefield.exile_if_it_would_leave", exile_if_it_would_leave);
+            let Some(cf) = super::filter::lower_card_filter(l, card_filter) else { return true };
+            let (inner, yours) = match source {
+                enums::ReanimateSource::TargetAnyGraveyard => (cf, true),
+                enums::ReanimateSource::TargetYourGraveyard => (and(cf, Filter::Owner(true)), true),
+                other => {
+                    l.unsupported(format!("ReturnCardFromGraveyardToBattlefield.source({other:?})"));
+                    return true;
+                }
+            };
+            let t = b.target(Filter::InGraveyard(Box::new(inner)), if *up_to_one { 0 } else { 1 }, 1);
+            b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: true, yours, tapped: false }));
+            if *lose_life_equal_mv {
+                b.op(Op::LoseLife { who: Who::You, n: Amount::LkiManaValue });
+            }
+        }
+        E::ReturnCreatureFromYourGraveyardToBattlefield(nodes::ReturnCreatureFromYourGraveyardToBattlefield {
+            creature,
+            artifact,
+            land,
+            nonland_permanent,
+            or_enchantment,
+            or_spacecraft,
+            or_artifact,
+            max_mv,
+            min_n,
+            max_n,
+            max_total_mv,
+            destination,
+            plus_one_counter,
+            log_suffix,
+            untargeted_all,
+            target_kind,
+        })
+        | E::ReturnCreatureFromYourGraveyardToHand(nodes::ReturnCreatureFromYourGraveyardToHand {
+            creature,
+            artifact,
+            land,
+            nonland_permanent,
+            or_enchantment,
+            or_spacecraft,
+            or_artifact,
+            max_mv,
+            min_n,
+            max_n,
+            max_total_mv,
+            destination,
+            plus_one_counter,
+            log_suffix,
+            untargeted_all,
+            target_kind,
+        })
+        | E::ReturnFromGraveyard(nodes::ReturnFromGraveyard {
+            creature,
+            artifact,
+            land,
+            nonland_permanent,
+            or_enchantment,
+            or_spacecraft,
+            or_artifact,
+            max_mv,
+            min_n,
+            max_n,
+            max_total_mv,
+            destination,
+            plus_one_counter,
+            log_suffix,
+            untargeted_all,
+            target_kind,
+        }) => {
+            // "Return [up to n] target <type> card[s] [with mana value n or
+            // less] from your graveyard to your hand / the battlefield."
+            let _ = (log_suffix, target_kind); // display, Python dispatch
+            l.deny("ReturnFromGraveyard.or_spacecraft", or_spacecraft);
+            l.deny("ReturnFromGraveyard.max_total_mv", max_total_mv);
+            l.deny("ReturnFromGraveyard.plus_one_counter", plus_one_counter);
+            l.deny("ReturnFromGraveyard.untargeted_all", untargeted_all);
+            let t = |b: u16| Filter::Type(b);
+            let primary = if *creature {
+                let mut bits = types::CREATURE;
+                if *or_enchantment {
+                    bits |= types::ENCHANTMENT;
+                }
+                if *or_artifact {
+                    bits |= types::ARTIFACT;
+                }
+                t(bits)
+            } else if *artifact {
+                t(types::ARTIFACT)
+            } else if *land {
+                t(types::LAND)
+            } else if *nonland_permanent {
+                // CR: a nonland permanent card (Python admits instants and
+                // sorceries too, ENGINE.md 14).
+                and(t(types::PERMANENT), not(t(types::LAND)))
+            } else {
+                l.unsupported("ReturnFromGraveyard(no card type)");
+                return true;
+            };
+            if !*creature && (*or_enchantment || *or_artifact) {
+                l.unsupported("ReturnFromGraveyard.or_*(without creature)");
+            }
+            let mut f = and(primary, Filter::Owner(true));
+            if *max_mv > 0 {
+                f = and(f, Filter::ManaValueAtMost(l.int("ReturnFromGraveyard.max_mv", *max_mv, 0, 30) as u8));
+            }
+            let lo = l.int("ReturnFromGraveyard.min_n", *min_n, 0, 8) as u8;
+            let hi = l.int("ReturnFromGraveyard.max_n", *max_n, 1, 8) as u8;
+            let tgt = b.target(Filter::InGraveyard(Box::new(f)), lo, hi);
+            let to_battlefield = *destination == enums::GraveyardReturnDestination::Battlefield;
+            b.op(Op::Ext(Ext::FromGraveyard { tgt, to_battlefield, yours: true, tapped: false }));
+        }
+        E::ExileUpToOneTargetCardFromGraveyard(nodes::ExileUpToOneTargetCardFromGraveyard {}) => {
+            let t = b.target(Filter::InGraveyard(Box::new(Filter::Any)), 0, 1);
+            b.op(Op::Exile { tgt: t });
+        }
+        E::ExileTargetCardFromGraveyard(nodes::ExileTargetCardFromGraveyard {}) => {
+            let t = b.target(Filter::InGraveyard(Box::new(Filter::Any)), 1, 1);
+            b.op(Op::Exile { tgt: t });
+        }
+        E::ExileEachOpponentsGraveyard(nodes::ExileEachOpponentsGraveyard {}) => {
+            b.op(Op::Ext(Ext::ExileGraveyard { who: Who::Opponent }));
+        }
+        E::EachPlayerPutsCardFromGraveyardOntoBattlefield(nodes::EachPlayerPutsCardFromGraveyardOntoBattlefield {
+            card_filter,
+        }) => {
+            let Some(filter) = super::filter::lower_card_filter(l, card_filter) else { return true };
+            b.op(Op::Ext(Ext::EachPutFromGraveyard { filter }));
         }
         _ => return false,
     }

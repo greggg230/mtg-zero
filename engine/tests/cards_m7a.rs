@@ -353,3 +353,76 @@ fn frantic_search_untaps_up_to_three_lands_one_set_at_a_time() {
     let tapped = g.lands_of(0).filter(|&c| g.obj(c).tapped).count();
     assert_eq!(tapped, 2);
 }
+
+#[test]
+fn reanimate_targets_a_card_in_any_graveyard_by_its_graveyard_slot() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp"])
+        .graveyard(0, &["Island", "Test Bear"])
+        .graveyard(1, &["Griselbrand"])
+        .hand(0, &["Reanimate"])
+        .at(Step::Main1, 0)
+        .start();
+    let gris = g.card(1, "Griselbrand", Zone::Graveyard);
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    cast(&mut g, 0, "Reanimate");
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    // GRAVEYARD ids: the decider's slots 0..63 (Test Bear is slot 1), the
+    // opponent's from 64. A land is not a creature card.
+    let d = g.pending_decision().unwrap();
+    let ids: Vec<u16> = d.options.iter().map(|o| o.action).collect();
+    assert_eq!(ids, vec![engine::act::GRAVEYARD + 1, engine::act::GRAVEYARD + 64]);
+    g.choose(g.tgt(gris));
+    g.drive_until(at_priority);
+    pay(&mut g);
+    settle(&mut g);
+    let gr = g.card(1, "Griselbrand", Zone::Battlefield);
+    assert_eq!(g.obj(gr).controller, 0, "under your control");
+    assert_eq!(g.obj(gr).owner, 1);
+    assert_eq!(g.life(0), 12, "lose life equal to its mana value");
+    let _ = bear;
+}
+
+#[test]
+fn exhume_cr_101_4_each_player_chooses_in_apnap_order_then_both_enter() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .graveyard(0, &["Test Bear", "Griselbrand"])
+        .graveyard(1, &["Test Striker", "Test Wall"])
+        .hand(0, &["Exhume"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Exhume");
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard));
+    assert_eq!(g.pending_decision().unwrap().player, 0);
+    let gris = g.card(0, "Griselbrand", Zone::Graveyard);
+    g.choose(Choice::Card(gris));
+    assert_eq!(g.pending_decision().unwrap().player, 1);
+    let wall = g.card(1, "Test Wall", Zone::Graveyard);
+    g.choose(Choice::Card(wall));
+    settle(&mut g);
+    assert_eq!(g.obj(gris).zone, Zone::Battlefield);
+    assert_eq!(g.obj(wall).zone, Zone::Battlefield);
+    assert_eq!(g.obj(wall).controller, 1);
+}
+
+#[test]
+fn territorial_kavu_discard_then_draw_is_not_optional() {
+    let mut g = scen()
+        .battlefield(0, &["Territorial Kavu", "Forest", "Mountain"])
+        .hand(0, &["Test Bear"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let kavu = bf(&g, 0, "Territorial Kavu");
+    // Domain: two basic land types.
+    assert_eq!(g.pt(kavu), (2, 2));
+    g.choose(Choice::Card(kavu));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode) || !at_priority(g));
+    g.choose(Choice::Number(0));
+    g.drive_until(|g| !at_priority(g) || g.stack().is_empty());
+    assert_eq!(g.kind(), Some(DecisionKind::Discard));
+    assert!(!g.has_option(Choice::Pass), "\"Discard a card. If you do\": not optional");
+}

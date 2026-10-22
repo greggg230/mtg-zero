@@ -183,7 +183,7 @@ impl Game {
                     Flow::Jump(*to)
                 }
             }
-            Ext::MayDiscard { skip } => {
+            Ext::DiscardThen { skip, optional } => {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
@@ -198,7 +198,9 @@ impl Game {
                             return Flow::Jump(*skip);
                         }
                         let mut opts = self.hand_options(p);
-                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        if *optional {
+                            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        }
                         self.ask(Task::Run(f.clone()), p, DecisionKind::Discard, opts);
                         Flow::Suspend
                     }
@@ -348,6 +350,69 @@ impl Game {
                 let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
                 self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
                 Flow::Suspend
+            }
+            Ext::FromGraveyard { tgt, to_battlefield, yours, tapped } => {
+                for t in self.targets_of(f, *tgt) {
+                    let Target::Obj(o) = t else { continue };
+                    if self.objs[o.idx.i()].zone != Zone::Graveyard {
+                        continue;
+                    }
+                    f.x = self.def_of(o.idx).mana_value() as i32;
+                    if *to_battlefield {
+                        let ctl = if *yours { f.controller } else { self.objs[o.idx.i()].owner };
+                        self.put_onto_battlefield(o.idx, ctl);
+                        if *tapped {
+                            self.tap(o.idx);
+                        }
+                    } else {
+                        self.move_card(o.idx, Zone::Hand, Pos::Top);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::EachPutFromGraveyard { filter } => {
+                // f.i: 0 = the active player chooses, 1 = the other, 2 = put.
+                let order = [self.turn.active, crate::ids::opp(self.turn.active)];
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        f.picked.push(c);
+                        f.i += 1;
+                    }
+                    Some(other) => unreachable!("graveyard choice {other:?}"),
+                    None => {}
+                }
+                while f.i < 2 {
+                    let p = order[f.i as usize];
+                    let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                    let mut opts: Vec<Opt> = Vec::new();
+                    for &c in &self.players[p as usize].graveyard {
+                        if self.card_matches(filter, c, &ctx) {
+                            opts.push(Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) });
+                        }
+                    }
+                    if opts.is_empty() {
+                        f.i += 1;
+                        continue;
+                    }
+                    self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                    return Flow::Suspend;
+                }
+                let chosen = std::mem::take(&mut f.picked);
+                for c in chosen {
+                    let owner = self.objs[c.i()].owner;
+                    if self.objs[c.i()].zone == Zone::Graveyard {
+                        self.put_onto_battlefield(c, owner);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::ExileGraveyard { who } => {
+                if let Some(p) = self.who(f, *who) {
+                    for c in self.players[p as usize].graveyard.clone() {
+                        self.move_card(c, Zone::Exile, Pos::Top);
+                    }
+                }
+                Flow::Next
             }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;

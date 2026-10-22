@@ -115,6 +115,8 @@ pub enum DecisionKind {
     /// A permanent chosen by an effect (not targeted), one per decision in
     /// increasing slot order; `PASS` = no more.
     ChoosePermanent,
+    /// A card in the decider's graveyard (`GRAVEYARD` slot).
+    ChooseGraveyardCard,
 }
 
 /// What an action means to the task that asked.
@@ -266,9 +268,19 @@ impl Game {
                         .id;
                     self.stack_action(id)
                 }
+                Zone::Graveyard => self.graveyard_action(viewer, r.idx),
                 z => panic!("no target slot for an object in {z:?}"),
             },
         }
+    }
+
+    /// `GRAVEYARD` slot of a card: its position in its owner's graveyard
+    /// (0 = bottom), the decider's first (ENGINE.md 11).
+    pub fn graveyard_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
+        let owner = self.objs[idx.i()].owner;
+        let pos = self.players[owner as usize].graveyard.iter().position(|&c| c == idx).expect("card in a graveyard");
+        assert!(pos < 64, "graveyard slot {pos} out of range");
+        act::GRAVEYARD + if owner == viewer { 0 } else { 64 } + pos as u16
     }
 
     /// Human-readable description of an option (tests, logs).

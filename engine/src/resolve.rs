@@ -408,7 +408,7 @@ impl Game {
             Op::ReturnToHand { tgt } => {
                 for t in self.targets_of(f, tgt) {
                     if let Target::Obj(o) = t {
-                        if matches!(self.objs[o.idx.i()].zone, Zone::Battlefield | Zone::Stack) {
+                        if matches!(self.objs[o.idx.i()].zone, Zone::Battlefield | Zone::Stack | Zone::Graveyard) {
                             self.move_card(o.idx, Zone::Hand, Pos::Top);
                         }
                     }

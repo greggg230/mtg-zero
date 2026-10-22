@@ -96,10 +96,10 @@ pub enum Ext {
     /// Unless the source is still on the battlefield and matches `filter`,
     /// continue at `to` ("if this creature is a Spirit").
     JumpUnlessSource { filter: Filter, to: u16 },
-    /// "You may discard a card. If you do, ...": the controller discards a
-    /// card of their choice, or declines and continues at `skip`. Choice:
-    /// a hand card, or `PASS`.
-    MayDiscard { skip: u16 },
+    /// "[You may] discard a card. If you do, ...": the controller discards
+    /// a card of their choice (or, if `optional`, declines), else continues
+    /// at `skip` (also with an empty hand). Choice: a hand card, or `PASS`.
+    DiscardThen { skip: u16, optional: bool },
     /// `who` chooses between `min` and `max` permanents matching `filter`
     /// (not targeted; "you" in the filter is the ability's controller), one
     /// decision per permanent in increasing slot order (`PASS` = no more),
@@ -122,6 +122,18 @@ pub enum Ext {
     /// The controller may attach the source (an Equipment) to the token the
     /// last `CreateToken` made. Choice: yes/no.
     MayAttachToMade,
+    /// Put each legal target of requirement `tgt` (a card in a graveyard)
+    /// into its owner's hand, or onto the battlefield (under the
+    /// ability's controller with `yours`, else its owner's), tapped if
+    /// `tapped`. Remembers the mana value of the last one
+    /// (`Amount::LkiManaValue`).
+    FromGraveyard { tgt: u8, to_battlefield: bool, yours: bool, tapped: bool },
+    /// Each player in APNAP order chooses a card matching `filter` in
+    /// their graveyard (if any); then those cards are put onto the
+    /// battlefield at once (CR 101.4). Choice: a `GRAVEYARD` slot.
+    EachPutFromGraveyard { filter: Filter },
+    /// Exile every card in `who`'s graveyard.
+    ExileGraveyard { who: Who },
     /// Each object of `on` explores (CR 701.44): its controller reveals the
     /// top card of their library; a land goes into their hand; otherwise a
     /// +1/+1 counter on the creature, and they may put the card into their
@@ -294,7 +306,7 @@ impl Op {
             | Op::Ext(Ext::Untap { on }) => matches!(on, On::EventObj),
             Op::Ext(Ext::PutCounters { on, n, .. }) => matches!(on, On::EventObj) || amt(n),
             Op::Ext(Ext::DoubleCounters { on, .. }) | Op::Ext(Ext::Explore { on }) => matches!(on, On::EventObj),
-            Op::Ext(Ext::Choose { who: w, .. }) => who(w),
+            Op::Ext(Ext::Choose { who: w, .. }) | Op::Ext(Ext::ExileGraveyard { who: w }) => who(w),
             Op::Ext(Ext::ApplyRules { who: w, .. }) | Op::Ext(Ext::RevealTopToHand { who: w }) => who(w),
             Op::Ext(Ext::Mill { who: w, n }) => who(w) || amt(n),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
@@ -313,7 +325,7 @@ impl Op {
             Op::May { skip, .. } => Some(skip),
             Op::OfferPay { if_paid, .. } => Some(if_paid),
             Op::Ext(Ext::JumpUnlessSource { to, .. }) => Some(to),
-            Op::Ext(Ext::MayDiscard { skip }) => Some(skip),
+            Op::Ext(Ext::DiscardThen { skip, .. }) => Some(skip),
             Op::Ext(Ext::FlipCoin { won }) => Some(won),
             Op::Ext(Ext::JumpUnlessLkiYours { to }) => Some(to),
             _ => None,

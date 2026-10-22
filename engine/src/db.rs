@@ -267,6 +267,10 @@ pub enum Filter {
     Tapped,
     /// A player who has drawn exactly n cards this turn.
     DrewThisTurn(u8),
+    /// A card in a graveyard matching the inner filter (a target).
+    InGraveyard(Box<Filter>),
+    /// Owned by the ability's controller (`true`) or an opponent.
+    Owner(bool),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

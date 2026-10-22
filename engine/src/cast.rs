@@ -160,7 +160,12 @@ impl Game {
             StackKind::Spell { card } => Some(self.obj_ref(card)).filter(|&r| Some(r) != ctx.source).map(Target::Obj),
             StackKind::Ability { .. } => None,
         });
-        players.chain(perms).chain(spells).filter(|&t| ok(t)).nth(n - 1).is_some()
+        let gy = wants_graveyard(&tr.filter);
+        let graves = [ctx.controller, crate::ids::opp(ctx.controller)]
+            .into_iter()
+            .filter(move |_| gy)
+            .flat_map(|q| self.players[q as usize].graveyard.iter().map(|&c| Target::Obj(self.obj_ref(c))));
+        players.chain(perms).chain(spells).chain(graves).filter(|&t| ok(t)).nth(n - 1).is_some()
     }
 
     // ---- casting (CR 601.2) ------------------------------------------------
@@ -355,6 +360,13 @@ impl Game {
                 }
             }
         }
+        if wants_graveyard(&tr.filter) {
+            for q in [ctx.controller, crate::ids::opp(ctx.controller)] {
+                for &c in &self.players[q as usize].graveyard {
+                    consider(Target::Obj(self.obj_ref(c)), &mut out);
+                }
+            }
+        }
         out
     }
 
@@ -438,6 +450,7 @@ impl Game {
                 match self.objs[r.idx.i()].zone {
                     Zone::Battlefield => self.perm_ok(f, r.idx, ctx),
                     Zone::Stack => self.spell_ok(f, r.idx, ctx),
+                    Zone::Graveyard => self.graveyard_ok(f, r.idx, ctx),
                     _ => false,
                 }
             }
@@ -446,11 +459,25 @@ impl Game {
 
     fn perm_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
         match f {
-            Filter::Player | Filter::Spell(_) | Filter::Opponent | Filter::DrewThisTurn(_) => false,
+            Filter::Player
+            | Filter::Spell(_)
+            | Filter::Opponent
+            | Filter::DrewThisTurn(_)
+            | Filter::InGraveyard(_) => false,
             Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
             Filter::Not(x) => !self.perm_ok(x, c, ctx),
             _ => self.card_matches(f, c, ctx),
+        }
+    }
+
+    /// A card in a graveyard matches only through `InGraveyard(f)`.
+    fn graveyard_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
+        match f {
+            Filter::InGraveyard(inner) => self.card_matches(inner, c, ctx),
+            Filter::And(a, b) => self.graveyard_ok(a, c, ctx) && self.graveyard_ok(b, c, ctx),
+            Filter::Or(v) => v.iter().any(|x| self.graveyard_ok(x, c, ctx)),
+            _ => false,
         }
     }
 
@@ -484,11 +511,22 @@ impl Game {
             Filter::Token => def.token,
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,
-            Filter::DrewThisTurn(_) => false,
+            Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
+            Filter::Owner(you) => (self.objs[c.i()].owner == ctx.controller) == *you,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
             Filter::Not(x) => !self.card_matches(x, c, ctx),
         }
+    }
+}
+
+/// Can a filter match a card in a graveyard (`InGraveyard`)?
+fn wants_graveyard(f: &Filter) -> bool {
+    match f {
+        Filter::InGraveyard(_) => true,
+        Filter::And(a, b) => wants_graveyard(a) || wants_graveyard(b),
+        Filter::Or(v) => v.iter().any(wants_graveyard),
+        _ => false,
     }
 }
 
