@@ -1,11 +1,13 @@
 //! Effects -> programs. One arm per supported IR class; each arm names every
 //! field of its node and lowers onto the shared ops (ENGINE.md 3, 7).
 
-use super::filter::{lower_card_filter, lower_condition_or_state, lower_pred, lower_pred_or_oneof};
+use super::filter::{
+    lower_card_filter, lower_condition_or_state, lower_pred, lower_pred_or_oneof, lower_search_filter,
+};
 use super::Lowerer;
 use crate::db::{types, AbilityDef, Filter, ManaProd};
 use crate::mana::{letter_index, ManaCost};
-use crate::program::{Amount, Builder, Op, SpellDest, Who};
+use crate::program::{Amount, Builder, Op, SearchDest, SpellDest, Who};
 use card_ir::{cats, enums, generated, nodes, unions, Count};
 
 pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
@@ -183,11 +185,21 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             targets,
         }) => {
             // Riders read the removed object's last known information.
+            enum Rider {
+                GainPower,
+                /// "Its controller [may] search their library for a basic
+                /// land card, put it onto the battlefield tapped, then
+                /// shuffle."
+                SearchBasic { optional: bool },
+            }
             let lki_rider = match rider.as_deref() {
                 None => None,
                 Some(cats::RemovalRider::ControllerGainsLifeEqualToPower(nodes::ControllerGainsLifeEqualToPower {})) => {
-                    Some(Op::GainLife { who: Who::LkiController, n: Amount::LkiPower })
+                    Some(Rider::GainPower)
                 }
+                Some(cats::RemovalRider::ControllerSearchesForBasicLand(nodes::ControllerSearchesForBasicLand {
+                    optional,
+                })) => Some(Rider::SearchBasic { optional: *optional }),
                 Some(other) => {
                     l.unsupported(format!("RemovalRider:{}", other.tag()));
                     None
@@ -242,8 +254,20 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     b.op(Op::ReturnToHand { tgt });
                 }
             }
-            if let Some(op) = lki_rider {
-                b.op(op);
+            match lki_rider {
+                None => {}
+                Some(Rider::GainPower) => {
+                    b.op(Op::GainLife { who: Who::LkiController, n: Amount::LkiPower });
+                }
+                Some(Rider::SearchBasic { optional }) => {
+                    let who = Who::LkiController;
+                    let may = optional.then(|| b.op(Op::May { who, skip: 0 }));
+                    let dest = SearchDest::Battlefield { tapped: true };
+                    b.op(Op::Search { who, filter: basic_land(), dest, reveal: false, may_fail: true });
+                    if let Some(at) = may {
+                        b.patch(at);
+                    }
+                }
             }
             if let Some(at) = guard {
                 b.patch(at);
@@ -417,6 +441,84 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             lower_effect(l, b, inner);
             b.patch(at);
         }
+        E::SearchLibrary(nodes::SearchLibrary { card_filter, destination, reveal, tapped }) => {
+            let Some(filter) = lower_search_filter(l, card_filter) else { return };
+            let dest = match destination {
+                enums::SearchDestination::Hand => SearchDest::Hand,
+                enums::SearchDestination::Top => SearchDest::Top,
+                enums::SearchDestination::Graveyard => SearchDest::Graveyard,
+                enums::SearchDestination::Battlefield => SearchDest::Battlefield { tapped: *tapped },
+            };
+            if *tapped && !matches!(dest, SearchDest::Battlefield { .. }) {
+                l.unsupported("SearchLibrary.tapped(not to the battlefield)");
+            }
+            // CR 701.19b/c: "a card" must be found; a card with a stated
+            // quality may be missed.
+            let may_fail = filter != Filter::Any;
+            b.op(Op::Search { who: Who::You, filter, dest, reveal: *reveal, may_fail });
+        }
+        E::SearchLibraryForLandCardToBattlefield(nodes::SearchLibraryForLandCardToBattlefield {
+            land_types,
+            basic_only,
+            tapped,
+        }) => {
+            // "A Mountain or Plains card" (fetch lands), "a basic land card"
+            // (Prismatic Vista).
+            let mut filter = if *basic_only { basic_land() } else { Filter::Type(types::LAND) };
+            if !land_types.is_empty() {
+                let any = Filter::Or(land_types.iter().map(|t| Filter::Subtype(l.subtype(t))).collect());
+                filter = Filter::And(Box::new(filter), Box::new(any));
+            }
+            let dest = SearchDest::Battlefield { tapped: *tapped };
+            b.op(Op::Search { who: Who::You, filter, dest, reveal: false, may_fail: true });
+        }
+        E::SearchLibraryForCard(nodes::SearchLibraryForCard { filter_name, max_mv, may_fail, subtypes }) => {
+            // "Search your library for a <kind> card, reveal it, put it into
+            // your hand, then shuffle" (typecycling). Every kind is a stated
+            // quality, so the search may fail (CR 701.19b) whatever the IR's
+            // `may_fail` says (ENGINE.md 14).
+            let _ = may_fail;
+            use enums::LibraryCardFilter as K;
+            let and = |a, b| Filter::And(Box::new(a), Box::new(b));
+            let mut basic_named = |name: &str| and(basic_land(), Filter::Subtype(l.subtype(name)));
+            let filter = match filter_name {
+                K::BasicPlains => basic_named("Plains"),
+                K::BasicIsland => basic_named("Island"),
+                K::BasicSwamp => basic_named("Swamp"),
+                K::BasicMountain => basic_named("Mountain"),
+                K::BasicForest => basic_named("Forest"),
+                K::Subtype if !subtypes.is_empty() => {
+                    Filter::Or(subtypes.iter().map(|s| Filter::Subtype(l.subtype(s))).collect())
+                }
+                K::BasicLand => basic_land(),
+                K::Creature => Filter::Type(types::CREATURE),
+                K::Artifact => Filter::Type(types::ARTIFACT),
+                K::LegendaryCreature => {
+                    and(Filter::Type(types::CREATURE), Filter::Supertype(crate::db::supertypes::LEGENDARY))
+                }
+                K::CreatureSmall | K::ArtifactSmall => {
+                    let n = l.int("SearchLibraryForCard.max_mv", *max_mv, 0, 30) as u8;
+                    let t = if *filter_name == K::CreatureSmall { types::CREATURE } else { types::ARTIFACT };
+                    and(Filter::Type(t), Filter::ManaValueAtMost(n))
+                }
+                other => {
+                    l.unsupported(format!("SearchLibraryForCard.filter_name({other:?})"));
+                    return;
+                }
+            };
+            if !matches!(filter_name, K::CreatureSmall | K::ArtifactSmall) {
+                l.deny("SearchLibraryForCard.max_mv", max_mv);
+            }
+            if *filter_name != K::Subtype {
+                l.deny("SearchLibraryForCard.subtypes", subtypes);
+            }
+            b.op(Op::Search { who: Who::You, filter, dest: SearchDest::Hand, reveal: true, may_fail: true });
+        }
         other => l.unsupported(format!("Effect:{}", other.tag())),
     }
+}
+
+/// "A basic land card."
+fn basic_land() -> Filter {
+    Filter::And(Box::new(Filter::Type(types::LAND)), Box::new(Filter::Supertype(crate::db::supertypes::BASIC)))
 }

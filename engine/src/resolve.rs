@@ -6,7 +6,7 @@ use crate::flow::Task;
 use crate::pay::PayMana;
 use crate::game::{DamageSource, Game, Pos, StackKind};
 use crate::ids::{DefId, ObjRef, PlayerId, Target, Zone};
-use crate::program::{Amount, Op, SpellDest, Who};
+use crate::program::{Amount, Op, SearchDest, SpellDest, Who};
 
 /// A running program (ENGINE.md 7). Plain data: cloning the game clones a
 /// resolution suspended at `pc`.
@@ -101,6 +101,7 @@ impl Game {
         let prog = &db.ability(f.ability).program;
         while (f.pc as usize) < prog.len() {
             let op = &prog[f.pc as usize];
+            let queued = self.agenda.len();
             match self.exec(&mut f, op) {
                 Flow::Next => {
                     f.pc += 1;
@@ -111,6 +112,15 @@ impl Game {
                     f.i = 0;
                 }
                 Flow::Suspend => return,
+            }
+            if self.agenda.len() > queued {
+                // The op queued a task (an "as this enters" choice of a
+                // permanent it put onto the battlefield, CR 614.12): it runs
+                // before the rest of the program.
+                let tasks = self.agenda.split_off(queued);
+                self.agenda.push(Task::Run(f));
+                self.agenda.extend(tasks);
+                return;
             }
         }
     }
@@ -405,6 +415,25 @@ impl Game {
                     Flow::Jump(to)
                 }
             }
+            Op::Search { who, ref filter, dest, reveal, may_fail } => {
+                let Some(p) = self.who(f, who) else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Def(d)) => self.finish_search(p, d, dest, reveal),
+                    Some(Choice::Pass) => {
+                        self.note(|_| format!("P{p} finds nothing"));
+                        self.shuffle_library(p);
+                    }
+                    Some(other) => unreachable!("search answer {other:?}"),
+                    None => {
+                        // "You" in the filter is the searcher.
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let opts = self.search_options(p, filter, may_fail, &ctx);
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::SearchLibrary, opts);
+                        return Flow::Suspend;
+                    }
+                }
+                Flow::Next
+            }
             Op::May { who, skip } => {
                 let Some(p) = self.who(f, who) else { return Flow::Jump(skip) };
                 match self.answer.take() {
@@ -419,6 +448,70 @@ impl Game {
                         Flow::Suspend
                     }
                 }
+            }
+        }
+    }
+
+    /// Options of a library search by `p` (CR 701.19): one per definition
+    /// among the matching cards, at the slot of its first card in the
+    /// library sorted by definition (so the options depend only on the
+    /// library's contents, which its owner always knows); `PASS` when the
+    /// search may fail or nothing matches.
+    fn search_options(&self, p: PlayerId, filter: &crate::db::Filter, may_fail: bool, ctx: &crate::cast::Ctx) -> Vec<Opt> {
+        let lib = self.library_sorted(p);
+        let mut opts = Vec::new();
+        for (i, &c) in lib.iter().enumerate() {
+            let d = self.objs[c.i()].def;
+            if i > 0 && self.objs[lib[i - 1].i()].def == d {
+                continue;
+            }
+            if self.card_matches(filter, c, ctx) {
+                assert!((i as u16) < act::LIBRARY_N, "library slot {i} out of range");
+                opts.push(Opt { action: act::LIBRARY + i as u16, choice: Choice::Def(d) });
+            }
+        }
+        if may_fail || opts.is_empty() {
+            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+        }
+        opts
+    }
+
+    /// Put the found card (a card of definition `d` in `p`'s library) where
+    /// the search says, then shuffle (CR 701.19, 701.20).
+    fn finish_search(&mut self, p: PlayerId, d: DefId, dest: SearchDest, reveal: bool) {
+        let c = self.library_sorted(p).into_iter().find(|&c| self.objs[c.i()].def == d).expect("found card");
+        // Which card was taken is private (unless revealed): the other
+        // player loses track of the library (ENGINE.md 10).
+        self.scramble(p, &[], false, true);
+        self.note(|g| format!("P{p} finds {}", g.name(c)));
+        match dest {
+            SearchDest::Hand => {
+                self.move_card(c, Zone::Hand, Pos::Top);
+                self.objs[c.i()].known |= 1 << p;
+                if reveal {
+                    self.reveal(c);
+                }
+                self.shuffle_library(p);
+            }
+            SearchDest::Top => {
+                // "Reveal it, then shuffle and put that card on top."
+                self.shuffle_library(p);
+                self.move_card(c, Zone::Library, Pos::Top);
+                self.objs[c.i()].known |= 1 << p;
+                if reveal {
+                    self.reveal(c);
+                }
+            }
+            SearchDest::Graveyard => {
+                self.move_card(c, Zone::Graveyard, Pos::Top);
+                self.shuffle_library(p);
+            }
+            SearchDest::Battlefield { tapped } => {
+                self.put_onto_battlefield(c, p);
+                if tapped {
+                    self.tap(c);
+                }
+                self.shuffle_library(p);
             }
         }
     }

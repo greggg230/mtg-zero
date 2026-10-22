@@ -41,6 +41,16 @@ pub enum SpellDest {
     Hand,
 }
 
+/// Where a searched-for card goes (CR 701.19).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum SearchDest {
+    Hand,
+    /// "Then shuffle and put that card on top."
+    Top,
+    Graveyard,
+    Battlefield { tapped: bool },
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Op {
     /// The source deals `amount` damage to each legal target of requirement
@@ -103,6 +113,12 @@ pub enum Op {
     /// `who` may do what follows ("you may"): no continues at `skip`.
     /// Choice: yes/no.
     May { who: Who, skip: u16 },
+    /// `who` searches their library for a card matching `filter`, puts it
+    /// into `dest` (revealing it first if `reveal`), then shuffles (CR
+    /// 701.19). With `may_fail` (a search for a card with a stated
+    /// quality, 701.19b) they may find nothing; otherwise they must find a
+    /// card if the library has one (701.19c). Choice: a definition.
+    Search { who: Who, filter: Filter, dest: SearchDest, reveal: bool, may_fail: bool },
 }
 
 impl Op {

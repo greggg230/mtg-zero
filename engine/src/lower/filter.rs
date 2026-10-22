@@ -121,21 +121,56 @@ pub(crate) fn lower_condition_or_state(l: &mut Lowerer, c: &cats::ConditionOrSta
 
 /// A `CardFilter` (characteristics of a card) -> [`Filter`].
 pub(crate) fn lower_card_filter(l: &mut Lowerer, f: &cats::CardFilter) -> Option<Filter> {
-    let cats::CardFilter::CardFilter(nodes::CardFilter {
-        any_types,
-        excluded_types,
-        max_mv,
-        color,
-        supertype,
-        subtype,
-        mana_costs,
-    }) = f;
+    let cats::CardFilter::CardFilter(n) = f;
+    lower_card_filter_node(l, n)
+}
+
+/// A library search's filter: a `CardFilter` or "a card of one of these
+/// types or subtypes".
+pub(crate) fn lower_search_filter(l: &mut Lowerer, f: &cats::CardFilterOrCardTypeOrSubtypeFilter) -> Option<Filter> {
+    match f {
+        cats::CardFilterOrCardTypeOrSubtypeFilter::CardFilter(n) => lower_card_filter_node(l, n),
+        cats::CardFilterOrCardTypeOrSubtypeFilter::CardTypeOrSubtypeFilter(nodes::CardTypeOrSubtypeFilter {
+            types: tys,
+            subtypes,
+        }) => {
+            let mut any: Vec<Filter> = Vec::new();
+            let mut bits = 0u16;
+            for t in tys {
+                match card_type_bits(t) {
+                    Some(b) => bits |= b,
+                    None => l.unsupported(format!("CardTypeOrSubtypeFilter.types({t})")),
+                }
+            }
+            if bits != 0 {
+                any.push(Filter::Type(bits));
+            }
+            any.extend(subtypes.iter().map(|s| Filter::Subtype(l.subtype(s))));
+            if any.is_empty() {
+                l.unsupported("CardTypeOrSubtypeFilter(empty)");
+                return None;
+            }
+            Some(if any.len() == 1 { any.pop().unwrap() } else { Filter::Or(any) })
+        }
+    }
+}
+
+/// A card type name, or "Permanent" (every permanent type).
+fn card_type_bits(t: &str) -> Option<u16> {
+    match t {
+        "Permanent" => Some(types::PERMANENT),
+        _ => types::from_name(t),
+    }
+}
+
+pub(crate) fn lower_card_filter_node(l: &mut Lowerer, f: &nodes::CardFilter) -> Option<Filter> {
+    let nodes::CardFilter { any_types, excluded_types, max_mv, color, supertype, subtype, mana_costs } = f;
     l.deny("CardFilter.mana_costs", mana_costs);
     let mut parts: Vec<Filter> = Vec::new();
     let bits = |l: &mut Lowerer, names: &[String]| {
         let mut b = 0u16;
         for t in names {
-            match types::from_name(t) {
+            match card_type_bits(t) {
                 Some(x) => b |= x,
                 None => l.unsupported(format!("CardFilter.types({t})")),
             }

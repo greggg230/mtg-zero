@@ -352,7 +352,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.color_indicator", color_indicator);
         l.deny("CardPrinting.has_convoke", has_convoke);
         l.deny("CardPrinting.can_only_block_creatures_with_flying", can_only_block_creatures_with_flying);
-        l.deny("CardPrinting.landcycling", landcycling);
         l.deny("CardPrinting.flashback_cost", flashback_cost);
         l.deny("CardPrinting.flashback_cost_str", flashback_cost_str);
         l.deny("CardPrinting.has_delve", has_delve);
@@ -582,6 +581,25 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     if hand_abilities.len() > 1 {
         l.unsupported("CardPrinting.hand_activated_abilities(more than 1)");
+    }
+    // Landcycling (CR 702.29) is a hand ability the IR also spells out in
+    // `hand_activated_abilities`: the summary must match it.
+    if let Some((kind, cost_str)) = landcycling {
+        let ok = ManaCost::parse(cost_str).is_some_and(|mana| {
+            hand_abilities.iter().any(|a| {
+                a.cost == Cost { mana, discard_self: true, ..Cost::default() }
+                    && match &a.effect {
+                        ActEffect::Stack(ab) => ab.program.iter().any(|op| {
+                            matches!(op, crate::program::Op::Search { filter: crate::db::Filter::Or(v), .. }
+                                if v.len() == 1 && v[0] == crate::db::Filter::Subtype(l.subtype(kind)))
+                        }),
+                        ActEffect::Mana(_) => false,
+                    }
+            })
+        });
+        if !ok {
+            l.unsupported("CardPrinting.landcycling(without its ability)");
+        }
     }
 
     // Entering the battlefield (CR 614.1c, 614.12).

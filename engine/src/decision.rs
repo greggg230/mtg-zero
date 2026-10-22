@@ -1,7 +1,7 @@
 //! Decisions, choices and the action-id layout (ENGINE.md 11).
 
 use crate::db::AbilitySlot;
-use crate::ids::{CardIdx, PlayerId, Target};
+use crate::ids::{CardIdx, DefId, PlayerId, Target};
 
 /// Global action ids are `< NUM_ACTIONS` (zero-core's `SearchGame::NUM_ACTIONS`).
 pub const NUM_ACTIONS: usize = 1024;
@@ -34,6 +34,7 @@ pub mod act {
     pub const TRIGGER_N: u16 = 16;
     /// A searched / looked-at pile, slot 0..63 (M4b).
     pub const LIBRARY: u16 = 340;
+    pub const LIBRARY_N: u16 = 64;
     /// Graveyards: the decider's 0..63, the opponent's 64..127 (M4b).
     pub const GRAVEYARD: u16 = 404;
     /// Activate ability i of the decider's permanent in `MY_PERM` slot s:
@@ -86,6 +87,10 @@ pub enum DecisionKind {
     DiscardCost,
     /// Which additional cost to pay (`NUMBER` = option index, CR 601.2b).
     ChooseCost,
+    /// A card to find in a library search (`LIBRARY` = the slot of its
+    /// definition in the library sorted by definition; `PASS` = find
+    /// nothing; CR 701.19).
+    SearchLibrary,
 }
 
 /// What an action means to the task that asked.
@@ -107,6 +112,10 @@ pub enum Choice {
     /// Activate this ability of this card (priority; a mana source while
     /// paying).
     Ability(CardIdx, AbilitySlot),
+    /// A card of this definition in a zone hidden from the decider (a
+    /// library search): which physical card is never part of the choice
+    /// (ENGINE.md 10).
+    Def(DefId),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -191,6 +200,13 @@ impl Game {
         out
     }
 
+    /// `p`'s library in canonical order: by definition, then card index.
+    pub fn library_sorted(&self, p: PlayerId) -> Vec<CardIdx> {
+        let mut l = self.players[p as usize].library.clone();
+        l.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+        l
+    }
+
     /// `MY_PERM` / `OPP_PERM` slot of a permanent, relative to `viewer`.
     pub fn perm_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
         let ctl = self.objs[idx.i()].controller;
@@ -243,6 +259,7 @@ impl Game {
             Choice::Target(t) => format!("target {}", self.describe_target(t)),
             Choice::Trigger(k) => format!("trigger {k}"),
             Choice::Ability(i, slot) => format!("activate {}#{} {slot:?}", self.name(i), i.0),
+            Choice::Def(d) => format!("a {}", self.db.def(d).name),
         }
     }
 }
