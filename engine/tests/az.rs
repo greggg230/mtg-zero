@@ -353,6 +353,32 @@ fn encoding_slots_name_the_action_slots() {
 }
 
 #[test]
+fn layout_json_is_checked_in() {
+    // mtgz/az/layout_v1.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it)
+    let want = encode::layout_json(CardDb::cube());
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v1.json");
+    if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
+        std::fs::write(&path, &want).unwrap();
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    assert!(have == want, "{} differs from encode::layout_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az layout)", path.display());
+    let v: serde_json::Value = serde_json::from_str(&want).unwrap();
+    assert_eq!(v["features"], NUM_FEATURES);
+    assert_eq!(v["cards"].as_array().unwrap().len(), CardDb::cube().len());
+}
+
+#[test]
+fn minor_decisions_are_mana_payments() {
+    let mut pay = 0;
+    for g in states(scale(4), 3, 11) {
+        let d = g.g.pending_decision().unwrap();
+        assert_eq!(g.minor_decision(), d.kind == engine::decision::DecisionKind::PayMana);
+        pay += g.minor_decision() as u32;
+    }
+    assert!(pay > 0, "no mana payment met");
+}
+
+#[test]
 fn decks_are_legal_seeded_and_varied() {
     let db = CardDb::cube();
     let gen = DeckGen::default();

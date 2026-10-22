@@ -216,7 +216,7 @@ fn op_code(op: &Op) -> usize {
 }
 
 /// The context of the pending decision.
-mod ctx {
+pub(crate) mod ctx {
     pub const KIND: usize = 0; // 32
     pub const DECIDER_IS_VIEWER: usize = 32;
     pub const PENDING: usize = 33;
@@ -670,6 +670,45 @@ impl Game {
             }
         }
     }
+}
+
+/// The object layout of this encoding for zero-core's token network (arch `tokens`, zero-core
+/// `python/zero/net.py` `TokenNet`; ENGINE.md 22): JSON with the card table's capacity as the
+/// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
+/// two one-hot digits of 16, the action ids each slot scores) and the bags (13 multisets of
+/// 256 identities). Every other feature (the 128 globals) is the global token's input. Checked
+/// in as `mtgz/az/layout_v1.json` (a test keeps the two equal). `cards` (the card table's names,
+/// for analysis) is not read by the network.
+pub fn layout_json(db: &CardDb) -> String {
+    use serde_json::json;
+    let id = json!({"at": 0, "radix": [16, 16]});
+    let seg = |name: &str, offset: usize, count: usize, width: usize, present: usize, actions: serde_json::Value| {
+        json!({"name": name, "offset": offset, "count": count, "width": width, "present": present,
+               "id": id.clone(), "actions": actions})
+    };
+    let a = |base: u16, stride: u16| json!([base, stride]);
+    let v = json!({
+        "version": 1,
+        "features": NUM_FEATURES,
+        "vocab": D,
+        "segments": [
+            {"name": "context", "offset": O_CONTEXT, "count": 1, "width": CONTEXT, "present": null,
+             "id": {"at": ctx::CARD, "radix": [D]}},
+            {"name": "tops", "offset": O_TOPS, "count": 2 * TOPS, "width": TOP_W, "present": 1,
+             "id": {"at": 2, "radix": [16, 16]}},
+            seg("my_permanents", O_MY_PERM, PERMS, PERM_W, CODE + perm::PRESENT,
+                json!([a(act::MY_PERM, 1), a(act::ACTIVATE, 4), a(act::ACTIVATE + 1, 4), a(act::ACTIVATE + 2, 4),
+                       a(act::ACTIVATE + 3, 4)])),
+            seg("opponent_permanents", O_OPP_PERM, PERMS, PERM_W, CODE + perm::PRESENT, json!([a(act::OPP_PERM, 1)])),
+            seg("hand", O_HAND, HANDS, HAND_W, CODE, json!([a(act::HAND, 1), a(act::HAND_ABILITY, 1)])),
+            seg("stack", O_STACK, STACKS, STACK_W, CODE, json!([a(act::STACK, 1)])),
+            seg("triggers", O_TRIG, TRIGS, TRIG_W, CODE, json!([a(act::TRIGGER, 1)])),
+            seg("list", O_LIST, LIST, LIST_W, CODE, json!([a(act::LIBRARY, 1)])),
+        ],
+        "bags": [{"name": "bags", "offset": O_BAGS, "count": BAGS, "width": D}],
+        "cards": (0..db.len()).map(|i| db.def(i as DefId).name.clone()).collect::<Vec<_>>(),
+    });
+    serde_json::to_string_pretty(&v).unwrap() + "\n"
 }
 
 /// Keywords in the permanent status, in this order.

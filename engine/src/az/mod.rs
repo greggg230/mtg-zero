@@ -257,6 +257,12 @@ impl SearchGame for MtgAz {
         self.g.turn().number
     }
 
+    /// Minor: which mana source to tap next while paying (ENGINE.md 22; zero-core searches it
+    /// with the seat's `sims_minor` and never records it).
+    fn minor_decision(&self) -> bool {
+        self.g.pending_decision().is_some_and(|d| d.kind == crate::decision::DecisionKind::PayMana)
+    }
+
     fn bot_names() -> &'static [&'static str] {
         &["heuristic"]
     }

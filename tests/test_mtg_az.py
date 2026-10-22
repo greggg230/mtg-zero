@@ -79,12 +79,17 @@ def test_selfplay_records_samples():
 
 
 def test_presets_and_defaults():
-    assert {'toy-smoke', 'toy-1', 'mtg-smoke', 'mtg-1'} <= set(run.PRESETS)
+    assert {'toy-smoke', 'toy-1', 'mtg-smoke', 'mtg-1', 'mtg-2', 'mtg-2-mlp'} <= set(run.PRESETS)
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {})
     assert cfg['game'] == 'mtg' and cfg['yardstick'] == 'heuristic'
     assert json.loads(cfg['spec'])['max_turns'] == 60
+    assert cfg['eval_spec'] == ''                                      # the package's evaluation spec
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-1']), {})
     assert cfg['game'] == 'mtg' and cfg['iters'] >= 4 and cfg['infer_device'] == 'cpu'
+    a = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-2']), {})
+    b = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-2-mlp']), {})
+    assert (a['arch'], a['policy_target'], a['sims_minor']) == ('tokens', 'cq', 4) and b['arch'] == 'mlp'
+    assert {k for k in a if a[k] != b[k]} == {'arch', 'hidden', 'preset'}      # the control differs only in the network
 
 
 def test_eval_spec():
@@ -99,9 +104,14 @@ def test_eval_spec():
 
 
 def test_evaluation_drivers_use_the_eval_decks():
-    """mtgz.az.run patches Run.driver: drivers that record nothing (evaluation matches) get the
-    evaluation spec, self-play drivers the run's spec."""
-    assert getattr(run.Run.driver, '_mtgz_eval_decks', False)
+    """The game package's evaluation spec (zero-core GamePackage.eval_specs: the evaluation deck
+    set of the run's spec): drivers that record nothing (evaluation matches) get it, self-play
+    drivers the run's spec; another game of the package (the toy) keeps its spec."""
+    import mtgz.az as A
+    from zero import package
+    assert not hasattr(run.Run.driver, '_mtgz_eval_decks')            # no patch any more
+    assert package.active().eval_spec_of('mtg', A.SPEC) == A.EVAL_SPEC == evaldecks.eval_spec(A.SPEC)
+    assert package.active().eval_spec_of('toy', '{}') == '{}'
     seen = []
     real = run.G.Driver
 
@@ -115,8 +125,60 @@ def test_evaluation_drivers_use_the_eval_decks():
         run.G.Driver = spy
         run.Run.driver(f, [['heuristic', 'random']], seed=1)
         run.Run.driver(f, [['heuristic', 'random']], seed=1, record=True)
+        f.cfg['eval_spec'] = '{"max_turns": 9}'                        # a run's own setting wins
+        run.Run.driver(f, [['heuristic', 'random']], seed=1)
     finally:
         run.G.Driver = real
     assert json.loads(seen[0][1])['decks'] == 'eval' and seen[0][0] is False
-    assert seen[1] == (True, SPEC)
-    assert f.cfg['spec'] == SPEC
+    assert seen[1] == (True, SPEC) and seen[2] == (False, '{"max_turns": 9}')
+
+
+def test_layout_and_token_network_read_the_encoding():
+    """layout_v1.json (encode::layout_json) through zero-core's token network: the identities the
+    network decodes are the engine's cards, the pointer actions of the hand and permanent slots
+    are their action ids, and a real leaf batch gets a valid answer."""
+    import torch
+    import mtgz.az as A
+    from zero.infer import NetEvaluator
+    from zero.net import make_net, tokens_layout
+    info = G.info('mtg')
+    lay = tokens_layout(A.LAYOUT, info['num_features'], info['num_actions'])
+    assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 256
+    names = A.LAYOUT['cards']
+    torch.manual_seed(0)
+    m = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)
+    E = G.engine()
+    rng = np.random.default_rng(2)
+    g = E.Game('mtg', SPEC, 2, 11)
+    seen = 0
+    while not g.over and seen < 40:
+        legal = list(g.legal())
+        x = torch.from_numpy(np.asarray(g.encode(g.to_move)))[None]
+        with torch.no_grad():
+            h, n, full = m.pack(x)
+        segs = {s['name']: s for s in lay['segments']}
+        hand = segs['hand']
+        for s in range(hand['count']):
+            o = hand['offset'] + s * hand['width']
+            if x[0, o + hand['present']] > 0.5:
+                ident = int(m._identity(x[0, o:o + hand['width']][None], hand['id'])[0])
+                assert ident < len(names) and int(x[0, o:o + 16].argmax()) * 16 + int(x[0, o + 16:o + 32].argmax()) == ident
+                seen += 1
+        # the slot of every legal HAND / MY_PERM / OPP_PERM id is a token
+        start, pos = 1, {}
+        for s in lay['segments']:
+            pos[s['name']] = start
+            start += s['count']
+        tokens = set(full[0, :int(n[0])].tolist())
+        for a in legal:
+            for name, base, cnt in (('hand', 36, 16), ('my_permanents', 100, 32), ('opponent_permanents', 196, 32)):
+                if base <= a < base + cnt:
+                    assert pos[name] + a - base in tokens, (name, a)
+        g.step(int(legal[rng.integers(len(legal))]))
+    assert seen > 0
+    seat = G.nn_seat('m', 4)
+    drv = G.Driver('mtg', [[seat, G.seat_dict('random')]] * 6, spec=SPEC, concurrency=6, threads=1, seed=4,
+                   max_steps=20000)
+    lb = drv.next_batch()
+    pri, val, mar = NetEvaluator(m)(lb)
+    protocol.validate_evaluation(lb, pri, val, mar)
