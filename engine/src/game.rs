@@ -580,15 +580,16 @@ impl Game {
                 }
             }
         }
-        // A card leaving a hidden zone for a public one is revealed to all
-        // (unless everyone knows it already: nothing is revealed).
+        // A card leaving a hidden zone for a public one is revealed to all.
+        // It is keyed even if everyone knew it: which known card a hidden
+        // choice (a hand slot) named can differ between sampled worlds.
         if from.is_hidden() {
             let def = self.objs[idx.i()].def;
             if to.is_hidden() {
                 self.knowledge_moves(idx, owner, from, to);
             } else {
                 self.knowledge_leaves(idx, owner, from, def, known_before);
-                if to != Zone::Nowhere && known_before != 0b11 {
+                if to != Zone::Nowhere {
                     self.emit_public(KEY_REVEAL, owner, def as u64);
                 }
             }

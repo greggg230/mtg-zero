@@ -229,6 +229,125 @@ impl Game {
         panic!("drive_until: no progress");
     }
 
+    /// Everything `viewer` can observe, as numbers (hidden-information
+    /// tests): public zones and objects, zone sizes, life and mana, the
+    /// turn, the viewer's own hand, every card the viewer knows exactly
+    /// where it is (library positions; the other hand as a multiset, its
+    /// cards are not told apart), the viewer's clouds, and the pending
+    /// decision (its options only if the viewer decides). Two worlds a
+    /// `determinize(viewer)` may produce must agree on it.
+    pub fn view_of(&self, viewer: PlayerId) -> Vec<u64> {
+        let mut v: Vec<u64> = Vec::with_capacity(256);
+        let t = &self.turn;
+        v.extend([t.number as u64, t.step as u64, t.active as u64, t.priority as u64, t.passes as u64]);
+        v.push(self.outcome.map_or(9, |o| o.winner.map_or(2, |w| w as u64)));
+        let obj = |v: &mut Vec<u64>, c: CardIdx| {
+            let o = &self.objs[c.i()];
+            v.extend([o.def as u64, o.owner as u64, o.controller as u64, o.tapped as u64, o.damage as u64]);
+            v.extend([o.attacking as u64, o.blocked as u64, o.blocking.is_some() as u64]);
+        };
+        for &c in &self.battlefield {
+            obj(&mut v, c);
+        }
+        v.push(u64::MAX);
+        for &c in &self.exile {
+            obj(&mut v, c);
+        }
+        v.push(u64::MAX);
+        // Objects are named by their public place (CardIdx identities are
+        // not observable): battlefield position, stack position, their
+        // definition in another public zone.
+        let place = |c: CardIdx| -> u64 {
+            match self.objs[c.i()].zone {
+                Zone::Battlefield => self.battlefield.iter().position(|&x| x == c).unwrap() as u64,
+                Zone::Stack => {
+                    1000 + self
+                        .stack
+                        .iter()
+                        .position(|s| s.kind == crate::game::StackKind::Spell { card: c })
+                        .unwrap_or(99) as u64
+                }
+                // In a hidden zone the slot's identity is not public (an
+                // ability's own definition says where it came from).
+                z if z.is_hidden() => 3000,
+                _ => 2000 + self.objs[c.i()].def as u64,
+            }
+        };
+        for s in &self.stack {
+            match s.kind {
+                crate::game::StackKind::Spell { card } => v.extend([1, self.objs[card.i()].def as u64]),
+                crate::game::StackKind::Ability { ability, source } => {
+                    let slot = match ability.slot {
+                        crate::db::AbilitySlot::Spell => 0,
+                        crate::db::AbilitySlot::Trigger(i) => 100 + i as u64,
+                        crate::db::AbilitySlot::Activated(i) => 200 + i as u64,
+                        crate::db::AbilitySlot::Hand(i) => 300 + i as u64,
+                    };
+                    v.extend([2, ability.def as u64, slot, place(source.idx)])
+                }
+            }
+            v.push(s.controller as u64);
+            for &(r, tg) in &s.targets {
+                v.push(r as u64);
+                v.push(match tg {
+                    Target::Player(p) => p as u64,
+                    Target::Obj(o) => 100 + place(o.idx),
+                });
+            }
+            v.extend(s.modes.iter().map(|&m| m as u64));
+            v.push(u64::MAX - 1);
+        }
+        for w in &self.waiting {
+            v.extend([w.controller as u64, w.source_def as u64, w.slot as u64]);
+        }
+        v.push(u64::MAX);
+        for p in 0..2u8 {
+            let pl = &self.players[p as usize];
+            v.extend([pl.life as i64 as u64, pl.hand.len() as u64, pl.library.len() as u64, pl.lands_played as u64]);
+            v.extend(pl.pool.amt.iter().map(|&n| n as u64));
+            v.extend(pl.graveyard.iter().map(|&c| self.objs[c.i()].def as u64));
+            v.push(u64::MAX);
+            // Library cards the viewer knows exactly, by position.
+            for (i, &c) in pl.library.iter().enumerate() {
+                if self.knows(viewer, c) {
+                    v.extend([i as u64, self.objs[c.i()].def as u64]);
+                }
+            }
+            v.push(u64::MAX);
+            // The hand: all of it if it is the viewer's, else the multiset
+            // of what the viewer knows exactly.
+            let mut h: Vec<u64> = pl
+                .hand
+                .iter()
+                .filter(|&&c| p == viewer || self.knows(viewer, c))
+                .map(|&c| self.objs[c.i()].def as u64)
+                .collect();
+            h.sort_unstable();
+            v.extend(h);
+            v.push(u64::MAX);
+        }
+        for k in self.clouds.iter().filter(|k| k.viewer == viewer) {
+            v.extend([k.owner as u64, k.hand as u64, k.library as u64]);
+            let lib = &self.players[k.owner as usize].library;
+            let mut pos: Vec<u64> = k
+                .slots
+                .iter()
+                .map(|c| lib.iter().position(|x| x == c).map_or(999, |i| i as u64))
+                .collect();
+            pos.sort_unstable();
+            v.extend(pos);
+            v.extend(k.defs.iter().map(|&d| d as u64));
+            v.push(u64::MAX - 2);
+        }
+        if let Some(d) = &self.pending {
+            v.extend([d.player as u64, d.kind as u64]);
+            if d.player == viewer {
+                v.extend(d.options.iter().map(|o| o.action as u64));
+            }
+        }
+        v
+    }
+
     /// A hash of the whole mutable state (determinism checks).
     pub fn fingerprint(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -249,6 +368,7 @@ impl Game {
         self.next_stack_id.hash(&mut h);
         self.outcome.hash(&mut h);
         self.clouds.hash(&mut h);
+        self.tokens.hash(&mut h);
         self.observer.hash(&mut h);
         h.finish()
     }

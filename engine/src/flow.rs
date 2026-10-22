@@ -137,6 +137,13 @@ impl Game {
         debug_assert!(options.iter().all(|o| (o.action as usize) < crate::decision::NUM_ACTIONS));
         self.agenda.push(task);
         if options.len() == 1 && self.spec.auto_single && !self.no_auto {
+            // The decision is answered here, so no node of the search sees
+            // it; that its decider had no alternative is a fact the next
+            // signature would otherwise not show (it may depend on hidden
+            // cards: no castable spell in hand), so it is keyed (ENGINE.md
+            // 10).
+            let payload = ((kind as u64) << 16) | options[0].action as u64;
+            self.emit_public(crate::hidden::KEY_AUTO, player, payload);
             self.answer = Some(options[0].choice);
             return;
         }

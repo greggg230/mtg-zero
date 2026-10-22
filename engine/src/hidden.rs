@@ -22,6 +22,10 @@ pub const KEY_REVEAL: u64 = 2;
 /// A player looked at a card in a hidden zone (the top of their library,
 /// another player's hand): private to the looker. Payload: its definition.
 pub const KEY_LOOK: u64 = 3;
+/// A decision with a single option was answered by the engine (`auto_single`):
+/// the player had no alternative. Payload: the decision kind (bits 16+) and
+/// the action id.
+pub const KEY_AUTO: u64 = 4;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
 

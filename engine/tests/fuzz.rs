@@ -81,11 +81,37 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
     g.legal_actions(&mut l1);
     d.legal_actions(&mut l2);
     assert_eq!(l1, l2, "seed {seed}: determinize changed the decider's actions");
-    assert_eq!(g.battlefield(), d.battlefield());
-    for &c in g.battlefield() {
-        assert_eq!(g.obj(c).def, d.obj(c).def);
+    // Nothing the viewer can observe changes; no card it knows exactly is
+    // resampled.
+    if g.view_of(viewer) != d.view_of(viewer) {
+        let mut info = String::new();
+        for st in g.stack() {
+            if let engine::game::StackKind::Ability { ability, source } = st.kind {
+                let o = g.obj(source.idx);
+                info += &format!(
+                    "ability {:?} of {} (slot {}) zone {:?} known {} -> now {}
+",
+                    ability.slot,
+                    g.name(source.idx),
+                    source.idx.0,
+                    o.zone,
+                    o.known,
+                    d.name(source.idx)
+                );
+            }
+        }
+        panic!("seed {seed}: determinize changed the viewer's view (viewer {viewer})
+{info}{}", g.log_lines().iter().rev().take(25).cloned().collect::<Vec<_>>().join("
+"));
+    }
+    for (i, o) in g.objs().iter().enumerate() {
+        let c = engine::CardIdx(i as u16);
+        if g.knows(viewer, c) {
+            assert_eq!(o.def, d.obj(c).def, "seed {seed}: a known card was resampled");
+        }
     }
     d.check_invariants().unwrap();
+    check_information_set(g, viewer, seed, rng);
     let mut legal = Vec::new();
     let mut keys = Vec::new();
     for _ in 0..30 {
@@ -95,6 +121,48 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
         d.legal_actions(&mut legal);
         d.apply(legal[rng.below(legal.len() as u32) as usize], &mut keys).unwrap();
         d.check_invariants().unwrap_or_else(|e| panic!("seed {seed} (determinized): {e}"));
+    }
+}
+
+/// Every revealed fact is keyed: two worlds `determinize(viewer)` samples,
+/// played with the same actions, stay indistinguishable to the viewer as
+/// long as the search would keep them in one node: zero-core keys children
+/// by (chance keys, next decider, next legal actions), so equal keys, an
+/// equal next decider and equal legal actions must mean an equal view.
+fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
+    let s = rng.next_u64();
+    let mut a = g.clone();
+    a.determinize(viewer, &mut Rng::new(s));
+    let mut b = g.clone();
+    b.determinize(viewer, &mut Rng::new(s ^ 0x5EED));
+    let (mut la, mut lb) = (Vec::new(), Vec::new());
+    for step in 0..25 {
+        a.legal_actions(&mut la);
+        b.legal_actions(&mut lb);
+        if a.to_move() != b.to_move() || la != lb {
+            // Another player's options may depend on its hidden cards (and a
+            // decision with one option is answered internally, so who
+            // decides next may differ too): the search keeps such worlds in
+            // different nodes. The viewer's own options never differ.
+            assert!(
+                !(a.to_move() == Some(viewer) && b.to_move() == Some(viewer)),
+                "seed {seed} step {step}: the viewer's options differ: {:?} / {:?}",
+                a.options_desc(),
+                b.options_desc()
+            );
+            return;
+        }
+        assert_eq!(a.view_of(viewer), b.view_of(viewer), "seed {seed} step {step}: same keys, different views");
+        if a.is_over() {
+            return;
+        }
+        let act = la[rng.below(la.len() as u32) as usize];
+        let (mut ka, mut kb) = (Vec::new(), Vec::new());
+        a.apply(act, &mut ka).unwrap();
+        b.apply(act, &mut kb).unwrap();
+        if ka != kb {
+            return; // different outcomes, told apart by the keys
+        }
     }
 }
 

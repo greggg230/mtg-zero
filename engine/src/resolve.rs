@@ -554,9 +554,12 @@ impl Game {
                     opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
                 }
                 if !rest && need == 0 {
-                    if opts.is_empty() {
+                    if f.pile.is_empty() {
                         return Flow::Next;
                     }
+                    // Even with no card to pick, ask (pass only): whether a
+                    // card matches is hidden from the other player, whose
+                    // determinize must find the same decision pending.
                     opts.push(Opt { action: act::PASS, choice: Choice::Pass });
                 }
                 let kind = match dest {
@@ -641,10 +644,12 @@ impl Game {
                             .into_iter()
                             .filter(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(filter, c, &ctx)))
                             .collect();
-                        if opts.is_empty() {
+                        if self.players[p as usize].hand.is_empty() {
                             return Flow::Next;
                         }
-                        if optional {
+                        // With no matching card, ask anyway (pass only): the
+                        // hand is hidden from the other player.
+                        if optional || opts.is_empty() {
                             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
                         }
                         self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseHandCard, opts);
