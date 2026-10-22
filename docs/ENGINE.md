@@ -1172,7 +1172,7 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
 
 ### 22.1 What changed
 
-**zero-core** (`main` @ CORESHA, pushed; its docs/az.md 10 and docs/search.md 1, 3):
+**zero-core** (`main` @ 71a1718, pushed; its docs/az.md 10 and docs/search.md 1, 3):
 
 * arch `tokens` (`zero.net.TokenNet`): a transformer over the game's objects, read from the
   same fixed-width features through a layout descriptor the game package registers
@@ -1184,7 +1184,7 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
 * run settings `eval_spec` (and `GamePackage.eval_specs`: a game's evaluation spec as a
   function of the self-play spec), `elo_opponents` / `elo_sims` / `elo_together` (cheaper Elo),
   `infer_workers` (CPU inference on several Python threads), `heads` / `ff`. Every default
-  keeps the old behaviour: the core's tests (67) and Rust tests, the golden self-play digests,
+  keeps the old behaviour: the core's tests (68) and Rust tests, the golden self-play digests,
   and `tools/check_checkpoint_compat.py` for mtg1's iteration-9 checkpoint (visits and cq
   records, results and a match against random identical on the old and the new checkout).
 
@@ -1218,18 +1218,20 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
 * The evaluation deck set goes through `GamePackage.eval_specs` (M5a's patch of `Run.driver` is
   gone; any spec's evaluation form, as before).
 * Presets `mtg-2` (22.4) and `mtg-2-mlp` (the same with mtg-1's MLP: the control).
-* The token network starts neutral (zero-core 3be6d11): its policy, value and margin output
-  layers are zero at first. Two false starts showed why: `runs/mtg2a` (random output layers)
-  began with 55% of the prior on `PASS` where 25% is uniform; its self-play games ran into the
-  turn cap (58.8 turns of 60, draws: no signal) and its first checkpoint lost 100/100 to the
-  heuristic. `runs/mtg2b` (uniform policy, random value head) still favoured `PASS`: the cq
-  targets of its first iteration put 49% on it against 36% uniform, the trained checkpoint
-  46%, and it lost 99/100 to the heuristic. Short self-play probes with untrained networks
-  (16 games, 32 sims) show a coin flip of the random value head, not the architecture: token
-  network seed 0 49% vs 36% uniform, seed 1 33% vs 40%; with the value head at zero 38% vs 38%.
-  The MLP control keeps the MLP's default initialisation (its seed-0 searches put 25% on
-  `PASS`, below uniform). Both false starts were stopped and their data deleted (logs, metrics
-  and checkpoints kept).
+* The token network's policy starts uniform (zero-core d89202f: its policy output layers are
+  zero at first; the value head keeps its random init), and mtg2 runs with seed 1. Three false
+  starts (stopped, their data deleted; logs, metrics and checkpoints kept) showed why:
+  `runs/mtg2a` (random output layers) began with 55% of the prior on `PASS` where 25% is
+  uniform; its self-play games ran into the turn cap (58.8 turns of 60: draws, no signal) and its
+  first checkpoint lost 100/100 to the heuristic. `runs/mtg2b` (uniform policy, seed 0) still
+  favoured `PASS`: the cq targets of its first iteration put 49% on it against 36% uniform, its
+  first checkpoint 47%, and it lost 99/100. `runs/mtg2n` (policy and value heads at zero,
+  3be6d11) made every search a tie, and the search's tie rule (the first maximum) plays the first
+  option, `PASS`: 3 self-play games finished in 15 minutes. Short self-play probes with
+  untrained token networks (16 games, 32 sims, cq targets: the share of `PASS` in the targets at
+  priority decisions that offer a hand card) show a coin flip of the random value head, not the
+  architecture: seed 0 49% vs 36% uniform, seed 1 33% vs 40%; the
+  MLP's seed 0 (the control) 25% vs 40%.
 
 ### 22.2 Stable card identities: layout v2 (23,324 floats)
 
@@ -1292,3 +1294,138 @@ The same data through the token network (96 x 3, 600 steps at lr 1e-3 on iterati
 loop's losses with value_q 0.9; tested on iteration 9): policy CE 1.005 (target entropy 0.934),
 value CE vs z 0.585, accuracy 67.5%, against the MLP's 1.012 / 0.600 / 65.8% - it learns from
 the same samples at least as well.
+
+### 22.4 The second run (`runs/mtg2`) and its control (`runs/mtg2c`)
+
+Preset `mtg-2` (`runs/mtg2`, seed 1, from the pinned worktree `~/mtg-zero-wt/run-531070a`, core
+c0d1a3c, layout v1) and its control `mtg-2-mlp` (`runs/mtg2c`, seed 0, from `run-ca74b0f`, core
+cc86dee: the MLP's code is the same in both cores). The same settings except the network:
+
+* network: tokens 96 x 3 (4 heads, feed-forward 192; 0.76M parameters) vs the MLP 256 x 3 of
+  mtg1 (4.19M); lr 1e-3, batch 512, `reuse` 2, window 6 (growing), value_q 0.9 (warm-up 2:
+  0.45 at iteration 1);
+* self-play: rolling, 768 games in flight, 600 finished games per iteration, 64 / 16 simulations
+  (`p_full` 0.25; mtg1: 32 / 8), mana payments at 4 simulations and never recorded
+  (`sims_minor`), completed-Q targets (c_visit 50, c_scale 1), temperature for the first 60
+  searched decisions;
+* CPU only: 6 search threads, 4 inference threads x 2 torch threads (`infer_workers`, 4
+  groups). The GPU ran two Kingdom Builder runs (100% busy), whose self-play workers also took
+  ~19 of the 32 logical CPUs throughout (measured: the machine at 31.8 / 32);
+* evaluation as mtg1 (100 games against the heuristic, 50 against random, 32 simulations, the 16
+  evaluation deck pairs), Elo matches against the 2 previous checkpoints in one driver (20
+  games each). mtg2's Elo matches took 12 minutes for one 20-game match (two token networks on
+  tiny batches), so after iteration 1 its config was changed to `elo_games` 0 (paused and resumed
+  during iteration 2's evaluation): its Elo rests on the heuristic and random results and the
+  1-vs-0 match.
+
+Wall clock (2026-10-22): mtg2 11:32-15:07 (3 h 35 min, 5 iterations; stopped with a STOP file
+and left stopped); mtg2c 08:34-11:38 (3 h 4 min, 10 iterations; stopped after iteration 10 to
+give mtg2 the CPU, left stopped). The control ran next to the token network's false starts
+(22.1: runs/mtg2a, mtg2b, mtg2n, 08:34-11:31, their data deleted); mtg2 had no other MTG run
+beside it after 11:38. Both shared the machine with the two Kingdom Builder runs.
+
+**mtg2** (token network):
+
+| Iter | Games (cum.) | Samples | Leaves / s | Decisions / game | Minor / game | Turns | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100) | vs random (50) | Elo (final fit) | Minutes (sp / train / eval / elo) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 0 |  |  |  |  |  |  |  | 4.0% +-2.0 | 54% | 334 +-53 | 0.0 / 0.0 / 10.1 / 0.0 |
+| 1 | 600 | 31,458 | 5,380 | 258 | 81 | 37.3 | 0.73 | 0.940 / 0.626 / 0.77 | 6.0% +-2.4 | 84% | 561 +-48 | 20.4 / 1.4 / 12.7 / 11.7 |
+| 2 | 1,200 | 43,124 | 4,588 | 341 | 59 | 41.9 | 0.63 | 0.899 / 0.675 / 0.79 | 3.0% +-1.7 | 66% | 403 +-56 | 22.4 / 2.2 / 9.2 / 0.0 |
+| 3 | 1,800 | 40,131 | 4,291 | 300 | 62 | 40.3 | 0.74 | 0.898 / 0.664 / 0.73 | 3.5% +-1.8 | 75% | 464 +-54 | 34.0 / 1.6 / 10.5 / 0.0 |
+| 4 | 2,400 | 48,805 | 3,284 | 362 | 37 | 43.5 | 0.72 | 0.901 / 0.664 / 0.72 | 2.0% +-1.4 | 79% | 471 +-54 | 27.6 / 2.2 / 8.9 / 0.0 |
+| 5 | 3,000 | 50,435 | 3,810 | 372 | 31 | 43.6 | 0.68 | 0.897 / 0.668 / 0.69 | 5.5% +-2.3 | 81% | 527 +-52 | 26.9 / 2.7 / 10.3 / 0.0 |
+
+**mtg2c** (the MLP control):
+
+| Iter | Games (cum.) | Samples | Leaves / s | Decisions / game | Minor / game | Turns | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100) | vs random (50) | Elo (final fit) | Minutes (sp / train / eval / elo) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 0 |  |  |  |  |  |  |  | 8.5% +-2.8 | 59% | 500 +-38 | 0.0 / 0.0 / 2.7 / 0.0 |
+| 1 | 600 | 19,936 | 8,859 | 173 | 66 | 34.7 | 0.64 | 0.877 / 0.617 / 0.79 | 11.5% +-3.2 | 66% | 593 +-34 | 7.8 / 0.5 / 9.9 / 2.7 |
+| 2 | 1,200 | 24,051 | 12,300 | 210 | 58 | 37.5 | 0.57 | 0.876 / 0.678 / 0.78 | 17.0% +-3.8 | 71% | 636 +-32 | 4.3 / 0.5 / 4.5 / 5.6 |
+| 3 | 1,800 | 29,142 | 17,613 | 242 | 43 | 40.8 | 0.50 | 0.866 / 0.660 / 0.73 | 12.5% +-3.3 | 80% | 612 +-32 | 3.6 / 0.4 / 3.7 / 6.9 |
+| 4 | 2,400 | 34,273 | 11,481 | 266 | 34 | 43.6 | 0.51 | 0.850 / 0.660 / 0.72 | 10.5% +-3.1 | 60% | 583 +-32 | 6.3 / 0.6 / 2.1 / 3.9 |
+| 5 | 3,000 | 37,423 | 12,316 | 285 | 35 | 46.3 | 0.49 | 0.844 / 0.662 / 0.69 | 12.0% +-3.2 | 69% | 605 +-32 | 5.5 / 0.8 / 5.7 / 4.6 |
+| 6 | 3,600 | 35,498 | 10,383 | 273 | 36 | 43.4 | 0.52 | 0.835 / 0.661 / 0.70 | 5.5% +-2.3 | 75% | 624 +-32 | 6.9 / 1.0 / 6.3 / 6.0 |
+| 7 | 4,200 | 41,752 | 12,986 | 311 | 27 | 46.0 | 0.55 | 0.850 / 0.663 / 0.69 | 9.0% +-2.9 | 92% | 668 +-31 | 6.9 / 0.9 / 4.2 / 5.0 |
+| 8 | 4,800 | 47,371 | 14,010 | 343 | 27 | 47.6 | 0.55 | 0.840 / 0.663 / 0.69 | 6.0% +-2.4 | 84% | 626 +-32 | 6.3 / 1.2 / 8.6 / 5.5 |
+| 9 | 5,400 | 47,976 | 13,484 | 345 | 24 | 46.8 | 0.55 | 0.841 / 0.665 / 0.68 | 10.5% +-3.1 | 75% | 653 +-33 | 7.1 / 1.4 / 7.5 / 6.3 |
+| 10 | 6,000 | 52,223 | 11,781 | 371 | 21 | 47.4 | 0.54 | 0.831 / 0.665 / 0.68 | 6.0% +-2.4 | 88% | 669 +-35 | 9.0 / 1.4 / 4.7 / 5.7 |
+
+Minutes per phase: self-play / training / evaluation (vs the heuristic and random) / Elo matches. Leaves per second are the self-play phase's (the first iteration fills the 768 games in flight).
+
+The heuristic is each run's anchor (1000); Elo fits are per run (random: 289 in mtg2's fit, 429
+in mtg2c's), so compare Elo within a run and the runs through the head-to-head matches below.
+
+**Head to head** (`python -m mtgz.az.h2h`, 32 simulations, chance_k 0, random decks, seats
+alternating; score of the token network, +- 1 se):
+
+| Token network | MLP | Games | Score of the token network | Elo difference |
+|---|---|---:|---:|---:|
+| iteration 3 (1,800 games) | iteration 3 (1,800 games) | 60 | 65.8% +-6.1 | +114 |
+| iteration 5 (3,000 games) | iteration 5 (3,000 games) | 100 | 57.0% +-5.0 | +49 |
+| iteration 5 (3,000 games) | iteration 10 (6,000 games) | 100 | 36.5% +-4.8 | -96 |
+
+**Value generalisation** (`value_gen`: checkpoint k's value head on the samples of its own
+iteration k and of the next iteration's unseen games; cross-entropy / accuracy against the
+result z), against mtg1 (checkpoint 8: 94% / 72%, checkpoint 3: 98% / 67%):
+
+| Checkpoint | mtg2 (tokens) own | mtg2 next | mtg2c (MLP) own | mtg2c next |
+|---:|---|---|---|---|
+| 1 | 0.396 / 87.3% | 0.592 / 68.3% | 0.345 / 93.3% | 0.626 / 65.4% |
+| 2 | 0.592 / 74.9% | 0.655 / 61.4% | 0.591 / 74.7% | 0.646 / 62.8% |
+| 3 | 0.601 / 71.6% | 0.629 / 66.0% | 0.581 / 72.2% | 0.640 / 62.8% |
+| 4 | 0.612 / 67.8% | 0.649 / 61.3% | 0.591 / 69.9% | 0.661 / 60.2% |
+| 5 | | | 0.618 / 68.6% | 0.642 / 62.7% |
+| 9 | | | 0.618 / 66.3% | 0.638 / 62.6% |
+
+(Checkpoint 1 still had value_q 0.45; from iteration 2 on value_q 0.9.)
+
+**Both networks on the same held-out games** (the control's iteration 7, unseen by both;
+`cross_eval`): token checkpoint 3: policy CE 1.011, value CE 0.621, accuracy 67.3%; MLP
+checkpoint 3: 1.005 / 0.649 / 61.8%; MLP checkpoint 6: 0.947 / 0.641 / 65.3% (the targets'
+entropy 0.588). Per decision kind the two checkpoint-3 policies are within 0.02 of each other
+(priority 0.968 / 0.966, targets 1.089 / 1.095, attackers 0.827 / 0.831).
+
+Readout:
+
+* **Against the heuristic neither network improves** in these iterations: the MLP stays at
+  5.5-17% (mean 10.1% over iterations 1-10, as mtg1's 9.3%), the token network at 2-6% (mean 4.0%
+  over 1-5), losing faster (22-25 turns, margin -20: the heuristic wins at full life). Against
+  random both win more (MLP 59% -> 75-92%, tokens 54% -> 75-84%).
+* **Head to head the token network is the stronger player** at equal iterations (57-66% against the MLP of the same iteration; the MLP of twice the games, which the CPU gave it in less time, wins 63.5%), and
+  its value head generalises at least as well (next-iteration accuracy 61-68% vs 60-65%; on the
+  same unseen games 67% vs 62%). The two yardsticks disagree: the heuristic (aggressive, casts
+  and attacks every turn) beats the token network more often than the MLP although the token
+  network beats the MLP. Blocking is the likely gap: blocks are rare in self-play (130 of 20,000
+  recorded decisions of mtg2's iteration 4) and the token network's prior on them is still
+  uniform (47% on no block, 48% uniform), while the heuristic attacks every turn.
+* **The memorised values are gone** with value_q 0.9 and reuse 2 in both runs: the gap between a
+  checkpoint's own games and the next iteration's is 4-12 accuracy points (mtg1: 22-31).
+* **The completed-Q targets are sharper** than mtg1's visit targets (H / ln n 0.49-0.74 vs 0.90),
+  and the policy loss now falls below the target entropy (MLP 0.877 -> 0.831).
+* **Cost**: the token network self-played at 3.3-5.4k leaves/s against the MLP's 8.9-17.6k on
+  the same machine and settings (2-3x slower), its evaluation took 9-13 minutes per iteration
+  against the MLP's 2-10, so it got 5 iterations (3,000 games) in 3 h 35 min where the MLP got
+  10 (6,000 games) in 3 h 4 min. Mana payments (minor) were 21-81 of 173-372 searched decisions
+  per game.
+* **Self-play games get longer** in both runs (MLP 173 -> 371 decisions, 35 -> 47 turns; tokens
+  258 -> 372, 37 -> 44): as in mtg1, the networks pass more than the heuristic.
+
+### 22.5 Next
+
+* **A yardstick that does not disagree with head to head**: the heuristic alone measures one
+  style; add Elo matches against fixed earlier checkpoints of both runs (cheap now with
+  `elo_together`), or a second, defensive bot.
+* **Blocking**: blocks are rare in self-play and pointer logits for "block this attacker with
+  the asked blocker" need the attacker's token to attend to the blocker's: give the
+  `DeclareBlockers` / `DeclareAttackers` decisions their own context (the asked blocker's slot
+  as a pointer query), and check per-kind policy and value calibration after each iteration.
+* **Compute**: the token network is CPU-bound at ~4k leaves/s with the machine shared; the GPU
+  (bfloat16, CUDA graphs as GridNet has) or a Rust / ONNX inference path would remove the
+  per-op Python overhead. Evaluation should batch its matches (vs the yardstick, vs random and
+  Elo in one driver) - 40% of mtg2's iteration time was evaluation on tiny batches.
+* **Search cost**: per game 170-370 searched decisions remain; priority stops where only passing
+  makes sense (always-available activations such as Sensei's Divining Top, Zuran Orb, Voltaic
+  Key: 85% of the activation-only priority decisions of mtg1's data) are the next minor
+  decisions to try.
+* **Layout v2** (22.2) for every new run; mtg2 / mtg2c checkpoints are layout v1.
