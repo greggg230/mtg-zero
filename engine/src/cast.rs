@@ -1,19 +1,28 @@
-//! Casting spells, choosing targets, paying mana (CR 601, 115; ENGINE.md 6).
+//! Casting spells, choosing targets, filters (CR 601, 115; ENGINE.md 6).
 
 use crate::db::{types, AbilityDef, AbilityRef, AbilitySlot, Filter, Kw, TargetReq};
 use crate::decision::{act, Choice, DecisionKind, Opt};
-use crate::flow::{PayMana, Task};
+use crate::flow::Task;
 use crate::game::{Game, StackItem, StackKind};
 use crate::ids::{CardIdx, ObjRef, PlayerId, Target, Zone};
-use crate::mana::{payable, ManaCost, ManaMask};
+use crate::pay::PayMana;
+
+/// Who is asking whether a filter matches: the spell or ability's
+/// controller ("you") and source ("this", "another").
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Ctx {
+    pub controller: PlayerId,
+    pub source: Option<ObjRef>,
+}
 
 impl Game {
-    // ---- priority options (CR 117.1, 116.2a, 307.1) -----------------------
+    // ---- priority options (CR 117.1, 116.2a, 307.1, 602.2) ----------------
 
     pub(crate) fn priority_options(&self, p: PlayerId) -> Vec<Opt> {
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let land_ok = sorcery_ok && self.players[p as usize].lands_played < 1;
+        let classes = self.mana_classes(p, None);
         for (action, c) in self.hand_slots(p) {
             let def = self.def_of(c);
             if def.is(types::LAND) {
@@ -26,7 +35,16 @@ impl Game {
             if !(instant_speed || sorcery_ok) {
                 continue;
             }
-            if !self.can_pay(p, &def.cost) {
+            // The card moves to the stack before its cost is paid (601.2a),
+            // so it cannot pay for itself (a Spirit Guide).
+            let own: Vec<crate::pay::Class>;
+            let cls = if def.hand_abilities.iter().any(|a| a.mana().is_some()) {
+                own = classes_without(&classes, c);
+                &own[..]
+            } else {
+                &classes[..]
+            };
+            if !self.can_pay_with(p, &def.cost, cls, Some(c), 0, 0) {
                 continue;
             }
             if let Some(ab) = &def.spell {
@@ -36,12 +54,14 @@ impl Game {
             }
             opts.push(Opt { action, choice: Choice::Cast(c) });
         }
+        self.activation_options(p, &classes, sorcery_ok, &mut opts);
         opts
     }
 
     /// Every target requirement has at least `min` legal candidates.
     pub(crate) fn targets_available(&self, ab: &AbilityDef, controller: PlayerId, source: Option<ObjRef>) -> bool {
-        ab.targets.iter().all(|tr| self.target_candidates(tr, controller, source, &[]).len() >= tr.min as usize)
+        let ctx = Ctx { controller, source };
+        ab.targets.iter().all(|tr| self.target_candidates(tr, &ctx, &[]).len() >= tr.min as usize)
     }
 
     // ---- casting (CR 601.2) ------------------------------------------------
@@ -98,8 +118,7 @@ impl Game {
         let Some(ar) = self.item_ability(item) else { return };
         let ab = self.db.ability(ar);
         let Some(tr) = ab.targets.get(req as usize) else { return };
-        let controller = item.controller;
-        let source = self.item_source(item);
+        let ctx = Ctx { controller: item.controller, source: Some(self.item_source(item)) };
         let already: Vec<Target> =
             item.targets.iter().filter(|(r, _)| *r == req).map(|&(_, t)| t).collect();
         match self.answer.take() {
@@ -120,10 +139,10 @@ impl Game {
             self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
             return;
         }
-        let cands = self.target_candidates(tr, controller, Some(source), &already);
+        let cands = self.target_candidates(tr, &ctx, &already);
         let mut opts: Vec<Opt> = cands
             .iter()
-            .map(|&t| Opt { action: self.target_action(controller, t), choice: Choice::Target(t) })
+            .map(|&t| Opt { action: self.target_action(ctx.controller, t), choice: Choice::Target(t) })
             .collect();
         if already.len() >= tr.min as usize {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
@@ -133,7 +152,7 @@ impl Game {
             // now, which nothing can do yet.
             panic!("no legal target for a required target");
         }
-        self.ask(Task::ChooseTargets { id, req }, controller, DecisionKind::Target, opts);
+        self.ask(Task::ChooseTargets { id, req }, ctx.controller, DecisionKind::Target, opts);
     }
 
     /// 601.2f-h: determine the total cost and pay it.
@@ -143,7 +162,7 @@ impl Game {
         let StackKind::Spell { card } = item.kind else { return };
         let cost = self.def_of(card).cost;
         let payer = item.controller;
-        self.agenda.push(Task::PayMana(PayMana { payer, cost, chosen: Vec::new(), min_class: 0, pooled: false }));
+        self.agenda.push(Task::PayMana(PayMana::new(payer, cost)));
     }
 
     /// 601.2i: the spell becomes cast (cast triggers come here later).
@@ -156,20 +175,14 @@ impl Game {
     /// (stack, top first). A spell or ability cannot target itself (115.5);
     /// `exclude` holds the targets already chosen for this requirement
     /// (the same object once per "target", 115.3).
-    pub(crate) fn target_candidates(
-        &self,
-        tr: &TargetReq,
-        controller: PlayerId,
-        source: Option<ObjRef>,
-        exclude: &[Target],
-    ) -> Vec<Target> {
+    pub(crate) fn target_candidates(&self, tr: &TargetReq, ctx: &Ctx, exclude: &[Target]) -> Vec<Target> {
         let mut out = Vec::new();
         let consider = |t: Target, out: &mut Vec<Target>| {
-            if !exclude.contains(&t) && self.filter_ok(&tr.filter, t) && self.targetable(t, controller) {
+            if !exclude.contains(&t) && self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx.controller) {
                 out.push(t);
             }
         };
-        for q in [controller, crate::ids::opp(controller)] {
+        for q in [ctx.controller, crate::ids::opp(ctx.controller)] {
             consider(Target::Player(q), &mut out);
         }
         for &c in &self.battlefield {
@@ -178,7 +191,7 @@ impl Game {
         for s in self.stack.iter().rev() {
             if let StackKind::Spell { card } = s.kind {
                 let r = self.obj_ref(card);
-                if Some(r) != source {
+                if Some(r) != ctx.source {
                     consider(Target::Obj(r), &mut out);
                 }
             }
@@ -186,149 +199,106 @@ impl Game {
         out
     }
 
-    /// Hexproof, shroud, protection and ward hook in here (none yet).
-    pub(crate) fn targetable(&self, _t: Target, _by: PlayerId) -> bool {
-        true
+    /// Hexproof and shroud (CR 702.11, 702.18); protection and ward later.
+    pub(crate) fn targetable(&self, t: Target, by: PlayerId) -> bool {
+        match t {
+            Target::Player(_) => true,
+            Target::Obj(r) => {
+                if self.objs[r.idx.i()].zone != Zone::Battlefield {
+                    return true;
+                }
+                !(self.has_kw(r.idx, Kw::Shroud)
+                    || (self.has_kw(r.idx, Kw::Hexproof) && self.objs[r.idx.i()].controller != by))
+            }
+        }
     }
 
     /// Is `t` (still) a legal choice for `tr` (CR 608.2b)?
-    pub(crate) fn target_legal(&self, tr: &TargetReq, t: Target, controller: PlayerId) -> bool {
+    pub(crate) fn target_legal(&self, tr: &TargetReq, t: Target, ctx: &Ctx) -> bool {
         if let Target::Obj(r) = t {
             if !self.live(r) {
                 return false;
             }
         }
-        self.filter_ok(&tr.filter, t) && self.targetable(t, controller)
+        self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx.controller)
     }
 
-    /// Top-level filter: type predicates mean permanents, `Spell(f)` a spell
-    /// on the stack, `Player` a player.
-    pub(crate) fn filter_ok(&self, f: &Filter, t: Target) -> bool {
-        match f {
-            Filter::Any => true,
-            Filter::Player => matches!(t, Target::Player(_)),
-            Filter::Type(bits) => match t {
-                Target::Obj(r) => self.on_battlefield(r) && self.types_of(r.idx) & bits != 0,
-                Target::Player(_) => false,
+    /// Top-level filter. Players and permanents are one universe (a bare
+    /// `Not(Creature)` matches players too, as in the IR); characteristic
+    /// predicates mean permanents. Spells on the stack match only through
+    /// `Spell(f)` (possibly inside `And` / `Or`).
+    pub(crate) fn filter_ok(&self, f: &Filter, t: Target, ctx: &Ctx) -> bool {
+        match t {
+            Target::Player(_) => match f {
+                Filter::Any | Filter::Player => true,
+                Filter::And(a, b) => self.filter_ok(a, t, ctx) && self.filter_ok(b, t, ctx),
+                Filter::Or(v) => v.iter().any(|x| self.filter_ok(x, t, ctx)),
+                Filter::Not(x) => !self.filter_ok(x, t, ctx),
+                _ => false,
             },
-            Filter::TotalPtAtMost(n) => match t {
-                Target::Obj(r) => {
-                    self.on_battlefield(r)
-                        && self.is_creature(r.idx)
-                        && self.power(r.idx) + self.toughness(r.idx) <= *n
+            Target::Obj(r) => {
+                if !self.live(r) {
+                    return false;
                 }
-                Target::Player(_) => false,
-            },
-            Filter::Spell(inner) => match t {
-                Target::Obj(r) => {
-                    self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack && self.card_matches(inner, r.idx)
+                match self.objs[r.idx.i()].zone {
+                    Zone::Battlefield => self.perm_ok(f, r.idx, ctx),
+                    Zone::Stack => self.spell_ok(f, r.idx, ctx),
+                    _ => false,
                 }
-                Target::Player(_) => false,
-            },
-            Filter::And(a, b) => self.filter_ok(a, t) && self.filter_ok(b, t),
-            Filter::Or(v) => v.iter().any(|x| self.filter_ok(x, t)),
-            Filter::Not(x) => !self.filter_ok(x, t),
+            }
         }
     }
 
-    fn on_battlefield(&self, r: ObjRef) -> bool {
-        self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield
+    fn perm_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
+        match f {
+            Filter::Player | Filter::Spell(_) => false,
+            Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
+            Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
+            Filter::Not(x) => !self.perm_ok(x, c, ctx),
+            _ => self.card_matches(f, c, ctx),
+        }
     }
 
-    /// A filter applied to a card's characteristics, whatever its zone.
-    pub(crate) fn card_matches(&self, f: &Filter, c: CardIdx) -> bool {
+    fn spell_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
+        match f {
+            Filter::Spell(inner) => self.card_matches(inner, c, ctx),
+            Filter::And(a, b) => self.spell_ok(a, c, ctx) && self.spell_ok(b, c, ctx),
+            Filter::Or(v) => v.iter().any(|x| self.spell_ok(x, c, ctx)),
+            _ => false,
+        }
+    }
+
+    /// A filter applied to an object's characteristics (and its controller
+    /// and identity relative to `ctx`), whatever its zone.
+    pub(crate) fn card_matches(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
+        let def = self.def_of(c);
         match f {
             Filter::Any => true,
             Filter::Player | Filter::Spell(_) => false,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
             Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) + self.toughness(c) <= *n,
-            Filter::And(a, b) => self.card_matches(a, c) && self.card_matches(b, c),
-            Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c)),
-            Filter::Not(x) => !self.card_matches(x, c),
+            Filter::Subtype(s) => def.subtypes.contains(s),
+            Filter::Supertype(bits) => def.supertypes & bits != 0,
+            Filter::ManaValueAtMost(n) => def.mana_value() <= *n,
+            Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n,
+            Filter::PowerAtMost(n) => self.is_creature(c) && self.power(c) <= *n,
+            Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,
+            Filter::Controller(you) => (self.objs[c.i()].controller == ctx.controller) == *you,
+            Filter::Source => ctx.source.is_some_and(|s| s.idx == c && self.live(s)),
+            Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
+            Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
+            Filter::Not(x) => !self.card_matches(x, c, ctx),
         }
     }
+}
 
-    // ---- mana (CR 106, 601.2g-h; ENGINE.md 6) ------------------------------
-
-    /// `p`'s untapped mana sources in battlefield order with their masks.
-    pub(crate) fn mana_sources(&self, p: PlayerId) -> Vec<(CardIdx, ManaMask)> {
-        self.permanents_of(p)
-            .filter(|&c| {
-                let o = &self.objs[c.i()];
-                // {T} abilities of creatures need 302.6 (no creature sources yet).
-                !o.tapped && self.def_of(c).produces != 0 && !(self.is_creature(c) && self.is_sick(c))
-            })
-            .map(|c| (c, self.def_of(c).produces))
-            .collect()
-    }
-
-    /// Can `p` pay `cost` from their pool plus untapped sources?
-    pub fn can_pay(&self, p: PlayerId, cost: &ManaCost) -> bool {
-        let mut c = *cost;
-        let mut pool = self.players[p as usize].pool;
-        pool.pay_into(&mut c);
-        if c.is_zero() {
-            return true;
-        }
-        let masks: Vec<ManaMask> = self.mana_sources(p).iter().map(|s| s.1).collect();
-        payable(&c, &[], &masks)
-    }
-
-    /// Classes of equivalent mana sources (same definition; untapped lands
-    /// have no other relevant state yet), in order of first appearance.
-    fn source_classes(&self, p: PlayerId) -> Vec<Vec<(CardIdx, ManaMask)>> {
-        let mut classes: Vec<Vec<(CardIdx, ManaMask)>> = Vec::new();
-        for (c, m) in self.mana_sources(p) {
-            let def = self.objs[c.i()].def;
-            match classes.iter_mut().find(|cl| self.objs[cl[0].0.i()].def == def) {
-                Some(cl) => cl.push((c, m)),
-                None => classes.push(vec![(c, m)]),
-            }
-        }
-        classes
-    }
-
-    /// The `PayMana` task (ENGINE.md 6).
-    pub(crate) fn pay_mana(&mut self, mut pm: PayMana) {
-        if !pm.pooled {
-            self.players[pm.payer as usize].pool.pay_into(&mut pm.cost);
-            pm.pooled = true;
-        }
-        let classes = self.source_classes(pm.payer);
-        if let Some(ch) = self.answer.take() {
-            let Choice::Card(c) = ch else { unreachable!("pay answer {ch:?}") };
-            pm.chosen.push(c);
-            pm.min_class = classes.iter().position(|cl| cl.iter().any(|s| s.0 == c)).expect("source class") as u8;
-        }
-        if pm.chosen.len() == pm.cost.total() as usize {
-            for &c in &pm.chosen {
-                self.tap(c); // the mana ability's cost; its mana is spent at once
-            }
-            let payer = pm.payer;
-            let n = pm.chosen.len();
-            self.note(|_| format!("P{payer} pays with {n} sources"));
-            return;
-        }
-        let mask_of = |c: CardIdx| self.def_of(c).produces;
-        let chosen_masks: Vec<ManaMask> = pm.chosen.iter().map(|&c| mask_of(c)).collect();
-        let mut opts = Vec::new();
-        for (ci, cl) in classes.iter().enumerate().skip(pm.min_class as usize) {
-            let Some(&(rep, m)) = cl.iter().find(|s| !pm.chosen.contains(&s.0)) else { continue };
-            let mut ch = chosen_masks.clone();
-            ch.push(m);
-            // Only classes from this one on can complete the set (the
-            // canonical order), so feasibility is checked against those.
-            let avail: Vec<ManaMask> = classes[ci..]
-                .iter()
-                .flatten()
-                .filter(|s| s.0 != rep && !pm.chosen.contains(&s.0))
-                .map(|s| s.1)
-                .collect();
-            if payable(&pm.cost, &ch, &avail) {
-                opts.push(Opt { action: self.perm_action(pm.payer, rep), choice: Choice::Card(rep) });
-            }
-        }
-        let payer = pm.payer;
-        self.ask(Task::PayMana(pm), payer, DecisionKind::PayMana, opts);
-    }
+/// `classes` without the sources of one card.
+pub(crate) fn classes_without(classes: &[crate::pay::Class], card: CardIdx) -> Vec<crate::pay::Class> {
+    classes
+        .iter()
+        .filter_map(|cl| {
+            let members: Vec<_> = cl.members.iter().copied().filter(|s| s.card != card).collect();
+            (!members.is_empty()).then(|| crate::pay::Class { members, yld: cl.yld.clone(), dmg: cl.dmg })
+        })
+        .collect()
 }

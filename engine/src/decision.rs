@@ -1,5 +1,6 @@
 //! Decisions, choices and the action-id layout (ENGINE.md 11).
 
+use crate::db::AbilitySlot;
 use crate::ids::{CardIdx, PlayerId, Target};
 
 /// Global action ids are `< NUM_ACTIONS` (zero-core's `SearchGame::NUM_ACTIONS`).
@@ -35,10 +36,14 @@ pub mod act {
     pub const LIBRARY: u16 = 340;
     /// Graveyards: the decider's 0..63, the opponent's 64..127 (M4b).
     pub const GRAVEYARD: u16 = 404;
-    /// `MY_PERM` slot * 4 + ability index (M4b).
+    /// Activate ability i of the decider's permanent in `MY_PERM` slot s:
+    /// `ACTIVATE + s * 4 + i` (at priority, and mana abilities while paying).
     pub const ACTIVATE: u16 = 532;
+    /// Activate the ability of the card in the decider's hand slot 0..63
+    /// (cycling, Spirit Guides).
+    pub const HAND_ABILITY: u16 = 916;
     /// First reserved id.
-    pub const RESERVED: u16 = 916;
+    pub const RESERVED: u16 = 980;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -69,6 +74,16 @@ pub enum DecisionKind {
     OrderTriggers,
     /// Which legendary permanent to keep (CR 704.5j).
     LegendRule,
+    /// How many Phyrexian pips of a colour to pay with 2 life each
+    /// (`NUMBER`, CR 107.4f).
+    PayPhyrexian,
+    /// Which mana a mana ability makes (`NUMBER` = production index, CR
+    /// 106.1b).
+    ChooseMana,
+    /// A permanent to sacrifice as a cost (CR 701.17).
+    Sacrifice,
+    /// A card to discard as a cost.
+    DiscardCost,
 }
 
 /// What an action means to the task that asked.
@@ -87,6 +102,9 @@ pub enum Choice {
     Target(Target),
     /// Index into the decider's waiting triggers.
     Trigger(u8),
+    /// Activate this ability of this card (priority; a mana source while
+    /// paying).
+    Ability(CardIdx, AbilitySlot),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -150,6 +168,27 @@ impl Game {
         self.hand_slots(p).into_iter().map(|(a, c)| Opt { action: a, choice: Choice::Card(c) }).collect()
     }
 
+    /// [`hand_options`](Self::hand_options) without one card (an ability's
+    /// source in hand); a definition keeps its canonical slot.
+    pub(crate) fn hand_options_except(&self, p: PlayerId, except: Option<CardIdx>) -> Vec<Opt> {
+        let h = self.hand_sorted(p);
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < h.len() {
+            let def = self.objs[h[i].i()].def;
+            let mut j = i;
+            while j < h.len() && self.objs[h[j].i()].def == def {
+                j += 1;
+            }
+            if let Some(&c) = h[i..j].iter().find(|&&c| Some(c) != except) {
+                assert!((i as u16) < act::HAND_N, "hand slot {i} out of range");
+                out.push(Opt { action: act::HAND + i as u16, choice: Choice::Card(c) });
+            }
+            i = j;
+        }
+        out
+    }
+
     /// `MY_PERM` / `OPP_PERM` slot of a permanent, relative to `viewer`.
     pub fn perm_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
         let ctl = self.objs[idx.i()].controller;
@@ -201,6 +240,7 @@ impl Game {
             Choice::Cast(i) => format!("cast {}#{}", self.name(i), i.0),
             Choice::Target(t) => format!("target {}", self.describe_target(t)),
             Choice::Trigger(k) => format!("trigger {k}"),
+            Choice::Ability(i, slot) => format!("activate {}#{} {slot:?}", self.name(i), i.0),
         }
     }
 }

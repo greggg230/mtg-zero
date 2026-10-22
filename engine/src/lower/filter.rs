@@ -1,7 +1,7 @@
-//! Object predicates -> [`Filter`].
+//! Object predicates -> [`Filter`]; conditions -> [`Cond`].
 
 use super::Lowerer;
-use crate::db::{types, Filter};
+use crate::db::{supertypes, types, Cond, Filter};
 use card_ir::{cats, nodes};
 
 /// Arms shared by `ObjectPredicate` and `ObjectPredicateOrOneOf` (the
@@ -16,14 +16,42 @@ macro_rules! lower_object_predicate {
             E::IsArtifact(nodes::IsArtifact {}) => Some(Filter::Type(types::ARTIFACT)),
             E::IsEnchantment(nodes::IsEnchantment {}) => Some(Filter::Type(types::ENCHANTMENT)),
             E::IsLand(nodes::IsLand {}) => Some(Filter::Type(types::LAND)),
+            E::CubeWalkersIsPermanent(nodes::CubeWalkersIsPermanent {})
+            | E::ValuePredicatesIsPermanent(nodes::ValuePredicatesIsPermanent {}) => {
+                Some(Filter::Type(types::PERMANENT))
+            }
             E::IsPlayer(nodes::IsPlayer {}) => Some(Filter::Player),
+            E::IsBasic(nodes::IsBasic {}) => Some(Filter::Supertype(supertypes::BASIC)),
+            E::IsLegendary(nodes::IsLegendary {}) => Some(Filter::Supertype(supertypes::LEGENDARY)),
+            E::HasSubtype(nodes::HasSubtype { name }) => Some(Filter::Subtype($l.subtype(name))),
             E::HasTotalPowerAndToughnessAtMost(nodes::HasTotalPowerAndToughnessAtMost { n }) => {
                 Some(Filter::TotalPtAtMost($l.int("HasTotalPowerAndToughnessAtMost.n", *n, -99, 99)))
             }
+            E::CubeWalkersHasManaValueAtMost(nodes::CubeWalkersHasManaValueAtMost { n })
+            | E::ValuePredicatesHasManaValueAtMost(nodes::ValuePredicatesHasManaValueAtMost { n }) => {
+                Some(Filter::ManaValueAtMost($l.int("HasManaValueAtMost.n", *n, 0, 30) as u8))
+            }
+            E::HasPowerAtLeast(nodes::HasPowerAtLeast { n }) => {
+                Some(Filter::PowerAtLeast($l.int("HasPowerAtLeast.n", *n, -99, 99)))
+            }
+            E::HasPowerAtMost(nodes::HasPowerAtMost { n }) => {
+                Some(Filter::PowerAtMost($l.int("HasPowerAtMost.n", *n, -99, 99)))
+            }
+            E::HasToughnessAtMost(nodes::HasToughnessAtMost { n }) => {
+                Some(Filter::ToughnessAtMost($l.int("HasToughnessAtMost.n", *n, -99, 99)))
+            }
+            E::ControlledByYou(nodes::ControlledByYou {}) => Some(Filter::Controller(true)),
+            E::ControlledByOpponent(nodes::ControlledByOpponent {}) => Some(Filter::Controller(false)),
+            E::IsSource(nodes::IsSource {}) => Some(Filter::Source),
             E::ObjectAnd(nodes::ObjectAnd { left, right }) => {
                 let a = lower_pred_or_oneof($l, left);
                 let b = lower_pred_or_oneof($l, right);
                 Some(Filter::And(Box::new(a?), Box::new(b?)))
+            }
+            E::ObjectOr(nodes::ObjectOr { left, right }) => {
+                let a = lower_pred($l, left);
+                let b = lower_pred($l, right);
+                Some(Filter::Or(vec![a?, b?]))
             }
             E::ObjectNot(nodes::ObjectNot { inner }) => Some(Filter::Not(Box::new(lower_pred($l, inner)?))),
             $($extra)*
@@ -44,6 +72,49 @@ pub(crate) fn lower_pred_or_oneof(l: &mut Lowerer, p: &cats::ObjectPredicateOrOn
         E::OneOf(nodes::OneOf { filters }) => {
             let fs: Vec<Option<Filter>> = filters.iter().map(|f| lower_pred_or_oneof(l, f)).collect();
             fs.into_iter().collect::<Option<Vec<_>>>().map(Filter::Or)
+        }
+    })
+}
+
+/// Arms shared by `Condition` and `ConditionOrStatePredicate`.
+macro_rules! lower_condition {
+    ($l:expr, $c:expr, $E:ident, { $($extra:tt)* }) => {{
+        use cats::$E as E;
+        match $c {
+            E::ControlPermanent(nodes::ControlPermanent { filter }) => {
+                Some(Cond::ControlAtLeast(lower_pred($l, filter)?, 1))
+            }
+            E::ControlsAtMost(nodes::ControlsAtMost { filter, n }) => {
+                let n = $l.int("ControlsAtMost.n", *n, 0, 99) as u8;
+                Some(Cond::ControlAtMost(lower_pred($l, filter)?, n))
+            }
+            E::HandSizeExactly(nodes::HandSizeExactly { n }) => {
+                Some(Cond::HandExactly($l.int("HandSizeExactly.n", *n, 0, 99) as u8))
+            }
+            E::DeliriumActive(nodes::DeliriumActive { min_card_types }) => {
+                Some(Cond::Delirium($l.int("DeliriumActive.min_card_types", *min_card_types, 1, 9) as u8))
+            }
+            E::PermanentLeftYourControlThisTurn(nodes::PermanentLeftYourControlThisTurn {}) => Some(Cond::Revolt),
+            E::YourTurnOfGameAtMost(nodes::YourTurnOfGameAtMost { n }) => {
+                Some(Cond::YourTurnAtMost($l.int("YourTurnOfGameAtMost.n", *n, 0, 99) as u8))
+            }
+            $($extra)*
+            other => {
+                $l.unsupported(format!("Condition:{}", other.tag()));
+                None
+            }
+        }
+    }};
+}
+
+pub(crate) fn lower_condition(l: &mut Lowerer, c: &cats::Condition) -> Option<Cond> {
+    lower_condition!(l, c, Condition, {})
+}
+
+pub(crate) fn lower_condition_or_state(l: &mut Lowerer, c: &cats::ConditionOrStatePredicate) -> Option<Cond> {
+    lower_condition!(l, c, ConditionOrStatePredicate, {
+        E::CardsInGraveyardAtLeast(nodes::CardsInGraveyardAtLeast { n }) => {
+            Some(Cond::GraveyardAtLeast(l.int("CardsInGraveyardAtLeast.n", *n, 0, 99) as u8))
         }
     })
 }

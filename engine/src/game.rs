@@ -88,6 +88,11 @@ pub struct Player {
     pub mulligan_declared: bool,
     /// Number of this player's most recent turn (0 = none yet).
     pub last_turn: u32,
+    /// Turns this player has begun (extra turns included).
+    pub turns: u32,
+    /// A permanent left the battlefield under this player's control this
+    /// turn (revolt).
+    pub left_battlefield: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -260,6 +265,8 @@ impl Game {
             kept: false,
             mulligan_declared: false,
             last_turn: 0,
+            turns: 0,
+            left_battlefield: false,
         };
         Game {
             db,
@@ -467,8 +474,36 @@ impl Game {
         self.move_card_ctl(idx, Zone::Stack, Pos::Top, Some(controller))
     }
 
+    /// Put a card onto the battlefield, applying "enters tapped" (CR
+    /// 614.1c, decided before it moves) and queueing "as this enters"
+    /// choices (614.12, a task that runs next).
     pub(crate) fn put_onto_battlefield(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
-        self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller))
+        let tapped = self.enters_tapped(idx, controller);
+        let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
+        if tapped {
+            self.objs[idx.i()].tapped = true;
+        }
+        if self.def_of(idx).shock_life > 0 {
+            self.agenda.push(Task::AsEnters { card: idx });
+        }
+        r
+    }
+
+    /// Reveal a card in a hidden zone to everyone (CR 701.16; 602.2a).
+    pub(crate) fn reveal(&mut self, idx: CardIdx) {
+        let o = &self.objs[idx.i()];
+        if o.zone.is_hidden() && o.known != 0b11 {
+            let (owner, def) = (o.owner, o.def);
+            self.objs[idx.i()].known = 0b11;
+            self.emit_public(KEY_REVEAL, owner, def as u64);
+        }
+    }
+
+    /// Lose life (CR 119.3; paying life is losing it, 119.4).
+    pub(crate) fn lose_life(&mut self, p: PlayerId, n: i32) {
+        if n > 0 {
+            self.players[p as usize].life -= n;
+        }
     }
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
@@ -482,6 +517,9 @@ impl Game {
         }
         if from == Zone::Stack {
             self.stack.retain(|s| s.kind != StackKind::Spell { card: idx });
+        }
+        if from == Zone::Battlefield {
+            self.players[old_controller as usize].left_battlefield = true;
         }
         let owner = self.objs[idx.i()].owner;
         let ts = if to == Zone::Battlefield {
@@ -517,8 +555,9 @@ impl Game {
                 Pos::Bottom => list.insert(0, idx),
             }
         }
-        // A card leaving a hidden zone for a public one is revealed to all.
-        if from.is_hidden() && !to.is_hidden() && to != Zone::Nowhere {
+        // A card leaving a hidden zone for a public one is revealed to all
+        // (unless everyone knows it already: nothing is revealed).
+        if from.is_hidden() && !to.is_hidden() && to != Zone::Nowhere && known_before != 0b11 {
             let def = self.objs[idx.i()].def;
             self.emit_public(KEY_REVEAL, owner, def as u64);
         }

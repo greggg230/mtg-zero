@@ -3,7 +3,7 @@
 //! cards; new IR classes should lower onto existing ops where the CR
 //! semantics match.
 
-use crate::db::{AbilityDef, Filter, TargetReq};
+use crate::db::{AbilityDef, Cond, Filter, TargetReq};
 use crate::mana::ManaCost;
 
 /// Which player an op acts on.
@@ -57,6 +57,30 @@ pub enum Op {
     Exile { tgt: u8 },
     /// `who` takes an extra turn after this one (CR 500.7).
     ExtraTurn { who: Who },
+    /// Continue at `to` (the end of a "then" branch).
+    Jump { to: u16 },
+    /// Unless `cond` holds for the controller now, continue at `to`
+    /// (conditions are checked as the effect resolves).
+    JumpUnless { cond: Cond, to: u16 },
+    /// Unless the legal targets of requirement `tgt` all match `filter` now,
+    /// continue at `to` ("destroy target creature if it has mana value 2 or
+    /// less").
+    JumpUnlessTarget { tgt: u8, filter: Filter, to: u16 },
+    /// `who` may do what follows ("you may"): no continues at `skip`.
+    /// Choice: yes/no.
+    May { who: Who, skip: u16 },
+}
+
+impl Op {
+    /// The forward jump target of a control-flow op.
+    fn jump_target(&mut self) -> Option<&mut u16> {
+        match self {
+            Op::Jump { to } | Op::JumpUnless { to, .. } | Op::JumpUnlessTarget { to, .. } => Some(to),
+            Op::May { skip, .. } => Some(skip),
+            Op::OfferPay { if_paid, .. } => Some(if_paid),
+            _ => None,
+        }
+    }
 }
 
 /// Builds an [`AbilityDef`] during lowering.
@@ -64,13 +88,33 @@ pub enum Op {
 pub struct Builder {
     pub targets: Vec<TargetReq>,
     pub program: Vec<Op>,
+    /// While lowering the second branch of a conditional, its target
+    /// requirements must repeat the first branch's from this index (one
+    /// target described in both branches); `reuse_failed` records a
+    /// mismatch.
+    pub reuse: Option<usize>,
+    pub reuse_failed: bool,
 }
 
 impl Builder {
     /// Add a target requirement; returns its index.
     pub fn target(&mut self, filter: Filter, min: u8, max: u8) -> u8 {
-        self.targets.push(TargetReq { filter, min, max });
+        let req = TargetReq { filter, min, max };
+        if let Some(k) = self.reuse {
+            if self.targets.get(k) == Some(&req) {
+                self.reuse = Some(k + 1);
+                return k as u8;
+            }
+            self.reuse_failed = true;
+        }
+        self.targets.push(req);
         (self.targets.len() - 1) as u8
+    }
+
+    /// Point the jump of the op at `at` to the current end.
+    pub fn patch(&mut self, at: usize) {
+        let here = self.here();
+        *self.program[at].jump_target().expect("a jump op") = here;
     }
 
     pub fn op(&mut self, op: Op) -> usize {

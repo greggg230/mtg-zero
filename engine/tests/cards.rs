@@ -5,7 +5,7 @@
 mod common;
 
 use common::db;
-use engine::db::types;
+use engine::db::{types, AbilitySlot};
 use engine::hidden::{key_kind, key_payload, key_player, KEY_DRAW, KEY_REVEAL};
 use engine::testkit::Scenario;
 use engine::{Choice, DecisionKind, Game, Step, Target, Zone};
@@ -238,10 +238,11 @@ fn mana_sources_are_chosen_by_class_in_canonical_order() {
     let island = g.card(0, "Island", Zone::Battlefield);
     let plains = g.card(0, "Plains", Zone::Battlefield);
     let tundra = g.card(0, "Tundra", Zone::Battlefield);
+    let tap = |c| Choice::Ability(c, AbilitySlot::Activated(0));
     // Tundra first would leave {1} for the classes after it: none.
-    assert!(g.has_option(Choice::Card(island)) && g.has_option(Choice::Card(plains)));
-    assert!(!g.has_option(Choice::Card(tundra)));
-    g.choose(Choice::Card(plains));
+    assert!(g.has_option(tap(island)) && g.has_option(tap(plains)));
+    assert!(!g.has_option(tap(tundra)));
+    g.choose(tap(plains));
     // Then only the Tundra can make the {U}.
     assert_eq!(g.options_desc().len(), 1);
     g.drive_until(at_priority);

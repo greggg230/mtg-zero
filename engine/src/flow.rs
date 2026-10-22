@@ -4,7 +4,7 @@
 use crate::decision::{act, Choice, Decision, DecisionKind, Opt};
 use crate::game::{EndReason, Game, Outcome, Pos, Step};
 use crate::ids::{opp, CardIdx, PlayerId, Zone};
-use crate::mana::ManaCost;
+use crate::pay::{PayMana, Src};
 use crate::resolve::Frame;
 
 /// One unit of pending work (ENGINE.md 4). The agenda is a stack: the last
@@ -40,18 +40,13 @@ pub(crate) enum Task {
     Resolve,
     Run(Frame),
     FinishResolve { id: u32 },
-}
-
-/// Paying a mana cost (CR 601.2g-h, ENGINE.md 6): sources are chosen one at
-/// a time in non-decreasing class order, then tapped together.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub(crate) struct PayMana {
-    pub payer: PlayerId,
-    /// Remaining cost (after the pool, once `pooled`).
-    pub cost: ManaCost,
-    pub chosen: Vec<CardIdx>,
-    pub min_class: u8,
-    pub pooled: bool,
+    // activated abilities (CR 602, 605)
+    ActPay { id: u32 },
+    ActCosts { id: u32, picked: Vec<CardIdx> },
+    ManaNow { src: Src },
+    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
+    // entering the battlefield (CR 614.12)
+    AsEnters { card: CardIdx },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -174,6 +169,11 @@ impl Game {
             Task::Resolve => self.resolve_top(),
             Task::Run(f) => self.run_frame(f),
             Task::FinishResolve { id } => self.finish_resolve(id),
+            Task::ActPay { id } => self.act_pay(id),
+            Task::ActCosts { id, picked } => self.act_costs(id, picked),
+            Task::ManaNow { src } => self.mana_now(src),
+            Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
+            Task::AsEnters { card } => self.as_enters(card),
         }
     }
 
@@ -268,8 +268,12 @@ impl Game {
         self.turn.active = next;
         self.turn.step = Step::Untap;
         let n = self.turn.number;
+        for pl in &mut self.players {
+            pl.left_battlefield = false;
+        }
         let pl = &mut self.players[next as usize];
         pl.last_turn = n;
+        pl.turns += 1;
         pl.lands_played = 0;
         self.note(|_| format!("turn {n}: P{next}"));
         self.agenda.push(Task::BeginStep);
@@ -403,14 +407,21 @@ impl Game {
                 self.turn.passes = 0;
                 self.players[p as usize].lands_played += 1;
                 self.note(|g| format!("P{p} plays {}", g.name(c)));
-                self.put_onto_battlefield(c, p);
                 self.agenda.push(Task::Priority);
+                self.put_onto_battlefield(c, p);
             }
             Some(Choice::Cast(c)) => {
                 // CR 117.3c: after casting, the caster receives priority.
                 self.turn.passes = 0;
                 self.agenda.push(Task::Priority);
                 self.begin_cast(p, c);
+            }
+            Some(Choice::Ability(c, slot)) => {
+                // CR 117.3c also after activating (and 605.3a: a mana
+                // ability leaves priority where it is).
+                self.turn.passes = 0;
+                self.agenda.push(Task::Priority);
+                self.begin_activate(p, c, slot);
             }
             Some(other) => unreachable!("priority answer {other:?}"),
         }

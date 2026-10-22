@@ -28,7 +28,9 @@ fn decks(seed: u64) -> (Vec<u16>, Vec<u16>) {
 
 fn new_game(seed: u64) -> Game {
     let (d0, d1) = decks(seed);
-    Game::new(common::db(), GameSpec::default(), [&d0, &d1], seed).unwrap()
+    // `FUZZ_LOG=1` keeps the game log, so a panic message shows the game.
+    let log = std::env::var("FUZZ_LOG").is_ok();
+    Game::new(common::db(), GameSpec { log, ..GameSpec::default() }, [&d0, &d1], seed).unwrap()
 }
 
 /// Play one game with random actions; run the extra checks along the way.
@@ -99,9 +101,13 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
 #[test]
 fn fuzz_random_games() {
     let n: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+    // `FUZZ_FIRST=s` starts at seed s (to rerun a failing seed alone).
+    let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     let (mut wins, mut draws, mut turns, mut decisions) = ([0u32; 2], 0u32, 0u64, 0u64);
-    for seed in 0..n {
-        let p = play(seed, true);
+    for seed in first..first + n {
+        let p = std::panic::catch_unwind(|| play(seed, true)).unwrap_or_else(|e| {
+            panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1): {e:?}")
+        });
         match p.outcome.winner {
             Some(w) => wins[w as usize] += 1,
             None => draws += 1,

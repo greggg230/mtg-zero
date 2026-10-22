@@ -48,7 +48,7 @@ impl Game {
             let o = &self.objs[c.i()];
             if t <= 0 {
                 zero.push(c);
-            } else if o.damage as i32 >= t || (o.deathtouched && o.damage > 0) {
+            } else if (o.damage as i32 >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c) {
                 destroyed.push(c);
             }
         }

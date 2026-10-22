@@ -2,7 +2,8 @@
 
 use crate::db::{AbilityRef, Kw};
 use crate::decision::{act, Choice, DecisionKind, Opt};
-use crate::flow::{PayMana, Task};
+use crate::flow::Task;
+use crate::pay::PayMana;
 use crate::game::{DamageSource, Game, Pos, StackKind};
 use crate::ids::{DefId, ObjRef, PlayerId, Target, Zone};
 use crate::program::{Amount, Op, SpellDest, Who};
@@ -26,8 +27,7 @@ pub(crate) struct Frame {
 
 enum Flow {
     Next,
-    /// Conditional ops (M4b) jump forward.
-    #[allow(dead_code)]
+    /// Control flow jumps forward.
     Jump(u16),
     /// The op pushed the frame back (and asked or pushed a sub-task).
     Suspend,
@@ -43,9 +43,10 @@ impl Game {
             return;
         };
         let ab = self.db.ability(ar);
+        let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.item_source(&item)) };
         let mut legal = 0u64;
         for (i, &(req, t)) in item.targets.iter().enumerate() {
-            if self.target_legal(&ab.targets[req as usize], t, item.controller) {
+            if self.target_legal(&ab.targets[req as usize], t, &ctx) {
                 legal |= 1 << i;
             }
         }
@@ -195,7 +196,8 @@ impl Game {
             Op::Counter { tgt, dest } => {
                 for t in self.targets_of(f, tgt) {
                     if let Target::Obj(o) = t {
-                        if self.objs[o.idx.i()].zone == Zone::Stack {
+                        // CR 101.2: "can't be countered" wins.
+                        if self.objs[o.idx.i()].zone == Zone::Stack && !self.def_of(o.idx).uncounterable {
                             self.note(|g| format!("counters {}", g.name(o.idx)));
                             match dest {
                                 SpellDest::Graveyard => self.move_card(o.idx, Zone::Graveyard, Pos::Top),
@@ -215,13 +217,7 @@ impl Game {
                         back.pc = if_paid;
                         back.i = 0;
                         self.agenda.push(Task::Run(back));
-                        self.agenda.push(Task::PayMana(PayMana {
-                            payer: p,
-                            cost,
-                            chosen: Vec::new(),
-                            min_class: 0,
-                            pooled: false,
-                        }));
+                        self.agenda.push(Task::PayMana(PayMana::new(p, cost)));
                         Flow::Suspend
                     }
                     Some(_) => Flow::Next,
@@ -289,12 +285,47 @@ impl Game {
                 }
                 Flow::Next
             }
+            Op::Jump { to } => Flow::Jump(to),
+            Op::JumpUnless { ref cond, to } => {
+                if self.cond_holds(cond, f.controller) {
+                    Flow::Next
+                } else {
+                    Flow::Jump(to)
+                }
+            }
+            Op::JumpUnlessTarget { tgt, ref filter, to } => {
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ts = self.targets_of(f, tgt);
+                if !ts.is_empty() && ts.iter().all(|&t| self.filter_ok(filter, t, &ctx)) {
+                    Flow::Next
+                } else {
+                    Flow::Jump(to)
+                }
+            }
+            Op::May { who, skip } => {
+                let Some(p) = self.who(f, who) else { return Flow::Jump(skip) };
+                match self.answer.take() {
+                    Some(Choice::Yes) => Flow::Next,
+                    Some(_) => Flow::Jump(skip),
+                    None => {
+                        let opts = vec![
+                            Opt { action: act::PASS, choice: Choice::Pass },
+                            Opt { action: act::YES, choice: Choice::Yes },
+                        ];
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
         }
     }
 
     /// Destroy a permanent (CR 701.7): to its owner's graveyard
     /// (indestructible and regeneration hook in here later).
     pub(crate) fn destroy(&mut self, c: crate::ids::CardIdx) {
+        if self.indestructible(c) {
+            return; // CR 702.12b
+        }
         self.move_card(c, Zone::Graveyard, Pos::Top);
     }
 }

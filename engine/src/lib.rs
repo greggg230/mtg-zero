@@ -5,6 +5,7 @@
 //! [`game::Game::legal_actions`] / [`game::Game::apply`] until
 //! [`game::Game::outcome`] is set.
 
+mod activate;
 mod cast;
 mod combat;
 pub mod db;
@@ -15,6 +16,7 @@ pub mod hidden;
 pub mod ids;
 pub mod lower;
 pub mod mana;
+mod pay;
 pub mod program;
 mod resolve;
 pub mod rng;

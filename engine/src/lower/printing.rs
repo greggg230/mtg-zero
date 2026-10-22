@@ -3,10 +3,15 @@
 //! when not at their default). Supporting a flag = moving it out of the
 //! deny list and implementing it.
 
+use super::activated::{lower_activated, prod_mask, From};
 use super::effect::lower_ability;
+use super::filter::lower_condition;
 use super::Lowerer;
-use crate::db::{supertypes, types, CardDef, EventKind, Kw, KwSet, TrigFilter, TriggerDef};
-use crate::mana::{letter_index, ManaCost, ManaMask};
+use crate::db::{
+    supertypes, types, ActEffect, ActivatedDef, CardDef, Cost, EntersTapped, EventKind, Kw, KwSet, ManaAbility,
+    ManaProd, TrigFilter, TriggerDef,
+};
+use crate::mana::{letter_index, pair_index, ManaCost, ManaMask};
 use card_ir::{cats, enums, generated, nodes};
 
 pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDef {
@@ -295,8 +300,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.ward_discard_chosen", ward_discard_chosen);
         l.deny("CardPrinting.ward_life_cost", ward_life_cost);
         l.deny("CardPrinting.equipment_bonuses", equipment_bonuses);
-        l.deny("CardPrinting.shock_land_life_cost", shock_land_life_cost);
-        l.deny("CardPrinting.enters_tapped", enters_tapped);
         l.deny("CardPrinting.doesnt_untap_during_untap_step", doesnt_untap_during_untap_step);
         l.deny("CardPrinting.enters_only_by_discarding_land", enters_only_by_discarding_land);
         l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
@@ -308,11 +311,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.equipment_granted_triggers", equipment_granted_triggers);
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
-        l.deny("CardPrinting.enters_tapped_unless", enters_tapped_unless);
-        l.deny("CardPrinting.produces_life_cost", produces_life_cost);
         l.deny("CardPrinting.produces_with_counter", produces_with_counter);
         l.deny("CardPrinting.opening_hand_action", opening_hand_action);
-        l.deny("CardPrinting.hand_activated_abilities", hand_activated_abilities);
         l.deny("CardPrinting.enters_choosing_basic_land_type", enters_choosing_basic_land_type);
         l.deny("CardPrinting.is_chosen_basic_land_type", is_chosen_basic_land_type);
         l.deny("CardPrinting.enters_with_named_counters", enters_with_named_counters);
@@ -322,7 +322,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.cost_reductions", cost_reductions);
         l.deny("CardPrinting.external_cost_reductions", external_cost_reductions);
         l.deny("CardPrinting.static_abilities", static_abilities);
-        l.deny("CardPrinting.activated_abilities", activated_abilities);
         l.deny("CardPrinting.enters_with_counters_from_x", enters_with_counters_from_x);
         l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
@@ -346,7 +345,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.wipes_all_creature_abilities", wipes_all_creature_abilities);
         l.deny("CardPrinting.sets_all_creature_pt_to_1_1", sets_all_creature_pt_to_1_1);
         l.deny("CardPrinting.must_be_blocked_if_able", must_be_blocked_if_able);
-        l.deny("CardPrinting.spell_is_uncounterable", spell_is_uncounterable);
         l.deny("CardPrinting.combat_damage_cant_be_prevented", combat_damage_cant_be_prevented);
         l.deny("CardPrinting.grants_toughness_as_damage_for_creatures_you_control", grants_toughness_as_damage_for_creatures_you_control);
         l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
@@ -535,8 +533,71 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     if prod != 0 && ty & types::LAND == 0 {
-        // Non-land mana sources need activated mana abilities (M4b).
+        // `produces` describes lands (CR 305.6 and land rules text).
         l.unsupported("CardPrinting.produces(non-land)");
+    }
+
+    // Activated abilities. The IR's `produces` is the land's "{T}: Add"
+    // ability, except for colours an explicit mana ability whose whole
+    // cost is {T} already makes (Wasteland's {C}, the Verges): there it
+    // is a summary (ENGINE.md 18).
+    let mut activated: Vec<ActivatedDef> = Vec::new();
+    for a in activated_abilities {
+        if let Some(ad) = lower_activated(l, a, From::Battlefield) {
+            activated.push(ad);
+        }
+    }
+    let covered = activated
+        .iter()
+        .filter(|a| a.cost == Cost { tap: true, ..Cost::default() })
+        .filter_map(|a| a.mana().map(|m| prod_mask(&m.prod)))
+        .fold(0, |m, x| m | x);
+    let intrinsic = prod & !covered;
+    let life = l.int("CardPrinting.produces_life_cost", *produces_life_cost, 0, 20) as u8;
+    if intrinsic != 0 {
+        activated.insert(
+            0,
+            ActivatedDef {
+                cost: Cost { tap: true, life, ..Cost::default() },
+                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::One(intrinsic), damage_to_you: 0 }),
+                sorcery: false,
+                instant_only: false,
+                only_if: None,
+                your_turn: false,
+            },
+        );
+    } else if life > 0 {
+        l.unsupported("CardPrinting.produces_life_cost(no produces ability)");
+    }
+    if activated.len() > 4 {
+        l.unsupported("CardPrinting.activated_abilities(more than 4)");
+    }
+    let mut hand_abilities = Vec::new();
+    for a in hand_activated_abilities {
+        if let Some(ad) = lower_activated(l, a, From::Hand) {
+            hand_abilities.push(ad);
+        }
+    }
+    if hand_abilities.len() > 1 {
+        l.unsupported("CardPrinting.hand_activated_abilities(more than 1)");
+    }
+
+    // Entering the battlefield (CR 614.1c, 614.12).
+    let entry = match (enters_tapped, enters_tapped_unless) {
+        (false, None) => EntersTapped::No,
+        (true, None) => EntersTapped::Always,
+        (false, Some(c)) => match lower_condition(l, c) {
+            Some(c) => EntersTapped::Unless(c),
+            None => EntersTapped::No,
+        },
+        (true, Some(_)) => {
+            l.unsupported("CardPrinting.enters_tapped(with enters_tapped_unless)");
+            EntersTapped::No
+        }
+    };
+    let shock_life = l.int("CardPrinting.shock_land_life_cost", *shock_land_life_cost, 0, 20) as u8;
+    if shock_life > 0 && entry != EntersTapped::No {
+        l.unsupported("CardPrinting.shock_land_life_cost(with enters_tapped)");
     }
 
     let is_spell_card = ty & (types::INSTANT | types::SORCERY) != 0;
@@ -570,23 +631,37 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         power: pw,
         toughness: tg,
         keywords: kws,
-        produces: prod,
         spell,
         triggers,
+        activated,
+        hand_abilities,
+        enters_tapped: entry,
+        shock_life,
+        uncounterable: *spell_is_uncounterable,
     }
 }
 
-/// `ManaCost` without X, hybrid or Phyrexian symbols.
+/// `ManaCost` without X (hybrid pairs and Phyrexian pips included).
 pub(crate) fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -> ManaCost {
     let cats::ManaCost::ManaCost(nodes::ManaCost { generic, colored, x_pips, hybrid, phyrexian }) = c;
     l.deny(&format!("{what}.x_pips"), x_pips);
-    l.deny(&format!("{what}.hybrid"), hybrid);
-    l.deny(&format!("{what}.phyrexian"), phyrexian);
-    let mut out = ManaCost { generic: l.int("ManaCost.generic", *generic, 0, 30) as u8, pips: [0; 6] };
+    let mut out = ManaCost { generic: l.int("ManaCost.generic", *generic, 0, 30) as u8, ..ManaCost::default() };
     for (sym, n) in colored {
         match letter_index(sym) {
             Some(i) => out.pips[i] += l.int("ManaCost.colored", *n, 0, 30) as u8,
             None => l.unsupported(format!("ManaCost.colored({sym})")),
+        }
+    }
+    for (a, b) in hybrid {
+        match (letter_index(a), letter_index(b)) {
+            (Some(x), Some(y)) if x < 5 && y < 5 && x != y => out.hybrid[pair_index(x, y).unwrap()] += 1,
+            _ => l.unsupported(format!("{what}.hybrid({a}/{b})")),
+        }
+    }
+    for sym in phyrexian {
+        match letter_index(sym) {
+            Some(i) if i < 5 => out.phyrexian[i] += 1,
+            _ => l.unsupported(format!("{what}.phyrexian({sym})")),
         }
     }
     out
@@ -610,6 +685,9 @@ fn lower_keyword(l: &mut Lowerer, k: &cats::Keyword) -> Option<Kw> {
         K::Defender => Kw::Defender,
         K::Menace => Kw::Menace,
         K::Flash => Kw::Flash,
+        K::Hexproof => Kw::Hexproof,
+        K::Shroud => Kw::Shroud,
+        K::Indestructible => Kw::Indestructible,
         other => {
             l.unsupported(format!("Keyword:{other:?}"));
             return None;

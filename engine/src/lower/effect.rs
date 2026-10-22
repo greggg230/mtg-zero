@@ -1,7 +1,7 @@
 //! Effects -> programs. One arm per supported IR class; each arm names every
 //! field of its node and lowers onto the shared ops (ENGINE.md 3, 7).
 
-use super::filter::{lower_pred, lower_pred_or_oneof};
+use super::filter::{lower_condition_or_state, lower_pred, lower_pred_or_oneof};
 use super::Lowerer;
 use crate::db::{types, AbilityDef, Filter};
 use crate::mana::{letter_index, ManaCost};
@@ -116,10 +116,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     Some(cost) => {
                         let at = b.op(Op::OfferPay { who: Who::ControllerOfTarget(tgt), cost, if_paid: 0 });
                         b.op(Op::Counter { tgt, dest });
-                        let end = b.here();
-                        if let Op::OfferPay { if_paid, .. } = &mut b.program[at] {
-                            *if_paid = end;
-                        }
+                        b.patch(at);
                     }
                     None => l.unsupported(format!("CounterSpell.unless_pays({unless_pays})")),
                 }
@@ -176,7 +173,6 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             targets,
         }) => {
             l.deny("RemoveTargetPermanents.rider", rider);
-            l.deny("RemoveTargetPermanents.only_if", only_if);
             l.deny("RemoveTargetPermanents.count_from_x", count_from_x);
             l.deny_ne(
                 "RemoveTargetPermanents.count_min",
@@ -201,6 +197,17 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             if tf.as_ref() != Some(&b.targets[tgt as usize].filter) {
                 l.unsupported("RemoveTargetPermanents.target_filter(differs from targets)");
             }
+            // "Destroy target creature if it has mana value 2 or less": a
+            // check on resolution, not a targeting restriction.
+            let guard = match only_if {
+                Some(p) => {
+                    if b.targets[tgt as usize].max != 1 {
+                        l.unsupported("RemoveTargetPermanents.only_if(several targets)");
+                    }
+                    lower_pred(l, p).map(|filter| b.op(Op::JumpUnlessTarget { tgt, filter, to: 0 }))
+                }
+                None => None,
+            };
             match action {
                 enums::RemovalAction::Destroy => {
                     b.op(Op::Destroy { tgt });
@@ -210,6 +217,42 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 }
                 other => l.unsupported(format!("RemoveTargetPermanents.action({other:?})")),
             }
+            if let Some(at) = guard {
+                b.patch(at);
+            }
+        }
+        E::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect }) => {
+            let Some(cond) = lower_condition_or_state(l, condition) else { return };
+            if b.reuse.is_some() {
+                l.unsupported("IfConditionElse(nested in a branch)");
+                return;
+            }
+            let j = b.op(Op::JumpUnless { cond, to: 0 });
+            let t0 = b.targets.len();
+            lower_effect(l, b, then_effect);
+            let t1 = b.targets.len();
+            match else_effect {
+                None => b.patch(j),
+                Some(e) => {
+                    let end = b.op(Op::Jump { to: 0 });
+                    b.patch(j);
+                    // One target described in both branches (Unholy Heat).
+                    b.reuse = Some(t0);
+                    b.reuse_failed = false;
+                    lower_effect(l, b, e);
+                    if b.reuse_failed || b.reuse != Some(t1) {
+                        l.unsupported("IfConditionElse.targets(differ between branches)");
+                    }
+                    b.reuse = None;
+                    b.patch(end);
+                }
+            }
+        }
+        E::MayDo(nodes::MayDo { inner, prompt }) => {
+            let _ = prompt; // display text
+            let at = b.op(Op::May { who: Who::You, skip: 0 });
+            lower_effect(l, b, inner);
+            b.patch(at);
         }
         other => l.unsupported(format!("Effect:{}", other.tag())),
     }

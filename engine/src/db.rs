@@ -71,6 +71,9 @@ pub enum Kw {
     Defender,
     Menace,
     Flash,
+    Hexproof,
+    Shroud,
+    Indestructible,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
@@ -89,7 +92,9 @@ impl KwSet {
 /// A predicate over targets (players and objects). At top level the type
 /// predicates mean *permanents* (on the battlefield) of that type, `Player`
 /// means a player, and `Spell(f)` means a spell on the stack whose card
-/// matches `f` by its characteristics.
+/// matches `f` by its characteristics. The other predicates test an
+/// object's characteristics (and, for `Controller`, who controls it,
+/// relative to the ability's controller).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Filter {
     Player,
@@ -98,6 +103,20 @@ pub enum Filter {
     Spell(Box<Filter>),
     /// Total power plus toughness at most n (a creature).
     TotalPtAtMost(i32),
+    /// Has this subtype (interned id).
+    Subtype(u16),
+    /// Has any of these supertypes (`supertypes::*` bits).
+    Supertype(u8),
+    /// Mana value at most n (CR 202.3).
+    ManaValueAtMost(u8),
+    /// A creature with power at least / at most n, toughness at most n.
+    PowerAtLeast(i32),
+    PowerAtMost(i32),
+    ToughnessAtMost(i32),
+    /// Controlled by the ability's controller (`true`) or an opponent.
+    Controller(bool),
+    /// The spell or ability's source itself ("another": `Not(Source)`).
+    Source,
     And(Box<Filter>, Box<Filter>),
     Or(Vec<Filter>),
     Not(Box<Filter>),
@@ -146,6 +165,132 @@ pub struct TriggerDef {
 pub enum AbilitySlot {
     Spell,
     Trigger(u8),
+    /// `CardDef.activated[i]` (abilities of a permanent).
+    Activated(u8),
+    /// `CardDef.hand_abilities[i]` (activated from hand: cycling).
+    Hand(u8),
+}
+
+/// A condition, evaluated for a player (the ability's controller): "if",
+/// "activate only if", "enters tapped unless".
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Cond {
+    /// You control at least n permanents matching the filter.
+    ControlAtLeast(Filter, u8),
+    /// You control at most n permanents matching the filter.
+    ControlAtMost(Filter, u8),
+    /// You have exactly n cards in hand.
+    HandExactly(u8),
+    /// At least n cards in your graveyard (threshold).
+    GraveyardAtLeast(u8),
+    /// At least n card types among cards in your graveyard (delirium).
+    Delirium(u8),
+    /// A permanent you controlled left the battlefield this turn (revolt).
+    Revolt,
+    /// It is your turn and one of your first n turns of the game.
+    YourTurnAtMost(u8),
+}
+
+/// What a mana ability makes (CR 106.1, 605.1a).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ManaProd {
+    /// One mana of one type in the mask (a basic land; Birds of Paradise).
+    One(ManaMask),
+    /// Fixed amounts per type (Sol Ring: `{C}{C}`).
+    Fixed([u8; 6]),
+    /// n mana of one type chosen from the mask (Black Lotus).
+    SameType { mask: ManaMask, n: u8 },
+    /// n mana in any combination of types in the mask (Relic of Sauron).
+    Combo { mask: ManaMask, n: u8 },
+    /// One mana of type `ty` per permanent you control matching the filter
+    /// (Gaea's Cradle).
+    PerPermanent { ty: u8, filter: Filter },
+    /// One mana of any colour among permanents you control matching the
+    /// filter (Mox Amber).
+    ColorAmong(Filter),
+}
+
+/// A mana ability's effect: the mana, plus damage its source deals to its
+/// controller (Talismans, Ancient Tomb).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ManaAbility {
+    pub prod: ManaProd,
+    pub damage_to_you: u8,
+}
+
+/// Sacrifice n permanents you control matching the filter (`another`: not
+/// the ability's source).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct SacCost {
+    pub filter: Filter,
+    pub n: u8,
+    pub another: bool,
+}
+
+/// A cost (CR 118, 602.2b). The mana part is paid first (601.2g-h: a
+/// permanent tapped for mana can then be sacrificed), then the rest
+/// (ENGINE.md 18).
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Cost {
+    pub mana: ManaCost,
+    /// `{T}` (CR 107.5): the source must be untapped and, if it is a
+    /// creature, free of summoning sickness (302.6).
+    pub tap: bool,
+    /// Pay n life (CR 119.4).
+    pub life: u8,
+    pub sac_self: bool,
+    /// Exile this card (a Spirit Guide from hand).
+    pub exile_self: bool,
+    /// Discard this card (cycling, CR 702.29a).
+    pub discard_self: bool,
+    pub discard_hand: bool,
+    pub sacrifice: Option<SacCost>,
+    /// Discard n cards of your choice.
+    pub discard: u8,
+}
+
+/// What an activated ability does.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ActEffect {
+    /// A mana ability (CR 605): resolves at once, never on the stack.
+    Mana(ManaAbility),
+    /// Goes on the stack (CR 602.2a).
+    Stack(AbilityDef),
+}
+
+/// An activated ability (CR 602) of a permanent or of a card in hand.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ActivatedDef {
+    pub cost: Cost,
+    pub effect: ActEffect,
+    /// "Activate only as a sorcery" (CR 602.5d).
+    pub sorcery: bool,
+    /// "Activate only as an instant." For a mana ability: only with
+    /// priority, never while paying a cost (Lion's Eye Diamond).
+    pub instant_only: bool,
+    /// "Activate only if ..." (CR 602.5b).
+    pub only_if: Option<Cond>,
+    /// "Activate only during your turn."
+    pub your_turn: bool,
+}
+
+impl ActivatedDef {
+    pub fn mana(&self) -> Option<&ManaAbility> {
+        match &self.effect {
+            ActEffect::Mana(m) => Some(m),
+            ActEffect::Stack(_) => None,
+        }
+    }
+}
+
+/// How a permanent enters the battlefield (CR 614.1c, 614.12).
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub enum EntersTapped {
+    #[default]
+    No,
+    Always,
+    /// Tapped unless the condition holds for its controller as it enters.
+    Unless(Cond),
 }
 
 /// Names one ability of one card definition; `Copy`, so stack items and
@@ -169,12 +314,21 @@ pub struct CardDef {
     pub power: Option<i32>,
     pub toughness: Option<i32>,
     pub keywords: KwSet,
-    /// Intrinsic mana ability "{T}: Add one mana of any type in the mask"
-    /// (CR 305.6 for basic land types; the IR's `produces`). 0 = none.
-    pub produces: ManaMask,
     /// The spell ability of an instant or sorcery.
     pub spell: Option<AbilityDef>,
     pub triggers: Vec<TriggerDef>,
+    /// Activated abilities of the permanent, mana abilities included (the
+    /// intrinsic "{T}: Add" of basic land types and the IR's `produces`
+    /// comes first). At most 4 (the `ACTIVATE` id range).
+    pub activated: Vec<ActivatedDef>,
+    /// Abilities activated from hand (cycling, Spirit Guides). At most 1.
+    pub hand_abilities: Vec<ActivatedDef>,
+    pub enters_tapped: EntersTapped,
+    /// "As this enters, you may pay n life. If you don't, it enters
+    /// tapped." (shock lands; 0 = none).
+    pub shock_life: u8,
+    /// "This spell can't be countered." (CR 101.2)
+    pub uncounterable: bool,
 }
 
 impl CardDef {
@@ -186,6 +340,14 @@ impl CardDef {
     }
     pub fn mana_value(&self) -> u8 {
         self.cost.mana_value()
+    }
+    /// The activated ability in `slot` (`Activated` or `Hand`).
+    pub fn activated_def(&self, slot: AbilitySlot) -> &ActivatedDef {
+        match slot {
+            AbilitySlot::Activated(i) => &self.activated[i as usize],
+            AbilitySlot::Hand(i) => &self.hand_abilities[i as usize],
+            other => panic!("{other:?} is not an activated ability"),
+        }
     }
 }
 
@@ -262,6 +424,10 @@ impl CardDb {
         match r.slot {
             AbilitySlot::Spell => d.spell.as_ref().expect("spell ability"),
             AbilitySlot::Trigger(i) => &d.triggers[i as usize].ability,
+            AbilitySlot::Activated(_) | AbilitySlot::Hand(_) => match &d.activated_def(r.slot).effect {
+                ActEffect::Stack(ab) => ab,
+                ActEffect::Mana(_) => panic!("a mana ability has no stack program"),
+            },
         }
     }
 

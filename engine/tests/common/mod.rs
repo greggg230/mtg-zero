@@ -103,70 +103,35 @@ pub fn db() -> &'static CardDb {
     })
 }
 
-/// Supported spells for random decks.
-pub const FUZZ_SPELLS: &[&str] = &[
-    "Lightning Bolt",
-    "Counterspell",
-    "Mana Leak",
-    "Memory Lapse",
-    "Brainstorm",
-    "Ancestral Recall",
-    "Dark Ritual",
-    "Hymn to Tourach",
-    "Time Walk",
-    "Flametongue Kavu",
-    "Baleful Strix",
-    "Cogwork Librarian",
-    "Cut Down",
-    "Flame Slash",
-    "Spell Pierce",
-    "Mana Tithe",
-    "Test Bear",
-    "Test Flyer",
-    "Test Reacher",
-    "Test Striker",
-    "Test Double",
-    "Test Deathtouch",
-    "Test Trampler",
-    "Test Lifelinker",
-    "Test Vigilant",
-    "Test Hasty",
-    "Test Wall",
-    "Test Menace",
-    "Test Flash",
-    "Test Legend",
-    "Test Zero",
-    "Test Dies Draw",
-    "Test Dies Ping",
-    "Test Giant",
-];
-
-pub const FUZZ_LANDS: &[&str] = &[
-    "Plains",
-    "Island",
-    "Swamp",
-    "Mountain",
-    "Forest",
-    "Tundra",
-    "Underground Sea",
-    "Badlands",
-    "Taiga",
-    "Savannah",
-    "Scrubland",
-    "Volcanic Island",
-    "Bayou",
-    "Plateau",
-    "Tropical Island",
-];
+/// The fuzz pool: every supported card of the cube plus the custom test
+/// cards, split into lands and the rest (so every newly supported card is
+/// fuzzed without editing a list).
+pub fn fuzz_pool() -> &'static (Vec<u16>, Vec<u16>) {
+    static POOL: OnceLock<(Vec<u16>, Vec<u16>)> = OnceLock::new();
+    POOL.get_or_init(|| {
+        let db = db();
+        let (mut lands, mut spells) = (Vec::new(), Vec::new());
+        for name in db.supported() {
+            let id = db.id(name).unwrap();
+            if db.def(id).is(engine::db::types::LAND) {
+                lands.push(id);
+            } else {
+                spells.push(id);
+            }
+        }
+        (lands, spells)
+    })
+}
 
 /// A random 40-card deck: 17 lands, 23 spells (duplicates allowed).
-pub fn random_deck(db: &CardDb, rng: &mut engine::rng::Rng) -> Vec<u16> {
+pub fn random_deck(_db: &CardDb, rng: &mut engine::rng::Rng) -> Vec<u16> {
+    let (lands, spells) = fuzz_pool();
     let mut d = Vec::with_capacity(40);
     for _ in 0..17 {
-        d.push(db.id(FUZZ_LANDS[rng.below(FUZZ_LANDS.len() as u32) as usize]).unwrap());
+        d.push(lands[rng.below(lands.len() as u32) as usize]);
     }
     for _ in 0..23 {
-        d.push(db.id(FUZZ_SPELLS[rng.below(FUZZ_SPELLS.len() as u32) as usize]).unwrap());
+        d.push(spells[rng.below(spells.len() as u32) as usize]);
     }
     d
 }

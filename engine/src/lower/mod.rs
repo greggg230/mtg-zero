@@ -8,6 +8,7 @@
 //! * an unknown variant records `Category:Tag`;
 //! * all blockers of a card are collected, not just the first.
 
+pub mod activated;
 pub mod effect;
 pub mod filter;
 pub mod printing;
