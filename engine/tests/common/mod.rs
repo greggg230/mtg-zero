@@ -117,6 +117,19 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
                     {"$t": "DealDamageAnyTarget", "amount": 1, "targets": [{"$t": "TargetSpec",
                         "filter": {"$t": "OneOf", "filters": [{"$t": "IsCreature"}, {"$t": "IsPlayer"}]}}]}]}}]}),
         ),
+        // When this enters, choose up to one: you gain 3 life.
+        creature(
+            "Test Up To One",
+            "{1}{W}",
+            1,
+            1,
+            &[],
+            false,
+            json!({"triggered_abilities": [{"$t": "TriggeredAbility", "event": "enters",
+                "predicate": {"$t": "IsSelf"},
+                "effect": {"$t": "ModalChooseOne", "modes": [
+                    {"$t": "GainLife", "amount": 3}, {"$t": "ChooseNoMode"}]}}]}),
+        ),
         spell(
             "Test Phyrexian Shock",
             "Instant",

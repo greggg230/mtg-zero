@@ -98,7 +98,15 @@ impl Game {
                 self.agenda.push(Task::ChooseModes { id });
                 return;
             }
-            Some(Choice::Pass) => return,
+            Some(Choice::Pass) => {
+                // 700.2b: a triggered ability with no mode chosen is
+                // removed from the stack.
+                if item.modes.is_empty() && matches!(ar.slot, crate::db::AbilitySlot::Trigger(_)) {
+                    self.note(|_| "no mode: the trigger is removed".to_string());
+                    self.stack.remove(pos);
+                }
+                return;
+            }
             Some(other) => unreachable!("mode answer {other:?}"),
             None => {}
         }

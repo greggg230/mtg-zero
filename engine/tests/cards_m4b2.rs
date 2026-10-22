@@ -659,3 +659,17 @@ fn timetwister_shuffles_hands_and_graveyards_away_and_forgets_their_places() {
     assert!(g.clouds().is_empty(), "{:?}", g.clouds());
     assert!(g.player(0).hand.iter().all(|&c| !g.knows(1, c)));
 }
+
+#[test]
+fn cr_700_2b_a_trigger_with_no_mode_chosen_is_removed() {
+    let mut g = scen().battlefield(0, &["Plains", "Plains"]).hand(0, &["Test Up To One"]).at(Step::Main1, 0).start();
+    let c = g.card(0, "Test Up To One", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(at_priority);
+    g.drive_until(|g| !at_priority(g) || g.stack().is_empty() && g.waiting_triggers().is_empty());
+    assert_eq!(modes_offered(&g), vec![0]);
+    assert!(g.has_option(Choice::Pass), "up to one");
+    g.pass();
+    assert!(g.stack().is_empty(), "removed from the stack");
+    assert_eq!(g.life(0), 20);
+}
