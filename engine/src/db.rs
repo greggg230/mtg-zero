@@ -604,6 +604,10 @@ pub struct AltCost {
     pub only_if: Option<Cond>,
     /// Evoke (CR 702.74): the permanent knows it was evoked.
     pub evoke: bool,
+    /// Dash (CR 702.109): the permanent gains haste and delayed ability
+    /// `k` (`delayed_base + k`) returns it to its owner's hand at the
+    /// beginning of the next end step.
+    pub dash: Option<u8>,
 }
 
 /// What an activated ability does.
@@ -731,6 +735,14 @@ pub struct CardDef {
     /// `triggers[delayed_base..]` are delayed triggered abilities its
     /// effects create (CR 603.7).
     pub delayed_base: u8,
+    /// Flashback cost (CR 702.34): castable from its owner's graveyard,
+    /// then exiled.
+    pub flashback: Option<ManaCost>,
+    /// Escape (CR 702.138): its mana, and the rest (cards exiled from the
+    /// graveyard).
+    pub escape: Option<(ManaCost, Cost)>,
+    /// "You may play lands from your graveyard."
+    pub lands_from_graveyard: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.

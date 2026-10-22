@@ -76,6 +76,50 @@ pub struct Obj {
     /// Last known information of its last time on the battlefield (CR
     /// 608.2h): (its `inc` there, its power as it left).
     pub lki_power: Option<(u16, i32)>,
+    /// A spell cast with flashback: exiled whenever it would leave the
+    /// stack (CR 702.34a).
+    pub flashback: bool,
+    /// It entered as a spell cast with escape (CR 702.138c).
+    pub escaped: bool,
+}
+
+/// How a spell was cast (CR 601.2a-b, 118.9).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum CastFrom {
+    /// From hand, for its mana cost or an alternative cost (`alt`).
+    #[default]
+    Hand,
+    /// From a graveyard for its flashback cost (printed, or granted: its
+    /// mana cost).
+    Flashback,
+    /// From its owner's graveyard for its escape cost.
+    Escape,
+    /// With a permission (from exile): for its mana cost, without paying
+    /// it (`free`), or with mana spent as though of any colour.
+    Permission { free: bool, any_mana: bool },
+}
+
+/// A permission to play a card from a zone other than a hand (CR 601.2a,
+/// 305.1): "you may play that card this turn".
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Permission {
+    /// The card (stale once it moves: the permission ends, CR 400.7).
+    pub card: ObjRef,
+    pub player: PlayerId,
+    /// Only during this turn (`Some(turn number)`), else while it stays.
+    pub turn: Option<u32>,
+    pub kind: PermKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PermKind {
+    /// Play it (a land too unless `cast_only`), [without paying its mana
+    /// cost], [spending mana as though of any colour], [only during a turn
+    /// you attacked with a creature of this subtype].
+    Play { free: bool, cast_only: bool, any_mana: bool, attacked_subtype: Option<u16> },
+    /// It has flashback; the flashback cost is its mana cost (Snapcaster
+    /// Mage).
+    Flashback,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -111,6 +155,9 @@ pub struct Player {
     pub gained_life: bool,
     /// Can't gain life for the rest of the game (Screaming Nemesis).
     pub cant_gain_life: bool,
+    /// Creatures declared as attackers this turn ("during any turn you
+    /// attacked with a Rogue").
+    pub attacked_with: Vec<ObjRef>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -138,6 +185,8 @@ pub struct StackItem {
     /// The cost a spell was cast for: 0 = its mana cost, k = alternative
     /// cost k - 1 (CR 118.9).
     pub alt: u8,
+    /// Where it was cast from, and how.
+    pub from: CastFrom,
     /// Divided damage: the amount for each target of the divided
     /// requirement, in the order chosen (CR 601.2d).
     pub division: Vec<u8>,
@@ -302,6 +351,11 @@ pub struct Game {
     /// How many times abilities of these objects resolved this turn
     /// ("if this is the second time this ability has resolved this turn").
     pub(crate) resolved: Vec<(ObjRef, u8)>,
+    /// Permissions to play cards from other zones (CR 601.2a).
+    pub(crate) permissions: Vec<Permission>,
+    /// ... cast with escape; cast for its dash cost (delayed ability k).
+    pub(crate) entering_escaped: bool,
+    pub(crate) entering_dash: Option<u8>,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -370,6 +424,7 @@ impl Game {
             noncreature_cast: 0,
             gained_life: false,
             cant_gain_life: false,
+            attacked_with: Vec::new(),
         };
         Game {
             db,
@@ -414,6 +469,9 @@ impl Game {
             links: Vec::new(),
             delayed: Vec::new(),
             resolved: Vec::new(),
+            permissions: Vec::new(),
+            entering_escaped: false,
+            entering_dash: None,
             batching: false,
             entering_cast: false,
             entering_evoked: false,
@@ -444,6 +502,8 @@ impl Game {
             attached: None,
             evoked: false,
             lki_power: None,
+            flashback: false,
+            escaped: false,
         });
         idx
     }
@@ -603,7 +663,31 @@ impl Game {
         }
         let tapped = self.enters_tapped(idx, controller);
         self.entering_evoked = evoked; // read as it moves (its ETB sees it)
+        let escaped = std::mem::take(&mut self.entering_escaped);
+        let dash = std::mem::take(&mut self.entering_dash);
+        self.entering_escaped = escaped && cast;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
+        if let (Some(k), true) = (dash, cast) {
+            // CR 702.109a: it gains haste, and returns to its owner's hand
+            // at the beginning of the next end step.
+            let mut haste = crate::db::KwSet::default();
+            haste.insert(Kw::Haste);
+            self.add_effect(
+                crate::layers::Affected::Obj(r),
+                crate::db::Mod::Keywords(haste),
+                crate::layers::Until::Forever,
+                controller,
+            );
+            let def = self.objs[idx.i()].def;
+            self.delayed.push(Delayed {
+                when: crate::db::DelayedWhen::NextEndStep,
+                controller,
+                source: r,
+                source_def: def,
+                slot: self.db.def(def).delayed_base + k,
+                ev: crate::triggers::EvCtx { obj: Some(r), ..Default::default() },
+            });
+        }
         if tapped {
             self.objs[idx.i()].tapped = true;
         }
@@ -651,6 +735,8 @@ impl Game {
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
+        // CR 702.34a: a flashback spell leaving the stack is exiled instead.
+        let to = if from == Zone::Stack && self.objs[idx.i()].flashback { Zone::Exile } else { to };
         if let Some(list) = self.zone_list(idx, from) {
             let i = list.iter().position(|&c| c == idx).expect("card in its zone list");
             list.remove(i);
@@ -693,6 +779,8 @@ impl Game {
             if lki_power.is_some() {
                 o.lki_power = lki_power;
             }
+            o.flashback = false;
+            o.escaped = to == Zone::Battlefield && std::mem::take(&mut self.entering_escaped);
         }
         self.layers_on_move(idx, old, from, to);
         if from == Zone::Battlefield && self.batching {

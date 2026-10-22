@@ -277,7 +277,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
         l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str);
         l.deny("CardPrinting.grants_additional_land_per_turn", grants_additional_land_per_turn);
-        l.deny("CardPrinting.grants_play_lands_from_graveyard", grants_play_lands_from_graveyard);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
         l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
@@ -343,8 +342,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_toughness_as_damage_for_creatures_you_control", grants_toughness_as_damage_for_creatures_you_control);
         l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
         l.deny("CardPrinting.has_convoke", has_convoke);
-        l.deny("CardPrinting.flashback_cost", flashback_cost);
-        l.deny("CardPrinting.flashback_cost_str", flashback_cost_str);
+        let _ = flashback_cost_str; // display form of `flashback_cost`
         l.deny("CardPrinting.has_delve", has_delve);
         l.deny("CardPrinting.buyback_cost", buyback_cost);
         l.deny("CardPrinting.buyback_cost_str", buyback_cost_str);
@@ -370,14 +368,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_prepared", enters_prepared);
         l.deny("CardPrinting.plot_cost", plot_cost);
         l.deny("CardPrinting.plot_cost_str", plot_cost_str);
-        l.deny("CardPrinting.escape_cost", escape_cost);
-        l.deny("CardPrinting.escape_cost_str", escape_cost_str);
-        l.deny("CardPrinting.escape_exile_count", escape_exile_count);
+        let _ = escape_cost_str; // display form of `escape_cost`
         l.deny("CardPrinting.grants_graveyard_escape_exile_count", grants_graveyard_escape_exile_count);
         l.deny("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing", sacrifice_at_cleanup_if_cast_without_sorcery_timing);
         l.deny("CardPrinting.graveyard_activated_abilities", graveyard_activated_abilities);
-        l.deny("CardPrinting.dash_cost", dash_cost);
-        l.deny("CardPrinting.dash_cost_str", dash_cost_str);
+        let _ = dash_cost_str; // display form of `dash_cost`
         l.deny("CardPrinting.watched_in_graveyard", watched_in_graveyard);
         l.deny("CardPrinting.watches_library_graveyard_exile", watches_library_graveyard_exile);
         l.deny("CardPrinting.multikicker", multikicker);
@@ -664,6 +659,31 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         None => None,
     };
 
+    // Dash (CR 702.109): an alternative cost; the dashed permanent's
+    // delayed "return to hand" ability.
+    let dash = dash_cost.as_ref().map(|m| {
+        let mana = lower_mana_cost(l, "CardPrinting.dash_cost", m);
+        let mut d = crate::program::Builder::default();
+        d.op(crate::program::Op::Ext(crate::program::Ext::ReturnEventObjToHand));
+        let k = l.delayed_ability(d.finish());
+        AltCost { mana, dash: Some(k), ..AltCost::default() }
+    });
+    if dash.is_some() && ty & types::CREATURE == 0 {
+        l.unsupported("CardPrinting.dash_cost(not a creature)");
+    }
+    let flashback = flashback_cost.as_ref().map(|m| lower_mana_cost(l, "CardPrinting.flashback_cost", m));
+    let escape = match (escape_cost, escape_exile_count) {
+        (None, 0) => None,
+        (Some(m), n) if *n > 0 => {
+            let mana = lower_mana_cost(l, "CardPrinting.escape_cost", m);
+            let n = l.int("CardPrinting.escape_exile_count", *n, 1, 20) as u8;
+            Some((mana, Cost { exile_graveyard: n, ..Cost::default() }))
+        }
+        _ => {
+            l.unsupported("CardPrinting.escape_cost(without an exile count)");
+            None
+        }
+    };
     let mut triggers = Vec::new();
     for t in triggered_abilities {
         if let Some(td) = super::trigger::lower_trigger(l, t, ty) {
@@ -744,6 +764,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             });
         }
     }
+    alt_costs.extend(dash);
     if !alt_costs.is_empty() && !additional.is_empty() {
         l.unsupported("CardPrinting.alternative_costs(with additional costs)");
     }
@@ -816,6 +837,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         alt_costs,
         discounts,
         delayed_base,
+        flashback,
+        escape,
+        lands_from_graveyard: *grants_play_lands_from_graveyard,
     }
 }
 

@@ -234,6 +234,17 @@ pub enum Ext {
     /// A reflexive triggered ability (CR 603.12): delayed ability `k` of
     /// the source's card triggers now, about the same event.
     Reflexive { k: u8 },
+    /// Exile the top n cards of `who`'s library (revealed); the
+    /// controller may play them (`kind`), this turn if `this_turn`.
+    ExileTopWithPermission { who: Who, n: u8, kind: crate::game::PermKind, this_turn: bool },
+    /// Each legal target of requirement `tgt` (a card in a graveyard)
+    /// gains flashback until end of turn (its mana cost).
+    GrantFlashback { tgt: u8 },
+    /// The controller sacrifices the source unless it escaped.
+    SacrificeSourceUnlessEscaped,
+    /// Return the object of the event to its owner's hand, if it is still
+    /// that permanent (dash).
+    ReturnEventObjToHand,
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -417,7 +428,8 @@ impl Op {
             Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
             Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
-            Op::Ext(Ext::Reflexive { .. }) => true,
+            Op::Ext(Ext::Reflexive { .. }) | Op::Ext(Ext::ReturnEventObjToHand) => true,
+            Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
             | Op::Ext(Ext::TapOrUntap { on })
             | Op::Ext(Ext::CounterOrDoubleOnSecond { on }) => matches!(on, On::EventObj),

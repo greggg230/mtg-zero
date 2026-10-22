@@ -43,8 +43,12 @@ pub mod act {
     /// Activate the ability of the card in the decider's hand slot 0..63
     /// (cycling, Spirit Guides).
     pub const HAND_ABILITY: u16 = 916;
+    /// Play / cast the k-th card in exile the decider may play (exile
+    /// order; M7a), k = 0..31.
+    pub const EXILE: u16 = 980;
+    pub const EXILE_N: u16 = 32;
     /// First reserved id.
-    pub const RESERVED: u16 = 980;
+    pub const RESERVED: u16 = 1012;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

@@ -144,8 +144,10 @@ impl Game {
                 if self.objs[card.i()].zone == Zone::Stack {
                     if self.def_of(card).is_permanent_card() {
                         self.entering_cast = true;
-                        self.entering_evoked = item.alt > 0
-                            && self.def_of(card).alt_costs[item.alt as usize - 1].evoke;
+                        let alt = (item.alt > 0).then(|| &self.def_of(card).alt_costs[item.alt as usize - 1]);
+                        self.entering_evoked = alt.is_some_and(|a| a.evoke);
+                        self.entering_dash = alt.and_then(|a| a.dash);
+                        self.entering_escaped = item.from == crate::game::CastFrom::Escape;
                         self.put_onto_battlefield(card, item.controller);
                     } else {
                         self.move_card(card, Zone::Graveyard, Pos::Top);

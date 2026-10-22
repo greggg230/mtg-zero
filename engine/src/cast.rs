@@ -20,7 +20,13 @@ impl Game {
     /// plus the increases of static abilities ("noncreature spells cost {1}
     /// more").
     pub(crate) fn spell_cost(&self, card: CardIdx, p: PlayerId) -> crate::mana::ManaCost {
-        let mut cost = self.def_of(card).cost;
+        self.cost_with(card, p, self.def_of(card).cost)
+    }
+
+    /// A cost to cast `card` (its mana cost, flashback cost, ...) with the
+    /// increases and reductions that apply (CR 601.2f).
+    pub(crate) fn cost_with(&self, card: CardIdx, p: PlayerId, base: crate::mana::ManaCost) -> crate::mana::ManaCost {
+        let mut cost = base;
         let ctx = Ctx { controller: p, source: None };
         for &c in &self.battlefield {
             for (f, n) in &self.def_of(c).spell_tax {
@@ -94,8 +100,170 @@ impl Game {
             }
             opts.push(Opt { action, choice: Choice::Cast(c) });
         }
+        self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts);
         self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
         opts
+    }
+
+    /// Does permission `pm` let `p` play its card now?
+    pub(crate) fn permission_ok(&self, pm: &crate::game::Permission, p: PlayerId) -> bool {
+        if pm.player != p || !self.live(pm.card) || pm.turn.is_some_and(|t| t != self.turn.number) {
+            return false;
+        }
+        match pm.kind {
+            crate::game::PermKind::Play { attacked_subtype: Some(s), .. } => {
+                // "During any turn you attacked with a <subtype>": the
+                // attackers as they are now, or as they last were.
+                self.players[p as usize].attacked_with.iter().any(|&r| {
+                    if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
+                        self.has_subtype(r.idx, s)
+                    } else {
+                        self.def_of(r.idx).subtypes.contains(&s)
+                    }
+                })
+            }
+            _ => true,
+        }
+    }
+
+    /// The permission that lets `p` play `card` from exile now, if any.
+    pub(crate) fn exile_permission(&self, p: PlayerId, card: CardIdx) -> Option<crate::game::PermKind> {
+        let r = self.obj_ref(card);
+        self.permissions
+            .iter()
+            .find(|pm| pm.card == r && self.permission_ok(pm, p) && matches!(pm.kind, crate::game::PermKind::Play { .. }))
+            .map(|pm| pm.kind)
+    }
+
+    /// How `p` may cast `card` from where it is (CR 601.2a): from hand; from
+    /// their graveyard with flashback (printed or granted) or escape; from
+    /// exile with a permission.
+    pub(crate) fn cast_route(&self, p: PlayerId, card: CardIdx) -> Option<crate::game::CastFrom> {
+        use crate::game::CastFrom;
+        let def = self.def_of(card);
+        match self.objs[card.i()].zone {
+            Zone::Hand => Some(CastFrom::Hand),
+            Zone::Graveyard => {
+                if self.objs[card.i()].owner != p {
+                    return None;
+                }
+                let r = self.obj_ref(card);
+                let granted = self.permissions.iter().any(|pm| {
+                    pm.card == r && pm.kind == crate::game::PermKind::Flashback && self.permission_ok(pm, p)
+                });
+                if def.flashback.is_some() || granted {
+                    Some(CastFrom::Flashback)
+                } else if def.escape.is_some() {
+                    Some(CastFrom::Escape)
+                } else {
+                    None
+                }
+            }
+            Zone::Exile => match self.exile_permission(p, card)? {
+                crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
+                crate::game::PermKind::Flashback => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The mana to pay to cast `card` the way `from` says, with increases
+    /// and reductions.
+    pub(crate) fn route_mana(&self, card: CardIdx, p: PlayerId, from: crate::game::CastFrom) -> crate::mana::ManaCost {
+        use crate::game::CastFrom;
+        let def = self.def_of(card);
+        match from {
+            CastFrom::Hand => self.spell_cost(card, p),
+            // "The flashback cost is equal to its mana cost" when granted.
+            CastFrom::Flashback => self.cost_with(card, p, def.flashback.unwrap_or(def.cost)),
+            CastFrom::Escape => self.cost_with(card, p, def.escape.as_ref().map_or(def.cost, |e| e.0)),
+            // "Without paying its mana cost" (an alternative cost of no
+            // mana, CR 118.9; increases still apply, 601.2f).
+            CastFrom::Permission { free: true, .. } => self.cost_with(card, p, Default::default()),
+            CastFrom::Permission { free: false, any_mana: true } => {
+                // "Spend mana as though it were mana of any color" (CR
+                // 609.4b): every coloured, hybrid and Phyrexian symbol is
+                // paid by any mana ({C} stays {C}).
+                let mut c = self.spell_cost(card, p);
+                let colored: u8 = c.pips[..5].iter().sum::<u8>() + c.hybrid.iter().sum::<u8>() + c.phyrexian.iter().sum::<u8>();
+                c.generic = c.generic.saturating_add(colored);
+                c.pips[..5].fill(0);
+                c.hybrid = Default::default();
+                c.phyrexian = Default::default();
+                c
+            }
+            CastFrom::Permission { .. } => self.spell_cost(card, p),
+        }
+    }
+
+    /// The non-mana part of the cost for a cast `from` (escape's exiled
+    /// cards; the additional cost chosen).
+    pub(crate) fn route_extra(&self, card: CardIdx, from: crate::game::CastFrom, option: u8) -> Option<&'static crate::db::Cost> {
+        let def = self.def_of(card);
+        match from {
+            crate::game::CastFrom::Escape => def.escape.as_ref().map(|e| &e.1),
+            _ => def.additional.get(option as usize),
+        }
+    }
+
+    /// Can `p` cast `card` (not in hand) the way `from` says now?
+    fn castable_via(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, classes: &[crate::pay::Class], sorcery_ok: bool) -> bool {
+        let def = self.def_of(card);
+        if !(def.is(types::INSTANT) || def.keywords.has(Kw::Flash) || sorcery_ok) {
+            return false;
+        }
+        let mana = self.route_mana(card, p, from);
+        let paid = match from {
+            crate::game::CastFrom::Escape => self.cost_payable(p, card, &def.escape.as_ref().unwrap().1, &mana, classes, None),
+            _ if !def.additional.is_empty() => def.additional.iter().any(|o| self.cost_payable(p, card, o, &mana, classes, None)),
+            _ => self.can_pay_with(p, &mana, classes, &Default::default()),
+        };
+        paid && def.spell.as_ref().is_none_or(|ab| self.targets_available(ab, p, Some(self.obj_ref(card))))
+    }
+
+    /// "You may play lands from your graveyard" (Crucible of Worlds).
+    pub(crate) fn lands_from_graveyard(&self, p: PlayerId) -> bool {
+        self.permanents_of(p).any(|c| self.def_of(c).lands_from_graveyard)
+    }
+
+    /// Priority options for cards in exile with a permission (`EXILE`
+    /// slots) and in the graveyard (`GRAVEYARD` slots): lands to play,
+    /// spells to cast.
+    fn other_zone_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<Opt>) {
+        let mut k = 0u16;
+        for &c in &self.exile {
+            let Some(crate::game::PermKind::Play { cast_only, .. }) = self.exile_permission(p, c) else { continue };
+            if k >= act::EXILE_N {
+                break;
+            }
+            let action = act::EXILE + k;
+            k += 1;
+            if self.def_of(c).is(types::LAND) {
+                if land_ok && !cast_only {
+                    opts.push(Opt { action, choice: Choice::Play(c) });
+                }
+                continue;
+            }
+            if let Some(from) = self.cast_route(p, c) {
+                if self.castable_via(p, c, from, classes, sorcery_ok) {
+                    opts.push(Opt { action, choice: Choice::Cast(c) });
+                }
+            }
+        }
+        let lands_ok = land_ok && self.lands_from_graveyard(p);
+        for &c in &self.players[p as usize].graveyard {
+            if self.def_of(c).is(types::LAND) {
+                if lands_ok {
+                    opts.push(Opt { action: self.graveyard_action(p, c), choice: Choice::Play(c) });
+                }
+                continue;
+            }
+            if let Some(from) = self.cast_route(p, c) {
+                if self.castable_via(p, c, from, classes, sorcery_ok) {
+                    opts.push(Opt { action: self.graveyard_action(p, c), choice: Choice::Cast(c) });
+                }
+            }
+        }
     }
 
     /// Every target requirement has at least `min` legal candidates; for a
@@ -179,7 +347,9 @@ impl Game {
         let graves = [ctx.controller, crate::ids::opp(ctx.controller)]
             .into_iter()
             .filter(move |_| gy)
-            .flat_map(|q| self.players[q as usize].graveyard.iter().map(|&c| Target::Obj(self.obj_ref(c))));
+            .flat_map(|q| self.players[q as usize].graveyard.iter().map(|&c| Target::Obj(self.obj_ref(c))))
+            // (A card cast from a graveyard is on the stack when it targets.)
+            .filter(|&t| Some(t) != ctx.source.map(Target::Obj));
         players.chain(perms).chain(spells).chain(graves).filter(|&t| ok(t)).nth(n - 1).is_some()
     }
 
@@ -283,8 +453,12 @@ impl Game {
     /// 601.2a: the card moves to the stack; then targets (601.2c), cost
     /// (601.2f-h) and "becomes cast" (601.2i) run as tasks.
     pub(crate) fn begin_cast(&mut self, p: PlayerId, card: CardIdx) {
-        self.note(|g| format!("P{p} casts {}", g.name(card)));
+        let from = self.cast_route(p, card).expect("a castable card");
+        self.note(|g| format!("P{p} casts {} ({from:?})", g.name(card)));
         self.move_card_to_stack(card, p);
+        if from == crate::game::CastFrom::Flashback {
+            self.objs[card.i()].flashback = true;
+        }
         let id = self.new_stack_id();
         self.stack.push(StackItem {
             id,
@@ -295,6 +469,7 @@ impl Game {
             modes: Vec::new(),
             ev: Default::default(),
             alt: 0,
+            from,
             division: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
@@ -311,7 +486,9 @@ impl Game {
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some()) {
             self.agenda.push(Task::ChooseModes { id }); // CR 601.2b, 700.2a
         }
-        if !self.def_of(card).alt_costs.is_empty() {
+        // CR 118.9a: one alternative cost at most (flashback, escape and
+        // "without paying its mana cost" are alternative costs).
+        if !self.def_of(card).alt_costs.is_empty() && from == crate::game::CastFrom::Hand {
             self.agenda.push(Task::CastAlt { id }); // CR 601.2b
         }
     }
@@ -329,7 +506,7 @@ impl Game {
             None => {
                 let def = self.def_of(card);
                 let classes = self.mana_classes(p, None);
-                let cost = self.spell_cost(card, p);
+                let cost = self.route_mana(card, p, item.from);
                 let opts: Vec<Opt> = (0..def.additional.len())
                     .filter(|&k| self.cost_payable(p, card, &def.additional[k], &cost, &classes, None))
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
@@ -431,11 +608,12 @@ impl Game {
             }
             return;
         }
-        let mut pm = PayMana::new(p, self.spell_cost(card, p));
-        if let Some(extra) = def.additional.get(item.cost_option as usize) {
+        let mut pm = PayMana::new(p, self.route_mana(card, p, item.from));
+        if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         }
+        let _ = def;
         self.agenda.push(Task::PayMana(pm));
     }
 
@@ -492,7 +670,10 @@ impl Game {
         if wants_graveyard(&tr.filter) {
             for q in [ctx.controller, crate::ids::opp(ctx.controller)] {
                 for &c in &self.players[q as usize].graveyard {
-                    consider(Target::Obj(self.obj_ref(c)), &mut out);
+                    let r = self.obj_ref(c);
+                    if Some(r) != ctx.source {
+                        consider(Target::Obj(r), &mut out);
+                    }
                 }
             }
         }
@@ -526,7 +707,10 @@ impl Game {
     /// be put there (never through the card, which may be hidden now).
     pub(crate) fn source_quality(&self, ctx: &Ctx) -> Option<crate::game::DamageSource> {
         let r = ctx.source?;
-        if self.live(r) && matches!(self.objs[r.idx.i()].zone, Zone::Battlefield | Zone::Stack | Zone::Hand) {
+        // (A card being cast is its own source wherever it is cast from.)
+        if self.live(r)
+            && matches!(self.objs[r.idx.i()].zone, Zone::Battlefield | Zone::Stack | Zone::Hand | Zone::Graveyard | Zone::Exile)
+        {
             return Some(crate::game::DamageSource { controller: ctx.controller, ..self.damage_source_of(r.idx) });
         }
         let def = self

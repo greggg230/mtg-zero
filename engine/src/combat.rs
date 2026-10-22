@@ -84,6 +84,10 @@ impl Game {
                         self.tap(c);
                     }
                 }
+                for &c in &attackers {
+                    let r = self.obj_ref(c);
+                    self.players[ap as usize].attacked_with.push(r);
+                }
                 // CR 508.1m: abilities that trigger on attacking.
                 for &c in &attackers {
                     let r = self.obj_ref(c);

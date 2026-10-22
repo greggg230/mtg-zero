@@ -292,6 +292,7 @@ impl Game {
         self.turn.step = Step::Untap;
         let n = self.turn.number;
         for pl in &mut self.players {
+            pl.attacked_with.clear();
             pl.left_battlefield = false;
             pl.drawn = 0;
             pl.spells_cast = 0;
@@ -299,6 +300,9 @@ impl Game {
             pl.gained_life = false;
         }
         self.resolved.clear();
+        // Permissions end with their turn, or when the card moves.
+        let perms = std::mem::take(&mut self.permissions);
+        self.permissions = perms.into_iter().filter(|p| p.turn.is_none_or(|t| t >= n) && self.live(p.card)).collect();
         let pl = &mut self.players[next as usize];
         pl.last_turn = n;
         pl.turns += 1;

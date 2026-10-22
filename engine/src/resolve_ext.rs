@@ -832,6 +832,51 @@ impl Game {
                 });
                 Flow::Next
             }
+            Ext::ExileTopWithPermission { who, n, kind, this_turn } => {
+                let Some(q) = self.who(f, *who) else { return Flow::Next };
+                for _ in 0..*n {
+                    let Some(&top) = self.players[q as usize].library.last() else { break };
+                    self.force_library_card(top, crate::hidden::KEY_REVEAL, q);
+                    self.reveal(top);
+                    let card = self.move_card(top, Zone::Exile, Pos::Top);
+                    self.permissions.push(crate::game::Permission {
+                        card,
+                        player: f.controller,
+                        turn: this_turn.then_some(self.turn.number),
+                        kind: *kind,
+                    });
+                }
+                Flow::Next
+            }
+            Ext::GrantFlashback { tgt } => {
+                for t in self.targets_of(f, *tgt) {
+                    let Target::Obj(o) = t else { continue };
+                    if self.objs[o.idx.i()].zone == Zone::Graveyard {
+                        let player = self.objs[o.idx.i()].owner;
+                        self.permissions.push(crate::game::Permission {
+                            card: o,
+                            player,
+                            turn: Some(self.turn.number),
+                            kind: crate::game::PermKind::Flashback,
+                        });
+                    }
+                }
+                Flow::Next
+            }
+            Ext::SacrificeSourceUnlessEscaped => {
+                if let Some(&c) = self.objs_on(f, &On::Source).first() {
+                    if !self.objs[c.i()].escaped {
+                        self.sacrifice(c);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::ReturnEventObjToHand => {
+                if let Some(&c) = self.objs_on(f, &On::EventObj).first() {
+                    self.move_card(c, Zone::Hand, Pos::Top);
+                }
+                Flow::Next
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

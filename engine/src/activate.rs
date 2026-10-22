@@ -140,6 +140,7 @@ impl Game {
             modes: Vec::new(),
             ev: Default::default(),
             alt: 0,
+            from: Default::default(),
             division: Vec::new(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
@@ -176,7 +177,7 @@ impl Game {
                 let c = if item.alt > 0 {
                     &def.alt_costs[item.alt as usize - 1].cost
                 } else {
-                    def.additional.get(item.cost_option as usize)?
+                    self.route_extra(card, item.from, item.cost_option)?
                 };
                 Some((item.controller, card, c))
             }

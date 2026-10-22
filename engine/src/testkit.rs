@@ -254,7 +254,7 @@ impl Game {
         let obj = |v: &mut Vec<u64>, c: CardIdx| {
             let o = &self.objs[c.i()];
             v.extend([o.def as u64, o.owner as u64, o.controller as u64, o.tapped as u64, o.damage as u64]);
-            v.extend([o.attacking as u64, o.blocked as u64, o.blocking.is_some() as u64]);
+            v.extend([o.attacking as u64, o.blocked as u64, o.blocking.is_some() as u64, o.escaped as u64]);
             // Counters and attachments (public, CR 122, 301.5).
             for (k, n) in self.counters_of(c) {
                 v.extend([h64(&k), n as u64]);
@@ -331,6 +331,16 @@ impl Game {
             v.extend([l.until as u64, l.back as u64, place(l.source.idx), place(l.card.idx)]);
         }
         v.push(u64::MAX);
+        for pm in &self.permissions {
+            v.extend([place(pm.card.idx), pm.player as u64, pm.turn.unwrap_or(0) as u64, h64(&pm.kind)]);
+        }
+        v.push(u64::MAX);
+        for p in 0..2usize {
+            for r in &self.players[p].attacked_with {
+                v.push(if self.live(*r) { place(r.idx) } else { 7777 });
+            }
+            v.push(u64::MAX);
+        }
         for &(r, n) in &self.resolved {
             v.extend([place(r.idx), r.inc as u64, n as u64]);
         }
@@ -414,6 +424,7 @@ impl Game {
         self.links.hash(&mut h);
         self.delayed.hash(&mut h);
         self.resolved.hash(&mut h);
+        self.permissions.hash(&mut h);
         self.counters.hash(&mut h);
         self.n_static.hash(&mut h);
         h.finish()

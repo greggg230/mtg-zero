@@ -254,6 +254,7 @@ impl Game {
             modes: Vec::new(),
             ev: t.ev,
             alt: 0,
+            from: Default::default(),
             division: Vec::new(),
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));

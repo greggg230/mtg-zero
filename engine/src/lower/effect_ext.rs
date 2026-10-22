@@ -1109,6 +1109,72 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             b.op(Op::Ext(Ext::Reflexive { k }));
             b.patch(skip);
         }
+        E::ExileTopCardsWithPlayPermission(nodes::ExileTopCardsWithPlayPermission {
+            count,
+            free,
+            duration,
+            whose,
+            cast_only,
+            face_down,
+            free_if,
+            requires_attacked_with_subtype,
+            any_color_mana,
+        }) => {
+            // "Exile the top n cards of <whose> library. You may play / cast
+            // them this turn [without paying their mana costs]" (CR 601.2a,
+            // 305.1: playing a land still uses the land drop).
+            l.deny("ExileTopCardsWithPlayPermission.face_down", face_down);
+            l.deny("ExileTopCardsWithPlayPermission.free_if", free_if);
+            let n = l.int("ExileTopCardsWithPlayPermission.count", *count, 1, 10) as u8;
+            let who = match whose {
+                enums::ImpulseLibraryOwner::You => Who::You,
+                enums::ImpulseLibraryOwner::ThatPlayer => Who::EventPlayer,
+                enums::ImpulseLibraryOwner::DefendingPlayer => Who::Opponent,
+            };
+            let attacked_subtype =
+                (!requires_attacked_with_subtype.is_empty()).then(|| l.subtype(requires_attacked_with_subtype));
+            // "During any turn you attacked with a Rogue": while it stays
+            // exiled (the IR keeps the default duration).
+            let this_turn = match duration {
+                enums::ExilePlayDuration::ThisTurn => attacked_subtype.is_none(),
+                enums::ExilePlayDuration::WhileExiled => false,
+                other => {
+                    l.unsupported(format!("ExileTopCardsWithPlayPermission.duration({other:?})"));
+                    true
+                }
+            };
+            let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+            b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind, this_turn }));
+        }
+        E::GrantFlashbackToTargetCardUEOT(nodes::GrantFlashbackToTargetCardUEOT { card_filter }) => {
+            // "Target instant or sorcery card in your graveyard gains
+            // flashback until end of turn. The flashback cost is equal to
+            // its mana cost."
+            let Some(cf) = super::filter::lower_card_filter(l, card_filter) else { return true };
+            let t = b.target(Filter::InGraveyard(Box::new(and(cf, Filter::Owner(true)))), 1, 1);
+            b.op(Op::Ext(Ext::GrantFlashback { tgt: t }));
+        }
+        E::OptionalPutLandFromHandOntoBattlefield(nodes::OptionalPutLandFromHandOntoBattlefield {}) => {
+            // "You may put a land card from your hand onto the battlefield."
+            b.op(Op::PutFromHand { who: Who::You, filter: Filter::Type(types::LAND), tapped: false, optional: true });
+        }
+        E::Backup(nodes::Backup { n, keywords, targets }) => {
+            // Backup n (CR 702.165): "put n +1/+1 counters on target
+            // creature. If that's another creature, it gains <keywords>
+            // until end of turn."
+            let n = l.int("Backup.n", *n, 1, 9);
+            let Some(t) = lower_targets(l, b, targets, "Backup") else { return true };
+            b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::P1P1, n: Amount::Fixed(n) }));
+            let mods = keyword_mods(l, keywords);
+            if !mods.is_empty() {
+                let at = b.op(Op::JumpUnlessTarget { tgt: t, filter: not(Filter::Source), to: 0 });
+                apply(b, On::Target(t), mods, Until::EndOfTurn);
+                b.patch(at);
+            }
+        }
+        E::SacrificeSelfUnlessEscaped(nodes::SacrificeSelfUnlessEscaped {}) => {
+            b.op(Op::Ext(Ext::SacrificeSourceUnlessEscaped));
+        }
         E::SacrificeSelfIfEvoked(nodes::SacrificeSelfIfEvoked {}) => {
             // (The "if evoked" is the trigger's: Source(WasEvoked).)
             b.op(Op::Ext(Ext::SacrificeSource));
