@@ -953,6 +953,9 @@ module does not depend on where it was built.
 
 ### 21.2 `encode`: layout v1 (13,532 floats)
 
+(M5a's layout. Layout v2, 22.2, keeps these blocks but gives every card a stable identity:
+the card code, the bags and the context's card no longer use the card table's index.)
+
 A fixed-width vector for one viewer ("me"), with no hidden information: everything in it is
 public or the viewer's own knowledge (its hand, the cards it knows exactly and where, its
 clouds, its own decision's options), so it is the same in every world `determinize(viewer)` can
@@ -1187,13 +1190,14 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
 
 **MTG Zero** (branch `m5b-run2`):
 
-* The encoding is unchanged (layout v1, 21.2). `encode::layout_json` describes it for the token
-  network, checked in as `mtgz/az/layout_v1.json` (`cargo test -p engine --test az
-  layout_json_is_checked_in`; `MTGZ_WRITE_LAYOUT=1` rewrites it):
+* The runs of 22.4 used layout v1 (21.2) unchanged; layout v2 (22.2) came after them.
+  `encode::layout_json` describes the encoding for the token network, checked in as
+  `mtgz/az/layout_v2.json` (v1: `layout_v1.json` at commit 531070a; `cargo test -p engine
+  --test az layout_json_is_checked_in`; `MTGZ_WRITE_LAYOUT=1` rewrites it):
 
   | Segment | Slots x floats | Present flag | Identity | Actions scored from the slot's token |
   |---|---|---|---|---|
-  | context | 1 x 384 | always | the decision's card (one-hot of 256) | |
+  | context | 1 x 384 (v2: 192) | always | the decision's card (v1: one-hot of 256; v2: card code) | |
   | tops | 6 x 50 | known to the viewer | card code | |
   | my permanents | 32 x 88 | present | card code | `MY_PERM` + s, `ACTIVATE` + 4 s + i (i = 0..3) |
   | opponent permanents | 32 x 88 | present | card code | `OPP_PERM` + s |
@@ -1201,18 +1205,19 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
   | stack | 8 x 72 | present | card code | `STACK` + s |
   | triggers | 4 x 52 | present | card code | `TRIGGER` + s |
   | list | 40 x 52 | present | card code | `LIBRARY` + s |
-  | bags | 13 x 256 | | multisets of identities (pooled into the global token) | |
+  | bags | 13 x 256 (v2: 13 x 1024) | | multisets of identities (pooled into the global token) | |
 
   The 128 globals are the global token's input; `PASS`, `YES`, `PLAYER`, `NUMBER`, `GRAVEYARD`
   and the slots beyond the encoded ones get their logits from the pooled state. The card
   identity is embedded once (256 + 1 rows, shared by every segment and the bags); a token is
   that embedding + a linear map of the slot's 50-88 floats (status, keywords, options) + a
-  (segment, slot) embedding. MTG positions hold 21 tokens on average (p99 39) of the 153 slots.
+  (segment, slot) embedding (v1: 256 + 1 identities; v2: 1024 + 1). MTG positions hold 21
+  tokens on average (p99 39) of the 153 slots.
 * Minor decisions: mana payments (`PayMana`, which source to tap next): 14% of the searched
   decisions of mtg1's games.
 * The evaluation deck set goes through `GamePackage.eval_specs` (M5a's patch of `Run.driver` is
   gone; any spec's evaluation form, as before).
-* Presets `mtg-2` (22.3) and `mtg-2-mlp` (the same with mtg-1's MLP: the control).
+* Presets `mtg-2` (22.4) and `mtg-2-mlp` (the same with mtg-1's MLP: the control).
 * The token network starts neutral (zero-core 3be6d11): its policy, value and margin output
   layers are zero at first. Two false starts showed why: `runs/mtg2a` (random output layers)
   began with 55% of the prior on `PASS` where 25% is uniform; its self-play games ran into the
@@ -1226,7 +1231,41 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
   `PASS`, below uniform). Both false starts were stopped and their data deleted (logs, metrics
   and checkpoints kept).
 
-### 22.2 Against the memorised values (evidence first)
+### 22.2 Stable card identities: layout v2 (23,324 floats)
+
+Layout v1 coded a card by its index in the card table (`CardDb`: the supported cards in IR
+order, then the tokens in the order lowering meets them), capacity 256: every card ported
+renumbers the cards after it (a checkpoint then reads every card as another one), and the
+cube's 546 cards do not fit. Layout v2 (`az/identity.rs`, `az/encode.rs`) codes the card's
+**identity**, which does not depend on what the engine supports:
+
+* a cube card: its position in the cube's IR card list (`data/cards/powerlsv.ir.json`, all 546
+  cards of the PowerLSV cube, supported or not, sorted by name, basic lands included): 0..545;
+  capacity 768;
+* a token: 768 + its line in the token registry `engine/src/az/tokens.txt` (30 lines today: one
+  key per token kind = name, power / toughness, colours, card types, subtypes, keywords, e.g.
+  `Thopter 1/1 C ac Thopter flying`). New tokens are appended, never inserted: when ported cards
+  create new tokens, `cargo test -p engine --test az token_registry` fails until
+  `MTGZ_WRITE_TOKENS=1` appends their keys (two token kinds with the same key would share an
+  identity; the test checks the keys are distinct);
+* 1023: anything else (a card outside the cube list, an unregistered token: never in a game
+  the tests accept).
+
+Capacity 1024 identities: the card code's identity part is three one-hots of 16, 8 and 8
+(index = 64 a + 8 b + c; 32 floats, as v1's two one-hots of 16, so every slot keeps its width),
+the bags are 13 x 1024 counts, and the context block carries the decision's card as a card
+code (192 floats instead of 384 with a 256-wide one-hot). Everything else is v1's. A
+checkpoint of layout v2 stays valid as cards are ported: a newly supported card appears under
+the identity it always had, and its descriptor floats (types, colours, mana value, size) are
+read the same way; its embedding (token network) or input weights (MLP) start untrained. A
+change to the cube list itself (another IR card order) or to the capacity is a new layout.
+Layout v1 checkpoints (runs/mtg1, mtg2, mtg2c) do not load into v2 (other widths): they run
+from their pinned worktrees. Tests: `encoding_slots_name_the_action_slots` (the slots' codes
+are the cards' identities), `token_registry_and_stable_identities` (every token registered,
+cube cards at their IR position, identities distinct, and a card table of a few cards gives
+them the same identities as the full one), `layout_json_is_checked_in`.
+
+### 22.3 Against the memorised values (evidence first)
 
 What fingerprints a game is not the decklists alone, and the decks cannot vary more than they
 do (every self-play game has two new random decks). Measured offline on runs/mtg1's data: a fresh
