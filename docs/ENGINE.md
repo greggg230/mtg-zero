@@ -1,8 +1,10 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M4b-2 (hidden information: library searches, looking at libraries and hands, partial
-knowledge; modal spells; tokens), 2026-10-22; M4b-1 added activated abilities, costs, mana
-abilities and lands; M4a built the Stage 0 core. This is the architecture every later card port follows. DESIGN.md section 3 says *why* (rules-correct, every choice an action, cards are data,
+Status: M5a (the zero-core game `mtg`: `SearchGame`, `force_chance`, `encode`, decks, bots,
+the `mtgz` package and a first self-play run; section 21), 2026-10-22; M4b-2 added hidden
+information (library searches, looking at libraries and hands, partial knowledge; modal
+spells; tokens); M4b-1 activated abilities, costs, mana abilities and lands; M4a built the
+Stage 0 core. This is the architecture every later card port follows. DESIGN.md section 3 says *why* (rules-correct, every choice an action, cards are data,
 the loop in Rust, Rust tests); this file says *how*. "CR" is the Comprehensive Rules; where the
 Python engine (`mtg-bot/src/mtg_bot`) behaves differently, section 14 lists the difference and
 the engine follows the CR.
@@ -36,8 +38,10 @@ Game (all mutable state, Clone)  <-- reads ------+
 | `hidden.rs` | knowledge (exact bits and partial "clouds"), chance keys, `determinize` (section 10) |
 | `rng.rs` | xoshiro256++ / splitmix64 (the same generators as zero-core) |
 | `testkit.rs` | scenario builder and helpers for tests (public; not used by the engine) |
+| `az/` | the zero-core game `mtg` (section 21): `mod.rs` (`MtgAz`, the spec, the `SearchGame` impl), `encode.rs`, `decks.rs`, `bots.rs` |
 
-No dependency beyond `card_ir`, `serde`, `serde_json`. No `HashMap` inside `Game` (iteration
+No dependency beyond `card_ir`, `serde`, `serde_json`, and zero-core's `zero_search` (the
+`SearchGame` trait, for `az/` only; the pinned submodule `third_party/zero-core`). No `HashMap` inside `Game` (iteration
 order must be deterministic); no threads, callbacks or interior mutability.
 
 ## 2. Objects, zones, players and ids
@@ -422,8 +426,21 @@ the game at once; if all players lose simultaneously the game is a draw (104.4a)
   played with the same actions, stay indistinguishable to it while their keys, next
   decider and legal actions agree (zero-core's child signature). The last check found the
   two leaks fixed in M4b-2 (`KEY_AUTO`, keyed reveals of known cards).
-* `force_chance` (zero-core `chance_k`) is not implemented yet (M5): a forced draw would move
-  the requested identity to the top of the unknown part of the library.
+* **`force_chance`** (zero-core `chance_k`, M5a): `Game::force_chance(keys)` queues outcomes;
+  every key the engine emits consumes one queued key, in order, so later keys stay aligned
+  with their events whatever happened to earlier ones. Three events follow their queued key
+  when the world allows it: a draw (`KEY_DRAW`) and a look at the top of a library
+  (`KEY_LOOK`, or `KEY_REVEAL` for a revealed look) swap the named identity into the card
+  about to be seen from another library card **interchangeable with it for every player**
+  (both unknown to everyone, in the same cloud domains: every player's knowledge still
+  holds), chosen at random among such cards; a random discard (`KEY_REVEAL` of its owner)
+  takes a card of the named identity if the hand holds one. Everything else falls back to
+  the world's own outcome: a key masked as `HIDDEN` (another player's private event), reveals
+  of chosen cards (casting, a revealed search), `KEY_AUTO`, a known top card, an identity
+  that is not there. The emitted keys are always the actual outcome (`force_chance(&[])`
+  clears the queue). Measured (tests/az.rs, mid-game states of mixed heuristic / random
+  play, the decider's world): a transition with the decider's draws or looks, replayed in
+  another world of the same decider, reproduces all its keys in 86% of the cases.
 
 ## 11. Decisions and the action-id layout
 
@@ -474,9 +491,9 @@ next pile card, in order; `PASS` ends a scry's bottom part), `PutInGraveyard` / 
 hand), `ChooseMode` (`NUMBER` = mode index; `PASS` = no more). Activating an ability is
 `Choice::Ability(card, slot)`.
 
-Mapping to zero-core's `SearchGame` (M5): `to_move` = the pending decision's player;
-`legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize` as
-above; `NUM_ACTIONS = 1024`.
+Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
+player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
+as above; `NUM_ACTIONS = 1024`.
 
 ## 12. Combat (CR 506-511)
 
@@ -560,8 +577,7 @@ ward, graveyard targets, targeting abilities on the stack, escalate and spree mo
 random order" (`LookAtTopCardsPutIntoHand.rest_random`: the owner would know a set of cards
 but not their order), looking at another player's library, naming a card, "activate only
 once" / exhaust / boast, mana abilities whose cost has a choice or a mana part (Orcish
-Lumberjack, Sunken Ruins, Loot), spend restrictions on mana, the play/draw choice,
-`force_chance`, `encode`.
+Lumberjack, Sunken Ruins, Loot), spend restrictions on mana, the play/draw choice.
 
 Deliberate simplifications and limits (each is small and local to change):
 
@@ -675,6 +691,7 @@ they isolate one keyword or trigger each.
 | `tests/cards_m4b2.rs` | Duress (revealed hand, keys, filter, known until it changes), Thoughtseize, Inquisition, Gitaxian Probe (private look, masked keys), a seen hand partly put back (cloud), 700.2a (modes before targets), a mode without targets, Fiery Confluence (repeats, non-decreasing), Mystic Confluence (a target per instance), 608.2b for modal spells, Pyroblast, 603.3c / 700.2b (modal triggers; no mode chosen), 111 / 704.5d tokens (Clue; a token put into a library), Malevolent Rumble, Thopter Foundry (nontoken), Sheoldred's Edict, Generous Ent, Timetwister |
 | `tests/hidden.rs` | determinize keeps the viewer's view and actions; known cards stay; observer masking of keys; refreshed decisions of the other player; an ability activated from hand reveals its card (602.2a); a payment in progress completes in every determinized world (pinned hand sources, then revealed); a pending shock-land choice survives determinize; a Brainstorm after a hand reveal leaves partial knowledge; a card leaving the hand is not told apart from a known twin |
 | `tests/support.rs` | the support report, the exact supported list, loud failures |
+| `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 
@@ -894,4 +911,180 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
   key in another world (a draw or a look: move the requested identity into place among the
   viewer's unknown cards, consistent with the clouds; a random discard: pick that identity);
   `KEY_AUTO` keys mean single-option decisions of other players split search nodes (the
-  alternative is to expose every decision, which zero-core would step anyway).
+  alternative is to expose every decision, which zero-core would step anyway). Done in M5a
+  (section 21).
+
+## 21. The zero-core game `mtg` (M5a)
+
+`engine/src/az` makes the engine a zero-core `SearchGame` named `mtg`: one game of Magic
+between two 40-card decks of supported cards. The repository is laid out per zero-core's
+docs/new_game.md: zero-core pinned as the git submodule `third_party/zero-core` (docs/pinning.md
+there; the pin is the staged gitlink, `tools/build_py.sh` refuses another core), the binding
+crate `py/` (`zero_py::engine_module!` -> Python module `mtgz._engine` with the games `toy` and
+`mtg`), the package `mtgz` (`mtgz/az/__init__.py` registers the `GamePackage`: presets, the
+default spec, dashboard port 5340, hub id `mtg_zero`; `mtgz.az.<module>` are shims of the core's
+`zero.<module>`), the run tools (`tools/{supervise,kill_run,pause_run,fork_run,launch_hidden}.py`)
+and the Python tests (`tests/`).
+
+### 21.1 The `SearchGame` mapping
+
+| zero-core | `MtgAz` |
+|---|---|
+| `NUM_ACTIONS` | 1024 (section 11: decision-relative ids) |
+| `NUM_FEATURES` | 13,532 (21.2) |
+| players | 2 |
+| `parse_spec` / `new_game(spec, 2, seed)` | `MtgSpec` (below); the game seed draws the decks (21.3), then `Game::new` (shuffles, starting player, mulligans) |
+| `to_move`, `legal_actions`, `step` | the pending decision's player, its ids, `Game::apply` with its chance keys (section 10) |
+| `force_chance` | `Game::force_chance` (section 10) |
+| `determinize(viewer, rng)` | `Game::determinize` with an engine RNG seeded from zero-core's |
+| `result` | 1 / 0 for a win; 0.5 each for a draw (both players lost at once, or the turn cap) |
+| `margin(seat)` | (life of the seat - life of the opponent, each floored at 0) / 20, clamped to [-1, 1] |
+| `score`, `rounds` | life (reports), the turn number |
+| `encode(viewer)` | `Game::encode_features` (21.2) |
+| bots | `random` (zero-core), `heuristic` (21.4) |
+
+The spec (JSON, every key optional): `{"max_turns": 60, "mulligans": true, "decks": "random",
+"lands": [16, 17], "eval_decks": 16, "eval_seed": 1}`. `max_turns` counts both players' turns
+(a draw after it; 60 = the engine default: ~3% of heuristic-vs-heuristic games and ~1% of
+heuristic-vs-random games reach it, against ~20% at 40); `decks` is `"random"` (two new decks
+per game), `"eval"` (a pair of the fixed evaluation set) or `{"p0": [names], "p1": [names]}`.
+Unknown keys are errors. The cube IR is compiled into the binary (`db::CUBE_IR`), so the Python
+module does not depend on where it was built.
+
+### 21.2 `encode`: layout v1 (13,532 floats)
+
+A fixed-width vector for one viewer ("me"), with no hidden information: everything in it is
+public or the viewer's own knowledge (its hand, the cards it knows exactly and where, its
+clouds, its own decision's options), so it is the same in every world `determinize(viewer)` can
+produce (tested for both viewers, 21.8). It is large and simple on purpose; M5b replaces it with
+a network that reads the board card by card.
+
+**Card code** (48 floats): the definition's index in the card table (`CardDb` order: the 191
+supported cards by name, then the 30 token definitions; capacity `D` = 256) as two one-hots
+(index / 16 and index % 16: 32 floats) plus a descriptor (16: artifact, creature, enchantment,
+instant, land, sorcery; the five colours; mana value / 8, printed power / 8, printed toughness
+/ 8; token; legendary). The card table is the layout's: a change to the supported cards changes
+the indices (checkpoints belong to one card table).
+
+| Block | Offset | Floats | Content |
+|---|---:|---:|---|
+| globals | 0 | 128 | turn / 50; step one-hot (14); me active, me priority, passes, I started, turns left / 50, stack size, waiting triggers, extra turns, over; per player (me, then the opponent, 40 each): life / 20, hand, library, graveyard, exile sizes, lands played, mana pool (6), mulligans, kept, drew from an empty library, lost, turns, a permanent left (revolt), permanents, creatures, lands, untapped lands, total power and toughness, creatures ready to attack, artifacts, tokens, extra turns |
+| context | 128 | 384 | the pending decision: `DecisionKind` one-hot (32); the decider is me; the asking task (20: priority, mulligan, bottom, attackers, blockers, damage, discard, targets, mana payment, a resolving effect, triggers, SBA, costs, cost option, modes, mana choice, as-enters, ...); the card behind it as a full one-hot (256: the spell being cast, the ability resolving or being paid for, the land entering, the attacker dividing damage) with its ability slot (spell, trigger, activated, from hand; index; mode); the resolving op (37 kinds) and program counter; the mana still to pay (generic, W U B R G C, hybrid, Phyrexian); damage left to divide; the target requirement; the next attacker slot; the blocker index; bottoms left; the looked-at pile's size; my number of options; modes chosen; cost cards picked |
+| bags | 512 | 13 x 256 | counts per card-table index (0.25 per card): my hand, my battlefield, the opponent's battlefield, the two graveyards, the cards each player owns in exile, my library (its contents, which its owner knows), the opponent's hidden pool (hand and library cards I do not know exactly: open decklists), the opponent's hand cards I know exactly, the identities my clouds place in the opponent's hand, my library cards I know, the opponent's library cards I know exactly plus the identities my clouds place there |
+| tops | 3840 | 2 x 3 x 50 | the top three positions of my library, then the opponent's: present, known to me, card code |
+| my permanents | 4140 | 32 x 88 | `MY_PERM` slots 0..31 (timestamp order): card code + 40 status floats: present, tapped, damage / 8, power / 8, toughness / 8, summoning sick (no haste), attacking, blocked, blocking, the blocked attacker's slot, struck first, the blocker this `DeclareBlockers` decision is about, the attacker and the blocker of this `AssignDamage` decision, its slot id is an option of my decision, `ACTIVATE` options for abilities 0..3, targeted by a stack object, blockers on it / 4, 15 keywords, token, entered this turn, controlled by a non-owner |
+| opponent permanents | 6956 | 32 x 88 | `OPP_PERM` slots 0..31, the same |
+| hand | 9772 | 16 x 56 | `HAND` slots 0..15 = my hand sorted by (definition, card): card code, present, copies in hand, `HAND` and `HAND_ABILITY` options, known to the opponent, a land |
+| stack | 10668 | 8 x 72 | `STACK` slots 0..7, top first: the source's card code, present, spell / activated / triggered, controller is me, modes, cost option, targets, and the first two targets (me, the opponent, my permanent's slot, an opponent permanent's slot, a stack slot) |
+| triggers | 11244 | 4 x 52 | `TRIGGER` slots 0..3 = my waiting triggers: card code, present, ability index, option |
+| list | 11452 | 40 x 52 | `LIBRARY` slots 0..39 of my own decision: the searched library, the looked-at pile or the seen hand, sorted by definition (section 11): card code, present, option, copies in the list |
+
+Slots beyond the encoded ones (permanents 32..95, hand 16..63, stack 8..31, list 40..63) can
+still be chosen (the policy head covers all 1024 ids); the bags count every card. Options are
+encoded only when the viewer decides (its own legal actions, which `determinize` keeps), and so
+is the list block (another player's pile or search is hidden from the viewer). The `NUMBER`,
+`YES`, `PASS` and `PLAYER` ids mean what the context says. Not encoded yet: counters (the engine
+has none), the graveyard order, which permanent a pending trigger came from. Encoding costs
+about as much as the rest of a simulation: the Rust search runs ~41 us per simulation per
+thread on `mtg` with a constant evaluator (`python -m mtgz.az.bench search`, 8 threads: 77k
+simulations/s) against 1.65 us on the toy.
+
+### 21.3 Decks
+
+`decks::generate` (seeded by the game seed): two colours at random; 23-24 singleton spells of
+those colours or colourless, weighted to creatures (3), interaction (2: damage, removal,
+counters, discard, edicts, token makers), other coloured cards (1) and colourless ones (0.5),
+with at most 3 spells of mana value 5+ and 4 of mana value 4; 16-17 lands: each supported
+nonbasic land that makes or fetches exactly the two colours (p 0.9), one of them only (0.5,
+Karakas; a fetch with one land type on colour), both among more (0.4, a triome), any colour
+(0.3, Mana Confluence, Prismatic Vista, Starting Town), colourless utility (0.15: Ancient Tomb,
+Wasteland, Library of Alexandria, Tolarian Academy, Gaea's Cradle), at most 9 of them; then
+basics split by the spells' coloured pips (at least a third each). `decks::check` validates a
+deck (40 cards, supported non-token cards, singleton but basics, 16-17 lands, at most two
+colours of spells). Only the supported cards are used, so the pool grows with the engine.
+
+**The evaluation set**: `decks::eval_pair(gen, seed, i)` = two decks generated from a fixed
+seed per pair; spec `"decks": "eval"` picks pair `split64(game seed) % eval_decks`. zero-core
+plays self-play and evaluation with one spec, so `mtgz.az.run` patches the loop
+(`mtgz.az.evaldecks`): every driver created without recording samples (the matches against
+the yardstick and random, the Elo matches, the random-vs-yardstick reference) gets the spec
+with `"decks": "eval"`; self-play keeps new random decks every game. The run's `spec` names
+both (`{"max_turns": 60, "eval_decks": 16, "eval_seed": 1}`).
+
+### 21.4 Bots
+
+* `random` (zero-core's `RandomBot`): uniform over the legal ids.
+* `heuristic` (`az/bots.rs`; the Elo anchor of the runs, 1000): plays a land; casts the most
+  expensive spell it can afford in its main phases, skipping harmful targeted spells without
+  an opposing target and a sweeper that would hit more of its own creatures; counters an
+  opponent's spell when it can; burns the opponent out when the damage is lethal; attacks
+  with each creature that no untapped opposing creature can kill and survive (all of them
+  when the opponent has no untapped creature); blocks when the blocker survives or trades
+  for a creature of at least its mana value, chump-blocks when the unblocked damage would be
+  lethal; assigns lethal damage in order; aims harmful effects at the opponent's most
+  valuable permanent it removes (or the player) and helpful ones at its own; keeps hands of
+  2-5 lands (one mulligan at most); gives up lands when flooded, else its most expensive
+  card; pays with the first source offered; never activates abilities. It reads only public
+  information and its own cards. A yardstick, not a goal.
+
+Measured (`cargo run --release -p engine --example az_probe -- <a> <b> <games> <spec>`, 1000
+games each, seats alternating, `max_turns` 60):
+
+| Match | Score of the first | Draws | Turns / game | Decisions / game | Games / s (1 thread) |
+|---|---:|---:|---:|---:|---:|
+| heuristic vs random (random decks) | 91.8% | 1.1% | 27.8 | 344 | 466 |
+| heuristic vs random (evaluation set) | 93.2% | 1.2% | 26.2 | 333 | 488 |
+| heuristic vs heuristic | 50.6% | 2.5% | 29.4 | 547 | 307 |
+| random vs random | 50.8% | 3.3% | 39.0 | 250 | 532 |
+
+A decision here is one with at least two options (the engine answers single-option decisions
+itself, section 4): many are priority passes and one-source-at-a-time mana payments.
+
+### 21.5 Running
+
+```
+bash tools/build_py.sh                                          # mtgz/_engine.pyd (inits the pinned core)
+python -m mtgz.az.run --run runs/x --preset mtg-smoke           # 3 tiny iterations, ~1 minute
+python -m mtgz.az.dashboard --host 0.0.0.0                       # port 5340 (hub mtg_zero)
+```
+
+Live runs go in `~/mtg-zero/runs/<run>` and run from a pinned worktree (zero-core docs/az.md 1):
+`git -C ~/mtg-zero worktree add --detach ~/mtg-zero-wt/run-<sha> <sha>`, then
+`CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<sha> bash tools/build_py.sh` there, then
+`python tools/launch_hidden.py <run>/supervisor_console.txt python tools/supervise.py <run>
+--preset mtg-1`. While the pinned core commit is not on GitHub, the submodule clone of a new
+worktree cannot fetch it: `git -C third_party/zero-core fetch ~/zero-core main && git -C
+third_party/zero-core checkout <pin>` first. Pause / resume / stop as in every Zero project
+(PAUSE and STOP files, `tools/pause_run.py`, the dashboards). zerodash lists the runs
+(`zero-core/dashboard/projects.json`, project `mtg`).
+
+Presets: `mtg-smoke` (CPU, a 32 x 1 network, 16 games per iteration at 8 / 2 sims, 8 games
+against the heuristic) and `mtg-1` (the first run, 21.6).
+
+### 21.6 The first self-play run (`runs/mtg1`)
+
+RESULTS_PLACEHOLDER
+
+### 21.7 For M5b and later
+
+RESULTS_M5B_PLACEHOLDER
+
+### 21.8 Tests
+
+`engine/tests/az.rs` (`cargo test -p engine --test az`; `AZ_SCALE=k` plays k times as many
+games): random and mixed heuristic / random games end with results summing to 1 (draws split,
+the turn cap a draw), illegal actions are errors; clones continue identically; `determinize`
+keeps the features of the viewer and the decider's legal actions, for the decider and the
+other player (22k checks at `AZ_SCALE=15`, all identical); two worlds of the decider played
+with the same actions have the same features while their keys, next decider and legal actions
+agree (zero-core's child signature; 22k comparisons); `force_chance` reproduces a transition's
+draws and looks in another world (86%) and keeps the world valid, an impossible key falls back
+and the next queued key still lands on its own event; the encoding's hand, permanent and list
+slots hold the cards behind the `HAND`, `MY_PERM` / `OPP_PERM` and `LIBRARY` ids and their
+option flags match the legal actions; decks are legal, seeded and cover the colour pairs; the
+evaluation set is fixed; the spec parser; the heuristic beats random (> 80% over 120 games)
+and always answers a legal id. `tests/` (pytest): the engine module registers `toy` and `mtg`,
+the game through the bindings (determinize keeps the features), the bots in the Rust driver,
+self-play records valid samples, the presets, the evaluation spec and the driver patch, the
+commands through the shims (zero-core's loop at toy scale: resume, STOP, PAUSE, supervisor,
+kill, fork, dashboard, h2h, targets), and one iteration of `mtg-smoke`.

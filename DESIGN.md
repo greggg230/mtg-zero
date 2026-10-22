@@ -174,7 +174,8 @@ and edge cases.
 | M1 | Human pick data + human pick strength (yardsticks only) | done (branch m1-draft-data) |
 | M3 | Card IR v1 in mtg-bot + generated Rust types | in progress |
 | M4 | Rust Stage 0: full games between vanilla/basic decks, every choice an action, fuzzed | next |
-| M5 | Stage 1 cards + `mtg` SearchGame on zero-core + play self-play on random supported-card decks + differential harness | |
+| M5 | Stage 1 cards + `mtg` SearchGame on zero-core + play self-play on random supported-card decks + differential harness | M5a done (branch m5a-zero): `mtg` on zero-core with 191 cards, fixed-width encoding, decks, bots, first self-play run (ENGINE.md 21) |
+| M5b | A network that reads the board card by card (in zero-core), replacing M5a's fixed-width encoding | next |
 | M6 | `team_draft` (2v2) + deferred-result hook in zero-core + co-training + yardsticks | |
 | M7 | Coverage to 360+ cards, 4v4 PowerLSV team drafts; then best-of-3 + sideboarding; Stages 3-4 | |
 
