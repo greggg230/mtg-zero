@@ -193,6 +193,29 @@ impl Game {
         panic!("pass_until: no progress");
     }
 
+    /// Answer forced decisions (one option) and pass priority until `stop`
+    /// holds or a real decision other than priority is pending. Meant for
+    /// games with `auto_single = false`, where it stops exactly at `stop`.
+    /// Returns the chance keys.
+    pub fn drive_until(&mut self, stop: impl Fn(&Game) -> bool) -> Vec<u64> {
+        let mut keys = Vec::new();
+        for _ in 0..100_000 {
+            if stop(self) {
+                return keys;
+            }
+            let Some(d) = &self.pending else { return keys };
+            let c = if d.options.len() == 1 {
+                d.options[0].choice
+            } else if d.kind == DecisionKind::Priority {
+                Choice::Pass
+            } else {
+                return keys;
+            };
+            keys.extend(self.choose(c));
+        }
+        panic!("drive_until: no progress");
+    }
+
     /// A hash of the whole mutable state (determinism checks).
     pub fn fingerprint(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
