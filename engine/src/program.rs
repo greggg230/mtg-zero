@@ -309,6 +309,21 @@ pub enum Ext {
     /// Sacrifice the source if it is still the same permanent, else
     /// continue at `skip` ("you may sacrifice it. If you do").
     SacrificeSourceThen { skip: u16 },
+    /// "You may mill that many cards. If you do, you may put a creature
+    /// card from among them into your hand" (the event's amount). Choice:
+    /// yes/no, then a `GRAVEYARD` slot or `PASS`.
+    MayMillThenTakeCreature,
+    /// Each creature card exiled with the source (CR 607.2a) is put onto
+    /// the battlefield under the controller's control [with a flying
+    /// counter] [as a p/t <subtype> in addition to its other types].
+    LinkedCreaturesToBattlefield { flying: bool, becomes: Option<(u16, i32, i32)> },
+    /// The controller looks at a card at random in `who`'s hand.
+    LookAtRandomHandCard { who: Who },
+    /// Reveal the top n cards; for each card type, the controller may put a
+    /// card of that type from among them into their hand (each card for
+    /// one type); the rest go on the bottom in a random order. Choice: a
+    /// `LIBRARY` slot or `PASS`.
+    RevealTopOnePerType { n: u8 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -492,7 +507,7 @@ impl Op {
             Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
             Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
-            Op::Ext(Ext::Reflexive { .. }) | Op::Ext(Ext::ReturnEventObjToHand) => true,
+            Op::Ext(Ext::Reflexive { .. }) | Op::Ext(Ext::ReturnEventObjToHand) | Op::Ext(Ext::MayMillThenTakeCreature) => true,
             Op::Ext(Ext::ReturnDiedWithCounter { .. }) => true,
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })

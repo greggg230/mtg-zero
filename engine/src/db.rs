@@ -799,6 +799,8 @@ pub struct CardDef {
     pub x_pips: u8,
     /// "Enters with X +1/+1 counters" (the X it was cast with).
     pub enters_x_counters: bool,
+    /// "You may play n additional lands on each of your turns."
+    pub extra_lands: u8,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.

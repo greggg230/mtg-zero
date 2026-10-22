@@ -275,7 +275,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.ward_cost_str", ward_cost_str);
         l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
         l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str);
-        l.deny("CardPrinting.grants_additional_land_per_turn", grants_additional_land_per_turn);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
         l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
@@ -916,6 +915,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         discard_land_to_enter: *enters_only_by_discarding_land,
         x_pips,
         enters_x_counters,
+        extra_lands: l.int("CardPrinting.grants_additional_land_per_turn", *grants_additional_land_per_turn, 0, 3) as u8,
     }
 }
 

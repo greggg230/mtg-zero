@@ -64,6 +64,15 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         if *sorcery_speed {
             l.unsupported("ManaAbility.sorcery_speed");
         }
+        // (The mana-ability payment path pays none of these.)
+        if cost.remove_counters.is_some()
+            || cost.crew > 0
+            || cost.exile_graveyard > 0
+            || cost.bounce.is_some()
+            || cost.exile_from_hand.is_some()
+        {
+            l.unsupported("ManaAbility.cost(counters, crew, exile or bounce)");
+        }
         // Payment treats a card's mana abilities as exclusive alternatives,
         // true when each one taps, sacrifices or exiles its source.
         if !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
@@ -153,7 +162,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     l.deny("ActivationCost.saddle", saddle);
     l.deny("ActivationCost.loyalty", loyalty);
     l.deny("ActivationCost.loyalty_x", loyalty_x);
-    l.deny("ActivationCost.remove_named_counter_from_self", remove_named_counter_from_self);
     l.deny("ActivationCost.exert_self", exert_self);
     l.deny("ActivationCost.waterbend", waterbend);
 
@@ -176,6 +184,14 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         remove_counters: None,
         crew: l.int("ActivationCost.crew", *crew, 0, 20) as u8,
     };
+    // "Remove a <name> counter from this."
+    if !remove_named_counter_from_self.is_empty() {
+        let name = remove_named_counter_from_self;
+        if cost.remove_counters.is_some() {
+            l.unsupported("ActivationCost.remove_named_counter_from_self(with another removal)");
+        }
+        cost.remove_counters = Some((super::effect_ext::counter_by_name(l, name), 1));
+    }
     // "Remove n <kind> counters from this" (CR 118.3).
     match (remove_counters_from_self_kind.as_str(), *remove_counters_from_self_amount) {
         ("", 0) => {}

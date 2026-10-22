@@ -343,7 +343,8 @@ impl Game {
             v.push(u64::MAX);
         }
         for &(r, n) in &self.resolved {
-            v.extend([place(r.idx), r.inc as u64, n as u64]);
+            // (Which object, by its place; `inc` is not observable.)
+            v.extend([if self.live(r) { place(r.idx) } else { 7777 }, n as u64]);
         }
         v.push(u64::MAX);
         for d in &self.delayed {

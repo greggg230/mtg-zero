@@ -57,6 +57,9 @@ pub struct Lowerer<'a> {
     pub subtypes: &'a mut Vec<String>,
     /// Token definitions the cards create (`Op::CreateToken` indexes).
     pub tokens: &'a mut Vec<CardDef>,
+    /// The card refers to "cards exiled with this": its exile effects
+    /// link (CR 607.2a).
+    pub link_exiles: bool,
     pub errs: Vec<String>,
     /// The colours of mana the card being lowered produces as a land
     /// (`produces`), for consistency checks.
@@ -139,7 +142,9 @@ pub fn lower_card(
     tokens: &mut Vec<CardDef>,
 ) -> Result<CardDef, Vec<String>> {
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
-    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0, delayed: Vec::new() };
+    // A card that refers to "cards exiled with this" links its exiles.
+    let link_exiles = format!("{p:?}").contains("ExiledWithSource");
+    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0, delayed: Vec::new(), link_exiles };
     let def = printing::lower_printing(&mut l, p);
     if l.errs.is_empty() {
         Ok(def)

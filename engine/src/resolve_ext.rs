@@ -1201,6 +1201,154 @@ impl Game {
                 }
                 None => Flow::Jump(*skip),
             },
+            Ext::MayMillThenTakeCreature => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        // Mill that many (the milled cards are the pile).
+                        let n = f.ev.amount as usize;
+                        let mut milled = Vec::new();
+                        for _ in 0..n {
+                            let Some(&top) = self.players[p as usize].library.last() else { break };
+                            self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
+                            self.reveal(top);
+                            self.move_card(top, Zone::Graveyard, Pos::Top);
+                            milled.push(top);
+                        }
+                        f.pile = milled;
+                        f.i = 1;
+                    }
+                    Some(Choice::Card(c)) => {
+                        self.move_card(c, Zone::Hand, Pos::Top);
+                        f.pile.clear();
+                        return Flow::Next;
+                    }
+                    Some(Choice::Pass) => {
+                        f.pile.clear();
+                        return Flow::Next;
+                    }
+                    Some(other) => unreachable!("mill answer {other:?}"),
+                    None => {}
+                }
+                if f.i == 0 {
+                    let opts = vec![
+                        Opt { action: act::PASS, choice: Choice::Pass },
+                        Opt { action: act::YES, choice: Choice::Yes },
+                    ];
+                    self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+                    return Flow::Suspend;
+                }
+                // "You may put a creature card from among them into your hand."
+                let mut opts: Vec<Opt> = f
+                    .pile
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.objs[c.i()].zone == Zone::Graveyard && self.def_of(c).is(crate::db::types::CREATURE))
+                    .map(|c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
+                    .collect();
+                if opts.is_empty() {
+                    f.pile.clear();
+                    return Flow::Next;
+                }
+                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                Flow::Suspend
+            }
+            Ext::LinkedCreaturesToBattlefield { flying, becomes } => {
+                let cards: Vec<crate::ids::ObjRef> = self
+                    .links
+                    .iter()
+                    .filter(|l| l.source == f.source)
+                    .map(|l| l.card)
+                    .filter(|r| self.live(*r) && self.objs[r.idx.i()].zone == Zone::Exile)
+                    .filter(|r| self.def_of(r.idx).is(crate::db::types::CREATURE))
+                    .collect();
+                let p = f.controller;
+                for r in cards {
+                    let new = self.put_onto_battlefield(r.idx, p);
+                    if self.objs[r.idx.i()].zone != Zone::Battlefield {
+                        continue;
+                    }
+                    if *flying {
+                        self.add_counters(r.idx, crate::db::Counter::Kw(crate::db::Kw::Flying), 1);
+                    }
+                    if let Some((sub, pw, tg)) = becomes {
+                        let m = Mod::Types { add: 0, subtypes: vec![*sub], replace: false };
+                        self.add_effect(Affected::Obj(new), m, crate::layers::Until::Forever, p);
+                        self.add_effect(Affected::Obj(new), Mod::SetPt(*pw, *tg), crate::layers::Until::Forever, p);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::LookAtRandomHandCard { who } => {
+                let Some(q) = self.who(f, *who) else { return Flow::Next };
+                let p = f.controller;
+                let sorted = self.hand_sorted(q);
+                if sorted.is_empty() {
+                    return Flow::Next;
+                }
+                let forced = self
+                    .forced_def(crate::hidden::KEY_LOOK, p)
+                    .and_then(|d| sorted.iter().copied().find(|&c| self.objs[c.i()].def == d));
+                let c = forced.unwrap_or_else(|| sorted[self.rng.below(sorted.len() as u32) as usize]);
+                // Its owner knows their hand: the looker may remember it.
+                self.learn(p, c);
+                let d = self.objs[c.i()].def;
+                self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+                self.note(|_| format!("P{p} looks at a card at random in P{q}'s hand"));
+                Flow::Next
+            }
+            Ext::RevealTopOnePerType { n } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        f.picked.push(c);
+                        f.pile.retain(|&x| x != c);
+                    }
+                    Some(Choice::Pass) => {
+                        f.i = 2;
+                    }
+                    Some(other) => unreachable!("reveal answer {other:?}"),
+                    None => {}
+                }
+                if f.i == 0 {
+                    self.look_top(f, p, *n, true);
+                    f.picked.clear();
+                    f.i = 1;
+                }
+                if f.i == 1 {
+                    // A further card is offered if every chosen card can
+                    // still stand for a different card type (a matching).
+                    let mut seen = Vec::new();
+                    let mut opts = Vec::new();
+                    let mut sorted = f.pile.clone();
+                    sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                    for (k, &c) in sorted.iter().enumerate() {
+                        let d = self.objs[c.i()].def;
+                        if seen.contains(&d) {
+                            continue;
+                        }
+                        seen.push(d);
+                        let mut set: Vec<u16> = f.picked.iter().map(|&x| self.def_of(x).types).collect();
+                        set.push(self.def_of(c).types);
+                        if crate::resolve_ext::types_matchable(&set) {
+                            opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
+                        }
+                    }
+                    if !opts.is_empty() {
+                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::PutInHand, opts);
+                        return Flow::Suspend;
+                    }
+                }
+                // The chosen cards to hand; the rest at random to the bottom.
+                for c in std::mem::take(&mut f.picked) {
+                    self.move_card(c, Zone::Hand, Pos::Top);
+                }
+                let rest = std::mem::take(&mut f.pile);
+                self.put_on_bottom_randomly(p, rest);
+                Flow::Next
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {
@@ -1215,4 +1363,20 @@ impl Game {
             }
         }
     }
+}
+
+/// Can each card (by its card types) stand for a different card type
+/// (Atraxa: "for each card type, a card of that type")? A bipartite
+/// matching of cards to the eight card types.
+pub(crate) fn types_matchable(cards: &[u16]) -> bool {
+    fn assign(i: usize, cards: &[u16], used: u16) -> bool {
+        if i == cards.len() {
+            return true;
+        }
+        (0..16).any(|b| {
+            let bit = 1u16 << b;
+            cards[i] & bit != 0 && used & bit == 0 && assign(i + 1, cards, used | bit)
+        })
+    }
+    cards.len() <= 8 && assign(0, cards, 0)
 }

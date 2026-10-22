@@ -788,7 +788,12 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         }
         E::ExileTargetCardFromGraveyard(nodes::ExileTargetCardFromGraveyard {}) => {
             let t = b.target(Filter::InGraveyard(Box::new(Filter::Any)), 1, 1);
-            b.op(Op::Exile { tgt: t });
+            if l.link_exiles {
+                // "Each card exiled with this" later (CR 607.2a).
+                b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: false }));
+            } else {
+                b.op(Op::Exile { tgt: t });
+            }
         }
         E::ExileEachOpponentsGraveyard(nodes::ExileEachOpponentsGraveyard {}) => {
             b.op(Op::Ext(Ext::ExileGraveyard { who: Who::Opponent }));
@@ -1288,6 +1293,46 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::Exile(nodes::Exile { targets }) => {
             let Some(t) = lower_targets(l, b, targets, "Exile") else { return true };
             b.op(Op::Exile { tgt: t });
+        }
+        E::MayMillDamageThenMayTakeCreature(nodes::MayMillDamageThenMayTakeCreature {}) => {
+            b.op(Op::Ext(Ext::MayMillThenTakeCreature));
+        }
+        E::PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl(
+            nodes::PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl { grant_flying_counter, grant_subtype_and_pt },
+        ) => {
+            let becomes = grant_subtype_and_pt.as_ref().map(|(s, p, t)| {
+                (l.subtype(s), l.int("grant_subtype_and_pt.p", *p, 0, 99), l.int("grant_subtype_and_pt.t", *t, 0, 99))
+            });
+            b.op(Op::Ext(Ext::LinkedCreaturesToBattlefield { flying: *grant_flying_counter, becomes }));
+        }
+        E::LookAtRandomCardInTargetPlayersHand(nodes::LookAtRandomCardInTargetPlayersHand {}) => {
+            let t = b.target(Filter::Player, 1, 1);
+            b.op(Op::Ext(Ext::LookAtRandomHandCard { who: Who::TargetPlayer(t) }));
+        }
+        E::GrantKeywordsUEOTAndPutCounters(nodes::GrantKeywordsUEOTAndPutCounters {
+            targets,
+            keywords,
+            target_counters,
+            self_counters,
+        }) => {
+            // "Another target creature gains <kws> until end of turn. Put
+            // <counters> on that creature and <counters> on this."
+            let Some(t) = lower_targets(l, b, targets, "GrantKeywordsUEOTAndPutCounters") else { return true };
+            let mods = keyword_mods(l, keywords);
+            if !mods.is_empty() {
+                apply(b, On::Target(t), mods, Until::EndOfTurn);
+            }
+            for (on, list) in [(On::Target(t), target_counters), (On::Source, self_counters)] {
+                for (name, n) in list {
+                    let counter = counter_by_name(l, name);
+                    let n = l.int("GrantKeywordsUEOTAndPutCounters.counters", *n, 1, 20);
+                    b.op(Op::Ext(Ext::PutCounters { on: on.clone(), counter, n: Amount::Fixed(n) }));
+                }
+            }
+        }
+        E::RevealTopNOnePerCardTypeToHand(nodes::RevealTopNOnePerCardTypeToHand { count }) => {
+            let n = l.int("RevealTopNOnePerCardTypeToHand.count", *count, 1, 20) as u8;
+            b.op(Op::Ext(Ext::RevealTopOnePerType { n }));
         }
         E::DealXDamage(nodes::DealXDamage { amount, targets }) => {
             // "This deals X damage to <target>."
