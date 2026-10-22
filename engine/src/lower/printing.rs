@@ -1,0 +1,671 @@
+//! `CardPrinting` -> `CardDef`. Every field of the generated struct is named
+//! below; fields the engine does not implement yet are `deny`-ed (a blocker
+//! when not at their default). Supporting a flag = moving it out of the
+//! deny list and implementing it.
+
+use super::effect::lower_ability;
+use super::Lowerer;
+use crate::db::{supertypes, types, CardDef, EventKind, Kw, KwSet, TrigFilter, TriggerDef};
+use crate::mana::{letter_index, ManaCost, ManaMask};
+use card_ir::{cats, enums, generated, nodes};
+
+pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDef {
+        let nodes::CardPrinting {
+            name,
+            mana_cost_str,
+            mana_cost,
+            type_line,
+            supertypes,
+            card_types,
+            subtypes,
+            power,
+            toughness,
+            produces,
+            keywords,
+            triggered_abilities,
+            spell_effect,
+            warp_cost,
+            warp_cost_str,
+            warp_additional_life_cost,
+            warp_castable_from_graveyard,
+            impending_cost,
+            impending_cost_str,
+            impending_count,
+            kicker_cost,
+            kicker_cost_str,
+            loyalty,
+            devour_land_multiplier,
+            station_threshold,
+            stationed_keywords,
+            chapter_count,
+            ward_cost,
+            ward_cost_str,
+            attached_grants_ward_cost,
+            attached_grants_ward_str,
+            grants_additional_land_per_turn,
+            grants_play_lands_from_graveyard,
+            attached_prevents_untap,
+            attached_grants_control,
+            attached_sets_base_pt,
+            attached_grants_lose_all_abilities,
+            attached_grants_subtype,
+            attached_grants_card_types,
+            attached_prevents_turning_face_up,
+            attached_grants_activated_abilities,
+            enters_as_copy_of_creature,
+            replaces_first_tokens_with_copies,
+            grants_look_at_top_of_library,
+            grants_cast_artifact_from_top_of_library,
+            grants_first_spell_each_turn_free,
+            grants_food_to_your_artifacts,
+            grants_food_ability_to_your_artifacts,
+            grants_blue_mana_ability_to_your_artifacts,
+            hand_ability_grants,
+            grants_control_opponent_ability_when_equipped,
+            ward_discard_random,
+            ward_discard_chosen,
+            ward_life_cost,
+            equipment_bonuses,
+            shock_land_life_cost,
+            enters_tapped,
+            doesnt_untap_during_untap_step,
+            enters_only_by_discarding_land,
+            may_skip_turn_to_untap,
+            equipment_bonus_per_controlled,
+            crew_power_bonus,
+            has_graveyard_triggers,
+            sunburst,
+            grants_play_from_top_paying_life,
+            equipment_granted_triggers,
+            enters_tapped_unless_any_player_life_at_most,
+            optional_copy_land_from_graveyard,
+            enters_tapped_unless,
+            mana_only_from_produces,
+            produces_life_cost,
+            produces_with_counter,
+            opening_hand_action,
+            hand_activated_abilities,
+            enters_choosing_basic_land_type,
+            is_chosen_basic_land_type,
+            enters_with_named_counters,
+            additional_cost_sacrifice_creature_or_artifact,
+            additional_cost_sacrifice_creature_or_enchantment,
+            additional_cost_choose_your_creature,
+            cost_reductions,
+            external_cost_reductions,
+            static_abilities,
+            activated_abilities,
+            enters_with_counters_from_x,
+            grants_etb_counter_per_land_entered_this_turn,
+            enters_with_plus_one_counter_if_creature_died_this_turn,
+            enters_with_minus_one_counters_from_hand_cast,
+            aura_enchant_type,
+            aura_yours_only,
+            dynamic_pt_formula,
+            restricts_noncreature_spells_to_one_per_turn,
+            opponents_cant_draw_more_than_one_card_each_turn,
+            opponents_cast_spells_only_at_sorcery_speed,
+            loyalty_abilities_at_instant_speed_if_entered_this_turn,
+            nonbasic_lands_are_mountains,
+            grants_all_basic_land_types_to_lands_you_control,
+            grants_basic_land_type_to_all_lands,
+            paints_all_objects_chosen_color_at_etb,
+            all_permanents_gain_card_type,
+            all_objects_colorless,
+            mana_spendable_as_any_color,
+            chooses_player_as_enters,
+            looks_at_opponents_face_down_creatures,
+            wipes_all_creature_abilities,
+            sets_all_creature_pt_to_1_1,
+            must_be_blocked_if_able,
+            spell_is_uncounterable,
+            combat_damage_cant_be_prevented,
+            grants_toughness_as_damage_for_creatures_you_control,
+            grants_toughness_as_station_power_for_creatures_you_control,
+            protection_from_color,
+            color_indicator,
+            has_convoke,
+            can_only_block_creatures_with_flying,
+            landcycling,
+            flashback_cost,
+            flashback_cost_str,
+            has_delve,
+            buyback_cost,
+            buyback_cost_str,
+            additional_cost_sacrifice_filter,
+            additional_cost_pay_x_life,
+            free_cast_condition,
+            has_storm,
+            alt_cost_exile_from_hand,
+            alt_cost_exile_from_hand_count,
+            splice_onto,
+            splice_cost,
+            splice_cost_str,
+            mdfc_back_face,
+            transform_back_face,
+            face_colors,
+            daybound,
+            nightbound,
+            class_level,
+            class_levels,
+            split_faces,
+            grants_mayhem_to_graveyard,
+            adventure_face,
+            prepare_spell,
+            enters_prepared,
+            plot_cost,
+            plot_cost_str,
+            escape_cost,
+            escape_cost_str,
+            escape_exile_count,
+            grants_graveyard_escape_exile_count,
+            sacrifice_at_cleanup_if_cast_without_sorcery_timing,
+            graveyard_activated_abilities,
+            dash_cost,
+            dash_cost_str,
+            heals_other_damage_when_dealt_damage,
+            watched_in_graveyard,
+            watches_library_graveyard_exile,
+            multikicker,
+            enters_with_counter_per_kick,
+            evoke_cost,
+            evoke_cost_str,
+            evoke_exile_from_hand,
+            opponents_cant_cast_spells_during_your_turn,
+            each_player_one_spell_per_turn,
+            opponents_nonbasic_lands_enter_tapped,
+            spell_cost_increases,
+            cant_be_blocked_by,
+            your_creatures_combat_damage_cant_be_prevented,
+            locks_activated_abilities_of,
+            locks_opponents_activated_abilities_of,
+            exiles_uncast_nontoken_creatures_entering,
+            grants_retrace_to_nonland_permanents_during_your_turn,
+            grants_once_per_turn_graveyard_play_mv,
+            grants_retrace_to,
+            opponents_cant_make_you_discard_or_sacrifice,
+            extra_mana_when_you_tap_land_subtype,
+            creature_during_your_turn,
+            chooses_card_name_as_enters,
+            named_spell_cost_increase,
+            named_ability_cost_increase,
+            reconfigure_cost,
+            reconfigure_cost_str,
+            equipment_bonus_per_own_counter,
+            bestow_cost,
+            bestow_cost_str,
+            bestow_enchanted_bonus,
+            extra_mana_when_you_tap_creature_for_mana,
+            min_blockers,
+            squad_cost,
+            squad_cost_str,
+            offspring_cost,
+            offspring_cost_str,
+            has_improvise,
+            void_exile_replacement,
+            zone_abilities,
+            emerge_cost,
+            emerge_cost_str,
+            emerge_sacrifice_type,
+            miracle_cost,
+            miracle_cost_str,
+            additional_cost_exile_from_graveyard,
+            artifact_ability_cost_reduction,
+            chooses_parity_as_enters,
+            x_min,
+            blocks_only_with_subtype,
+            enters_as_copy_types,
+            enters_as_copy_zone,
+            enters_as_copy_add_type,
+            enters_as_copy_keep_name,
+            enters_as_copy_base_pt,
+            enters_as_copy_add_subtypes,
+            enters_as_copy_exiles_card,
+            enters_as_copy_add_triggers,
+            enters_as_copy_add_keywords,
+            enters_as_copy_max_mv_mana_spent,
+            rebound,
+            room_halves,
+            alternative_costs,
+            additional_cost_options,
+            replicate_cost,
+            teamwork_power,
+            roto_statics,
+            enters_choosing_creature_type,
+            cast_from_top_of_library_kinds,
+            suspend_count,
+            suspend_cost,
+            suspend_cost_str,
+            has_no_mana_cost,
+            exile_activated_abilities,
+            aura_enchant_subtype,
+            enters_choosing_color,
+            enchanted_land_adds_chosen_color,
+            additional_cost_discard_x,
+            optional_sacrifice_any_number,
+            grants_free_casts_from_hand,
+            free_flash_creature_casts_max_mv,
+            grants_discard_alternative_cost,
+            tapped_for_mana_triggers,
+            extra_mana_when_you_tap_nonland_for_mana,
+            board_rules,
+            escape_exile_card_types,
+            conspiracy_rules,
+            replacement_statics,
+        } = p;
+        l.deny("CardPrinting.warp_cost", warp_cost);
+        l.deny("CardPrinting.warp_cost_str", warp_cost_str);
+        l.deny("CardPrinting.warp_additional_life_cost", warp_additional_life_cost);
+        l.deny("CardPrinting.warp_castable_from_graveyard", warp_castable_from_graveyard);
+        l.deny("CardPrinting.impending_cost", impending_cost);
+        l.deny("CardPrinting.impending_cost_str", impending_cost_str);
+        l.deny("CardPrinting.impending_count", impending_count);
+        l.deny("CardPrinting.kicker_cost", kicker_cost);
+        l.deny("CardPrinting.kicker_cost_str", kicker_cost_str);
+        l.deny("CardPrinting.loyalty", loyalty);
+        l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
+        l.deny("CardPrinting.station_threshold", station_threshold);
+        l.deny("CardPrinting.stationed_keywords", stationed_keywords);
+        l.deny("CardPrinting.chapter_count", chapter_count);
+        l.deny("CardPrinting.ward_cost", ward_cost);
+        l.deny("CardPrinting.ward_cost_str", ward_cost_str);
+        l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
+        l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str);
+        l.deny("CardPrinting.grants_additional_land_per_turn", grants_additional_land_per_turn);
+        l.deny("CardPrinting.grants_play_lands_from_graveyard", grants_play_lands_from_graveyard);
+        l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
+        l.deny("CardPrinting.attached_grants_control", attached_grants_control);
+        l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
+        l.deny("CardPrinting.attached_grants_lose_all_abilities", attached_grants_lose_all_abilities);
+        l.deny("CardPrinting.attached_grants_subtype", attached_grants_subtype);
+        l.deny("CardPrinting.attached_grants_card_types", attached_grants_card_types);
+        l.deny("CardPrinting.attached_prevents_turning_face_up", attached_prevents_turning_face_up);
+        l.deny("CardPrinting.attached_grants_activated_abilities", attached_grants_activated_abilities);
+        l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
+        l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
+        l.deny("CardPrinting.grants_look_at_top_of_library", grants_look_at_top_of_library);
+        l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
+        l.deny("CardPrinting.grants_first_spell_each_turn_free", grants_first_spell_each_turn_free);
+        l.deny("CardPrinting.grants_food_to_your_artifacts", grants_food_to_your_artifacts);
+        l.deny("CardPrinting.grants_food_ability_to_your_artifacts", grants_food_ability_to_your_artifacts);
+        l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
+        l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
+        l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
+        l.deny("CardPrinting.ward_discard_random", ward_discard_random);
+        l.deny("CardPrinting.ward_discard_chosen", ward_discard_chosen);
+        l.deny("CardPrinting.ward_life_cost", ward_life_cost);
+        l.deny("CardPrinting.equipment_bonuses", equipment_bonuses);
+        l.deny("CardPrinting.shock_land_life_cost", shock_land_life_cost);
+        l.deny("CardPrinting.enters_tapped", enters_tapped);
+        l.deny("CardPrinting.doesnt_untap_during_untap_step", doesnt_untap_during_untap_step);
+        l.deny("CardPrinting.enters_only_by_discarding_land", enters_only_by_discarding_land);
+        l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
+        l.deny("CardPrinting.equipment_bonus_per_controlled", equipment_bonus_per_controlled);
+        l.deny("CardPrinting.crew_power_bonus", crew_power_bonus);
+        l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
+        l.deny("CardPrinting.sunburst", sunburst);
+        l.deny("CardPrinting.grants_play_from_top_paying_life", grants_play_from_top_paying_life);
+        l.deny("CardPrinting.equipment_granted_triggers", equipment_granted_triggers);
+        l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
+        l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
+        l.deny("CardPrinting.enters_tapped_unless", enters_tapped_unless);
+        l.deny("CardPrinting.produces_life_cost", produces_life_cost);
+        l.deny("CardPrinting.produces_with_counter", produces_with_counter);
+        l.deny("CardPrinting.opening_hand_action", opening_hand_action);
+        l.deny("CardPrinting.hand_activated_abilities", hand_activated_abilities);
+        l.deny("CardPrinting.enters_choosing_basic_land_type", enters_choosing_basic_land_type);
+        l.deny("CardPrinting.is_chosen_basic_land_type", is_chosen_basic_land_type);
+        l.deny("CardPrinting.enters_with_named_counters", enters_with_named_counters);
+        l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
+        l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
+        l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
+        l.deny("CardPrinting.cost_reductions", cost_reductions);
+        l.deny("CardPrinting.external_cost_reductions", external_cost_reductions);
+        l.deny("CardPrinting.static_abilities", static_abilities);
+        l.deny("CardPrinting.activated_abilities", activated_abilities);
+        l.deny("CardPrinting.enters_with_counters_from_x", enters_with_counters_from_x);
+        l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
+        l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
+        l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
+        l.deny_ne("CardPrinting.aura_enchant_type", aura_enchant_type, &generated::defaults::d_CardPrinting_aura_enchant_type());
+        l.deny("CardPrinting.aura_yours_only", aura_yours_only);
+        l.deny("CardPrinting.dynamic_pt_formula", dynamic_pt_formula);
+        l.deny("CardPrinting.restricts_noncreature_spells_to_one_per_turn", restricts_noncreature_spells_to_one_per_turn);
+        l.deny("CardPrinting.opponents_cant_draw_more_than_one_card_each_turn", opponents_cant_draw_more_than_one_card_each_turn);
+        l.deny("CardPrinting.opponents_cast_spells_only_at_sorcery_speed", opponents_cast_spells_only_at_sorcery_speed);
+        l.deny("CardPrinting.loyalty_abilities_at_instant_speed_if_entered_this_turn", loyalty_abilities_at_instant_speed_if_entered_this_turn);
+        l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
+        l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
+        l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
+        l.deny("CardPrinting.paints_all_objects_chosen_color_at_etb", paints_all_objects_chosen_color_at_etb);
+        l.deny("CardPrinting.all_permanents_gain_card_type", all_permanents_gain_card_type);
+        l.deny("CardPrinting.all_objects_colorless", all_objects_colorless);
+        l.deny("CardPrinting.mana_spendable_as_any_color", mana_spendable_as_any_color);
+        l.deny("CardPrinting.chooses_player_as_enters", chooses_player_as_enters);
+        l.deny("CardPrinting.looks_at_opponents_face_down_creatures", looks_at_opponents_face_down_creatures);
+        l.deny("CardPrinting.wipes_all_creature_abilities", wipes_all_creature_abilities);
+        l.deny("CardPrinting.sets_all_creature_pt_to_1_1", sets_all_creature_pt_to_1_1);
+        l.deny("CardPrinting.must_be_blocked_if_able", must_be_blocked_if_able);
+        l.deny("CardPrinting.spell_is_uncounterable", spell_is_uncounterable);
+        l.deny("CardPrinting.combat_damage_cant_be_prevented", combat_damage_cant_be_prevented);
+        l.deny("CardPrinting.grants_toughness_as_damage_for_creatures_you_control", grants_toughness_as_damage_for_creatures_you_control);
+        l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
+        l.deny("CardPrinting.protection_from_color", protection_from_color);
+        l.deny("CardPrinting.color_indicator", color_indicator);
+        l.deny("CardPrinting.has_convoke", has_convoke);
+        l.deny("CardPrinting.can_only_block_creatures_with_flying", can_only_block_creatures_with_flying);
+        l.deny("CardPrinting.landcycling", landcycling);
+        l.deny("CardPrinting.flashback_cost", flashback_cost);
+        l.deny("CardPrinting.flashback_cost_str", flashback_cost_str);
+        l.deny("CardPrinting.has_delve", has_delve);
+        l.deny("CardPrinting.buyback_cost", buyback_cost);
+        l.deny("CardPrinting.buyback_cost_str", buyback_cost_str);
+        l.deny("CardPrinting.additional_cost_sacrifice_filter", additional_cost_sacrifice_filter);
+        l.deny("CardPrinting.additional_cost_pay_x_life", additional_cost_pay_x_life);
+        l.deny("CardPrinting.free_cast_condition", free_cast_condition);
+        l.deny("CardPrinting.has_storm", has_storm);
+        l.deny("CardPrinting.alt_cost_exile_from_hand", alt_cost_exile_from_hand);
+        l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
+        l.deny("CardPrinting.splice_onto", splice_onto);
+        l.deny("CardPrinting.splice_cost", splice_cost);
+        l.deny("CardPrinting.splice_cost_str", splice_cost_str);
+        l.deny("CardPrinting.mdfc_back_face", mdfc_back_face);
+        l.deny("CardPrinting.transform_back_face", transform_back_face);
+        l.deny("CardPrinting.face_colors", face_colors);
+        l.deny("CardPrinting.daybound", daybound);
+        l.deny("CardPrinting.nightbound", nightbound);
+        l.deny("CardPrinting.class_level", class_level);
+        l.deny("CardPrinting.class_levels", class_levels);
+        l.deny("CardPrinting.split_faces", split_faces);
+        l.deny("CardPrinting.grants_mayhem_to_graveyard", grants_mayhem_to_graveyard);
+        l.deny("CardPrinting.adventure_face", adventure_face);
+        l.deny("CardPrinting.prepare_spell", prepare_spell);
+        l.deny("CardPrinting.enters_prepared", enters_prepared);
+        l.deny("CardPrinting.plot_cost", plot_cost);
+        l.deny("CardPrinting.plot_cost_str", plot_cost_str);
+        l.deny("CardPrinting.escape_cost", escape_cost);
+        l.deny("CardPrinting.escape_cost_str", escape_cost_str);
+        l.deny("CardPrinting.escape_exile_count", escape_exile_count);
+        l.deny("CardPrinting.grants_graveyard_escape_exile_count", grants_graveyard_escape_exile_count);
+        l.deny("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing", sacrifice_at_cleanup_if_cast_without_sorcery_timing);
+        l.deny("CardPrinting.graveyard_activated_abilities", graveyard_activated_abilities);
+        l.deny("CardPrinting.dash_cost", dash_cost);
+        l.deny("CardPrinting.dash_cost_str", dash_cost_str);
+        l.deny("CardPrinting.heals_other_damage_when_dealt_damage", heals_other_damage_when_dealt_damage);
+        l.deny("CardPrinting.watched_in_graveyard", watched_in_graveyard);
+        l.deny("CardPrinting.watches_library_graveyard_exile", watches_library_graveyard_exile);
+        l.deny("CardPrinting.multikicker", multikicker);
+        l.deny("CardPrinting.enters_with_counter_per_kick", enters_with_counter_per_kick);
+        l.deny("CardPrinting.evoke_cost", evoke_cost);
+        l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
+        l.deny("CardPrinting.evoke_exile_from_hand", evoke_exile_from_hand);
+        l.deny("CardPrinting.opponents_cant_cast_spells_during_your_turn", opponents_cant_cast_spells_during_your_turn);
+        l.deny("CardPrinting.each_player_one_spell_per_turn", each_player_one_spell_per_turn);
+        l.deny("CardPrinting.opponents_nonbasic_lands_enter_tapped", opponents_nonbasic_lands_enter_tapped);
+        l.deny("CardPrinting.spell_cost_increases", spell_cost_increases);
+        l.deny("CardPrinting.cant_be_blocked_by", cant_be_blocked_by);
+        l.deny("CardPrinting.your_creatures_combat_damage_cant_be_prevented", your_creatures_combat_damage_cant_be_prevented);
+        l.deny("CardPrinting.locks_activated_abilities_of", locks_activated_abilities_of);
+        l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
+        l.deny("CardPrinting.exiles_uncast_nontoken_creatures_entering", exiles_uncast_nontoken_creatures_entering);
+        l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
+        l.deny("CardPrinting.grants_once_per_turn_graveyard_play_mv", grants_once_per_turn_graveyard_play_mv);
+        l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
+        l.deny("CardPrinting.opponents_cant_make_you_discard_or_sacrifice", opponents_cant_make_you_discard_or_sacrifice);
+        l.deny("CardPrinting.extra_mana_when_you_tap_land_subtype", extra_mana_when_you_tap_land_subtype);
+        l.deny("CardPrinting.creature_during_your_turn", creature_during_your_turn);
+        l.deny("CardPrinting.chooses_card_name_as_enters", chooses_card_name_as_enters);
+        l.deny("CardPrinting.named_spell_cost_increase", named_spell_cost_increase);
+        l.deny("CardPrinting.named_ability_cost_increase", named_ability_cost_increase);
+        l.deny("CardPrinting.reconfigure_cost", reconfigure_cost);
+        l.deny("CardPrinting.reconfigure_cost_str", reconfigure_cost_str);
+        l.deny("CardPrinting.equipment_bonus_per_own_counter", equipment_bonus_per_own_counter);
+        l.deny("CardPrinting.bestow_cost", bestow_cost);
+        l.deny("CardPrinting.bestow_cost_str", bestow_cost_str);
+        l.deny("CardPrinting.bestow_enchanted_bonus", bestow_enchanted_bonus);
+        l.deny("CardPrinting.extra_mana_when_you_tap_creature_for_mana", extra_mana_when_you_tap_creature_for_mana);
+        l.deny("CardPrinting.min_blockers", min_blockers);
+        l.deny("CardPrinting.squad_cost", squad_cost);
+        l.deny("CardPrinting.squad_cost_str", squad_cost_str);
+        l.deny("CardPrinting.offspring_cost", offspring_cost);
+        l.deny("CardPrinting.offspring_cost_str", offspring_cost_str);
+        l.deny("CardPrinting.has_improvise", has_improvise);
+        l.deny("CardPrinting.void_exile_replacement", void_exile_replacement);
+        l.deny("CardPrinting.zone_abilities", zone_abilities);
+        l.deny("CardPrinting.emerge_cost", emerge_cost);
+        l.deny("CardPrinting.emerge_cost_str", emerge_cost_str);
+        l.deny_ne("CardPrinting.emerge_sacrifice_type", emerge_sacrifice_type, &generated::defaults::d_CardPrinting_emerge_sacrifice_type());
+        l.deny("CardPrinting.miracle_cost", miracle_cost);
+        l.deny("CardPrinting.miracle_cost_str", miracle_cost_str);
+        l.deny("CardPrinting.additional_cost_exile_from_graveyard", additional_cost_exile_from_graveyard);
+        l.deny("CardPrinting.artifact_ability_cost_reduction", artifact_ability_cost_reduction);
+        l.deny("CardPrinting.chooses_parity_as_enters", chooses_parity_as_enters);
+        l.deny("CardPrinting.x_min", x_min);
+        l.deny("CardPrinting.blocks_only_with_subtype", blocks_only_with_subtype);
+        l.deny("CardPrinting.enters_as_copy_types", enters_as_copy_types);
+        l.deny_ne("CardPrinting.enters_as_copy_zone", enters_as_copy_zone, &generated::defaults::d_CardPrinting_enters_as_copy_zone());
+        l.deny("CardPrinting.enters_as_copy_add_type", enters_as_copy_add_type);
+        l.deny("CardPrinting.enters_as_copy_keep_name", enters_as_copy_keep_name);
+        l.deny("CardPrinting.enters_as_copy_base_pt", enters_as_copy_base_pt);
+        l.deny("CardPrinting.enters_as_copy_add_subtypes", enters_as_copy_add_subtypes);
+        l.deny("CardPrinting.enters_as_copy_exiles_card", enters_as_copy_exiles_card);
+        l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
+        l.deny("CardPrinting.enters_as_copy_add_keywords", enters_as_copy_add_keywords);
+        l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
+        l.deny("CardPrinting.rebound", rebound);
+        l.deny("CardPrinting.room_halves", room_halves);
+        l.deny("CardPrinting.alternative_costs", alternative_costs);
+        l.deny("CardPrinting.additional_cost_options", additional_cost_options);
+        l.deny("CardPrinting.replicate_cost", replicate_cost);
+        l.deny("CardPrinting.teamwork_power", teamwork_power);
+        l.deny("CardPrinting.roto_statics", roto_statics);
+        l.deny("CardPrinting.enters_choosing_creature_type", enters_choosing_creature_type);
+        l.deny("CardPrinting.cast_from_top_of_library_kinds", cast_from_top_of_library_kinds);
+        l.deny("CardPrinting.suspend_count", suspend_count);
+        l.deny("CardPrinting.suspend_cost", suspend_cost);
+        l.deny("CardPrinting.suspend_cost_str", suspend_cost_str);
+        l.deny("CardPrinting.has_no_mana_cost", has_no_mana_cost);
+        l.deny("CardPrinting.exile_activated_abilities", exile_activated_abilities);
+        l.deny("CardPrinting.aura_enchant_subtype", aura_enchant_subtype);
+        l.deny("CardPrinting.enters_choosing_color", enters_choosing_color);
+        l.deny("CardPrinting.enchanted_land_adds_chosen_color", enchanted_land_adds_chosen_color);
+        l.deny("CardPrinting.additional_cost_discard_x", additional_cost_discard_x);
+        l.deny("CardPrinting.optional_sacrifice_any_number", optional_sacrifice_any_number);
+        l.deny("CardPrinting.grants_free_casts_from_hand", grants_free_casts_from_hand);
+        l.deny("CardPrinting.free_flash_creature_casts_max_mv", free_flash_creature_casts_max_mv);
+        l.deny("CardPrinting.grants_discard_alternative_cost", grants_discard_alternative_cost);
+        l.deny("CardPrinting.tapped_for_mana_triggers", tapped_for_mana_triggers);
+        l.deny("CardPrinting.extra_mana_when_you_tap_nonland_for_mana", extra_mana_when_you_tap_nonland_for_mana);
+        l.deny("CardPrinting.board_rules", board_rules);
+        l.deny("CardPrinting.escape_exile_card_types", escape_exile_card_types);
+        l.deny("CardPrinting.conspiracy_rules", conspiracy_rules);
+        l.deny("CardPrinting.replacement_statics", replacement_statics);
+
+    // Informational duplicates of `mana_cost` and the type fields.
+    let _ = (mana_cost_str, type_line);
+    // Lands pay only through their mana abilities here, so the Python
+    // engine's "no generic fallback" marker needs no code (ENGINE.md 14).
+    let _ = mana_only_from_produces;
+
+    let mut ty = 0u16;
+    for t in card_types {
+        match types::from_name(t) {
+            Some(b) => ty |= b,
+            None => l.unsupported(format!("CardType:{t}")),
+        }
+    }
+    let mut sup = 0u8;
+    for s in supertypes {
+        match supertypes::from_name(s) {
+            Some(b) => sup |= b,
+            None => l.unsupported(format!("Supertype:{s}")),
+        }
+    }
+    let subs: Vec<u16> = subtypes.iter().map(|s| l.subtype(s)).collect();
+    let cost = lower_mana_cost(l, "CardPrinting.mana_cost", mana_cost);
+
+    let is_creature = ty & types::CREATURE != 0;
+    let (pw, tg) = match (power, toughness) {
+        (Some(pw), Some(tg)) => (
+            Some(l.int("CardPrinting.power", *pw, -99, 99)),
+            Some(l.int("CardPrinting.toughness", *tg, -99, 99)),
+        ),
+        (None, None) => (None, None),
+        _ => {
+            l.unsupported("CardPrinting.power/toughness(partial)");
+            (None, None)
+        }
+    };
+    if is_creature && pw.is_none() {
+        l.unsupported("CardPrinting.power(creature without P/T)");
+    }
+
+    let mut kws = KwSet::default();
+    for k in keywords {
+        if let Some(kw) = lower_keyword(l, k) {
+            kws.insert(kw);
+        }
+    }
+
+    let mut prod: ManaMask = 0;
+    for s in produces {
+        match letter_index(s) {
+            Some(i) => prod |= 1 << i,
+            None => l.unsupported(format!("CardPrinting.produces({s})")),
+        }
+    }
+    if prod != 0 && ty & types::LAND == 0 {
+        // Non-land mana sources need activated mana abilities (M4b).
+        l.unsupported("CardPrinting.produces(non-land)");
+    }
+
+    let is_spell_card = ty & (types::INSTANT | types::SORCERY) != 0;
+    let spell = match spell_effect {
+        Some(e) if is_spell_card => Some(lower_ability(l, e)),
+        Some(_) => {
+            l.unsupported("CardPrinting.spell_effect(on a permanent card)");
+            None
+        }
+        None if is_spell_card => {
+            l.unsupported("CardPrinting.spell_effect(missing)");
+            None
+        }
+        None => None,
+    };
+
+    let mut triggers = Vec::new();
+    for t in triggered_abilities {
+        if let Some(td) = lower_trigger(l, t) {
+            triggers.push(td);
+        }
+    }
+
+    CardDef {
+        name: name.clone(),
+        types: ty,
+        supertypes: sup,
+        subtypes: subs,
+        colors: cost.colors(),
+        cost,
+        power: pw,
+        toughness: tg,
+        keywords: kws,
+        produces: prod,
+        spell,
+        triggers,
+    }
+}
+
+/// `ManaCost` without X, hybrid or Phyrexian symbols.
+pub(crate) fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -> ManaCost {
+    let cats::ManaCost::ManaCost(nodes::ManaCost { generic, colored, x_pips, hybrid, phyrexian }) = c;
+    l.deny(&format!("{what}.x_pips"), x_pips);
+    l.deny(&format!("{what}.hybrid"), hybrid);
+    l.deny(&format!("{what}.phyrexian"), phyrexian);
+    let mut out = ManaCost { generic: l.int("ManaCost.generic", *generic, 0, 30) as u8, pips: [0; 6] };
+    for (sym, n) in colored {
+        match letter_index(sym) {
+            Some(i) => out.pips[i] += l.int("ManaCost.colored", *n, 0, 30) as u8,
+            None => l.unsupported(format!("ManaCost.colored({sym})")),
+        }
+    }
+    out
+}
+
+fn lower_keyword(l: &mut Lowerer, k: &cats::Keyword) -> Option<Kw> {
+    let cats::Keyword::Keyword(nodes::Keyword { kind, n, quality }) = k;
+    l.deny("Keyword.n", n);
+    l.deny("Keyword.quality", quality);
+    use enums::KeywordKind as K;
+    Some(match kind {
+        K::Flying => Kw::Flying,
+        K::Reach => Kw::Reach,
+        K::FirstStrike => Kw::FirstStrike,
+        K::DoubleStrike => Kw::DoubleStrike,
+        K::Deathtouch => Kw::Deathtouch,
+        K::Trample => Kw::Trample,
+        K::Lifelink => Kw::Lifelink,
+        K::Vigilance => Kw::Vigilance,
+        K::Haste => Kw::Haste,
+        K::Defender => Kw::Defender,
+        K::Menace => Kw::Menace,
+        K::Flash => Kw::Flash,
+        other => {
+            l.unsupported(format!("Keyword:{other:?}"));
+            return None;
+        }
+    })
+}
+
+fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility) -> Option<TriggerDef> {
+    let cats::TriggeredAbility::TriggeredAbility(nodes::TriggeredAbility {
+        effect,
+        requires_void,
+        once_per_turn,
+        tier_threshold,
+        event,
+        predicate,
+        room_half,
+        functions_in_graveyard,
+    }) = t;
+    l.deny("TriggeredAbility.requires_void", requires_void);
+    l.deny("TriggeredAbility.once_per_turn", once_per_turn);
+    l.deny("TriggeredAbility.tier_threshold", tier_threshold);
+    l.deny("TriggeredAbility.room_half", room_half);
+    l.deny("TriggeredAbility.functions_in_graveyard", functions_in_graveyard);
+    use enums::Event as E;
+    let ev = match event {
+        Some(E::Enters) => Some(EventKind::Enters),
+        Some(E::Dies) => Some(EventKind::Dies),
+        Some(other) => {
+            l.unsupported(format!("Event:{other:?}"));
+            None
+        }
+        None => {
+            l.unsupported("TriggeredAbility.event(missing)");
+            None
+        }
+    };
+    let filter = match predicate.as_deref() {
+        Some(cats::TriggerPredicate::IsSelf(nodes::IsSelf { subject })) => {
+            l.deny("IsSelf.subject", subject);
+            Some(TrigFilter::SelfObj)
+        }
+        Some(other) => {
+            l.unsupported(format!("TriggerPredicate:{}", other.tag()));
+            None
+        }
+        None => {
+            l.unsupported("TriggeredAbility.predicate(missing)");
+            None
+        }
+    };
+    let ability = match effect {
+        Some(e) => lower_ability(l, e),
+        None => {
+            l.unsupported("TriggeredAbility.effect(missing)");
+            return None;
+        }
+    };
+    Some(TriggerDef { event: ev?, filter: filter?, ability })
+}

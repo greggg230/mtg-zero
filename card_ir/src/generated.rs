@@ -5613,12 +5613,30 @@ pub mod cats {
         ActivatedAbility(nodes::ActivatedAbility),
     }
 
+    impl ActivatedAbility {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ActivatedAbility(_) => "ActivatedAbility",
+            }
+        }
+    }
+
     /// Categories: ActivationCost
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum ActivationCost {
         #[serde(rename = "ActivationCost")]
         ActivationCost(nodes::ActivationCost),
+    }
+
+    impl ActivationCost {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ActivationCost(_) => "ActivationCost",
+            }
+        }
     }
 
     /// Categories: AdditionalCostOption
@@ -5629,12 +5647,30 @@ pub mod cats {
         AdditionalCostOption(nodes::AdditionalCostOption),
     }
 
+    impl AdditionalCostOption {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::AdditionalCostOption(_) => "AdditionalCostOption",
+            }
+        }
+    }
+
     /// Categories: AlternativeCost
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum AlternativeCost {
         #[serde(rename = "AlternativeCost")]
         AlternativeCost(nodes::AlternativeCost),
+    }
+
+    impl AlternativeCost {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::AlternativeCost(_) => "AlternativeCost",
+            }
+        }
     }
 
     /// Categories: BeginGameOnBattlefield
@@ -5645,12 +5681,30 @@ pub mod cats {
         BeginGameOnBattlefield(nodes::BeginGameOnBattlefield),
     }
 
+    impl BeginGameOnBattlefield {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::BeginGameOnBattlefield(_) => "BeginGameOnBattlefield",
+            }
+        }
+    }
+
     /// Categories: CardFilter
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum CardFilter {
         #[serde(rename = "CardFilter")]
         CardFilter(nodes::CardFilter),
+    }
+
+    impl CardFilter {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CardFilter(_) => "CardFilter",
+            }
+        }
     }
 
     /// Categories: CardFilter, CardTypeOrSubtypeFilter
@@ -5663,6 +5717,16 @@ pub mod cats {
         CardTypeOrSubtypeFilter(nodes::CardTypeOrSubtypeFilter),
     }
 
+    impl CardFilterOrCardTypeOrSubtypeFilter {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CardFilter(_) => "CardFilter",
+                Self::CardTypeOrSubtypeFilter(_) => "CardTypeOrSubtypeFilter",
+            }
+        }
+    }
+
     /// Categories: CardPrinting
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
@@ -5671,12 +5735,30 @@ pub mod cats {
         CardPrinting(nodes::CardPrinting),
     }
 
+    impl CardPrinting {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CardPrinting(_) => "CardPrinting",
+            }
+        }
+    }
+
     /// Categories: CardTypeOrSubtypeFilter
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum CardTypeOrSubtypeFilter {
         #[serde(rename = "CardTypeOrSubtypeFilter")]
         CardTypeOrSubtypeFilter(nodes::CardTypeOrSubtypeFilter),
+    }
+
+    impl CardTypeOrSubtypeFilter {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CardTypeOrSubtypeFilter(_) => "CardTypeOrSubtypeFilter",
+            }
+        }
     }
 
     /// Categories: Condition
@@ -5733,6 +5815,39 @@ pub mod cats {
         YourLibraryHasNoCards(nodes::YourLibraryHasNoCards),
         #[serde(rename = "YourTurnOfGameAtMost")]
         YourTurnOfGameAtMost(nodes::YourTurnOfGameAtMost),
+    }
+
+    impl Condition {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::AlternativeCostWasPaid(_) => "AlternativeCostWasPaid",
+                Self::CardTypesAmongExiledWithSourceAtLeast(_) => "CardTypesAmongExiledWithSourceAtLeast",
+                Self::CardsInYourGraveyardAtLeast(_) => "CardsInYourGraveyardAtLeast",
+                Self::ControlOtherPermanentOfColor(_) => "ControlOtherPermanentOfColor",
+                Self::ControlPermanent(_) => "ControlPermanent",
+                Self::ControlsAtMost(_) => "ControlsAtMost",
+                Self::DeliriumActive(_) => "DeliriumActive",
+                Self::FirstSpellYouCastThisGame(_) => "FirstSpellYouCastThisGame",
+                Self::FormulaCoversLibrary(_) => "FormulaCoversLibrary",
+                Self::HandSizeAtMost(_) => "HandSizeAtMost",
+                Self::HandSizeExactly(_) => "HandSizeExactly",
+                Self::LevelCountersInRange(_) => "LevelCountersInRange",
+                Self::LifeAtMostHalfStartingLife(_) => "LifeAtMostHalfStartingLife",
+                Self::NameStickerGate(_) => "NameStickerGate",
+                Self::OptionalAdditionalCostPaid(_) => "OptionalAdditionalCostPaid",
+                Self::PerBasicLandTypeAmongLandsYouControl(_) => "PerBasicLandTypeAmongLandsYouControl",
+                Self::PerControlled(_) => "PerControlled",
+                Self::PermanentLeftYourControlThisTurn(_) => "PermanentLeftYourControlThisTurn",
+                Self::SourceHasCounter(_) => "SourceHasCounter",
+                Self::SpellCastFromGraveyard(_) => "SpellCastFromGraveyard",
+                Self::SpellCastFromOutsideHand(_) => "SpellCastFromOutsideHand",
+                Self::SpellWasKicked(_) => "SpellWasKicked",
+                Self::StateCondition(_) => "StateCondition",
+                Self::YourLibraryHasNoCards(_) => "YourLibraryHasNoCards",
+                Self::YourTurnOfGameAtMost(_) => "YourTurnOfGameAtMost",
+            }
+        }
     }
 
     /// Categories: Condition, StatePredicate
@@ -5815,12 +5930,66 @@ pub mod cats {
         YourTurnOfGameAtMost(nodes::YourTurnOfGameAtMost),
     }
 
+    impl ConditionOrStatePredicate {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::AlternativeCostWasPaid(_) => "AlternativeCostWasPaid",
+                Self::CardTypesAmongExiledWithSourceAtLeast(_) => "CardTypesAmongExiledWithSourceAtLeast",
+                Self::CardsInGraveyardAtLeast(_) => "CardsInGraveyardAtLeast",
+                Self::CardsInYourGraveyardAtLeast(_) => "CardsInYourGraveyardAtLeast",
+                Self::CompletedADungeon(_) => "CompletedADungeon",
+                Self::ControlOtherPermanentOfColor(_) => "ControlOtherPermanentOfColor",
+                Self::ControlPermanent(_) => "ControlPermanent",
+                Self::ControlsAtMost(_) => "ControlsAtMost",
+                Self::Delirium(_) => "Delirium",
+                Self::DeliriumActive(_) => "DeliriumActive",
+                Self::FirstSpellYouCastThisGame(_) => "FirstSpellYouCastThisGame",
+                Self::FormulaCoversLibrary(_) => "FormulaCoversLibrary",
+                Self::GainedLifeThisTurn(_) => "GainedLifeThisTurn",
+                Self::HandSizeAtMost(_) => "HandSizeAtMost",
+                Self::HandSizeExactly(_) => "HandSizeExactly",
+                Self::HasCitysBlessing(_) => "HasCitysBlessing",
+                Self::HasInitiative(_) => "HasInitiative",
+                Self::IsMonarch(_) => "IsMonarch",
+                Self::LandsPlayedThisTurnAtLeast(_) => "LandsPlayedThisTurnAtLeast",
+                Self::LevelCountersInRange(_) => "LevelCountersInRange",
+                Self::LifeAtMostHalfStartingLife(_) => "LifeAtMostHalfStartingLife",
+                Self::NameStickerGate(_) => "NameStickerGate",
+                Self::NoncreatureSpellsCastThisTurn(_) => "NoncreatureSpellsCastThisTurn",
+                Self::OpponentHasMoreCardsInHand(_) => "OpponentHasMoreCardsInHand",
+                Self::OptionalAdditionalCostPaid(_) => "OptionalAdditionalCostPaid",
+                Self::PerBasicLandTypeAmongLandsYouControl(_) => "PerBasicLandTypeAmongLandsYouControl",
+                Self::PerControlled(_) => "PerControlled",
+                Self::PermanentLeftYourControlThisTurn(_) => "PermanentLeftYourControlThisTurn",
+                Self::SourceHasCounter(_) => "SourceHasCounter",
+                Self::SpellCastFromGraveyard(_) => "SpellCastFromGraveyard",
+                Self::SpellCastFromOutsideHand(_) => "SpellCastFromOutsideHand",
+                Self::SpellWasKicked(_) => "SpellWasKicked",
+                Self::SpellsCastThisTurn(_) => "SpellsCastThisTurn",
+                Self::StateCondition(_) => "StateCondition",
+                Self::YouControlAtLeast(_) => "YouControlAtLeast",
+                Self::YourLibraryHasNoCards(_) => "YourLibraryHasNoCards",
+                Self::YourTurnOfGameAtMost(_) => "YourTurnOfGameAtMost",
+            }
+        }
+    }
+
     /// Categories: ContinuousModifier
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum ContinuousModifier {
         #[serde(rename = "ContinuousModifier")]
         ContinuousModifier(nodes::ContinuousModifier),
+    }
+
+    impl ContinuousModifier {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ContinuousModifier(_) => "ContinuousModifier",
+            }
+        }
     }
 
     /// Categories: CostAtom
@@ -5837,12 +6006,33 @@ pub mod cats {
         TapUntappedPermanentsCost(nodes::TapUntappedPermanentsCost),
     }
 
+    impl CostAtom {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ExileSelfFromGraveyardCost(_) => "ExileSelfFromGraveyardCost",
+                Self::RemoveCountersFromSelfCost(_) => "RemoveCountersFromSelfCost",
+                Self::SacrificePermanentsCost(_) => "SacrificePermanentsCost",
+                Self::TapUntappedPermanentsCost(_) => "TapUntappedPermanentsCost",
+            }
+        }
+    }
+
     /// Categories: CostReduction
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum CostReduction {
         #[serde(rename = "CostReduction")]
         CostReduction(nodes::CostReduction),
+    }
+
+    impl CostReduction {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CostReduction(_) => "CostReduction",
+            }
+        }
     }
 
     /// Categories: Duration
@@ -5853,6 +6043,16 @@ pub mod cats {
         EndOfTurn(nodes::EndOfTurn),
         #[serde(rename = "Permanent")]
         Permanent(nodes::Permanent),
+    }
+
+    impl Duration {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::EndOfTurn(_) => "EndOfTurn",
+                Self::Permanent(_) => "Permanent",
+            }
+        }
     }
 
     /// Categories: Effect
@@ -6555,12 +6755,376 @@ pub mod cats {
         YourPermanentsBecomeCreaturesUEOT(nodes::YourPermanentsBecomeCreaturesUEOT),
     }
 
+    impl Effect {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::Adapt(_) => "Adapt",
+                Self::AddManaInAnyCombination(_) => "AddManaInAnyCombination",
+                Self::AddManaOfColorPerCount(_) => "AddManaOfColorPerCount",
+                Self::AddManaToPool(_) => "AddManaToPool",
+                Self::AddNManaOfChosenColor(_) => "AddNManaOfChosenColor",
+                Self::AddOneManaOfColorAmongControlled(_) => "AddOneManaOfColorAmongControlled",
+                Self::AddOneManaOfImprintedColors(_) => "AddOneManaOfImprintedColors",
+                Self::AddOneManaSacrificedLandCouldProduce(_) => "AddOneManaSacrificedLandCouldProduce",
+                Self::AddOneOfManaCombinations(_) => "AddOneOfManaCombinations",
+                Self::AdditionalCombatPhaseAfterThisPhase(_) => "AdditionalCombatPhaseAfterThisPhase",
+                Self::AdjustSourceLoyalty(_) => "AdjustSourceLoyalty",
+                Self::Airbend(_) => "Airbend",
+                Self::Amass(_) => "Amass",
+                Self::AnOpponentDrawsCards(_) => "AnOpponentDrawsCards",
+                Self::ApplyEffect(_) => "ApplyEffect",
+                Self::AtBeginningOfNextEndStep(_) => "AtBeginningOfNextEndStep",
+                Self::Backup(_) => "Backup",
+                Self::BalanceEffect(_) => "BalanceEffect",
+                Self::BecomeLandCreatureUEOT(_) => "BecomeLandCreatureUEOT",
+                Self::BecomeMonarch(_) => "BecomeMonarch",
+                Self::BecomeSaddled(_) => "BecomeSaddled",
+                Self::BecomeType(_) => "BecomeType",
+                Self::BindEventPlayer(_) => "BindEventPlayer",
+                Self::Bounce(_) => "Bounce",
+                Self::Cascade(_) => "Cascade",
+                Self::ChooseModes(_) => "ChooseModes",
+                Self::ChooseNameExileThenRevealUntilNamed(_) => "ChooseNameExileThenRevealUntilNamed",
+                Self::ChooseNameRevealTopPutNamedIntoHand(_) => "ChooseNameRevealTopPutNamedIntoHand",
+                Self::ChooseNoMode(_) => "ChooseNoMode",
+                Self::ChooseOpponentsExiledCardWithCounterMayPlayFree(_) => "ChooseOpponentsExiledCardWithCounterMayPlayFree",
+                Self::ConditionalIfCastFromHand(_) => "ConditionalIfCastFromHand",
+                Self::CopyEachTokenYouControlEnteredThisTurn(_) => "CopyEachTokenYouControlEnteredThisTurn",
+                Self::CopyTargetInstantOrSorcerySpellYouControl(_) => "CopyTargetInstantOrSorcerySpellYouControl",
+                Self::CopyThisSpell(_) => "CopyThisSpell",
+                Self::CounterSpell(_) => "CounterSpell",
+                Self::CounterTargetSpell(_) => "CounterTargetSpell",
+                Self::CounterTargetStackObject(_) => "CounterTargetStackObject",
+                Self::CounterThenDelayedManaEqualToMV(_) => "CounterThenDelayedManaEqualToMV",
+                Self::CounterThenWhenItAttacksMonarch(_) => "CounterThenWhenItAttacksMonarch",
+                Self::CreateAttackingTokenForEachOpponent(_) => "CreateAttackingTokenForEachOpponent",
+                Self::CreateEmblemWithAbilities(_) => "CreateEmblemWithAbilities",
+                Self::CreateEmblemWithStatics(_) => "CreateEmblemWithStatics",
+                Self::CreateThenTheyGainKeywordsUEOT(_) => "CreateThenTheyGainKeywordsUEOT",
+                Self::CreateThisTurnTriggeredAbility(_) => "CreateThisTurnTriggeredAbility",
+                Self::CreateToken(_) => "CreateToken",
+                Self::CreateTokenAndAttachSelf(_) => "CreateTokenAndAttachSelf",
+                Self::CreateTokenCopiesOfSelf(_) => "CreateTokenCopiesOfSelf",
+                Self::CreateTokenCopyOfSource(_) => "CreateTokenCopyOfSource",
+                Self::CreateTokenCopyOfTargetPermanent(_) => "CreateTokenCopyOfTargetPermanent",
+                Self::CreateTokenCopyOfTargetTokenYouControl(_) => "CreateTokenCopyOfTargetTokenYouControl",
+                Self::CreateTokenCopyOfTargetWithKeywordsSacAtEndStep(_) => "CreateTokenCopyOfTargetWithKeywordsSacAtEndStep",
+                Self::CreateTokenPerFormula(_) => "CreateTokenPerFormula",
+                Self::CreateTokenThenMayAttachSelf(_) => "CreateTokenThenMayAttachSelf",
+                Self::CreateTokensEqualToSourcePower(_) => "CreateTokensEqualToSourcePower",
+                Self::CreateTokensScaledByX(_) => "CreateTokensScaledByX",
+                Self::CreateTriggersUntilYourNextTurn(_) => "CreateTriggersUntilYourNextTurn",
+                Self::CreaturesCantBlockThisTurn(_) => "CreaturesCantBlockThisTurn",
+                Self::DealCombatDamageAmountToTarget(_) => "DealCombatDamageAmountToTarget",
+                Self::DealDamage(_) => "DealDamage",
+                Self::DealDamageAnyTarget(_) => "DealDamageAnyTarget",
+                Self::DealDamageByFormula(_) => "DealDamageByFormula",
+                Self::DealDamageDividedAmongTargets(_) => "DealDamageDividedAmongTargets",
+                Self::DealDamageEachOpponent(_) => "DealDamageEachOpponent",
+                Self::DealDamageExileIfDiesThisTurn(_) => "DealDamageExileIfDiesThisTurn",
+                Self::DealDamageFromEvent(_) => "DealDamageFromEvent",
+                Self::DealDamagePaidInEnergy(_) => "DealDamagePaidInEnergy",
+                Self::DealDamageThenChainCopy(_) => "DealDamageThenChainCopy",
+                Self::DealDamageToControllerAndAddMana(_) => "DealDamageToControllerAndAddMana",
+                Self::DealDamageToTargetCreature(_) => "DealDamageToTargetCreature",
+                Self::DealNDamageToEachCreature(_) => "DealNDamageToEachCreature",
+                Self::DealPowerDamageToEachOfUpToKickedTargets(_) => "DealPowerDamageToEachOfUpToKickedTargets",
+                Self::DealXDamage(_) => "DealXDamage",
+                Self::DefendingPlayerSacrificesPermanents(_) => "DefendingPlayerSacrificesPermanents",
+                Self::Destroy(_) => "Destroy",
+                Self::DestroyTargetArtifact(_) => "DestroyTargetArtifact",
+                Self::DestroyTargetLand(_) => "DestroyTargetLand",
+                Self::DestroyTargetNoncreaturePermanent(_) => "DestroyTargetNoncreaturePermanent",
+                Self::DiscardSelf(_) => "DiscardSelf",
+                Self::DiscardThenDrawTokensPerNonland(_) => "DiscardThenDrawTokensPerNonland",
+                Self::DiscardUpToNThenDrawThatMany(_) => "DiscardUpToNThenDrawThatMany",
+                Self::DiscardYourHand(_) => "DiscardYourHand",
+                Self::DoublePlusOneCountersOnEach(_) => "DoublePlusOneCountersOnEach",
+                Self::DrawCards(_) => "DrawCards",
+                Self::DrawCardsPerCounterOnSource(_) => "DrawCardsPerCounterOnSource",
+                Self::DrawDiscardThenTokensPerDiscardedType(_) => "DrawDiscardThenTokensPerDiscardedType",
+                Self::DrawHalfLibraryRoundedUp(_) => "DrawHalfLibraryRoundedUp",
+                Self::DrawPerOpponentWhoLostLifeThisTurn(_) => "DrawPerOpponentWhoLostLifeThisTurn",
+                Self::EachChoosesOneOfEachTypeSacrificesRest(_) => "EachChoosesOneOfEachTypeSacrificesRest",
+                Self::EachOpponentChoiceDestroyOneAtRandom(_) => "EachOpponentChoiceDestroyOneAtRandom",
+                Self::EachOpponentLosesLife(_) => "EachOpponentLosesLife",
+                Self::EachOpponentSacrificesCreature(_) => "EachOpponentSacrificesCreature",
+                Self::EachOpponentSacrificesMatching(_) => "EachOpponentSacrificesMatching",
+                Self::EachOpponentSacrificesN(_) => "EachOpponentSacrificesN",
+                Self::EachPlayerDiscardsHand(_) => "EachPlayerDiscardsHand",
+                Self::EachPlayerDraws(_) => "EachPlayerDraws",
+                Self::EachPlayerExilesHandDrawsNReturnsLater(_) => "EachPlayerExilesHandDrawsNReturnsLater",
+                Self::EachPlayerExilesUntilNonlandMayCastFree(_) => "EachPlayerExilesUntilNonlandMayCastFree",
+                Self::EachPlayerPutsCardFromGraveyardOntoBattlefield(_) => "EachPlayerPutsCardFromGraveyardOntoBattlefield",
+                Self::EachPlayerReturnsCardsExiledWithSource(_) => "EachPlayerReturnsCardsExiledWithSource",
+                Self::EachPlayerShufflesZonesIntoLibrary(_) => "EachPlayerShufflesZonesIntoLibrary",
+                Self::Earthbend(_) => "Earthbend",
+                Self::EnduringDiesReturnAsEnchantmentEffect(_) => "EnduringDiesReturnAsEnchantmentEffect",
+                Self::EquipToTargetCreatureYouControl(_) => "EquipToTargetCreatureYouControl",
+                Self::EventSubjectGetsUEOT(_) => "EventSubjectGetsUEOT",
+                Self::ExchangeControlOfTargets(_) => "ExchangeControlOfTargets",
+                Self::Exile(_) => "Exile",
+                Self::ExileAllCreaturesThenIncubate(_) => "ExileAllCreaturesThenIncubate",
+                Self::ExileEachOpponentsGraveyard(_) => "ExileEachOpponentsGraveyard",
+                Self::ExileGraveyardCardCounterIfPermanent(_) => "ExileGraveyardCardCounterIfPermanent",
+                Self::ExileInsteadOfGraveyardThisTurn(_) => "ExileInsteadOfGraveyardThisTurn",
+                Self::ExileLinkedToSource(_) => "ExileLinkedToSource",
+                Self::ExileOpponentsNonlandPermanentUntilLeaves(_) => "ExileOpponentsNonlandPermanentUntilLeaves",
+                Self::ExileRandomGraveyardCardWithPlayPermission(_) => "ExileRandomGraveyardCardWithPlayPermission",
+                Self::ExileSourceThenReturnTransformed(_) => "ExileSourceThenReturnTransformed",
+                Self::ExileTargetCardFromGraveyard(_) => "ExileTargetCardFromGraveyard",
+                Self::ExileTargetGraveyardCardWithPlayPermission(_) => "ExileTargetGraveyardCardWithPlayPermission",
+                Self::ExileTargetPlayersLibraryThenShuffleHandIn(_) => "ExileTargetPlayersLibraryThenShuffleHandIn",
+                Self::ExileTargetReturnAtNextEndStep(_) => "ExileTargetReturnAtNextEndStep",
+                Self::ExileTargetUntilSourceLeaves(_) => "ExileTargetUntilSourceLeaves",
+                Self::ExileThatCreature(_) => "ExileThatCreature",
+                Self::ExileThisSpell(_) => "ExileThisSpell",
+                Self::ExileTopCardMayCastOtherwise(_) => "ExileTopCardMayCastOtherwise",
+                Self::ExileTopCardsWithPlayPermission(_) => "ExileTopCardsWithPlayPermission",
+                Self::ExileUntilNonlandThenCounterOrMayCastIt(_) => "ExileUntilNonlandThenCounterOrMayCastIt",
+                Self::ExileUntilOpponentBecomesMonarch(_) => "ExileUntilOpponentBecomesMonarch",
+                Self::ExileUpToOneTargetCardFromGraveyard(_) => "ExileUpToOneTargetCardFromGraveyard",
+                Self::ExileUpToOneTargetGraveyardCardWithSource(_) => "ExileUpToOneTargetGraveyardCardWithSource",
+                Self::ExiledCardOwnerCreatesManaValueToken(_) => "ExiledCardOwnerCreatesManaValueToken",
+                Self::Explore(_) => "Explore",
+                Self::FlickerUpToOneOtherTargetNonlandPermanentYouControl(_) => "FlickerUpToOneOtherTargetNonlandPermanentYouControl",
+                Self::FlipCoinIfLost(_) => "FlipCoinIfLost",
+                Self::FlipCoinStealOrCounterTargetSpell(_) => "FlipCoinStealOrCounterTargetSpell",
+                Self::GainClassLevel(_) => "GainClassLevel",
+                Self::GainControlOfTargetPermanently(_) => "GainControlOfTargetPermanently",
+                Self::GainControlOfTargetThenAttachIfEquipment(_) => "GainControlOfTargetThenAttachIfEquipment",
+                Self::GainControlOfTriggeringSpellTargets(_) => "GainControlOfTriggeringSpellTargets",
+                Self::GainLife(_) => "GainLife",
+                Self::GainProtectionFromEverythingUntilYourNextTurn(_) => "GainProtectionFromEverythingUntilYourNextTurn",
+                Self::GetEnergy(_) => "GetEnergy",
+                Self::GetExperienceCounter(_) => "GetExperienceCounter",
+                Self::GrantAbilityToPermanentsYouControlUEOT(_) => "GrantAbilityToPermanentsYouControlUEOT",
+                Self::GrantActivatedAbility(_) => "GrantActivatedAbility",
+                Self::GrantExtraLoyaltyActivationsThisTurn(_) => "GrantExtraLoyaltyActivationsThisTurn",
+                Self::GrantFlashbackToTargetCardUEOT(_) => "GrantFlashbackToTargetCardUEOT",
+                Self::GrantKeywordsUEOTAndPutCounters(_) => "GrantKeywordsUEOTAndPutCounters",
+                Self::GrantKeywordsUEOTThenExplores(_) => "GrantKeywordsUEOTThenExplores",
+                Self::GrantProtectionOfChoiceUEOT(_) => "GrantProtectionOfChoiceUEOT",
+                Self::GrantUnblockableUEOT(_) => "GrantUnblockableUEOT",
+                Self::HarnessSelf(_) => "HarnessSelf",
+                Self::HideawayLookExileOneFaceDown(_) => "HideawayLookExileOneFaceDown",
+                Self::IfCondition(_) => "IfCondition",
+                Self::IfConditionElse(_) => "IfConditionElse",
+                Self::IfSourceHasNoCounters(_) => "IfSourceHasNoCounters",
+                Self::IfYouDo(_) => "IfYouDo",
+                Self::ImprintCardFromHand(_) => "ImprintCardFromHand",
+                Self::LinkExiledCardsToSource(_) => "LinkExiledCardsToSource",
+                Self::LinkedCreatureControllerSacrifices(_) => "LinkedCreatureControllerSacrifices",
+                Self::LookAtHandExileNonlandOwnerMayPlayTaxed(_) => "LookAtHandExileNonlandOwnerMayPlayTaxed",
+                Self::LookAtHandMayExileNonlandUntilSourceLeaves(_) => "LookAtHandMayExileNonlandUntilSourceLeaves",
+                Self::LookAtRandomCardInTargetPlayersHand(_) => "LookAtRandomCardInTargetPlayersHand",
+                Self::LookAtTargetPlayersHand(_) => "LookAtTargetPlayersHand",
+                Self::LookAtTopCardOfTargetPlayersLibrary(_) => "LookAtTopCardOfTargetPlayersLibrary",
+                Self::LookAtTopCardOfTargetPlayersLibraryMayBottom(_) => "LookAtTopCardOfTargetPlayersLibraryMayBottom",
+                Self::LookAtTopCardsDistribute(_) => "LookAtTopCardsDistribute",
+                Self::LookAtTopCardsPutIntoHand(_) => "LookAtTopCardsPutIntoHand",
+                Self::LookAtTopRepeatPayLifeThenStackTop(_) => "LookAtTopRepeatPayLifeThenStackTop",
+                Self::LookTopNKeepUpToOneOnTopRestBottom(_) => "LookTopNKeepUpToOneOnTopRestBottom",
+                Self::LookTopNMayRevealMatchingToHandRestBottomRandom(_) => "LookTopNMayRevealMatchingToHandRestBottomRandom",
+                Self::LootThenMayCastDiscardedFreeIfCounters(_) => "LootThenMayCastDiscardedFreeIfCounters",
+                Self::LoseLife(_) => "LoseLife",
+                Self::LoseLifeEqualToEventAmount(_) => "LoseLifeEqualToEventAmount",
+                Self::LoseLifePerCounterOnSource(_) => "LoseLifePerCounterOnSource",
+                Self::ManifestDread(_) => "ManifestDread",
+                Self::MayCastSorceriesAsThoughFlashUntilYourNextTurn(_) => "MayCastSorceriesAsThoughFlashUntilYourNextTurn",
+                Self::MayCastSpellFromGraveyardNow(_) => "MayCastSpellFromGraveyardNow",
+                Self::MayCastTargetGraveyardCardThisTurn(_) => "MayCastTargetGraveyardCardThisTurn",
+                Self::MayCastTargetGraveyardCardThisTurnExileInstead(_) => "MayCastTargetGraveyardCardThisTurnExileInstead",
+                Self::MayDo(_) => "MayDo",
+                Self::MayDoThenReflexive(_) => "MayDoThenReflexive",
+                Self::MayExileThatCardFromYourGraveyard(_) => "MayExileThatCardFromYourGraveyard",
+                Self::MayMillDamageThenMayTakeCreature(_) => "MayMillDamageThenMayTakeCreature",
+                Self::MayPlayFromGraveyardThisTurn(_) => "MayPlayFromGraveyardThisTurn",
+                Self::MayTapOrUntapTarget(_) => "MayTapOrUntapTarget",
+                Self::MillChooseOpponentAttackPump(_) => "MillChooseOpponentAttackPump",
+                Self::MillTargetPlayer(_) => "MillTargetPlayer",
+                Self::MillThenMayPutLandIntoHand(_) => "MillThenMayPutLandIntoHand",
+                Self::MillTwoRepeatWhileShareColor(_) => "MillTwoRepeatWhileShareColor",
+                Self::Mobilize(_) => "Mobilize",
+                Self::ModalChooseOne(_) => "ModalChooseOne",
+                Self::ModalChooseOneNotYetChosen(_) => "ModalChooseOneNotYetChosen",
+                Self::Monstrosity(_) => "Monstrosity",
+                Self::OathRevealUntilCreature(_) => "OathRevealUntilCreature",
+                Self::OpponentGainsControlOfSource(_) => "OpponentGainsControlOfSource",
+                Self::OptionalManaCostThenEffect(_) => "OptionalManaCostThenEffect",
+                Self::OptionalPutLandFromHandOntoBattlefield(_) => "OptionalPutLandFromHandOntoBattlefield",
+                Self::OwnerPutsTargetSecondFromTopOrBottom(_) => "OwnerPutsTargetSecondFromTopOrBottom",
+                Self::OwnerPutsTargetSpellOnTopOrBottom(_) => "OwnerPutsTargetSpellOnTopOrBottom",
+                Self::OwnerShufflesGraveyardIntoLibrary(_) => "OwnerShufflesGraveyardIntoLibrary",
+                Self::PayEnergy(_) => "PayEnergy",
+                Self::PayToCopyEnchantedCreatureElseToken(_) => "PayToCopyEnchantedCreatureElseToken",
+                Self::PlayExiledCardFreeIfAnyLibraryAtMost(_) => "PlayExiledCardFreeIfAnyLibraryAtMost",
+                Self::PoisonCountersEqualToDamage(_) => "PoisonCountersEqualToDamage",
+                Self::PumpAllCreaturesUEOT(_) => "PumpAllCreaturesUEOT",
+                Self::PumpCreaturesYouControlUntilEOT(_) => "PumpCreaturesYouControlUntilEOT",
+                Self::PumpSelfUntilEOT(_) => "PumpSelfUntilEOT",
+                Self::PumpTargetCreatureByFormulaUEOT(_) => "PumpTargetCreatureByFormulaUEOT",
+                Self::PumpTargetCreatureUntilEOT(_) => "PumpTargetCreatureUntilEOT",
+                Self::PumpTargetUntilYourNextTurn(_) => "PumpTargetUntilYourNextTurn",
+                Self::PutCardFromHandOntoBattlefield(_) => "PutCardFromHandOntoBattlefield",
+                Self::PutCardYouOwnWithCounterFromExileIntoHand(_) => "PutCardYouOwnWithCounterFromExileIntoHand",
+                Self::PutCardsFromHandOnTopOfLibrary(_) => "PutCardsFromHandOnTopOfLibrary",
+                Self::PutChargeCountersOnSelf(_) => "PutChargeCountersOnSelf",
+                Self::PutCounterDoublingOnSecondResolution(_) => "PutCounterDoublingOnSecondResolution",
+                Self::PutCountersOnTargetAndAddSubtype(_) => "PutCountersOnTargetAndAddSubtype",
+                Self::PutCountersUntapItBecomesCreature(_) => "PutCountersUntapItBecomesCreature",
+                Self::PutCreatureFromHandHasteSacrificeAtNextEndStep(_) => "PutCreatureFromHandHasteSacrificeAtNextEndStep",
+                Self::PutCreatureFromHandSacrificeUnlessPay(_) => "PutCreatureFromHandSacrificeUnlessPay",
+                Self::PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl(_) => "PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl",
+                Self::PutLoyaltyCounterOnSelf(_) => "PutLoyaltyCounterOnSelf",
+                Self::PutNamedCountersOnSelf(_) => "PutNamedCountersOnSelf",
+                Self::PutPlusOneCounterOnCreatureYouControl(_) => "PutPlusOneCounterOnCreatureYouControl",
+                Self::PutPlusOneCounterOnEachCreatureYouControl(_) => "PutPlusOneCounterOnEachCreatureYouControl",
+                Self::PutPlusOneCounterOnEachCreatureYouControlThenGrantKeywords(_) => "PutPlusOneCounterOnEachCreatureYouControlThenGrantKeywords",
+                Self::PutPlusOneCounterOnEachMatching(_) => "PutPlusOneCounterOnEachMatching",
+                Self::PutPlusOneCounterOnEachOfUpToNTargetCreatures(_) => "PutPlusOneCounterOnEachOfUpToNTargetCreatures",
+                Self::PutPlusOneCounterOnOpponentsCreature(_) => "PutPlusOneCounterOnOpponentsCreature",
+                Self::PutPlusOneCounterOnSelf(_) => "PutPlusOneCounterOnSelf",
+                Self::PutPlusOneCounterOnTargetCreature(_) => "PutPlusOneCounterOnTargetCreature",
+                Self::PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower(_) => "PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower",
+                Self::PutPlusOneCountersOnTargetThenGrantKeywordsUEOT(_) => "PutPlusOneCountersOnTargetThenGrantKeywordsUEOT",
+                Self::PutSourceOnTopOfOwnersLibrary(_) => "PutSourceOnTopOfOwnersLibrary",
+                Self::PutSourceOntoBattlefieldTappedAndAttacking(_) => "PutSourceOntoBattlefieldTappedAndAttacking",
+                Self::PutStunCounterOnTappedCreature(_) => "PutStunCounterOnTappedCreature",
+                Self::PutTargetIntoOwnersLibraryNthFromTop(_) => "PutTargetIntoOwnersLibraryNthFromTop",
+                Self::PutTargetPermanentIntoOwnersLibrary(_) => "PutTargetPermanentIntoOwnersLibrary",
+                Self::ReanimateAndAttachSource(_) => "ReanimateAndAttachSource",
+                Self::ReanimateExiledWithSourceFinalityHasteSacrifice(_) => "ReanimateExiledWithSourceFinalityHasteSacrifice",
+                Self::ReanimateTargetCreatureCardFromAGraveyard(_) => "ReanimateTargetCreatureCardFromAGraveyard",
+                Self::ReconfigureAttach(_) => "ReconfigureAttach",
+                Self::ReconfigureUnattach(_) => "ReconfigureUnattach",
+                Self::ReflexiveWhenYouDo(_) => "ReflexiveWhenYouDo",
+                Self::RemoveACounterFromSelf(_) => "RemoveACounterFromSelf",
+                Self::RemoveAllCountersAddManaPerCounter(_) => "RemoveAllCountersAddManaPerCounter",
+                Self::RemoveAllMatching(_) => "RemoveAllMatching",
+                Self::RemoveNamedCounterFromSelfOrSacrifice(_) => "RemoveNamedCounterFromSelfOrSacrifice",
+                Self::RemoveTargetPermanents(_) => "RemoveTargetPermanents",
+                Self::ReorderTopCards(_) => "ReorderTopCards",
+                Self::ReturnAllPermanentsToOwnersHands(_) => "ReturnAllPermanentsToOwnersHands",
+                Self::ReturnCardFromGraveyardToBattlefield(_) => "ReturnCardFromGraveyardToBattlefield",
+                Self::ReturnCardsExiledWithSourceToOwnersHand(_) => "ReturnCardsExiledWithSourceToOwnersHand",
+                Self::ReturnChosenGraveyardCardToHand(_) => "ReturnChosenGraveyardCardToHand",
+                Self::ReturnCreatureFromYourGraveyardToBattlefield(_) => "ReturnCreatureFromYourGraveyardToBattlefield",
+                Self::ReturnCreatureFromYourGraveyardToHand(_) => "ReturnCreatureFromYourGraveyardToHand",
+                Self::ReturnExiledWithSourceToGraveyardThenToken(_) => "ReturnExiledWithSourceToGraveyardThenToken",
+                Self::ReturnFromGraveyard(_) => "ReturnFromGraveyard",
+                Self::ReturnTargetCardFromYourGraveyardToHand(_) => "ReturnTargetCardFromYourGraveyardToHand",
+                Self::ReturnTargetCreatureToOwnersHand(_) => "ReturnTargetCreatureToOwnersHand",
+                Self::ReturnTargetGraveyardCardToHand(_) => "ReturnTargetGraveyardCardToHand",
+                Self::ReturnTargetSpellOrNonlandPermanentToHand(_) => "ReturnTargetSpellOrNonlandPermanentToHand",
+                Self::ReturnTargetSpellToOwnersHand(_) => "ReturnTargetSpellToOwnersHand",
+                Self::ReturnThisCardFromGraveyardThenAttachToThatCreature(_) => "ReturnThisCardFromGraveyardThenAttachToThatCreature",
+                Self::ReturnThisCardFromGraveyardToBattlefield(_) => "ReturnThisCardFromGraveyardToBattlefield",
+                Self::RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves(_) => "RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves",
+                Self::RevealTopCardToHandLoseLifeEqualMV(_) => "RevealTopCardToHandLoseLifeEqualMV",
+                Self::RevealTopLandToBattlefieldElseHand(_) => "RevealTopLandToBattlefieldElseHand",
+                Self::RevealTopNOnePerCardTypeToHand(_) => "RevealTopNOnePerCardTypeToHand",
+                Self::RevealTopNOpponentChoosesOneRestExiledWithCounter(_) => "RevealTopNOpponentChoosesOneRestExiledWithCounter",
+                Self::RevealUntilCreatureOntoBattlefieldAttacking(_) => "RevealUntilCreatureOntoBattlefieldAttacking",
+                Self::RollDieTable(_) => "RollDieTable",
+                Self::SacrificeAPermanent(_) => "SacrificeAPermanent",
+                Self::SacrificeArtifactTutorArtifactPayDifference(_) => "SacrificeArtifactTutorArtifactPayDifference",
+                Self::SacrificeCreatureThenDamageEqualToItsPower(_) => "SacrificeCreatureThenDamageEqualToItsPower",
+                Self::SacrificeSelf(_) => "SacrificeSelf",
+                Self::SacrificeSelfIfEvoked(_) => "SacrificeSelfIfEvoked",
+                Self::SacrificeSelfIfNoNamedCounters(_) => "SacrificeSelfIfNoNamedCounters",
+                Self::SacrificeSelfUnlessEscaped(_) => "SacrificeSelfUnlessEscaped",
+                Self::ScheduleDelayedEffect(_) => "ScheduleDelayedEffect",
+                Self::Scry(_) => "Scry",
+                Self::SearchAnyNumberExileCastFreeThisTurn(_) => "SearchAnyNumberExileCastFreeThisTurn",
+                Self::SearchAnyNumberOntoBattlefield(_) => "SearchAnyNumberOntoBattlefield",
+                Self::SearchLibrary(_) => "SearchLibrary",
+                Self::SearchLibraryForCard(_) => "SearchLibraryForCard",
+                Self::SearchLibraryForGreenCreatureWithMVAtMostX(_) => "SearchLibraryForGreenCreatureWithMVAtMostX",
+                Self::SearchLibraryForLandCardToBattlefield(_) => "SearchLibraryForLandCardToBattlefield",
+                Self::SelfMill(_) => "SelfMill",
+                Self::Sequence(_) => "Sequence",
+                Self::SetBasePTUntilEOT(_) => "SetBasePTUntilEOT",
+                Self::ShuffleSourceIntoOwnersLibrary(_) => "ShuffleSourceIntoOwnersLibrary",
+                Self::ShuffleThenExileTopMayPlayFree(_) => "ShuffleThenExileTopMayPlayFree",
+                Self::ShuffleYourLibrary(_) => "ShuffleYourLibrary",
+                Self::SourceBecomesCopyOfTargetGraveyardCardUEOT(_) => "SourceBecomesCopyOfTargetGraveyardCardUEOT",
+                Self::SourceBecomesIfSubtype(_) => "SourceBecomesIfSubtype",
+                Self::SourceBecomesPrepared(_) => "SourceBecomesPrepared",
+                Self::SourceCantBeBlockedThisTurn(_) => "SourceCantBeBlockedThisTurn",
+                Self::SourceConnives(_) => "SourceConnives",
+                Self::SourceDealsDamageToController(_) => "SourceDealsDamageToController",
+                Self::SourceDealsLoyaltyDamageToChosen(_) => "SourceDealsLoyaltyDamageToChosen",
+                Self::SourceFightsTarget(_) => "SourceFightsTarget",
+                Self::Surveil(_) => "Surveil",
+                Self::SwapArtifactWithGraveyardArtifact(_) => "SwapArtifactWithGraveyardArtifact",
+                Self::TakeExtraTurnAfterThisOne(_) => "TakeExtraTurnAfterThisOne",
+                Self::TakeInitiative(_) => "TakeInitiative",
+                Self::Tap(_) => "Tap",
+                Self::TapSelf(_) => "TapSelf",
+                Self::TapTargetPutStunCounters(_) => "TapTargetPutStunCounters",
+                Self::TapUpToOneTargetCreature(_) => "TapUpToOneTargetCreature",
+                Self::TargetBecomesCopyOfAnotherTargetUEOT(_) => "TargetBecomesCopyOfAnotherTargetUEOT",
+                Self::TargetBecomesCreatureIndefinitely(_) => "TargetBecomesCreatureIndefinitely",
+                Self::TargetConnives(_) => "TargetConnives",
+                Self::TargetCreatureCantBlockThisTurn(_) => "TargetCreatureCantBlockThisTurn",
+                Self::TargetOpponentCreatesToken(_) => "TargetOpponentCreatesToken",
+                Self::TargetOpponentDiscardsCasterChoice(_) => "TargetOpponentDiscardsCasterChoice",
+                Self::TargetOpponentExilesThreeMayCastOneFree(_) => "TargetOpponentExilesThreeMayCastOneFree",
+                Self::TargetOpponentLosesLife(_) => "TargetOpponentLosesLife",
+                Self::TargetOpponentMayLetYouDrawElseMill(_) => "TargetOpponentMayLetYouDrawElseMill",
+                Self::TargetOpponentMills(_) => "TargetOpponentMills",
+                Self::TargetPlayerDiscards(_) => "TargetPlayerDiscards",
+                Self::TargetPlayerDiscardsAtRandom(_) => "TargetPlayerDiscardsAtRandom",
+                Self::TargetPlayerDraws(_) => "TargetPlayerDraws",
+                Self::TargetPlayerDrawsThenDiscards(_) => "TargetPlayerDrawsThenDiscards",
+                Self::TargetPlayerExilesTopNYouMayPlayThem(_) => "TargetPlayerExilesTopNYouMayPlayThem",
+                Self::TargetPlayerLosesLife(_) => "TargetPlayerLosesLife",
+                Self::TargetPlayerMayCopyThisSpell(_) => "TargetPlayerMayCopyThisSpell",
+                Self::TargetPlayerPerformsActions(_) => "TargetPlayerPerformsActions",
+                Self::TargetPlayerPutsGraveyardOnBottomRandom(_) => "TargetPlayerPutsGraveyardOnBottomRandom",
+                Self::TargetPlayerRevealsHandYouChooseDiscard(_) => "TargetPlayerRevealsHandYouChooseDiscard",
+                Self::TargetPlayerTakesExtraTurn(_) => "TargetPlayerTakesExtraTurn",
+                Self::TezzeretEmblemBeginCombat(_) => "TezzeretEmblemBeginCombat",
+                Self::ThatPlayerDrawsAndGainsControlOfSource(_) => "ThatPlayerDrawsAndGainsControlOfSource",
+                Self::ThenItsControllerDraws(_) => "ThenItsControllerDraws",
+                Self::ThenTargetBecomesCreatureIfNot(_) => "ThenTargetBecomesCreatureIfNot",
+                Self::ThenTargetControllerResolves(_) => "ThenTargetControllerResolves",
+                Self::ThenTargetLosesAbilitiesWhileSourceRemains(_) => "ThenTargetLosesAbilitiesWhileSourceRemains",
+                Self::TransformSource(_) => "TransformSource",
+                Self::Untap(_) => "Untap",
+                Self::UntapAllMatching(_) => "UntapAllMatching",
+                Self::UntapChosenPermanents(_) => "UntapChosenPermanents",
+                Self::UntapSelf(_) => "UntapSelf",
+                Self::UntapTargetArtifactOrCreatureConditionalCounter(_) => "UntapTargetArtifactOrCreatureConditionalCounter",
+                Self::UntapTargetOtherPermanent(_) => "UntapTargetOtherPermanent",
+                Self::UntapUpToNLands(_) => "UntapUpToNLands",
+                Self::UntapUpToNPermanents(_) => "UntapUpToNPermanents",
+                Self::UntapXTargets(_) => "UntapXTargets",
+                Self::VoteExileNonlandPermanent(_) => "VoteExileNonlandPermanent",
+                Self::WinTheGame(_) => "WinTheGame",
+                Self::YouAndTargetOpponentEachDraw(_) => "YouAndTargetOpponentEachDraw",
+                Self::YourPermanentsBecomeCreaturesUEOT(_) => "YourPermanentsBecomeCreaturesUEOT",
+            }
+        }
+    }
+
     /// Categories: EventPattern
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum EventPattern {
         #[serde(rename = "EventPattern")]
         EventPattern(nodes::EventPattern),
+    }
+
+    impl EventPattern {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::EventPattern(_) => "EventPattern",
+            }
+        }
     }
 
     /// Categories: EventTransform
@@ -6579,12 +7143,34 @@ pub mod cats {
         WinTheGameInstead(nodes::WinTheGameInstead),
     }
 
+    impl EventTransform {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::AddToCount(_) => "AddToCount",
+                Self::InsteadForSourceController(_) => "InsteadForSourceController",
+                Self::MultiplyCount(_) => "MultiplyCount",
+                Self::Replace(_) => "Replace",
+                Self::WinTheGameInstead(_) => "WinTheGameInstead",
+            }
+        }
+    }
+
     /// Categories: ExternalCostReduction
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum ExternalCostReduction {
         #[serde(rename = "ExternalCostReduction")]
         ExternalCostReduction(nodes::ExternalCostReduction),
+    }
+
+    impl ExternalCostReduction {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ExternalCostReduction(_) => "ExternalCostReduction",
+            }
+        }
     }
 
     /// Categories: Formula
@@ -6615,12 +7201,40 @@ pub mod cats {
         Scaled(nodes::Scaled),
     }
 
+    impl Formula {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CountAttackingCreatures(_) => "CountAttackingCreatures",
+                Self::CountControlledMatching(_) => "CountControlledMatching",
+                Self::CountPermanentsOfPlayer(_) => "CountPermanentsOfPlayer",
+                Self::DevotionTo(_) => "DevotionTo",
+                Self::EventSubjectManaValue(_) => "EventSubjectManaValue",
+                Self::EventSubjectPower(_) => "EventSubjectPower",
+                Self::ExperienceCounters(_) => "ExperienceCounters",
+                Self::MVOfCostPaidObjectPlus(_) => "MVOfCostPaidObjectPlus",
+                Self::ResolvingDamageAmount(_) => "ResolvingDamageAmount",
+                Self::ResolvingX(_) => "ResolvingX",
+                Self::Scaled(_) => "Scaled",
+            }
+        }
+    }
+
     /// Categories: Keyword
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum Keyword {
         #[serde(rename = "Keyword")]
         Keyword(nodes::Keyword),
+    }
+
+    impl Keyword {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::Keyword(_) => "Keyword",
+            }
+        }
     }
 
     /// Categories: LayerPayload
@@ -6635,12 +7249,32 @@ pub mod cats {
         PowerToughnessBonus(nodes::PowerToughnessBonus),
     }
 
+    impl LayerPayload {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CantBeBlocked(_) => "CantBeBlocked",
+                Self::GrantKeyword(_) => "GrantKeyword",
+                Self::PowerToughnessBonus(_) => "PowerToughnessBonus",
+            }
+        }
+    }
+
     /// Categories: ManaCost
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum ManaCost {
         #[serde(rename = "ManaCost")]
         ManaCost(nodes::ManaCost),
+    }
+
+    impl ManaCost {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ManaCost(_) => "ManaCost",
+            }
+        }
     }
 
     /// Categories: ObjectPredicate
@@ -6729,6 +7363,55 @@ pub mod cats {
         ValuePredicatesHasManaValueAtMost(nodes::ValuePredicatesHasManaValueAtMost),
         #[serde(rename = "value_predicates.IsPermanent")]
         ValuePredicatesIsPermanent(nodes::ValuePredicatesIsPermanent),
+    }
+
+    impl ObjectPredicate {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ControlledByOpponent(_) => "ControlledByOpponent",
+                Self::ControlledByYou(_) => "ControlledByYou",
+                Self::DrawIsFirstInOwnDrawStep(_) => "DrawIsFirstInOwnDrawStep",
+                Self::HasColor(_) => "HasColor",
+                Self::HasDrawnNCardsThisTurn(_) => "HasDrawnNCardsThisTurn",
+                Self::HasKeyword(_) => "HasKeyword",
+                Self::HasManaValueAtMostColorsSpent(_) => "HasManaValueAtMostColorsSpent",
+                Self::HasPowerAtLeast(_) => "HasPowerAtLeast",
+                Self::HasPowerAtMost(_) => "HasPowerAtMost",
+                Self::HasPowerToughness(_) => "HasPowerToughness",
+                Self::HasPrintedCardType(_) => "HasPrintedCardType",
+                Self::HasSubtype(_) => "HasSubtype",
+                Self::HasTotalPowerAndToughnessAtMost(_) => "HasTotalPowerAndToughnessAtMost",
+                Self::HasToughnessAtMost(_) => "HasToughnessAtMost",
+                Self::IsArtifact(_) => "IsArtifact",
+                Self::IsAttacking(_) => "IsAttacking",
+                Self::IsBasic(_) => "IsBasic",
+                Self::IsBattle(_) => "IsBattle",
+                Self::IsCreature(_) => "IsCreature",
+                Self::IsEnchantment(_) => "IsEnchantment",
+                Self::IsHarnessed(_) => "IsHarnessed",
+                Self::IsLand(_) => "IsLand",
+                Self::IsLegendary(_) => "IsLegendary",
+                Self::IsNontoken(_) => "IsNontoken",
+                Self::IsPlaneswalker(_) => "IsPlaneswalker",
+                Self::IsPlayer(_) => "IsPlayer",
+                Self::IsSource(_) => "IsSource",
+                Self::IsTapped(_) => "IsTapped",
+                Self::ObjectAnd(_) => "ObjectAnd",
+                Self::ObjectNot(_) => "ObjectNot",
+                Self::ObjectOr(_) => "ObjectOr",
+                Self::OffspringCostPaid(_) => "OffspringCostPaid",
+                Self::SpellTargetsMatching(_) => "SpellTargetsMatching",
+                Self::SquadCostPaid(_) => "SquadCostPaid",
+                Self::WasEvoked(_) => "WasEvoked",
+                Self::CubeWalkersHasManaValueAtLeast(_) => "cube_walkers.HasManaValueAtLeast",
+                Self::CubeWalkersHasManaValueAtMost(_) => "cube_walkers.HasManaValueAtMost",
+                Self::CubeWalkersIsColorless(_) => "cube_walkers.IsColorless",
+                Self::CubeWalkersIsPermanent(_) => "cube_walkers.IsPermanent",
+                Self::ValuePredicatesHasManaValueAtMost(_) => "value_predicates.HasManaValueAtMost",
+                Self::ValuePredicatesIsPermanent(_) => "value_predicates.IsPermanent",
+            }
+        }
     }
 
     /// Categories: ObjectPredicate, OneOf
@@ -6821,12 +7504,71 @@ pub mod cats {
         ValuePredicatesIsPermanent(nodes::ValuePredicatesIsPermanent),
     }
 
+    impl ObjectPredicateOrOneOf {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ControlledByOpponent(_) => "ControlledByOpponent",
+                Self::ControlledByYou(_) => "ControlledByYou",
+                Self::DrawIsFirstInOwnDrawStep(_) => "DrawIsFirstInOwnDrawStep",
+                Self::HasColor(_) => "HasColor",
+                Self::HasDrawnNCardsThisTurn(_) => "HasDrawnNCardsThisTurn",
+                Self::HasKeyword(_) => "HasKeyword",
+                Self::HasManaValueAtMostColorsSpent(_) => "HasManaValueAtMostColorsSpent",
+                Self::HasPowerAtLeast(_) => "HasPowerAtLeast",
+                Self::HasPowerAtMost(_) => "HasPowerAtMost",
+                Self::HasPowerToughness(_) => "HasPowerToughness",
+                Self::HasPrintedCardType(_) => "HasPrintedCardType",
+                Self::HasSubtype(_) => "HasSubtype",
+                Self::HasTotalPowerAndToughnessAtMost(_) => "HasTotalPowerAndToughnessAtMost",
+                Self::HasToughnessAtMost(_) => "HasToughnessAtMost",
+                Self::IsArtifact(_) => "IsArtifact",
+                Self::IsAttacking(_) => "IsAttacking",
+                Self::IsBasic(_) => "IsBasic",
+                Self::IsBattle(_) => "IsBattle",
+                Self::IsCreature(_) => "IsCreature",
+                Self::IsEnchantment(_) => "IsEnchantment",
+                Self::IsHarnessed(_) => "IsHarnessed",
+                Self::IsLand(_) => "IsLand",
+                Self::IsLegendary(_) => "IsLegendary",
+                Self::IsNontoken(_) => "IsNontoken",
+                Self::IsPlaneswalker(_) => "IsPlaneswalker",
+                Self::IsPlayer(_) => "IsPlayer",
+                Self::IsSource(_) => "IsSource",
+                Self::IsTapped(_) => "IsTapped",
+                Self::ObjectAnd(_) => "ObjectAnd",
+                Self::ObjectNot(_) => "ObjectNot",
+                Self::ObjectOr(_) => "ObjectOr",
+                Self::OffspringCostPaid(_) => "OffspringCostPaid",
+                Self::OneOf(_) => "OneOf",
+                Self::SpellTargetsMatching(_) => "SpellTargetsMatching",
+                Self::SquadCostPaid(_) => "SquadCostPaid",
+                Self::WasEvoked(_) => "WasEvoked",
+                Self::CubeWalkersHasManaValueAtLeast(_) => "cube_walkers.HasManaValueAtLeast",
+                Self::CubeWalkersHasManaValueAtMost(_) => "cube_walkers.HasManaValueAtMost",
+                Self::CubeWalkersIsColorless(_) => "cube_walkers.IsColorless",
+                Self::CubeWalkersIsPermanent(_) => "cube_walkers.IsPermanent",
+                Self::ValuePredicatesHasManaValueAtMost(_) => "value_predicates.HasManaValueAtMost",
+                Self::ValuePredicatesIsPermanent(_) => "value_predicates.IsPermanent",
+            }
+        }
+    }
+
     /// Categories: OneOf
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum OneOf {
         #[serde(rename = "OneOf")]
         OneOf(nodes::OneOf),
+    }
+
+    impl OneOf {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::OneOf(_) => "OneOf",
+            }
+        }
     }
 
     /// Categories: PTFormula
@@ -6841,6 +7583,18 @@ pub mod cats {
         LevelerPT(nodes::LevelerPT),
         #[serde(rename = "PowerEqualsCount")]
         PowerEqualsCount(nodes::PowerEqualsCount),
+    }
+
+    impl PTFormula {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CardTypesInAllGraveyardsPT(_) => "CardTypesInAllGraveyardsPT",
+                Self::DomainPT(_) => "DomainPT",
+                Self::LevelerPT(_) => "LevelerPT",
+                Self::PowerEqualsCount(_) => "PowerEqualsCount",
+            }
+        }
     }
 
     /// Categories: RemovalRider
@@ -6859,12 +7613,34 @@ pub mod cats {
         OtherPlayersCreateTokenCopy(nodes::OtherPlayersCreateTokenCopy),
     }
 
+    impl RemovalRider {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ControllerCreatesTokens(_) => "ControllerCreatesTokens",
+                Self::ControllerGainsLifeEqualToPower(_) => "ControllerGainsLifeEqualToPower",
+                Self::ControllerSearchesForBasicLand(_) => "ControllerSearchesForBasicLand",
+                Self::IfYouControlledItDraw(_) => "IfYouControlledItDraw",
+                Self::OtherPlayersCreateTokenCopy(_) => "OtherPlayersCreateTokenCopy",
+            }
+        }
+    }
+
     /// Categories: ReplacementEffect
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum ReplacementEffect {
         #[serde(rename = "ReplacementEffect")]
         ReplacementEffect(nodes::ReplacementEffect),
+    }
+
+    impl ReplacementEffect {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::ReplacementEffect(_) => "ReplacementEffect",
+            }
+        }
     }
 
     /// Categories: StatePredicate
@@ -6897,12 +7673,41 @@ pub mod cats {
         YouControlAtLeast(nodes::YouControlAtLeast),
     }
 
+    impl StatePredicate {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::CardsInGraveyardAtLeast(_) => "CardsInGraveyardAtLeast",
+                Self::CompletedADungeon(_) => "CompletedADungeon",
+                Self::Delirium(_) => "Delirium",
+                Self::GainedLifeThisTurn(_) => "GainedLifeThisTurn",
+                Self::HasCitysBlessing(_) => "HasCitysBlessing",
+                Self::HasInitiative(_) => "HasInitiative",
+                Self::IsMonarch(_) => "IsMonarch",
+                Self::LandsPlayedThisTurnAtLeast(_) => "LandsPlayedThisTurnAtLeast",
+                Self::NoncreatureSpellsCastThisTurn(_) => "NoncreatureSpellsCastThisTurn",
+                Self::OpponentHasMoreCardsInHand(_) => "OpponentHasMoreCardsInHand",
+                Self::SpellsCastThisTurn(_) => "SpellsCastThisTurn",
+                Self::YouControlAtLeast(_) => "YouControlAtLeast",
+            }
+        }
+    }
+
     /// Categories: StaticAbility
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum StaticAbility {
         #[serde(rename = "StaticAbility")]
         StaticAbility(nodes::StaticAbility),
+    }
+
+    impl StaticAbility {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::StaticAbility(_) => "StaticAbility",
+            }
+        }
     }
 
     /// Categories: StaticScope
@@ -6913,12 +7718,30 @@ pub mod cats {
         StaticScope(nodes::StaticScope),
     }
 
+    impl StaticScope {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::StaticScope(_) => "StaticScope",
+            }
+        }
+    }
+
     /// Categories: TargetSpec
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum TargetSpec {
         #[serde(rename = "TargetSpec")]
         TargetSpec(nodes::TargetSpec),
+    }
+
+    impl TargetSpec {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::TargetSpec(_) => "TargetSpec",
+            }
+        }
     }
 
     /// Categories: TriggerPredicate
@@ -6981,12 +7804,56 @@ pub mod cats {
         ThisSpellWasKicked(nodes::ThisSpellWasKicked),
     }
 
+    impl TriggerPredicate {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::Always(_) => "Always",
+                Self::And(_) => "And",
+                Self::CardsExiledFromLibraryOrGraveyard(_) => "CardsExiledFromLibraryOrGraveyard",
+                Self::CastAnotherSpellThisTurn(_) => "CastAnotherSpellThisTurn",
+                Self::CastOrCopy(_) => "CastOrCopy",
+                Self::ChapterReached(_) => "ChapterReached",
+                Self::ClassLevelReached(_) => "ClassLevelReached",
+                Self::Controlled(_) => "Controlled",
+                Self::ControlsAtMostNamed(_) => "ControlsAtMostNamed",
+                Self::EnteredNotFromZones(_) => "EnteredNotFromZones",
+                Self::EnteredViaCast(_) => "EnteredViaCast",
+                Self::EnteringWithXAtLeast(_) => "EnteringWithXAtLeast",
+                Self::FirstAttackThisTurn(_) => "FirstAttackThisTurn",
+                Self::HostAttacksWithAnother(_) => "HostAttacksWithAnother",
+                Self::IsFormerHost(_) => "IsFormerHost",
+                Self::IsSelf(_) => "IsSelf",
+                Self::IsThisSpell(_) => "IsThisSpell",
+                Self::Not(_) => "Not",
+                Self::NthCardDrawnThisTurn(_) => "NthCardDrawnThisTurn",
+                Self::OneOrMoreBatch(_) => "OneOrMoreBatch",
+                Self::Or(_) => "Or",
+                Self::PutIntoGraveyardFromAnywhere(_) => "PutIntoGraveyardFromAnywhere",
+                Self::Source(_) => "Source",
+                Self::SpellMVHasSourceParity(_) => "SpellMVHasSourceParity",
+                Self::StateBound(_) => "StateBound",
+                Self::Subject(_) => "Subject",
+                Self::ThisSpellWasKicked(_) => "ThisSpellWasKicked",
+            }
+        }
+    }
+
     /// Categories: TriggeredAbility
     #[derive(Debug, Clone, PartialEq, Deserialize)]
     #[serde(tag = "$t")]
     pub enum TriggeredAbility {
         #[serde(rename = "TriggeredAbility")]
         TriggeredAbility(nodes::TriggeredAbility),
+    }
+
+    impl TriggeredAbility {
+        /// The variant's `$t` tag.
+        pub fn tag(&self) -> &'static str {
+            match self {
+                Self::TriggeredAbility(_) => "TriggeredAbility",
+            }
+        }
     }
 }
 

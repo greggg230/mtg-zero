@@ -1,0 +1,206 @@
+//! Decisions, choices and the action-id layout (ENGINE.md 11).
+
+use crate::ids::{CardIdx, PlayerId, Target};
+
+/// Global action ids are `< NUM_ACTIONS` (zero-core's `SearchGame::NUM_ACTIONS`).
+pub const NUM_ACTIONS: usize = 1024;
+
+/// Decision-relative action id ranges. Object slots are canonical and
+/// relative to the decider (ENGINE.md 11).
+pub mod act {
+    /// Pass priority / no / keep / done / no block / decline.
+    pub const PASS: u16 = 0;
+    /// Yes / take a mulligan / pay.
+    pub const YES: u16 = 1;
+    /// 2 = the decider, 3 = the opponent.
+    pub const PLAYER: u16 = 2;
+    /// n = 0..31.
+    pub const NUMBER: u16 = 4;
+    pub const NUMBER_N: u16 = 32;
+    /// The decider's hand, slot 0..63.
+    pub const HAND: u16 = 36;
+    pub const HAND_N: u16 = 64;
+    /// The decider's permanents, slot 0..95.
+    pub const MY_PERM: u16 = 100;
+    pub const PERM_N: u16 = 96;
+    /// The opponent's permanents, slot 0..95.
+    pub const OPP_PERM: u16 = 196;
+    /// Stack slot 0..31, 0 = top.
+    pub const STACK: u16 = 292;
+    pub const STACK_N: u16 = 32;
+    /// The decider's waiting triggers, slot 0..15.
+    pub const TRIGGER: u16 = 324;
+    pub const TRIGGER_N: u16 = 16;
+    /// A searched / looked-at pile, slot 0..63 (M4b).
+    pub const LIBRARY: u16 = 340;
+    /// Graveyards: the decider's 0..63, the opponent's 64..127 (M4b).
+    pub const GRAVEYARD: u16 = 404;
+    /// `MY_PERM` slot * 4 + ability index (M4b).
+    pub const ACTIVATE: u16 = 532;
+    /// First reserved id.
+    pub const RESERVED: u16 = 916;
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DecisionKind {
+    /// Pass, play a land, cast a spell (CR 117).
+    Priority,
+    /// Keep (`PASS`) or take a mulligan (`YES`) (CR 103.5).
+    Mulligan,
+    /// Put a hand card on the bottom after a mulligan (CR 103.5).
+    MulliganBottom,
+    /// Choose a target (CR 601.2c, 603.3d); `PASS` = no more targets.
+    Target,
+    /// Choose the next mana source to tap (CR 601.2g).
+    PayMana,
+    /// Add an attacker (increasing slot order) or `PASS` = done (CR 508.1).
+    DeclareAttackers,
+    /// Which attacker the next potential blocker blocks, or `PASS` (CR 509.1).
+    DeclareBlockers,
+    /// Combat damage to the next blocker (`NUMBER`) (CR 510.1c).
+    AssignDamage,
+    /// Pay a cost / do an optional action: `YES` or `PASS`.
+    YesNo,
+    /// Choose a card in hand for an effect (Brainstorm).
+    ChooseHandCard,
+    /// Discard to hand size (CR 514.1).
+    Discard,
+    /// Which waiting trigger goes on the stack next (CR 603.3b).
+    OrderTriggers,
+    /// Which legendary permanent to keep (CR 704.5j).
+    LegendRule,
+}
+
+/// What an action means to the task that asked.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Choice {
+    Pass,
+    Yes,
+    Number(u8),
+    /// A card or permanent (hand card, attacker, blocker's attacker, mana
+    /// source, legend to keep).
+    Card(CardIdx),
+    /// Priority: play this land.
+    Play(CardIdx),
+    /// Priority: cast this spell.
+    Cast(CardIdx),
+    Target(Target),
+    /// Index into the decider's waiting triggers.
+    Trigger(u8),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Opt {
+    pub action: u16,
+    pub choice: Choice,
+}
+
+/// The one pending decision: options sorted by action id, no duplicates,
+/// never empty.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Decision {
+    pub player: PlayerId,
+    pub kind: DecisionKind,
+    pub options: Vec<Opt>,
+}
+
+impl Decision {
+    pub fn choice_of(&self, action: u16) -> Option<Choice> {
+        self.options
+            .binary_search_by_key(&action, |o| o.action)
+            .ok()
+            .map(|i| self.options[i].choice)
+    }
+
+    pub fn action_of(&self, choice: Choice) -> Option<u16> {
+        self.options.iter().find(|o| o.choice == choice).map(|o| o.action)
+    }
+}
+
+// ---- the slot codec (ENGINE.md 11) -----------------------------------------
+
+use crate::game::{Game, StackKind};
+use crate::ids::Zone;
+
+impl Game {
+    /// `p`'s hand in canonical order: by definition, then card index.
+    pub fn hand_sorted(&self, p: PlayerId) -> Vec<CardIdx> {
+        let mut h = self.players[p as usize].hand.clone();
+        h.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+        h
+    }
+
+    /// One (slot, card) per distinct definition in `p`'s hand: cards in a
+    /// hidden zone have no other state, so equal definitions are equivalent.
+    pub fn hand_slots(&self, p: PlayerId) -> Vec<(u16, CardIdx)> {
+        let h = self.hand_sorted(p);
+        let mut out = Vec::with_capacity(h.len());
+        for (i, &c) in h.iter().enumerate() {
+            if i > 0 && self.objs[h[i - 1].i()].def == self.objs[c.i()].def {
+                continue;
+            }
+            assert!((i as u16) < act::HAND_N, "hand slot {i} out of range");
+            out.push((act::HAND + i as u16, c));
+        }
+        out
+    }
+
+    /// Options "choose a card in `p`'s hand", one per distinct definition.
+    pub(crate) fn hand_options(&self, p: PlayerId) -> Vec<Opt> {
+        self.hand_slots(p).into_iter().map(|(a, c)| Opt { action: a, choice: Choice::Card(c) }).collect()
+    }
+
+    /// `MY_PERM` / `OPP_PERM` slot of a permanent, relative to `viewer`.
+    pub fn perm_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
+        let ctl = self.objs[idx.i()].controller;
+        let slot = self.permanents_of(ctl).position(|c| c == idx).expect("permanent on the battlefield") as u16;
+        assert!(slot < act::PERM_N, "permanent slot {slot} out of range");
+        if ctl == viewer {
+            act::MY_PERM + slot
+        } else {
+            act::OPP_PERM + slot
+        }
+    }
+
+    /// `STACK` slot (0 = top) of the stack item with this id.
+    pub fn stack_action(&self, id: u32) -> u16 {
+        let pos = self.stack.iter().position(|s| s.id == id).expect("stack item");
+        let slot = (self.stack.len() - 1 - pos) as u16;
+        assert!(slot < act::STACK_N, "stack slot {slot} out of range");
+        act::STACK + slot
+    }
+
+    /// The action id of choosing target `t`, relative to `viewer`.
+    pub fn target_action(&self, viewer: PlayerId, t: Target) -> u16 {
+        match t {
+            Target::Player(q) => act::PLAYER + (q != viewer) as u16,
+            Target::Obj(r) => match self.objs[r.idx.i()].zone {
+                Zone::Battlefield => self.perm_action(viewer, r.idx),
+                Zone::Stack => {
+                    let id = self
+                        .stack
+                        .iter()
+                        .find(|s| s.kind == StackKind::Spell { card: r.idx })
+                        .expect("spell on the stack")
+                        .id;
+                    self.stack_action(id)
+                }
+                z => panic!("no target slot for an object in {z:?}"),
+            },
+        }
+    }
+
+    /// Human-readable description of an option (tests, logs).
+    pub fn describe_choice(&self, c: Choice) -> String {
+        match c {
+            Choice::Pass => "pass".into(),
+            Choice::Yes => "yes".into(),
+            Choice::Number(n) => format!("{n}"),
+            Choice::Card(i) => format!("{}#{}", self.name(i), i.0),
+            Choice::Play(i) => format!("play {}#{}", self.name(i), i.0),
+            Choice::Cast(i) => format!("cast {}#{}", self.name(i), i.0),
+            Choice::Target(t) => format!("target {}", self.describe_target(t)),
+            Choice::Trigger(k) => format!("trigger {k}"),
+        }
+    }
+}

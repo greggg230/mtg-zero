@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["card_ir"]
+members = ["card_ir", "engine"]
 
 [workspace.package]
 edition = "2021"
@@ -9,3 +9,6 @@ license = "MIT"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[profile.release]
+debug = 1
