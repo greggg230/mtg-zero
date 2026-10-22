@@ -245,6 +245,8 @@ impl Game {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
                 if let Some(ch) = self.answer.take() {
                     let Choice::Card(c) = ch else { unreachable!("hand card answer {ch:?}") };
+                    // Which hand card goes back is private (ENGINE.md 10).
+                    self.scramble(p, &[], true, false);
                     self.move_card(c, Zone::Library, Pos::Top);
                     f.i += 1;
                 }

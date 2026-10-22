@@ -239,6 +239,7 @@ impl Game {
 
     fn mulligan_bottom(&mut self, p: PlayerId, left: u8) {
         if let Some(Choice::Card(c)) = self.answer.take() {
+            self.scramble(p, &[], true, false); // a private choice (ENGINE.md 10)
             self.move_card(c, Zone::Library, Pos::Bottom);
             if left > 1 {
                 self.agenda.push(Task::MulliganBottom { p, left: left - 1 });

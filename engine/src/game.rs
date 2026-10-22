@@ -203,6 +203,8 @@ pub struct Game {
     pub(crate) next_ts: u32,
     pub(crate) next_stack_id: u32,
     pub(crate) outcome: Option<Outcome>,
+    /// Partial knowledge (ENGINE.md 10).
+    pub(crate) clouds: Vec<crate::hidden::Cloud>,
     /// Set by `determinize`: private reveals to others are keyed as hidden.
     pub(crate) observer: Option<PlayerId>,
     /// Chance keys of the current `apply`; always empty between calls.
@@ -303,6 +305,7 @@ impl Game {
             next_ts: 1,
             next_stack_id: 1,
             outcome: None,
+            clouds: Vec::new(),
             observer: None,
             keys: Vec::new(),
             decisions: 0,
@@ -497,16 +500,6 @@ impl Game {
         r
     }
 
-    /// Reveal a card in a hidden zone to everyone (CR 701.16; 602.2a).
-    pub(crate) fn reveal(&mut self, idx: CardIdx) {
-        let o = &self.objs[idx.i()];
-        if o.zone.is_hidden() && o.known != 0b11 {
-            let (owner, def) = (o.owner, o.def);
-            self.objs[idx.i()].known = 0b11;
-            self.emit_public(KEY_REVEAL, owner, def as u64);
-        }
-    }
-
     /// Lose life (CR 119.3; paying life is losing it, 119.4).
     pub(crate) fn lose_life(&mut self, p: PlayerId, n: i32) {
         if n > 0 {
@@ -569,9 +562,16 @@ impl Game {
         }
         // A card leaving a hidden zone for a public one is revealed to all
         // (unless everyone knows it already: nothing is revealed).
-        if from.is_hidden() && !to.is_hidden() && to != Zone::Nowhere && known_before != 0b11 {
+        if from.is_hidden() {
             let def = self.objs[idx.i()].def;
-            self.emit_public(KEY_REVEAL, owner, def as u64);
+            if to.is_hidden() {
+                self.knowledge_moves(idx, owner, from, to);
+            } else {
+                self.knowledge_leaves(idx, owner, from, def, known_before);
+                if to != Zone::Nowhere && known_before != 0b11 {
+                    self.emit_public(KEY_REVEAL, owner, def as u64);
+                }
+            }
         }
         let new = self.obj_ref(idx);
         self.note(|g| format!("{} {:?} -> {:?}", g.name(idx), from, to));
@@ -599,8 +599,11 @@ impl Game {
         self.emit_private(KEY_DRAW, p, def as u64);
     }
 
-    /// Shuffle a library (CR 701.20): positions become unknown to everyone.
+    /// Shuffle a library (CR 701.20): positions become unknown to everyone;
+    /// what another player knew of its cards becomes "somewhere in that
+    /// library" (ENGINE.md 10).
     pub(crate) fn shuffle_library(&mut self, p: PlayerId) {
+        self.scramble(p, &[], false, true);
         let mut lib = std::mem::take(&mut self.players[p as usize].library);
         self.rng.shuffle(&mut lib);
         for &c in &lib {

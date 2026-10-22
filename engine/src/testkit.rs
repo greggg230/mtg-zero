@@ -61,6 +61,16 @@ impl Scenario {
         self
     }
 
+    /// Hand cards both players know (as if revealed earlier).
+    pub fn hand_known(mut self, p: PlayerId, names: &[&str]) -> Self {
+        for n in names {
+            let c = self.add(p, n, Zone::Hand);
+            self.g.objs[c.i()].known = 0b11;
+            self.g.players[p as usize].hand.push(c);
+        }
+        self
+    }
+
     /// Permanents that have been under their controller's control since
     /// before this turn (no summoning sickness).
     pub fn battlefield(mut self, p: PlayerId, names: &[&str]) -> Self {
@@ -238,6 +248,7 @@ impl Game {
         self.next_ts.hash(&mut h);
         self.next_stack_id.hash(&mut h);
         self.outcome.hash(&mut h);
+        self.clouds.hash(&mut h);
         self.observer.hash(&mut h);
         h.finish()
     }
@@ -293,6 +304,7 @@ impl Game {
         if self.outcome.is_none() && self.pending.is_none() {
             return Err("no decision pending in a running game".into());
         }
+        self.check_knowledge()?;
         let mut ts: Vec<u32> = self.battlefield.iter().map(|c| self.objs[c.i()].timestamp).collect();
         if ts.windows(2).any(|w| w[0] >= w[1]) {
             return Err("battlefield not in timestamp order".into());

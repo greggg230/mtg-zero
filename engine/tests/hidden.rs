@@ -293,3 +293,105 @@ fn a_pending_shock_land_choice_survives_determinize() {
         assert!(d.obj(crypt).tapped);
     }
 }
+
+/// Where `card`'s identity sits after `determinize(viewer)`: the slot now
+/// carrying the definition `def`, among `owner`'s hidden cards.
+fn slots_with(d: &Game, owner: PlayerId, def: u16) -> Vec<CardIdx> {
+    let pl = d.player(owner);
+    pl.hand.iter().chain(pl.library.iter()).copied().filter(|&c| d.obj(c).def == def).collect()
+}
+
+#[test]
+fn brainstorm_after_a_hand_reveal_leaves_partial_knowledge() {
+    // P1 knew the Test Bear in P0's hand. P0 Brainstorms and puts two cards
+    // back: P1 no longer knows where the Bear is, but knows it is in P0's
+    // hand or among the two cards put back (not deep in the library).
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island"])
+        .hand(0, &["Brainstorm", "Mountain"])
+        .hand_known(0, &["Test Bear"])
+        .library(0, &["Forest", "Plains", "Swamp", "Island", "Lightning Bolt", "Counterspell", "Forest", "Forest"])
+        .library(1, &["Island"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    let bear_def = g.obj(bear).def;
+    let bs = g.card(0, "Brainstorm", Zone::Hand);
+    g.choose(Choice::Cast(bs));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard));
+    g.choose(Choice::Card(bear));
+    let mountain = g.card(0, "Mountain", Zone::Hand);
+    g.choose(Choice::Card(mountain));
+    g.check_invariants().unwrap();
+    assert!(!g.knows(1, bear), "P1 cannot tell which cards went back");
+    assert_eq!(g.clouds().len(), 1);
+    let k = &g.clouds()[0];
+    assert_eq!((k.viewer, k.owner, k.hand, k.library), (1, 0, true, false));
+    assert_eq!(k.defs, vec![bear_def]);
+    assert_eq!(k.slots.len(), 2);
+    let top2: Vec<CardIdx> = g.player(0).library.iter().rev().take(2).copied().collect();
+    let (mut in_hand, mut on_top) = (0, 0);
+    for s in 0..200 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.check_invariants().unwrap();
+        let at = slots_with(&d, 0, bear_def);
+        assert!(!at.is_empty(), "seed {s}: the Bear is somewhere");
+        assert!(
+            at.iter().any(|c| d.player(0).hand.contains(c) || top2.contains(c)),
+            "seed {s}: the Bear left the hand and the top two"
+        );
+        in_hand += at.iter().any(|c| d.player(0).hand.contains(c)) as u32;
+        on_top += at.iter().any(|c| top2.contains(c)) as u32;
+    }
+    assert!(in_hand > 20 && on_top > 20, "hand {in_hand}, top {on_top}");
+    // P0 knows exactly.
+    for s in 0..20 {
+        let mut d = g.clone();
+        d.determinize(0, &mut Rng::new(s));
+        assert_eq!(d.obj(bear).def, bear_def);
+    }
+    // Drawing the top card keeps the knowledge exact for what P1 saw: the
+    // drawn card joins the hand, which the cloud covers.
+    g.drive_until(|g| g.turn().number == 5 && g.turn().step == Step::Main1);
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn a_card_leaving_the_hand_is_not_told_apart_from_a_known_twin() {
+    // P1 knows one Lightning Bolt in P0's hand; P0 holds a second, unknown
+    // to P1, and casts a Bolt. P1 cannot tell which one: it no longer knows
+    // that P0 holds a Bolt.
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Mountain"])
+        .hand(0, &["Lightning Bolt", "Island"])
+        .hand_known(0, &["Lightning Bolt"])
+        .library(0, &["Forest"; 6])
+        .library(1, &["Forest"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let bolts: Vec<CardIdx> =
+        g.player(0).hand.iter().copied().filter(|&c| g.name(c) == "Lightning Bolt").collect();
+    assert_eq!(bolts.iter().filter(|&&c| g.knows(1, c)).count(), 1);
+    let pick = g
+        .pending_decision()
+        .unwrap()
+        .options
+        .iter()
+        .map(|o| o.choice)
+        .find(|&c| matches!(c, Choice::Cast(x) if g.name(x) == "Lightning Bolt"))
+        .unwrap();
+    g.choose(pick);
+    g.check_invariants().unwrap();
+    let left = g.card(0, "Lightning Bolt", Zone::Hand);
+    assert!(!g.knows(1, left), "P1 does not know a Bolt is left");
+    let bolt = db().id("Lightning Bolt").unwrap();
+    let gone = (0..60).any(|s| {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.player(0).hand.iter().all(|&c| d.obj(c).def != bolt)
+    });
+    assert!(gone, "some sampled world has no Bolt in P0's hand");
+}
