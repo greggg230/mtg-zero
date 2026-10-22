@@ -531,6 +531,54 @@ impl Game {
                 }
                 Flow::Next
             }
+            Op::RevealHand { whose, to } => {
+                let Some(owner) = self.who(f, whose) else { return Flow::Next };
+                let looker = match to {
+                    Some(w) => match self.who(f, w) {
+                        Some(p) => Some(p),
+                        None => return Flow::Next,
+                    },
+                    None => None,
+                };
+                self.reveal_hand(owner, looker);
+                Flow::Next
+            }
+            Op::ChooseDiscard { chooser, whose, ref filter, optional } => {
+                let (Some(p), Some(owner)) = (self.who(f, chooser), self.who(f, whose)) else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        self.note(|g| format!("P{owner} discards {}", g.name(c)));
+                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                        Flow::Next
+                    }
+                    Some(Choice::Pass) => Flow::Next,
+                    Some(other) => unreachable!("discard choice {other:?}"),
+                    None => {
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let hand = self.hand_sorted(owner);
+                        let mut opts = Vec::new();
+                        for (k, &c) in hand.iter().enumerate() {
+                            let d = self.objs[c.i()].def;
+                            if k > 0 && self.objs[hand[k - 1].i()].def == d {
+                                continue;
+                            }
+                            debug_assert!(self.knows(p, c), "the chooser has seen the hand");
+                            if self.card_matches(filter, c, &ctx) {
+                                assert!((k as u16) < act::LIBRARY_N, "hand slot {k} out of range");
+                                opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
+                            }
+                        }
+                        if opts.is_empty() {
+                            return Flow::Next;
+                        }
+                        if optional {
+                            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseDiscard, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
             Op::May { who, skip } => {
                 let Some(p) = self.who(f, who) else { return Flow::Jump(skip) };
                 match self.answer.take() {
@@ -570,6 +618,22 @@ impl Game {
         }
         self.note(|_| format!("P{p} looks at {} card(s)", pile.len()));
         f.pile = pile;
+    }
+
+    /// `owner`'s hand is revealed to everyone (`looker: None`) or looked at
+    /// by `looker`: keys per card in definition order (CR 701.16).
+    fn reveal_hand(&mut self, owner: PlayerId, looker: Option<PlayerId>) {
+        for c in self.hand_sorted(owner) {
+            match looker {
+                None => self.reveal(c),
+                Some(q) => {
+                    self.learn(q, c);
+                    let d = self.objs[c.i()].def;
+                    self.emit_private(crate::hidden::KEY_LOOK, q, d as u64);
+                }
+            }
+        }
+        self.note(|_| format!("P{owner}'s hand is seen by {looker:?}"));
     }
 
     /// Move a card of the pile to `dest` (it is known to its owner).

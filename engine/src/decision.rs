@@ -102,6 +102,10 @@ pub enum DecisionKind {
     PutInGraveyard,
     /// A card of the pile to put into the hand (`PASS` = done when allowed).
     PutInHand,
+    /// A card of another player's revealed hand for them to discard
+    /// (`LIBRARY` = its slot in that hand sorted by definition; `PASS` =
+    /// none, when allowed).
+    ChooseDiscard,
 }
 
 /// What an action means to the task that asked.

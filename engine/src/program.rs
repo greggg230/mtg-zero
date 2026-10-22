@@ -149,6 +149,14 @@ pub enum Op {
     /// The ability's source, if it is still the same permanent, goes on top
     /// of its owner's library.
     SourceToLibraryTop,
+    /// `whose` hand is revealed to everyone (`to: None`, CR 701.16) or
+    /// looked at by `to`. Keys per card, in definition order.
+    RevealHand { whose: Who, to: Option<Who> },
+    /// `chooser` chooses a card matching `filter` from `whose`'s hand, which
+    /// they have seen; that player discards it ("you choose a ... card from
+    /// it; that player discards that card"). With `optional` the chooser
+    /// may choose nothing.
+    ChooseDiscard { chooser: Who, whose: Who, filter: Filter, optional: bool },
 }
 
 impl Op {

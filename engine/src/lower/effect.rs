@@ -590,7 +590,48 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 enums::RestZone::Graveyard => PileDest::Graveyard,
             }));
         }
+        E::TargetPlayerRevealsHandYouChooseDiscard(nodes::TargetPlayerRevealsHandYouChooseDiscard {
+            card_filter,
+            opponent_only,
+            optional,
+            then_draws,
+            destination,
+        }) => {
+            // "Target player reveals their hand. You choose a <filter> card
+            // from it. That player discards that card." (Duress,
+            // Thoughtseize, Inquisition of Kozilek.)
+            l.deny("TargetPlayerRevealsHandYouChooseDiscard.then_draws", then_draws);
+            if *destination != enums::RevealedCardFate::Discard {
+                l.unsupported(format!("TargetPlayerRevealsHandYouChooseDiscard.destination({destination:?})"));
+            }
+            let Some(filter) = lower_card_filter(l, card_filter) else { return };
+            let t = b.target(player_filter(*opponent_only), 1, 1);
+            b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
+            b.op(Op::ChooseDiscard { chooser: Who::You, whose: Who::TargetPlayer(t), filter, optional: *optional });
+        }
+        E::LookAtTargetPlayersHand(nodes::LookAtTargetPlayersHand {}) => {
+            let t = b.target(Filter::Player, 1, 1);
+            b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: Some(Who::You) });
+        }
+        E::TargetPlayerDiscards(nodes::TargetPlayerDiscards { amount }) => {
+            // "Target player discards a card" (of their choice, CR 701.9a).
+            let n = match int_amount(l, "TargetPlayerDiscards.amount", amount) {
+                Amount::Fixed(n) => n as u8,
+                _ => 0,
+            };
+            let t = b.target(Filter::Player, 1, 1);
+            b.op(Op::Discard { who: Who::TargetPlayer(t), n });
+        }
         other => l.unsupported(format!("Effect:{}", other.tag())),
+    }
+}
+
+/// "Target player" / "target opponent".
+fn player_filter(opponent_only: bool) -> Filter {
+    if opponent_only {
+        Filter::And(Box::new(Filter::Player), Box::new(Filter::Opponent))
+    } else {
+        Filter::Player
     }
 }
 
