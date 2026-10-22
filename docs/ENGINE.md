@@ -1164,3 +1164,92 @@ kill, fork, dashboard, h2h, targets), and one iteration of `mtg-smoke`. zero-cor
 smoke runs all of it plus the 3-iteration `mtg-smoke` run: `SKIP_CORE=1 bash
 third_party/zero-core/tools/smoke_all.sh ~/mtg-zero` (GREEN 2026-10-22: build 115 s, cargo test
 in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
+
+## 22. A network that reads the board card by card, and the second run (M5b)
+
+### 22.1 What changed
+
+**zero-core** (`main` @ CORESHA, pushed; its docs/az.md 10 and docs/search.md 1, 3):
+
+* arch `tokens` (`zero.net.TokenNet`): a transformer over the game's objects, read from the
+  same fixed-width features through a layout descriptor the game package registers
+  (`GamePackage.tokens`). The `SearchGame` trait, the driver, the leaf batches and the shards
+  are unchanged, so the MLP and the token network train on the same data and can be compared
+  one for one.
+* `SearchGame::minor_decision` + run setting `sims_minor`: a self-play seat searches the game's
+  minor decisions with that many simulations and never records them.
+* run settings `eval_spec` (and `GamePackage.eval_specs`: a game's evaluation spec as a
+  function of the self-play spec), `elo_opponents` / `elo_sims` / `elo_together` (cheaper Elo),
+  `infer_workers` (CPU inference on several Python threads), `heads` / `ff`. Every default
+  keeps the old behaviour: the core's tests (67) and Rust tests, the golden self-play digests,
+  and `tools/check_checkpoint_compat.py` for mtg1's iteration-9 checkpoint (visits and cq
+  records, results and a match against random identical on the old and the new checkout).
+
+**MTG Zero** (branch `m5b-run2`):
+
+* The encoding is unchanged (layout v1, 21.2). `encode::layout_json` describes it for the token
+  network, checked in as `mtgz/az/layout_v1.json` (`cargo test -p engine --test az
+  layout_json_is_checked_in`; `MTGZ_WRITE_LAYOUT=1` rewrites it):
+
+  | Segment | Slots x floats | Present flag | Identity | Actions scored from the slot's token |
+  |---|---|---|---|---|
+  | context | 1 x 384 | always | the decision's card (one-hot of 256) | |
+  | tops | 6 x 50 | known to the viewer | card code | |
+  | my permanents | 32 x 88 | present | card code | `MY_PERM` + s, `ACTIVATE` + 4 s + i (i = 0..3) |
+  | opponent permanents | 32 x 88 | present | card code | `OPP_PERM` + s |
+  | hand | 16 x 56 | present | card code | `HAND` + s, `HAND_ABILITY` + s |
+  | stack | 8 x 72 | present | card code | `STACK` + s |
+  | triggers | 4 x 52 | present | card code | `TRIGGER` + s |
+  | list | 40 x 52 | present | card code | `LIBRARY` + s |
+  | bags | 13 x 256 | | multisets of identities (pooled into the global token) | |
+
+  The 128 globals are the global token's input; `PASS`, `YES`, `PLAYER`, `NUMBER`, `GRAVEYARD`
+  and the slots beyond the encoded ones get their logits from the pooled state. The card
+  identity is embedded once (256 + 1 rows, shared by every segment and the bags); a token is
+  that embedding + a linear map of the slot's 50-88 floats (status, keywords, options) + a
+  (segment, slot) embedding. MTG positions hold 21 tokens on average (p99 39) of the 153 slots.
+* Minor decisions: mana payments (`PayMana`, which source to tap next): 14% of the searched
+  decisions of mtg1's games.
+* The evaluation deck set goes through `GamePackage.eval_specs` (M5a's patch of `Run.driver` is
+  gone; any spec's evaluation form, as before).
+* Presets `mtg-2` (22.3) and `mtg-2-mlp` (the same with mtg-1's MLP: the control).
+* The token network starts neutral (zero-core 3be6d11): its policy, value and margin output
+  layers are zero at first. Two false starts showed why: `runs/mtg2a` (random output layers)
+  began with 55% of the prior on `PASS` where 25% is uniform; its self-play games ran into the
+  turn cap (58.8 turns of 60, draws: no signal) and its first checkpoint lost 100/100 to the
+  heuristic. `runs/mtg2b` (uniform policy, random value head) still favoured `PASS`: the cq
+  targets of its first iteration put 49% on it against 36% uniform, the trained checkpoint
+  46%, and it lost 99/100 to the heuristic. Short self-play probes with untrained networks
+  (16 games, 32 sims) show a coin flip of the random value head, not the architecture: token
+  network seed 0 49% vs 36% uniform, seed 1 33% vs 40%; with the value head at zero 38% vs 38%.
+  The MLP control keeps the MLP's default initialisation (its seed-0 searches put 25% on
+  `PASS`, below uniform). Both false starts were stopped and their data deleted (logs, metrics
+  and checkpoints kept).
+
+### 22.2 Against the memorised values (evidence first)
+
+What fingerprints a game is not the decklists alone, and the decks cannot vary more than they
+do (every self-play game has two new random decks). Measured offline on runs/mtg1's data: a fresh
+256 x 3 MLP's value head trained on iterations 6-8 (175,757 samples), tested on iteration 9's
+unseen games (61,748 samples), cross-entropy and accuracy against the game result z:
+
+| Training | Train CE / acc. | Next-iteration CE / acc. |
+|---|---:|---:|
+| target z, 4 epochs (mtg1's reuse 4) | 0.123 / 97.0% | 1.385 / 65.5% |
+| target z, 1 epoch | 0.255 / 87.9% | 0.910 / 65.3% |
+| target 0.1 z + 0.9 search value, 4 epochs | 0.508 / 73.3% | **0.602 / 66.3%** |
+| target z, 4 epochs, the decklist bags zeroed (my library, the opponent's hidden pool, known library cards) | 0.166 / 90.0% | 1.332 / 62.4% |
+| 0.9 search value, 1 epoch, decklist bags zeroed | 0.542 / 70.7% | 0.629 / 63.0% |
+
+* Without the decklist bags the network still memorises (90% on its training games): the
+  whole position identifies a game, not just the decks. The bags help on unseen games (+3
+  points), so they stay.
+* A value target that varies within a game (`value_q` 0.9) removes the memorisation (train
+  and next-iteration CE 0.51 / 0.60) and gives the best next-iteration CE and accuracy; fewer
+  passes over the data help less. Hence `value_q` 0.9 (warm-up 2 iterations) and `reuse` 2;
+  the decks stay as they are.
+
+The same data through the token network (96 x 3, 600 steps at lr 1e-3 on iterations 7-8, the
+loop's losses with value_q 0.9; tested on iteration 9): policy CE 1.005 (target entropy 0.934),
+value CE vs z 0.585, accuracy 67.5%, against the MLP's 1.012 / 0.600 / 65.8% - it learns from
+the same samples at least as well.
