@@ -27,6 +27,7 @@ impl Game {
             Cond::YourTurnAtMost(n) => self.turn.active == p && pl.turns <= *n as u32,
             Cond::HandAtMost(n) => pl.hand.len() <= *n as usize,
             Cond::DevotionCoversLibrary(color) => self.devotion(p, *color) as usize >= pl.library.len(),
+            Cond::FirstSpellThisGame => pl.spells_game == 0,
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::SpellsCastThisTurn { n, noncreature } => {
@@ -142,6 +143,9 @@ impl Game {
             ev: Default::default(),
             alt: 0,
             from: Default::default(),
+            delved: 0,
+            delve_floor: 0,
+            discarded_land: false,
             division: Vec::new(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });

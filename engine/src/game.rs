@@ -164,6 +164,10 @@ pub struct Player {
     pub attacked_with: Vec<ObjRef>,
     /// Cards drawn in this player's own draw step this turn.
     pub draw_step_draws: u8,
+    /// Spells cast this game.
+    pub spells_game: u16,
+    /// Energy counters (CR 122.1).
+    pub energy: u16,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -193,6 +197,12 @@ pub struct StackItem {
     pub alt: u8,
     /// Where it was cast from, and how.
     pub from: CastFrom,
+    /// Cards exiled for delve so far, and the graveyard slot the next pick
+    /// starts from (CR 702.66).
+    pub delved: u8,
+    pub delve_floor: u8,
+    /// A land card was discarded for it to enter (Mox Diamond).
+    pub discarded_land: bool,
     /// Divided damage: the amount for each target of the divided
     /// requirement, in the order chosen (CR 601.2d).
     pub division: Vec<u8>,
@@ -436,6 +446,8 @@ impl Game {
             cant_gain_life: false,
             attacked_with: Vec::new(),
             draw_step_draws: 0,
+            spells_game: 0,
+            energy: 0,
         };
         Game {
             db,

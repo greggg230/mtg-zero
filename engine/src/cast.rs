@@ -3,7 +3,7 @@
 use crate::db::{types, AbilityDef, AbilityRef, AbilitySlot, Filter, Kw, TargetReq};
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
-use crate::game::{Game, StackItem, StackKind};
+use crate::game::{Game, Pos, StackItem, StackKind};
 use crate::ids::{CardIdx, ObjRef, PlayerId, Target, Zone};
 use crate::pay::PayMana;
 
@@ -71,14 +71,14 @@ impl Game {
                 continue;
             }
             let cls = &classes[..];
-            let cost = self.spell_cost(c, p);
+            let cost = self.delve_reduced(c, p, self.spell_cost(c, p));
             let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
             if alt_ok {
                 // castable for an alternative cost (601.2b); the mana cost
                 // may be payable too (asked on casting)
             } else if !def.additional.is_empty() {
                 // (Excluding the card itself: on the stack while it is paid.)
-                if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &cost, cls, Some(c))) {
+                if !self.options_payable(p, c, &cost, cls, Some(c)) {
                     continue;
                 }
             } else if self.hand_mana_source(c) {
@@ -212,13 +212,123 @@ impl Game {
         if !(def.is(types::INSTANT) || def.keywords.has(Kw::Flash) || sorcery_ok) {
             return false;
         }
-        let mana = self.route_mana(card, p, from);
+        let mana = self.delve_reduced(card, p, self.route_mana(card, p, from));
         let paid = match from {
             crate::game::CastFrom::Escape => self.cost_payable(p, card, &def.escape.as_ref().unwrap().1, &mana, classes, None),
-            _ if !def.additional.is_empty() => def.additional.iter().any(|o| self.cost_payable(p, card, o, &mana, classes, None)),
+            _ if !def.additional.is_empty() => self.options_payable(p, card, &mana, classes, None),
             _ => self.can_pay_with(p, &mana, classes, &Default::default()),
         };
         paid && def.spell.as_ref().is_none_or(|ab| self.targets_available(ab, p, Some(self.obj_ref(card))))
+    }
+
+    /// Can `p` pay one of the spell's additional-cost options (CR 601.2b)
+    /// with `cost` plus the option's own mana; for kicker, only an option
+    /// whose effect has its targets.
+    fn options_payable(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        cost: &crate::mana::ManaCost,
+        classes: &[crate::pay::Class],
+        exclude: Option<CardIdx>,
+    ) -> bool {
+        let def = self.def_of(card);
+        let src = Some(self.obj_ref(card));
+        def.additional.iter().enumerate().any(|(k, o)| {
+            (!def.kicker
+                || def
+                    .spell
+                    .as_ref()
+                    .and_then(|ab| ab.modes.as_ref())
+                    .is_some_and(|m| self.targets_available(&m.list[k], p, src)))
+                && self.cost_payable(p, card, o, &cost.plus(&o.mana), classes, exclude)
+        })
+    }
+
+    /// A delve spell's cost with as much generic mana as its caster's
+    /// graveyard can pay (castability, CR 702.66).
+    pub(crate) fn delve_reduced(&self, card: CardIdx, p: PlayerId, cost: crate::mana::ManaCost) -> crate::mana::ManaCost {
+        if !self.def_of(card).delve {
+            return cost;
+        }
+        let gy = &self.players[p as usize].graveyard;
+        let n = gy.iter().filter(|&&c| c != card).count().min(255) as u8;
+        cost.less_generic(n)
+    }
+
+    /// CR 702.66a: exile cards from the graveyard, each paying {1}; one
+    /// decision per card in increasing slot order, `PASS` when the rest of
+    /// the cost can be paid.
+    pub(crate) fn delve(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let StackKind::Spell { card } = self.stack[pos].kind else { return };
+        let p = self.stack[pos].controller;
+        match self.answer.take() {
+            Some(Choice::Card(c)) => {
+                let at = self.players[p as usize].graveyard.iter().position(|&x| x == c).unwrap_or(0);
+                self.move_card(c, Zone::Exile, Pos::Top);
+                let item = &mut self.stack[pos];
+                item.delved += 1;
+                item.delve_floor = at as u8;
+                self.agenda.push(Task::Delve { id });
+                return;
+            }
+            Some(Choice::Pass) => return,
+            Some(other) => unreachable!("delve answer {other:?}"),
+            None => {}
+        }
+        let item = &self.stack[pos];
+        let mut cost = self.route_mana(card, p, item.from).less_generic(item.delved);
+        if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
+            cost = cost.plus(&extra.mana);
+        }
+        if cost.generic == 0 {
+            return;
+        }
+        // The fewest more cards that leave a payable cost (castability
+        // made sure some number does).
+        let need = (0..=cost.generic).find(|&d| self.can_pay(p, &cost.less_generic(d))).unwrap_or(cost.generic) as usize;
+        let floor = item.delve_floor as usize;
+        let gy = &self.players[p as usize].graveyard;
+        // Picks go up the graveyard (each set once), leaving enough cards
+        // above for the picks still needed.
+        let mut opts: Vec<Opt> = gy
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i >= floor && gy.len() - i >= need)
+            .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
+            .collect();
+        if need == 0 || opts.is_empty() {
+            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+        }
+        self.ask(Task::Delve { id }, p, DecisionKind::ChooseGraveyardCard, opts);
+    }
+
+    /// Mox Diamond as it resolves: discard a land card (it enters) or not
+    /// (it goes to the graveyard).
+    pub(crate) fn enter_by_discard(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let p = self.stack[pos].controller;
+        match self.answer.take() {
+            Some(Choice::Card(c)) => {
+                self.discard(c);
+                self.stack[pos].discarded_land = true;
+            }
+            Some(Choice::Pass) => {}
+            Some(other) => unreachable!("discard answer {other:?}"),
+            None => {
+                let ctx = Ctx { controller: p, source: None };
+                let land = Filter::Type(types::LAND);
+                let mut opts: Vec<Opt> = self
+                    .hand_options(p)
+                    .into_iter()
+                    .filter(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(&land, c, &ctx)))
+                    .collect();
+                // (Asked even without a land card: the hand is hidden.)
+                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                self.ask(Task::EnterByDiscard { id }, p, DecisionKind::Discard, opts);
+            }
+        }
     }
 
     /// "You may play lands from your graveyard" (Crucible of Worlds).
@@ -414,8 +524,9 @@ impl Game {
     pub(crate) fn normal_payable(&self, p: PlayerId, card: CardIdx, classes: &[crate::pay::Class]) -> bool {
         let def = self.def_of(card);
         let cost = self.spell_cost(card, p);
+        let cost = self.delve_reduced(card, p, cost);
         if !def.additional.is_empty() {
-            def.additional.iter().any(|o| self.cost_payable(p, card, o, &cost, classes, Some(card)))
+            self.options_payable(p, card, &cost, classes, Some(card))
         } else {
             self.can_pay_with(p, &cost, &classes_without(classes, card), &Default::default())
         }
@@ -470,10 +581,16 @@ impl Game {
             ev: Default::default(),
             alt: 0,
             from,
+            delved: 0,
+            delve_floor: 0,
+            discarded_land: false,
             division: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
         self.agenda.push(Task::CastPay { id });
+        if self.def_of(card).delve {
+            self.agenda.push(Task::Delve { id }); // CR 702.66a: while paying
+        }
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
             self.agenda.push(Task::Divide { id }); // CR 601.2d
         }
@@ -483,7 +600,7 @@ impl Game {
         if self.def_of(card).additional.len() > 1 {
             self.agenda.push(Task::CastOption { id });
         }
-        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some()) {
+        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some()) && !self.def_of(card).kicker {
             self.agenda.push(Task::ChooseModes { id }); // CR 601.2b, 700.2a
         }
         // CR 118.9a: one alternative cost at most (flashback, escape and
@@ -501,14 +618,26 @@ impl Game {
         let StackKind::Spell { card } = item.kind else { return };
         let p = item.controller;
         match self.answer.take() {
-            Some(Choice::Number(k)) => self.stack[pos].cost_option = k,
+            Some(Choice::Number(k)) => {
+                self.stack[pos].cost_option = k;
+                if self.def_of(card).kicker {
+                    // Kicked or not: the spell's effect follows (CR 702.33d).
+                    self.stack[pos].modes = vec![k];
+                    self.note(|_| format!("kicked: {}", k == 1));
+                }
+            }
             Some(other) => unreachable!("cost option answer {other:?}"),
             None => {
                 let def = self.def_of(card);
                 let classes = self.mana_classes(p, None);
-                let cost = self.route_mana(card, p, item.from);
+                let cost = self.delve_reduced(card, p, self.route_mana(card, p, item.from));
+                let src = Some(self.obj_ref(card));
+                let kicker_ok = |k: usize| {
+                    !def.kicker
+                        || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| self.targets_available(&m.list[k], p, src))
+                };
                 let opts: Vec<Opt> = (0..def.additional.len())
-                    .filter(|&k| self.cost_payable(p, card, &def.additional[k], &cost, &classes, None))
+                    .filter(|&k| kicker_ok(k) && self.cost_payable(p, card, &def.additional[k], &cost.plus(&def.additional[k].mana), &classes, None))
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();
                 self.ask(Task::CastOption { id }, p, DecisionKind::ChooseCost, opts);
@@ -608,7 +737,11 @@ impl Game {
             }
             return;
         }
-        let mut pm = PayMana::new(p, self.route_mana(card, p, item.from));
+        let mut cost = self.route_mana(card, p, item.from).less_generic(item.delved);
+        if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
+            cost = cost.plus(&extra.mana);
+        }
+        let mut pm = PayMana::new(p, cost);
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
@@ -626,6 +759,7 @@ impl Game {
         let p = item.controller;
         let pl = &mut self.players[p as usize];
         pl.spells_cast = pl.spells_cast.saturating_add(1);
+        pl.spells_game = pl.spells_game.saturating_add(1);
         if !self.def_of(card).is(types::CREATURE) {
             let pl = &mut self.players[p as usize];
             pl.noncreature_cast = pl.noncreature_cast.saturating_add(1);
@@ -751,6 +885,10 @@ impl Game {
                 Filter::Any | Filter::Player => true,
                 Filter::Opponent => p != ctx.controller,
                 Filter::DrewThisTurn(n) => self.players[p as usize].drawn == *n,
+                Filter::OathTarget => {
+                    let ap = self.turn.active;
+                    p != ap && self.creatures_of(p).count() > self.creatures_of(ap).count()
+                }
                 Filter::FirstDrawInDrawStep => {
                     self.turn.step == crate::game::Step::Draw
                         && self.turn.active == p
@@ -782,6 +920,7 @@ impl Game {
             | Filter::Opponent
             | Filter::DrewThisTurn(_)
             | Filter::FirstDrawInDrawStep
+            | Filter::OathTarget
             | Filter::InGraveyard(_) => false,
             Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
@@ -833,7 +972,7 @@ impl Game {
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
             Filter::Owner(you) => (self.objs[c.i()].owner == ctx.controller) == *you,
-            Filter::FirstDrawInDrawStep => false,
+            Filter::FirstDrawInDrawStep | Filter::OathTarget => false,
             Filter::NoCounters(k) => self.counters_on(c, *k) == 0,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),

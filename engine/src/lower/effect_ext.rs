@@ -1087,6 +1087,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 Some(E::RemoveACounterFromSelf(nodes::RemoveACounterFromSelf {})) => {
                     b.op(Op::Ext(Ext::MayRemoveCounterThen { skip: 0 }))
                 }
+                Some(E::PayEnergy(nodes::PayEnergy { amount })) => {
+                    let n = l.int("PayEnergy.amount", *amount, 1, 20) as u8;
+                    b.op(Op::Ext(Ext::MayPayEnergyThen { n, skip: 0 }))
+                }
                 Some(other) => {
                     l.unsupported(format!("ReflexiveWhenYouDo.cost({})", other.tag()));
                     return true;
@@ -1264,6 +1268,88 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let at = b.op(Op::JumpUnless { cond, to: 0 });
             lower_effect(l, b, then);
             b.patch(at);
+        }
+        E::Exile(nodes::Exile { targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "Exile") else { return true };
+            b.op(Op::Exile { tgt: t });
+        }
+        E::ReturnAllPermanentsToOwnersHands(nodes::ReturnAllPermanentsToOwnersHands {}) => {
+            b.op(Op::Ext(Ext::BounceAll));
+        }
+        E::VoteExileNonlandPermanent(nodes::VoteExileNonlandPermanent {}) => {
+            // "Each player votes for a nonland permanent you don't control"
+            // (not targeted).
+            let filter = and(not(Filter::Type(types::LAND)), Filter::Controller(false));
+            b.op(Op::Ext(Ext::VoteExile { filter }));
+        }
+        E::MillTwoRepeatWhileShareColor(nodes::MillTwoRepeatWhileShareColor {}) => {
+            let t = b.target(Filter::Player, 1, 1);
+            b.op(Op::Ext(Ext::MillTwoWhileShareColor { who: Who::TargetPlayer(t) }));
+        }
+        E::PutCreatureFromHandSacrificeUnlessPay(nodes::PutCreatureFromHandSacrificeUnlessPay { reduction }) => {
+            // "You may put a creature card from your hand onto the
+            // battlefield. If you do, sacrifice it unless you pay its mana
+            // cost reduced by {n}."
+            let n = l.int("PutCreatureFromHandSacrificeUnlessPay.reduction", *reduction, 0, 9) as u8;
+            b.op(Op::PutFromHand { who: Who::You, filter: creature(), tapped: false, optional: true });
+            b.op(Op::Ext(Ext::SacMadeUnlessPayReduced { n }));
+        }
+        E::OathRevealUntilCreature(nodes::OathRevealUntilCreature { card_type }) => {
+            // "That player chooses target player who controls more
+            // creatures than they do and is their opponent. The first player
+            // may reveal cards ... until they reveal a creature card ..."
+            let Some(bits) = types::from_name(&format!("{card_type:?}")) else {
+                l.unsupported(format!("OathRevealUntilCreature.card_type({card_type:?})"));
+                return true;
+            };
+            b.target(Filter::OathTarget, 1, 1);
+            b.op(Op::Ext(Ext::RevealUntilToBattlefield { who: Who::Active, types: bits }));
+        }
+        E::GetEnergy(nodes::GetEnergy { amount }) => {
+            let n = l.int("GetEnergy.amount", *amount, 1, 20) as u8;
+            b.op(Op::Ext(Ext::GetEnergy { n }));
+        }
+        E::DealDamagePaidInEnergy(nodes::DealDamagePaidInEnergy { amount, targets, energy }) => {
+            // "Choose target <...>. You get {E} x n, then you may pay any
+            // amount of {E}. This deals that much damage to that permanent."
+            l.deny("DealDamagePaidInEnergy.amount", amount);
+            let n = l.int("DealDamagePaidInEnergy.energy", *energy, 0, 20) as u8;
+            let Some(t) = lower_targets(l, b, targets, "DealDamagePaidInEnergy") else { return true };
+            if n > 0 {
+                b.op(Op::Ext(Ext::GetEnergy { n }));
+            }
+            b.op(Op::Ext(Ext::PayEnergyDamage { tgt: t }));
+        }
+        E::PutCountersOnTargetAndAddSubtype(nodes::PutCountersOnTargetAndAddSubtype { targets, counters, subtype }) => {
+            // "Put <counters> on target <...>. It becomes a <subtype> in
+            // addition to its other types."
+            let Some(t) = lower_targets(l, b, targets, "PutCountersOnTargetAndAddSubtype") else { return true };
+            for (name, n) in counters {
+                let counter = counter_by_name(l, name);
+                let n = l.int("PutCountersOnTargetAndAddSubtype.counters", *n, 1, 20);
+                b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter, n: Amount::Fixed(n) }));
+            }
+            let s = l.subtype(subtype);
+            apply(b, On::Target(t), vec![Mod::Types { add: 0, subtypes: vec![s], replace: false }], Until::Forever);
+        }
+        E::LookAtTopCardsDistribute(nodes::LookAtTopCardsDistribute { count, piles }) => {
+            // "Look at the top three cards of your library. Put one of them
+            // into your hand, put one of them on the bottom of your library,
+            // and exile one of them. You may play the exiled card this turn."
+            use enums::DistributePile as D;
+            if *count != 3 || piles[..] != [D::Hand, D::Bottom, D::ExilePlayable] {
+                l.unsupported("LookAtTopCardsDistribute(not hand, bottom, exile)");
+                return true;
+            }
+            b.op(Op::LookTop { who: Who::You, n: 3, reveal: false });
+            let pile = |dest| Op::PileTo { who: Who::You, dest, filter: Filter::Any, min: 1, max: 1, rest: false, reveal: false };
+            b.op(pile(crate::program::PileDest::Hand));
+            b.op(pile(crate::program::PileDest::Bottom));
+            b.op(Op::Ext(Ext::PileRestExilePlayable));
+        }
+        E::LookAtTopCardOfTargetPlayersLibrary(nodes::LookAtTopCardOfTargetPlayersLibrary {}) => {
+            let t = b.target(Filter::Player, 1, 1);
+            b.op(Op::Ext(Ext::LookAtTopOf { who: Who::TargetPlayer(t) }));
         }
         E::WinTheGame(nodes::WinTheGame {}) => {
             b.op(Op::Ext(Ext::WinGame));

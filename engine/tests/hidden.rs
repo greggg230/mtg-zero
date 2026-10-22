@@ -157,6 +157,9 @@ fn determinize_for_another_viewer_refreshes_the_pending_decision() {
         let dec = d.pending_decision().expect("a decision");
         for o in &dec.options {
             match o.choice {
+                // (Cards in a graveyard or exile are public: only hand
+                // slots can go stale.)
+                Choice::Cast(c) | Choice::Play(c) if d.obj(c).zone != engine::Zone::Hand => {}
                 Choice::Cast(c) | Choice::Play(c) => {
                     assert!(d.player(mover).hand.contains(&c));
                     let slots = d.hand_slots(mover);

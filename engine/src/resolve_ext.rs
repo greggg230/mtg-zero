@@ -971,6 +971,218 @@ impl Game {
                 self.outcome = Some(crate::game::Outcome { winner: Some(p), reason: crate::game::EndReason::Effect });
                 Flow::Next
             }
+            Ext::BounceAll => {
+                let all: Vec<CardIdx> = self.battlefield.clone();
+                self.begin_batch();
+                for c in all {
+                    if self.objs[c.i()].zone == Zone::Battlefield {
+                        self.move_card(c, Zone::Hand, Pos::Top);
+                    }
+                }
+                self.end_batch();
+                Flow::Next
+            }
+            Ext::VoteExile { filter } => {
+                // f.i: votes cast so far (the controller, then the other).
+                let order = [f.controller, crate::ids::opp(f.controller)];
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        f.picked.push(c);
+                        f.i += 1;
+                    }
+                    Some(other) => unreachable!("vote answer {other:?}"),
+                    None => {}
+                }
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                while f.i < 2 {
+                    let voter = order[f.i as usize];
+                    let opts: Vec<Opt> = self
+                        .battlefield
+                        .iter()
+                        .copied()
+                        .filter(|&c| self.card_matches(filter, c, &ctx))
+                        .map(|c| Opt { action: self.perm_action(voter, c), choice: Choice::Card(c) })
+                        .collect();
+                    if opts.is_empty() {
+                        f.i += 1;
+                        continue;
+                    }
+                    self.ask(Task::Run(f.clone()), voter, DecisionKind::ChoosePermanent, opts);
+                    return Flow::Suspend;
+                }
+                // Two votes: one permanent with both, or both tied with one.
+                let mut chosen = std::mem::take(&mut f.picked);
+                chosen.dedup();
+                chosen.sort_by_key(|c| self.objs[c.i()].timestamp);
+                chosen.dedup();
+                self.begin_batch();
+                for c in chosen {
+                    if self.objs[c.i()].zone == Zone::Battlefield {
+                        self.move_card(c, Zone::Exile, Pos::Top);
+                    }
+                }
+                self.end_batch();
+                Flow::Next
+            }
+            Ext::MillTwoWhileShareColor { who } => {
+                let Some(p) = self.who(f, *who) else { return Flow::Next };
+                loop {
+                    let mut milled = Vec::new();
+                    for _ in 0..2 {
+                        let Some(&top) = self.players[p as usize].library.last() else { break };
+                        self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
+                        self.reveal(top);
+                        self.move_card(top, Zone::Graveyard, Pos::Top);
+                        milled.push(top);
+                    }
+                    let share = milled.len() == 2 && self.def_of(milled[0]).colors & self.def_of(milled[1]).colors != 0;
+                    if !share {
+                        break;
+                    }
+                }
+                Flow::Next
+            }
+            Ext::SacMadeUnlessPayReduced { n } => {
+                let Some(c) = f.made.filter(|&c| self.objs[c.i()].zone == Zone::Battlefield) else { return Flow::Next };
+                let p = f.controller;
+                let cost = self.def_of(c).cost.less_generic(*n);
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        let mut back = f.clone();
+                        back.pc += 1;
+                        back.i = 0;
+                        back.floor = 0;
+                        self.agenda.push(Task::Run(back));
+                        self.agenda.push(Task::PayMana(crate::pay::PayMana::new(p, cost)));
+                        Flow::Suspend
+                    }
+                    Some(_) => {
+                        self.sacrifice(c);
+                        Flow::Next
+                    }
+                    None => {
+                        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                        if self.can_pay(p, &cost) {
+                            opts.push(Opt { action: act::YES, choice: Choice::Yes });
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::RevealUntilToBattlefield { who, types } => {
+                let Some(p) = self.who(f, *who) else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Yes) => {}
+                    Some(_) => return Flow::Next,
+                    None => {
+                        let opts = vec![
+                            Opt { action: act::PASS, choice: Choice::Pass },
+                            Opt { action: act::YES, choice: Choice::Yes },
+                        ];
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+                        return Flow::Suspend;
+                    }
+                }
+                // Reveal from the top until a card of the types (CR
+                // 701.20a); the revealed cards stay in the library until
+                // then.
+                let lib: Vec<CardIdx> = self.players[p as usize].library.iter().rev().copied().collect();
+                let mut revealed = Vec::new();
+                let mut found = None;
+                for c in lib {
+                    self.force_library_card(c, crate::hidden::KEY_REVEAL, p);
+                    self.reveal(c);
+                    if self.def_of(c).types & types != 0 {
+                        found = Some(c);
+                        break;
+                    }
+                    revealed.push(c);
+                }
+                if let Some(c) = found {
+                    self.put_onto_battlefield(c, p);
+                }
+                for c in revealed {
+                    self.move_card(c, Zone::Graveyard, Pos::Top);
+                }
+                Flow::Next
+            }
+            Ext::GetEnergy { n } => {
+                let pl = &mut self.players[f.controller as usize];
+                pl.energy = pl.energy.saturating_add(*n as u16);
+                Flow::Next
+            }
+            Ext::PayEnergyDamage { tgt } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Number(k)) => {
+                        self.players[p as usize].energy -= k as u16;
+                        let src = self.frame_damage_source(f);
+                        for t in self.targets_of(f, *tgt) {
+                            self.deal_damage(src, t, k as i32);
+                        }
+                        Flow::Next
+                    }
+                    Some(other) => unreachable!("energy answer {other:?}"),
+                    None => {
+                        let most = self.players[p as usize].energy.min(act::NUMBER_N - 1);
+                        let opts = (0..=most).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseMode, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::MayPayEnergyThen { n, skip } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        self.players[p as usize].energy -= *n as u16;
+                        Flow::Next
+                    }
+                    Some(_) => Flow::Jump(*skip),
+                    None => {
+                        if self.players[p as usize].energy < *n as u16 {
+                            return Flow::Jump(*skip);
+                        }
+                        let opts = vec![
+                            Opt { action: act::PASS, choice: Choice::Pass },
+                            Opt { action: act::YES, choice: Choice::Yes },
+                        ];
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::PileRestExilePlayable => {
+                for c in std::mem::take(&mut f.pile) {
+                    self.reveal(c);
+                    let card = self.move_card(c, Zone::Exile, Pos::Top);
+                    self.permissions.push(crate::game::Permission {
+                        card,
+                        player: f.controller,
+                        turn: Some(self.turn.number),
+                        kind: crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, attacked_subtype: None },
+                    });
+                }
+                Flow::Next
+            }
+            Ext::LookAtTopOf { who } => {
+                let Some(q) = self.who(f, *who) else { return Flow::Next };
+                let p = f.controller;
+                if let Some(&top) = self.players[q as usize].library.last() {
+                    self.force_library_card(top, crate::hidden::KEY_LOOK, p);
+                    // Knowledge of a library card its owner doesn't know
+                    // can't be kept: the owner's determinize may change it
+                    // (ENGINE.md 10). The look is keyed; it isn't remembered.
+                    if p == q || self.knows(q, top) {
+                        self.learn(p, top);
+                    }
+                    let d = self.objs[top.i()].def;
+                    self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+                    self.note(|_| format!("P{p} looks at the top card of P{q}'s library"));
+                }
+                Flow::Next
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

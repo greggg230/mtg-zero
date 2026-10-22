@@ -61,6 +61,11 @@ impl Game {
         let Some(ar) = self.item_ability(&item) else {
             // A permanent spell: it becomes a permanent (608.3).
             self.agenda.push(Task::FinishResolve { id: item.id });
+            if let StackKind::Spell { card } = item.kind {
+                if self.def_of(card).discard_land_to_enter {
+                    self.agenda.push(Task::EnterByDiscard { id: item.id });
+                }
+            }
             return;
         };
         let ab = self.db.ability(ar);
@@ -142,7 +147,9 @@ impl Game {
             let item = self.stack.remove(pos);
             if let StackKind::Spell { card } = item.kind {
                 if self.objs[card.i()].zone == Zone::Stack {
-                    if self.def_of(card).is_permanent_card() {
+                    if self.def_of(card).discard_land_to_enter && !item.discarded_land {
+                        self.move_card(card, Zone::Graveyard, Pos::Top);
+                    } else if self.def_of(card).is_permanent_card() {
                         self.entering_cast = true;
                         let alt = (item.alt > 0).then(|| &self.def_of(card).alt_costs[item.alt as usize - 1]);
                         self.entering_evoked = alt.is_some_and(|a| a.evoke);
@@ -241,6 +248,9 @@ impl Game {
             }
             Amount::LkiManaValue => f.x,
             Amount::Devotion(color) => self.devotion(f.controller, color) as i32,
+            Amount::CountTypes(bits) => {
+                self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
+            }
             Amount::EventObjPower => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => self.power(r.idx),
                 Some(r) => match self.objs[r.idx.i()].lki_power {

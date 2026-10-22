@@ -53,6 +53,10 @@ pub(crate) enum Task {
     ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
     // entering the battlefield (CR 614.12)
     AsEnters { card: CardIdx },
+    /// Exile graveyard cards for delve (CR 702.66).
+    Delve { id: u32 },
+    /// Discard a land for Mox Diamond to enter, or not.
+    EnterByDiscard { id: u32 },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -192,6 +196,8 @@ impl Game {
             Task::ManaNow { src } => self.mana_now(src),
             Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
             Task::AsEnters { card } => self.as_enters(card),
+            Task::Delve { id } => self.delve(id),
+            Task::EnterByDiscard { id } => self.enter_by_discard(id),
         }
     }
 

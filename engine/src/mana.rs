@@ -64,6 +64,29 @@ impl ManaCost {
         self.total() == 0
     }
 
+    /// The two costs together (an additional cost's mana, kicker).
+    pub fn plus(&self, o: &ManaCost) -> ManaCost {
+        let mut c = *self;
+        c.generic = c.generic.saturating_add(o.generic);
+        for i in 0..6 {
+            c.pips[i] = c.pips[i].saturating_add(o.pips[i]);
+        }
+        for i in 0..10 {
+            c.hybrid[i] = c.hybrid[i].saturating_add(o.hybrid[i]);
+        }
+        for i in 0..5 {
+            c.phyrexian[i] = c.phyrexian[i].saturating_add(o.phyrexian[i]);
+        }
+        c
+    }
+
+    /// This cost with its generic part reduced by up to n.
+    pub fn less_generic(&self, n: u8) -> ManaCost {
+        let mut c = *self;
+        c.generic = c.generic.saturating_sub(n);
+        c
+    }
+
     /// Mana value (CR 202.3): every symbol counts one (hybrid and
     /// Phyrexian included).
     pub fn mana_value(&self) -> u8 {

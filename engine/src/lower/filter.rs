@@ -16,6 +16,7 @@ macro_rules! lower_object_predicate {
             E::IsArtifact(nodes::IsArtifact {}) => Some(Filter::Type(types::ARTIFACT)),
             E::IsEnchantment(nodes::IsEnchantment {}) => Some(Filter::Type(types::ENCHANTMENT)),
             E::IsLand(nodes::IsLand {}) => Some(Filter::Type(types::LAND)),
+            E::IsAttacking(nodes::IsAttacking {}) => Some(Filter::Attacking),
             E::CubeWalkersIsPermanent(nodes::CubeWalkersIsPermanent {})
             | E::ValuePredicatesIsPermanent(nodes::ValuePredicatesIsPermanent {}) => {
                 Some(Filter::Type(types::PERMANENT))

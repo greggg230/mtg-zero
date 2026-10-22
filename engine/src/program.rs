@@ -43,6 +43,9 @@ pub enum Amount {
     LkiManaValue,
     /// The controller's devotion to a colour (index W U B R G; CR 700.5).
     Devotion(u8),
+    /// The number of permanents of these card types the controller
+    /// controls ("the number of lands you control").
+    CountTypes(u16),
     /// The power of the triggered ability's event object ("its power"):
     /// now if it is still on the battlefield, else as it last existed there
     /// (CR 608.2h).
@@ -269,6 +272,35 @@ pub enum Ext {
     LookTopN { who: Who, n: Amount },
     /// The controller wins the game (CR 104.2b).
     WinGame,
+    /// Return all permanents to their owners' hands (at once).
+    BounceAll,
+    /// Will of the council: starting with the controller, each player
+    /// votes for a permanent matching `filter` ("you" = the controller);
+    /// exile each with the most votes or tied. Choice: a permanent.
+    VoteExile { filter: Filter },
+    /// `who` mills two cards; if two cards that share a colour were milled,
+    /// repeat (Grindstone).
+    MillTwoWhileShareColor { who: Who },
+    /// Unless the controller pays the made object's mana cost reduced by
+    /// {n}, sacrifice it (Flash). Choice: yes/no, then `PayMana`.
+    SacMadeUnlessPayReduced { n: u8 },
+    /// `who` may reveal cards from the top of their library until a card
+    /// of these types; it is put onto the battlefield under their control,
+    /// the others into their graveyard (Oath of Druids). Choice: yes/no.
+    RevealUntilToBattlefield { who: Who, types: u16 },
+    /// The controller gets n energy counters.
+    GetEnergy { n: u8 },
+    /// The controller may pay any amount of energy; the source deals that
+    /// much damage to each legal target of `tgt`. Choice: `NUMBER`.
+    PayEnergyDamage { tgt: u8 },
+    /// "You may pay {E} x n. When you do, ...": unless paid, continue at
+    /// `skip`. Choice: yes/no.
+    MayPayEnergyThen { n: u8, skip: u16 },
+    /// The rest of the pile is exiled; the controller may play those cards
+    /// this turn.
+    PileRestExilePlayable,
+    /// The controller looks at the top card of `who`'s library.
+    LookAtTopOf { who: Who },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -482,6 +514,7 @@ impl Op {
             Op::Ext(Ext::JumpUnlessMadeYours { to }) => Some(to),
             Op::Ext(Ext::SacrificeThen { skip, .. }) => Some(skip),
             Op::Ext(Ext::MayRemoveCounterThen { skip }) => Some(skip),
+            Op::Ext(Ext::MayPayEnergyThen { skip, .. }) => Some(skip),
             _ => None,
         }
     }

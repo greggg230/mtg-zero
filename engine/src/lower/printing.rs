@@ -265,8 +265,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
-        l.deny("CardPrinting.kicker_cost", kicker_cost);
-        l.deny("CardPrinting.kicker_cost_str", kicker_cost_str);
+        let _ = kicker_cost_str; // display form of `kicker_cost`
         l.deny("CardPrinting.loyalty", loyalty);
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
         l.deny("CardPrinting.station_threshold", station_threshold);
@@ -298,7 +297,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.ward_discard_random", ward_discard_random);
         l.deny("CardPrinting.ward_discard_chosen", ward_discard_chosen);
         l.deny("CardPrinting.ward_life_cost", ward_life_cost);
-        l.deny("CardPrinting.enters_only_by_discarding_land", enters_only_by_discarding_land);
         l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
         l.deny("CardPrinting.crew_power_bonus", crew_power_bonus);
         l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
@@ -342,11 +340,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
         l.deny("CardPrinting.has_convoke", has_convoke);
         let _ = flashback_cost_str; // display form of `flashback_cost`
-        l.deny("CardPrinting.has_delve", has_delve);
         l.deny("CardPrinting.buyback_cost", buyback_cost);
         l.deny("CardPrinting.buyback_cost_str", buyback_cost_str);
         l.deny("CardPrinting.additional_cost_pay_x_life", additional_cost_pay_x_life);
-        l.deny("CardPrinting.free_cast_condition", free_cast_condition);
         l.deny("CardPrinting.has_storm", has_storm);
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
         let _ = alt_cost_exile_from_hand_count; // 1 (checked above)
@@ -645,7 +641,40 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
 
     let is_spell_card = ty & (types::INSTANT | types::SORCERY) != 0;
+    // Kicker (CR 702.33): an optional additional cost; "if this spell was
+    // kicked" picks the effect, as a mode given by the cost (its targets
+    // follow, CR 601.2c after 601.2b).
+    let kicker = match kicker_cost {
+        None => None,
+        Some(m) => {
+            let mana = lower_mana_cost(l, "CardPrinting.kicker_cost", m);
+            match spell_effect.as_deref() {
+                Some(cats::Effect::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(e) }))
+                    if matches!(**condition, cats::ConditionOrStatePredicate::SpellWasKicked(_)) && is_spell_card =>
+                {
+                    if !additional.is_empty() {
+                        l.unsupported("CardPrinting.kicker_cost(with additional costs)");
+                    }
+                    additional = vec![Cost::default(), Cost { mana, ..Cost::default() }];
+                    let plain = lower_ability(l, e);
+                    let kicked = lower_ability(l, then_effect);
+                    if plain.modes.is_some() || kicked.modes.is_some() || plain.divide.is_some() || kicked.divide.is_some() {
+                        l.unsupported("CardPrinting.kicker_cost(modal effect)");
+                    }
+                    Some(crate::db::AbilityDef {
+                        modes: Some(Box::new(crate::db::Modes { list: vec![plain, kicked], min: 1, max: 1, repeat: false })),
+                        ..Default::default()
+                    })
+                }
+                _ => {
+                    l.unsupported("CardPrinting.kicker_cost(not \"if kicked ... else\")");
+                    None
+                }
+            }
+        }
+    };
     let spell = match spell_effect {
+        _ if kicker.is_some() => kicker.clone(),
         Some(e) if is_spell_card => Some(lower_ability(l, e)),
         Some(_) => {
             l.unsupported("CardPrinting.spell_effect(on a permanent card)");
@@ -780,6 +809,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     alt_costs.extend(dash);
+    // "If this spell is the first spell you've cast this game, you may cast
+    // it without paying its mana cost" (an alternative cost, CR 118.9).
+    match free_cast_condition.as_deref() {
+        None => {}
+        Some(cats::Condition::FirstSpellYouCastThisGame(_)) => {
+            alt_costs.push(AltCost { only_if: Some(crate::db::Cond::FirstSpellThisGame), ..AltCost::default() });
+        }
+        Some(other) => l.unsupported(format!("CardPrinting.free_cast_condition({})", other.tag())),
+    }
     if !alt_costs.is_empty() && !additional.is_empty() {
         l.unsupported("CardPrinting.alternative_costs(with additional costs)");
     }
@@ -857,6 +895,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         lands_from_graveyard: *grants_play_lands_from_graveyard,
         combat_unpreventable: *your_creatures_combat_damage_cant_be_prevented,
         chooses_player,
+        delve: *has_delve,
+        kicker: kicker.is_some(),
+        discard_land_to_enter: *enters_only_by_discarding_land,
     }
 }
 

@@ -281,6 +281,9 @@ pub enum Filter {
     FirstDrawInDrawStep,
     /// A permanent with no counters of this kind.
     NoCounters(Counter),
+    /// A player who is the active player's opponent and controls more
+    /// creatures than the active player (Oath of Druids).
+    OathTarget,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -538,6 +541,8 @@ pub enum Cond {
     /// Your devotion to the colour (index W U B R G) is at least the
     /// number of cards in your library (Thassa's Oracle).
     DevotionCoversLibrary(u8),
+    /// You have cast no spell this game.
+    FirstSpellThisGame,
     /// You gained life this turn.
     GainedLifeThisTurn,
     /// An opponent has more cards in hand than you.
@@ -770,6 +775,16 @@ pub struct CardDef {
     pub combat_unpreventable: bool,
     /// "As this enters, choose a player" (CR 614.12).
     pub chooses_player: bool,
+    /// Delve (CR 702.66).
+    pub delve: bool,
+    /// Kicker (CR 702.33): `additional` is [not kicked, kicked] and the
+    /// spell's modes are [its effect, its kicked effect], the mode given
+    /// by the option (no mode choice).
+    pub kicker: bool,
+    /// "If this would enter, you may discard a land card instead. If you
+    /// do, put it onto the battlefield; if you don't, into its owner's
+    /// graveyard" (Mox Diamond; as it resolves).
+    pub discard_land_to_enter: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.

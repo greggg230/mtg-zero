@@ -644,16 +644,35 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             // "Look at (reveal) the top N cards; put K [matching] of them
             // into your hand [you may]; the rest on the bottom in any order
             // / into your graveyard."
-            let n = match count {
-                unions::IntOrFormula::Int(n) => l.int("LookAtTopCardsPutIntoHand.count", *n, 1, 20) as u8,
-                unions::IntOrFormula::Formula(f) => {
-                    l.unsupported(format!("Formula:{}", f.tag()));
-                    return;
-                }
-            };
             let k = l.int("LookAtTopCardsPutIntoHand.take", *take, 1, 20) as u8;
             let Some(filter) = lower_card_filter(l, take_filter) else { return };
-            b.op(Op::LookTop { who: Who::You, n, reveal: *reveal });
+            match count {
+                unions::IntOrFormula::Int(n) => {
+                    let n = l.int("LookAtTopCardsPutIntoHand.count", *n, 1, 20) as u8;
+                    b.op(Op::LookTop { who: Who::You, n, reveal: *reveal });
+                }
+                // "The top X cards, where X is the number of lands you
+                // control" (as it resolves).
+                unions::IntOrFormula::Formula(f) => match &**f {
+                    cats::Formula::CountControlledMatching(nodes::CountControlledMatching { predicate }) => {
+                        let bits = match lower_pred(l, predicate) {
+                            Some(Filter::Type(bits)) => bits,
+                            _ => {
+                                l.unsupported("Formula:CountControlledMatching(not a card type)");
+                                return;
+                            }
+                        };
+                        if *reveal {
+                            l.unsupported("LookAtTopCardsPutIntoHand.reveal(with a count formula)");
+                        }
+                        b.op(Op::Ext(crate::program::Ext::LookTopN { who: Who::You, n: Amount::CountTypes(bits) }));
+                    }
+                    other => {
+                        l.unsupported(format!("Formula:{}", other.tag()));
+                        return;
+                    }
+                },
+            }
             let min = if *optional { 0 } else { k };
             b.op(Op::PileTo {
                 who: Who::You,
