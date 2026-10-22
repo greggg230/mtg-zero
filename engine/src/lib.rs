@@ -6,6 +6,7 @@
 //! [`game::Game::outcome`] is set.
 
 mod activate;
+pub mod az;
 mod cast;
 mod combat;
 pub mod db;

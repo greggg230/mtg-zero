@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["card_ir", "engine"]
+members = ["card_ir", "engine", "py"]
+# `cargo test` / `cargo build` at the root skip the PyO3 module `py` (built by tools/build_py.sh)
+default-members = ["card_ir", "engine"]
+# the pinned zero-core (git submodule) has its own workspace: its crates are path dependencies here
+exclude = ["third_party"]
 
 [workspace.package]
 edition = "2021"

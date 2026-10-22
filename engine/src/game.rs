@@ -214,6 +214,12 @@ pub struct Game {
     pub(crate) observer: Option<PlayerId>,
     /// Chance keys of the current `apply`; always empty between calls.
     pub(crate) keys: Vec<u64>,
+    /// Outcomes queued by `force_chance` (zero-core `chance_k`): every
+    /// emitted key consumes one; a draw, a look at the top of a library and
+    /// a random discard follow theirs when possible (ENGINE.md 10).
+    pub(crate) forced: Vec<u64>,
+    /// The next queued outcome in `forced`.
+    pub(crate) forced_at: usize,
     /// Decisions answered by `apply` (not counting auto-answered ones).
     pub(crate) decisions: u32,
     /// While refreshing a decision after `determinize`: never auto-answer.
@@ -314,6 +320,8 @@ impl Game {
             tokens: 0,
             observer: None,
             keys: Vec::new(),
+            forced: Vec::new(),
+            forced_at: 0,
             decisions: 0,
             no_auto: false,
             log: if spec.log { Some(Vec::new()) } else { None },
@@ -609,6 +617,9 @@ impl Game {
 
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.
     pub(crate) fn draw(&mut self, p: PlayerId) {
+        if let Some(&top) = self.players[p as usize].library.last() {
+            self.force_library_card(top, crate::hidden::KEY_DRAW, p);
+        }
         let Some(&top) = self.players[p as usize].library.last() else {
             self.players[p as usize].drew_from_empty = true;
             self.note(|_| format!("P{p} draws from an empty library"));

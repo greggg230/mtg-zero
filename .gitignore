@@ -1,5 +1,11 @@
 .venv/
 /target
+/target_*/
 __pycache__/
 **/__pycache__/
 *.pyc
+*.pyd
+*.so
+*.pyd.*.old
+/runs/
+.pytest_cache/

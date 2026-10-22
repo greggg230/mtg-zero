@@ -336,7 +336,10 @@ impl Game {
                         // The hand's canonical order makes the pick independent
                         // of insertion order; the reveal key names the card.
                         let sorted = self.hand_sorted(p);
-                        let c = sorted[self.rng.below(sorted.len() as u32) as usize];
+                        let c = match self.forced_hand_pick(p, &sorted) {
+                            Some(c) => c,
+                            None => sorted[self.rng.below(sorted.len() as u32) as usize],
+                        };
                         self.move_card(c, Zone::Graveyard, Pos::Top);
                     }
                 }
@@ -737,6 +740,13 @@ impl Game {
         let lib = &self.players[p as usize].library;
         let pile: Vec<CardIdx> = lib.iter().rev().take(n as usize).copied().collect();
         for &c in &pile {
+            // A forced outcome (zero-core chance_k) swaps the identity in
+            // before the card is seen (ENGINE.md 10).
+            if reveal {
+                self.force_library_card(c, crate::hidden::KEY_REVEAL, p);
+            } else {
+                self.force_library_card(c, crate::hidden::KEY_LOOK, p);
+            }
             if reveal {
                 self.reveal(c);
             } else {

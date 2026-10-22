@@ -437,6 +437,12 @@ impl CardDb {
         self.token_base + t
     }
 
+    /// Number of card definitions (`0..num_cards()`); token definitions
+    /// follow them.
+    pub fn num_cards(&self) -> usize {
+        self.token_base as usize
+    }
+
     pub fn from_document(doc: &card_ir::Document) -> CardDb {
         CardDb::from_cards(&doc.cards)
     }
@@ -520,7 +526,10 @@ pub fn cube_ir_path() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/cards/powerlsv.ir.json")
 }
 
+/// The checked-in cube IR, compiled in (so the Python module `mtgz._engine`
+/// does not depend on where it was built).
+pub const CUBE_IR: &str = include_str!("../../data/cards/powerlsv.ir.json");
+
 pub fn load_cube_document() -> card_ir::Document {
-    let text = std::fs::read_to_string(cube_ir_path()).expect("data/cards/powerlsv.ir.json");
-    card_ir::load_document(&text).unwrap_or_else(|e| panic!("{e}"))
+    card_ir::load_document(CUBE_IR).unwrap_or_else(|e| panic!("{e}"))
 }

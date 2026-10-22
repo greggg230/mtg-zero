@@ -18,7 +18,7 @@ impl Game {
     }
 
     /// CR 508.1a: untapped, no summoning sickness unless haste, no defender.
-    fn can_attack(&self, c: CardIdx) -> bool {
+    pub(crate) fn can_attack(&self, c: CardIdx) -> bool {
         self.is_creature(c)
             && !self.objs[c.i()].tapped
             && (!self.is_sick(c) || self.has_kw(c, Kw::Haste))
@@ -26,11 +26,11 @@ impl Game {
     }
 
     /// CR 509.1a-b: untapped; flying attackers need flying or reach.
-    fn can_block(&self, b: CardIdx, a: CardIdx) -> bool {
+    pub(crate) fn can_block(&self, b: CardIdx, a: CardIdx) -> bool {
         !self.has_kw(a, Kw::Flying) || self.has_kw(b, Kw::Flying) || self.has_kw(b, Kw::Reach)
     }
 
-    fn potential_blockers(&self) -> Vec<CardIdx> {
+    pub(crate) fn potential_blockers(&self) -> Vec<CardIdx> {
         let dp = opp(self.turn.active);
         self.creatures_of(dp).filter(|&c| !self.objs[c.i()].tapped).collect()
     }
@@ -230,7 +230,7 @@ impl Game {
 
     /// Lethal damage for assignment purposes (CR 510.1c-d, 702.2c): what the
     /// blocker still needs, counting damage already assigned this step.
-    fn lethal_needed(&self, att: CardIdx, b: CardIdx) -> u16 {
+    pub(crate) fn lethal_needed(&self, att: CardIdx, b: CardIdx) -> u16 {
         let assigned: u16 = self
             .combat_dmg
             .iter()

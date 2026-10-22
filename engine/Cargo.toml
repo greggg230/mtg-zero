@@ -2,9 +2,12 @@
 name = "engine"
 version = "0.1.0"
 edition.workspace = true
-description = "MTG Zero rules engine (docs/ENGINE.md)"
+description = "MTG Zero rules engine (docs/ENGINE.md) and its AlphaZero layer (the zero-core game `mtg`)"
 
 [dependencies]
 card_ir = { path = "../card_ir" }
 serde.workspace = true
 serde_json.workspace = true
+# the search crate of the pinned core (git submodule third_party/zero-core, docs/pinning.md there):
+# the `SearchGame` trait the AZ layer (src/az) implements
+zero_search = { path = "../third_party/zero-core/crates/search" }

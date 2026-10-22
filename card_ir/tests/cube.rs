@@ -42,7 +42,7 @@ fn every_cube_card_deserializes() {
     names.dedup();
     assert_eq!(names.len(), doc.cards.len(), "card names are unique and sorted");
     for c in &doc.cards {
-        assert!(c.custom || c.oracle_id.as_deref().map_or(false, |s| s.len() == 36), "{}", c.name);
+        assert!(c.custom || c.oracle_id.as_deref().is_some_and(|s| s.len() == 36), "{}", c.name);
     }
 }
 
@@ -57,7 +57,7 @@ fn per_category_counts() {
         println!("{cat:<28} {n:>7}");
     }
     println!("{:<28} {:>7}", "total", total);
-    assert_eq!(counts["CardPrinting"] >= 546, true);
+    assert!(counts["CardPrinting"] >= 546);
     for cat in ["Effect", "ObjectPredicate", "TriggerPredicate", "Condition", "Formula", "CostAtom"] {
         assert!(counts.get(cat).copied().unwrap_or(0) > 0, "no {cat} objects");
     }

@@ -83,6 +83,7 @@ impl Game {
     /// A fact revealed to everyone.
     pub(crate) fn emit_public(&mut self, kind: u64, player: PlayerId, payload: u64) {
         self.keys.push(key(kind, player, payload));
+        self.consume_forced();
     }
 
     /// A fact revealed only to `to`: hidden from any other observer.
@@ -92,6 +93,79 @@ impl Game {
             _ => payload,
         };
         self.keys.push(key(kind, to, payload));
+        self.consume_forced();
+    }
+
+    // ---- forced outcomes (zero-core `force_chance`, ENGINE.md 10) ---------
+
+    /// Queue outcomes for the next chance events (zero-core `chance_k`:
+    /// replaying a key sampled in another determinized world). Every key the
+    /// engine emits consumes one queued key, in order, so later keys stay
+    /// aligned with their events. A draw, a look at the top of a library and
+    /// a random discard follow their queued key when this world allows it
+    /// (the identity is among the cards nobody knows, in the same knowledge
+    /// domain); otherwise, and for every other kind (reveals of chosen
+    /// cards, `KEY_AUTO`, keys masked as `HIDDEN`), the world's own outcome
+    /// happens. The emitted key is always the actual outcome. `&[]` clears
+    /// the queue.
+    pub fn force_chance(&mut self, keys: &[u64]) {
+        self.forced.clear();
+        self.forced.extend_from_slice(keys);
+        self.forced_at = 0;
+    }
+
+    fn consume_forced(&mut self) {
+        if self.forced_at < self.forced.len() {
+            self.forced_at += 1;
+        }
+    }
+
+    /// The queued key the next emitted key will consume, if it is of this
+    /// kind and player and names a definition.
+    pub(crate) fn forced_def(&self, kind: u64, player: PlayerId) -> Option<DefId> {
+        let k = *self.forced.get(self.forced_at)?;
+        let d = key_payload(k);
+        (key_kind(k) == kind && key_player(k) == player && d != HIDDEN && (d as usize) < self.db.len())
+            .then_some(d as DefId)
+    }
+
+    /// Before library card `c` is drawn or looked at (keyed `kind` for
+    /// `player`): if the next queued key names another identity, swap it in
+    /// from a card that holds it and is interchangeable with `c` for every
+    /// player (both unknown to everyone, the same cloud domains), so every
+    /// player's knowledge still holds in the changed world.
+    pub(crate) fn force_library_card(&mut self, c: CardIdx, kind: u64, player: PlayerId) {
+        let Some(d) = self.forced_def(kind, player) else { return };
+        let o = &self.objs[c.i()];
+        if o.def == d || o.zone != Zone::Library || o.known != 0 {
+            return;
+        }
+        let owner = o.owner;
+        let homes = |g: &Game, x: CardIdx| -> Vec<bool> {
+            g.clouds.iter().map(|k| Self::in_domain_at(k, owner, x, Zone::Library)).collect()
+        };
+        let mine = homes(self, c);
+        let cands: Vec<CardIdx> = self.players[owner as usize]
+            .library
+            .iter()
+            .copied()
+            .filter(|&x| x != c && self.objs[x.i()].def == d && self.objs[x.i()].known == 0)
+            .filter(|&x| homes(self, x) == mine)
+            .collect();
+        if cands.is_empty() {
+            return;
+        }
+        let x = cands[self.rng.below(cands.len() as u32) as usize];
+        let (a, b) = (self.objs[c.i()].def, self.objs[x.i()].def);
+        self.objs[c.i()].def = b;
+        self.objs[x.i()].def = a;
+    }
+
+    /// A random discard from `p`'s hand (`hand` in canonical order): the
+    /// card the next queued reveal names, if the hand holds one.
+    pub(crate) fn forced_hand_pick(&self, p: PlayerId, hand: &[CardIdx]) -> Option<CardIdx> {
+        let d = self.forced_def(KEY_REVEAL, p)?;
+        hand.iter().copied().find(|&c| self.objs[c.i()].def == d)
     }
 
     /// Does `viewer` know the identity of this card exactly?
