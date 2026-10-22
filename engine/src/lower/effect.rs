@@ -5,15 +5,54 @@ use super::filter::{
     lower_card_filter, lower_condition_or_state, lower_pred, lower_pred_or_oneof, lower_search_filter,
 };
 use super::Lowerer;
-use crate::db::{types, AbilityDef, Filter, ManaProd};
+use crate::db::{types, AbilityDef, Filter, ManaProd, Modes};
 use crate::mana::{letter_index, ManaCost};
 use crate::program::{Amount, Builder, Op, PileDest, SearchDest, SpellDest, Who, PILE_ANY};
 use card_ir::{cats, enums, generated, nodes, unions, Count};
 
 pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
-    let mut b = Builder::default();
-    lower_effect(l, &mut b, e);
-    b.finish()
+    use cats::Effect as E;
+    // A modal spell or ability (CR 700.2): every mode is an ability.
+    let modal = match e {
+        E::ModalChooseOne(nodes::ModalChooseOne { modes, or_both }) => Some((modes, 1, if *or_both { 2 } else { 1 }, false)),
+        E::ChooseModes(nodes::ChooseModes {
+            modes,
+            min_modes,
+            max_modes,
+            repeats,
+            mode_mana_costs,
+            escalate_discard,
+            header,
+        }) => {
+            let _ = header; // display text ("Choose two")
+            l.deny("ChooseModes.mode_mana_costs", mode_mana_costs);
+            l.deny("ChooseModes.escalate_discard", escalate_discard);
+            let min = l.int("ChooseModes.min_modes", *min_modes, 0, 8) as u8;
+            let max = l.int("ChooseModes.max_modes", *max_modes, 1, 8) as u8;
+            Some((modes, min, max, *repeats))
+        }
+        _ => None,
+    };
+    let Some((modes, mut min, max, repeat)) = modal else {
+        let mut b = Builder::default();
+        lower_effect(l, &mut b, e);
+        return b.finish();
+    };
+    let mut list = Vec::new();
+    for m in modes {
+        match m {
+            // "Choose up to one": no mode is a choice too.
+            E::ChooseNoMode(nodes::ChooseNoMode {}) => min = 0,
+            m => list.push(lower_ability(l, m)),
+        }
+    }
+    if list.iter().any(|x| x.modes.is_some()) {
+        l.unsupported("ModalChooseOne(nested)");
+    }
+    if list.len() > crate::decision::act::NUMBER_N as usize || min > max {
+        l.unsupported("ModalChooseOne(mode count)");
+    }
+    AbilityDef { targets: Vec::new(), program: Vec::new(), modes: Some(Box::new(Modes { list, min, max, repeat })) }
 }
 
 /// The single `TargetSpec` of an effect -> a target requirement index.
@@ -97,10 +136,17 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
         }
         E::CounterSpell(nodes::CounterSpell { spell_filter, unless_pays, only_if, destination, label }) => {
             let _ = label; // display text ("noncreature spell")
-            l.deny("CounterSpell.only_if", only_if);
             let inner = match spell_filter {
                 Some(p) => lower_pred(l, p).unwrap_or(Filter::Any),
                 None => Filter::Any,
+            };
+            // "Counter target spell if it is blue": a check on resolution.
+            let only_if = match only_if {
+                Some(p) => match lower_pred(l, p) {
+                    Some(f) => Some(Filter::Spell(Box::new(f))),
+                    None => return,
+                },
+                None => None,
             };
             let dest = match destination {
                 enums::SpellDestination::Graveyard => SpellDest::Graveyard,
@@ -109,6 +155,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 enums::SpellDestination::Hand => SpellDest::Hand,
             };
             let tgt = spell_target(b, inner);
+            let guard = only_if.map(|filter| b.op(Op::JumpUnlessTarget { tgt, filter, to: 0 }));
             if unless_pays.is_empty() {
                 b.op(Op::Counter { tgt, dest });
             } else {
@@ -120,6 +167,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     }
                     None => l.unsupported(format!("CounterSpell.unless_pays({unless_pays})")),
                 }
+            }
+            if let Some(at) = guard {
+                b.patch(at);
             }
         }
         E::DrawCards(nodes::DrawCards { amount }) => {
@@ -608,6 +658,21 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             let t = b.target(player_filter(*opponent_only), 1, 1);
             b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
             b.op(Op::ChooseDiscard { chooser: Who::You, whose: Who::TargetPlayer(t), filter, optional: *optional });
+        }
+        E::DestroyTargetArtifact(nodes::DestroyTargetArtifact { targets }) => {
+            let Some(tgt) = lower_targets(l, b, targets, "DestroyTargetArtifact") else { return };
+            if b.targets[tgt as usize].filter != Filter::Type(types::ARTIFACT) {
+                l.unsupported("DestroyTargetArtifact.targets(not an artifact)");
+            }
+            b.op(Op::Destroy { tgt });
+        }
+        E::DealNDamageToEachCreature(nodes::DealNDamageToEachCreature { amount }) => {
+            let amount = l.int("DealNDamageToEachCreature.amount", *amount, 0, 99);
+            b.op(Op::DamageAll { amount: Amount::Fixed(amount), filter: Filter::Type(types::CREATURE) });
+        }
+        E::DealDamageEachOpponent(nodes::DealDamageEachOpponent { amount }) => {
+            let amount = l.int("DealDamageEachOpponent.amount", *amount, 0, 99);
+            b.op(Op::DamagePlayer { amount: Amount::Fixed(amount), who: Who::Opponent });
         }
         E::LookAtTargetPlayersHand(nodes::LookAtTargetPlayersHand {}) => {
             let t = b.target(Filter::Player, 1, 1);

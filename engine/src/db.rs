@@ -135,11 +135,40 @@ pub struct TargetReq {
     pub max: u8,
 }
 
-/// A spell or ability's effect: its target requirements and program.
+/// A spell or ability's effect: its target requirements and program; or,
+/// for a modal one (CR 700.2), its modes (`targets` and `program` empty).
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub struct AbilityDef {
     pub targets: Vec<TargetReq>,
     pub program: Vec<Op>,
+    pub modes: Option<Box<Modes>>,
+}
+
+/// The modes of a modal spell or ability (CR 700.2): choose between `min`
+/// and `max` of them, the same one more than once if `repeat`. Each mode is
+/// an ability of its own (its targets and program).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Modes {
+    pub list: Vec<AbilityDef>,
+    pub min: u8,
+    pub max: u8,
+    pub repeat: bool,
+}
+
+impl AbilityDef {
+    /// Does any part of it target (any mode, for a modal one)?
+    pub fn has_targets(&self) -> bool {
+        !self.targets.is_empty() || self.modes.as_ref().is_some_and(|m| m.list.iter().any(|x| x.has_targets()))
+    }
+
+    /// The target requirements of the chosen mode instances in order (the
+    /// ability's own for a non-modal one).
+    pub fn reqs(&self, modes: &[u8]) -> Vec<&TargetReq> {
+        match &self.modes {
+            None => self.targets.iter().collect(),
+            Some(m) => modes.iter().flat_map(|&k| m.list[k as usize].targets.iter()).collect(),
+        }
+    }
 }
 
 /// Events triggered abilities listen for (ENGINE.md 8).
@@ -303,6 +332,8 @@ pub enum EntersTapped {
 pub struct AbilityRef {
     pub def: DefId,
     pub slot: AbilitySlot,
+    /// One mode of a modal ability (a resolving mode instance).
+    pub mode: Option<u8>,
 }
 
 /// A lowered card (ENGINE.md 3). Read only through `Game` accessors during
@@ -428,13 +459,17 @@ impl CardDb {
 
     pub fn ability(&self, r: AbilityRef) -> &AbilityDef {
         let d = self.def(r.def);
-        match r.slot {
+        let ab = match r.slot {
             AbilitySlot::Spell => d.spell.as_ref().expect("spell ability"),
             AbilitySlot::Trigger(i) => &d.triggers[i as usize].ability,
             AbilitySlot::Activated(_) | AbilitySlot::Hand(_) => match &d.activated_def(r.slot).effect {
                 ActEffect::Stack(ab) => ab,
                 ActEffect::Mana(_) => panic!("a mana ability has no stack program"),
             },
+        };
+        match r.mode {
+            None => ab,
+            Some(m) => &ab.modes.as_ref().expect("a modal ability").list[m as usize],
         }
     }
 

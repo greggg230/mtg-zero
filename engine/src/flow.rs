@@ -44,6 +44,7 @@ pub(crate) enum Task {
     ActPay { id: u32 },
     PayCosts { id: u32, picked: Vec<CardIdx> },
     CastOption { id: u32 },
+    ChooseModes { id: u32 },
     ManaNow { src: Src },
     ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
     // entering the battlefield (CR 614.12)
@@ -173,6 +174,7 @@ impl Game {
             Task::ActPay { id } => self.act_pay(id),
             Task::PayCosts { id, picked } => self.pay_costs(id, picked),
             Task::CastOption { id } => self.cast_option(id),
+            Task::ChooseModes { id } => self.choose_modes(id),
             Task::ManaNow { src } => self.mana_now(src),
             Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
             Task::AsEnters { card } => self.as_enters(card),

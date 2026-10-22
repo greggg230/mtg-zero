@@ -106,6 +106,10 @@ pub enum DecisionKind {
     /// (`LIBRARY` = its slot in that hand sorted by definition; `PASS` =
     /// none, when allowed).
     ChooseDiscard,
+    /// The next mode of a modal spell or ability (`NUMBER` = mode index, in
+    /// non-decreasing order; `PASS` = no more, once enough are chosen; CR
+    /// 700.2).
+    ChooseMode,
 }
 
 /// What an action means to the task that asked.

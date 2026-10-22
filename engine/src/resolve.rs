@@ -51,10 +51,11 @@ impl Game {
             return;
         };
         let ab = self.db.ability(ar);
+        let reqs = ab.reqs(&item.modes);
         let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.item_source(&item)) };
         let mut legal = 0u64;
         for (i, &(req, t)) in item.targets.iter().enumerate() {
-            if self.target_legal(&ab.targets[req as usize], t, &ctx) {
+            if self.target_legal(reqs[req as usize], t, &ctx) {
                 legal |= 1 << i;
             }
         }
@@ -69,19 +70,46 @@ impl Game {
             StackKind::Spell { card } => self.objs[card.i()].def,
             StackKind::Ability { ability, .. } => ability.def,
         };
-        self.agenda.push(Task::Run(Frame {
-            ability: ar,
+        let frame = |ability: AbilityRef, targets: Vec<(u8, Target)>, legal: u64| Frame {
+            ability,
             pc: 0,
             source,
             source_def,
             controller: item.controller,
-            targets: item.targets.clone(),
+            targets,
             legal,
             i: 0,
             lki: None,
             pile: Vec::new(),
             floor: 0,
-        }));
+        };
+        let Some(modes) = &ab.modes else {
+            self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
+            return;
+        };
+        // A modal ability: each chosen mode instance runs in turn, in the
+        // order chosen (non-decreasing, the order printed), with its own
+        // targets (CR 700.2).
+        let mut frames = Vec::with_capacity(item.modes.len());
+        let mut offset = 0u8;
+        for &m in &item.modes {
+            let n = modes.list[m as usize].targets.len() as u8;
+            let mut ts = Vec::new();
+            let mut bits = 0u64;
+            for (i, &(req, t)) in item.targets.iter().enumerate() {
+                if (offset..offset + n).contains(&req) {
+                    if legal & (1 << i) != 0 {
+                        bits |= 1 << ts.len();
+                    }
+                    ts.push((req - offset, t));
+                }
+            }
+            frames.push(frame(AbilityRef { mode: Some(m), ..ar }, ts, bits));
+            offset += n;
+        }
+        for f in frames.into_iter().rev() {
+            self.agenda.push(Task::Run(f));
+        }
     }
 
     /// The last step of resolution (608.2n, 608.3): the item leaves the
@@ -166,6 +194,7 @@ impl Game {
             Who::LkiController => f.lki.map(|l| l.1),
             Who::Active => Some(self.turn.active),
             Who::NonActive => Some(crate::ids::opp(self.turn.active)),
+            Who::Opponent => Some(crate::ids::opp(f.controller)),
         }
     }
 
@@ -194,6 +223,26 @@ impl Game {
                 let src = self.frame_damage_source(f);
                 for t in self.targets_of(f, to) {
                     self.deal_damage(src, t, n);
+                }
+                Flow::Next
+            }
+            Op::DamageAll { amount, ref filter } => {
+                let n = self.amount(f, amount);
+                let src = self.frame_damage_source(f);
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let all: Vec<CardIdx> =
+                    self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
+                for c in all {
+                    let t = Target::Obj(self.obj_ref(c));
+                    self.deal_damage(src, t, n);
+                }
+                Flow::Next
+            }
+            Op::DamagePlayer { amount, who } => {
+                if let Some(p) = self.who(f, who) {
+                    let n = self.amount(f, amount);
+                    let src = self.frame_damage_source(f);
+                    self.deal_damage(src, Target::Player(p), n);
                 }
                 Flow::Next
             }

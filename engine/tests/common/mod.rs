@@ -101,6 +101,22 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
                 "predicate": {"$t": "IsSelf"},
                 "effect": {"$t": "MayDo", "inner": {"$t": "DrawCards", "amount": 1}}}]}),
         ),
+        // When this enters, choose one: you gain 3 life; or 1 damage to any
+        // target (a modal trigger, CR 603.3c).
+        creature(
+            "Test Modal Entry",
+            "{1}{W}",
+            1,
+            1,
+            &[],
+            false,
+            json!({"triggered_abilities": [{"$t": "TriggeredAbility", "event": "enters",
+                "predicate": {"$t": "IsSelf"},
+                "effect": {"$t": "ModalChooseOne", "modes": [
+                    {"$t": "GainLife", "amount": 3},
+                    {"$t": "DealDamageAnyTarget", "amount": 1, "targets": [{"$t": "TargetSpec",
+                        "filter": {"$t": "OneOf", "filters": [{"$t": "IsCreature"}, {"$t": "IsPlayer"}]}}]}]}}]}),
+        ),
         spell(
             "Test Phyrexian Shock",
             "Instant",

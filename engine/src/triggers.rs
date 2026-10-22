@@ -76,7 +76,7 @@ impl Game {
         };
         let t = self.waiting.remove(pick);
         self.agenda.push(Task::PutTriggers);
-        let ability = AbilityRef { def: t.source_def, slot: AbilitySlot::Trigger(t.slot) };
+        let ability = AbilityRef { def: t.source_def, slot: AbilitySlot::Trigger(t.slot), mode: None };
         let ab = self.db.ability(ability);
         if !self.targets_available(ab, t.controller, None) {
             self.note(|_| "trigger removed: no legal target".to_string());
@@ -89,10 +89,14 @@ impl Game {
             controller: t.controller,
             targets: Vec::new(),
             cost_option: 0,
+            modes: Vec::new(),
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
-        if !ab.targets.is_empty() {
+        if ab.has_targets() {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
+        }
+        if ab.modes.is_some() {
+            self.agenda.push(Task::ChooseModes { id }); // CR 700.2b, 603.3c
         }
     }
 }

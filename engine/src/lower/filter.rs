@@ -43,6 +43,13 @@ macro_rules! lower_object_predicate {
             E::ControlledByYou(nodes::ControlledByYou {}) => Some(Filter::Controller(true)),
             E::ControlledByOpponent(nodes::ControlledByOpponent {}) => Some(Filter::Controller(false)),
             E::IsSource(nodes::IsSource {}) => Some(Filter::Source),
+            E::HasColor(nodes::HasColor { color }) => match crate::mana::letter_index(color) {
+                Some(i) if i < 5 => Some(Filter::Color(1 << i)),
+                _ => {
+                    $l.unsupported(format!("HasColor.color({color})"));
+                    None
+                }
+            },
             E::ObjectAnd(nodes::ObjectAnd { left, right }) => {
                 let a = lower_pred_or_oneof($l, left);
                 let b = lower_pred_or_oneof($l, right);

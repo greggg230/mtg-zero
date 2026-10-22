@@ -124,18 +124,23 @@ impl Game {
             return;
         }
         let id = self.new_stack_id();
-        let ability = AbilityRef { def, slot };
+        let ability = AbilityRef { def, slot, mode: None };
         self.stack.push(StackItem {
             id,
             kind: StackKind::Ability { ability, source: self.obj_ref(card) },
             controller: p,
             targets: Vec::new(),
             cost_option: 0,
+            modes: Vec::new(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });
-        if !self.db.ability(ability).targets.is_empty() {
+        let ab = self.db.ability(ability);
+        if ab.has_targets() {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
+        }
+        if ab.modes.is_some() {
+            self.agenda.push(Task::ChooseModes { id }); // CR 700.2a, 602.2b
         }
     }
 

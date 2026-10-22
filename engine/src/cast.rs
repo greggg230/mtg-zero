@@ -66,10 +66,63 @@ impl Game {
         opts
     }
 
-    /// Every target requirement has at least `min` legal candidates.
+    /// Every target requirement has at least `min` legal candidates; for a
+    /// modal ability, enough modes can be chosen (a mode whose targets
+    /// cannot be chosen cannot be, CR 700.2, 601.2c).
     pub(crate) fn targets_available(&self, ab: &AbilityDef, controller: PlayerId, source: Option<ObjRef>) -> bool {
-        let ctx = Ctx { controller, source };
-        ab.targets.iter().all(|tr| tr.min == 0 || self.has_candidates(tr, &ctx, tr.min as usize))
+        match &ab.modes {
+            None => {
+                let ctx = Ctx { controller, source };
+                ab.targets.iter().all(|tr| tr.min == 0 || self.has_candidates(tr, &ctx, tr.min as usize))
+            }
+            Some(m) => {
+                let avail = m.list.iter().filter(|x| self.targets_available(x, controller, source)).count();
+                m.min == 0 || if m.repeat { avail > 0 } else { avail >= m.min as usize }
+            }
+        }
+    }
+
+    /// 601.2b / 603.3c: choose the modes of stack item `id`, one decision
+    /// per mode instance, in non-decreasing order (each choice of modes
+    /// once); only modes whose targets can be chosen, and only while the
+    /// rest can still reach the minimum.
+    pub(crate) fn choose_modes(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
+        let Some(ar) = self.item_ability(item) else { return };
+        let Some(m) = &self.db.ability(ar).modes else { return };
+        match self.answer.take() {
+            Some(Choice::Number(k)) => {
+                self.note(|_| format!("mode {k}"));
+                self.stack[pos].modes.push(k);
+                self.agenda.push(Task::ChooseModes { id });
+                return;
+            }
+            Some(Choice::Pass) => return,
+            Some(other) => unreachable!("mode answer {other:?}"),
+            None => {}
+        }
+        let chosen = item.modes.len();
+        if chosen >= m.max as usize {
+            return;
+        }
+        let (p, source) = (item.controller, Some(self.item_source(item)));
+        let avail: Vec<bool> = m.list.iter().map(|x| self.targets_available(x, p, source)).collect();
+        let floor = item.modes.last().map_or(0, |&l| if m.repeat { l } else { l + 1 }) as usize;
+        let need = (m.min as usize).saturating_sub(chosen + 1);
+        let mut opts = Vec::new();
+        for k in floor..m.list.len() {
+            // After k, the later picks come from k on (k itself if modes
+            // repeat): enough must be available.
+            let later = if m.repeat { avail[k] as usize * need } else { avail[k + 1..].iter().filter(|&&a| a).count() };
+            if avail[k] && later >= need {
+                opts.push(Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) });
+            }
+        }
+        if chosen >= m.min as usize {
+            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+        }
+        self.ask(Task::ChooseModes { id }, p, DecisionKind::ChooseMode, opts);
     }
 
     /// At least `n` legal candidates for `tr` (the same order and rules as
@@ -99,14 +152,18 @@ impl Game {
             controller: p,
             targets: Vec::new(),
             cost_option: 0,
+            modes: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
         self.agenda.push(Task::CastPay { id });
-        if self.def_of(card).spell.as_ref().is_some_and(|ab| !ab.targets.is_empty()) {
+        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.has_targets()) {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
         }
         if self.def_of(card).additional.len() > 1 {
             self.agenda.push(Task::CastOption { id });
+        }
+        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some()) {
+            self.agenda.push(Task::ChooseModes { id }); // CR 601.2b, 700.2a
         }
     }
 
@@ -147,7 +204,7 @@ impl Game {
         match item.kind {
             StackKind::Spell { card } => {
                 let def = self.objs[card.i()].def;
-                self.db.def(def).spell.as_ref().map(|_| AbilityRef { def, slot: AbilitySlot::Spell })
+                self.db.def(def).spell.as_ref().map(|_| AbilityRef { def, slot: AbilitySlot::Spell, mode: None })
             }
             StackKind::Ability { ability, .. } => Some(ability),
         }
@@ -168,8 +225,8 @@ impl Game {
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         let Some(ar) = self.item_ability(item) else { return };
-        let ab = self.db.ability(ar);
-        let Some(tr) = ab.targets.get(req as usize) else { return };
+        let reqs = self.db.ability(ar).reqs(&item.modes);
+        let Some(&tr) = reqs.get(req as usize) else { return };
         let ctx = Ctx { controller: item.controller, source: Some(self.item_source(item)) };
         let already: Vec<Target> =
             item.targets.iter().filter(|(r, _)| *r == req).map(|&(_, t)| t).collect();

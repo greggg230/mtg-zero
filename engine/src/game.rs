@@ -112,6 +112,9 @@ pub struct StackItem {
     /// The additional cost the caster chose (index into the card's
     /// options, CR 601.2b); 0 when there is at most one.
     pub cost_option: u8,
+    /// The chosen mode instances of a modal spell or ability, in
+    /// non-decreasing order (CR 700.2).
+    pub modes: Vec<u8>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

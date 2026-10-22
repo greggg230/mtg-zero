@@ -10,6 +10,7 @@ use engine::lower::support::SupportReport;
 
 /// The supported set (M4b-2). Changing it is deliberate: update this list.
 const SUPPORTED: &[&str] = &[
+    "Abrade",
     "Abrupt Decay",
     "Aether Spellbomb",
     "Ancestral Recall",
@@ -55,6 +56,7 @@ const SUPPORTED: &[&str] = &[
     "Exorcise",
     "Expedition Map",
     "Fatal Push",
+    "Fiery Confluence",
     "Fiery Islet",
     "Flame Slash",
     "Flametongue Kavu",
@@ -105,6 +107,7 @@ const SUPPORTED: &[&str] = &[
     "Mox Pearl",
     "Mox Ruby",
     "Mox Sapphire",
+    "Mystic Confluence",
     "Mystical Tutor",
     "Natural Order",
     "No More Lies",
@@ -119,6 +122,7 @@ const SUPPORTED: &[&str] = &[
     "Preordain",
     "Prismatic Vista",
     "Pyrite Spellbomb",
+    "Pyroblast",
     "Raffine's Tower",
     "Raucous Theater",
     "Raugrin Triome",

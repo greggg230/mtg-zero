@@ -213,3 +213,231 @@ fn a_seen_hand_partly_put_back_is_known_only_as_its_contents() {
     assert!(lib > 10 && hand > 10, "top {lib}, hand {hand}");
     assert!(!g.knows(0, tw));
 }
+
+// ---- modal spells (CR 700.2) ------------------------------------------------
+
+fn modes_offered(g: &Game) -> Vec<u8> {
+    let d = g.pending_decision().unwrap();
+    assert_eq!(d.kind, DecisionKind::ChooseMode, "{:?}", g.options_desc());
+    d.options
+        .iter()
+        .filter_map(|o| match o.choice {
+            Choice::Number(k) => Some(k),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn cr_700_2a_modes_are_chosen_on_casting_before_targets() {
+    // Abrade: 3 damage to target creature, or destroy target artifact.
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain"])
+        .hand(0, &["Abrade"])
+        .battlefield(1, &["Test Bear", "Sol Ring"])
+        .at(Step::Main1, 0)
+        .start();
+    let abrade = g.card(0, "Abrade", Zone::Hand);
+    g.choose(Choice::Cast(abrade));
+    assert_eq!(modes_offered(&g), vec![0, 1]);
+    assert!(!g.has_option(Choice::Pass), "choose one: exactly one");
+    g.choose(Choice::Number(1));
+    // 700.2d-ish: only the chosen mode's targets: artifacts.
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    let ring = g.card(1, "Sol Ring", Zone::Battlefield);
+    let bear = g.card(1, "Test Bear", Zone::Battlefield);
+    assert!(g.has_option(g.tgt(ring)) && !g.has_option(g.tgt(bear)));
+    g.choose(g.tgt(ring));
+    g.drive_until(at_priority);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(1, "Sol Ring", Zone::Graveyard), 1);
+    assert_eq!(g.obj(bear).damage, 0);
+}
+
+#[test]
+fn cr_700_2_a_mode_without_legal_targets_cannot_be_chosen() {
+    let mut g = scen().battlefield(0, &["Mountain", "Mountain"]).hand(0, &["Abrade"]).battlefield(1, &["Test Bear"]).at(Step::Main1, 0).start();
+    let abrade = g.card(0, "Abrade", Zone::Hand);
+    g.choose(Choice::Cast(abrade));
+    assert_eq!(modes_offered(&g), vec![0], "no artifact to target");
+    // With nothing to target at all, it cannot be cast.
+    let g = scen().battlefield(0, &["Mountain", "Mountain"]).hand(0, &["Abrade"]).at(Step::Main1, 0).start();
+    let abrade = g.card(0, "Abrade", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(abrade)));
+}
+
+#[test]
+fn fiery_confluence_repeats_modes_in_non_decreasing_order() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain"; 4])
+        .battlefield(0, &["Test Bear"])
+        .hand(0, &["Fiery Confluence"])
+        .battlefield(1, &["Test Reacher", "Sol Ring"])
+        .at(Step::Main1, 0)
+        .start();
+    let fc = g.card(0, "Fiery Confluence", Zone::Hand);
+    g.choose(Choice::Cast(fc));
+    assert_eq!(modes_offered(&g), vec![0, 1, 2]);
+    g.choose(Choice::Number(1));
+    // Non-decreasing: mode 0 is gone, mode 1 may repeat.
+    assert_eq!(modes_offered(&g), vec![1, 2]);
+    g.choose(Choice::Number(1));
+    assert!(!g.has_option(Choice::Pass), "choose three");
+    g.choose(Choice::Number(2));
+    // The third mode's target, then the payment.
+    let ring = g.card(1, "Sol Ring", Zone::Battlefield);
+    g.choose(g.tgt(ring));
+    g.drive_until(at_priority);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.life(1), 16, "2 damage to each opponent, twice");
+    assert_eq!(g.count_in(1, "Sol Ring", Zone::Graveyard), 1);
+    let reacher = g.card(1, "Test Reacher", Zone::Battlefield);
+    assert_eq!(g.obj(reacher).damage, 0, "mode 0 not chosen");
+
+    // Mode 0 three times: 3 damage to each creature, both sides.
+    let mut g = scen()
+        .battlefield(0, &["Mountain"; 4])
+        .battlefield(0, &["Test Bear"])
+        .hand(0, &["Fiery Confluence"])
+        .battlefield(1, &["Test Reacher"])
+        .at(Step::Main1, 0)
+        .start();
+    let fc = g.card(0, "Fiery Confluence", Zone::Hand);
+    g.choose(Choice::Cast(fc));
+    for _ in 0..3 {
+        g.choose(Choice::Number(0));
+    }
+    g.drive_until(at_priority);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Graveyard), 1);
+    assert_eq!(g.count_in(1, "Test Reacher", Zone::Graveyard), 1);
+}
+
+#[test]
+fn mystic_confluence_gives_each_mode_instance_its_own_target() {
+    // Return target creature twice: two instances, each with its own
+    // target (the same creature may be chosen for both, CR 115.3); then
+    // draw.
+    let mut g = scen()
+        .battlefield(0, &["Island"; 5])
+        .hand(0, &["Mystic Confluence"])
+        .battlefield(1, &["Test Bear", "Test Reacher"])
+        .at(Step::Main1, 0)
+        .start();
+    let mc = g.card(0, "Mystic Confluence", Zone::Hand);
+    g.choose(Choice::Cast(mc));
+    assert_eq!(modes_offered(&g), vec![1, 2], "no spell to counter");
+    g.choose(Choice::Number(1));
+    g.choose(Choice::Number(1));
+    g.choose(Choice::Number(2));
+    let bear = g.card(1, "Test Bear", Zone::Battlefield);
+    let reacher = g.card(1, "Test Reacher", Zone::Battlefield);
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    g.choose(g.tgt(bear));
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    assert!(g.has_option(g.tgt(bear)), "another instance may target it again");
+    g.choose(g.tgt(reacher));
+    g.drive_until(at_priority);
+    let hand = g.player(0).hand.len();
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(1, "Test Bear", Zone::Hand), 1);
+    assert_eq!(g.count_in(1, "Test Reacher", Zone::Hand), 1);
+    assert_eq!(g.player(0).hand.len(), hand + 1, "drew one");
+}
+
+#[test]
+fn cr_608_2b_a_modal_spell_with_every_target_illegal_does_not_resolve() {
+    // Mystic Confluence: bounce the Bear twice and draw. P1 exiles its own
+    // Bear in response: every target is illegal, so even the draw does not
+    // happen.
+    let mut g = scen()
+        .battlefield(0, &["Island"; 5])
+        .hand(0, &["Mystic Confluence"])
+        .battlefield(1, &["Test Bear", "Plains"])
+        .hand(1, &["Swords to Plowshares"])
+        .at(Step::Main1, 0)
+        .start();
+    let mc = g.card(0, "Mystic Confluence", Zone::Hand);
+    g.choose(Choice::Cast(mc));
+    g.choose(Choice::Number(1));
+    g.choose(Choice::Number(1));
+    g.choose(Choice::Number(2));
+    let bear = g.card(1, "Test Bear", Zone::Battlefield);
+    g.choose(g.tgt(bear));
+    g.choose(g.tgt(bear));
+    g.drive_until(at_priority);
+    g.pass();
+    let stp = g.card(1, "Swords to Plowshares", Zone::Hand);
+    g.choose(Choice::Cast(stp));
+    g.choose(g.tgt(bear));
+    g.drive_until(at_priority);
+    let hand = g.player(0).hand.len();
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(1, "Test Bear", Zone::Exile), 1);
+    assert_eq!(g.player(0).hand.len(), hand, "the draw mode did not happen");
+    assert_eq!(g.count_in(0, "Mystic Confluence", Zone::Graveyard), 1);
+}
+
+#[test]
+fn pyroblast_targets_any_spell_and_counters_only_a_blue_one() {
+    // A red spell: Pyroblast can target it but does nothing.
+    let mut g = scen()
+        .battlefield(0, &["Mountain"])
+        .hand(0, &["Lightning Bolt"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Pyroblast"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.choose(Choice::Target(engine::Target::Player(1)));
+    g.drive_until(at_priority);
+    g.pass();
+    let pb = g.card(1, "Pyroblast", Zone::Hand);
+    g.choose(Choice::Cast(pb));
+    assert_eq!(modes_offered(&g), vec![0, 1], "a spell and permanents to target");
+    g.choose(Choice::Number(0));
+    g.drive_until(at_priority);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.life(1), 17, "the Bolt resolved");
+    // A blue spell is countered.
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island"])
+        .hand(0, &["Test Flyer"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Pyroblast"])
+        .at(Step::Main1, 0)
+        .start();
+    let flyer = g.card(0, "Test Flyer", Zone::Hand);
+    g.choose(Choice::Cast(flyer));
+    g.drive_until(at_priority);
+    g.pass();
+    let pb = g.card(1, "Pyroblast", Zone::Hand);
+    g.choose(Choice::Cast(pb));
+    g.choose(Choice::Number(0));
+    g.drive_until(at_priority);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Test Flyer", Zone::Graveyard), 1);
+}
+
+#[test]
+fn cr_603_3c_a_modal_trigger_chooses_its_mode_as_it_goes_on_the_stack() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains"])
+        .hand(0, &["Test Modal Entry"])
+        .battlefield(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Test Modal Entry", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(at_priority);
+    g.drive_until(|g| !at_priority(g) || g.stack().is_empty() && g.waiting_triggers().is_empty());
+    assert_eq!(modes_offered(&g), vec![0, 1]);
+    g.choose(Choice::Number(1));
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    let bear = g.card(1, "Test Bear", Zone::Battlefield);
+    g.choose(g.tgt(bear));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.obj(bear).damage, 1);
+    assert_eq!(g.life(0), 20);
+}

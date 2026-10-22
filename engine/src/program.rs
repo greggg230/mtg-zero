@@ -22,6 +22,8 @@ pub enum Who {
     /// in APNAP order (CR 101.4).
     Active,
     NonActive,
+    /// The controller's opponent ("each opponent", 2p).
+    Opponent,
 }
 
 /// A number an op uses.
@@ -70,6 +72,11 @@ pub enum Op {
     /// The source deals `amount` damage to each legal target of requirement
     /// `to` (CR 120).
     DealDamage { amount: Amount, to: u8 },
+    /// The source deals `amount` damage to each creature matching `filter`
+    /// (CR 120; all at once).
+    DamageAll { amount: Amount, filter: Filter },
+    /// The source deals `amount` damage to player `who`.
+    DamagePlayer { amount: Amount, who: Who },
     /// `who` draws `n` cards, one at a time (CR 121.2).
     Draw { who: Who, n: Amount },
     /// `who` gains `n` life (CR 119).
@@ -216,6 +223,6 @@ impl Builder {
     }
 
     pub fn finish(self) -> AbilityDef {
-        AbilityDef { targets: self.targets, program: self.program }
+        AbilityDef { targets: self.targets, program: self.program, modes: None }
     }
 }
