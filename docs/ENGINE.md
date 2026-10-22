@@ -667,7 +667,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_sba.rs` | 704.5a, b, f, g (+ 514.2), h, j (legend rule choice), 104.4a, turn cap |
 | `tests/rules_combat.rs` | 302.6 / 702.10, 508.1f / 702.3b, 509.1b, 702.110b, 510.1c, 702.19c, 702.4, 702.7, 702.15, 508.8, 506.4 / 702.19e |
 | `tests/rules_triggers.rs` | 603.3, 603.3b (APNAP, ordering decision), 603.3d (targets; removal without target), 603.10a |
-| `tests/rules_activated.rs` | 602.2a (on the stack before targets and costs), 602.2 (targets before a sacrifice cost; the source gone while its ability waits), 605 (mana abilities while paying, not at priority), 302.6 (tap abilities and summoning sickness, haste; non-tap and noncreature abilities), 602.5d, 602.5b, 106 (excess mana stays; Black Lotus's colour), 601.2g (activation order: Mox Opal before Black Lotus), a card's mana abilities are alternatives (Talisman damage), 119.4, 107.4f (Phyrexian), 107.4e (hybrid) and a mana choice on resolution, 601.2b (additional-cost options), sacrifice reservations, Spirit Guides, Lion's Eye Diamond, cycling, "you may", indestructible, hexproof; 605.3a (a Spirit Guide while paying, also an "unless pays" cost during resolution; revealed when picked), a hand mana source leaves the cards a discard cost needs |
+| `tests/rules_activated.rs` | 602.2a (on the stack before targets and costs), 602.2 (targets before a sacrifice cost; the source gone while its ability waits), 605 (mana abilities while paying, not at priority), 302.6 (tap abilities and summoning sickness, haste; non-tap and noncreature abilities), 602.5d, 602.5b, 106 (excess mana stays; Black Lotus's colour), 601.2g (activation order: Mox Opal before Black Lotus), a card's mana abilities are alternatives (Talisman damage), 119.4, 107.4f (Phyrexian), 107.4e (hybrid) and a mana choice on resolution, 601.2b (additional-cost options), sacrifice reservations, Lion's Eye Diamond, cycling, "you may", indestructible, hexproof; 605.3a (a Spirit Guide while paying, also an "unless pays" cost during resolution; revealed when picked), a hand mana source leaves the cards a discard cost needs |
 | `tests/rules_lands.rs` | 614.1c (enters tapped; fast lands), 614.12 (shock lands, 119.4 at 1 and 2 life), Starting Town, horizon lands, Gaea's Cradle, Ancient Tomb, Wasteland, Karakas, Strip Mine blocked |
 | `tests/cards.rs` | the cube cards: Mana Leak (pay / decline / cannot pay), Memory Lapse, Counterspell, Spell Pierce, Brainstorm (mid-resolution choices, a clone taken mid-resolution), Ancestral Recall, Dark Ritual + Hymn (pool, keyed random discard), Time Walk, Cut Down / Flame Slash filters, Cogwork Librarian, mana-source classes |
 | `tests/cards_m4b1.rs` | Swords to Plowshares (last known power), Fatal Push (resolution check; revolt from a Lotus Petal sacrificed for mana), Unholy Heat (delirium), Cabal Ritual (threshold counted while on the stack), Abrupt Decay vs Counterspell, Oust, Remand / No More Lies, Time Warp on the opponent (500.7), Wheel of Fortune, Relic of Sauron, Zuran Orb, Voltaic Key, Aether Spellbomb, Mox Amber, Loran of the Third Path |
@@ -689,7 +689,8 @@ Every ~40 actions: two clones given the same action stay identical (state hash a
 (`view_of`) and never resamples a card the viewer knows, the clouds still hold in the
 resampled world, two worlds sampled for the viewer stay indistinguishable to it while their
 keys, next decider and legal actions agree (section 10), then the resampled world plays on 30
-random actions under the same checks. After every action the clouds are checked against the
+random actions under the same checks; the same view, known-card and invariant checks run for
+the other player's determinize too. After every action the clouds are checked against the
 true state (`check_knowledge`). Every game must end (60-turn cap).
 Separately, 30 games are replayed from their seed and action list and must reproduce the
 final state hash, the outcome and the chance-key sequence exactly. `FUZZ_GAMES=n` sets the
@@ -752,7 +753,7 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 | `Game::clone` (mean over mid-game states) | 1.36 us (6,616 states); `size_of::<Game>()` = 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
 | `clone` + `determinize(to_move)` (one search simulation's setup) | 2.3 us | 2.3 us | 2.4 us |
 | `legal_actions` (copies cached ids) | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 64 s, no failure (with the information-set checks) | 60 s | 28 s |
+| Fuzzer, 20,000 games, release | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
