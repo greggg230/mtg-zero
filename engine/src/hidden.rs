@@ -26,6 +26,8 @@ pub const KEY_LOOK: u64 = 3;
 /// the player had no alternative. Payload: the decision kind (bits 16+) and
 /// the action id.
 pub const KEY_AUTO: u64 = 4;
+/// A coin flip (CR 705): payload 1 = its player won, 0 = lost. Public.
+pub const KEY_COIN: u64 = 5;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
 
@@ -163,6 +165,44 @@ impl Game {
 
     /// A random discard from `p`'s hand (`hand` in canonical order): the
     /// card the next queued reveal names, if the hand holds one.
+    /// Hand cards of one definition are interchangeable (ENGINE.md 10):
+    /// which of them another player knows is not information. Their
+    /// knowledge bits are normalised so the better-known come first in
+    /// canonical order (by definition, then card), making the state, and
+    /// what an encoding reads per hand slot, independent of which physical
+    /// card a sampled world dealt where.
+    pub(crate) fn canon_hand_knowledge(&mut self) {
+        for p in 0..2u8 {
+            if self.players[p as usize].hand.len() < 2 {
+                continue;
+            }
+            let h = self.hand_sorted(p);
+            let mut i = 0;
+            while i < h.len() {
+                let d = self.objs[h[i].i()].def;
+                let mut j = i + 1;
+                while j < h.len() && self.objs[h[j].i()].def == d {
+                    j += 1;
+                }
+                if j - i > 1 {
+                    let mut bits: Vec<u8> = h[i..j].iter().map(|c| self.objs[c.i()].known).collect();
+                    bits.sort_unstable_by(|a, b| b.cmp(a));
+                    for (k, &c) in h[i..j].iter().enumerate() {
+                        self.objs[c.i()].known = bits[k];
+                    }
+                }
+                i = j;
+            }
+        }
+    }
+
+    /// The queued outcome of a coin flip by `p` (`force_chance`), if the
+    /// next queued key is one.
+    pub(crate) fn forced_coin(&self, p: PlayerId) -> Option<bool> {
+        let k = *self.forced.get(self.forced_at)?;
+        (key_kind(k) == KEY_COIN && key_player(k) == p).then(|| key_payload(k) == 1)
+    }
+
     pub(crate) fn forced_hand_pick(&self, p: PlayerId, hand: &[CardIdx]) -> Option<CardIdx> {
         let d = self.forced_def(KEY_REVEAL, p)?;
         hand.iter().copied().find(|&c| self.objs[c.i()].def == d)

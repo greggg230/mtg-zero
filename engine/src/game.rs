@@ -225,6 +225,9 @@ pub struct Game {
     pub(crate) tokens: u32,
     /// A simultaneous move off the battlefield is in progress (`leaving`).
     pub(crate) batching: bool,
+    /// The permanent being put onto the battlefield is a resolving spell
+    /// (it was cast).
+    pub(crate) entering_cast: bool,
     /// Set by `determinize`: private reveals to others are keyed as hidden.
     pub(crate) observer: Option<PlayerId>,
     /// Chance keys of the current `apply`; always empty between calls.
@@ -358,6 +361,7 @@ impl Game {
             n_static: 0,
             leaving: Vec::new(),
             batching: false,
+            entering_cast: false,
             log: if spec.log { Some(Vec::new()) } else { None },
         }
     }
@@ -526,6 +530,19 @@ impl Game {
     /// 614.1c, decided before it moves) and queueing "as this enters"
     /// choices (614.12, a task that runs next).
     pub(crate) fn put_onto_battlefield(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
+        // CR 614.1a: "If a nontoken creature would enter and it wasn't
+        // cast, exile it instead."
+        let cast = std::mem::take(&mut self.entering_cast);
+        if !cast && self.def_of(idx).is(types::CREATURE) && !self.def_of(idx).token {
+            let replaced = self
+                .battlefield
+                .iter()
+                .any(|&c| self.def_of(c).exiles_uncast_creatures);
+            if replaced {
+                self.note(|g| format!("{} is exiled instead (not cast)", g.name(idx)));
+                return self.move_card(idx, Zone::Exile, Pos::Top);
+            }
+        }
         let tapped = self.enters_tapped(idx, controller);
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
         if tapped {
@@ -684,12 +701,10 @@ impl Game {
 
     /// Tap a permanent (a "becomes tapped" event if it was untapped).
     pub(crate) fn tap(&mut self, idx: CardIdx) {
-        if !self.objs[idx.i()].tapped {
+        if !self.objs[idx.i()].tapped && self.objs[idx.i()].zone == Zone::Battlefield {
             self.objs[idx.i()].tapped = true;
-            if self.objs[idx.i()].zone == Zone::Battlefield {
-                let r = self.obj_ref(idx);
-                self.event(Event::obj(EventKind::BecomesTapped, r));
-            }
+            let r = self.obj_ref(idx);
+            self.event(Event::obj(EventKind::BecomesTapped, r));
         }
     }
 
@@ -699,6 +714,19 @@ impl Game {
         if self.objs[idx.i()].tapped && self.remove_counters(idx, crate::db::Counter::Stun, 1) == 0 {
             self.objs[idx.i()].tapped = false;
         }
+    }
+
+    /// Discard a card (CR 701.9): from its owner's hand to their graveyard,
+    /// then a "discards" event.
+    pub(crate) fn discard(&mut self, idx: CardIdx) {
+        let owner = self.objs[idx.i()].owner;
+        let r = self.move_card(idx, Zone::Graveyard, Pos::Top);
+        self.event(Event {
+            kind: EventKind::CardDiscarded,
+            a: crate::triggers::Subj::Player(owner),
+            b: crate::triggers::Subj::Obj(r),
+            amount: 0,
+        });
     }
 
     /// Sacrifice a permanent (CR 701.17): to its owner's graveyard, a
@@ -742,8 +770,13 @@ impl Game {
                     self.note(|g| format!("damage to {} prevented (protection)", g.describe_target(t)));
                     return 0;
                 }
+                let heals = self.def_of(r.idx).heals_on_damage;
                 let o = &mut self.objs[r.idx.i()];
-                o.damage = o.damage.saturating_add(amount as u16);
+                let amt = amount.min(u16::MAX as i32) as u16;
+                o.damage = if heals { amt } else { o.damage.saturating_add(amt) };
+                if heals {
+                    o.deathtouched = false;
+                }
                 if src.deathtouch {
                     o.deathtouched = true;
                 }

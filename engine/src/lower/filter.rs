@@ -62,6 +62,18 @@ macro_rules! lower_object_predicate {
                 Some(Filter::Or(vec![a?, b?]))
             }
             E::ObjectNot(nodes::ObjectNot { inner }) => Some(Filter::Not(Box::new(lower_pred($l, inner)?))),
+            E::HasDrawnNCardsThisTurn(nodes::HasDrawnNCardsThisTurn { n }) => {
+                Some(Filter::DrewThisTurn($l.int("HasDrawnNCardsThisTurn.n", *n, 0, 99) as u8))
+            }
+            E::HasPrintedCardType(nodes::HasPrintedCardType { card_type }) => match types::from_name(card_type) {
+                // Printed = the card's own types (no type-changing effect
+                // touches spells or graveyard cards here).
+                Some(t) => Some(Filter::Type(t)),
+                None => {
+                    $l.unsupported(format!("HasPrintedCardType({card_type})"));
+                    None
+                }
+            },
             $($extra)*
             other => {
                 $l.unsupported(format!("ObjectPredicate:{}", other.tag()));

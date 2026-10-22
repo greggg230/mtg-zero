@@ -101,6 +101,16 @@ impl Game {
             Some(other) => unreachable!("attack answer {other:?}"),
             None => {}
         }
+        if next == 0 {
+            // CR 508.1d: creatures that attack each combat if able are
+            // declared first (no attack here has a cost, so they can).
+            for c in self.permanents_of(ap).collect::<Vec<_>>() {
+                if !self.objs[c.i()].attacking && self.can_attack(c) && self.flags_of(c).must_attack {
+                    self.objs[c.i()].attacking = true;
+                    self.note(|g| format!("{} must attack", g.name(c)));
+                }
+            }
+        }
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
         for c in self.permanents_of(ap).collect::<Vec<_>>() {
             let a = self.perm_action(ap, c);
@@ -235,18 +245,18 @@ impl Game {
             let blockers = self.blockers_of(a);
             let trample = self.has_kw(a, Kw::Trample);
             if !self.objs[a.i()].blocked {
-                self.combat_dmg.push((a, Target::Player(dp), power as u16));
+                self.combat_dmg.push((a, Target::Player(dp), power.min(u16::MAX as i32) as u16));
             } else if blockers.is_empty() {
                 // CR 509.1h / 702.19e: blocked, blockers gone: only trample.
                 if trample {
-                    self.combat_dmg.push((a, Target::Player(dp), power as u16));
+                    self.combat_dmg.push((a, Target::Player(dp), power.min(u16::MAX as i32) as u16));
                 }
             } else if blockers.len() == 1 && !trample {
                 let b = self.obj_ref(blockers[0]);
-                self.combat_dmg.push((a, Target::Obj(b), power as u16));
+                self.combat_dmg.push((a, Target::Obj(b), power.min(u16::MAX as i32) as u16));
             } else {
                 self.agenda.push(Task::CombatDamage { first, att: k as u8 + 1 });
-                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: power as u16 });
+                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: power.min(u16::MAX as i32) as u16 });
                 return;
             }
         }
@@ -259,7 +269,7 @@ impl Game {
             let p = self.power(c);
             if p > 0 {
                 let ar = self.obj_ref(a);
-                self.combat_dmg.push((c, Target::Obj(ar), p as u16));
+                self.combat_dmg.push((c, Target::Obj(ar), p.min(u16::MAX as i32) as u16));
             }
         }
         // CR 510.2: all at once. Sources are read before anything changes.
@@ -311,12 +321,18 @@ impl Game {
         let blockers = self.blockers_of(att);
         let trample = self.has_kw(att, Kw::Trample);
         let dp = opp(self.turn.active);
-        if let Some(Choice::Number(n)) = self.answer.take() {
+        if let Some(Choice::Number(k)) = self.answer.take() {
+            // With 32 or more to divide, 30 = lethal and 31 = all the rest.
+            let n = match (left >= act::NUMBER_N, k) {
+                (true, 30) => self.lethal_needed(att, blockers[j as usize]),
+                (true, 31) => left,
+                _ => k as u16,
+            };
             let b = self.obj_ref(blockers[j as usize]);
             if n > 0 {
-                self.combat_dmg.push((att, Target::Obj(b), n as u16));
+                self.combat_dmg.push((att, Target::Obj(b), n));
             }
-            self.agenda.push(Task::AssignDamage { att, j: j + 1, left: left - n as u16 });
+            self.agenda.push(Task::AssignDamage { att, j: j + 1, left: left - n });
             return;
         }
         if j as usize >= blockers.len() {
@@ -337,10 +353,9 @@ impl Game {
         } else {
             (lethal..=left).collect()
         };
-        assert!(left <= u8::MAX as u16, "damage {left} exceeds the choice range");
-        // `NUMBER` n = n damage. With more than 31 to divide, the amounts
-        // offered are 0..=29 exactly, the blocker's lethal damage (id 30)
-        // and all of the rest (id 31): the divisions that differ in what
+        // `NUMBER` n = n damage. With 32 or more to divide, the amounts
+        // offered are 0..=29 exactly, the blocker's lethal damage (n = 30)
+        // and all of the rest (n = 31): the divisions that differ in what
         // dies and what tramples over (ENGINE.md 13).
         let opts = if left < act::NUMBER_N {
             amounts.into_iter().map(|n| Opt { action: act::NUMBER + n, choice: Choice::Number(n as u8) }).collect()
@@ -351,10 +366,10 @@ impl Game {
                 .map(|&n| Opt { action: act::NUMBER + n, choice: Choice::Number(n as u8) })
                 .collect();
             if lethal > 29 && amounts.contains(&lethal) {
-                v.push(Opt { action: act::NUMBER + 30, choice: Choice::Number(lethal as u8) });
+                v.push(Opt { action: act::NUMBER + 30, choice: Choice::Number(30) });
             }
             if left > 29 && left != lethal && amounts.contains(&left) {
-                v.push(Opt { action: act::NUMBER + 31, choice: Choice::Number(left as u8) });
+                v.push(Opt { action: act::NUMBER + 31, choice: Choice::Number(31) });
             }
             v
         };

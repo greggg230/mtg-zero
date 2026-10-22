@@ -112,6 +112,9 @@ pub enum DecisionKind {
     ChooseMode,
     /// A colour (`NUMBER` = W U B R G index; 5 = colorless).
     ChooseColor,
+    /// A permanent chosen by an effect (not targeted), one per decision in
+    /// increasing slot order; `PASS` = no more.
+    ChoosePermanent,
 }
 
 /// What an action means to the task that asked.

@@ -179,6 +179,9 @@ impl Game {
     /// depend on choices: {T} (untapped; a creature also free of summoning
     /// sickness, CR 302.6 / 602.5a), "only during your turn", "only if".
     pub(crate) fn activation_ready(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef) -> bool {
+        if self.activation_locked(card) {
+            return false;
+        }
         let o = &self.objs[card.i()];
         if ad.cost.tap && (o.tapped || (self.is_creature(card) && self.is_sick(card) && !self.has_kw(card, Kw::Haste)))
         {
@@ -193,6 +196,17 @@ impl Game {
             }
         }
         true
+    }
+
+    /// "Activated abilities of [types] can't be activated" (CR 602.5) by a
+    /// static ability of a permanent on the battlefield (mana abilities
+    /// included).
+    pub(crate) fn activation_locked(&self, card: CardIdx) -> bool {
+        if self.objs[card.i()].zone != Zone::Battlefield {
+            return false;
+        }
+        let t = self.types_of(card);
+        self.battlefield.iter().any(|&c| self.def_of(c).locks_activated & t != 0)
     }
 
     /// The mana sources `p` can use to pay a cost, by class (ENGINE.md 18):
@@ -411,7 +425,7 @@ impl Game {
         if cost.discard_hand {
             for h in self.hand_sorted(p) {
                 if h != c {
-                    self.move_card(h, Zone::Graveyard, Pos::Top);
+                    self.discard(h);
                 }
             }
         }
@@ -419,7 +433,7 @@ impl Game {
             self.sacrifice(c);
         }
         if cost.discard_self {
-            self.move_card(c, Zone::Graveyard, Pos::Top);
+            self.discard(c);
         }
         if cost.exile_self {
             self.move_card(c, Zone::Exile, Pos::Top);

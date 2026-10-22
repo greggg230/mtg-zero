@@ -237,6 +237,8 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             // Riders read the removed object's last known information.
             enum Rider {
                 GainPower,
+                /// "If you controlled it, draw n cards."
+                IfYouControlledDraw(i32),
                 /// "Its controller [may] search their library for a basic
                 /// land card, put it onto the battlefield tapped, then
                 /// shuffle."
@@ -250,6 +252,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 Some(cats::RemovalRider::ControllerSearchesForBasicLand(nodes::ControllerSearchesForBasicLand {
                     optional,
                 })) => Some(Rider::SearchBasic { optional: *optional }),
+                Some(cats::RemovalRider::IfYouControlledItDraw(nodes::IfYouControlledItDraw { amount })) => {
+                    Some(Rider::IfYouControlledDraw(l.int("IfYouControlledItDraw.amount", *amount, 1, 9)))
+                }
                 Some(other) => {
                     l.unsupported(format!("RemovalRider:{}", other.tag()));
                     None
@@ -308,6 +313,11 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 None => {}
                 Some(Rider::GainPower) => {
                     b.op(Op::GainLife { who: Who::LkiController, n: Amount::LkiPower });
+                }
+                Some(Rider::IfYouControlledDraw(n)) => {
+                    let at = b.op(Op::Ext(crate::program::Ext::JumpUnlessLkiYours { to: 0 }));
+                    b.op(Op::Draw { who: Who::You, n: Amount::Fixed(n) });
+                    b.patch(at);
                 }
                 Some(Rider::SearchBasic { optional }) => {
                     let who = Who::LkiController;

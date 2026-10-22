@@ -56,6 +56,7 @@ pub struct Effect {
 pub struct Flags {
     pub cant_block: bool,
     pub cant_be_blocked: bool,
+    pub must_attack: bool,
 }
 
 impl Game {
@@ -104,6 +105,7 @@ impl Game {
             Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::Controller(y) => (self.objs[c.i()].controller == you) == *y,
             Filter::Token => self.def_of(c).token,
+            Filter::Attacking => self.objs[c.i()].attacking,
             Filter::And(a, b) => self.scope_matches(a, c, you) && self.scope_matches(b, c, you),
             Filter::Or(v) => v.iter().any(|x| self.scope_matches(x, c, you)),
             Filter::Not(x) => !self.scope_matches(x, c, you),
@@ -243,6 +245,7 @@ impl Game {
             match m {
                 Mod::CantBlock => f.cant_block = true,
                 Mod::CantBeBlocked => f.cant_be_blocked = true,
+                Mod::MustAttack => f.must_attack = true,
                 _ => {}
             }
         }
@@ -358,7 +361,7 @@ impl Game {
             return;
         }
         match self.counters.iter_mut().find(|x| x.0 == c && x.1 == k) {
-            Some(x) => x.2 += n,
+            Some(x) => x.2 = x.2.saturating_add(n),
             None => self.counters.push((c, k, n)),
         }
         self.note(|g| format!("{n} {k:?} counter(s) on {}", g.name(c)));

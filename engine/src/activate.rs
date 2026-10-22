@@ -250,7 +250,7 @@ impl Game {
             } else {
                 // Discards happen one at a time: a chosen hand card is never
                 // left hidden while another decision is pending.
-                self.move_card(c, Zone::Graveyard, Pos::Top);
+                self.discard(c);
                 picked.push(c);
             }
         }
@@ -288,7 +288,7 @@ impl Game {
         if cost.discard_hand {
             for h in self.hand_sorted(p) {
                 if h != card {
-                    self.move_card(h, Zone::Graveyard, Pos::Top);
+                    self.discard(h);
                 }
             }
         }
@@ -296,7 +296,7 @@ impl Game {
             self.sacrifice(card);
         }
         if cost.discard_self {
-            self.move_card(card, Zone::Graveyard, Pos::Top);
+            self.discard(card);
         }
         if cost.exile_self {
             self.move_card(card, Zone::Exile, Pos::Top);

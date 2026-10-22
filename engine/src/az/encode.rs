@@ -118,9 +118,13 @@ pub mod perm {
 /// The descriptor part of a card code: types, colours, size.
 fn code(out: &mut [f32], db: &CardDb, def: DefId) {
     let i = def as usize;
-    debug_assert!(i < D, "card table capacity {D}");
-    out[(i >> 4) & 15] = 1.0;
-    out[16 + (i & 15)] = 1.0;
+    // M7a stopgap until layout v2 (M5b's stable identities): a definition
+    // past the v1 table's capacity has no identity digits, only its
+    // descriptor.
+    if i < D {
+        out[(i >> 4) & 15] = 1.0;
+        out[16 + (i & 15)] = 1.0;
+    }
     let d = db.def(def);
     for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
         .iter()
@@ -143,6 +147,9 @@ fn code(out: &mut [f32], db: &CardDb, def: DefId) {
 }
 
 fn bag_add(out: &mut [f32], b: usize, def: DefId) {
+    if (def as usize) >= D {
+        return; // M7a stopgap (see `code`)
+    }
     out[O_BAGS + b * D + def as usize] += 0.25;
 }
 
@@ -249,7 +256,6 @@ impl Game {
     /// [`NUM_FEATURES`] floats, zeroed by the caller.
     pub fn encode_features(&self, viewer: PlayerId, out: &mut [f32]) {
         assert_eq!(out.len(), NUM_FEATURES);
-        assert!(self.db.len() <= D, "card table larger than the encoding's capacity {D}");
         let me = viewer;
         let op_ = opp(me);
         let decision = self.pending.as_ref();
@@ -654,7 +660,9 @@ impl Game {
             _ => card = frame_card(task),
         }
         if let Some((def, slot, mode)) = card {
-            x[ctx::CARD + def as usize] = 1.0;
+            if (def as usize) < D {
+                x[ctx::CARD + def as usize] = 1.0; // M7a stopgap (see `code`)
+            }
             x[ctx::HAS_CARD] = 1.0;
             if let Some(s) = slot {
                 let (k, i) = match s {

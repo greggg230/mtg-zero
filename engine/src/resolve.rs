@@ -36,6 +36,10 @@ pub(crate) struct Frame {
     /// A number an op remembered for later ops (a revealed card's mana
     /// value).
     pub x: i32,
+    /// Permanents chosen so far by the current `Ext::Choose`.
+    pub picked: Vec<CardIdx>,
+    /// The token the last `CreateToken` made.
+    pub made: Option<CardIdx>,
 }
 
 pub(crate) enum Flow {
@@ -93,6 +97,8 @@ impl Game {
             floor: 0,
             ev: item.ev,
             x: 0,
+            picked: Vec::new(),
+            made: None,
         };
         let Some(modes) = &ab.modes else {
             self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
@@ -131,6 +137,7 @@ impl Game {
             if let StackKind::Spell { card } = item.kind {
                 if self.objs[card.i()].zone == Zone::Stack {
                     if self.def_of(card).is_permanent_card() {
+                        self.entering_cast = true;
                         self.put_onto_battlefield(card, item.controller);
                     } else {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
@@ -369,7 +376,7 @@ impl Game {
                             Some(c) => c,
                             None => sorted[self.rng.below(sorted.len() as u32) as usize],
                         };
-                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                        self.discard(c);
                     }
                 }
                 Flow::Next
@@ -420,7 +427,7 @@ impl Game {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
                 if let Some(ch) = self.answer.take() {
                     let Choice::Card(c) = ch else { unreachable!("discard answer {ch:?}") };
-                    self.move_card(c, Zone::Graveyard, Pos::Top);
+                    self.discard(c);
                     f.i += 1;
                 }
                 if f.i >= n || self.players[p as usize].hand.is_empty() {
@@ -433,7 +440,7 @@ impl Game {
             Op::DiscardHand { who } => {
                 if let Some(p) = self.who(f, who) {
                     for c in self.hand_sorted(p) {
-                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                        self.discard(c);
                     }
                 }
                 Flow::Next
@@ -613,8 +620,11 @@ impl Game {
             }
             Op::CreateToken { token, n, tapped } => {
                 let def = self.db.token_def(token);
-                for _ in 0..n {
-                    self.create_token(def, f.controller, tapped);
+                for k in 0..n {
+                    let t = self.create_token(def, f.controller, tapped);
+                    if k == 0 {
+                        f.made = Some(t);
+                    }
                 }
                 Flow::Next
             }
@@ -714,7 +724,7 @@ impl Game {
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         self.note(|g| format!("P{owner} discards {}", g.name(c)));
-                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                        self.discard(c);
                         Flow::Next
                     }
                     Some(Choice::Pass) => Flow::Next,

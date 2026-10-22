@@ -54,7 +54,6 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility) -> Option<S
     l.deny("StaticAbility.grants_creature_spells_uncounterable", grants_creature_spells_uncounterable);
     l.deny("StaticAbility.grants_spells_uncounterable", grants_spells_uncounterable);
     l.deny("StaticAbility.grants_ward_life_cost", grants_ward_life_cost);
-    l.deny("StaticAbility.must_attack_each_combat", must_attack_each_combat);
     l.deny("StaticAbility.opponents_enter_tapped_types", opponents_enter_tapped_types);
     l.deny("StaticAbility.activation_cost_reduction", activation_cost_reduction);
     l.deny_ne(
@@ -81,6 +80,9 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility) -> Option<S
         ));
     }
     mods.extend(super::effect_ext::keyword_mods(l, granted_keywords));
+    if *must_attack_each_combat {
+        mods.push(Mod::MustAttack);
+    }
     if let Some(c) = continuous_effect.as_deref() {
         let cats::ContinuousModifier::ContinuousModifier(nodes::ContinuousModifier { layer, payload, subject_filter }) = c;
         l.deny("ContinuousModifier.subject_filter", subject_filter);

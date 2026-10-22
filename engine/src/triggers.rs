@@ -169,6 +169,12 @@ impl Game {
                 (who == src.controller) == *you
             }
             TrigPred::If(c) | TrigPred::State(c) => self.cond_holds(c, src.controller),
+            TrigPred::FormerHost(s) => match ev.subject(*s) {
+                // Evaluated as the host leaves (look back): the Equipment
+                // is still attached to it.
+                Subj::Obj(r) => self.objs[src.r.idx.i()].attached == Some(r),
+                _ => false,
+            },
         }
     }
 

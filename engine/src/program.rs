@@ -100,6 +100,40 @@ pub enum Ext {
     /// card of their choice, or declines and continues at `skip`. Choice:
     /// a hand card, or `PASS`.
     MayDiscard { skip: u16 },
+    /// `who` chooses between `min` and `max` permanents matching `filter`
+    /// (not targeted; "you" in the filter is the ability's controller), one
+    /// decision per permanent in increasing slot order (`PASS` = no more),
+    /// then `act` happens to all of them at once.
+    Choose { who: Who, filter: Filter, min: u8, max: u8, act: ChooseAct },
+    /// Exile each legal target of requirement `tgt`, then return those cards
+    /// to the battlefield under their owners' control (a token ceases to
+    /// exist instead).
+    Flicker { tgt: u8 },
+    /// Double the counters of a kind on each object of `on` (CR 701.10e-like:
+    /// put that many more).
+    DoubleCounters { on: On, counter: Counter },
+    /// The controller flips a coin (CR 705): winning continues at `won`,
+    /// losing at the next op. A public chance key.
+    FlipCoin { won: u16 },
+    /// Unless the object last remembered (`Op::Remember`) was controlled by
+    /// the ability's controller, continue at `to` ("if you controlled that
+    /// permanent").
+    JumpUnlessLkiYours { to: u16 },
+    /// The controller may attach the source (an Equipment) to the token the
+    /// last `CreateToken` made. Choice: yes/no.
+    MayAttachToMade,
+    /// Each object of `on` explores (CR 701.44): its controller reveals the
+    /// top card of their library; a land goes into their hand; otherwise a
+    /// +1/+1 counter on the creature, and they may put the card into their
+    /// graveyard. Choice: yes/no.
+    Explore { on: On },
+}
+
+/// What `Ext::Choose` does to the chosen permanents.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ChooseAct {
+    Untap,
+    Destroy,
 }
 
 /// Where a countered spell goes (CR 701.5a; Memory Lapse).
@@ -259,6 +293,8 @@ impl Op {
             | Op::Ext(Ext::Tap { on })
             | Op::Ext(Ext::Untap { on }) => matches!(on, On::EventObj),
             Op::Ext(Ext::PutCounters { on, n, .. }) => matches!(on, On::EventObj) || amt(n),
+            Op::Ext(Ext::DoubleCounters { on, .. }) | Op::Ext(Ext::Explore { on }) => matches!(on, On::EventObj),
+            Op::Ext(Ext::Choose { who: w, .. }) => who(w),
             Op::Ext(Ext::ApplyRules { who: w, .. }) | Op::Ext(Ext::RevealTopToHand { who: w }) => who(w),
             Op::Ext(Ext::Mill { who: w, n }) => who(w) || amt(n),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
@@ -278,6 +314,8 @@ impl Op {
             Op::OfferPay { if_paid, .. } => Some(if_paid),
             Op::Ext(Ext::JumpUnlessSource { to, .. }) => Some(to),
             Op::Ext(Ext::MayDiscard { skip }) => Some(skip),
+            Op::Ext(Ext::FlipCoin { won }) => Some(won),
+            Op::Ext(Ext::JumpUnlessLkiYours { to }) => Some(to),
             _ => None,
         }
     }

@@ -41,6 +41,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::BeginningOfCombat) => Some(EventKind::BeginningOfCombat),
         Some(E::BeginningOfEndStep) => Some(EventKind::BeginningOfEndStep),
         Some(E::DealtDamage) => Some(EventKind::DealtDamage),
+        Some(E::CardDiscarded) => Some(EventKind::CardDiscarded),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -87,7 +88,9 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
             v
         }
         TrigPred::Not(a) => slots_used(a),
-        TrigPred::IsSelf(s) | TrigPred::Subject(s, _) | TrigPred::Controlled(s, _) => vec![*s],
+        TrigPred::IsSelf(s) | TrigPred::Subject(s, _) | TrigPred::Controlled(s, _) | TrigPred::FormerHost(s) => {
+            vec![*s]
+        }
         TrigPred::Always | TrigPred::If(_) | TrigPred::State(_) => Vec::new(),
     }
 }
@@ -103,6 +106,7 @@ fn slot(l: &mut Lowerer, s: &Option<enums::EventSubject>) -> Option<Slot> {
         Some(S::Spell) => Slot::Spell,
         Some(S::Controller) => Slot::Controller,
         Some(S::Player) => Slot::Player,
+        Some(S::Card) => Slot::Card,
         Some(other) => {
             l.unsupported(format!("TriggerPredicate.subject({other:?})"));
             return None;
@@ -128,6 +132,9 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         P::Not(nodes::Not { inner }) => Some(TrigPred::Not(b(lower_trig_pred(l, inner)?))),
         P::IsSelf(nodes::IsSelf { subject }) => Some(TrigPred::IsSelf(slot(l, subject)?)),
         P::IsThisSpell(nodes::IsThisSpell {}) => Some(TrigPred::IsSelf(Slot::Spell)),
+        P::IsFormerHost(nodes::IsFormerHost { subject }) => Some(TrigPred::FormerHost(slot(l, subject)?)),
+        // A spell copy would also count; there are none yet (CR 707.10).
+        P::CastOrCopy(nodes::CastOrCopy {}) => Some(TrigPred::Always),
         P::Subject(nodes::Subject { slot: s, inner }) => {
             let s = slot(l, s);
             let f = lower_pred(l, inner);

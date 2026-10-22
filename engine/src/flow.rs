@@ -125,6 +125,7 @@ impl Game {
             self.answer = None;
             self.agenda.clear();
         }
+        self.canon_hand_knowledge();
     }
 
     /// Ask `player` (ENGINE.md 4): push the asker back and set the decision,
@@ -471,7 +472,7 @@ impl Game {
     fn cleanup_discard(&mut self) {
         let ap = self.turn.active;
         if let Some(Choice::Card(c)) = self.answer.take() {
-            self.move_card(c, Zone::Graveyard, Pos::Top);
+            self.discard(c);
         }
         if self.players[ap as usize].hand.len() > self.spec.max_hand as usize {
             let opts = self.hand_options(ap);

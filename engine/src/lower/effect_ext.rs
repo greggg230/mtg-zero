@@ -6,7 +6,7 @@ use super::effect::{lower_targets, lower_effect};
 use super::Lowerer;
 use crate::db::{types, Counter, Filter, Kw, KwSet, Mod, Prot};
 use crate::layers::Until;
-use crate::program::{Amount, Builder, Ext, On, Op, Who};
+use crate::program::{Amount, Builder, ChooseAct, Ext, On, Op, Who};
 use card_ir::{cats, enums, nodes};
 
 fn and(a: Filter, b: Filter) -> Filter {
@@ -30,7 +30,11 @@ pub(crate) fn keyword_mods(l: &mut Lowerer, kws: &[cats::Keyword]) -> Vec<Mod> {
             Some(super::printing::KwOrProt::Kw(kw)) => set.insert(kw),
             Some(super::printing::KwOrProt::Prot(p)) => prot.union(&p),
             // Granting a triggered keyword needs a granted trigger.
-            Some(super::printing::KwOrProt::Exalted | super::printing::KwOrProt::BattleCry) => {
+            Some(
+                super::printing::KwOrProt::Exalted
+                | super::printing::KwOrProt::BattleCry
+                | super::printing::KwOrProt::Prowess,
+            ) => {
                 l.unsupported("Keyword(granted trigger)")
             }
             None => {}
@@ -446,6 +450,110 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
                 other => l.unsupported(format!("IfYouDo.do_action({})", other.tag())),
             }
+        }
+        E::PutPlusOneCounterOnEachOfUpToNTargetCreatures(nodes::PutPlusOneCounterOnEachOfUpToNTargetCreatures { max_n }) => {
+            let n = l.int("PutPlusOneCounterOnEachOfUpToNTargetCreatures.max_n", *max_n, 1, 8) as u8;
+            let t = b.target(creature(), 0, n);
+            b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::P1P1, n: Amount::Fixed(1) }));
+        }
+        E::PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower(
+            nodes::PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower {},
+        ) => {
+            // X is the source's power as the ability resolves, once (608.2h).
+            let f = and(creature(), Filter::Controller(true));
+            b.op(Op::Ext(Ext::PutCounters { on: On::Each(f), counter: Counter::P1P1, n: Amount::SourcePower }));
+        }
+        E::DoublePlusOneCountersOnEach(nodes::DoublePlusOneCountersOnEach { permanent_filter }) => {
+            let Some(p) = permanent_filter else {
+                l.unsupported("DoublePlusOneCountersOnEach.permanent_filter(missing)");
+                return true;
+            };
+            let Some(f) = super::filter::lower_pred(l, p) else { return true };
+            b.op(Op::Ext(Ext::DoubleCounters { on: On::Each(f), counter: Counter::P1P1 }));
+        }
+        E::PutStunCounterOnTappedCreature(nodes::PutStunCounterOnTappedCreature {}) => {
+            // "Put a stun counter on up to one target tapped creature."
+            let t = b.target(and(creature(), Filter::Tapped), 0, 1);
+            b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::Stun, n: Amount::Fixed(1) }));
+        }
+        E::UntapUpToNPermanents(nodes::UntapUpToNPermanents { n, permanent_filter }) => {
+            // "Untap up to n <permanents>" (not targeted). Untapped ones are
+            // not offered: choosing one does nothing (ENGINE.md 13).
+            let n = l.int("UntapUpToNPermanents.n", *n, 1, 8) as u8;
+            let f = match permanent_filter {
+                Some(p) => match super::filter::lower_pred(l, p) {
+                    Some(f) => f,
+                    None => return true,
+                },
+                None => Filter::Type(types::PERMANENT),
+            };
+            let filter = and(f, Filter::Tapped);
+            b.op(Op::Ext(Ext::Choose { who: Who::You, filter, min: 0, max: n, act: ChooseAct::Untap }));
+        }
+        E::EachOpponentChoiceDestroyOneAtRandom(nodes::EachOpponentChoiceDestroyOneAtRandom {}) => {
+            // "For each opponent, choose a nonland permanent that player
+            // controls. Destroy one of them chosen at random": with one
+            // opponent, the chosen one (not targeted).
+            let filter = and(not(Filter::Type(types::LAND)), Filter::Controller(false));
+            b.op(Op::Ext(Ext::Choose { who: Who::You, filter, min: 1, max: 1, act: ChooseAct::Destroy }));
+        }
+        E::TargetPlayerPerformsActions(nodes::TargetPlayerPerformsActions { actions, opponent_only }) => {
+            // "Target opponent sacrifices ..., discards ..., and loses ...",
+            // in printed order.
+            let pf = if *opponent_only { and(Filter::Player, Filter::Opponent) } else { Filter::Player };
+            let t = b.target(pf, 1, 1);
+            let who = Who::TargetPlayer(t);
+            for (verb, arg) in actions {
+                use card_ir::unions::IntOrCardFilter as A;
+                match (verb.as_str(), arg) {
+                    ("sacrifice", A::CardFilter(cf)) => {
+                        let Some(filter) = super::filter::lower_card_filter(l, cf) else { continue };
+                        b.op(Op::Sacrifice { who, filter });
+                    }
+                    ("discard", A::Int(n)) => {
+                        let n = l.int("TargetPlayerPerformsActions.discard", *n, 1, 9) as u8;
+                        b.op(Op::Discard { who, n });
+                    }
+                    ("lose_life", A::Int(n)) => {
+                        let n = Amount::Fixed(l.int("TargetPlayerPerformsActions.lose_life", *n, 0, 99));
+                        b.op(Op::LoseLife { who, n });
+                    }
+                    (v, _) => l.unsupported(format!("TargetPlayerPerformsActions.actions({v})")),
+                }
+            }
+        }
+        E::FlickerUpToOneOtherTargetNonlandPermanentYouControl(
+            nodes::FlickerUpToOneOtherTargetNonlandPermanentYouControl { other },
+        ) => {
+            let mut f = and(and(Filter::Type(types::PERMANENT), not(Filter::Type(types::LAND))), Filter::Controller(true));
+            if *other {
+                f = and(f, not(Filter::Source));
+            }
+            let t = b.target(f, 0, 1);
+            b.op(Op::Ext(Ext::Flicker { tgt: t }));
+        }
+        E::CreateTokenThenMayAttachSelf(nodes::CreateTokenThenMayAttachSelf { create }) => {
+            if !matches!(**create, E::CreateToken(_)) {
+                l.unsupported(format!("CreateTokenThenMayAttachSelf.create({})", create.tag()));
+                return true;
+            }
+            lower_effect(l, b, create);
+            b.op(Op::Ext(Ext::MayAttachToMade));
+        }
+        E::FlipCoinIfLost(nodes::FlipCoinIfLost { on_loss }) => {
+            let at = b.op(Op::Ext(Ext::FlipCoin { won: 0 }));
+            match &**on_loss {
+                E::SourceDealsDamageToController(nodes::SourceDealsDamageToController { amount }) => {
+                    let amount = Amount::Fixed(l.int("SourceDealsDamageToController.amount", *amount, 0, 99));
+                    b.op(Op::DamagePlayer { amount, who: Who::You });
+                }
+                other => lower_effect(l, b, other),
+            }
+            b.patch(at);
+        }
+        E::Explore(nodes::Explore { target }) => {
+            let on = if *target { On::Target(b.target(and(creature(), Filter::Controller(true)), 1, 1)) } else { On::Source };
+            b.op(Op::Ext(Ext::Explore { on }));
         }
         _ => return false,
     }

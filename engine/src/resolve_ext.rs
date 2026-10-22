@@ -42,6 +42,29 @@ impl Game {
         }
     }
 
+    /// The end of `Ext::Choose`: act on every chosen permanent at once.
+    fn finish_choose(&mut self, f: &mut Frame, what: crate::program::ChooseAct) -> Flow {
+        let chosen: Vec<CardIdx> = std::mem::take(&mut f.picked)
+            .into_iter()
+            .filter(|&c| self.objs[c.i()].zone == Zone::Battlefield)
+            .collect();
+        match what {
+            crate::program::ChooseAct::Untap => {
+                for c in chosen {
+                    self.untap(c);
+                }
+            }
+            crate::program::ChooseAct::Destroy => {
+                self.begin_batch();
+                for c in chosen {
+                    self.destroy(c);
+                }
+                self.end_batch();
+            }
+        }
+        Flow::Next
+    }
+
     pub(crate) fn exec_ext(&mut self, f: &mut Frame, op: &Ext) -> Flow {
         match op {
             Ext::Apply { on, mods, until } => {
@@ -89,7 +112,7 @@ impl Game {
                 }
             }
             Ext::PutCounters { on, counter, n } => {
-                let n = self.amount(f, *n).max(0) as u16;
+                let n = self.amount(f, *n).clamp(0, u16::MAX as i32) as u16;
                 for c in self.objs_on(f, on) {
                     self.add_counters(c, *counter, n);
                 }
@@ -165,7 +188,7 @@ impl Game {
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         self.note(|g| format!("P{p} discards {}", g.name(c)));
-                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                        self.discard(c);
                         Flow::Next
                     }
                     Some(Choice::Pass) => Flow::Jump(*skip),
@@ -180,6 +203,151 @@ impl Game {
                         Flow::Suspend
                     }
                 }
+            }
+            Ext::Choose { who, filter, min, max, act: what } => {
+                let Some(p) = self.who(f, *who) else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => f.picked.push(c),
+                    Some(Choice::Pass) => return self.finish_choose(f, *what),
+                    Some(other) => unreachable!("choose answer {other:?}"),
+                    None => {}
+                }
+                // The next pick comes after the last one in canonical order
+                // (each set of permanents is reachable once).
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let floor = f.picked.last().map(|&c| self.objs[c.i()].timestamp);
+                let cands: Vec<CardIdx> = self
+                    .battlefield
+                    .iter()
+                    .copied()
+                    .filter(|&c| floor.is_none_or(|t| self.objs[c.i()].timestamp > t))
+                    .filter(|&c| self.card_matches(filter, c, &ctx))
+                    .collect();
+                if f.picked.len() as u8 >= *max || cands.is_empty() {
+                    return self.finish_choose(f, *what);
+                }
+                let mut opts: Vec<Opt> =
+                    cands.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
+                if f.picked.len() as u8 >= *min {
+                    opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                }
+                self.ask(Task::Run(f.clone()), p, DecisionKind::ChoosePermanent, opts);
+                Flow::Suspend
+            }
+            Ext::Flicker { tgt } => {
+                for t in self.targets_of(f, *tgt) {
+                    if let Target::Obj(o) = t {
+                        if self.objs[o.idx.i()].zone != Zone::Battlefield {
+                            continue;
+                        }
+                        let owner = self.objs[o.idx.i()].owner;
+                        self.move_card(o.idx, Zone::Exile, Pos::Top);
+                        // CR 111.7: a token that left can't come back.
+                        if !self.def_of(o.idx).token {
+                            self.put_onto_battlefield(o.idx, owner);
+                        }
+                    }
+                }
+                Flow::Next
+            }
+            Ext::DoubleCounters { on, counter } => {
+                for c in self.objs_on(f, on) {
+                    let n = self.counters_on(c, *counter);
+                    self.add_counters(c, *counter, n);
+                }
+                Flow::Next
+            }
+            Ext::FlipCoin { won } => {
+                let p = f.controller;
+                let win = match self.forced_coin(p) {
+                    Some(w) => w,
+                    None => self.rng.below(2) == 0,
+                };
+                self.emit_public(crate::hidden::KEY_COIN, p, win as u64);
+                self.note(|_| format!("P{p} {} the flip", if win { "wins" } else { "loses" }));
+                if win {
+                    Flow::Jump(*won)
+                } else {
+                    Flow::Next
+                }
+            }
+            Ext::JumpUnlessLkiYours { to } => {
+                if f.lki.is_some_and(|l| l.1 == f.controller) {
+                    Flow::Next
+                } else {
+                    Flow::Jump(*to)
+                }
+            }
+            Ext::MayAttachToMade => {
+                let eq = self.objs_on(f, &On::Source);
+                let token = f.made.filter(|&t| self.objs[t.i()].zone == Zone::Battlefield);
+                let (Some(&e), Some(t)) = (eq.first(), token) else { return Flow::Next };
+                if self.is_creature(e) || !self.is_creature(t) {
+                    return Flow::Next;
+                }
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        let tr = self.obj_ref(t);
+                        if !self.protected_from(t, &self.damage_source_of(e)) {
+                            self.objs[e.i()].attached = Some(tr);
+                        }
+                        Flow::Next
+                    }
+                    Some(_) => Flow::Next,
+                    None => {
+                        let opts = vec![
+                            Opt { action: act::PASS, choice: Choice::Pass },
+                            Opt { action: act::YES, choice: Choice::Yes },
+                        ];
+                        self.ask(Task::Run(f.clone()), f.controller, DecisionKind::YesNo, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::Explore { on } => {
+                // The creature is chosen when the op starts; the yes/no is
+                // asked after the reveal (the card stays on top meanwhile).
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        if let Some(c) = f.picked.pop() {
+                            if self.objs[c.i()].zone == Zone::Library {
+                                self.move_card(c, Zone::Graveyard, Pos::Top);
+                            }
+                        }
+                        return Flow::Next;
+                    }
+                    Some(_) => {
+                        f.picked.clear();
+                        return Flow::Next;
+                    }
+                    None => {}
+                }
+                if !f.picked.is_empty() {
+                    // Re-asked after a refresh: the revealed card is pending.
+                    let opts =
+                        vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
+                    let owner = self.objs[f.picked[0].i()].owner;
+                    self.ask(Task::Run(f.clone()), owner, DecisionKind::YesNo, opts);
+                    return Flow::Suspend;
+                }
+                let Some(&c) = self.objs_on(f, on).first() else { return Flow::Next };
+                let p = self.objs[c.i()].controller;
+                let Some(&top) = self.players[p as usize].library.last() else {
+                    // CR 701.44c: nothing revealed is not a land.
+                    self.add_counters(c, crate::db::Counter::P1P1, 1);
+                    return Flow::Next;
+                };
+                self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
+                self.reveal(top);
+                if self.def_of(top).is(crate::db::types::LAND) {
+                    self.move_card(top, Zone::Hand, Pos::Top);
+                    return Flow::Next;
+                }
+                self.add_counters(c, crate::db::Counter::P1P1, 1);
+                f.picked.push(top);
+                let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
+                self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+                Flow::Suspend
             }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;

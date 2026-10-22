@@ -165,6 +165,8 @@ pub enum Mod {
     CantBlock,
     /// It can't be blocked.
     CantBeBlocked,
+    /// It attacks each combat if able (CR 508.1d).
+    MustAttack,
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated
@@ -263,6 +265,8 @@ pub enum Filter {
     Attacking,
     /// A tapped permanent.
     Tapped,
+    /// A player who has drawn exactly n cards this turn.
+    DrewThisTurn(u8),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -352,6 +356,8 @@ pub enum EventKind {
     DealtDamage,
     /// A creature attacks alone (exalted, CR 702.83a). Subject: attacker.
     AttacksAlone,
+    /// A player discarded a card (701.9). Subjects: player, card.
+    CardDiscarded,
 }
 
 impl EventKind {
@@ -372,6 +378,7 @@ impl EventKind {
             | E::BeginningOfCombat
             | E::BeginningOfEndStep => (&[Slot::Player], &[]),
             E::DealsCombatDamage => (&[Slot::Source], &[Slot::Target]),
+            E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
         };
         match s {
@@ -396,6 +403,7 @@ pub enum Slot {
     Spell,
     Controller,
     Player,
+    Card,
 }
 
 /// When a triggered ability triggers (CR 603.2), over the event's subjects
@@ -413,6 +421,9 @@ pub enum TrigPred {
     /// The subject (an object: its controller; a player: itself) is the
     /// ability's controller (`true`) or an opponent.
     Controlled(Slot, bool),
+    /// The subject is the permanent this source (an Equipment) was
+    /// attached to ("whenever equipped creature dies"; seen as it was).
+    FormerHost(Slot),
     /// An intervening "if" (CR 603.4): checked when the event happens and
     /// again on resolution.
     If(Cond),
@@ -651,6 +662,18 @@ pub struct CardDef {
     pub trig_mask: u32,
     /// Printed protection (CR 702.16).
     pub protection: Prot,
+    /// "Spells matching the filter cost {n} more to cast" (every player's;
+    /// CR 601.2f).
+    pub spell_tax: Vec<(Filter, u8)>,
+    /// "Activated abilities of [these types] can't be activated" (card
+    /// type bits; mana abilities included, CR 602.5).
+    pub locks_activated: u16,
+    /// "If a nontoken creature would enter and it wasn't cast, exile it
+    /// instead." (CR 614.1a)
+    pub exiles_uncast_creatures: bool,
+    /// "If damage would be dealt to this, instead that damage is dealt, but
+    /// all other damage already dealt to it is healed." (CR 614.1a)
+    pub heals_on_damage: bool,
 }
 
 impl CardDef {

@@ -298,9 +298,19 @@ fn forced_keys_are_consumed_in_order_and_impossible_ones_fall_back() {
 }
 
 fn decode_id(code: &[f32]) -> usize {
-    let hi = code[..16].iter().position(|&v| v == 1.0).unwrap();
+    // (M7a stopgap: a definition past the v1 capacity has no digits.)
+    let Some(hi) = code[..16].iter().position(|&v| v == 1.0) else { return usize::MAX };
     let lo = code[16..32].iter().position(|&v| v == 1.0).unwrap();
     hi * 16 + lo
+}
+
+/// The identity the v1 card code can show for a definition.
+fn shown(def: usize) -> usize {
+    if def < encode::D {
+        def
+    } else {
+        usize::MAX
+    }
 }
 
 #[test]
@@ -316,7 +326,7 @@ fn encoding_slots_name_the_action_slots() {
         let hand = g.g.hand_sorted(me as u8);
         for (s, &c) in hand.iter().enumerate().take(encode::HANDS) {
             let o = encode::O_HAND + s * encode::HAND_W;
-            assert_eq!(decode_id(&x[o..o + CODE]), g.g.obj(c).def as usize);
+            assert_eq!(decode_id(&x[o..o + CODE]), shown(g.g.obj(c).def as usize));
             assert_eq!(x[o + CODE + 2] == 1.0, l.contains(&(act::HAND + s as u16)));
         }
         // permanents
@@ -325,7 +335,7 @@ fn encoding_slots_name_the_action_slots() {
             let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
             for (s, c) in g.g.permanents_of(p).enumerate().take(encode::PERMS) {
                 let o = base + s * encode::PERM_W;
-                assert_eq!(decode_id(&x[o..o + CODE]), g.g.obj(c).def as usize);
+                assert_eq!(decode_id(&x[o..o + CODE]), shown(g.g.obj(c).def as usize));
                 assert_eq!(x[o + CODE + encode::perm::TAPPED] == 1.0, g.g.obj(c).tapped);
                 assert_eq!(x[o + CODE + encode::perm::OPTION] == 1.0, l.contains(&(range + s as u16)));
             }
@@ -341,7 +351,7 @@ fn encoding_slots_name_the_action_slots() {
                     engine::Choice::Card(c) => g.g.obj(c).def as usize,
                     _ => unreachable!(),
                 };
-                assert_eq!(decode_id(&x[off..off + CODE]), want);
+                assert_eq!(decode_id(&x[off..off + CODE]), shown(want));
                 assert_eq!(x[off + CODE + 1], 1.0);
                 lists += 1;
             }

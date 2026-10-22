@@ -16,6 +16,22 @@ pub(crate) struct Ctx {
 }
 
 impl Game {
+    /// The total mana cost of casting `card` (CR 601.2f): its mana cost
+    /// plus the increases of static abilities ("noncreature spells cost {1}
+    /// more").
+    pub(crate) fn spell_cost(&self, card: CardIdx, p: PlayerId) -> crate::mana::ManaCost {
+        let mut cost = self.def_of(card).cost;
+        let ctx = Ctx { controller: p, source: None };
+        for &c in &self.battlefield {
+            for (f, n) in &self.def_of(c).spell_tax {
+                if self.card_matches(f, card, &ctx) {
+                    cost.generic = cost.generic.saturating_add(*n);
+                }
+            }
+        }
+        cost
+    }
+
     // ---- priority options (CR 117.1, 116.2a, 307.1, 602.2) ----------------
 
     pub(crate) fn priority_options(&self, p: PlayerId) -> Vec<Opt> {
@@ -38,20 +54,21 @@ impl Game {
                 continue;
             }
             let cls = &classes[..];
+            let cost = self.spell_cost(c, p);
             if !def.additional.is_empty() {
                 // (Excluding the card itself: on the stack while it is paid.)
-                if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &def.cost, cls, Some(c))) {
+                if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &cost, cls, Some(c))) {
                     continue;
                 }
             } else if self.hand_mana_source(c) {
                 // A card cast from hand is on the stack while its cost is
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
-                if !self.can_pay_with(p, &def.cost, &classes_without(cls, c), &Default::default()) {
+                if !self.can_pay_with(p, &cost, &classes_without(cls, c), &Default::default()) {
                     continue;
                 }
             } else {
                 let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
-                if !self.can_pay_plain(p, &def.cost, cls, plain) {
+                if !self.can_pay_plain(p, &cost, cls, plain) {
                     continue;
                 }
             }
@@ -189,8 +206,9 @@ impl Game {
             None => {
                 let def = self.def_of(card);
                 let classes = self.mana_classes(p, None);
+                let cost = self.spell_cost(card, p);
                 let opts: Vec<Opt> = (0..def.additional.len())
-                    .filter(|&k| self.cost_payable(p, card, &def.additional[k], &def.cost, &classes, None))
+                    .filter(|&k| self.cost_payable(p, card, &def.additional[k], &cost, &classes, None))
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();
                 self.ask(Task::CastOption { id }, p, DecisionKind::ChooseCost, opts);
@@ -279,7 +297,7 @@ impl Game {
         let item = &self.stack[pos];
         let StackKind::Spell { card } = item.kind else { return };
         let def = self.def_of(card);
-        let mut pm = PayMana::new(item.controller, def.cost);
+        let mut pm = PayMana::new(item.controller, self.spell_cost(card, item.controller));
         if let Some(extra) = def.additional.get(item.cost_option as usize) {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
@@ -407,6 +425,7 @@ impl Game {
             Target::Player(p) => match f {
                 Filter::Any | Filter::Player => true,
                 Filter::Opponent => p != ctx.controller,
+                Filter::DrewThisTurn(n) => self.players[p as usize].drawn == *n,
                 Filter::And(a, b) => self.filter_ok(a, t, ctx) && self.filter_ok(b, t, ctx),
                 Filter::Or(v) => v.iter().any(|x| self.filter_ok(x, t, ctx)),
                 Filter::Not(x) => !self.filter_ok(x, t, ctx),
@@ -427,7 +446,7 @@ impl Game {
 
     fn perm_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
         match f {
-            Filter::Player | Filter::Spell(_) | Filter::Opponent => false,
+            Filter::Player | Filter::Spell(_) | Filter::Opponent | Filter::DrewThisTurn(_) => false,
             Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
             Filter::Not(x) => !self.perm_ok(x, c, ctx),
@@ -465,6 +484,7 @@ impl Game {
             Filter::Token => def.token,
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,
+            Filter::DrewThisTurn(_) => false,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
             Filter::Not(x) => !self.card_matches(x, c, ctx),

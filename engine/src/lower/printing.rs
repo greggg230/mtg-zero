@@ -379,7 +379,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.graveyard_activated_abilities", graveyard_activated_abilities);
         l.deny("CardPrinting.dash_cost", dash_cost);
         l.deny("CardPrinting.dash_cost_str", dash_cost_str);
-        l.deny("CardPrinting.heals_other_damage_when_dealt_damage", heals_other_damage_when_dealt_damage);
         l.deny("CardPrinting.watched_in_graveyard", watched_in_graveyard);
         l.deny("CardPrinting.watches_library_graveyard_exile", watches_library_graveyard_exile);
         l.deny("CardPrinting.multikicker", multikicker);
@@ -390,11 +389,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.opponents_cant_cast_spells_during_your_turn", opponents_cant_cast_spells_during_your_turn);
         l.deny("CardPrinting.each_player_one_spell_per_turn", each_player_one_spell_per_turn);
         l.deny("CardPrinting.opponents_nonbasic_lands_enter_tapped", opponents_nonbasic_lands_enter_tapped);
-        l.deny("CardPrinting.spell_cost_increases", spell_cost_increases);
         l.deny("CardPrinting.your_creatures_combat_damage_cant_be_prevented", your_creatures_combat_damage_cant_be_prevented);
-        l.deny("CardPrinting.locks_activated_abilities_of", locks_activated_abilities_of);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
-        l.deny("CardPrinting.exiles_uncast_nontoken_creatures_entering", exiles_uncast_nontoken_creatures_entering);
         l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
         l.deny("CardPrinting.grants_once_per_turn_graveyard_play_mv", grants_once_per_turn_graveyard_play_mv);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
@@ -523,6 +519,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::Prot(p)) => protection.union(&p),
             Some(KwOrProt::Exalted) => keyword_triggers.push(exalted()),
             Some(KwOrProt::BattleCry) => keyword_triggers.push(battle_cry()),
+            Some(KwOrProt::Prowess) => keyword_triggers.push(prowess()),
             None => {}
         }
     }
@@ -718,6 +715,19 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         None => None,
         Some(p) => super::filter::lower_pred(l, p),
     };
+    let mut spell_tax = Vec::new();
+    for (f, n) in spell_cost_increases {
+        if let Some(f) = lower_card_filter(l, f) {
+            spell_tax.push((f, l.int("CardPrinting.spell_cost_increases", *n, 1, 9) as u8));
+        }
+    }
+    let mut locks_activated = 0u16;
+    for t in locks_activated_abilities_of {
+        match types::from_name(t) {
+            Some(b) => locks_activated |= b,
+            None => l.unsupported(format!("CardPrinting.locks_activated_abilities_of({t})")),
+        }
+    }
     let mut enters_counters = Vec::new();
     for (name, n) in enters_with_named_counters {
         let k = super::effect_ext::counter_by_name(l, name);
@@ -753,6 +763,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         enters_counters,
         trig_mask,
         protection,
+        spell_tax,
+        locks_activated,
+        exiles_uncast_creatures: *exiles_uncast_nontoken_creatures_entering,
+        heals_on_damage: *heals_other_damage_when_dealt_damage,
     }
 }
 
@@ -817,12 +831,14 @@ pub(crate) fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -
 }
 
 /// A lowered keyword: a keyword the engine knows by name, protection (CR
-/// 702.16), or a keyword that is a triggered ability (exalted, battle cry).
+/// 702.16), or a keyword that is a triggered ability (exalted, battle cry,
+/// prowess).
 pub(crate) enum KwOrProt {
     Kw(Kw),
     Prot(Prot),
     Exalted,
     BattleCry,
+    Prowess,
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
@@ -859,10 +875,14 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
             }
             return Some(KwOrProt::Prot(p));
         }
-        K::Exalted | K::BattleCry => {
+        K::Exalted | K::BattleCry | K::Prowess => {
             l.deny("Keyword.n", n);
             l.deny("Keyword.quality", quality);
-            return Some(if *kind == K::Exalted { KwOrProt::Exalted } else { KwOrProt::BattleCry });
+            return Some(match kind {
+                K::Exalted => KwOrProt::Exalted,
+                K::BattleCry => KwOrProt::BattleCry,
+                _ => KwOrProt::Prowess,
+            });
         }
         _ => {}
     }
@@ -883,6 +903,27 @@ fn exalted() -> TriggerDef {
         pred: TrigPred::Controlled(Slot::Default, true),
         ability: b.finish(),
         uses_event: true,
+    }
+}
+
+/// Prowess (CR 702.108a): "Whenever you cast a noncreature spell, this
+/// creature gets +1/+1 until end of turn."
+fn prowess() -> TriggerDef {
+    let mut b = crate::program::Builder::default();
+    b.op(crate::program::Op::Ext(crate::program::Ext::Apply {
+        on: crate::program::On::Source,
+        mods: vec![Mod::Pt(1, 1)],
+        until: crate::layers::Until::EndOfTurn,
+    }));
+    let noncreature = Filter::Not(Box::new(Filter::Type(types::CREATURE)));
+    TriggerDef {
+        event: EventKind::IsCast,
+        pred: TrigPred::And(
+            Box::new(TrigPred::Subject(Slot::Spell, noncreature)),
+            Box::new(TrigPred::Controlled(Slot::Controller, true)),
+        ),
+        ability: b.finish(),
+        uses_event: false,
     }
 }
 
