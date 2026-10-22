@@ -268,6 +268,29 @@ impl Game {
         }
     }
 
+    /// Delayed triggered abilities that trigger at the beginning of the
+    /// current step (CR 603.7): each triggers once and is gone.
+    pub(crate) fn fire_delayed(&mut self) {
+        use crate::db::DelayedWhen as W;
+        let (step, ap) = (self.turn.step, self.turn.active);
+        let fires = |d: &crate::game::Delayed| match d.when {
+            W::NextEndStep => step == crate::game::Step::End,
+            W::NextUpkeep => step == crate::game::Step::Upkeep,
+            W::YourNextMainPhase => step.is_main() && ap == d.controller,
+        };
+        let (now, later): (Vec<_>, Vec<_>) = self.delayed.iter().copied().partition(|d| fires(d));
+        self.delayed = later;
+        for d in now {
+            self.waiting.push(PendingTrigger {
+                controller: d.controller,
+                source: d.source,
+                source_def: d.source_def,
+                slot: d.slot,
+                ev: d.ev,
+            });
+        }
+    }
+
     /// CR 603.4: a triggered ability with an intervening "if" does nothing
     /// on resolution unless the condition still holds.
     pub(crate) fn intervening_holds(&self, ability: AbilityRef, controller: PlayerId) -> bool {

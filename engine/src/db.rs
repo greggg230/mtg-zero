@@ -367,6 +367,20 @@ pub enum EventKind {
     AttacksAlone,
     /// A player discarded a card (701.9). Subjects: player, card.
     CardDiscarded,
+    /// Never emitted: the trigger is a delayed triggered ability (CR 603.7)
+    /// an effect creates (`Ext::Delay`).
+    Delayed,
+}
+
+/// When a delayed triggered ability triggers (CR 603.7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DelayedWhen {
+    /// At the beginning of the next end step.
+    NextEndStep,
+    /// At the beginning of the next turn's upkeep.
+    NextUpkeep,
+    /// At the beginning of its controller's next main phase.
+    YourNextMainPhase,
 }
 
 impl EventKind {
@@ -388,6 +402,7 @@ impl EventKind {
             | E::BeginningOfEndStep => (&[Slot::Player], &[]),
             E::DealsCombatDamage => (&[Slot::Source], &[Slot::Target]),
             E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
+            E::Delayed => (&[], &[]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
         };
         match s {
@@ -709,6 +724,20 @@ pub struct CardDef {
     pub heals_on_damage: bool,
     /// Alternative costs (CR 118.9; evoke, 702.74).
     pub alt_costs: Vec<AltCost>,
+    /// "This spell costs {n} less to cast for each ..." (CR 601.2f).
+    pub discounts: Vec<Discount>,
+    /// `triggers[delayed_base..]` are delayed triggered abilities its
+    /// effects create (CR 603.7).
+    pub delayed_base: u8,
+}
+
+/// A cost reduction of a spell (CR 601.2f), in generic mana.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Discount {
+    /// n less per basic land type among lands you control (domain).
+    PerBasicLandType(u8),
+    /// n less per permanent you control matching the filter (affinity).
+    PerControlled(Filter, u8),
 }
 
 impl CardDef {

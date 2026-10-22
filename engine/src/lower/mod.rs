@@ -61,6 +61,24 @@ pub struct Lowerer<'a> {
     /// The colours of mana the card being lowered produces as a land
     /// (`produces`), for consistency checks.
     pub land_colors: crate::mana::ManaMask,
+    /// Delayed triggered abilities the card's effects create (CR 603.7),
+    /// appended to its triggers.
+    pub delayed: Vec<crate::db::TriggerDef>,
+}
+
+impl Lowerer<'_> {
+    /// Register a delayed triggered ability with this program; returns its
+    /// index among the card's delayed abilities.
+    pub fn delayed_ability(&mut self, ability: crate::db::AbilityDef) -> u8 {
+        let uses_event = ability.uses_event();
+        self.delayed.push(crate::db::TriggerDef {
+            event: crate::db::EventKind::Delayed,
+            pred: crate::db::TrigPred::Always,
+            ability,
+            uses_event,
+        });
+        (self.delayed.len() - 1) as u8
+    }
 }
 
 impl Lowerer<'_> {
@@ -121,7 +139,7 @@ pub fn lower_card(
     tokens: &mut Vec<CardDef>,
 ) -> Result<CardDef, Vec<String>> {
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
-    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0 };
+    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0, delayed: Vec::new() };
     let def = printing::lower_printing(&mut l, p);
     if l.errs.is_empty() {
         Ok(def)

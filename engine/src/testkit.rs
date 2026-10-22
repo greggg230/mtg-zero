@@ -327,6 +327,15 @@ impl Game {
             v.push(h64(&e.m));
         }
         v.push(u64::MAX);
+        for l in &self.links {
+            v.extend([l.until as u64, l.back as u64, place(l.source.idx), place(l.card.idx)]);
+        }
+        v.push(u64::MAX);
+        for d in &self.delayed {
+            v.extend([d.when as u64, d.controller as u64, d.source_def as u64, d.slot as u64, d.ev.amount as u64]);
+            v.push(d.ev.obj.map_or(u64::MAX, |r| place(r.idx)));
+        }
+        v.push(u64::MAX);
         for p in 0..2u8 {
             let pl = &self.players[p as usize];
             v.extend([pl.life as i64 as u64, pl.hand.len() as u64, pl.library.len() as u64, pl.lands_played as u64]);
@@ -397,6 +406,8 @@ impl Game {
         self.tokens.hash(&mut h);
         self.observer.hash(&mut h);
         self.effects.hash(&mut h);
+        self.links.hash(&mut h);
+        self.delayed.hash(&mut h);
         self.counters.hash(&mut h);
         self.n_static.hash(&mut h);
         h.finish()

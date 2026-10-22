@@ -6,7 +6,8 @@ use super::effect::{lower_targets, lower_effect};
 use super::Lowerer;
 use crate::db::{types, Counter, Filter, Kw, KwSet, Mod, Prot};
 use crate::layers::Until;
-use crate::program::{Amount, Builder, ChooseAct, Ext, On, Op, Who};
+use crate::db::DelayedWhen;
+use crate::program::{About, Amount, Builder, ChooseAct, Ext, On, Op, Who};
 use card_ir::{cats, enums, nodes};
 
 fn and(a: Filter, b: Filter) -> Filter {
@@ -564,6 +565,45 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         }
         E::ReturnCardFromGraveyardToBattlefield(nodes::ReturnCardFromGraveyardToBattlefield {
             card_filter,
+            source: enums::ReanimateSource::TopOfYourGraveyard,
+            haste,
+            exile_at_next_end_step,
+            lose_life_equal_mv,
+            with_counter,
+            exile_if_it_would_leave,
+            up_to_one,
+        }) => {
+            // "Return the top creature card of your graveyard to the
+            // battlefield. That creature gains haste until end of turn.
+            // Exile it at the beginning of the next end step." (Shallow
+            // Grave: not targeted)
+            l.deny("ReturnCardFromGraveyardToBattlefield.lose_life_equal_mv", lose_life_equal_mv);
+            l.deny("ReturnCardFromGraveyardToBattlefield.with_counter", with_counter);
+            l.deny("ReturnCardFromGraveyardToBattlefield.exile_if_it_would_leave", exile_if_it_would_leave);
+            l.deny("ReturnCardFromGraveyardToBattlefield.up_to_one", up_to_one);
+            let Some(cf) = super::filter::lower_card_filter(l, card_filter) else { return true };
+            b.op(Op::Ext(Ext::TopOfGraveyardToBattlefield { filter: cf }));
+            match haste {
+                None => {}
+                Some(h) => {
+                    let mut kw = KwSet::default();
+                    kw.insert(Kw::Haste);
+                    let until = match h {
+                        enums::HasteRider::UntilEndOfTurn => Until::EndOfTurn,
+                        enums::HasteRider::Permanent => Until::Forever,
+                    };
+                    apply(b, On::Made, vec![Mod::Keywords(kw)], until);
+                }
+            }
+            if *exile_at_next_end_step {
+                let mut d = Builder::default();
+                d.op(Op::Ext(Ext::ExileEventObj));
+                let k = l.delayed_ability(d.finish());
+                b.op(Op::Ext(Ext::Delay { k, when: DelayedWhen::NextEndStep, about: About::Made }));
+            }
+        }
+        E::ReturnCardFromGraveyardToBattlefield(nodes::ReturnCardFromGraveyardToBattlefield {
+            card_filter,
             source,
             haste,
             exile_at_next_end_step,
@@ -746,6 +786,126 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let f = Filter::Spell(Box::new(Filter::Type(bits)));
             let t = b.target(f, if *up_to_one { 0 } else { 1 }, 1);
             b.op(Op::Ext(Ext::SpellToLibraryOwnerChooses { tgt: t }));
+        }
+        E::ExileOpponentsNonlandPermanentUntilLeaves(nodes::ExileOpponentsNonlandPermanentUntilLeaves { max_mv }) => {
+            // "Exile target nonland permanent an opponent controls [with mana
+            // value n or less] until this leaves the battlefield."
+            let mut f = and(and(Filter::Type(types::PERMANENT), not(Filter::Type(types::LAND))), Filter::Controller(false));
+            if *max_mv > 0 {
+                f = and(f, Filter::ManaValueAtMost(l.int("ExileOpponentsNonlandPermanentUntilLeaves.max_mv", *max_mv, 0, 30) as u8));
+            }
+            let t = b.target(f, 1, 1);
+            b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: true }));
+        }
+        E::ExileTargetUntilSourceLeaves(nodes::ExileTargetUntilSourceLeaves { targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "ExileTargetUntilSourceLeaves") else { return true };
+            b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: true }));
+        }
+        E::LookAtHandMayExileNonlandUntilSourceLeaves(nodes::LookAtHandMayExileNonlandUntilSourceLeaves {}) => {
+            // "Look at target opponent's hand. You may exile a nonland card
+            // from it until this leaves the battlefield." (Deep-Cavern Bat)
+            let t = b.target(and(Filter::Player, Filter::Opponent), 1, 1);
+            b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: Some(Who::You) });
+            b.op(Op::Ext(Ext::ExileFromHandLinked {
+                chooser: Who::You,
+                whose: Who::TargetPlayer(t),
+                filter: not(Filter::Type(types::LAND)),
+                optional: true,
+                until: true,
+            }));
+        }
+        E::LinkExiledCardsToSource(nodes::LinkExiledCardsToSource { inner }) => match &**inner {
+            // "Target opponent reveals their hand and you choose a nonland
+            // card from it. Exile that card." (Tidehollow Sculler: its
+            // leave trigger returns it.)
+            E::TargetPlayerRevealsHandYouChooseDiscard(nodes::TargetPlayerRevealsHandYouChooseDiscard {
+                card_filter,
+                opponent_only,
+                optional,
+                then_draws,
+                destination,
+            }) if *destination == enums::RevealedCardFate::Exile => {
+                l.deny("TargetPlayerRevealsHandYouChooseDiscard.then_draws", then_draws);
+                let Some(filter) = super::filter::lower_card_filter(l, card_filter) else { return true };
+                let pf = if *opponent_only { and(Filter::Player, Filter::Opponent) } else { Filter::Player };
+                let t = b.target(pf, 1, 1);
+                b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
+                b.op(Op::Ext(Ext::ExileFromHandLinked {
+                    chooser: Who::You,
+                    whose: Who::TargetPlayer(t),
+                    filter,
+                    optional: *optional,
+                    until: false,
+                }));
+            }
+            other => l.unsupported(format!("LinkExiledCardsToSource.inner({})", other.tag())),
+        },
+        E::ReturnCardsExiledWithSourceToOwnersHand(nodes::ReturnCardsExiledWithSourceToOwnersHand {}) => {
+            b.op(Op::Ext(Ext::ReturnLinkedToHand));
+        }
+        E::ExileTargetReturnAtNextEndStep(nodes::ExileTargetReturnAtNextEndStep { targets, counter_on_source_if_yours }) => {
+            // "Exile [another] target permanent. Return that card to the
+            // battlefield under its owner's control at the beginning of the
+            // next end step [; if it entered under your control, a +1/+1
+            // counter on this]."
+            let Some(t) = lower_targets(l, b, targets, "ExileTargetReturnAtNextEndStep") else { return true };
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::ReturnEventCard));
+            if *counter_on_source_if_yours {
+                let at = d.op(Op::Ext(Ext::JumpUnlessMadeYours { to: 0 }));
+                d.op(Op::Ext(Ext::PutCounters { on: On::Source, counter: Counter::P1P1, n: Amount::Fixed(1) }));
+                d.patch(at);
+            }
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::ExileThenDelay { tgt: t, k, when: DelayedWhen::NextEndStep }));
+        }
+        E::PutCreatureFromHandHasteSacrificeAtNextEndStep(nodes::PutCreatureFromHandHasteSacrificeAtNextEndStep {}) => {
+            // "You may put a creature card from your hand onto the
+            // battlefield. That creature gains haste. Sacrifice the creature
+            // at the beginning of the next end step." (Sneak Attack)
+            b.op(Op::PutFromHand { who: Who::You, filter: creature(), tapped: false, optional: true });
+            let mut haste = KwSet::default();
+            haste.insert(Kw::Haste);
+            apply(b, On::Made, vec![Mod::Keywords(haste)], Until::Forever);
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::SacrificeEventObj));
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::Delay { k, when: DelayedWhen::NextEndStep, about: About::Made }));
+        }
+        E::CounterThenDelayedManaEqualToMV(nodes::CounterThenDelayedManaEqualToMV { counter, color }) => {
+            // "Counter target spell. At the beginning of your next main
+            // phase, add an amount of {C} equal to that spell's mana
+            // value." (Mana Drain)
+            if color != "C" {
+                l.unsupported(format!("CounterThenDelayedManaEqualToMV.color({color})"));
+            }
+            match counter.as_deref() {
+                Some(E::CounterTargetSpell(nodes::CounterTargetSpell { filter_types })) if filter_types.is_empty() => {}
+                _ => {
+                    l.unsupported("CounterThenDelayedManaEqualToMV.counter");
+                    return true;
+                }
+            }
+            let t = b.target(Filter::Spell(Box::new(Filter::Any)), 1, 1);
+            b.op(Op::Ext(Ext::RememberSpellMv { tgt: t }));
+            b.op(Op::Counter { tgt: t, dest: crate::program::SpellDest::Graveyard });
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::AddColorless { n: Amount::EventAmount }));
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::Delay { k, when: DelayedWhen::YourNextMainPhase, about: About::Remembered }));
+        }
+        E::ScheduleDelayedEffect(nodes::ScheduleDelayedEffect { inner, step }) => {
+            let mut d = Builder::default();
+            lower_effect(l, &mut d, inner);
+            if !d.targets.is_empty() {
+                l.unsupported("ScheduleDelayedEffect.inner(with targets)");
+            }
+            let k = l.delayed_ability(d.finish());
+            let when = match step {
+                enums::DelayedStep::Upkeep => DelayedWhen::NextUpkeep,
+                enums::DelayedStep::End => DelayedWhen::NextEndStep,
+            };
+            b.op(Op::Ext(Ext::Delay { k, when, about: About::Nothing }));
         }
         E::SacrificeSelfIfEvoked(nodes::SacrificeSelfIfEvoked {}) => {
             // (The "if evoked" is the trigger's: Source(WasEvoked).)

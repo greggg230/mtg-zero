@@ -367,6 +367,10 @@ impl Game {
                 if let Some(k) = kind {
                     self.event(Event::player(k, ap));
                 }
+                // Delayed triggered abilities whose moment it is (603.7).
+                if !self.delayed.is_empty() {
+                    self.fire_delayed();
+                }
                 self.agenda.push(Task::Priority);
             }
         }

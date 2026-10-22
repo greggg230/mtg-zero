@@ -29,6 +29,17 @@ impl Game {
                 }
             }
         }
+        // Then reductions (CR 601.2f: increases, then reductions; generic
+        // mana only, not below zero).
+        for d in &self.def_of(card).discounts {
+            let less = match d {
+                crate::db::Discount::PerBasicLandType(n) => self.basic_land_types(p) * n,
+                crate::db::Discount::PerControlled(f, n) => {
+                    self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u8 * n
+                }
+            };
+            cost.generic = cost.generic.saturating_sub(less);
+        }
         cost
     }
 

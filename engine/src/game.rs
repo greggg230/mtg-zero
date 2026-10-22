@@ -194,6 +194,33 @@ pub struct Outcome {
     pub reason: EndReason,
 }
 
+/// A card exiled with a permanent (CR 610.3; 607.2a: linked abilities).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Link {
+    /// The permanent it was exiled with.
+    pub source: ObjRef,
+    /// The exiled card.
+    pub card: ObjRef,
+    /// "Until the source leaves the battlefield": then the card returns to
+    /// `back` (its previous zone; a permanent under its owner's control).
+    pub until: bool,
+    pub back: Zone,
+}
+
+/// A delayed triggered ability (CR 603.7): it triggers once, at `when`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Delayed {
+    pub when: crate::db::DelayedWhen,
+    pub controller: PlayerId,
+    /// The source of the ability that created it (603.7d).
+    pub source: ObjRef,
+    pub source_def: DefId,
+    /// Its index in `source_def`'s triggers.
+    pub slot: u8,
+    /// "That card", "that much".
+    pub ev: crate::triggers::EvCtx,
+}
+
 /// Where `move_card` puts a card in an ordered zone.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Pos {
@@ -262,6 +289,11 @@ pub struct Game {
     /// Objects that already left the battlefield in the current
     /// simultaneous move (their leave triggers look back, CR 603.10a).
     pub(crate) leaving: Vec<crate::triggers::Lki>,
+    /// Cards exiled with a permanent ("until it leaves the battlefield",
+    /// CR 610.3; "the exiled card").
+    pub(crate) links: Vec<Link>,
+    /// Delayed triggered abilities waiting for their moment (CR 603.7).
+    pub(crate) delayed: Vec<Delayed>,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -370,6 +402,8 @@ impl Game {
             counters: Vec::new(),
             n_static: 0,
             leaving: Vec::new(),
+            links: Vec::new(),
+            delayed: Vec::new(),
             batching: false,
             entering_cast: false,
             entering_evoked: false,
@@ -679,7 +713,36 @@ impl Game {
         if to == Zone::Battlefield {
             self.event(Event::obj(EventKind::Enters, new));
         }
+        if from == Zone::Battlefield && !self.links.is_empty() {
+            self.release_links(old);
+        }
         new
+    }
+
+    /// CR 610.3a: the cards exiled "until" `source` leaves the battlefield
+    /// return to their previous zones at once; links whose card left exile
+    /// are dropped.
+    fn release_links(&mut self, source: ObjRef) {
+        let (back, keep): (Vec<Link>, Vec<Link>) =
+            self.links.iter().copied().partition(|l| l.until && l.source == source);
+        self.links = keep;
+        for l in back {
+            if !self.live(l.card) || self.objs[l.card.idx.i()].zone != Zone::Exile {
+                continue;
+            }
+            let owner = self.objs[l.card.idx.i()].owner;
+            self.note(|g| format!("{} returns ({:?})", g.name(l.card.idx), l.back));
+            match l.back {
+                Zone::Battlefield => {
+                    self.put_onto_battlefield(l.card.idx, owner);
+                }
+                z => {
+                    self.move_card(l.card.idx, z, Pos::Top);
+                }
+            }
+        }
+        let objs = &self.objs;
+        self.links.retain(|l| objs[l.card.idx.i()].inc == l.card.inc && objs[l.card.idx.i()].zone == Zone::Exile);
     }
 
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.

@@ -316,7 +316,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
-        l.deny("CardPrinting.cost_reductions", cost_reductions);
         l.deny("CardPrinting.external_cost_reductions", external_cost_reductions);
         l.deny("CardPrinting.enters_with_counters_from_x", enters_with_counters_from_x);
         l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
@@ -536,6 +535,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     let saved_land_colors = l.land_colors;
+    let saved_delayed = std::mem::take(&mut l.delayed);
     l.land_colors = prod & crate::mana::COLORS;
     if prod != 0 && ty & types::LAND == 0 {
         // `produces` describes lands (CR 305.6 and land rules text).
@@ -672,6 +672,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     triggers.extend(keyword_triggers);
     let trig_mask = triggers.iter().fold(0u32, |m, t| m | 1 << t.event as u32);
+    // Delayed triggered abilities come last (`delayed_base`).
+    let delayed_base = triggers.len() as u8;
+    triggers.extend(std::mem::replace(&mut l.delayed, saved_delayed));
+    if triggers.len() > u8::MAX as usize {
+        l.unsupported("CardPrinting.triggered_abilities(too many)");
+    }
 
     // Static abilities (CR 604) and equipment bonuses (301.5).
     let mut statics = Vec::new();
@@ -741,6 +747,20 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if !alt_costs.is_empty() && !additional.is_empty() {
         l.unsupported("CardPrinting.alternative_costs(with additional costs)");
     }
+    let mut discounts = Vec::new();
+    for r in cost_reductions {
+        let cats::CostReduction::CostReduction(nodes::CostReduction { amount, condition }) = r;
+        let n = l.int("CostReduction.amount", *amount, 1, 9) as u8;
+        match &**condition {
+            cats::Condition::PerBasicLandTypeAmongLandsYouControl(nodes::PerBasicLandTypeAmongLandsYouControl {}) => {
+                discounts.push(crate::db::Discount::PerBasicLandType(n))
+            }
+            other => l.unsupported(format!("CostReduction.condition({})", other.tag())),
+        }
+    }
+    if !discounts.is_empty() && !alt_costs.is_empty() {
+        l.unsupported("CardPrinting.cost_reductions(with alternative costs)");
+    }
     let mut spell_tax = Vec::new();
     for (f, n) in spell_cost_increases {
         if let Some(f) = lower_card_filter(l, f) {
@@ -794,6 +814,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         exiles_uncast_creatures: *exiles_uncast_nontoken_creatures_entering,
         heals_on_damage: *heals_other_damage_when_dealt_damage,
         alt_costs,
+        discounts,
+        delayed_base,
     }
 }
 

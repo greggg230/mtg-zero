@@ -327,17 +327,22 @@ impl Game {
                 (n as i32, printed.1)
             }
             PtCda::Domain => {
-                let ctl = self.objs[c.i()].controller;
-                let mut n = 0;
-                for name in ["Plains", "Island", "Swamp", "Mountain", "Forest"] {
-                    let Some(s) = self.db.subtype_id(name) else { continue };
-                    if self.permanents_of(ctl).any(|x| self.types_of(x) & types::LAND != 0 && self.has_subtype(x, s)) {
-                        n += 1;
-                    }
-                }
+                let n = self.basic_land_types(self.objs[c.i()].controller) as i32;
                 (n, n)
             }
         }
+    }
+
+    /// Domain: basic land types among lands `p` controls (CR 305.6).
+    pub fn basic_land_types(&self, p: PlayerId) -> u8 {
+        let mut n = 0;
+        for name in ["Plains", "Island", "Swamp", "Mountain", "Forest"] {
+            let Some(s) = self.db.subtype_id(name) else { continue };
+            if self.permanents_of(p).any(|x| self.types_of(x) & types::LAND != 0 && self.has_subtype(x, s)) {
+                n += 1;
+            }
+        }
+        n
     }
 
     // ---- counters (CR 122) ------------------------------------------------

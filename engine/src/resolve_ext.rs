@@ -35,6 +35,10 @@ impl Game {
                 Some(r) if on_bf(r) => vec![r.idx],
                 _ => Vec::new(),
             },
+            On::Made => match f.made {
+                Some(c) if self.objs[c.i()].zone == Zone::Battlefield => vec![c],
+                _ => Vec::new(),
+            },
             On::Each(filter) => {
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                 self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect()
@@ -63,6 +67,19 @@ impl Game {
             }
         }
         Flow::Next
+    }
+
+    /// Create delayed triggered ability `k` of the ability's card (CR 603.7).
+    fn add_delayed(&mut self, f: &Frame, k: u8, when: crate::db::DelayedWhen, ev: crate::triggers::EvCtx) {
+        let base = self.db.def(f.source_def).delayed_base;
+        self.delayed.push(crate::game::Delayed {
+            when,
+            controller: f.controller,
+            source: f.source,
+            source_def: f.source_def,
+            slot: base + k,
+            ev,
+        });
     }
 
     pub(crate) fn exec_ext(&mut self, f: &mut Frame, op: &Ext) -> Flow {
@@ -472,6 +489,168 @@ impl Game {
             Ext::SacrificeSource => {
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
                     self.sacrifice(c);
+                }
+                Flow::Next
+            }
+            Ext::ExileLinked { tgt, until } => {
+                // CR 610.3c: if the source left first, nothing is exiled.
+                if *until && self.objs_on(f, &On::Source).is_empty() {
+                    return Flow::Next;
+                }
+                for t in self.targets_of(f, *tgt) {
+                    let Target::Obj(o) = t else { continue };
+                    let back = self.objs[o.idx.i()].zone;
+                    let card = self.move_card(o.idx, Zone::Exile, Pos::Top);
+                    self.links.push(crate::game::Link { source: f.source, card, until: *until, back });
+                }
+                Flow::Next
+            }
+            Ext::ExileFromHandLinked { chooser, whose, filter, optional, until } => {
+                let (Some(p), Some(owner)) = (self.who(f, *chooser), self.who(f, *whose)) else { return Flow::Next };
+                if *until && self.objs_on(f, &On::Source).is_empty() {
+                    return Flow::Next;
+                }
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        self.note(|g| format!("P{p} exiles {} from P{owner}'s hand", g.name(c)));
+                        let card = self.move_card(c, Zone::Exile, Pos::Top);
+                        self.links.push(crate::game::Link { source: f.source, card, until: *until, back: Zone::Hand });
+                        Flow::Next
+                    }
+                    Some(Choice::Pass) => Flow::Next,
+                    Some(other) => unreachable!("hand choice {other:?}"),
+                    None => {
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let hand = self.hand_sorted(owner);
+                        let mut opts = Vec::new();
+                        for (k, &c) in hand.iter().enumerate() {
+                            let d = self.objs[c.i()].def;
+                            if k > 0 && self.objs[hand[k - 1].i()].def == d {
+                                continue;
+                            }
+                            debug_assert!(self.knows(p, c), "the chooser has seen the hand");
+                            if self.card_matches(filter, c, &ctx) {
+                                assert!((k as u16) < act::LIBRARY_N, "hand slot {k} out of range");
+                                opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
+                            }
+                        }
+                        // With nothing to choose the decision is still asked
+                        // when optional (the hand is hidden from the other
+                        // player); a required choice of nothing ends it.
+                        if opts.is_empty() && !*optional {
+                            return Flow::Next;
+                        }
+                        if *optional || opts.is_empty() {
+                            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseDiscard, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::ReturnLinkedToHand => {
+                let mine: Vec<crate::game::Link> = self.links.iter().copied().filter(|l| l.source == f.source).collect();
+                self.links.retain(|l| l.source != f.source);
+                for l in mine {
+                    if self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile {
+                        self.move_card(l.card.idx, Zone::Hand, Pos::Top);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::Delay { k, when, about } => {
+                if *about == crate::program::About::Made && f.made.is_none() {
+                    return Flow::Next; // nothing to be about
+                }
+                let ev = match about {
+                    crate::program::About::Nothing => Default::default(),
+                    crate::program::About::Made => crate::triggers::EvCtx {
+                        obj: f.made.map(|c| self.obj_ref(c)),
+                        ..Default::default()
+                    },
+                    crate::program::About::Remembered => {
+                        crate::triggers::EvCtx { amount: f.x.max(0) as u16, ..Default::default() }
+                    }
+                };
+                self.add_delayed(f, *k, *when, ev);
+                Flow::Next
+            }
+            Ext::ExileThenDelay { tgt, k, when } => {
+                for t in self.targets_of(f, *tgt) {
+                    let Target::Obj(o) = t else { continue };
+                    let card = self.move_card(o.idx, Zone::Exile, Pos::Top);
+                    // A token ceases to exist (704.5d); the delayed trigger
+                    // then finds nothing.
+                    let ev = crate::triggers::EvCtx { obj: Some(card), ..Default::default() };
+                    self.add_delayed(f, *k, *when, ev);
+                }
+                Flow::Next
+            }
+            Ext::ReturnEventCard => {
+                f.made = None;
+                if let Some(r) = f.ev.obj {
+                    let z = self.objs[r.idx.i()].zone;
+                    if self.live(r) && matches!(z, Zone::Exile | Zone::Graveyard) {
+                        let owner = self.objs[r.idx.i()].owner;
+                        self.put_onto_battlefield(r.idx, owner);
+                        f.made = Some(r.idx);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::JumpUnlessMadeYours { to } => {
+                let yours = f.made.is_some_and(|c| {
+                    self.objs[c.i()].zone == Zone::Battlefield && self.objs[c.i()].controller == f.controller
+                });
+                if yours {
+                    Flow::Next
+                } else {
+                    Flow::Jump(*to)
+                }
+            }
+            Ext::SacrificeEventObj => {
+                if let Some(&c) = self.objs_on(f, &On::EventObj).first() {
+                    self.sacrifice(c);
+                }
+                Flow::Next
+            }
+            Ext::ExileEventObj => {
+                if let Some(&c) = self.objs_on(f, &On::EventObj).first() {
+                    self.move_card(c, Zone::Exile, Pos::Top);
+                }
+                Flow::Next
+            }
+            Ext::AddColorless { n } => {
+                let n = self.amount(f, *n).clamp(0, 255) as u8;
+                self.players[f.controller as usize].pool.amt[5] =
+                    self.players[f.controller as usize].pool.amt[5].saturating_add(n);
+                Flow::Next
+            }
+            Ext::RememberSpellMv { tgt } => {
+                f.x = 0;
+                for t in self.targets_of(f, *tgt) {
+                    if let Target::Obj(o) = t {
+                        if self.objs[o.idx.i()].zone == Zone::Stack {
+                            f.x = self.def_of(o.idx).mana_value() as i32;
+                            break;
+                        }
+                    }
+                }
+                Flow::Next
+            }
+            Ext::TopOfGraveyardToBattlefield { filter } => {
+                f.made = None;
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let top = self.players[f.controller as usize]
+                    .graveyard
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|&c| self.card_matches(filter, c, &ctx));
+                if let Some(c) = top {
+                    let owner = self.objs[c.i()].owner;
+                    self.put_onto_battlefield(c, owner);
+                    f.made = Some(c);
                 }
                 Flow::Next
             }

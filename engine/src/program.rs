@@ -48,6 +48,9 @@ pub enum Amount {
 pub enum On {
     /// Each legal target of requirement i.
     Target(u8),
+    /// The object the last op made (a token, a card put onto the
+    /// battlefield), if it is still that permanent.
+    Made,
     /// The ability's source, if it is still the same object on the
     /// battlefield.
     Source,
@@ -146,11 +149,57 @@ pub enum Ext {
     /// The controller sacrifices the source, if it is still the same
     /// permanent.
     SacrificeSource,
+    /// Exile each legal target of requirement `tgt`, linked to the source
+    /// (CR 607.2a); with `until`, only while the source is on the
+    /// battlefield, and they return when it leaves (CR 610.3).
+    ExileLinked { tgt: u8, until: bool },
+    /// `chooser` chooses a card matching `filter` from `whose`'s hand (which
+    /// they have seen); it is exiled, linked to the source as above. With
+    /// `optional` they may choose none. Choice: a card of the seen hand
+    /// (`LIBRARY` slot) or `PASS`.
+    ExileFromHandLinked { chooser: Who, whose: Who, filter: Filter, optional: bool, until: bool },
+    /// The cards exiled with the source return to their owners' hands.
+    ReturnLinkedToHand,
+    /// Create delayed triggered ability `k` of the source's card (CR 603.7;
+    /// its trigger `delayed_base + k`) for `when`, about `about`.
+    Delay { k: u8, when: crate::db::DelayedWhen, about: About },
+    /// Exile each legal target of requirement `tgt`; for each card exiled,
+    /// create delayed triggered ability `k` about it (Flickerwisp).
+    ExileThenDelay { tgt: u8, k: u8, when: crate::db::DelayedWhen },
+    /// Put the card of the triggered ability's event (a card in exile or a
+    /// graveyard, still the same object) onto the battlefield under its
+    /// owner's control; it becomes the made object.
+    ReturnEventCard,
+    /// Unless the made object is a permanent the controller controls,
+    /// continue at `to` ("if it entered under your control").
+    JumpUnlessMadeYours { to: u16 },
+    /// Sacrifice / exile the object of the event, if it is still the same
+    /// permanent ("sacrifice the creature", "exile it").
+    SacrificeEventObj,
+    ExileEventObj,
+    /// Add n {C} (`n` an amount).
+    AddColorless { n: Amount },
+    /// Remember the mana value of the first legal target spell of
+    /// requirement `tgt` (`Amount::LkiManaValue`).
+    RememberSpellMv { tgt: u8 },
+    /// Put the top card matching `filter` of your graveyard onto the
+    /// battlefield; it becomes the made object (Shallow Grave).
+    TopOfGraveyardToBattlefield { filter: Filter },
     /// Each object of `on` explores (CR 701.44): its controller reveals the
     /// top card of their library; a land goes into their hand; otherwise a
     /// +1/+1 counter on the creature, and they may put the card into their
     /// graveyard. Choice: yes/no.
     Explore { on: On },
+}
+
+/// What a delayed trigger is about ("that card", "that much").
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum About {
+    Nothing,
+    /// The object the last `CreateToken` or put-onto-the-battlefield made.
+    Made,
+    /// The number remembered (`Amount::LkiManaValue`).
+    Remembered,
 }
 
 /// What `Ext::Choose` does to the chosen permanents.
@@ -321,6 +370,8 @@ impl Op {
             Op::Ext(Ext::Choose { who: w, .. }) | Op::Ext(Ext::ExileGraveyard { who: w }) => who(w),
             Op::Ext(Ext::ApplyRules { who: w, .. }) | Op::Ext(Ext::RevealTopToHand { who: w }) => who(w),
             Op::Ext(Ext::Mill { who: w, n }) => who(w) || amt(n),
+            Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
+            Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {
@@ -341,6 +392,7 @@ impl Op {
             Op::Ext(Ext::FlipCoin { won }) => Some(won),
             Op::Ext(Ext::JumpUnlessLkiYours { to }) => Some(to),
             Op::Ext(Ext::JumpUnlessAlt { to }) => Some(to),
+            Op::Ext(Ext::JumpUnlessMadeYours { to }) => Some(to),
             _ => None,
         }
     }

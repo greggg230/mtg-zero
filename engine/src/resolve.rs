@@ -685,9 +685,13 @@ impl Game {
                         if tapped {
                             self.tap(c);
                         }
+                        f.made = Some(c);
                         Flow::Next
                     }
-                    Some(Choice::Pass) => Flow::Next,
+                    Some(Choice::Pass) => {
+                        f.made = None;
+                        Flow::Next
+                    }
                     Some(other) => unreachable!("put-from-hand answer {other:?}"),
                     None => {
                         let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };

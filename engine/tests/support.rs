@@ -61,6 +61,7 @@ const SUPPORTED: &[&str] = &[
     "Dark Ritual",
     "Darkslick Shores",
     "Daze",
+    "Deep-Cavern Bat",
     "Demonic Tutor",
     "Dismember",
     "Displacer Kitten",
@@ -84,6 +85,7 @@ const SUPPORTED: &[&str] = &[
     "Figure of Fable",
     "Flame Slash",
     "Flametongue Kavu",
+    "Flickerwisp",
     "Flooded Strand",
     "Force of Negation",
     "Force of Vigor",
@@ -123,6 +125,7 @@ const SUPPORTED: &[&str] = &[
     "Knight of Autumn",
     "Kolaghan's Command",
     "Legion Extruder",
+    "Leyline Binding",
     "Library of Alexandria",
     "Lightning Bolt",
     "Lightning Greaves",
@@ -138,6 +141,7 @@ const SUPPORTED: &[&str] = &[
     "Malevolent Rumble",
     "Mana Confluence",
     "Mana Crypt",
+    "Mana Drain",
     "Mana Leak",
     "Mana Tithe",
     "Manamorphose",
@@ -168,10 +172,12 @@ const SUPPORTED: &[&str] = &[
     "Oust",
     "Overgrown Tomb",
     "Path to Exile",
+    "Phelia, Exuberant Shepherd",
     "Plains",
     "Plateau",
     "Polluted Delta",
     "Ponder",
+    "Portable Hole",
     "Preordain",
     "Prismatic Vista",
     "Pyrite Spellbomb",
@@ -199,11 +205,13 @@ const SUPPORTED: &[&str] = &[
     "Sensei's Divining Top",
     "Sentinel of the Nameless City",
     "Shadowy Backstreet",
+    "Shallow Grave",
     "Sheoldred's Edict",
     "Sheoldred, the Apocalypse",
     "Simian Spirit Guide",
     "Skateboard",
     "Skullclamp",
+    "Sneak Attack",
     "Snuff Out",
     "Sol Ring",
     "Solitude",
@@ -241,12 +249,14 @@ const SUPPORTED: &[&str] = &[
     "Thoughtseize",
     "Thraben Inspector",
     "Thundering Falls",
+    "Tidehollow Sculler",
     "Time Walk",
     "Time Warp",
     "Timetwister",
     "Tinker",
     "Titania, Protector of Argoth",
     "Tolarian Academy",
+    "Touch the Spirit Realm",
     "Trinket Mage",
     "Troll of Khazad-dûm",
     "Tropical Island",
@@ -341,8 +351,8 @@ fn threat_report() {
 #[test]
 fn unsupported_cards_fail_loudly() {
     let db = CardDb::cube();
-    let err = db.expect_id("Mana Drain").unwrap_err();
-    assert!(err.contains("Effect:CounterThenDelayedManaEqualToMV"), "{err}");
+    let err = db.expect_id("Balance").unwrap_err();
+    assert!(err.contains("Effect:BalanceEffect"), "{err}");
     let err = db.expect_id("Jace, the Mind Sculptor").unwrap_err();
     assert!(err.contains("CardPrinting.loyalty"), "{err}");
     assert!(db.expect_id("No Such Card").is_err());
