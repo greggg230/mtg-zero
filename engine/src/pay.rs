@@ -14,8 +14,9 @@ use crate::game::{DamageSource, Game, Pos};
 use crate::ids::{CardIdx, DefId, PlayerId, Target, Zone};
 use crate::mana::{payable_within, Budget, ManaCost, ManaMask, ManaPool, Unit, COLORS};
 
-/// A mana ability that can help pay a cost: of a permanent, or of a card
-/// in hand (a Spirit Guide).
+/// A mana ability of a permanent that can help pay a cost. (Mana abilities
+/// of cards in hand, the Spirit Guides, are activated with priority only,
+/// so a payment never waits on a hidden card; ENGINE.md 18.)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Src {
     pub card: CardIdx,
@@ -36,8 +37,8 @@ pub(crate) enum Yield {
     Multi { prods: Vec<[u8; 6]>, units: Option<Vec<Unit>> },
 }
 
-/// Equivalent sources (same zone, definition and ability), canonical order:
-/// several-mana classes first, then permanents, then cards in hand.
+/// Equivalent sources (same definition and ability), canonical order:
+/// several-mana classes first, then single-mana ones.
 #[derive(Clone, Debug)]
 pub(crate) struct Class {
     pub members: Vec<Src>,
@@ -50,12 +51,11 @@ pub(crate) struct Class {
 
 /// What later parts of a cost need from the payment of its mana (601.2h:
 /// the mana is paid first): the source itself is not a mana source, life
-/// and hand cards stay available, and enough permanents stay to sacrifice.
+/// stays available, and enough permanents stay to sacrifice.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub(crate) struct Keep {
     pub exclude: Option<CardIdx>,
     pub life: u8,
-    pub hand: u8,
     /// A later "sacrifice n permanents matching" and the card whose cost it
     /// is ("another").
     pub sac: Option<(SacCost, CardIdx)>,
@@ -193,11 +193,11 @@ impl Game {
     }
 
     /// The mana sources `p` can use to pay a cost, by class (ENGINE.md 18):
-    /// several-mana permanents, then single-mana permanents, then cards in
-    /// hand; within each, by first appearance in canonical order.
+    /// several-mana permanents, then single-mana permanents; within each,
+    /// by first appearance in canonical order.
     pub(crate) fn mana_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
         type L = Vec<(DefId, AbilitySlot, Class)>;
-        let (mut multi, mut one, mut hand): (L, L, L) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut multi, mut one): (L, L) = (Vec::new(), Vec::new());
         let add = |list: &mut L, def: DefId, src: Src, yld: Yield, dmg: u8, sac_self: bool| match list
             .iter_mut()
             .find(|(d, s, _)| *d == def && *s == src.slot)
@@ -224,23 +224,7 @@ impl Game {
                 }
             }
         }
-        for c in self.hand_sorted(p) {
-            if Some(c) == exclude {
-                continue;
-            }
-            let def = self.objs[c.i()].def;
-            for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
-                let Some(m) = ad.mana() else { continue };
-                if ad.instant_only || !self.activation_ready(p, c, ad) {
-                    continue;
-                }
-                let src = Src { card: c, slot: AbilitySlot::Hand(i as u8) };
-                let ManaProd::One(mask) = m.prod else { unreachable!("lowering keeps hand mana to one mana") };
-                let unit = Unit { life: ad.cost.life, hand: ad.cost.exile_self || ad.cost.discard_self, ..Unit::free(mask) };
-                add(&mut hand, def, src, Yield::One(unit), m.damage_to_you, false);
-            }
-        }
-        multi.into_iter().chain(one).chain(hand).map(|(_, _, cl)| cl).collect()
+        multi.into_iter().chain(one).map(|(_, _, cl)| cl).collect()
     }
 
     fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8) -> Option<Yield> {
@@ -270,17 +254,15 @@ impl Game {
     /// pay life only up to their life total; life paid later in the same
     /// cost (`later`: Phyrexian pips, a life cost) is reserved, and then the
     /// damage mana abilities deal (dealt first, in 601.2g) counts too
-    /// (the returned flag). Hand cards and sacrifice candidates that later
-    /// parts need stay out of reach.
+    /// (the returned flag). Sacrifice candidates that later parts need stay
+    /// out of reach.
     fn budget(&self, p: PlayerId, keep: &Keep, later: u8) -> (Budget, bool) {
         let pl = &self.players[p as usize];
-        let hand = pl.hand.iter().filter(|&&c| Some(c) != keep.exclude).count() as i32 - keep.hand as i32;
         let sac = match &keep.sac {
             Some((s, card)) => self.sacrifice_candidates(p, *card, s).len() as i32 - s.n as i32,
             None => i32::MAX,
         };
-        let b = Budget { life: (pl.life - later as i32).max(0), hand: hand.max(0), sac: sac.max(0) };
-        (b, later > 0)
+        (Budget { life: (pl.life - later as i32).max(0), sac: sac.max(0) }, later > 0)
     }
 
     /// Mana sources whose use takes a permanent a later sacrifice needs.
@@ -362,9 +344,6 @@ impl Game {
         let (cost, dmg) = (ad.cost.clone(), ad.mana().map_or(0, |m| m.damage_to_you));
         let dsrc = self.damage_source_of(c);
         self.note(|g| format!("P{p} activates a mana ability of {}", g.name(c)));
-        if self.objs[c.i()].zone == Zone::Hand {
-            self.reveal(c); // CR 602.2a
-        }
         if cost.tap {
             self.tap(c);
         }
@@ -427,14 +406,12 @@ impl Game {
         let extra = extra.map(|(ci, s)| (&classes[ci], s));
         for (cl, s) in picks.chain(extra) {
             let mut life = if dmg { cl.dmg as i32 } else { 0 };
-            let mut hand = 0;
             if let Yield::One(u) = cl.yld {
                 life += u.life as i32;
-                hand += u.hand as i32;
             }
             let sac = self.reserved(pm.payer, &pm.keep, cl, &s) as i32;
-            b = Budget { life: b.life - life, hand: b.hand - hand, sac: b.sac - sac };
-            if b.life < 0 || b.hand < 0 || b.sac < 0 {
+            b = Budget { life: b.life - life, sac: b.sac - sac };
+            if b.life < 0 || b.sac < 0 {
                 return None;
             }
         }
@@ -505,12 +482,7 @@ impl Game {
             let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
             pm.min_class = ci as u8;
             match &classes[ci].yld {
-                Yield::One(_) => {
-                    if self.objs[card.i()].zone == Zone::Hand {
-                        self.reveal(card); // CR 602.2a, at once: never a hidden pick
-                    }
-                    pm.chosen.push(src);
-                }
+                Yield::One(_) => pm.chosen.push(src),
                 Yield::Multi { prods, .. } => {
                     if prods.len() == 1 {
                         Self::pick_multi(&mut pm, src, prods[0]);
@@ -641,7 +613,6 @@ struct Cands {
 struct Way {
     units: Vec<Unit>,
     life: i32,
-    hand: i32,
     sac: i32,
 }
 
@@ -656,14 +627,9 @@ fn cands(
         let extra = if dmg { cl.dmg as i32 } else { 0 };
         for s in cl.members.iter().filter(|s| use_src(s)) {
             let sac = reserved(cl, s) as i32;
-            let multi = |units: Vec<Unit>| Way { units, life: extra, hand: 0, sac };
+            let multi = |units: Vec<Unit>| Way { units, life: extra, sac };
             let ways: Vec<Way> = match &cl.yld {
-                Yield::One(u) => vec![Way {
-                    units: vec![Unit::free(u.mask)],
-                    life: u.life as i32 + extra,
-                    hand: u.hand as i32,
-                    sac,
-                }],
+                Yield::One(u) => vec![Way { units: vec![Unit::free(u.mask)], life: u.life as i32 + extra, sac }],
                 Yield::Multi { units: Some(us), .. } => {
                     vec![multi(us.iter().map(|u| Unit::free(u.mask)).collect())]
                 }
@@ -675,12 +641,12 @@ fn cands(
             }
         }
     }
-    let weightless = |w: &Way| w.life == 0 && w.hand == 0 && w.sac == 0;
+    let weightless = |w: &Way| w.life == 0 && w.sac == 0;
     // A single unit carries its budget use itself.
-    let as_unit = |w: &Way| Unit { life: w.life as u8, hand: w.hand > 0, sac: w.sac > 0, ..w.units[0] };
+    let as_unit = |w: &Way| Unit { life: w.life as u8, sac: w.sac > 0, ..w.units[0] };
     let mut out = Cands { fixed: Vec::new(), alts: Vec::new() };
     for (_, ways) in per_card {
-        let same_use = |a: &Way, b: &Way| (a.life, a.hand, a.sac) == (b.life, b.hand, b.sac);
+        let same_use = |a: &Way, b: &Way| (a.life, a.sac) == (b.life, b.sac);
         if ways.len() == 1 && (ways[0].units.len() == 1 || weightless(&ways[0])) {
             let w = &ways[0];
             if w.units.len() == 1 {
@@ -706,8 +672,8 @@ fn cands_payable(cost: &ManaCost, chosen: &[ManaMask], c: &Cands, budget: Budget
             return payable_within(cost, chosen, units, b);
         };
         let use_way = |w: &Way, units: &mut Vec<Unit>| {
-            let left = Budget { life: b.life - w.life, hand: b.hand - w.hand, sac: b.sac - w.sac };
-            if left.life < 0 || left.hand < 0 || left.sac < 0 {
+            let left = Budget { life: b.life - w.life, sac: b.sac - w.sac };
+            if left.life < 0 || left.sac < 0 {
                 return false;
             }
             let len = units.len();

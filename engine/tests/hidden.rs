@@ -173,3 +173,85 @@ fn determinize_for_another_viewer_refreshes_the_pending_decision() {
         d.check_invariants().unwrap();
     }
 }
+
+#[test]
+fn cr_602_2a_an_ability_activated_from_hand_reveals_its_card() {
+    // Cycling: the card stays in hand while its cost is paid, revealed, so
+    // the opponent's determinize never changes it.
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island", "Island", "Island"])
+        .hand(0, &["Raffine's Tower", "Test Bear", "Test Flyer"])
+        .library(0, &["Forest"; 6])
+        .library(1, &["Forest"; 6])
+        .at(Step::Upkeep, 0)
+        .start();
+    let tower = g.card(0, "Raffine's Tower", Zone::Hand);
+    g.choose(Choice::Ability(tower, engine::db::AbilitySlot::Hand(0)));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana));
+    assert!(g.knows(1, tower), "revealed to the opponent");
+    for seed in 0..20 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(seed));
+        assert_eq!(d.obj(tower).def, g.obj(tower).def);
+        d.check_invariants().unwrap();
+    }
+}
+
+#[test]
+fn a_pending_payment_never_waits_on_a_hidden_card() {
+    // A Spirit Guide's mana is floated with priority (public), so a payment
+    // in progress completes in every world the opponent's determinize
+    // samples.
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Mountain", "Mountain"])
+        .hand(0, &["Simian Spirit Guide", "Test Double", "Test Bear", "Island"])
+        .library(0, &["Forest", "Simian Spirit Guide", "Plains"])
+        .library(1, &["Forest"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
+    g.choose(Choice::Ability(guide, engine::db::AbilitySlot::Hand(0)));
+    let dbl = g.card(0, "Test Double", Zone::Hand); // {2}{R}
+    g.choose(Choice::Cast(dbl));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana));
+    for seed in 0..30 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(seed));
+        d.check_invariants().unwrap();
+        let mut legal = Vec::new();
+        for _ in 0..10 {
+            if d.kind() == Some(DecisionKind::Priority) {
+                break;
+            }
+            d.legal_actions(&mut legal);
+            let mut keys = Vec::new();
+            d.apply(legal[0], &mut keys).unwrap();
+        }
+        assert_eq!(d.kind(), Some(DecisionKind::Priority));
+        assert_eq!(d.stack().len(), 1);
+    }
+}
+
+#[test]
+fn a_pending_shock_land_choice_survives_determinize() {
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .hand(0, &["Blood Crypt", "Test Bear", "Test Flyer"])
+        .library(0, &["Forest"; 4])
+        .library(1, &["Forest"; 4])
+        .at(Step::Main1, 0)
+        .start();
+    let crypt = g.card(0, "Blood Crypt", Zone::Hand);
+    g.choose(Choice::Play(crypt));
+    assert_eq!(g.kind(), Some(DecisionKind::YesNo));
+    for viewer in 0..2 {
+        let mut d = g.clone();
+        d.determinize(viewer, &mut Rng::new(7));
+        assert_eq!(d.obj(crypt).def, g.obj(crypt).def, "on the battlefield already: public");
+        assert_eq!(d.kind(), Some(DecisionKind::YesNo));
+        d.choose(Choice::Pass);
+        assert!(d.obj(crypt).tapped);
+    }
+}

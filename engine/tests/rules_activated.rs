@@ -477,28 +477,28 @@ fn a_permanent_a_later_sacrifice_needs_is_not_spent_on_mana() {
 }
 
 #[test]
-fn a_spirit_guide_pays_from_hand_and_is_revealed() {
-    // One guide and one land make two mana, not three.
-    let g = manual()
-        .battlefield(0, &["Forest"])
+fn a_spirit_guide_is_activated_with_priority_and_revealed() {
+    // Mana abilities of cards in hand are priority actions (ENGINE.md 18):
+    // a payment never waits on a hidden card. The guide's mana counts once
+    // it is in the pool.
+    let mut g = manual()
+        .battlefield(0, &["Forest", "Forest"])
         .hand(0, &["Simian Spirit Guide", "Test Double"])
         .at(Step::Main1, 0)
         .start();
     let dbl = g.card(0, "Test Double", Zone::Hand); // {2}{R}
     assert!(!g.has_option(Choice::Cast(dbl)));
-    let mut g = manual()
-        .battlefield(0, &["Forest"])
-        .hand(0, &["Simian Spirit Guide", "Test Hasty"])
-        .at(Step::Main1, 0)
-        .start();
-    let hasty = g.card(0, "Test Hasty", Zone::Hand); // {R}
-    g.choose(Choice::Cast(hasty));
-    assert_eq!(g.kind(), Some(DecisionKind::PayMana));
     let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
     let keys = g.choose(Choice::Ability(guide, AbilitySlot::Hand(0)));
-    assert_eq!(g.count_in(0, "Simian Spirit Guide", Zone::Exile), 1);
     assert!(keys.iter().any(|&k| key_kind(k) == KEY_REVEAL && key_player(k) == 0));
-    assert!(!g.obj(g.card(0, "Forest", Zone::Battlefield)).tapped);
+    assert_eq!(g.count_in(0, "Simian Spirit Guide", Zone::Exile), 1);
+    assert_eq!(g.player(0).pool.amt[engine::mana::R], 1);
+    assert_eq!((g.kind(), g.to_move()), (Some(DecisionKind::Priority), Some(0)));
+    assert!(g.has_option(Choice::Cast(dbl)));
+    g.choose(Choice::Cast(dbl));
+    g.drive_until(at_priority);
+    assert_eq!(g.stack().len(), 1);
+    assert_eq!(g.player(0).pool.total(), 0);
 }
 
 #[test]

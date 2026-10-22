@@ -35,15 +35,7 @@ impl Game {
             if !(instant_speed || sorcery_ok) {
                 continue;
             }
-            // The card moves to the stack before its cost is paid (601.2a),
-            // so it cannot pay for itself (a Spirit Guide).
-            let own: Vec<crate::pay::Class>;
-            let cls = if def.hand_abilities.iter().any(|a| a.mana().is_some()) {
-                own = classes_without(&classes, c);
-                &own[..]
-            } else {
-                &classes[..]
-            };
+            let cls = &classes[..];
             if def.additional.is_empty() {
                 let keep = crate::pay::Keep { exclude: Some(c), ..Default::default() };
                 if !self.can_pay_with(p, &def.cost, cls, &keep) {

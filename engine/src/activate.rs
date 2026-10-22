@@ -30,8 +30,9 @@ impl Game {
 
     /// The activated abilities `p` may activate with priority now (CR
     /// 602.2, 117.1b): permanents' abilities, then hand abilities. Mana
-    /// abilities are activated while paying costs instead (ENGINE.md 18),
-    /// except those that may be activated only as an instant.
+    /// abilities of permanents are activated while paying costs instead
+    /// (ENGINE.md 18), except those that may be activated only as an
+    /// instant; mana abilities of cards in hand only with priority.
     pub(crate) fn activation_options(&self, p: PlayerId, classes: &[Class], sorcery_ok: bool, out: &mut Vec<Opt>) {
         for c in self.permanents_of(p) {
             for (i, ad) in self.def_of(c).activated.iter().enumerate() {
@@ -71,7 +72,7 @@ impl Game {
         sorcery_ok: bool,
     ) -> bool {
         let mana_ability = ad.mana().is_some();
-        if mana_ability && !ad.instant_only {
+        if mana_ability && !ad.instant_only && matches!(slot, AbilitySlot::Activated(_)) {
             return false;
         }
         if ad.sorcery && !sorcery_ok {
@@ -88,9 +89,7 @@ impl Game {
             return false;
         }
         let ActEffect::Stack(ab) = &ad.effect else { unreachable!() };
-        let src = self.obj_ref(card);
-        let _ = slot;
-        self.targets_available(ab, p, Some(src))
+        self.targets_available(ab, p, Some(self.obj_ref(card)))
     }
 
     /// Permanents `p` could sacrifice for `s` (canonical order).
@@ -197,7 +196,7 @@ impl Game {
 
     /// What the parts of `cost` paid after its mana need from that payment.
     pub(crate) fn keep_for(card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Keep {
-        Keep { exclude, life: cost.life, hand: cost.discard, sac: cost.sacrifice.clone().map(|s| (s, card)) }
+        Keep { exclude, life: cost.life, sac: cost.sacrifice.clone().map(|s| (s, card)) }
     }
 
     /// 601.2g-h for an activation: the mana part first.
