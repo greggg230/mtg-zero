@@ -85,19 +85,6 @@ impl ManaCost {
         m
     }
 
-    /// The coloured requirements as (acceptable types, count): single
-    /// pips, then hybrid pips. Generic is the rest. No Phyrexian pips.
-    fn needs(&self) -> Vec<(ManaMask, u8)> {
-        debug_assert!(!self.has_phyrexian());
-        let mut v: Vec<(ManaMask, u8)> = (0..6).filter(|&c| self.pips[c] > 0).map(|c| (1 << c, self.pips[c])).collect();
-        for (i, &n) in self.hybrid.iter().enumerate() {
-            if n > 0 {
-                v.push((pair_mask(i), n));
-            }
-        }
-        v
-    }
-
     /// Parse `{3}`, `{1}{U}`, `{U}{U}`, `{C}`, `{W/U}`, `{B/P}`; anything
     /// else (X, `{2/W}`) is `None`.
     pub fn parse(s: &str) -> Option<ManaCost> {
@@ -218,28 +205,58 @@ impl ManaPool {
 /// a matching; among matchings we maximise the chosen units used on pips,
 /// and the leftover chosen units must fit into the generic part.
 pub fn payable(cost: &ManaCost, chosen: &[ManaMask], available: &[ManaMask]) -> bool {
+    payable_iter(cost, chosen, available.iter().copied(), available.len())
+}
+
+/// [`payable`] over any sequence of available masks (no allocation: this
+/// runs for every castable card at every priority decision).
+fn payable_iter(cost: &ManaCost, chosen: &[ManaMask], available: impl Iterator<Item = ManaMask>, n: usize) -> bool {
     let need = cost.total() as usize;
-    if chosen.len() > need || chosen.len() + available.len() < need {
+    if chosen.len() > need || chosen.len() + n < need {
         return false;
     }
-    let mut groups: Vec<(ManaMask, bool, u8)> = Vec::with_capacity(8);
-    for (&m, ch) in chosen.iter().map(|m| (m, true)).chain(available.iter().map(|m| (m, false))) {
-        match groups.iter_mut().find(|g| g.0 == m && g.1 == ch) {
-            Some(g) => g.2 += 1,
-            None => groups.push((m, ch, 1)),
+    let mut groups = [(0u8, false, 0u8); 128];
+    let mut ng = 0;
+    let mut add = |m: ManaMask, ch: bool| match groups[..ng].iter_mut().find(|g| g.0 == m && g.1 == ch) {
+        Some(g) => g.2 = g.2.saturating_add(1),
+        None => {
+            groups[ng] = (m, ch, 1);
+            ng += 1;
+        }
+    };
+    for &m in chosen {
+        add(m, true);
+    }
+    for m in available {
+        add(m, false);
+    }
+    let mut needs = [(0u8, 0u8); 16];
+    let mut nn = 0;
+    for c in 0..6 {
+        if cost.pips[c] > 0 {
+            needs[nn] = (1 << c, cost.pips[c]);
+            nn += 1;
         }
     }
-    let needs = cost.needs();
-    match best_chosen(&needs, &mut groups) {
+    for (i, &k) in cost.hybrid.iter().enumerate() {
+        if k > 0 {
+            needs[nn] = (pair_mask(i), k);
+            nn += 1;
+        }
+    }
+    debug_assert!(!cost.has_phyrexian());
+    match best_chosen(&needs[..nn], &mut groups[..ng], chosen.len() as u8) {
         Some(used) => chosen.len() - used as usize <= cost.generic as usize,
         None => false,
     }
 }
 
-fn best_chosen(needs: &[(ManaMask, u8)], groups: &mut [(ManaMask, bool, u8)]) -> Option<u8> {
+/// The most chosen units the coloured needs can use (stops at `cap`, all of
+/// them); `None` if the needs cannot be met.
+fn best_chosen(needs: &[(ManaMask, u8)], groups: &mut [(ManaMask, bool, u8)], cap: u8) -> Option<u8> {
     match needs.split_first() {
         None => Some(0),
-        Some((&(c, k), rest)) => distribute(c, k, 0, rest, groups),
+        Some((&(c, k), rest)) => distribute(c, k, 0, rest, groups, cap),
     }
 }
 
@@ -249,9 +266,10 @@ fn distribute(
     gi: usize,
     rest: &[(ManaMask, u8)],
     groups: &mut [(ManaMask, bool, u8)],
+    cap: u8,
 ) -> Option<u8> {
     if k == 0 {
-        return best_chosen(rest, groups);
+        return best_chosen(rest, groups, cap);
     }
     if gi == groups.len() {
         return None;
@@ -260,12 +278,17 @@ fn distribute(
     let most = if mask & need != 0 { k.min(cnt) } else { 0 };
     let mut best: Option<u8> = None;
     for t in (0..=most).rev() {
+        let used = if ch { t } else { 0 };
         groups[gi].2 -= t;
-        if let Some(v) = distribute(need, k - t, gi + 1, rest, groups) {
-            let v = v + if ch { t } else { 0 };
-            best = Some(best.map_or(v, |b| b.max(v)));
-        }
+        let r = distribute(need, k - t, gi + 1, rest, groups, cap.saturating_sub(used));
         groups[gi].2 += t;
+        if let Some(v) = r {
+            let v = v + used;
+            best = Some(best.map_or(v, |b| b.max(v)));
+            if v >= cap {
+                break; // every chosen unit is used: nothing better exists
+            }
+        }
     }
     best
 }
@@ -310,14 +333,11 @@ impl Budget {
 
 /// [`payable`] within a [`Budget`] for the available units used.
 pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], budget: Budget) -> bool {
+    if available.iter().try_fold(budget, |b, u| if u.budgeted() { b.take(u, 1) } else { Some(b) }).is_some() {
+        return payable_iter(cost, chosen, available.iter().map(|u| u.mask), available.len());
+    }
     let free: Vec<ManaMask> = available.iter().filter(|u| !u.budgeted()).map(|u| u.mask).collect();
     let paid: Vec<Unit> = available.iter().copied().filter(|u| u.budgeted()).collect();
-    let all = paid.iter().try_fold(budget, |b, u| b.take(u, 1));
-    if all.is_some() {
-        let mut v = free;
-        v.extend(paid.iter().map(|u| u.mask));
-        return payable(cost, chosen, &v);
-    }
     // Rare (low life, discard costs): try how many units of each budgeted
     // group to use.
     let mut groups: Vec<(Unit, u8)> = Vec::new();

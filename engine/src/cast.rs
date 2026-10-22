@@ -23,7 +23,9 @@ impl Game {
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let land_ok = sorcery_ok && self.players[p as usize].lands_played < 1;
         let classes = self.mana_classes(p, None);
-        for (action, c) in self.hand_slots(p) {
+        let mut plain = None;
+        let slots = self.hand_slots(p);
+        for &(action, c) in &slots {
             let def = self.def_of(c);
             if def.is(types::LAND) {
                 if land_ok {
@@ -37,8 +39,8 @@ impl Game {
             }
             let cls = &classes[..];
             if def.additional.is_empty() {
-                let keep = crate::pay::Keep { exclude: Some(c), ..Default::default() };
-                if !self.can_pay_with(p, &def.cost, cls, &keep) {
+                let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
+                if !self.can_pay_plain(p, &def.cost, cls, plain) {
                     continue;
                 }
             } else if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &def.cost, cls, Some(c))) {
@@ -51,14 +53,27 @@ impl Game {
             }
             opts.push(Opt { action, choice: Choice::Cast(c) });
         }
-        self.activation_options(p, &classes, sorcery_ok, &mut opts);
+        self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
         opts
     }
 
     /// Every target requirement has at least `min` legal candidates.
     pub(crate) fn targets_available(&self, ab: &AbilityDef, controller: PlayerId, source: Option<ObjRef>) -> bool {
         let ctx = Ctx { controller, source };
-        ab.targets.iter().all(|tr| self.target_candidates(tr, &ctx, &[]).len() >= tr.min as usize)
+        ab.targets.iter().all(|tr| tr.min == 0 || self.has_candidates(tr, &ctx, tr.min as usize))
+    }
+
+    /// At least `n` legal candidates for `tr` (the same order and rules as
+    /// [`target_candidates`](Self::target_candidates), without building it).
+    fn has_candidates(&self, tr: &TargetReq, ctx: &Ctx, n: usize) -> bool {
+        let ok = |t: Target| self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx.controller);
+        let players = [ctx.controller, crate::ids::opp(ctx.controller)].into_iter().map(Target::Player);
+        let perms = self.battlefield.iter().map(|&c| Target::Obj(self.obj_ref(c)));
+        let spells = self.stack.iter().rev().filter_map(|s| match s.kind {
+            StackKind::Spell { card } => Some(self.obj_ref(card)).filter(|&r| Some(r) != ctx.source).map(Target::Obj),
+            StackKind::Ability { .. } => None,
+        });
+        players.chain(perms).chain(spells).filter(|&t| ok(t)).nth(n - 1).is_some()
     }
 
     // ---- casting (CR 601.2) ------------------------------------------------

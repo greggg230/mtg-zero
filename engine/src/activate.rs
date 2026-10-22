@@ -33,20 +33,31 @@ impl Game {
     /// abilities of permanents are activated while paying costs instead
     /// (ENGINE.md 18), except those that may be activated only as an
     /// instant; mana abilities of cards in hand only with priority.
-    pub(crate) fn activation_options(&self, p: PlayerId, classes: &[Class], sorcery_ok: bool, out: &mut Vec<Opt>) {
+    pub(crate) fn activation_options(
+        &self,
+        p: PlayerId,
+        classes: &[Class],
+        slots: &[(u16, CardIdx)],
+        sorcery_ok: bool,
+        out: &mut Vec<Opt>,
+    ) {
         for c in self.permanents_of(p) {
             for (i, ad) in self.def_of(c).activated.iter().enumerate() {
+                if ad.mana().is_some() && !ad.instant_only {
+                    continue; // paid with while paying a cost (ENGINE.md 18)
+                }
                 let slot = AbilitySlot::Activated(i as u8);
                 if self.can_activate(p, c, slot, ad, classes, sorcery_ok) {
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
         }
-        for (_, c) in self.hand_slots(p) {
+        for &(a, c) in slots {
             for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
                 let slot = AbilitySlot::Hand(i as u8);
                 if self.can_activate(p, c, slot, ad, classes, sorcery_ok) {
-                    out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+                    // One hand ability per card (lowering): the card's slot.
+                    out.push(Opt { action: act::HAND_ABILITY + (a - act::HAND), choice: Choice::Ability(c, slot) });
                 }
             }
         }

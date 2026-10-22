@@ -41,6 +41,7 @@ pub(crate) enum Yield {
 /// several-mana classes first, then single-mana ones.
 #[derive(Clone, Debug)]
 pub(crate) struct Class {
+    pub def: DefId,
     pub members: Vec<Src>,
     pub yld: Yield,
     /// Damage the ability's source deals to its controller (Talismans).
@@ -196,15 +197,8 @@ impl Game {
     /// several-mana permanents, then single-mana permanents; within each,
     /// by first appearance in canonical order.
     pub(crate) fn mana_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
-        type L = Vec<(DefId, AbilitySlot, Class)>;
-        let (mut multi, mut one): (L, L) = (Vec::new(), Vec::new());
-        let add = |list: &mut L, def: DefId, src: Src, yld: Yield, dmg: u8, sac_self: bool| match list
-            .iter_mut()
-            .find(|(d, s, _)| *d == def && *s == src.slot)
-        {
-            Some((_, _, cl)) => cl.members.push(src),
-            None => list.push((def, src.slot, Class { members: vec![src], yld, dmg, sac_self })),
-        };
+        let mut out: Vec<Class> = Vec::with_capacity(8);
+        let mut n_multi = 0;
         for c in self.permanents_of(p) {
             if Some(c) == exclude {
                 continue;
@@ -216,15 +210,23 @@ impl Game {
                     continue;
                 }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
-                let sac = ad.cost.sac_self;
-                match self.yield_of(p, &m.prod, ad.cost.life) {
-                    Some(y @ Yield::One(_)) => add(&mut one, def, src, y, m.damage_to_you, sac),
-                    Some(y) => add(&mut multi, def, src, y, m.damage_to_you, sac),
-                    None => {}
+                // Same definition and ability: the same yield (it depends on
+                // the controller only).
+                if let Some(cl) = out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == src.slot) {
+                    cl.members.push(src);
+                    continue;
+                }
+                let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life) else { continue };
+                let cl = Class { def, members: vec![src], yld, dmg: m.damage_to_you, sac_self: ad.cost.sac_self };
+                if matches!(cl.yld, Yield::Multi { .. }) {
+                    out.insert(n_multi, cl);
+                    n_multi += 1;
+                } else {
+                    out.push(cl);
                 }
             }
         }
-        multi.into_iter().chain(one).map(|(_, _, cl)| cl).collect()
+        out
     }
 
     fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8) -> Option<Yield> {
@@ -304,6 +306,25 @@ impl Game {
                     && self.phyrexian_feasible(p, &split_phyrexian(cost, col, k), classes, keep, later as u8)
             }),
         }
+    }
+
+    /// The candidates of an unrestricted payment by `p` (computed once per
+    /// priority decision).
+    pub(crate) fn plain_cands(&self, p: PlayerId, classes: &[Class]) -> Cands {
+        self.cands(p, &Keep::default(), classes, &|_| true, false)
+    }
+
+    /// [`can_pay_with`](Self::can_pay_with) for an unrestricted payment,
+    /// with candidates from [`plain_cands`](Self::plain_cands).
+    pub(crate) fn can_pay_plain(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], plain: &Cands) -> bool {
+        if cost.has_phyrexian() {
+            return self.can_pay_with(p, cost, classes, &Keep::default());
+        }
+        let mut c = *cost;
+        let mut pool = self.players[p as usize].pool;
+        pool.pay_into(&mut c);
+        let life = self.players[p as usize].life.max(0);
+        c.is_zero() || cands_payable(&c, &[], plain, Budget { life, sac: i32::MAX })
     }
 
     /// Can `p` pay `cost` with everything available?
@@ -604,7 +625,7 @@ fn split_phyrexian(cost: &ManaCost, col: usize, k: u8) -> ManaCost {
 /// one unit. Otherwise the card is a list of ways to try (each with the
 /// budget its activation takes, charged once, all its mana or none). With
 /// `dmg`, the damage an ability deals its controller weighs like life.
-struct Cands {
+pub(crate) struct Cands {
     fixed: Vec<Unit>,
     alts: Vec<Vec<Way>>,
 }
@@ -622,11 +643,35 @@ fn cands(
     dmg: bool,
     reserved: &dyn Fn(&Class, &Src) -> bool,
 ) -> Cands {
+    // How many usable abilities each card has: a card with one simple way
+    // goes straight to the fixed units.
+    let mut count: Vec<(CardIdx, u8)> = Vec::with_capacity(16);
+    for cl in classes {
+        for s in cl.members.iter().filter(|s| use_src(s)) {
+            match count.iter_mut().find(|(c, _)| *c == s.card) {
+                Some((_, n)) => *n += 1,
+                None => count.push((s.card, 1)),
+            }
+        }
+    }
+    let alone = |c: CardIdx| count.iter().any(|&(x, n)| x == c && n == 1);
+    let mut out = Cands { fixed: Vec::with_capacity(count.len() + 4), alts: Vec::new() };
     let mut per_card: Vec<(CardIdx, Vec<Way>)> = Vec::new();
     for cl in classes {
         let extra = if dmg { cl.dmg as i32 } else { 0 };
         for s in cl.members.iter().filter(|s| use_src(s)) {
             let sac = reserved(cl, s) as i32;
+            match &cl.yld {
+                Yield::One(u) if alone(s.card) => {
+                    out.fixed.push(Unit { mask: u.mask, life: (u.life as i32 + extra) as u8, sac: sac > 0 });
+                    continue;
+                }
+                Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 => {
+                    out.fixed.extend(us.iter().map(|u| Unit::free(u.mask)));
+                    continue;
+                }
+                _ => {}
+            }
             let multi = |units: Vec<Unit>| Way { units, life: extra, sac };
             let ways: Vec<Way> = match &cl.yld {
                 Yield::One(u) => vec![Way { units: vec![Unit::free(u.mask)], life: u.life as i32 + extra, sac }],
@@ -641,20 +686,11 @@ fn cands(
             }
         }
     }
-    let weightless = |w: &Way| w.life == 0 && w.sac == 0;
     // A single unit carries its budget use itself.
     let as_unit = |w: &Way| Unit { life: w.life as u8, sac: w.sac > 0, ..w.units[0] };
-    let mut out = Cands { fixed: Vec::new(), alts: Vec::new() };
     for (_, ways) in per_card {
         let same_use = |a: &Way, b: &Way| (a.life, a.sac) == (b.life, b.sac);
-        if ways.len() == 1 && (ways[0].units.len() == 1 || weightless(&ways[0])) {
-            let w = &ways[0];
-            if w.units.len() == 1 {
-                out.fixed.push(as_unit(w));
-            } else {
-                out.fixed.extend(w.units.iter().copied());
-            }
-        } else if ways.iter().all(|w| w.units.len() == 1 && same_use(w, &ways[0])) {
+        if ways.iter().all(|w| w.units.len() == 1 && same_use(w, &ways[0])) {
             let mask = ways.iter().fold(0, |m, w| m | w.units[0].mask);
             out.fixed.push(Unit { mask, ..as_unit(&ways[0]) });
         } else {
@@ -683,6 +719,9 @@ fn cands_payable(cost: &ManaCost, chosen: &[ManaMask], c: &Cands, budget: Budget
             ok
         };
         first.iter().any(|w| use_way(w, units)) || go(cost, chosen, units, rest, b)
+    }
+    if c.alts.is_empty() {
+        return payable_within(cost, chosen, &c.fixed, budget);
     }
     let mut units = c.fixed.clone();
     go(cost, chosen, &mut units, &c.alts, budget)

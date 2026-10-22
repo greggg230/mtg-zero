@@ -55,6 +55,34 @@ impl Game {
         (zero, destroyed)
     }
 
+    /// A cheap test (no allocation) that no SBA applies: nobody lost, no
+    /// creature dies, no player controls two legendary permanents with the
+    /// same name.
+    fn sba_possible(&self) -> bool {
+        if self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty) {
+            return true;
+        }
+        for (i, &c) in self.battlefield.iter().enumerate() {
+            if self.is_creature(c) {
+                let o = &self.objs[c.i()];
+                let t = self.toughness(c);
+                if t <= 0 || ((o.damage as i32 >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c)) {
+                    return true;
+                }
+            }
+            if self.is_legendary(c) {
+                let (ctl, name) = (self.objs[c.i()].controller, &self.def_of(c).name);
+                if self.battlefield[i + 1..]
+                    .iter()
+                    .any(|&d| self.objs[d.i()].controller == ctl && &self.def_of(d).name == name)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Would an SBA happen now? (Cleanup, 514.3a.)
     pub(crate) fn sba_needed(&self) -> bool {
         let (z, d) = self.dying_creatures();
@@ -70,6 +98,13 @@ impl Game {
     pub(crate) fn sba_check(&mut self, mut keep: Vec<CardIdx>) {
         if let Some(Choice::Card(c)) = self.answer.take() {
             keep.push(c);
+        }
+        if keep.is_empty() && !self.sba_possible() {
+            if !self.waiting.is_empty() {
+                self.agenda.push(Task::SbaCheck { keep });
+                self.agenda.push(Task::PutTriggers);
+            }
+            return;
         }
         let groups = self.legend_groups();
         for (p, g) in &groups {
