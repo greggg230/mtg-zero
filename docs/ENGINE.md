@@ -1664,6 +1664,8 @@ At the end of M7a: threats 125 supported (104 creatures), 121 blocked (105 creat
   interaction in the pool).
 * Mox Diamond's "if this would enter" replacement applies as the spell resolves (no other
   supported effect puts it onto the battlefield).
+* Escape granted by Underworld Breach isn't offered for a card with its own additional
+  costs (Bitter Triumph): the two costs would have to be paid as one.
 * "True-Name Nemesis": choosing yourself is offered (a `Target` decision with `PLAYER` ids;
   dominated, but legal).
 * The tap-or-untap choice, a counter kind to remove, an energy amount and X use `ChooseMode`

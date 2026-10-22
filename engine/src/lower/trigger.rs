@@ -44,6 +44,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::CardDiscarded) => Some(EventKind::CardDiscarded),
         Some(E::BecomesMonstrous) => Some(EventKind::BecomesMonstrous),
         Some(E::Blocks) => Some(EventKind::Blocks),
+        Some(E::DealsCombatDamageToCreature) => Some(EventKind::DealsCombatDamageToCreature),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -90,7 +91,11 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
             v
         }
         TrigPred::Not(a) => slots_used(a),
-        TrigPred::IsSelf(s) | TrigPred::Subject(s, _) | TrigPred::Controlled(s, _) | TrigPred::FormerHost(s) => {
+        TrigPred::IsSelf(s)
+        | TrigPred::Subject(s, _)
+        | TrigPred::Controlled(s, _)
+        | TrigPred::FormerHost(s)
+        | TrigPred::IsHost(s) => {
             vec![*s]
         }
         TrigPred::Always
@@ -198,4 +203,16 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
             return None;
         }
     })
+}
+
+/// A triggered ability an Equipment grants its creature, as the
+/// Equipment's own: "this creature" becomes "the equipped creature".
+pub(crate) fn granted_to_host(p: TrigPred) -> TrigPred {
+    match p {
+        TrigPred::IsSelf(s) => TrigPred::IsHost(s),
+        TrigPred::And(a, b) => TrigPred::And(Box::new(granted_to_host(*a)), Box::new(granted_to_host(*b))),
+        TrigPred::Or(a, b) => TrigPred::Or(Box::new(granted_to_host(*a)), Box::new(granted_to_host(*b))),
+        TrigPred::Not(a) => TrigPred::Not(Box::new(granted_to_host(*a))),
+        other => other,
+    }
 }

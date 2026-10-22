@@ -1294,6 +1294,20 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let Some(t) = lower_targets(l, b, targets, "Exile") else { return true };
             b.op(Op::Exile { tgt: t });
         }
+        E::CreateTokenCopyOfTargetTokenYouControl(nodes::CreateTokenCopyOfTargetTokenYouControl {}) => {
+            // "Create a token that's a copy of target token you control."
+            let t = b.target(and(Filter::Token, Filter::Controller(true)), 1, 1);
+            b.op(Op::Ext(Ext::CopyTargetToken { tgt: t }));
+        }
+        E::OpponentGainsControlOfSource(nodes::OpponentGainsControlOfSource {}) => {
+            b.op(Op::Ext(Ext::GiveSourceToOpponent));
+        }
+        E::ExileThatCreature(nodes::ExileThatCreature {}) => {
+            b.op(Op::Ext(Ext::ExileEventObj2));
+        }
+        E::SacrificeSelf(nodes::SacrificeSelf {}) => {
+            b.op(Op::Ext(Ext::SacrificeSource));
+        }
         E::MayMillDamageThenMayTakeCreature(nodes::MayMillDamageThenMayTakeCreature {}) => {
             b.op(Op::Ext(Ext::MayMillThenTakeCreature));
         }

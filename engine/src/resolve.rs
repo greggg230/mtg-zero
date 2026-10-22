@@ -160,6 +160,9 @@ impl Game {
                         self.entering_escaped = item.from == crate::game::CastFrom::Escape;
                         self.entering_x = item.x;
                         self.put_onto_battlefield(card, item.controller);
+                    } else if self.def_of(card).buyback && item.cost_option == 1 {
+                        // CR 702.27a: bought back.
+                        self.move_card(card, Zone::Hand, Pos::Top);
                     } else {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
                     }

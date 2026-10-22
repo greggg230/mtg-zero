@@ -324,6 +324,14 @@ pub enum Ext {
     /// one type); the rest go on the bottom in a random order. Choice: a
     /// `LIBRARY` slot or `PASS`.
     RevealTopOnePerType { n: u8 },
+    /// Create a token that's a copy of the first legal target of `tgt` (a
+    /// token: its definition, CR 707.2).
+    CopyTargetToken { tgt: u8 },
+    /// An opponent gains control of the source (CR 108.4).
+    GiveSourceToOpponent,
+    /// Exile the event's second object ("that creature"), if it is still
+    /// that permanent.
+    ExileEventObj2,
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -507,7 +515,10 @@ impl Op {
             Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
             Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
-            Op::Ext(Ext::Reflexive { .. }) | Op::Ext(Ext::ReturnEventObjToHand) | Op::Ext(Ext::MayMillThenTakeCreature) => true,
+            Op::Ext(Ext::Reflexive { .. })
+            | Op::Ext(Ext::ReturnEventObjToHand)
+            | Op::Ext(Ext::MayMillThenTakeCreature)
+            | Op::Ext(Ext::ExileEventObj2) => true,
             Op::Ext(Ext::ReturnDiedWithCounter { .. }) => true,
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })

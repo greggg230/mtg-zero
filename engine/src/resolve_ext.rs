@@ -1349,6 +1349,34 @@ impl Game {
                 self.put_on_bottom_randomly(p, rest);
                 Flow::Next
             }
+            Ext::CopyTargetToken { tgt } => {
+                if let Some(&c) = self.objs_on(f, &On::Target(*tgt)).first() {
+                    if self.def_of(c).token {
+                        let def = self.objs[c.i()].def;
+                        self.create_token(def, f.controller, false);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::GiveSourceToOpponent => {
+                if let Some(&c) = self.objs_on(f, &On::Source).first() {
+                    let q = crate::ids::opp(f.controller);
+                    let turn = self.turn.number;
+                    let o = &mut self.objs[c.i()];
+                    o.controller = q;
+                    o.control_since = turn;
+                    self.note(|g| format!("P{q} gains control of {}", g.name(c)));
+                }
+                Flow::Next
+            }
+            Ext::ExileEventObj2 => {
+                if let Some(r) = f.ev.obj2 {
+                    if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
+                        self.move_card(r.idx, Zone::Exile, Pos::Top);
+                    }
+                }
+                Flow::Next
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

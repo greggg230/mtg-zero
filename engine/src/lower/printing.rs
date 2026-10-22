@@ -301,7 +301,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
         l.deny("CardPrinting.sunburst", sunburst);
         l.deny("CardPrinting.grants_play_from_top_paying_life", grants_play_from_top_paying_life);
-        l.deny("CardPrinting.equipment_granted_triggers", equipment_granted_triggers);
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
         l.deny("CardPrinting.produces_with_counter", produces_with_counter);
@@ -346,8 +345,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
         l.deny("CardPrinting.has_convoke", has_convoke);
         let _ = flashback_cost_str; // display form of `flashback_cost`
-        l.deny("CardPrinting.buyback_cost", buyback_cost);
-        l.deny("CardPrinting.buyback_cost_str", buyback_cost_str);
+        let _ = buyback_cost_str; // display form of `buyback_cost`
         l.deny("CardPrinting.additional_cost_pay_x_life", additional_cost_pay_x_life);
         l.deny("CardPrinting.has_storm", has_storm);
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
@@ -370,7 +368,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.plot_cost", plot_cost);
         l.deny("CardPrinting.plot_cost_str", plot_cost_str);
         let _ = escape_cost_str; // display form of `escape_cost`
-        l.deny("CardPrinting.grants_graveyard_escape_exile_count", grants_graveyard_escape_exile_count);
         l.deny("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing", sacrifice_at_cleanup_if_cast_without_sorcery_timing);
         l.deny("CardPrinting.graveyard_activated_abilities", graveyard_activated_abilities);
         let _ = dash_cost_str; // display form of `dash_cost`
@@ -688,8 +685,51 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             }
         }
     };
+    // Overload (CR 702.96): the alternative cost changes "target" to
+    // "each": the two branches of "if the alternative cost was paid" are
+    // the modes, the mode given by the cost.
+    let overload = alternative_costs.iter().any(|a| {
+        let cats::AlternativeCost::AlternativeCost(n) = a;
+        n.overload
+    });
+    let overloaded = if overload {
+        match spell_effect.as_deref() {
+            Some(cats::Effect::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(e) }))
+                if matches!(**condition, cats::ConditionOrStatePredicate::AlternativeCostWasPaid(_)) && is_spell_card =>
+            {
+                let plain = lower_ability(l, e);
+                let each = lower_ability(l, then_effect);
+                if plain.modes.is_some() || each.modes.is_some() || alternative_costs.len() != 1 {
+                    l.unsupported("AlternativeCost.overload(shape)");
+                }
+                Some(crate::db::AbilityDef {
+                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, each], min: 1, max: 1, repeat: false })),
+                    ..Default::default()
+                })
+            }
+            _ => {
+                l.unsupported("AlternativeCost.overload(not \"if overloaded ... else\")");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    // Buyback (CR 702.27): an optional additional cost.
+    let buyback = match buyback_cost {
+        None => false,
+        Some(m) => {
+            let mana = lower_mana_cost(l, "CardPrinting.buyback_cost", m);
+            if !additional.is_empty() || kicker.is_some() {
+                l.unsupported("CardPrinting.buyback_cost(with other additional costs)");
+            }
+            additional = vec![Cost::default(), Cost { mana, ..Cost::default() }];
+            true
+        }
+    };
     let spell = match spell_effect {
         _ if kicker.is_some() => kicker.clone(),
+        _ if overloaded.is_some() => overloaded.clone(),
         Some(e) if is_spell_card => Some(lower_ability(l, e)),
         Some(_) => {
             l.unsupported("CardPrinting.spell_effect(on a permanent card)");
@@ -728,6 +768,16 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     };
     let mut triggers = Vec::new();
+    // Triggered abilities an Equipment grants (Kaldra Compleat).
+    for t in equipment_granted_triggers {
+        if !subs.contains(&l.subtype("Equipment")) {
+            l.unsupported("CardPrinting.equipment_granted_triggers(not an Equipment)");
+        }
+        if let Some(mut td) = super::trigger::lower_trigger(l, t, ty) {
+            td.pred = super::trigger::granted_to_host(td.pred);
+            triggers.push(td);
+        }
+    }
     for t in triggered_abilities {
         if let Some(td) = super::trigger::lower_trigger(l, t, ty) {
             triggers.push(td);
@@ -916,6 +966,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         x_pips,
         enters_x_counters,
         extra_lands: l.int("CardPrinting.grants_additional_land_per_turn", *grants_additional_land_per_turn, 0, 3) as u8,
+        buyback,
+        overload: overloaded.is_some(),
+        grants_escape: (*grants_graveyard_escape_exile_count > 0).then(|| Cost {
+            exile_graveyard: l.int("CardPrinting.grants_graveyard_escape_exile_count", *grants_graveyard_escape_exile_count, 1, 20) as u8,
+            ..Cost::default()
+        }),
     }
 }
 
@@ -944,8 +1000,9 @@ fn lower_alt_cost(l: &mut Lowerer, a: &cats::AlternativeCost) -> Option<AltCost>
     }) = a;
     l.deny("AlternativeCost.opponent_gains_life", opponent_gains_life);
     l.deny("AlternativeCost.discard_card_sharing_color", discard_card_sharing_color);
-    // Overload changes "target" to "each" (CR 702.96): another ability.
-    l.deny("AlternativeCost.overload", overload);
+    // Overload changes "target" to "each" (CR 702.96): the spell's modes
+    // (lower_printing).
+    let _ = overload;
     l.deny("AlternativeCost.condition", condition);
     let mut out = AltCost::default();
     if !mana.is_empty() {

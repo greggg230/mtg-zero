@@ -57,6 +57,8 @@ pub(crate) struct Lki {
 pub struct EvCtx {
     pub player: Option<PlayerId>,
     pub obj: Option<ObjRef>,
+    /// The second object subject ("that creature" dealt damage).
+    pub obj2: Option<ObjRef>,
     pub amount: u16,
 }
 
@@ -122,6 +124,10 @@ impl Game {
                 Subj::Obj(r) => Some(*r),
                 _ => None,
             }),
+            obj2: match (ev.a, ev.b) {
+                (Subj::Obj(_), Subj::Obj(r)) => Some(r),
+                _ => None,
+            },
             amount: ev.amount,
         };
         for o in obs {
@@ -173,6 +179,10 @@ impl Game {
                 let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
                 self.live(src.r) && self.subject_matches(f, src.r.idx, &ctx)
             }
+            TrigPred::IsHost(s) => match ev.subject(*s) {
+                Subj::Obj(r) => self.objs[src.r.idx.i()].attached == Some(r) && self.live(r),
+                _ => false,
+            },
             TrigPred::HostAttacksWithAnother => {
                 let host = self.objs[src.r.idx.i()].attached;
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2

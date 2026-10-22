@@ -72,7 +72,7 @@ impl Game {
                 continue;
             }
             let cls = &classes[..];
-            let cost = self.delve_reduced(c, p, self.spell_cost(c, p));
+            let cost = self.delve_reduced(c, p, self.spell_cost(c, p), 0);
             let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
             if alt_ok {
                 // castable for an alternative cost (601.2b); the mana cost
@@ -97,6 +97,13 @@ impl Game {
             if let Some(ab) = &def.spell {
                 if !self.targets_available(ab, p, Some(self.obj_ref(c))) {
                     continue;
+                }
+                // Not overloaded: its own target is needed.
+                if def.overload && !alt_ok {
+                    let plain = ab.modes.as_ref().map(|m| &m.list[0]);
+                    if !plain.is_some_and(|x| self.targets_available(x, p, Some(self.obj_ref(c)))) {
+                        continue;
+                    }
                 }
             }
             opts.push(Opt { action, choice: Choice::Cast(c) });
@@ -154,7 +161,12 @@ impl Game {
                 });
                 if def.flashback.is_some() || granted {
                     Some(CastFrom::Flashback)
-                } else if def.escape.is_some() {
+                } else if def.escape.is_some()
+                    // (Granted escape with the card's own additional costs is
+                    // not offered: one combined cost isn't built; ENGINE.md
+                    // 23.11.)
+                    || (!def.is(types::LAND) && def.additional.is_empty() && self.escape_granter(p).is_some())
+                {
                     Some(CastFrom::Escape)
                 } else {
                     None
@@ -202,7 +214,13 @@ impl Game {
     pub(crate) fn route_extra(&self, card: CardIdx, from: crate::game::CastFrom, option: u8) -> Option<&'static crate::db::Cost> {
         let def = self.def_of(card);
         match from {
-            crate::game::CastFrom::Escape => def.escape.as_ref().map(|e| &e.1),
+            crate::game::CastFrom::Escape => match &def.escape {
+                Some(e) => Some(&e.1),
+                None => {
+                    let p = self.objs[card.i()].owner;
+                    self.escape_granter(p).and_then(|g| self.def_of(g).grants_escape.as_ref())
+                }
+            },
             _ => def.additional.get(option as usize),
         }
     }
@@ -213,9 +231,11 @@ impl Game {
         if !(def.is(types::INSTANT) || def.keywords.has(Kw::Flash) || sorcery_ok) {
             return false;
         }
-        let mana = self.delve_reduced(card, p, self.route_mana(card, p, from));
+        let mana = self.delve_reduced(card, p, self.route_mana(card, p, from), self.escape_exiles(card, from));
         let paid = match from {
-            crate::game::CastFrom::Escape => self.cost_payable(p, card, &def.escape.as_ref().unwrap().1, &mana, classes, None),
+            crate::game::CastFrom::Escape => {
+                self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape cost"), &mana, classes, None)
+            }
             _ if !def.additional.is_empty() => self.options_payable(p, card, &mana, classes, None),
             _ => self.can_pay_with(p, &mana, classes, &Default::default()),
         };
@@ -293,13 +313,22 @@ impl Game {
 
     /// A delve spell's cost with as much generic mana as its caster's
     /// graveyard can pay (castability, CR 702.66).
-    pub(crate) fn delve_reduced(&self, card: CardIdx, p: PlayerId, cost: crate::mana::ManaCost) -> crate::mana::ManaCost {
+    /// (`keep`: graveyard cards another part of the cost exiles, escape.)
+    pub(crate) fn delve_reduced(&self, card: CardIdx, p: PlayerId, cost: crate::mana::ManaCost, keep: u8) -> crate::mana::ManaCost {
         if !self.def_of(card).delve {
             return cost;
         }
         let gy = &self.players[p as usize].graveyard;
-        let n = gy.iter().filter(|&&c| c != card).count().min(255) as u8;
+        let n = gy.iter().filter(|&&c| c != card).count().saturating_sub(keep as usize).min(255) as u8;
         cost.less_generic(n)
+    }
+
+    /// Graveyard cards an escape cost exiles (0 for other routes).
+    pub(crate) fn escape_exiles(&self, card: CardIdx, from: crate::game::CastFrom) -> u8 {
+        match from {
+            crate::game::CastFrom::Escape => self.route_extra(card, from, 0).map_or(0, |c| c.exile_graveyard),
+            _ => 0,
+        }
     }
 
     /// CR 702.66a: exile cards from the graveyard, each paying {1}; one
@@ -335,13 +364,14 @@ impl Game {
         // made sure some number does).
         let need = (0..=cost.generic).find(|&d| self.can_pay(p, &cost.less_generic(d))).unwrap_or(cost.generic) as usize;
         let floor = item.delve_floor as usize;
+        let keep = self.escape_exiles(card, item.from) as usize;
         let gy = &self.players[p as usize].graveyard;
         // Picks go up the graveyard (each set once), leaving enough cards
         // above for the picks still needed.
         let mut opts: Vec<Opt> = gy
             .iter()
             .enumerate()
-            .filter(|&(i, _)| i >= floor && gy.len() - i >= need)
+            .filter(|&(i, _)| i >= floor && gy.len() - i >= need && gy.len() > keep)
             .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
             .collect();
         if need == 0 || opts.is_empty() {
@@ -375,6 +405,12 @@ impl Game {
                 self.ask(Task::EnterByDiscard { id }, p, DecisionKind::Discard, opts);
             }
         }
+    }
+
+    /// A permanent of `p` giving the nonland cards in their graveyard
+    /// escape (Underworld Breach).
+    pub(crate) fn escape_granter(&self, p: PlayerId) -> Option<CardIdx> {
+        self.permanents_of(p).find(|&c| self.def_of(c).grants_escape.is_some())
     }
 
     /// "You may play lands from your graveyard" (Crucible of Worlds).
@@ -570,7 +606,7 @@ impl Game {
     pub(crate) fn normal_payable(&self, p: PlayerId, card: CardIdx, classes: &[crate::pay::Class]) -> bool {
         let def = self.def_of(card);
         let cost = self.spell_cost(card, p);
-        let cost = self.delve_reduced(card, p, cost);
+        let cost = self.delve_reduced(card, p, cost, 0);
         if !def.additional.is_empty() {
             self.options_payable(p, card, &cost, classes, Some(card))
         } else {
@@ -589,12 +625,21 @@ impl Game {
             Some(Choice::Number(k)) => {
                 self.stack[pos].alt = k;
                 self.note(|_| format!("cost {k}"));
+                if self.def_of(card).overload {
+                    // CR 702.96a: overloaded, "target" becomes "each".
+                    self.stack[pos].modes = vec![(k > 0) as u8];
+                }
             }
             Some(other) => unreachable!("cost answer {other:?}"),
             None => {
                 let classes = self.mana_classes(p, None);
                 let mut opts = Vec::new();
-                if self.normal_payable(p, card, &classes) {
+                let def = self.def_of(card);
+                let plain_targets = !def.overload
+                    || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| {
+                        self.targets_available(&m.list[0], p, Some(self.obj_ref(card)))
+                    });
+                if plain_targets && self.normal_payable(p, card, &classes) {
                     opts.push(Opt { action: act::NUMBER, choice: Choice::Number(0) });
                 }
                 for k in 0..self.def_of(card).alt_costs.len() {
@@ -650,7 +695,16 @@ impl Game {
         if self.def_of(card).x_pips > 0 {
             self.agenda.push(Task::ChooseX { id }); // CR 601.2b
         }
-        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some()) && !self.def_of(card).kicker {
+        if self.def_of(card).overload {
+            // Not overloaded unless the alternative cost is chosen.
+            if let Some(pos) = self.item_index(id) {
+                self.stack[pos].modes = vec![0];
+            }
+        }
+        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some())
+            && !self.def_of(card).kicker
+            && !self.def_of(card).overload
+        {
             self.agenda.push(Task::ChooseModes { id }); // CR 601.2b, 700.2a
         }
         // CR 118.9a: one alternative cost at most (flashback, escape and
@@ -680,7 +734,7 @@ impl Game {
             None => {
                 let def = self.def_of(card);
                 let classes = self.mana_classes(p, None);
-                let cost = self.delve_reduced(card, p, self.route_mana(card, p, item.from));
+                let cost = self.delve_reduced(card, p, self.route_mana(card, p, item.from), self.escape_exiles(card, item.from));
                 let src = Some(self.obj_ref(card));
                 let kicker_ok = |k: usize| {
                     !def.kicker

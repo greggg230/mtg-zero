@@ -380,6 +380,9 @@ pub enum EventKind {
     CardDiscarded,
     /// A permanent became monstrous (701.37b). Subject: obj.
     BecomesMonstrous,
+    /// A creature dealt combat damage to a creature (510.2). Subjects:
+    /// source, target.
+    DealsCombatDamageToCreature,
     /// A creature was declared as a blocker (509.1). Subjects: blocker,
     /// attacker.
     Blocks,
@@ -423,7 +426,7 @@ impl EventKind {
             | E::BeginningOfPrecombatMain
             | E::BeginningOfCombat
             | E::BeginningOfEndStep => (&[Slot::Player], &[]),
-            E::DealsCombatDamage => (&[Slot::Source], &[Slot::Target]),
+            E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
             E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
@@ -475,6 +478,9 @@ pub enum TrigPred {
     /// "Whenever equipped creature and at least one other creature
     /// attack": the source's host attacks, with another attacker.
     HostAttacksWithAnother,
+    /// The subject is the permanent this source (an Equipment) is attached
+    /// to now (a triggered ability it grants, CR 301.5c-like).
+    IsHost(Slot),
     /// An intervening "if" (CR 603.4): checked when the event happens and
     /// again on resolution.
     If(Cond),
@@ -801,6 +807,16 @@ pub struct CardDef {
     pub enters_x_counters: bool,
     /// "You may play n additional lands on each of your turns."
     pub extra_lands: u8,
+    /// Buyback (CR 702.27): `additional` is [none, buyback]; bought back,
+    /// it goes to its owner's hand as it resolves.
+    pub buyback: bool,
+    /// Overload (CR 702.96): alternative cost 0; the spell's modes are
+    /// [its targeted effect, its "each" effect], the mode given by the
+    /// cost.
+    pub overload: bool,
+    /// "Each nonland card in your graveyard has escape": the rest of the
+    /// escape cost (the mana cost is the card's).
+    pub grants_escape: Option<Cost>,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.
