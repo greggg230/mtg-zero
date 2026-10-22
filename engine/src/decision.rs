@@ -91,6 +91,17 @@ pub enum DecisionKind {
     /// definition in the library sorted by definition; `PASS` = find
     /// nothing; CR 701.19).
     SearchLibrary,
+    /// The next card of a looked-at pile to put on top of the library
+    /// (`LIBRARY` = its slot in the pile sorted by definition).
+    PutOnTop,
+    /// The next card of the pile to put on the bottom (`PASS` = done when
+    /// the number is free: scry).
+    PutOnBottom,
+    /// A card of the pile to put into the graveyard (`PASS` = done:
+    /// surveil).
+    PutInGraveyard,
+    /// A card of the pile to put into the hand (`PASS` = done when allowed).
+    PutInHand,
 }
 
 /// What an action means to the task that asked.

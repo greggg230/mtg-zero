@@ -7,7 +7,7 @@ mod common;
 use common::db;
 use engine::db::AbilitySlot;
 use engine::decision::act;
-use engine::hidden::{key_kind, key_payload, key_player, KEY_REVEAL};
+use engine::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_LOOK, KEY_REVEAL};
 use engine::rng::Rng;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Zone};
@@ -356,4 +356,240 @@ fn cr_701_20_a_shuffle_keeps_what_was_known_in_the_library_but_not_where() {
         }
     }
     assert!(places.len() > 3, "anywhere in the library: {places:?}");
+}
+
+/// The cards offered by a pile decision, by name.
+fn offered_names(g: &Game) -> Vec<String> {
+    let d = g.pending_decision().unwrap();
+    d.options
+        .iter()
+        .map(|o| match o.choice {
+            Choice::Card(c) => g.name(c).to_string(),
+            Choice::Pass => "pass".to_string(),
+            other => format!("{other:?}"),
+        })
+        .collect()
+}
+
+fn pick(g: &mut Game, name: &str) -> Vec<u64> {
+    let c = g
+        .pending_decision()
+        .unwrap()
+        .options
+        .iter()
+        .map(|o| o.choice)
+        .find(|&c| matches!(c, Choice::Card(x) if g.name(x) == name))
+        .unwrap_or_else(|| panic!("{name} not offered: {:?}", g.options_desc()));
+    g.choose(c)
+}
+
+#[test]
+fn cr_701_18_scry_puts_any_number_on_the_bottom_and_the_rest_on_top() {
+    // Preordain: scry 2, then draw. Library top: Forest, Island.
+    let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Preordain"]).at(Step::Main1, 0).start();
+    cast(&mut g, 0, "Preordain");
+    let keys = resolve(&mut g);
+    // Two private looks, top first.
+    let looks: Vec<u64> = keys.iter().copied().filter(|&k| key_kind(k) == KEY_LOOK).collect();
+    assert_eq!(looks.iter().map(|&k| key_payload(k) as u16).collect::<Vec<_>>(), vec![def("Forest"), def("Island")]);
+    assert_eq!(g.kind(), Some(DecisionKind::PutOnBottom));
+    let mut got = offered_names(&g);
+    got.sort();
+    assert_eq!(got, vec!["Forest".to_string(), "Island".to_string(), "pass".to_string()]);
+    let forest = *g.player(0).library.last().unwrap();
+    pick(&mut g, "Forest");
+    assert_eq!(g.player(0).library[0], forest, "on the bottom");
+    assert_eq!(g.kind(), Some(DecisionKind::PutOnBottom));
+    g.pass(); // keep the Island on top (the last card is placed without a choice)
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Island", Zone::Hand), 1, "drew the Island");
+    // P0 knows the bottom card; P1 does not.
+    assert!(g.knows(0, forest) && !g.knows(1, forest));
+    for s in 0..10 {
+        let mut d = g.clone();
+        d.determinize(0, &mut Rng::new(s));
+        assert_eq!(d.obj(forest).def, def("Forest"));
+    }
+    assert!((0..40).any(|s| {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.obj(forest).def != def("Forest")
+    }));
+}
+
+#[test]
+fn a_scry_decision_hides_the_cards_from_the_opponent_and_keys_are_masked() {
+    let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Preordain"]).at(Step::Main1, 0).start();
+    cast(&mut g, 0, "Preordain");
+    // Searching for P1: P0's looks are keyed but hidden.
+    let mut o = g.clone();
+    o.determinize(1, &mut Rng::new(3));
+    let keys = resolve(&mut o);
+    let looks: Vec<u64> = keys.iter().copied().filter(|&k| key_kind(k) == KEY_LOOK).collect();
+    assert_eq!(looks.len(), 2);
+    assert!(looks.iter().all(|&k| key_payload(k) == HIDDEN));
+    // At P0's decision, P1's determinize resamples the looked-at cards and
+    // refreshes the decision; P0's keeps it.
+    resolve(&mut g);
+    let dec = g.pending_decision().unwrap().clone();
+    for s in 0..20 {
+        let mut d = g.clone();
+        d.determinize(0, &mut Rng::new(s));
+        assert_eq!(d.pending_decision().unwrap(), &dec);
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.check_invariants().unwrap();
+        assert_eq!(d.kind(), Some(DecisionKind::PutOnBottom));
+    }
+}
+
+#[test]
+fn cr_701_42_surveil_puts_any_number_into_the_graveyard() {
+    // Consider: surveil 1, then draw.
+    let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Consider"]).at(Step::Main1, 0).start();
+    cast(&mut g, 0, "Consider");
+    resolve(&mut g);
+    assert_eq!(g.kind(), Some(DecisionKind::PutInGraveyard));
+    assert_eq!(offered_names(&g), vec!["pass".to_string(), "Forest".to_string()]);
+    let keys = pick(&mut g, "Forest");
+    assert_eq!(reveals(&keys), vec![def("Forest")], "a card put into the graveyard is revealed");
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Forest", Zone::Graveyard), 1);
+    assert_eq!(g.count_in(0, "Island", Zone::Hand), 1, "drew the next card");
+}
+
+#[test]
+fn a_surveil_land_surveils_when_it_enters() {
+    let mut g = scen().hand(0, &["Hedge Maze"]).at(Step::Main1, 0).start();
+    let maze = g.card(0, "Hedge Maze", Zone::Hand);
+    g.choose(Choice::Play(maze));
+    assert!(g.obj(maze).tapped, "enters tapped");
+    resolve(&mut g);
+    assert_eq!(g.kind(), Some(DecisionKind::PutInGraveyard));
+    g.pass();
+    let top = *g.player(0).library.last().unwrap();
+    assert!(g.knows(0, top) && !g.knows(1, top), "kept on top, known to its owner");
+}
+
+#[test]
+fn ponder_reorders_then_may_shuffle() {
+    let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Ponder"]).at(Step::Main1, 0).start();
+    cast(&mut g, 0, "Ponder");
+    resolve(&mut g);
+    // Top three: Forest, Island, Swamp. One decision per card placed on
+    // top, the last placed ends on top; the last card needs no choice.
+    assert_eq!(g.kind(), Some(DecisionKind::PutOnTop));
+    assert_eq!(g.options_desc().len(), 3);
+    pick(&mut g, "Island");
+    assert_eq!(g.options_desc().len(), 2);
+    pick(&mut g, "Swamp");
+    g.drive_until(|g| g.kind() != Some(DecisionKind::PutOnTop));
+    let lib = &g.player(0).library;
+    let top3: Vec<&str> = lib.iter().rev().take(3).map(|&c| g.name(c)).collect();
+    assert_eq!(top3, vec!["Forest", "Swamp", "Island"]);
+    assert!(lib.iter().rev().take(3).all(|&c| g.knows(0, c) && !g.knows(1, c)));
+    // "You may shuffle."
+    assert_eq!(g.kind(), Some(DecisionKind::YesNo));
+    g.pass();
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Forest", Zone::Hand), 1);
+}
+
+#[test]
+fn stock_up_takes_two_and_bottoms_the_rest_in_any_order() {
+    // Top five: Forest, Island, Swamp, Island, Lightning Bolt.
+    let mut g = scen().battlefield(0, &["Island", "Island", "Island"]).hand(0, &["Stock Up"]).at(Step::Main1, 0).start();
+    cast(&mut g, 0, "Stock Up");
+    resolve(&mut g);
+    assert_eq!(g.kind(), Some(DecisionKind::PutInHand));
+    // The pair is picked in definition order, so the largest definition
+    // cannot come first (it would leave no second pick); no pass before
+    // two are taken.
+    let names = offered_names(&g);
+    assert!(!names.contains(&"pass".to_string()));
+    let largest = ["Forest", "Island", "Swamp", "Lightning Bolt"].into_iter().max_by_key(|n| def(n)).unwrap();
+    assert!(!names.contains(&largest.to_string()), "{names:?}");
+    // Two Islands are offered once.
+    assert_eq!(names.iter().filter(|n| *n == "Island").count(), 1);
+    let first = ["Island", "Lightning Bolt"].into_iter().min_by_key(|n| def(n)).unwrap();
+    let second = ["Island", "Lightning Bolt"].into_iter().max_by_key(|n| def(n)).unwrap();
+    pick(&mut g, first);
+    pick(&mut g, second);
+    assert_eq!(g.kind(), Some(DecisionKind::PutOnBottom));
+    assert_eq!(g.options_desc().len(), 3, "Forest, Swamp, Island: no pass");
+    pick(&mut g, "Forest");
+    pick(&mut g, "Swamp");
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    let hand: Vec<&str> = g.player(0).hand.iter().map(|&c| g.name(c)).collect();
+    assert!(hand.contains(&"Island") && hand.contains(&"Lightning Bolt"));
+    let mut bottom: Vec<&str> = g.player(0).library.iter().take(3).map(|&c| g.name(c)).collect();
+    bottom.sort();
+    assert_eq!(bottom, vec!["Forest", "Island", "Swamp"]);
+}
+
+#[test]
+fn senseis_divining_top_reorders_and_returns_itself_to_the_library() {
+    let mut g = scen().battlefield(0, &["Sensei's Divining Top", "Island"]).at(Step::Main1, 0).start();
+    let top = g.card(0, "Sensei's Divining Top", Zone::Battlefield);
+    g.choose(Choice::Ability(top, AbilitySlot::Activated(0)));
+    g.drive_until(at_priority);
+    resolve(&mut g);
+    assert_eq!(g.kind(), Some(DecisionKind::PutOnTop));
+    pick(&mut g, "Swamp");
+    pick(&mut g, "Island");
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    let order: Vec<&str> = g.player(0).library.iter().rev().take(3).map(|&c| g.name(c)).collect();
+    assert_eq!(order, vec!["Forest", "Island", "Swamp"]);
+    // {T}: draw a card, then put it on top of its owner's library.
+    g.choose(Choice::Ability(top, AbilitySlot::Activated(1)));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Forest", Zone::Hand), 1);
+    let t = *g.player(0).library.last().unwrap();
+    assert_eq!(g.name(t), "Sensei's Divining Top");
+    assert!(g.knows(1, t), "everyone saw it go there");
+}
+
+#[test]
+fn a_scry_after_a_revealed_top_card_leaves_it_among_the_scried_cards() {
+    // P1 knows Counterspell is on top (Mystical Tutor). P0 scries 2, puts
+    // Counterspell on the bottom and draws the other: P1 knows Counterspell
+    // is either that bottom card or the card P0 drew, not which.
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island", "Island"])
+        .hand(0, &["Mystical Tutor", "Preordain"])
+        .library(0, &["Forest", "Counterspell", "Plains", "Swamp", "Mountain", "Forest", "Forest"])
+        .library(1, &["Island"; 8])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Mystical Tutor");
+    resolve(&mut g);
+    g.choose(Choice::Def(def("Counterspell")));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    let cs = *g.player(0).library.last().unwrap();
+    assert!(g.knows(1, cs));
+    cast(&mut g, 0, "Preordain");
+    resolve(&mut g);
+    pick(&mut g, "Counterspell");
+    g.pass();
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.player(0).library[0], cs);
+    assert!(!g.knows(1, cs));
+    let k = g.clouds().iter().find(|k| k.viewer == 1).expect("a cloud");
+    assert_eq!(k.defs, vec![def("Counterspell")]);
+    // The cloud covers Counterspell (bottom) and the drawn card (now in
+    // P0's hand, whose cards P1 cannot tell apart).
+    assert!(k.slots.contains(&cs) && k.hand, "{k:?}");
+    let (mut bottom, mut hand) = (0, 0);
+    for s in 0..60 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.check_invariants().unwrap();
+        let at_bottom = d.obj(d.player(0).library[0]).def == def("Counterspell");
+        let in_hand = d.player(0).hand.iter().any(|&c| d.obj(c).def == def("Counterspell"));
+        assert!(at_bottom || in_hand, "seed {s}");
+        bottom += at_bottom as u32;
+        hand += in_hand as u32;
+    }
+    assert!(bottom > 5 && hand > 5, "bottom {bottom}, hand {hand}");
 }

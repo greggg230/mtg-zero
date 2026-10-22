@@ -51,6 +51,20 @@ pub enum SearchDest {
     Battlefield { tapped: bool },
 }
 
+/// Where cards of a looked-at pile go (scry, surveil, "look at the top N").
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PileDest {
+    /// On top of the library, in the order chosen (the last on top).
+    Top,
+    /// On the bottom, in the order chosen (the last at the very bottom).
+    Bottom,
+    Graveyard,
+    Hand,
+}
+
+/// `PileTo.max`: any number of the cards.
+pub const PILE_ANY: u8 = u8::MAX;
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Op {
     /// The source deals `amount` damage to each legal target of requirement
@@ -119,6 +133,22 @@ pub enum Op {
     /// quality, 701.19b) they may find nothing; otherwise they must find a
     /// card if the library has one (701.19c). Choice: a definition.
     Search { who: Who, filter: Filter, dest: SearchDest, reveal: bool, may_fail: bool },
+    /// `who` looks at the top `n` cards of their library (all of them if
+    /// fewer): they become the frame's pile, known to `who` (CR 701.18a,
+    /// 701.42a); with `reveal`, revealed to everyone. Keys per card.
+    LookTop { who: Who, n: u8, reveal: bool },
+    /// `who` puts cards of the pile into `dest`, one decision per card:
+    /// with `rest`, every card left (only their order is chosen);
+    /// otherwise between `min` and `max` (`PILE_ANY`) of those matching
+    /// `filter` (as many as there are, if fewer). Top and bottom take the
+    /// cards in the order chosen; a hand or graveyard takes a set, chosen in
+    /// canonical order. With `reveal`, each is revealed as it moves.
+    PileTo { who: Who, dest: PileDest, filter: Filter, min: u8, max: u8, rest: bool, reveal: bool },
+    /// `who` shuffles their library (CR 701.20).
+    Shuffle { who: Who },
+    /// The ability's source, if it is still the same permanent, goes on top
+    /// of its owner's library.
+    SourceToLibraryTop,
 }
 
 impl Op {

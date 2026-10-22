@@ -5,8 +5,8 @@ use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::pay::PayMana;
 use crate::game::{DamageSource, Game, Pos, StackKind};
-use crate::ids::{DefId, ObjRef, PlayerId, Target, Zone};
-use crate::program::{Amount, Op, SearchDest, SpellDest, Who};
+use crate::ids::{CardIdx, DefId, ObjRef, PlayerId, Target, Zone};
+use crate::program::{Amount, Op, PileDest, SearchDest, SpellDest, Who, PILE_ANY};
 
 /// A running program (ENGINE.md 7). Plain data: cloning the game clones a
 /// resolution suspended at `pc`.
@@ -26,6 +26,11 @@ pub(crate) struct Frame {
     /// Last known information remembered by `Op::Remember`: (power,
     /// controller).
     pub lki: Option<(i32, PlayerId)>,
+    /// The cards looked at by `Op::LookTop` not yet placed.
+    pub pile: Vec<CardIdx>,
+    /// Per-op floor (reset when `pc` moves): the smallest definition the
+    /// next pick of a set may take (each set chosen once).
+    pub floor: DefId,
 }
 
 enum Flow {
@@ -74,6 +79,8 @@ impl Game {
             legal,
             i: 0,
             lki: None,
+            pile: Vec::new(),
+            floor: 0,
         }));
     }
 
@@ -106,10 +113,12 @@ impl Game {
                 Flow::Next => {
                     f.pc += 1;
                     f.i = 0;
+                    f.floor = 0;
                 }
                 Flow::Jump(pc) => {
                     f.pc = pc;
                     f.i = 0;
+                    f.floor = 0;
                 }
                 Flow::Suspend => return,
             }
@@ -236,6 +245,7 @@ impl Game {
                         let mut back = f.clone();
                         back.pc = if_paid;
                         back.i = 0;
+                        back.floor = 0;
                         self.agenda.push(Task::Run(back));
                         self.agenda.push(Task::PayMana(PayMana::new(p, cost)));
                         Flow::Suspend
@@ -434,6 +444,93 @@ impl Game {
                 }
                 Flow::Next
             }
+            Op::LookTop { who, n, reveal } => {
+                if let Some(p) = self.who(f, who) {
+                    self.look_top(f, p, n, reveal);
+                }
+                Flow::Next
+            }
+            Op::PileTo { who, dest, ref filter, min, max, rest, reveal } => {
+                let Some(p) = self.who(f, who) else { return Flow::Next };
+                let set = matches!(dest, PileDest::Graveyard | PileDest::Hand);
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        f.pile.retain(|&x| x != c);
+                        f.i += 1;
+                        if set {
+                            f.floor = self.objs[c.i()].def;
+                        }
+                        self.put_from_pile(p, c, dest, reveal);
+                    }
+                    Some(Choice::Pass) => return Flow::Next,
+                    Some(other) => unreachable!("pile answer {other:?}"),
+                    None => {}
+                }
+                if rest && f.pile.is_empty() || !rest && max != PILE_ANY && f.i >= max {
+                    return Flow::Next;
+                }
+                if rest && set {
+                    // "The rest into your graveyard": no choice, canonical order.
+                    let mut all = std::mem::take(&mut f.pile);
+                    all.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                    for c in all {
+                        self.put_from_pile(p, c, dest, reveal);
+                    }
+                    return Flow::Next;
+                }
+                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                let mut sorted = f.pile.clone();
+                sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                // The cards that may be picked now (a set is picked in
+                // non-decreasing definition order, so each set once).
+                let eligible: Vec<DefId> = sorted
+                    .iter()
+                    .filter(|&&c| rest || (self.objs[c.i()].def >= f.floor && self.card_matches(filter, c, &ctx)))
+                    .map(|c| self.objs[c.i()].def)
+                    .collect();
+                // Picks still required: as many as possible up to `min`.
+                let need = if rest { 0 } else { (min as usize).saturating_sub(f.i as usize).min(eligible.len()) };
+                let mut opts = Vec::new();
+                for (k, &c) in sorted.iter().enumerate() {
+                    let d = self.objs[c.i()].def;
+                    if k > 0 && self.objs[sorted[k - 1].i()].def == d {
+                        continue;
+                    }
+                    let Some(first) = eligible.iter().position(|&x| x == d) else { continue };
+                    // A set pick must leave enough later picks for `need`.
+                    if set && eligible.len() - first < need {
+                        continue;
+                    }
+                    assert!((k as u16) < act::LIBRARY_N, "pile slot {k} out of range");
+                    opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
+                }
+                if !rest && need == 0 {
+                    if opts.is_empty() {
+                        return Flow::Next;
+                    }
+                    opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                }
+                let kind = match dest {
+                    PileDest::Top => DecisionKind::PutOnTop,
+                    PileDest::Bottom => DecisionKind::PutOnBottom,
+                    PileDest::Graveyard => DecisionKind::PutInGraveyard,
+                    PileDest::Hand => DecisionKind::PutInHand,
+                };
+                self.ask(Task::Run(f.clone()), p, kind, opts);
+                Flow::Suspend
+            }
+            Op::Shuffle { who } => {
+                if let Some(p) = self.who(f, who) {
+                    self.shuffle_library(p);
+                }
+                Flow::Next
+            }
+            Op::SourceToLibraryTop => {
+                if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
+                    self.move_card(f.source.idx, Zone::Library, Pos::Top);
+                }
+                Flow::Next
+            }
             Op::May { who, skip } => {
                 let Some(p) = self.who(f, who) else { return Flow::Jump(skip) };
                 match self.answer.take() {
@@ -449,6 +546,45 @@ impl Game {
                     }
                 }
             }
+        }
+    }
+
+    /// `p` looks at the top `n` cards of their library (CR 701.18a,
+    /// 701.42a): each is keyed for the looker (or revealed to all); the
+    /// other player loses track of which is which as `p` holds them
+    /// (ENGINE.md 10). They become the frame's pile.
+    fn look_top(&mut self, f: &mut Frame, p: PlayerId, n: u8, reveal: bool) {
+        let lib = &self.players[p as usize].library;
+        let pile: Vec<CardIdx> = lib.iter().rev().take(n as usize).copied().collect();
+        for &c in &pile {
+            if reveal {
+                self.reveal(c);
+            } else {
+                self.learn(p, c);
+                let d = self.objs[c.i()].def;
+                self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+            }
+        }
+        if !reveal {
+            self.scramble(p, &pile, false, false);
+        }
+        self.note(|_| format!("P{p} looks at {} card(s)", pile.len()));
+        f.pile = pile;
+    }
+
+    /// Move a card of the pile to `dest` (it is known to its owner).
+    fn put_from_pile(&mut self, p: PlayerId, c: CardIdx, dest: PileDest, reveal: bool) {
+        if reveal {
+            self.reveal(c);
+        }
+        match dest {
+            PileDest::Top => self.move_card(c, Zone::Library, Pos::Top),
+            PileDest::Bottom => self.move_card(c, Zone::Library, Pos::Bottom),
+            PileDest::Graveyard => self.move_card(c, Zone::Graveyard, Pos::Top),
+            PileDest::Hand => self.move_card(c, Zone::Hand, Pos::Top),
+        };
+        if self.objs[c.i()].zone.is_hidden() {
+            self.objs[c.i()].known |= 1 << p;
         }
     }
 

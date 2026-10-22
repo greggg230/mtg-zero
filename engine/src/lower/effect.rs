@@ -7,7 +7,7 @@ use super::filter::{
 use super::Lowerer;
 use crate::db::{types, AbilityDef, Filter, ManaProd};
 use crate::mana::{letter_index, ManaCost};
-use crate::program::{Amount, Builder, Op, SearchDest, SpellDest, Who};
+use crate::program::{Amount, Builder, Op, PileDest, SearchDest, SpellDest, Who, PILE_ANY};
 use card_ir::{cats, enums, generated, nodes, unions, Count};
 
 pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
@@ -514,8 +514,95 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             }
             b.op(Op::Search { who: Who::You, filter, dest: SearchDest::Hand, reveal: true, may_fail: true });
         }
+        E::Surveil(nodes::Surveil { amount, use_artifact_count }) => {
+            // CR 701.42a: look at the top N, put any number into the
+            // graveyard and the rest on top in any order.
+            l.deny("Surveil.use_artifact_count", use_artifact_count);
+            let n = l.int("Surveil.amount", *amount, 1, 20) as u8;
+            b.op(Op::LookTop { who: Who::You, n, reveal: false });
+            b.op(pile(PileDest::Graveyard, Filter::Any, 0, PILE_ANY));
+            b.op(pile_rest(PileDest::Top));
+        }
+        E::Scry(nodes::Scry { amount, bottom_choice }) => {
+            // CR 701.18a: any number on the bottom in any order, the rest on
+            // top in any order. (`bottom_choice: false` is a Python shortcut
+            // that keeps everything on top; the CR always lets the player
+            // choose, ENGINE.md 14.)
+            let _ = bottom_choice;
+            let n = l.int("Scry.amount", *amount, 1, 20) as u8;
+            b.op(Op::LookTop { who: Who::You, n, reveal: false });
+            b.op(pile(PileDest::Bottom, Filter::Any, 0, PILE_ANY));
+            b.op(pile_rest(PileDest::Top));
+        }
+        E::ReorderTopCards(nodes::ReorderTopCards { count }) => {
+            // "Look at the top N cards of your library, then put them back
+            // in any order."
+            let n = l.int("ReorderTopCards.count", *count, 1, 20) as u8;
+            b.op(Op::LookTop { who: Who::You, n, reveal: false });
+            b.op(pile_rest(PileDest::Top));
+        }
+        E::ShuffleYourLibrary(nodes::ShuffleYourLibrary { optional }) => {
+            let at = optional.then(|| b.op(Op::May { who: Who::You, skip: 0 }));
+            b.op(Op::Shuffle { who: Who::You });
+            if let Some(at) = at {
+                b.patch(at);
+            }
+        }
+        E::PutSourceOnTopOfOwnersLibrary(nodes::PutSourceOnTopOfOwnersLibrary {}) => {
+            b.op(Op::SourceToLibraryTop);
+        }
+        E::LookAtTopCardsPutIntoHand(nodes::LookAtTopCardsPutIntoHand {
+            count,
+            take,
+            take_filter,
+            optional,
+            reveal,
+            reveal_taken,
+            rest_zone,
+            rest_random,
+        }) => {
+            // "Look at (reveal) the top N cards; put K [matching] of them
+            // into your hand [you may]; the rest on the bottom in any order
+            // / into your graveyard."
+            l.deny("LookAtTopCardsPutIntoHand.rest_random", rest_random);
+            let n = match count {
+                unions::IntOrFormula::Int(n) => l.int("LookAtTopCardsPutIntoHand.count", *n, 1, 20) as u8,
+                unions::IntOrFormula::Formula(f) => {
+                    l.unsupported(format!("Formula:{}", f.tag()));
+                    return;
+                }
+            };
+            let k = l.int("LookAtTopCardsPutIntoHand.take", *take, 1, 20) as u8;
+            let Some(filter) = lower_card_filter(l, take_filter) else { return };
+            b.op(Op::LookTop { who: Who::You, n, reveal: *reveal });
+            let min = if *optional { 0 } else { k };
+            b.op(Op::PileTo {
+                who: Who::You,
+                dest: PileDest::Hand,
+                filter,
+                min,
+                max: k,
+                rest: false,
+                reveal: *reveal_taken,
+            });
+            b.op(pile_rest(match rest_zone {
+                enums::RestZone::Bottom => PileDest::Bottom,
+                enums::RestZone::Graveyard => PileDest::Graveyard,
+            }));
+        }
         other => l.unsupported(format!("Effect:{}", other.tag())),
     }
+}
+
+/// `PileTo` for the controller: between `min` and `max` of the pile's cards
+/// matching `filter`.
+fn pile(dest: PileDest, filter: Filter, min: u8, max: u8) -> Op {
+    Op::PileTo { who: Who::You, dest, filter, min, max, rest: false, reveal: false }
+}
+
+/// `PileTo` for the controller: every card left in the pile.
+fn pile_rest(dest: PileDest) -> Op {
+    Op::PileTo { who: Who::You, dest, filter: Filter::Any, min: 0, max: 0, rest: true, reveal: false }
 }
 
 /// "A basic land card."
