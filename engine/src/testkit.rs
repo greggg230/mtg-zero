@@ -110,9 +110,7 @@ impl Scenario {
         for p in &mut g.players {
             p.kept = true;
         }
-        g.agenda.push(Task::BeginTurn);
         // The turn continues from `step`; the next turn starts normally.
-        g.agenda.pop();
         g.agenda.push(Task::BeginStep);
         g.advance();
         g.keys.clear();

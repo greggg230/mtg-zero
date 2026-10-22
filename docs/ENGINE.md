@@ -203,16 +203,18 @@ An ability's program is a flat `Vec<Op>` with forward jumps (lowered from the IR
 `Sequence` concatenates, conditionals and "unless" become jumps). It runs in a `Frame`:
 
 ```
-Frame { ability: AbilityRef, pc, source: ObjRef, source_def, controller,
-        targets: Vec<Target>, legal: u32 /* targets legal at resolution start */,
-        i: u8 /* per-op loop counter */, flag: bool, lki: Lki /* remembered values */ }
+Frame { ability: AbilityRef, pc: u16, source: ObjRef, source_def, controller,
+        targets: Vec<(req, Target)>, legal: u64 /* targets legal at resolution start */,
+        i: u8 /* per-op loop counter, reset when pc moves */ }
 ```
 
 `Task::Run(frame)` executes ops from `pc` until the program ends or an op needs a choice. Such
 an op uses ask-or-consume: it pushes `Run(frame)` back with the same `pc` (and its loop
 counter in `frame.i`) and asks; on resume it consumes the answer and moves on. Ops that need a
-sub-process (paying mana in "counter unless its controller pays {3}") push the sub-process
-task above the frame. Examples:
+sub-process (paying mana in "counter unless its controller pays {3}") push the frame with its
+continuation `pc` first and the sub-process task above it. Values an effect must remember
+across ops (last known information of a removed target for "its controller gains life equal
+to its power") will be frame registers filled by an explicit `Remember` op (M4b). Examples:
 
 | Op | Choice | CR |
 |---|---|---|
@@ -280,11 +282,17 @@ the game at once; if all players lose simultaneously the game is a draw (104.4a)
 * **`determinize(viewer, rng)`** resamples what the viewer does not know: for each owner, the
   identities (`def`) of that owner's cards in hidden zones (the other player's hand; both
   libraries) whose `known` bit for the viewer is clear are shuffled among themselves; known
-  cards (e.g. the two Brainstorm put back) stay in place. It reseeds the state's RNG, sets the
-  observer and refreshes the pending decision by re-running its asker (section 4), so the
-  options never refer to a stale identity. It never touches public state or the viewer's
-  own hand, so the viewer's legal actions are unchanged (tested). Assumption for now: both
-  decklists are known (open decklists); team drafts will need partial pool knowledge (M6).
+  cards (e.g. the two Brainstorm put back) stay in place. It reseeds the state's RNG and sets
+  the observer. It never touches public state or the viewer's own hand, so the viewer's
+  legal actions are unchanged (tested, and asserted by zero-core every simulation).
+  If the pending decision belongs to the *other* player, its options are refreshed by
+  re-running the asker (section 4), so they never refer to a stale identity. The viewer's
+  own decision needs no refresh because of one rule every new decision kind must keep:
+  **a choice of a card in a zone hidden from its decider names the card's definition, not
+  its slot** (a library search offers "a Forest", not "card 17"; the decider's hand is never
+  resampled for them). Debug builds re-run the asker anyway and assert the options are equal.
+  Assumption for now: both decklists are known (open decklists); team drafts will need
+  partial pool knowledge (M6).
 * `force_chance` (zero-core `chance_k`) is not implemented yet (M5): a forced draw would move
   the requested identity to the top of the unknown part of the library.
 
@@ -364,6 +372,20 @@ abilities other than intrinsic mana abilities, tokens, counters, planeswalkers a
 copies, delayed triggers, hexproof / shroud / protection / indestructible, mana abilities as
 free-standing priority actions, the play/draw choice, `force_chance`, `encode`.
 
+Deliberate simplifications and limits (each is small and local to change):
+
+* Mana already in a pool is spent first and automatically; generic pips take colourless
+  first, then the most plentiful colour (section 5).
+* Events recorded: enters the battlefield and dies. Cast, attack, block, tap and draw events
+  get recorded when the first card listens for them (`triggers.rs`, one place).
+* Waiting triggers with the same definition and ability are offered once in the ordering
+  decision (their order cannot matter while effects ignore their source's per-object state).
+* Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide is an
+  assertion failure for now.
+* Creatures attack only players; the starting player is chosen from the seed; determinize
+  assumes open decklists.
+* Targets are not deduplicated (section 11).
+
 ## 14. Differences from the Python engine (CR followed)
 
 * Priority after a non-active player casts: Python returns priority to the active player; the
@@ -377,13 +399,70 @@ free-standing priority actions, the play/draw choice, `force_chance`, `encode`.
 * The Python engine's "any land pays one generic" fallback has no counterpart: lands pay only
   through their mana abilities (so `mana_only_from_produces` needs no code here).
 
-## 15. Tests and measurements
+## 15. Tests
 
-`cargo test -p engine` (CR tests in `tests/rules_*.rs`, card tests in `tests/cards.rs`, the
-support report in `tests/support.rs`, the fuzzer in `tests/fuzz.rs`). Performance:
-`cargo test --release -p engine --test perf -- --ignored --nocapture`. Numbers are in
-section 16 once measured.
+`cargo test -p engine` runs everything below in about 5 s (debug). Rules tests name the CR
+rule they check in the test name. Custom test cards (`tests/common/mod.rs`, "Test Bear",
+"Test Striker", ...) are written as card IR and go through the same lowering as cube cards;
+they isolate one keyword or trigger each.
 
-## 16. Measurements
+| File | What |
+|---|---|
+| `tests/rules_setup.rs` | 103 setup, 103.5 London mulligan |
+| `tests/rules_priority.rs` | 117.3a-d, 117.4, 405.5 (LIFO), 305.2, 307.1 / 702.8 timing, 115.5, 608.2b fizzle, 500.4, 103.8a |
+| `tests/rules_sba.rs` | 704.5a, b, f, g (+ 514.2), h, j (legend rule choice), 104.4a, turn cap |
+| `tests/rules_combat.rs` | 302.6 / 702.10, 508.1f / 702.3b, 509.1b, 702.110b, 510.1c, 702.19c, 702.4, 702.7, 702.15, 508.8, 506.4 / 702.19e |
+| `tests/rules_triggers.rs` | 603.3, 603.3b (APNAP, ordering decision), 603.3d (targets; removal without target), 603.10a |
+| `tests/cards.rs` | the cube cards: Mana Leak (pay / decline / cannot pay), Memory Lapse, Counterspell, Spell Pierce, Brainstorm (mid-resolution choices, a clone taken mid-resolution), Ancestral Recall, Dark Ritual + Hymn (pool, keyed random discard), Time Walk, Cut Down / Flame Slash filters, Cogwork Librarian, mana-source classes |
+| `tests/hidden.rs` | determinize keeps the viewer's view and actions; known cards stay; observer masking of keys; refreshed decisions of the other player |
+| `tests/support.rs` | the support report, the exact supported list, loud failures |
+| `tests/fuzz.rs` | random play (below) and replay determinism |
+| `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 
-(filled in at the end of M4a)
+**Fuzzer.** Uniform random actions in complete games between random 40-card decks (17 lands,
+23 spells drawn with repetition from the supported cards and the test cards, so duplicates,
+legends and combat keywords are common). After every action: no panic; every card in exactly
+the zone list its `zone` says, once (card count conserved); battlefield in timestamp order;
+legal actions sorted, unique, non-empty, `< NUM_ACTIONS`; no chance keys left in the state.
+Every ~40 actions: two clones given the same action stay identical (state hash and keys), and
+`determinize(to_move)` keeps the decider's legal actions and the board, then the resampled
+world plays on 30 random actions under the same checks. Every game must end (60-turn cap).
+Separately, 30 games are replayed from their seed and action list and must reproduce the
+final state hash, the outcome and the chance-key sequence exactly. `FUZZ_GAMES=n` sets the
+game count (default 300; 20,000 in release took 28 s, no failure).
+
+## 16. Porting a card (the recipe for M4b onwards)
+
+1. `cargo test -p engine --test support -- --nocapture` lists blocked cards and the features
+   that block most cards on their own. Pick from the top.
+2. An IR effect class: add an arm to `lower/effect.rs` that destructures every field of its
+   node (no `..`), lowers onto existing ops and `deny`s whatever it does not implement. A
+   `CardPrinting` flag: remove its `deny` line in `lower/printing.rs` and implement it where
+   it belongs (casting, SBAs, combat, ...). A predicate: `lower/filter.rs` + `Filter`.
+3. Only if no op expresses it: add an `Op` named after the rules action (never the card) in
+   `program.rs`, implement it in `resolve.rs::exec`, cite the CR. An op that needs a choice
+   uses ask-or-consume with a `DecisionKind` and the action ranges of section 11; choices of
+   hidden cards name definitions (section 10).
+4. Tests: a card test in `tests/cards.rs` (drive with `auto_single = false` and
+   `drive_until` to stop exactly where you look), a custom IR test card when a rule needs
+   isolating, the card in `tests/support.rs::SUPPORTED` and in the fuzz pool
+   (`tests/common/mod.rs`). Then `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`.
+
+## 17. Measurements
+
+Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
+`tests/perf.rs`; random decks as in the fuzzer, mulligans on, `auto_single` on.
+
+| Measure | Value |
+|---|---|
+| Random play | 1,357 games/s (4,000 games, setup included) |
+| Per exposed decision (`apply`, running to the next decision) | 4.4 us (169 decisions, 36 turns per game on average) |
+| `Game::clone` (mean over 4,778 mid-game states) | 1.04 us; `size_of::<Game>()` = 560 B + ~10 heap blocks |
+| `clone` + `determinize(to_move)` (one search simulation's setup) | 2.4 us |
+| `legal_actions` (copies cached ids) | 6 ns |
+
+The clone cost is mostly the ~10 heap allocations (cards, six zone lists, battlefield,
+agenda, options) under the Windows system allocator; packing the zones into one array or a
+faster allocator would cut it if it ever matters (the network evaluation per simulation will
+cost far more). For comparison the old crate measured 0.35 us per clone with copy-on-write
+zones but paid for it on first write, and its game loop ran in Python.

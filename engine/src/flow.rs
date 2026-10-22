@@ -77,6 +77,28 @@ impl Game {
         }
     }
 
+    /// Per-seat result for zero-core's `SearchGame::result`: 1 / 0 for a
+    /// win, 0.5 each for a draw; all zero while the game runs.
+    pub fn result_values(&self) -> [f32; 2] {
+        match self.outcome {
+            Some(o) => match o.winner {
+                Some(w) => {
+                    let mut r = [0.0; 2];
+                    r[w as usize] = 1.0;
+                    r
+                }
+                None => [0.5, 0.5],
+            },
+            None => [0.0; 2],
+        }
+    }
+
+    /// What `action` means for the pending decision (logs, debugging).
+    pub fn describe_action(&self, action: u16) -> Option<String> {
+        let d = self.pending.as_ref()?;
+        d.choice_of(action).map(|c| format!("{:?} P{}: {}", d.kind, d.player, self.describe_choice(c)))
+    }
+
     /// Take `action` for the pending decision and run to the next decision.
     /// Chance keys revealed on the way are appended to `chance`.
     pub fn apply(&mut self, action: u16, chance: &mut Vec<u64>) -> Result<(), String> {
@@ -94,7 +116,7 @@ impl Game {
     pub(crate) fn advance(&mut self) {
         let mut budget = TASK_BUDGET;
         while self.pending.is_none() && self.outcome.is_none() {
-            let t = self.agenda.pop().unwrap_or(Task::NextStep);
+            let t = self.agenda.pop().expect("the agenda is never empty while the game runs");
             self.run_task(t);
             budget -= 1;
             assert!(budget > 0, "engine loop: {TASK_BUDGET} tasks without a decision");

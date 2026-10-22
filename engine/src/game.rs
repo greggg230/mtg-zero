@@ -434,7 +434,9 @@ impl Game {
         if self.log.is_some() {
             let line = f(self);
             let t = format!("T{} {:?} ", self.turn.number, self.turn.step);
-            self.log.as_mut().unwrap().push(t + &line);
+            if let Some(log) = &mut self.log {
+                log.push(t + &line);
+            }
         }
     }
 

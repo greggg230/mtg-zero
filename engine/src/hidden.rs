@@ -71,7 +71,18 @@ impl Game {
         }
         self.rng = Rng::new(rng.next_u64());
         self.observer = Some(viewer);
-        self.refresh_pending();
+        // The viewer's own options never name a card whose identity was
+        // resampled (rule: a choice of a card in a zone hidden from its
+        // decider names its definition, not its slot; the decider's hand is
+        // never resampled for them). Only another player's decision needs
+        // recomputing. Debug builds check the rule exactly.
+        if self.pending.as_ref().is_some_and(|d| d.player != viewer) {
+            self.refresh_pending();
+        } else if cfg!(debug_assertions) && self.pending.is_some() {
+            let mut c = self.clone();
+            c.refresh_pending();
+            assert_eq!(c.pending, self.pending, "determinize changed the viewer's decision");
+        }
     }
 
     /// Re-run the asker of the pending decision so its options reflect the
