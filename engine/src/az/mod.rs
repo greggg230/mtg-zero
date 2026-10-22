@@ -16,6 +16,7 @@
 pub mod bots;
 pub mod decks;
 pub mod encode;
+pub mod identity;
 
 use crate::db::CardDb;
 use crate::game::{Game, GameSpec};
@@ -255,6 +256,12 @@ impl SearchGame for MtgAz {
 
     fn rounds(&self) -> u32 {
         self.g.turn().number
+    }
+
+    /// Minor: which mana source to tap next while paying (ENGINE.md 22; zero-core searches it
+    /// with the seat's `sims_minor` and never records it).
+    fn minor_decision(&self) -> bool {
+        self.g.pending_decision().is_some_and(|d| d.kind == crate::decision::DecisionKind::PayMana)
     }
 
     fn bot_names() -> &'static [&'static str] {

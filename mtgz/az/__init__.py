@@ -1,23 +1,28 @@
 """MTG Zero's AlphaZero stack = zero-core (third_party/zero-core, pinned; its docs/az.md and
 docs/search.md) + what is MTG's, registered here as the process's game package: the game `mtg`
-(engine/src/az, docs/ENGINE.md 21: one game of Magic between two random 40-card decks of the
-supported PowerLSV cube cards), the run presets (mtg-smoke, mtg-1), the default spec and the
-dashboard's title / port.
+(engine/src/az, docs/ENGINE.md 21-22: one game of Magic between two random 40-card decks of the
+supported PowerLSV cube cards), its object layout for zero-core's token network (arch 'tokens':
+`layout_v2.json`, written by the engine's `encode::layout_json`), the run presets (mtg-smoke,
+mtg-1, mtg-2, mtg-2-mlp), the default spec, the evaluation spec and the dashboard's title / port.
 
 The modules of this package are the core's under the usual names, so every command has the same
 CLI as in the other games: `python -m mtgz.az.run`, `python -m mtgz.az.dashboard --host 0.0.0.0
---port 5340`, `python -m mtgz.az.h2h`, ... (each `mtgz.az.<m>` IS `zero.<m>`; `mtgz.az.run` adds
-the evaluation deck set, `mtgz.az.evaldecks`). Importing this package stays light (no torch, no
-numpy): the tools import `mtgz.az.runctl`.
+--port 5340`, `python -m mtgz.az.h2h`, ... (each `mtgz.az.<m>` IS `zero.<m>`). Importing this
+package stays light (no torch, no numpy): the tools import `mtgz.az.runctl`.
 
 Yardsticks: the built-in Rust bots `heuristic` (the Elo anchor, 1000) and `random`
 (engine/src/az/bots.rs). Self-play games use new random decks every game; evaluation matches
-(vs the yardstick, vs random, Elo matches) use the fixed evaluation deck set (spec "decks":
-"eval", `mtgz.az.evaldecks`), so win rates and Elo compare across iterations.
+(vs the yardstick, vs random, Elo matches) use the fixed evaluation deck set (the spec with
+"decks": "eval", `mtgz.az.evaldecks.eval_spec`: the package's evaluation spec of the game, which
+zero-core's loop uses unless the run sets `eval_spec`), so win rates and Elo compare across
+iterations.
 """
+import json
 import os
 
 from zero.package import GamePackage, register
+
+from .evaldecks import eval_spec
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,6 +30,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # the game is a draw after 60 turns (both players' turns; ~3% of heuristic-vs-heuristic games).
 # Evaluation: 16 fixed deck pairs (evaluation set seed 1).
 SPEC = '{"max_turns": 60, "eval_decks": 16, "eval_seed": 1}'
+EVAL_SPEC = eval_spec(SPEC)
+
+# The objects of encode layout v2 for zero-core's token network (docs/ENGINE.md 22)
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v2.json'), encoding='utf-8') as _f:
+    LAYOUT = json.load(_f)
 
 PRESETS = {
     # the end-to-end check on CPU (tiny network, few sims; a game has ~300-500 decisions with
@@ -45,9 +55,24 @@ PRESETS = {
                   yardstick='heuristic', eval_games=100, eval_sims=32, eval_random_games=50, elo_games=20,
                   ref_games=100, threads=8, groups=2, torch_threads=6, max_steps=20_000),
 }
+# The second run (M5b, docs/ENGINE.md 22): the token network (a transformer over the cards:
+# width 96, 3 layers; CPU inference on 4 threads of 2 torch threads each, 4 batches in flight),
+# 64 / 16 simulations, mana payments (minor decisions) at 4 and never recorded, completed-Q
+# policy targets, value targets 0.9 search estimate, 2 reuses, evaluation as mtg-1 (100 games vs
+# the heuristic and 50 vs random at 32 simulations on the evaluation decks), Elo against the 2
+# previous checkpoints in one driver. mtg-2-mlp: the same with mtg-1's MLP (the control).
+_M2 = dict(game='mtg', spec=SPEC, eval_spec=EVAL_SPEC, players=[2], iters=40, games=600, rolling=1, conc=768,
+           sims=64, sims_fast=16, p_full=0.25, sims_minor=4, temp_moves=60, chance_k=0, policy_target='cq',
+           cq_c_visit=50.0, cq_c_scale=1.0, arch='tokens', hidden=96, blocks=3, heads=4, ff=192, batch=512,
+           reuse=2.0, lr=1e-3, window=6, window_grow=1, min_window_samples=30_000, value_q=0.9, value_q_warmup=2,
+           yardstick='heuristic', eval_games=100, eval_sims=32, eval_random_games=50, elo_games=20, elo_opponents=2,
+           elo_together=1, ref_games=100, threads=6, groups=4, infer_workers=4, torch_threads=2, max_steps=20_000,
+           keep_data=6)
+PRESETS['mtg-2'] = _M2
+PRESETS['mtg-2-mlp'] = dict(_M2, arch='mlp', hidden=256, blocks=3)
 
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
     specs={'mtg': SPEC}, dashboard_port=5340, hub_id='mtg_zero', env_prefix='MTGZ',
-    presets=PRESETS,
+    presets=PRESETS, tokens={'mtg': LAYOUT}, eval_specs={'mtg': eval_spec},
 ))

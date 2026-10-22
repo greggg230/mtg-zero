@@ -1,0 +1,30 @@
+Cat Warrior 2/1 W c Cat Warrior
+Beast 4/4 G c Beast
+Treasure -/- C a Treasure
+Blood -/- C a Blood
+Clue -/- C a Clue
+Soldier 1/1 W c Soldier
+Cat 2/2 G c Cat
+Goblin Shaman 2/2 R c Goblin Shaman
+Faerie Dragon 1/1 U c Dragon Faerie flying
+Food -/- C a Food
+Construct 0/0 C ac Construct
+Golem 3/3 C ac Golem
+Spirit 1/1 W c Spirit flying
+Eldrazi Spawn 0/1 C c Eldrazi Spawn
+Boo 1/1 C c Hamster trample haste
+Moloid 1/1 G c Minion
+Cat 1/1 W c Cat
+Drone 1/1 C ac Drone flying
+Robot 1/1 C ac Robot
+Servo 1/1 C ac Servo
+Thopter 1/1 C ac Thopter flying
+Construct 4/4 C ac Construct
+Bat 1/1 B c Bat flying
+Pest 1/1 BG c Pest
+Map -/- C a Map
+Samurai 2/2 W c Samurai vigilance
+Thopter 1/1 U ac Thopter flying
+Elemental 5/3 G c Elemental
+Spirit 1/1 C c Spirit
+Wurm 5/5 G c Wurm trample

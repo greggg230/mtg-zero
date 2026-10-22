@@ -953,6 +953,9 @@ module does not depend on where it was built.
 
 ### 21.2 `encode`: layout v1 (13,532 floats)
 
+(M5a's layout. Layout v2, 22.2, keeps these blocks but gives every card a stable identity:
+the card code, the bags and the context's card no longer use the card table's index.)
+
 A fixed-width vector for one viewer ("me"), with no hidden information: everything in it is
 public or the viewer's own knowledge (its hand, the cards it knows exactly and where, its
 clouds, its own decision's options), so it is the same in every world `determinize(viewer)` can
@@ -1164,3 +1167,266 @@ kill, fork, dashboard, h2h, targets), and one iteration of `mtg-smoke`. zero-cor
 smoke runs all of it plus the 3-iteration `mtg-smoke` run: `SKIP_CORE=1 bash
 third_party/zero-core/tools/smoke_all.sh ~/mtg-zero` (GREEN 2026-10-22: build 115 s, cargo test
 in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
+
+## 22. A network that reads the board card by card, and the second run (M5b)
+
+### 22.1 What changed
+
+**zero-core** (`main` @ 71a1718, pushed; its docs/az.md 10 and docs/search.md 1, 3):
+
+* arch `tokens` (`zero.net.TokenNet`): a transformer over the game's objects, read from the
+  same fixed-width features through a layout descriptor the game package registers
+  (`GamePackage.tokens`). The `SearchGame` trait, the driver, the leaf batches and the shards
+  are unchanged, so the MLP and the token network train on the same data and can be compared
+  one for one.
+* `SearchGame::minor_decision` + run setting `sims_minor`: a self-play seat searches the game's
+  minor decisions with that many simulations and never records them.
+* run settings `eval_spec` (and `GamePackage.eval_specs`: a game's evaluation spec as a
+  function of the self-play spec), `elo_opponents` / `elo_sims` / `elo_together` (cheaper Elo),
+  `infer_workers` (CPU inference on several Python threads), `heads` / `ff`. Every default
+  keeps the old behaviour: the core's tests (68) and Rust tests, the golden self-play digests,
+  and `tools/check_checkpoint_compat.py` for mtg1's iteration-9 checkpoint (visits and cq
+  records, results and a match against random identical on the old and the new checkout).
+
+**MTG Zero** (branch `m5b-run2`):
+
+* The runs of 22.4 used layout v1 (21.2) unchanged; layout v2 (22.2) came after them.
+  `encode::layout_json` describes the encoding for the token network, checked in as
+  `mtgz/az/layout_v2.json` (v1: `layout_v1.json` at commit 531070a; `cargo test -p engine
+  --test az layout_json_is_checked_in`; `MTGZ_WRITE_LAYOUT=1` rewrites it):
+
+  | Segment | Slots x floats | Present flag | Identity | Actions scored from the slot's token |
+  |---|---|---|---|---|
+  | context | 1 x 384 (v2: 192) | always | the decision's card (v1: one-hot of 256; v2: card code) | |
+  | tops | 6 x 50 | known to the viewer | card code | |
+  | my permanents | 32 x 88 | present | card code | `MY_PERM` + s, `ACTIVATE` + 4 s + i (i = 0..3) |
+  | opponent permanents | 32 x 88 | present | card code | `OPP_PERM` + s |
+  | hand | 16 x 56 | present | card code | `HAND` + s, `HAND_ABILITY` + s |
+  | stack | 8 x 72 | present | card code | `STACK` + s |
+  | triggers | 4 x 52 | present | card code | `TRIGGER` + s |
+  | list | 40 x 52 | present | card code | `LIBRARY` + s |
+  | bags | 13 x 256 (v2: 13 x 1024) | | multisets of identities (pooled into the global token) | |
+
+  The 128 globals are the global token's input; `PASS`, `YES`, `PLAYER`, `NUMBER`, `GRAVEYARD`
+  and the slots beyond the encoded ones get their logits from the pooled state. The card
+  identity is embedded once (256 + 1 rows, shared by every segment and the bags); a token is
+  that embedding + a linear map of the slot's 50-88 floats (status, keywords, options) + a
+  (segment, slot) embedding (v1: 256 + 1 identities; v2: 1024 + 1). MTG positions hold 21
+  tokens on average (p99 39) of the 153 slots.
+* Minor decisions: mana payments (`PayMana`, which source to tap next): 14% of the searched
+  decisions of mtg1's games.
+* The evaluation deck set goes through `GamePackage.eval_specs` (M5a's patch of `Run.driver` is
+  gone; any spec's evaluation form, as before).
+* Presets `mtg-2` (22.4) and `mtg-2-mlp` (the same with mtg-1's MLP: the control).
+* The token network's policy starts uniform (zero-core d89202f: its policy output layers are
+  zero at first; the value head keeps its random init), and mtg2 runs with seed 1. Three false
+  starts (stopped, their data deleted; logs, metrics and checkpoints kept) showed why:
+  `runs/mtg2a` (random output layers) began with 55% of the prior on `PASS` where 25% is
+  uniform; its self-play games ran into the turn cap (58.8 turns of 60: draws, no signal) and its
+  first checkpoint lost 100/100 to the heuristic. `runs/mtg2b` (uniform policy, seed 0) still
+  favoured `PASS`: the cq targets of its first iteration put 49% on it against 36% uniform, its
+  first checkpoint 47%, and it lost 99/100. `runs/mtg2n` (policy and value heads at zero,
+  3be6d11) made every search a tie, and the search's tie rule (the first maximum) plays the first
+  option, `PASS`: 3 self-play games finished in 15 minutes. Short self-play probes with
+  untrained token networks (16 games, 32 sims, cq targets: the share of `PASS` in the targets at
+  priority decisions that offer a hand card) show a coin flip of the random value head, not the
+  architecture: seed 0 49% vs 36% uniform, seed 1 33% vs 40%; the
+  MLP's seed 0 (the control) 25% vs 40%.
+
+### 22.2 Stable card identities: layout v2 (23,324 floats)
+
+Layout v1 coded a card by its index in the card table (`CardDb`: the supported cards in IR
+order, then the tokens in the order lowering meets them), capacity 256: every card ported
+renumbers the cards after it (a checkpoint then reads every card as another one), and the
+cube's 546 cards do not fit. Layout v2 (`az/identity.rs`, `az/encode.rs`) codes the card's
+**identity**, which does not depend on what the engine supports:
+
+* a cube card: its position in the cube's IR card list (`data/cards/powerlsv.ir.json`, all 546
+  cards of the PowerLSV cube, supported or not, sorted by name, basic lands included): 0..545;
+  capacity 768;
+* a token: 768 + its line in the token registry `engine/src/az/tokens.txt` (30 lines today: one
+  key per token kind = name, power / toughness, colours, card types, subtypes, keywords, e.g.
+  `Thopter 1/1 C ac Thopter flying`). New tokens are appended, never inserted: when ported cards
+  create new tokens, `cargo test -p engine --test az token_registry` fails until
+  `MTGZ_WRITE_TOKENS=1` appends their keys (two token kinds with the same key would share an
+  identity; the test checks the keys are distinct);
+* 1023: anything else (a card outside the cube list, an unregistered token: never in a game
+  the tests accept).
+
+Capacity 1024 identities: the card code's identity part is three one-hots of 16, 8 and 8
+(index = 64 a + 8 b + c; 32 floats, as v1's two one-hots of 16, so every slot keeps its width),
+the bags are 13 x 1024 counts, and the context block carries the decision's card as a card
+code (192 floats instead of 384 with a 256-wide one-hot). Everything else is v1's. A
+checkpoint of layout v2 stays valid as cards are ported: a newly supported card appears under
+the identity it always had, and its descriptor floats (types, colours, mana value, size) are
+read the same way; its embedding (token network) or input weights (MLP) start untrained. A
+change to the cube list itself (another IR card order) or to the capacity is a new layout.
+Layout v1 checkpoints (runs/mtg1, mtg2, mtg2c) do not load into v2 (other widths): they run
+from their pinned worktrees. Tests: `encoding_slots_name_the_action_slots` (the slots' codes
+are the cards' identities), `token_registry_and_stable_identities` (every token registered,
+cube cards at their IR position, identities distinct, and a card table of a few cards gives
+them the same identities as the full one), `layout_json_is_checked_in`.
+
+### 22.3 Against the memorised values (evidence first)
+
+What fingerprints a game is not the decklists alone, and the decks cannot vary more than they
+do (every self-play game has two new random decks). Measured offline on runs/mtg1's data: a fresh
+256 x 3 MLP's value head trained on iterations 6-8 (175,757 samples), tested on iteration 9's
+unseen games (61,748 samples), cross-entropy and accuracy against the game result z:
+
+| Training | Train CE / acc. | Next-iteration CE / acc. |
+|---|---:|---:|
+| target z, 4 epochs (mtg1's reuse 4) | 0.123 / 97.0% | 1.385 / 65.5% |
+| target z, 1 epoch | 0.255 / 87.9% | 0.910 / 65.3% |
+| target 0.1 z + 0.9 search value, 4 epochs | 0.508 / 73.3% | **0.602 / 66.3%** |
+| target z, 4 epochs, the decklist bags zeroed (my library, the opponent's hidden pool, known library cards) | 0.166 / 90.0% | 1.332 / 62.4% |
+| 0.9 search value, 1 epoch, decklist bags zeroed | 0.542 / 70.7% | 0.629 / 63.0% |
+
+* Without the decklist bags the network still memorises (90% on its training games): the
+  whole position identifies a game, not just the decks. The bags help on unseen games (+3
+  points), so they stay.
+* A value target that varies within a game (`value_q` 0.9) removes the memorisation (train
+  and next-iteration CE 0.51 / 0.60) and gives the best next-iteration CE and accuracy; fewer
+  passes over the data help less. Hence `value_q` 0.9 (warm-up 2 iterations) and `reuse` 2;
+  the decks stay as they are.
+
+The same data through the token network (96 x 3, 600 steps at lr 1e-3 on iterations 7-8, the
+loop's losses with value_q 0.9; tested on iteration 9): policy CE 1.005 (target entropy 0.934),
+value CE vs z 0.585, accuracy 67.5%, against the MLP's 1.012 / 0.600 / 65.8% - it learns from
+the same samples at least as well.
+
+### 22.4 The second run (`runs/mtg2`) and its control (`runs/mtg2c`)
+
+Preset `mtg-2` (`runs/mtg2`, seed 1, from the pinned worktree `~/mtg-zero-wt/run-531070a`, core
+c0d1a3c, layout v1) and its control `mtg-2-mlp` (`runs/mtg2c`, seed 0, from `run-ca74b0f`, core
+cc86dee: the MLP's code is the same in both cores). The same settings except the network:
+
+* network: tokens 96 x 3 (4 heads, feed-forward 192; 0.76M parameters) vs the MLP 256 x 3 of
+  mtg1 (4.19M); lr 1e-3, batch 512, `reuse` 2, window 6 (growing), value_q 0.9 (warm-up 2:
+  0.45 at iteration 1);
+* self-play: rolling, 768 games in flight, 600 finished games per iteration, 64 / 16 simulations
+  (`p_full` 0.25; mtg1: 32 / 8), mana payments at 4 simulations and never recorded
+  (`sims_minor`), completed-Q targets (c_visit 50, c_scale 1), temperature for the first 60
+  searched decisions;
+* CPU only: 6 search threads, 4 inference threads x 2 torch threads (`infer_workers`, 4
+  groups). The GPU ran two Kingdom Builder runs (100% busy), whose self-play workers also took
+  ~19 of the 32 logical CPUs throughout (measured: the machine at 31.8 / 32);
+* evaluation as mtg1 (100 games against the heuristic, 50 against random, 32 simulations, the 16
+  evaluation deck pairs), Elo matches against the 2 previous checkpoints in one driver (20
+  games each). mtg2's Elo matches took 12 minutes for one 20-game match (two token networks on
+  tiny batches), so after iteration 1 its config was changed to `elo_games` 0 (paused and resumed
+  during iteration 2's evaluation): its Elo rests on the heuristic and random results and the
+  1-vs-0 match.
+
+Wall clock (2026-10-22): mtg2 11:32-15:07 (3 h 35 min, 5 iterations; stopped with a STOP file
+and left stopped); mtg2c 08:34-11:38 (3 h 4 min, 10 iterations; stopped after iteration 10 to
+give mtg2 the CPU, left stopped). The control ran next to the token network's false starts
+(22.1: runs/mtg2a, mtg2b, mtg2n, 08:34-11:31, their data deleted); mtg2 had no other MTG run
+beside it after 11:38. Both shared the machine with the two Kingdom Builder runs. Afterwards
+only the last two iterations' shards were kept (mtg2 2.6 GB, mtg2c 2.8 GB on C:).
+
+**mtg2** (token network):
+
+| Iter | Games (cum.) | Samples | Leaves / s | Decisions / game | Minor / game | Turns | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100) | vs random (50) | Elo (final fit) | Minutes (sp / train / eval / elo) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 0 |  |  |  |  |  |  |  | 4.0% +-2.0 | 54% | 334 +-53 | 0.0 / 0.0 / 10.1 / 0.0 |
+| 1 | 600 | 31,458 | 5,380 | 258 | 81 | 37.3 | 0.73 | 0.940 / 0.626 / 0.77 | 6.0% +-2.4 | 84% | 561 +-48 | 20.4 / 1.4 / 12.7 / 11.7 |
+| 2 | 1,200 | 43,124 | 4,588 | 341 | 59 | 41.9 | 0.63 | 0.899 / 0.675 / 0.79 | 3.0% +-1.7 | 66% | 403 +-56 | 22.4 / 2.2 / 9.2 / 0.0 |
+| 3 | 1,800 | 40,131 | 4,291 | 300 | 62 | 40.3 | 0.74 | 0.898 / 0.664 / 0.73 | 3.5% +-1.8 | 75% | 464 +-54 | 34.0 / 1.6 / 10.5 / 0.0 |
+| 4 | 2,400 | 48,805 | 3,284 | 362 | 37 | 43.5 | 0.72 | 0.901 / 0.664 / 0.72 | 2.0% +-1.4 | 79% | 471 +-54 | 27.6 / 2.2 / 8.9 / 0.0 |
+| 5 | 3,000 | 50,435 | 3,810 | 372 | 31 | 43.6 | 0.68 | 0.897 / 0.668 / 0.69 | 5.5% +-2.3 | 81% | 527 +-52 | 26.9 / 2.7 / 10.3 / 0.0 |
+
+**mtg2c** (the MLP control):
+
+| Iter | Games (cum.) | Samples | Leaves / s | Decisions / game | Minor / game | Turns | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100) | vs random (50) | Elo (final fit) | Minutes (sp / train / eval / elo) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 0 |  |  |  |  |  |  |  | 8.5% +-2.8 | 59% | 500 +-38 | 0.0 / 0.0 / 2.7 / 0.0 |
+| 1 | 600 | 19,936 | 8,859 | 173 | 66 | 34.7 | 0.64 | 0.877 / 0.617 / 0.79 | 11.5% +-3.2 | 66% | 593 +-34 | 7.8 / 0.5 / 9.9 / 2.7 |
+| 2 | 1,200 | 24,051 | 12,300 | 210 | 58 | 37.5 | 0.57 | 0.876 / 0.678 / 0.78 | 17.0% +-3.8 | 71% | 636 +-32 | 4.3 / 0.5 / 4.5 / 5.6 |
+| 3 | 1,800 | 29,142 | 17,613 | 242 | 43 | 40.8 | 0.50 | 0.866 / 0.660 / 0.73 | 12.5% +-3.3 | 80% | 612 +-32 | 3.6 / 0.4 / 3.7 / 6.9 |
+| 4 | 2,400 | 34,273 | 11,481 | 266 | 34 | 43.6 | 0.51 | 0.850 / 0.660 / 0.72 | 10.5% +-3.1 | 60% | 583 +-32 | 6.3 / 0.6 / 2.1 / 3.9 |
+| 5 | 3,000 | 37,423 | 12,316 | 285 | 35 | 46.3 | 0.49 | 0.844 / 0.662 / 0.69 | 12.0% +-3.2 | 69% | 605 +-32 | 5.5 / 0.8 / 5.7 / 4.6 |
+| 6 | 3,600 | 35,498 | 10,383 | 273 | 36 | 43.4 | 0.52 | 0.835 / 0.661 / 0.70 | 5.5% +-2.3 | 75% | 624 +-32 | 6.9 / 1.0 / 6.3 / 6.0 |
+| 7 | 4,200 | 41,752 | 12,986 | 311 | 27 | 46.0 | 0.55 | 0.850 / 0.663 / 0.69 | 9.0% +-2.9 | 92% | 668 +-31 | 6.9 / 0.9 / 4.2 / 5.0 |
+| 8 | 4,800 | 47,371 | 14,010 | 343 | 27 | 47.6 | 0.55 | 0.840 / 0.663 / 0.69 | 6.0% +-2.4 | 84% | 626 +-32 | 6.3 / 1.2 / 8.6 / 5.5 |
+| 9 | 5,400 | 47,976 | 13,484 | 345 | 24 | 46.8 | 0.55 | 0.841 / 0.665 / 0.68 | 10.5% +-3.1 | 75% | 653 +-33 | 7.1 / 1.4 / 7.5 / 6.3 |
+| 10 | 6,000 | 52,223 | 11,781 | 371 | 21 | 47.4 | 0.54 | 0.831 / 0.665 / 0.68 | 6.0% +-2.4 | 88% | 669 +-35 | 9.0 / 1.4 / 4.7 / 5.7 |
+
+Minutes per phase: self-play / training / evaluation (vs the heuristic and random) / Elo matches. Leaves per second are the self-play phase's (the first iteration fills the 768 games in flight).
+
+The heuristic is each run's anchor (1000); Elo fits are per run (random: 289 in mtg2's fit, 429
+in mtg2c's), so compare Elo within a run and the runs through the head-to-head matches below.
+
+**Head to head** (`python -m mtgz.az.h2h`, 32 simulations, chance_k 0, random decks, seats
+alternating; score of the token network, +- 1 se):
+
+| Token network | MLP | Games | Score of the token network | Elo difference |
+|---|---|---:|---:|---:|
+| iteration 3 (1,800 games) | iteration 3 (1,800 games) | 60 | 65.8% +-6.1 | +114 |
+| iteration 5 (3,000 games) | iteration 5 (3,000 games) | 100 | 57.0% +-5.0 | +49 |
+| iteration 5 (3,000 games) | iteration 10 (6,000 games) | 100 | 36.5% +-4.8 | -96 |
+
+**Value generalisation** (`value_gen`: checkpoint k's value head on the samples of its own
+iteration k and of the next iteration's unseen games; cross-entropy / accuracy against the
+result z), against mtg1 (checkpoint 8: 94% / 72%, checkpoint 3: 98% / 67%):
+
+| Checkpoint | mtg2 (tokens) own | mtg2 next | mtg2c (MLP) own | mtg2c next |
+|---:|---|---|---|---|
+| 1 | 0.396 / 87.3% | 0.592 / 68.3% | 0.345 / 93.3% | 0.626 / 65.4% |
+| 2 | 0.592 / 74.9% | 0.655 / 61.4% | 0.591 / 74.7% | 0.646 / 62.8% |
+| 3 | 0.601 / 71.6% | 0.629 / 66.0% | 0.581 / 72.2% | 0.640 / 62.8% |
+| 4 | 0.612 / 67.8% | 0.649 / 61.3% | 0.591 / 69.9% | 0.661 / 60.2% |
+| 5 | | | 0.618 / 68.6% | 0.642 / 62.7% |
+| 9 | | | 0.618 / 66.3% | 0.638 / 62.6% |
+
+(Checkpoint 1 still had value_q 0.45; from iteration 2 on value_q 0.9.)
+
+**Both networks on the same held-out games** (the control's iteration 7, unseen by both;
+`cross_eval`): token checkpoint 3: policy CE 1.011, value CE 0.621, accuracy 67.3%; MLP
+checkpoint 3: 1.005 / 0.649 / 61.8%; MLP checkpoint 6: 0.947 / 0.641 / 65.3% (the targets'
+entropy 0.588). Per decision kind the two checkpoint-3 policies are within 0.02 of each other
+(priority 0.968 / 0.966, targets 1.089 / 1.095, attackers 0.827 / 0.831).
+
+Readout:
+
+* **Against the heuristic neither network improves** in these iterations: the MLP stays at
+  5.5-17% (mean 10.1% over iterations 1-10, as mtg1's 9.3%), the token network at 2-6% (mean 4.0%
+  over 1-5), losing faster (22-25 turns, margin -20: the heuristic wins at full life). Against
+  random both win more (MLP 59% -> 75-92%, tokens 54% -> 75-84%).
+* **Head to head the token network is the stronger player** at equal iterations (57-66% against the MLP of the same iteration; the MLP of twice the games, which the CPU gave it in less time, wins 63.5%), and
+  its value head generalises at least as well (next-iteration accuracy 61-68% vs 60-65%; on the
+  same unseen games 67% vs 62%). The two yardsticks disagree: the heuristic (aggressive, casts
+  and attacks every turn) beats the token network more often than the MLP although the token
+  network beats the MLP. Blocking is the likely gap: blocks are rare in self-play (130 of 20,000
+  recorded decisions of mtg2's iteration 4) and the token network's prior on them is still
+  uniform (47% on no block, 48% uniform), while the heuristic attacks every turn.
+* **The memorised values are gone** with value_q 0.9 and reuse 2 in both runs: the gap between a
+  checkpoint's own games and the next iteration's is 4-12 accuracy points (mtg1: 22-31).
+* **The completed-Q targets are sharper** than mtg1's visit targets (H / ln n 0.49-0.74 vs 0.90),
+  and the policy loss now falls below the target entropy (MLP 0.877 -> 0.831).
+* **Cost**: the token network self-played at 3.3-5.4k leaves/s against the MLP's 8.9-17.6k on
+  the same machine and settings (2-3x slower), its evaluation took 9-13 minutes per iteration
+  against the MLP's 2-10, so it got 5 iterations (3,000 games) in 3 h 35 min where the MLP got
+  10 (6,000 games) in 3 h 4 min. Mana payments (minor) were 21-81 of 173-372 searched decisions
+  per game.
+* **Self-play games get longer** in both runs (MLP 173 -> 371 decisions, 35 -> 47 turns; tokens
+  258 -> 372, 37 -> 44): as in mtg1, the networks pass more than the heuristic.
+
+### 22.5 Next
+
+* **A yardstick that does not disagree with head to head**: the heuristic alone measures one
+  style; add Elo matches against fixed earlier checkpoints of both runs (cheap now with
+  `elo_together`), or a second, defensive bot.
+* **Blocking**: blocks are rare in self-play and pointer logits for "block this attacker with
+  the asked blocker" need the attacker's token to attend to the blocker's: give the
+  `DeclareBlockers` / `DeclareAttackers` decisions their own context (the asked blocker's slot
+  as a pointer query), and check per-kind policy and value calibration after each iteration.
+* **Compute**: the token network is CPU-bound at ~4k leaves/s with the machine shared; the GPU
+  (bfloat16, CUDA graphs as GridNet has) or a Rust / ONNX inference path would remove the
+  per-op Python overhead. Evaluation should batch its matches (vs the yardstick, vs random and
+  Elo in one driver) - 40% of mtg2's iteration time was evaluation on tiny batches.
+* **Search cost**: per game 170-370 searched decisions remain; priority stops where only passing
+  makes sense (always-available activations such as Sensei's Divining Top, Zuran Orb, Voltaic
+  Key: 85% of the activation-only priority decisions of mtg1's data) are the next minor
+  decisions to try.
+* **Layout v2** (22.2) for every new run; mtg2 / mtg2c checkpoints are layout v1.

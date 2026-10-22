@@ -474,7 +474,7 @@ impl Game {
                     None => {
                         let opts =
                             vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
-                        self.ask(Task::Run(f.clone()), owner, DecisionKind::TopOrBottom, opts);
+                        self.ask(Task::Run(f.clone()), owner, DecisionKind::YesNo, opts);
                         Flow::Suspend
                     }
                 }

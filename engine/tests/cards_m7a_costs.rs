@@ -261,7 +261,7 @@ fn subtlety_the_spells_owner_puts_it_on_top_or_bottom() {
     for _ in 0..200 {
         g.drive_until(|g| (g.stack().is_empty() && at_priority(g)) || !at_priority(g));
         match g.kind() {
-            Some(DecisionKind::TopOrBottom) => {
+            Some(DecisionKind::YesNo) => {
                 asked = Some(g.pending_decision().unwrap().player);
                 g.choose(Choice::Pass); // the bottom
             }

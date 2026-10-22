@@ -127,9 +127,8 @@ pub enum DecisionKind {
     /// The amount of divided damage for the next target (`NUMBER`, CR
     /// 601.2d).
     DivideDamage,
-    /// Put a spell on top of (`YES`) or on the bottom of (`PASS`) its
-    /// owner's library.
-    TopOrBottom,
+    // (At most 32 kinds: the network's context block has 32 slots. "Top or
+    // bottom" is a `YesNo`: `YES` = top.)
 }
 
 /// What an action means to the task that asked.
