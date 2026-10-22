@@ -36,11 +36,13 @@ PRESETS = {
     # the first small self-play run (M5a, docs/ENGINE.md 21.6; CPU inference while other
     # projects' runs use the GPU): a few iterations at modest sims, evaluated against the
     # heuristic (the Elo anchor) and random. Rolling self-play keeps 384 games in flight (CPU
-    # inference needs large batches: 96 games in flight gave batches of ~22 and 5.7k leaves/s)
-    'mtg-1': dict(game='mtg', spec=SPEC, players=[2], iters=10, games=400, rolling=1, conc=384, sims=32,
+    # inference needs large batches: 96 games in flight gave batches of ~22 and 5.7k leaves/s).
+    # runs/mtg1 started with 400 games and 40-game Elo matches and continued from iteration 2
+    # with these (Elo matches with both seats searching batch badly on CPU)
+    'mtg-1': dict(game='mtg', spec=SPEC, players=[2], iters=10, games=800, rolling=1, conc=384, sims=32,
                   sims_fast=8, p_full=0.25, temp_moves=60, chance_k=0, hidden=256, blocks=3, batch=512, reuse=4.0,
                   window=4, window_grow=1, min_window_samples=20_000, value_q=0.5, value_q_warmup=3,
-                  yardstick='heuristic', eval_games=100, eval_sims=32, eval_random_games=50, elo_games=40,
+                  yardstick='heuristic', eval_games=100, eval_sims=32, eval_random_games=50, elo_games=20,
                   ref_games=100, threads=8, groups=2, torch_threads=6, max_steps=20_000),
 }
 

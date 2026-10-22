@@ -1059,15 +1059,88 @@ third_party/zero-core checkout <pin>` first. Pause / resume / stop as in every Z
 (`zero-core/dashboard/projects.json`, project `mtg`).
 
 Presets: `mtg-smoke` (CPU, a 32 x 1 network, 16 games per iteration at 8 / 2 sims, 8 games
-against the heuristic) and `mtg-1` (the first run, 21.6).
+against the heuristic) and `mtg-1` (the first run's settings, 21.6).
 
 ### 21.6 The first self-play run (`runs/mtg1`)
 
-RESULTS_PLACEHOLDER
+`runs/mtg1` (2026-10-22 01:47-03:43, 1 h 56 min; stopped with a STOP file after iteration 9,
+left stopped): preset `mtg-1` from the pinned worktree `~/mtg-zero-wt/run-82767fd` (core
+7225a65), tabula rasa, a 256 x 3 MLP (4.2M parameters), CPU only (8 search threads, 6 torch
+threads; the GPU was busy with two Kingdom Builder Zero runs, which were not touched), rolling
+self-play with 384 games in flight, 32 / 8 simulations (p_full 0.25), visit-count targets,
+chance_k 0, value_q 0.5 (warm-up 3), evaluation at 32 simulations on the 16 fixed deck pairs.
+After iteration 2 the run was restarted from its checkpoint with 800 self-play games per
+iteration (was 400) and 20-game Elo matches (was 40): the Elo matches (both seats searching,
+few games in flight: small CPU batches) took 3 minutes each and grew to 4 per iteration.
+
+| Iter | Self-play games (cum.) | Samples | Games / h | Leaves / s | Decisions / game | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100) | vs random (50) | Elo (final fit) | Minutes |
+|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| 0 | 0 | | | | | | | 8.5% +-2.8 | 59% | 436 +-34 | 2.0 |
+| 1 | 400 | 18,008 | 10,178 | 11,584 | 180 | 0.90 | 0.991 / 0.393 / 0.90 | 7.0% +-2.5 | 78% | 542 +-31 | 5.9 |
+| 2 | 800 | 21,528 | 16,847 | 14,417 | 214 | 0.90 | 0.982 / 0.462 / 0.95 | 8.5% +-2.8 | 83% | 567 +-31 | 9.8 |
+| 3 | 1,600 | 44,940 | 10,347 | 11,767 | 224 | 0.91 | 0.980 / 0.483 / 0.95 | 14.5% +-3.5 | 82% | 594 +-32 | 11.1 |
+| 4 | 2,400 | 50,862 | 15,901 | 15,483 | 256 | 0.91 | 0.982 / 0.483 / 0.95 | 10.5% +-3.1 | 79% | 561 +-31 | 10.9 |
+| 5 | 3,200 | 53,991 | 10,947 | 11,937 | 270 | 0.92 | 0.983 / 0.478 / 0.94 | 8.5% +-2.8 | 87% | 632 +-30 | 13.1 |
+| 6 | 4,000 | 56,111 | 11,480 | 12,384 | 282 | 0.91 | 0.982 / 0.473 / 0.94 | 4.0% +-2.0 | 85% | 630 +-31 | 12.9 |
+| 7 | 4,800 | 59,146 | 14,645 | 16,570 | 295 | 0.91 | 0.978 / 0.477 / 0.93 | 14.5% +-3.5 | 89% | 687 +-30 | 14.7 |
+| 8 | 5,600 | 60,500 | 13,781 | 16,320 | 302 | 0.91 | 0.984 / 0.476 / 0.92 | 10.0% +-3.0 | 88% | 674 +-31 | 17.5 |
+| 9 | 6,400 | 61,748 | 12,080 | 14,322 | 308 | 0.90 | 0.986 / 0.479 / 0.90 | 6.5% +-2.5 | 98% | 668 +-32 | 17.3 |
+
+The heuristic is the anchor (1000); random rates 324 (5/100 against the heuristic). Games per
+hour and leaves per second are the self-play phase's (iterations 2, 4 and 7 started with games
+already in flight). A sample is 27 KB (float16), ~1.6 GB of shards per 800-game iteration.
+
+Readout:
+
+* **The network beats random from the first iteration and keeps improving against it**: 59%
+  (iteration 0, the untrained net with search) -> 78% -> ... -> 88-89% -> 98% at iteration 9.
+  The final Elo fit rises from 436 (iteration 0) to 668-687 (iterations 7-9), +230-250, all of
+  it measured against random and earlier checkpoints.
+* **Against the heuristic it is flat**: 4-14.5% per iteration (mean 9.3% over iterations 1-9, no
+  trend over 6,400 games), against the heuristic's own 92-93% vs random. Not yet a success on that
+  yardstick; an honest flat result.
+* **Why, as far as the metrics show**: (1) the policy targets are nearly uniform (normalised
+  entropy H(pi) / ln(options) 0.90-0.92 throughout; policy loss = entropy = 0.98, unchanged
+  from iteration 1): at 32 simulations over ~3 options PUCT's visits stay at the prior, so the
+  policy has nothing to learn from (the visit-target plateau zero-core docs/az.md 9 describes;
+  Glass Road and Kingdom Builder moved to completed-Q targets for it). (2) The value head
+  memorises games: on the iteration it was trained on, checkpoint 8 calls the winner 94% of
+  the time (cross-entropy 0.35), on the next, unseen iteration 72% (0.60); checkpoint 3: 98%
+  vs 67%. Every game has its own random decks and the bags fingerprint them (Kingdom Builder's
+  random boards did the same). (3) Self-play games got longer (180 -> 308 searched decisions,
+  35 -> 43 turns): the net passes more than the heuristic, which casts and attacks every turn.
 
 ### 21.7 For M5b and later
 
-RESULTS_M5B_PLACEHOLDER
+* **The network** (M5b, in zero-core): a network that reads the board card by card (a set /
+  transformer encoder over objects: each permanent, hand card, stack object, list card and the
+  context as a token with its card embedding and status), with a policy head that scores the
+  action ids through the objects they refer to (slot -> token). The fixed-width layout above
+  is what such a network replaces: 13,532 dense floats (27 KB per float16 sample, ~0.5 GB of
+  shards per 400-game iteration) of which a few hundred are non-zero, slots cut at 32 / 16 / 8
+  / 40, and per-slot one-hots that must be learned slot by slot. Dominion Zero's token encoder
+  is the starting point (DESIGN.md 5). The protocol then needs variable-length (or padded)
+  object lists in the leaf batches and the shards, and a sparse feed.
+* **The next run** (measured in 21.6): completed-Q policy targets (`policy_target='cq'`, the
+  visit targets stayed at H/ln n 0.90), more simulations per searched decision, and against
+  the value memorisation `value_q` near 1 and fewer reuses (Kingdom Builder's fix: value_q 0.9,
+  reuse 2), or more distinct decks per sample. The fingerprint is structural (every game has
+  its own decks and the bags show them), so a card-by-card network will meet it too.
+* **zero-core** (worked around here, for the core):
+  * an evaluation spec (a run setting the loop uses for every evaluation match) would replace
+    `mtgz.az.evaldecks`' patch of `Run.driver`;
+  * evaluation and Elo matches dominate a CPU iteration (two network seats at 32 sims with 20-40
+    games in flight batch badly on CPU): an evaluation cadence or cheaper Elo for CPU runs;
+  * the pinned commit (zero-core `main` 7225a65) is not on GitHub yet: push it so worktrees can
+    init the submodule without the local fetch (21.5).
+* **Search cost**: ~180-550 decisions with two or more options per game, many of them priority
+  passes and one-source-at-a-time mana payments; an engine-level shortcut (a mana payment as
+  one decision among a few canonical tappings; skipping priority stops where only "pass" makes
+  sense) would cut the simulations per game several fold. The encoding is ~40 us of the Rust
+  side per simulation.
+* **force_chance** falls back for looks at another player's hand and hand reveals (the forced
+  identities would have to be dealt into the hand consistently with the clouds); these are
+  rare and keyed, so they only cost search-tree sharing.
 
 ### 21.8 Tests
 
@@ -1087,4 +1160,7 @@ and always answers a legal id. `tests/` (pytest): the engine module registers `t
 the game through the bindings (determinize keeps the features), the bots in the Rust driver,
 self-play records valid samples, the presets, the evaluation spec and the driver patch, the
 commands through the shims (zero-core's loop at toy scale: resume, STOP, PAUSE, supervisor,
-kill, fork, dashboard, h2h, targets), and one iteration of `mtg-smoke`.
+kill, fork, dashboard, h2h, targets), and one iteration of `mtg-smoke`. zero-core's cross-game
+smoke runs all of it plus the 3-iteration `mtg-smoke` run: `SKIP_CORE=1 bash
+third_party/zero-core/tools/smoke_all.sh ~/mtg-zero` (GREEN 2026-10-22: build 115 s, cargo test
+in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
