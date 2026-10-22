@@ -48,6 +48,10 @@ fn cube_support_report() {
     let db = CardDb::cube();
     let r = SupportReport::from_db(db);
     println!("{}", r.render(40));
+    println!("greedy staging (feature, cards it completes, cumulative):");
+    for (f, n, total) in r.greedy(30) {
+        println!("  {f:<60} {n:>4} {total:>5}");
+    }
     assert_eq!(r.total(), 546);
     assert_eq!(r.supported, SUPPORTED);
     // Every unsupported card names at least one blocker.

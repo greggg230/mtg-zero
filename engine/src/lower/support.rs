@@ -56,6 +56,42 @@ impl SupportReport {
         self.blocked.iter().filter(|(_, b)| b.len() == n).collect()
     }
 
+    /// Greedy staging: repeatedly add the feature that completes the most
+    /// cards (ties: the feature blocking the most cards). Returns (feature,
+    /// cards completed by it, cumulative supported cards) per step.
+    pub fn greedy(&self, steps: usize) -> Vec<(String, usize, usize)> {
+        let mut done: Vec<&str> = Vec::new();
+        let mut open: Vec<&Vec<String>> = self.blocked.iter().map(|(_, b)| b).collect();
+        let mut supported = self.supported.len();
+        let mut out = Vec::new();
+        for _ in 0..steps {
+            let mut best: Option<(&str, usize, usize)> = None;
+            let mut cand: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+            for b in &open {
+                let missing: Vec<&str> =
+                    b.iter().map(|s| s.as_str()).filter(|f| !done.contains(f)).collect();
+                for f in &missing {
+                    let e = cand.entry(f).or_default();
+                    e.1 += 1;
+                    if missing.len() == 1 {
+                        e.0 += 1;
+                    }
+                }
+            }
+            for (f, (alone, cards)) in cand {
+                if best.is_none_or(|(_, a, c)| (alone, cards) > (a, c)) {
+                    best = Some((f, alone, cards));
+                }
+            }
+            let Some((f, alone, _)) = best else { break };
+            done.push(f);
+            open.retain(|b| !b.iter().all(|x| done.contains(&x.as_str())));
+            supported += alone;
+            out.push((f.to_string(), alone, supported));
+        }
+        out
+    }
+
     pub fn render(&self, top: usize) -> String {
         let mut s = String::new();
         let _ = writeln!(s, "supported {} / {} cards", self.supported.len(), self.total());

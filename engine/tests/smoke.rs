@@ -1,10 +1,13 @@
+//! One random game with the human-readable log on: run with `--nocapture`
+//! to read what the engine does (a debugging aid; `fuzz.rs` is the test).
+
 mod common;
 
 use engine::rng::Rng;
 use engine::{Game, GameSpec};
 
 #[test]
-fn one_random_game() {
+fn sample_game_log() {
     let db = common::db();
     let mut rng = Rng::new(7);
     let d0 = common::random_deck(db, &mut rng);

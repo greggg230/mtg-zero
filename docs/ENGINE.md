@@ -433,8 +433,13 @@ game count (default 300; 20,000 in release took 28 s, no failure).
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
-1. `cargo test -p engine --test support -- --nocapture` lists blocked cards and the features
-   that block most cards on their own. Pick from the top.
+1. `cargo test -p engine --test support -- --nocapture` lists blocked cards, the features
+   that block most cards on their own, and a greedy staging order (the feature completing
+   the most cards next). Some blockers are coarse: `CardPrinting.activated_abilities`,
+   `static_abilities`, `alternative_costs` deny a whole sub-structure until its lowering
+   exists, after which the report names the cost atoms and effects inside instead. At M4a
+   the greedy order starts activated abilities (80 cards complete, 31 -> 111), lands that
+   enter tapped unless / shock lands (-> 135), loyalty, modal spells, statics.
 2. An IR effect class: add an arm to `lower/effect.rs` that destructures every field of its
    node (no `..`), lowers onto existing ops and `deny`s whatever it does not implement. A
    `CardPrinting` flag: remove its `deny` line in `lower/printing.rs` and implement it where
