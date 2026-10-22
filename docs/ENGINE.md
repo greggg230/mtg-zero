@@ -1,7 +1,11 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M5a (the zero-core game `mtg`: `SearchGame`, `force_chance`, `encode`, decks, bots,
-the `mtgz` package and a first self-play run; section 21), 2026-10-22; M4b-2 added hidden
+Status: M7a (threats first: layers and continuous effects, counters, generic triggers,
+protection and combat restrictions, alternative costs, X, kicker, delve, casting from
+graveyards and exile, linked exile, delayed and reflexive triggers; 340 supported cube cards;
+section 23), 2026-10-22; M5b a token network and stable card identities (section 22); M5a
+the zero-core game `mtg` (`SearchGame`, `force_chance`, `encode`, decks, bots, the `mtgz`
+package and a first self-play run; section 21); M4b-2 added hidden
 information (library searches, looking at libraries and hands, partial knowledge; modal
 spells; tokens); M4b-1 activated abilities, costs, mana abilities and lands; M4a built the
 Stage 0 core. This is the architecture every later card port follows. DESIGN.md section 3 says *why* (rules-correct, every choice an action, cards are data,
@@ -466,7 +470,8 @@ to the decider:
 | `GRAVEYARD` | 404-531 | decider's 0..63, opponent's 64..127 (M4b) |
 | `ACTIVATE` | 532-915 | `MY_PERM` slot * 4 + ability index: activate at priority; a mana source while paying |
 | `HAND_ABILITY` | 916-979 | the ability of the card in the decider's hand slot 0..63 (cycling; a Spirit Guide while paying) |
-| reserved | 980-1023 | alternative costs, modes, ... |
+| `EXILE` | 980-1011 | at priority: play or cast the k-th card in exile the decider may play (exile order; M7a) |
+| reserved | 1012-1023 | |
 
 `NUM_ACTIONS = 1024`. Canonical orders: hand, library, pile = sorted by (definition, card
 index); permanents = timestamp order, split by controller; stack = top first. **Equivalent
@@ -489,7 +494,15 @@ definition, `Choice::Def`; `PASS` = find nothing, 701.19b), `PutOnTop` / `PutOnB
 next pile card, in order; `PASS` ends a scry's bottom part), `PutInGraveyard` / `PutInHand`
 (a set, in definition order; `PASS` = done when allowed), `ChooseDiscard` (a card of a seen
 hand), `ChooseMode` (`NUMBER` = mode index; `PASS` = no more). Activating an ability is
-`Choice::Ability(card, slot)`.
+`Choice::Ability(card, slot)`. M7a: `ChooseColor` (`NUMBER` = W U B R G, 5 = colorless),
+`ChoosePermanent` (a permanent chosen without targeting, a vote, crew, an Army; `PASS` = no
+more), `ChooseGraveyardCard` (`GRAVEYARD` slots: Exhume, a graveyard cost, delve, a milled
+creature), `ChooseAltCost` (`NUMBER` 0 = the mana cost, k + 1 = alternative cost k),
+`ExileCost` and `BounceCost` (one card per decision), `DivideDamage` (`NUMBER` = the amount
+for the next target); X, a counter kind, an energy amount and tap-or-untap use `ChooseMode`;
+"top or bottom" is a `YesNo`. Priority also offers graveyard cards (`GRAVEYARD`: flashback,
+escape, lands with Crucible of Worlds) and exiled cards with a permission (`EXILE`). There
+are 32 decision kinds, the context block's capacity (section 22).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
@@ -538,7 +551,40 @@ graveyard), shuffles; hand reveals and looks, chosen discards; partial knowledge
 a determinize that keeps it; modal spells and triggers (700.2) with repeats and "up to one";
 tokens (111) from IR token printings, 704.5d; edicts; colour indicators; keyed auto-answers.
 
-Supported cube cards: 191 (M4b-1: 133, M4a: 31). New in M4b-2 (58): the fetch lands Arid
+Implemented (M7a, section 23): layers 4-7 with static abilities and effects until end of
+turn, counters, generic triggers with event subjects and delayed / reflexive triggers,
+protection and combat restrictions, equipment, alternative costs (evoke, dash, the Forces),
+cost changes, kicker, X, delve, crew, graveyard and counter costs, flashback, escape,
+permissions to play exiled cards, lands from graveyards, extra land drops, linked exile,
+graveyard targets, coin flips, energy, amass, persist, monstrosity, living weapon, devotion.
+
+Supported cube cards: 340 (M4b-2: 191, M4b-1: 133, M4a: 31); creatures 104 (M4b-2: 20).
+New in M7a (149): Abandoned Air Temple, Adeline, Agent Bishop, Alpha Deathclaw, Archon of
+Cruelty, Arwen, Atraxa, Auriok Salvagers, Baleful Mastery, Baloth Prime, Barrowgoyf, Basalt
+Monolith, Bejeweled Warg, Bloodtithe Harvester, Boomerang Basics, Bristly Bill, Burst
+Lightning, Carnage Interpreter, Chaos Defiler, Clarion Conqueror, Consult the Star Charts,
+Containment Priest, Cori-Steel Cutter, Council's Judgment, Crucible of Worlds, Cryogen Relic,
+Dark Confidant, Daze, Death-Greeter's Champion, Deep-Cavern Bat, Dig Through Time, Dismember,
+Displacer Kitten, Dragon's Rage Channeler, Eagles of the North, Echo of Eons, Endurance,
+Exhume, Expressive Iteration, Faerie Mastermind, Faithless Looting, Figure of Destiny, Figure
+of Fable, Flash, Flashback, Flickerwisp, Force of Negation, Force of Vigor, Force of Will,
+Formidable Speaker, Frantic Search, Fury, Galvanic Discharge, Get Lost, Ghost Vacuum, Giver
+of Runes, Glimmer Lens, Goblin Engineer, Golos, Grief, Grim Monolith, Grindstone, Guide of
+Souls, Gut, Harvester of Misery, Icetill Explorer, Ignoble Hierarch, Iron-Shield Elf, Ivora,
+Knight of Autumn, Kolaghan's Command, Leatherhead, Leyline Binding, Lightning Greaves,
+Lingering Souls, Lotus Cobra, Luminarch Aspirant, Magda, Mana Crypt, Mana Drain, Manifold
+Key, Mind Twist, Mine Collapse, Mishra's Bauble, Mole Man, Mother of Runes, Mox Diamond,
+Nettlecyst, Noble Hierarch, Oath of Druids, Oliphaunt, Once Upon a Time, Orcish Bowmasters,
+Ouroboroid, Phelia, Phlage, Portable Hole, Psychic Frog, Pyrogoyf, Pyrokinesis, Questing
+Beast, Ragavan, Ravenous Robots, Reanimate, Restless Vinestalk, Retrofitter Foundry, Robber
+of the Rich, Sanguine Evangelist, Screaming Nemesis, Scythecat Cub, Sentinel of the Nameless
+City, Sewer-veillance Cam, Shallow Grave, Sheoldred, the Apocalypse, Skateboard, Skullclamp,
+Skyclave Apparition, Smuggler's Copter, Snapcaster Mage, Sneak Attack, Snuff Out, Solitude,
+Soul-Guide Lantern, Spectacular Spider-Man, Subtlety, Super Shredder, Sylvan Safekeeper, Tear
+Asunder, Territorial Kavu, Thalia, Thassa's Oracle, The Fantasticar, Tidehollow Sculler,
+Titania, Torsten, Touch the Spirit Realm, Traumatic Critique, Treasure Cruise, Troll of
+Khazad-dûm, True-Name Nemesis, Unearth, Unexpectedly Absent, Upheaval, Uro, Urza's Bauble,
+Walking Ballista, Witherbloom Apprentice, Wolverine, Woodfall Primus. New in M4b-2 (58): the fetch lands Arid
 Mesa, Bloodstained Mire, Flooded Strand, Marsh Flats, Misty Rainforest, Polluted Delta,
 Scalding Tarn, Verdant Catacombs, Windswept Heath, Wooded Foothills, Prismatic Vista; the
 surveil lands Commercial District, Elegant Parlor, Hedge Maze, Lush Portico, Meticulous
@@ -569,15 +615,13 @@ Caryatid, the six Talismans, Time Warp, Unholy Heat, Vindicate, Voltaic Key, Whe
 Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED`.
 
 Not yet (later milestones; each is a blocker in the support report, never a silent no-op):
-layers and continuous effects ("until end of turn" pumps, keyword grants, manlands),
-replacement and prevention effects beyond entering tapped, alternative costs (kicker,
-flashback, Force of Will, evoke), X costs, cost reductions, counters (and so loyalty,
-planeswalkers and battles), copies (and token copies), delayed triggers, protection and
-ward, graveyard targets, targeting abilities on the stack, escalate and spree modes, "in a
-random order" (`LookAtTopCardsPutIntoHand.rest_random`: the owner would know a set of cards
-but not their order), looking at another player's library, naming a card, "activate only
-once" / exhaust / boast, mana abilities whose cost has a choice or a mana part (Orcish
-Lumberjack, Sunken Ruins, Loot), spend restrictions on mana, the play/draw choice.
+planeswalkers and loyalty (and attacking them), battles, copies (of spells, token copies,
+"enters as a copy"), transform and double-faced cards, adventures, ward, targeting abilities
+on the stack, the initiative and the monarch, sagas, replacement and prevention effects beyond
+the ones above, escalate and spree, multikicker, mana with spend restrictions, mana abilities
+whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic Star),
+granted triggered abilities (Kaldra Compleat), activated abilities in graveyards, naming a
+card, "activate only once" / exhaust / boast, the play/draw choice.
 
 Deliberate simplifications and limits (each is small and local to change):
 
@@ -598,12 +642,13 @@ Deliberate simplifications and limits (each is small and local to change):
   matter (every search shuffles; no search in the cube leaves the library in order).
 * Which modes are chosen is one decision per mode in printed order; "choose one or more"
   with repeats offers each multiset of modes once.
-* Events recorded: enters the battlefield and dies. Cast, attack, block, tap and draw events
-  get recorded when the first card listens for them (`triggers.rs`, one place).
+* Events are recorded only for the kinds some permanent listens for (`trig_mask`); section
+  23.2 lists the kinds.
+* M7a's own simplifications are in section 23.11.
 * Waiting triggers with the same definition and ability are offered once in the ordering
   decision (their order cannot matter while effects ignore their source's per-object state).
-* Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide is an
-  assertion failure for now.
+* Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide offers the
+  first 30 amounts, lethal and all (M7a).
 * Creatures attack only players; the starting player is chosen from the seed; determinize
   assumes open decklists.
 * Targets are not deduplicated (section 11), nor are activations of identical permanents
@@ -668,6 +713,17 @@ Deliberate simplifications and limits (each is small and local to change):
 * `SearchLibraryForCard.may_fail = false` would make Python find a card when one matches;
   every such search names a quality, which may always be missed (701.19b). No cube card sets
   it.
+* M7a: "that creature deals damage equal to its power" (Pyrogoyf): the entering creature is
+  the source (its colours, deathtouch, lifelink); Python deals the damage from Pyrogoyf.
+* M7a: "nonland permanent" filters: Python's predicate admits instant and sorcery cards
+  (in a graveyard, on the stack); here a permanent card type is required.
+* M7a: "whenever you cast your second spell each turn" is a condition of the event, not an
+  intervening "if" (CR 603.4 applies to "if" clauses only), so it isn't checked again on
+  resolution.
+* M7a: Leatherhead's "that player controls": the player dealt combat damage (the opponent
+  in two-player games).
+* M7a: Robber of the Rich lasts while the card is exiled (the Oracle text; the IR's default
+  "this turn", 23.10), as in Python.
 
 ## 15. Tests
 
@@ -690,7 +746,9 @@ they isolate one keyword or trigger each.
 | `tests/rules_library.rs` | 701.19c (must find "a card"; nothing in an empty library), 701.19b (may fail; revealed on top), Vampiric Tutor (known to its owner only), Entomb, fetch lands (land types, a shock land's choice first), Path to Exile (the creature's controller may search; no search, no shuffle), typecycling, a search decision unchanged under its searcher's determinize, 701.20 (a shuffle keeps "in the library", not where), 701.18 scry (looks keyed and masked; bottom and top order), 701.42 surveil (and a surveil land), Ponder, Stock Up (sets in canonical order, no impossible pick), Sensei's Divining Top, a scry of a revealed card (a cloud over the scried cards) |
 | `tests/cards_m4b2.rs` | Duress (revealed hand, keys, filter, known until it changes), Thoughtseize, Inquisition, Gitaxian Probe (private look, masked keys), a seen hand partly put back (cloud), 700.2a (modes before targets), a mode without targets, Fiery Confluence (repeats, non-decreasing), Mystic Confluence (a target per instance), 608.2b for modal spells, Pyroblast, 603.3c / 700.2b (modal triggers; no mode chosen), 111 / 704.5d tokens (Clue; a token put into a library), Malevolent Rumble, Thopter Foundry (nontoken), Sheoldred's Edict, Generous Ent, Timetwister |
 | `tests/hidden.rs` | determinize keeps the viewer's view and actions; known cards stay; observer masking of keys; refreshed decisions of the other player; an ability activated from hand reveals its card (602.2a); a payment in progress completes in every determinized world (pinned hand sources, then revealed); a pending shock-land choice survives determinize; a Brainstorm after a hand reveal leaves partial knowledge; a card leaving the hand is not told apart from a known twin |
-| `tests/support.rs` | the support report, the exact supported list, loud failures |
+| `tests/rules_layers.rs` | M7a: 613 layers (types, colours, keywords, set P/T in timestamp order, pumps, counters), 611.2c, statics and their conditions, 704.5q, protection 702.16, "can't block" groups, equipment 301.5 / 704.5n, exalted, battle cry, prowess |
+| `tests/cards_m7a.rs`, `cards_m7a_costs.rs`, `cards_m7a_zones.rs`, `cards_m7a_zones2.rs`, `cards_m7a_threats.rs`, `cards_m7a_threats2.rs`, `cards_m7a_misc.rs`, `cards_m7a_x.rs`, `cards_m7a_more.rs` | M7a cards and rules: equipment triggers, taxes and locks, replacement of uncast creatures, flicker, coin flips, explore, alternative costs and evoke (118.9, 702.74), divided damage (601.2d), linked exile (610.3), delayed triggers (603.7), reflexive triggers (603.12), random bottom order, tokens attacking (508.4), flashback (702.34), escape (702.138), exile permissions, dash (702.109), backup, amass, persist, monstrosity, living weapon, chosen player (614.12), devotion and winning (104.2b), delve, kicker, energy, X (107.3), crew (702.122), extra land drops |
+| `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
@@ -713,7 +771,7 @@ Separately, 30 games are replayed from their seed and action list and must repro
 final state hash, the outcome and the chance-key sequence exactly. `FUZZ_GAMES=n` sets the
 game count (default 300). A failing game prints its seed; `FUZZ_FIRST=s FUZZ_GAMES=1
 FUZZ_LOG=1` reruns it with the game log in the panic message. M4b-2: 20,000 games in release,
-no failure (see section 17 for the time).
+no failure (see section 17 for the time). M7a: 20,000 games over the 340 cards, no failure.
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
@@ -763,14 +821,14 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 `tests/perf.rs`; random decks of every supported card as in the fuzzer, mulligans on,
 `auto_single` on.
 
-| Measure | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
-|---|---|---|---|
-| Random play | 694 games/s (4,000 games, setup included) | 750 games/s | 1,357 games/s |
-| Per exposed decision (`apply`, running to the next decision) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
-| `Game::clone` (mean over mid-game states) | 1.36 us (6,616 states); `size_of::<Game>()` = 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
-| `clone` + `determinize(to_move)` (one search simulation's setup) | 2.3 us | 2.3 us | 2.4 us |
-| `legal_actions` (copies cached ids) | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+| Measure | M7a (340 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
+|---|---|---|---|---|
+| Random play | 905 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
+| Per exposed decision (`apply`, running to the next decision) | 5.0 us (220 decisions, 29 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
+| `Game::clone` (mean over mid-game states) | 0.98 us (6,160 states); `size_of::<Game>()` = 880 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
+| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
+| `legal_actions` (copies cached ids) | 4 ns | 8 ns | 4-9 ns | 6 ns |
+| Fuzzer, 20,000 games, release | 79 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
@@ -887,6 +945,9 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
 
 * IR defect: Strip Mine has no "{T}: Add {C}" (it relied on the Python fallback); blocked
   until mtg-bot exports it.
+* M7a IR findings (section 23.10): Celestial Colonnade and Creeping Tar Pit lack the colours
+  their animation sets; Robber of the Rich's permission duration; Get Lost's Map token (the
+  engine now builds Map from the printing other cards carry).
 * IR gap: Get Lost's rider (`ControllerCreatesTokens { token_name: "Map" }`) names a token
   the IR does not describe (Python looks it up in `TOKEN_PRINTINGS`); the IR should carry the
   printing, as `CreateToken.token_printing` does (Map also needs explore).
@@ -1430,3 +1491,181 @@ Readout:
   Key: 85% of the activation-only priority decisions of mtg1's data) are the next minor
   decisions to try.
 * **Layout v2** (22.2) for every new run; mtg2 / mtg2c checkpoints are layout v1.
+
+## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
+
+M7a grew the supported cube from 191 to 340 cards, creatures from 20 to 104 (threats, i.e.
+creatures, Vehicles, Equipment, manlands, token makers and burn, from 37 to 125). The work
+went feature by feature in the order the threat view of the support report (23.9) gave:
+threats unlocked per unit of work. Every card's IR was read against its Oracle text; a
+mismatch is a blocker, not a guess (23.10).
+
+### 23.1 Continuous effects and layers (CR 611, 613; `layers.rs`)
+
+Characteristics are read through accessors (`types_of`, `has_subtype`, `colors_of`,
+`keywords_of`, `protection_of`, `flags_of`, `pt`) that apply, in layer order: printed values
+(or a characteristic-defining ability, 7a: Tarmogoyf-style counts, "power equal to the
+number of creatures you control", domain), then type-changing (4), colour (5), ability (6:
+keywords, protection, rules flags such as "can't block", "can't be blocked", "attacks each
+combat if able"), base power/toughness setting in timestamp order (7b), then pumps, counters
+and per-count bonuses summed (7c). Two sources feed them:
+
+* **Static abilities** (`StaticDef { scope, cond, mods }` on the card): `This`, `Equipped`
+  (301.5) or `Matching { filter, other }` (types, subtypes, colours, controller, token-ness
+  relative to the source's controller), with an optional condition ("as long as you have one
+  or fewer cards in hand"). Re-evaluated continuously (611.3a). A fast path skips everything
+  when no static or effect exists.
+* **Effects from resolved spells and abilities** (`Game.effects`: `Effect { ts, until, on,
+  m, controller }`, `until` = end of turn or forever). Effects on objects are locked in at
+  resolution (611.2c: `Affected::Obj(ObjRef)`, ending when the object changes zones); rules
+  effects on a group ("creatures target player controls can't block this turn") apply to
+  whatever matches while they last (`Affected::Group`).
+
+**Counters** (CR 122) live in `Game.counters` per object: +1/+1, -1/-1 (they annihilate,
+704.5q), keyword counters (flying, hexproof, lifelink, indestructible, ...), stun (122.1d:
+removed instead of untapping) and named counters (charge, ...). They leave with the object.
+
+### 23.2 Generic triggers (CR 603; `triggers.rs`)
+
+An `Event { kind, a, b, amount }` names its subjects (`Slot`: obj, attacker, blocker, source,
+target, spell, controller, player, card). Kinds: enters, dies, leaves the battlefield,
+attacks, attacks alone, you attack, blocks, deals combat damage (to a player), is dealt
+damage, is cast, draws, discards, becomes tapped, is sacrificed, becomes monstrous, the
+beginnings of upkeep, draw step, precombat main, combat and end step. A trigger's
+predicate is a tree (`TrigPred`: `IsSelf(slot)`, `Subject(slot, filter)`, `Controlled(slot,
+you)`, `FormerHost` for "equipped creature dies", `HostAttacksWithAnother`, `Source(filter)`,
+`If(cond)` = an intervening "if" checked again on resolution (603.4), `State(cond)` = part of
+the event ("your second spell each turn"), and/or/not). Leave-the-battlefield triggers look
+back (603.10a): the events are recorded before the object moves, and a simultaneous move
+(SBA deaths, "destroy all", sacrificed costs) shows each leaver the others
+(`begin_batch`/`end_batch`). A triggered ability remembers its event (`EvCtx`: "that
+player", "that creature", "that much") through resolution. Keyword triggers are synthesized
+at lowering: exalted, battle cry, prowess, persist.
+
+**Delayed triggered abilities** (603.7; `Game.delayed`): an effect creates "at the beginning
+of the next end step / next upkeep / your next main phase" abilities about an object or a
+number (Flickerwisp's return, Sneak Attack's sacrifice, dash, Shallow Grave, Mana Drain's
+mana, the Baubles' draw). **Reflexive** triggers (603.12: "you may remove a counter. When you
+do, ...") trigger at once and choose their targets as they go on the stack.
+
+### 23.3 Combat keywords and restrictions
+
+Protection (702.16: damage prevented, not blocked by, not targeted by, not enchanted or
+equipped by; from colours, card types, everything, each opponent, the chosen player),
+"can't block", "can't be blocked", "can't be blocked except by two or more" generalized to
+n blockers, "can block only creatures with flying", "can't be blocked by <filter>", "attacks
+each combat if able" (508.1d: declared before the free choices), exalted and battle cry.
+Tokens can enter tapped and attacking (508.4: not declared, so no attack triggers; only for
+the attacking player during combat). "Combat damage that would be dealt by creatures you
+control can't be prevented" overrides protection's prevention.
+
+### 23.4 Costs
+
+* **Alternative costs** (118.9): `AltCost { mana, cost, turn, only_if, evoke, dash }` - Force
+  of Will and the other Forces, Daze (return an Island), Snuff Out, Fury and Solitude
+  (evoke, 702.74: the permanent knows; its "when evoked" sacrifice), dash (702.109: haste and
+  a delayed return), "if this is the first spell you've cast this game". `ChooseAltCost`
+  (`NUMBER` 0 = the mana cost, k + 1 = alternative k) asks only when more than one is payable.
+  Cost increases apply to them (601.2f).
+* **Cost changes** (601.2f): increases ("noncreature spells cost {1} more"), then reductions
+  (per basic land type, per controlled permanent), generic only.
+* **Additional costs and kicker** (702.33): a kicked spell's effect and targets follow the
+  option like a mode (the two branches of "if this spell was kicked" are the modes; no mode
+  decision).
+* **X** (107.3): announced at 601.2b (`NUMBER`, from 0 to what the caster can pay, 0 when
+  cast without paying its mana cost), paid as generic mana, read by `Amount::X`, counted in
+  the mana value on the stack (202.3e), "enters with X +1/+1 counters".
+* **Delve** (702.66): graveyard cards exiled while paying, one decision per card in
+  increasing slot order, never leaving the rest unpayable.
+* **Other cost parts**: exile a card of a kind from your hand, return permanents to hand,
+  exile n cards from your graveyard (a set: increasing positions), remove counters from the
+  source (by kind or name), crew n (702.122: untapped creatures other than the Vehicle, one
+  per decision in slot order, `PASS` once their power is enough), divided damage announced
+  with the targets (601.2d, `DivideDamage`).
+
+### 23.5 Casting and playing from other zones (601.2a)
+
+`cast_route` says how a card may be cast from where it is: from hand; from its owner's
+graveyard with **flashback** (702.34; printed, or granted for its mana cost by Snapcaster
+Mage or Flashback; the card is exiled whenever it would leave the stack) or **escape**
+(702.138; the permanent knows it escaped); from exile with a **permission**
+(`Game.permissions`: Golos, Ragavan, Robber of the Rich, Expressive Iteration; this turn or
+while exiled, free, "mana as though of any colour", "during any turn you attacked with a
+Rogue"). Lands may be played from exile with a permission or from the graveyard ("you may
+play lands from your graveyard"); additional land drops (305.2) count. Priority ids: a
+graveyard card is its `GRAVEYARD` slot; an exiled card with a permission is `EXILE` + k, the
+k-th such card in exile order (980-1011, section 11). A card cast this way is its own source
+for protection and never its own graveyard target. "Without paying its mana cost" is an
+alternative cost; flashback, escape and permissions don't combine with another one (118.9a).
+
+### 23.6 Linked and delayed exile (607.2a, 610.3)
+
+`Game.links`: cards exiled with a permanent. "Until this leaves the battlefield" (Portable
+Hole, Leyline Binding, Deep-Cavern Bat, Tidehollow Sculler) returns them when it leaves
+(610.3a; exiles nothing if it already left, 610.3c). Untimed links serve "the exiled card"
+later: Skyclave Apparition's token, Ghost Vacuum's return. Flickerwisp exiles and creates a
+delayed return about the exiled card (a new object, 400.7).
+
+### 23.7 New hidden-information cases (section 10)
+
+* **Random order** ("on the bottom in a random order": Torsten, Endurance, Thassa's Oracle,
+  Atraxa): nobody knows the order. The owner forgets the cards (an owner's knowledge is
+  exact or nothing); what another player knew of them becomes a cloud over that library
+  (the owner's determinize keeps library cards in the library, so it stays true); a cloud
+  naming one of those slots is widened to the library.
+* **Looking at another player's library card that its owner doesn't know** (Mishra's
+  Bauble): the look is keyed for the looker but not remembered; the owner's determinize may
+  change that card, and the looker's clouds could not stay consistent with it. A random hand
+  card seen (Urza's Bauble) is remembered (its owner knows it). Cards cast from exile or a
+  graveyard are public.
+* A coin flip (Mana Crypt) is a public chance key (`KEY_COIN`) and can be forced.
+* Which of two identical hand cards another player "knows" is canonicalized after every
+  action (a card leaving the hand is not told apart from a known twin).
+
+### 23.8 Effects added (the `Ext` instructions)
+
+`Op::Ext(Ext)` holds the M7a instructions (`resolve_ext.rs`), so `az/encode.rs`'s
+exhaustive `op_code` needs a single arm. Among them: apply mods / rules effects, protection
+of a chosen colour, counters (put, double, "the second time this resolved this turn"),
+tap / untap / tap-or-untap, attach (equip), fight, mill, explore, choose permanents without
+targeting (Chaos Defiler, "untap up to three lands"), flicker, coin flips, graveyard returns
+(Reanimate, Exhume's each-player choice, Unearth), divided damage, the evoke sacrifice,
+linked exile, delayed and reflexive triggers, amass, monstrosity, living weapon / For
+Mirrodin!, damage dealt by the event's object (Pyrogoyf) with its last known power,
+"can't gain life for the rest of the game", energy, will of the council, devotion, winning
+the game (104.2b), the Oath, Upheaval, Flash, Grindstone, Atraxa's one card per type (a
+bipartite matching of chosen cards to card types).
+
+### 23.9 The threat view of the support report
+
+`cargo test -p engine --test support threat_report -- --nocapture` classifies every cube
+card as a threat (creature; Vehicle; Equipment; manland; token maker; burn) or not, and ranks
+features by the threats they block alone and in total, with a greedy staging over threats.
+At the end of M7a: threats 125 supported (104 creatures), 121 blocked (105 creatures).
+
+### 23.10 Blocked by the IR, not by the engine
+
+* Celestial Colonnade and Creeping Tar Pit: `BecomeLandCreatureUEOT` lacks the animated
+  creature's colours ("a 4/4 white and blue Elemental"); a coloured land without
+  `set_colors` is a blocker rather than a colourless creature.
+* Strip Mine has no "{T}: Add {C}" (section 20).
+* Robber of the Rich's permission keeps the default duration ("this turn") in the IR; the
+  Oracle text ("during any turn you attacked with a Rogue") makes it last while the card is
+  exiled, as Python does; the lowering follows the Oracle text.
+
+### 23.11 Simplifications
+
+* A Pyrogoyf-like "that creature deals damage" whose creature left uses its last known
+  power and its characteristics as a card (not as it last existed on the battlefield).
+* Untap-up-to effects offer only tapped permanents (choosing an untapped one does nothing).
+* Combat damage to divide among blockers above 31 offers the first 30 amounts, lethal and
+  all (the `NUMBER` range).
+* An Equipment's timestamp is not refreshed when it is re-attached (no layer-dependent
+  interaction in the pool).
+* Mox Diamond's "if this would enter" replacement applies as the spell resolves (no other
+  supported effect puts it onto the battlefield).
+* "True-Name Nemesis": choosing yourself is offered (a `Target` decision with `PLAYER` ids;
+  dominated, but legal).
+* The tap-or-untap choice, a counter kind to remove, an energy amount and X use `ChooseMode`
+  with `NUMBER` ids; DecisionKind stays at 32 kinds (the network's context block), so "top
+  or bottom" is a `YesNo` (`YES` = top).
