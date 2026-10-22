@@ -395,3 +395,49 @@ fn a_card_leaving_the_hand_is_not_told_apart_from_a_known_twin() {
     });
     assert!(gone, "some sampled world has no Bolt in P0's hand");
 }
+
+#[test]
+fn a_decision_the_engine_answers_itself_is_keyed() {
+    // With auto_single on, P1's priority with nothing castable is answered
+    // internally; that P1 had no alternative depends on its hidden hand, so
+    // the transition carries a KEY_AUTO for it.
+    use engine::hidden::KEY_AUTO;
+    let start = |p1_hand: &[&str]| {
+        Scenario::new(db())
+            .spec(|s| s.auto_single = true)
+            .battlefield(1, &["Island", "Island"])
+            .hand(1, p1_hand)
+            .library(0, &["Forest"; 6])
+            .library(1, &["Forest"; 6])
+            .at(Step::Main1, 0)
+            .start()
+    };
+    let autos = |keys: &[u64]| keys.iter().filter(|&&k| key_kind(k) == KEY_AUTO && key_player(k) == 1).count();
+    // P0 passes in main 1: P1 gets priority. With only lands in hand P1's
+    // single option (pass) is answered for it.
+    let mut g = start(&["Forest"]);
+    let keys = g.pass();
+    assert!(autos(&keys) >= 1, "{keys:?}");
+    // With a castable instant P1 decides: no auto key for that decision.
+    let mut g = start(&["Brainstorm"]);
+    let keys = g.pass();
+    assert_eq!(g.to_move(), Some(1));
+    assert_eq!(autos(&keys), 0);
+}
+
+#[test]
+fn casting_a_known_card_is_keyed() {
+    // P1 knows P0's Lightning Bolt; casting it still emits its reveal key
+    // (which known card a hand slot names differs between sampled worlds).
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Mountain"])
+        .hand_known(0, &["Lightning Bolt"])
+        .library(0, &["Forest"; 6])
+        .library(1, &["Forest"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    let keys = g.choose(Choice::Cast(bolt));
+    assert!(keys.iter().any(|&k| key_kind(k) == engine::hidden::KEY_REVEAL && key_payload(k) == g.obj(bolt).def as u64));
+}

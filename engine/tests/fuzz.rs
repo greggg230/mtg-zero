@@ -74,53 +74,50 @@ fn check_clone(g: &Game, a: u16, seed: u64) {
 /// `determinize(to_move)` keeps the decider's legal actions and the public
 /// state; the resampled world keeps playing without breaking invariants.
 fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
-    let viewer = g.to_move().unwrap();
-    let mut d = g.clone();
-    d.determinize(viewer, rng);
-    let (mut l1, mut l2) = (Vec::new(), Vec::new());
-    g.legal_actions(&mut l1);
-    d.legal_actions(&mut l2);
-    assert_eq!(l1, l2, "seed {seed}: determinize changed the decider's actions");
-    // Nothing the viewer can observe changes; no card it knows exactly is
-    // resampled.
-    if g.view_of(viewer) != d.view_of(viewer) {
-        let mut info = String::new();
-        for st in g.stack() {
-            if let engine::game::StackKind::Ability { ability, source } = st.kind {
-                let o = g.obj(source.idx);
-                info += &format!(
-                    "ability {:?} of {} (slot {}) zone {:?} known {} -> now {}
-",
-                    ability.slot,
-                    g.name(source.idx),
-                    source.idx.0,
-                    o.zone,
-                    o.known,
-                    d.name(source.idx)
-                );
+    let mover = g.to_move().unwrap();
+    // The decider (what the search does) and the other player (tests and
+    // analysis: its determinize refreshes the decider's decision).
+    for viewer in [mover, 1 - mover] {
+        let mut d = g.clone();
+        d.determinize(viewer, rng);
+        if viewer == mover {
+            let (mut l1, mut l2) = (Vec::new(), Vec::new());
+            g.legal_actions(&mut l1);
+            d.legal_actions(&mut l2);
+            assert_eq!(l1, l2, "seed {seed}: determinize changed the decider's actions");
+        } else {
+            assert_eq!(d.to_move(), Some(mover), "seed {seed}: a refresh ran past the decision");
+        }
+        // Nothing the viewer can observe changes; no card it knows exactly
+        // is resampled.
+        assert_eq!(
+            g.view_of(viewer),
+            d.view_of(viewer),
+            "seed {seed}: determinize changed the view of P{viewer} (mover P{mover})
+{}",
+            g.log_lines().iter().rev().take(20).cloned().collect::<Vec<_>>().join("
+")
+        );
+        for (i, o) in g.objs().iter().enumerate() {
+            let c = engine::CardIdx(i as u16);
+            if g.knows(viewer, c) {
+                assert_eq!(o.def, d.obj(c).def, "seed {seed}: a card P{viewer} knows was resampled");
             }
         }
-        panic!("seed {seed}: determinize changed the viewer's view (viewer {viewer})
-{info}{}", g.log_lines().iter().rev().take(25).cloned().collect::<Vec<_>>().join("
-"));
-    }
-    for (i, o) in g.objs().iter().enumerate() {
-        let c = engine::CardIdx(i as u16);
-        if g.knows(viewer, c) {
-            assert_eq!(o.def, d.obj(c).def, "seed {seed}: a known card was resampled");
+        d.check_invariants().unwrap();
+        if viewer == mover {
+            check_information_set(g, viewer, seed, rng);
         }
-    }
-    d.check_invariants().unwrap();
-    check_information_set(g, viewer, seed, rng);
-    let mut legal = Vec::new();
-    let mut keys = Vec::new();
-    for _ in 0..30 {
-        if d.is_over() {
-            break;
+        let mut legal = Vec::new();
+        let mut keys = Vec::new();
+        for _ in 0..30 {
+            if d.is_over() {
+                break;
+            }
+            d.legal_actions(&mut legal);
+            d.apply(legal[rng.below(legal.len() as u32) as usize], &mut keys).unwrap();
+            d.check_invariants().unwrap_or_else(|e| panic!("seed {seed} (determinized for P{viewer}): {e}"));
         }
-        d.legal_actions(&mut legal);
-        d.apply(legal[rng.below(legal.len() as u32) as usize], &mut keys).unwrap();
-        d.check_invariants().unwrap_or_else(|e| panic!("seed {seed} (determinized): {e}"));
     }
 }
 
