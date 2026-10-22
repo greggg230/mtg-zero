@@ -203,6 +203,8 @@ pub struct StackItem {
     pub delve_floor: u8,
     /// A land card was discarded for it to enter (Mox Diamond).
     pub discarded_land: bool,
+    /// The value of X (CR 107.3a).
+    pub x: u8,
     /// Divided damage: the amount for each target of the divided
     /// requirement, in the order chosen (CR 601.2d).
     pub division: Vec<u8>,
@@ -375,6 +377,8 @@ pub struct Game {
     pub(crate) combat_damage_now: bool,
     /// ... cast with escape; cast for its dash cost (delayed ability k).
     pub(crate) entering_escaped: bool,
+    /// ... the X it was cast with.
+    pub(crate) entering_x: u8,
     pub(crate) entering_dash: Option<u8>,
     pub(crate) log: Option<Vec<String>>,
 }
@@ -495,6 +499,7 @@ impl Game {
             permissions: Vec::new(),
             combat_damage_now: false,
             entering_escaped: false,
+            entering_x: 0,
             entering_dash: None,
             batching: false,
             entering_cast: false,
@@ -691,6 +696,7 @@ impl Game {
         self.entering_evoked = evoked; // read as it moves (its ETB sees it)
         let escaped = std::mem::take(&mut self.entering_escaped);
         let dash = std::mem::take(&mut self.entering_dash);
+        let x = std::mem::take(&mut self.entering_x);
         self.entering_escaped = escaped && cast;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
         if let (Some(k), true) = (dash, cast) {
@@ -720,6 +726,9 @@ impl Game {
         // CR 122.6: "enters with counters".
         for &(k, n) in &self.def_of(idx).enters_counters {
             self.add_counters(idx, k, n as u16);
+        }
+        if self.def_of(idx).enters_x_counters && x > 0 {
+            self.add_counters(idx, crate::db::Counter::P1P1, x as u16);
         }
         if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player {
             self.agenda.push(Task::AsEnters { card: idx });

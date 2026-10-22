@@ -476,6 +476,22 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     lower_effect(l, b, then_action);
                     b.patch(at);
                 }
+                E::DrawCards(nodes::DrawCards { amount }) if optional => {
+                    // "You may draw n. If you do, ..."
+                    let n = l.int("DrawCards.amount", *amount, 1, 9);
+                    let at = b.op(Op::May { who: Who::You, skip: 0 });
+                    b.op(Op::Draw { who: Who::You, n: Amount::Fixed(n) });
+                    lower_effect(l, b, then_action);
+                    b.patch(at);
+                }
+                E::SacrificeSelf(nodes::SacrificeSelf {}) if optional => {
+                    // "You may sacrifice this. If you do, ..."
+                    let at = b.op(Op::May { who: Who::You, skip: 0 });
+                    let gone = b.op(Op::Ext(Ext::SacrificeSourceThen { skip: 0 }));
+                    lower_effect(l, b, then_action);
+                    b.patch(at);
+                    b.patch(gone);
+                }
                 E::SacrificeAPermanent(nodes::SacrificeAPermanent { permanent_filter, another, label }) => {
                     // "[You may] sacrifice [another] <filter>. If you do, ..."
                     let _ = label; // display text
@@ -1272,6 +1288,41 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::Exile(nodes::Exile { targets }) => {
             let Some(t) = lower_targets(l, b, targets, "Exile") else { return true };
             b.op(Op::Exile { tgt: t });
+        }
+        E::DealXDamage(nodes::DealXDamage { amount, targets }) => {
+            // "This deals X damage to <target>."
+            l.deny("DealXDamage.amount", amount);
+            let Some(t) = lower_targets(l, b, targets, "DealXDamage") else { return true };
+            b.op(Op::DealDamage { amount: Amount::X, to: t });
+        }
+        E::ApplyEffect(nodes::ApplyEffect { inner, ends_at }) => {
+            // "<This> becomes an artifact creature until end of turn"
+            // (crew, CR 702.122a).
+            let until = match &**ends_at {
+                cats::Duration::EndOfTurn(nodes::EndOfTurn {}) => Until::EndOfTurn,
+                other => {
+                    l.unsupported(format!("ApplyEffect.ends_at({})", other.tag()));
+                    return true;
+                }
+            };
+            match &**inner {
+                E::BecomeType(nodes::BecomeType { types_to_add, subtypes_to_add, base_pt }) => {
+                    let mut add = 0u16;
+                    for t in types_to_add {
+                        match types::from_name(&format!("{t:?}")) {
+                            Some(bits) => add |= bits,
+                            None => l.unsupported(format!("BecomeType.types_to_add({t:?})")),
+                        }
+                    }
+                    let subtypes: Vec<u16> = subtypes_to_add.iter().map(|s| l.subtype(s)).collect();
+                    let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
+                    if let Some((p, t)) = base_pt {
+                        mods.push(Mod::SetPt(l.int("BecomeType.base_pt", *p, 0, 99), l.int("BecomeType.base_pt", *t, 0, 99)));
+                    }
+                    apply(b, On::Source, mods, until);
+                }
+                other => l.unsupported(format!("ApplyEffect.inner({})", other.tag())),
+            }
         }
         E::ReturnAllPermanentsToOwnersHands(nodes::ReturnAllPermanentsToOwnersHands {}) => {
             b.op(Op::Ext(Ext::BounceAll));

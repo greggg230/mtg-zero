@@ -57,6 +57,8 @@ pub(crate) enum Task {
     Delve { id: u32 },
     /// Discard a land for Mox Diamond to enter, or not.
     EnterByDiscard { id: u32 },
+    /// Announce X (CR 601.2b, 107.3).
+    ChooseX { id: u32 },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -198,6 +200,7 @@ impl Game {
             Task::AsEnters { card } => self.as_enters(card),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
+            Task::ChooseX { id } => self.choose_x(id),
         }
     }
 

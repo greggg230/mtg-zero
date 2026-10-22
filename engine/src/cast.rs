@@ -221,6 +221,51 @@ impl Game {
         paid && def.spell.as_ref().is_none_or(|ab| self.targets_available(ab, p, Some(self.obj_ref(card))))
     }
 
+    /// CR 601.2b: announce X, from 0 to the most the caster can pay (31 at
+    /// most; 0 when cast without paying its mana cost, 107.3b). Choice:
+    /// `NUMBER`.
+    pub(crate) fn choose_x(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let StackKind::Spell { card } = self.stack[pos].kind else { return };
+        let p = self.stack[pos].controller;
+        match self.answer.take() {
+            Some(Choice::Number(x)) => {
+                self.stack[pos].x = x;
+                self.note(|_| format!("X = {x}"));
+                return;
+            }
+            Some(other) => unreachable!("X answer {other:?}"),
+            None => {}
+        }
+        let item = &self.stack[pos];
+        let k = self.def_of(card).x_pips;
+        let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. });
+        let base = self.route_mana(card, p, item.from);
+        let mut most = 0u8;
+        if !free {
+            while most < (act::NUMBER_N - 1) as u8 {
+                let mut c = base;
+                c.generic = c.generic.saturating_add((most + 1).saturating_mul(k));
+                if !self.can_pay(p, &c) {
+                    break;
+                }
+                most += 1;
+            }
+        }
+        let opts = (0..=most).map(|x| Opt { action: act::NUMBER + x as u16, choice: Choice::Number(x) }).collect();
+        self.ask(Task::ChooseX { id }, p, DecisionKind::ChooseMode, opts);
+    }
+
+    /// Mana value (CR 202.3), with X on the stack (202.3e).
+    pub(crate) fn mana_value_of(&self, c: CardIdx) -> u8 {
+        let mv = self.def_of(c).mana_value();
+        if self.objs[c.i()].zone != Zone::Stack {
+            return mv;
+        }
+        let x = self.stack.iter().find(|s| s.kind == StackKind::Spell { card: c }).map_or(0, |s| s.x);
+        mv.saturating_add(x.saturating_mul(self.def_of(c).x_pips))
+    }
+
     /// Can `p` pay one of the spell's additional-cost options (CR 601.2b)
     /// with `cost` plus the option's own mana; for kicker, only an option
     /// whose effect has its targets.
@@ -584,6 +629,7 @@ impl Game {
             delved: 0,
             delve_floor: 0,
             discarded_land: false,
+            x: 0,
             division: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
@@ -599,6 +645,9 @@ impl Game {
         }
         if self.def_of(card).additional.len() > 1 {
             self.agenda.push(Task::CastOption { id });
+        }
+        if self.def_of(card).x_pips > 0 {
+            self.agenda.push(Task::ChooseX { id }); // CR 601.2b
         }
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some()) && !self.def_of(card).kicker {
             self.agenda.push(Task::ChooseModes { id }); // CR 601.2b, 700.2a
@@ -741,6 +790,7 @@ impl Game {
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             cost = cost.plus(&extra.mana);
         }
+        cost.generic = cost.generic.saturating_add(item.x.saturating_mul(def.x_pips));
         let mut pm = PayMana::new(p, cost);
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
@@ -960,7 +1010,7 @@ impl Game {
             Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) + self.toughness(c) <= *n,
             Filter::Subtype(s) => self.has_subtype(c, *s),
             Filter::Supertype(bits) => def.supertypes & bits != 0,
-            Filter::ManaValueAtMost(n) => def.mana_value() <= *n,
+            Filter::ManaValueAtMost(n) => self.mana_value_of(c) <= *n,
             Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n,
             Filter::PowerAtMost(n) => self.is_creature(c) && self.power(c) <= *n,
             Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,

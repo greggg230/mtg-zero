@@ -43,6 +43,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::DealtDamage) => Some(EventKind::DealtDamage),
         Some(E::CardDiscarded) => Some(EventKind::CardDiscarded),
         Some(E::BecomesMonstrous) => Some(EventKind::BecomesMonstrous),
+        Some(E::Blocks) => Some(EventKind::Blocks),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -106,6 +107,7 @@ fn slot(l: &mut Lowerer, s: &Option<enums::EventSubject>) -> Option<Slot> {
         None => Slot::Default,
         Some(S::Obj) => Slot::Obj,
         Some(S::Attacker) => Slot::Attacker,
+        Some(S::Blocker) => Slot::Blocker,
         Some(S::Source) => Slot::Source,
         Some(S::Target) => Slot::Target,
         Some(S::Spell) => Slot::Spell,

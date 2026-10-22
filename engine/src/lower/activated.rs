@@ -150,9 +150,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     l.deny("ActivationCost.exile_granting_equipment", exile_granting_equipment);
     l.deny("ActivationCost.mana_reduced_by_source_power", mana_reduced_by_source_power);
     l.deny("ActivationCost.tap_x_untapped_artifacts_you_control", tap_x_untapped_artifacts_you_control);
-    l.deny("ActivationCost.remove_counters_from_self_kind", remove_counters_from_self_kind);
-    l.deny("ActivationCost.remove_counters_from_self_amount", remove_counters_from_self_amount);
-    l.deny("ActivationCost.crew", crew);
     l.deny("ActivationCost.saddle", saddle);
     l.deny("ActivationCost.loyalty", loyalty);
     l.deny("ActivationCost.loyalty_x", loyalty_x);
@@ -176,7 +173,18 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         exile_from_hand: None,
         bounce: None,
         exile_graveyard: l.int("ActivationCost.exile_cards_from_graveyard", *exile_cards_from_graveyard, 0, 20) as u8,
+        remove_counters: None,
+        crew: l.int("ActivationCost.crew", *crew, 0, 20) as u8,
     };
+    // "Remove n <kind> counters from this" (CR 118.3).
+    match (remove_counters_from_self_kind.as_str(), *remove_counters_from_self_amount) {
+        ("", 0) => {}
+        (k, n) if !k.is_empty() && n > 0 => {
+            let counter = super::effect_ext::counter_by_name(l, k);
+            cost.remove_counters = Some((counter, l.int("ActivationCost.remove_counters_from_self_amount", n, 1, 20) as u8));
+        }
+        _ => l.unsupported("ActivationCost.remove_counters_from_self(kind and amount)"),
+    }
     match from {
         From::Battlefield => {
             l.deny("ActivationCost.exile_self(on the battlefield)", exile_self);
@@ -249,6 +257,14 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
                 if let Some(f) = lower_pred(l, permanent_filter) {
                     sacs.push(SacCost { filter: f, n, another: *another });
                 }
+            }
+            // "Remove n +1/+1 counters from this" (Walking Ballista).
+            cats::CostAtom::RemoveCountersFromSelfCost(nodes::RemoveCountersFromSelfCost { count }) => {
+                if cost.remove_counters.is_some() {
+                    l.unsupported("CostAtom:RemoveCountersFromSelfCost(twice)");
+                }
+                let n = l.int("RemoveCountersFromSelfCost.count", *count, 1, 20) as u8;
+                cost.remove_counters = Some((crate::db::Counter::P1P1, n));
             }
             other => l.unsupported(format!("CostAtom:{}", other.tag())),
         }

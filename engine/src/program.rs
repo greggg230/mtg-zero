@@ -46,6 +46,8 @@ pub enum Amount {
     /// The number of permanents of these card types the controller
     /// controls ("the number of lands you control").
     CountTypes(u16),
+    /// The spell's X (CR 107.3).
+    X,
     /// The power of the triggered ability's event object ("its power"):
     /// now if it is still on the battlefield, else as it last existed there
     /// (CR 608.2h).
@@ -301,6 +303,12 @@ pub enum Ext {
     PileRestExilePlayable,
     /// The controller looks at the top card of `who`'s library.
     LookAtTopOf { who: Who },
+    /// Put each legal target of requirement `tgt` into its owner's library
+    /// beneath the top X cards.
+    PutInLibraryAtX { tgt: u8 },
+    /// Sacrifice the source if it is still the same permanent, else
+    /// continue at `skip` ("you may sacrifice it. If you do").
+    SacrificeSourceThen { skip: u16 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -515,6 +523,7 @@ impl Op {
             Op::Ext(Ext::SacrificeThen { skip, .. }) => Some(skip),
             Op::Ext(Ext::MayRemoveCounterThen { skip }) => Some(skip),
             Op::Ext(Ext::MayPayEnergyThen { skip, .. }) => Some(skip),
+            Op::Ext(Ext::SacrificeSourceThen { skip }) => Some(skip),
             _ => None,
         }
     }

@@ -380,6 +380,9 @@ pub enum EventKind {
     CardDiscarded,
     /// A permanent became monstrous (701.37b). Subject: obj.
     BecomesMonstrous,
+    /// A creature was declared as a blocker (509.1). Subjects: blocker,
+    /// attacker.
+    Blocks,
     /// Never emitted: the trigger is a delayed triggered ability (CR 603.7)
     /// an effect creates (`Ext::Delay`).
     Delayed,
@@ -412,6 +415,7 @@ impl EventKind {
                 (&[Slot::Obj], &[])
             }
             E::Attacks | E::AttacksAlone => (&[Slot::Attacker], &[]),
+            E::Blocks => (&[Slot::Blocker], &[]),
             E::YouAttack
             | E::DrawsCard
             | E::BeginningOfUpkeep
@@ -441,6 +445,7 @@ pub enum Slot {
     Default,
     Obj,
     Attacker,
+    Blocker,
     Source,
     Target,
     Spell,
@@ -615,6 +620,11 @@ pub struct Cost {
     pub bounce: Option<SacCost>,
     /// Exile n cards from your graveyard (chosen as the cost is paid).
     pub exile_graveyard: u8,
+    /// Remove n counters of a kind from the source (CR 118.3).
+    pub remove_counters: Option<(Counter, u8)>,
+    /// Crew n (CR 702.122): tap untapped creatures you control (not the
+    /// source) with total power n or more.
+    pub crew: u8,
 }
 
 /// An alternative cost (CR 118.9): paid instead of the mana cost.
@@ -785,6 +795,10 @@ pub struct CardDef {
     /// do, put it onto the battlefield; if you don't, into its owner's
     /// graveyard" (Mox Diamond; as it resolves).
     pub discard_land_to_enter: bool,
+    /// {X} symbols in its mana cost (CR 107.3).
+    pub x_pips: u8,
+    /// "Enters with X +1/+1 counters" (the X it was cast with).
+    pub enters_x_counters: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.

@@ -146,6 +146,7 @@ impl Game {
             delved: 0,
             delve_floor: 0,
             discarded_land: false,
+            x: 0,
             division: Vec::new(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
@@ -224,6 +225,14 @@ impl Game {
                 return false;
             }
         }
+        if let Some((k, n)) = cost.remove_counters {
+            if self.counters_on(card, k) < n as u16 {
+                return false;
+            }
+        }
+        if cost.crew > 0 && self.crew_power(p, card) < cost.crew as i32 {
+            return false;
+        }
         let in_gy = self.objs[card.i()].zone == Zone::Graveyard;
         if cost.exile_graveyard as usize > pl.graveyard.len() - in_gy as usize {
             return false;
@@ -240,6 +249,17 @@ impl Game {
             None => classes,
         };
         self.can_pay_with(p, mana, classes, &Self::keep_for(card, cost, exclude))
+    }
+
+    /// Creatures that can crew `vehicle` for `p`: untapped creatures they
+    /// control other than it.
+    pub(crate) fn crew_eligible(&self, p: PlayerId, vehicle: CardIdx) -> Vec<CardIdx> {
+        self.creatures_of(p).filter(|&c| c != vehicle && !self.objs[c.i()].tapped).collect()
+    }
+
+    /// The most power `p` can tap to crew `vehicle`.
+    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx) -> i32 {
+        self.crew_eligible(p, vehicle).into_iter().map(|c| self.power(c).max(0)).sum()
     }
 
     /// Cards in `p`'s hand matching `f` other than `card`, one per
@@ -288,9 +308,19 @@ impl Game {
         let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
         let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
         let n_gy = n_bounce + cost.exile_graveyard as usize;
+        let mut crew_done = false;
         if let Some(ch) = self.answer.take() {
-            let Choice::Card(c) = ch else { unreachable!("cost answer {ch:?}") };
-            if picked.len() < n_sac {
+            let c = match ch {
+                Choice::Card(c) => c,
+                // CR 702.122a: enough power tapped for crew.
+                Choice::Pass => {
+                    crew_done = true;
+                    CardIdx(u16::MAX)
+                }
+                other => unreachable!("cost answer {other:?}"),
+            };
+            if crew_done {
+            } else if picked.len() < n_sac {
                 picked.push(c);
             } else if picked.len() < n_disc {
                 // Discards happen one at a time: a chosen hand card is never
@@ -353,8 +383,42 @@ impl Game {
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChooseGraveyardCard, opts);
             return;
         }
+        if cost.crew > 0 && !crew_done {
+            // Crew (CR 702.122a): untapped creatures other than the source,
+            // one decision each in increasing slot order; PASS once their
+            // total power is enough. A pick must leave the total reachable.
+            let need = cost.crew as i32;
+            let tapped_in: Vec<CardIdx> = picked[n_gy..].to_vec();
+            let have: i32 = tapped_in.iter().map(|&c| self.power(c)).sum();
+            let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
+            let cands: Vec<CardIdx> = self
+                .crew_eligible(p, card)
+                .into_iter()
+                .filter(|c| !tapped_in.contains(c) && floor.is_none_or(|f| self.perm_action(p, *c) > f))
+                .collect();
+            let mut opts: Vec<Opt> = Vec::new();
+            for (k, &c) in cands.iter().enumerate() {
+                let rest: i32 = cands[k + 1..].iter().map(|&x| self.power(x).max(0)).sum();
+                if have + self.power(c) + rest >= need {
+                    opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
+                }
+            }
+            if have >= need {
+                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+            }
+            if !(opts.len() == 1 && have >= need) {
+                self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
+                return;
+            }
+        }
+        for &c in &picked[n_gy..] {
+            self.tap(c);
+        }
         for &c in &picked[n_bounce..n_gy] {
             self.move_card(c, Zone::Exile, Pos::Top);
+        }
+        if let Some((k, n)) = cost.remove_counters {
+            self.remove_counters(card, k, n as u16);
         }
         // Permanents returned as a cost leave together.
         let mut bounced: Vec<CardIdx> = picked[n_exile..n_bounce].to_vec();

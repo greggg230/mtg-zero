@@ -631,7 +631,7 @@ impl Game {
                 for t in self.targets_of(f, *tgt) {
                     if let Target::Obj(o) = t {
                         if self.objs[o.idx.i()].zone == Zone::Stack {
-                            f.x = self.def_of(o.idx).mana_value() as i32;
+                            f.x = self.mana_value_of(o.idx) as i32;
                             break;
                         }
                     }
@@ -1183,6 +1183,24 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::PutInLibraryAtX { tgt } => {
+                let depth = f.spell_x;
+                for t in self.targets_of(f, *tgt) {
+                    if let Target::Obj(o) = t {
+                        if self.objs[o.idx.i()].zone == Zone::Battlefield {
+                            self.move_card(o.idx, Zone::Library, Pos::FromTop(depth));
+                        }
+                    }
+                }
+                Flow::Next
+            }
+            Ext::SacrificeSourceThen { skip } => match self.objs_on(f, &On::Source).first() {
+                Some(&c) => {
+                    self.sacrifice(c);
+                    Flow::Next
+                }
+                None => Flow::Jump(*skip),
+            },
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

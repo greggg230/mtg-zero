@@ -262,6 +262,7 @@ impl Game {
             delved: 0,
             delve_floor: 0,
             discarded_land: false,
+            x: 0,
             division: Vec::new(),
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));

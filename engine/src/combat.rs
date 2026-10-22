@@ -146,6 +146,16 @@ impl Game {
                 let blocked = !self.blockers_of(a).is_empty();
                 self.objs[a.i()].blocked = blocked;
             }
+            // CR 509.1i (509.2a-like): "whenever this blocks" triggers.
+            let blocks: Vec<(CardIdx, CardIdx)> = self
+                .battlefield
+                .iter()
+                .filter_map(|&c| self.objs[c.i()].blocking.map(|a| (c, a)))
+                .collect();
+            for (c, a) in blocks {
+                let (r, ar) = (self.obj_ref(c), self.obj_ref(a));
+                self.event(Event { kind: EventKind::Blocks, a: Subj::Obj(r), b: Subj::Obj(ar), amount: 0 });
+            }
             return;
         };
         let rest = &pot[i as usize + 1..];

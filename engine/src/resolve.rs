@@ -44,6 +44,8 @@ pub(crate) struct Frame {
     pub alt: bool,
     /// Divided damage per target of the divided requirement (CR 601.2d).
     pub division: Vec<u8>,
+    /// The spell's X (CR 107.3).
+    pub spell_x: u8,
 }
 
 pub(crate) enum Flow {
@@ -110,6 +112,7 @@ impl Game {
             made: None,
             alt: item.alt > 0,
             division: item.division.clone(),
+            spell_x: item.x,
         };
         let Some(modes) = &ab.modes else {
             self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
@@ -155,6 +158,7 @@ impl Game {
                         self.entering_evoked = alt.is_some_and(|a| a.evoke);
                         self.entering_dash = alt.and_then(|a| a.dash);
                         self.entering_escaped = item.from == crate::game::CastFrom::Escape;
+                        self.entering_x = item.x;
                         self.put_onto_battlefield(card, item.controller);
                     } else {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
@@ -248,6 +252,7 @@ impl Game {
             }
             Amount::LkiManaValue => f.x,
             Amount::Devotion(color) => self.devotion(f.controller, color) as i32,
+            Amount::X => f.spell_x as i32,
             Amount::CountTypes(bits) => {
                 self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
             }

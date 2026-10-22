@@ -94,6 +94,8 @@ fn lower_target_spec(l: &mut Lowerer, s: &cats::TargetSpec) -> Option<(Filter, u
 fn int_amount(l: &mut Lowerer, what: &str, v: &unions::IntOrFormula) -> Amount {
     match v {
         unions::IntOrFormula::Int(n) => Amount::Fixed(l.int(what, *n, 0, 99)),
+        // The spell's X (CR 107.3).
+        unions::IntOrFormula::Formula(f) if matches!(**f, cats::Formula::ResolvingX(_)) => Amount::X,
         unions::IntOrFormula::Formula(f) => {
             l.unsupported(format!("Formula:{}", f.tag()));
             Amount::Fixed(0)
@@ -462,17 +464,18 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             let Some(f) = lower_card_filter(l, card_filter) else { return };
             let depth = match position {
                 enums::LibraryPosition::SecondFromTop => 1,
-                other => {
-                    l.unsupported(format!("PutTargetPermanentIntoOwnersLibrary.position({other:?})"));
-                    return;
-                }
+                enums::LibraryPosition::BeneathTopX => u8::MAX,
             };
             let tgt = b.target(f, 1, 1);
             let life = l.int("PutTargetPermanentIntoOwnersLibrary.controller_gains_life", *controller_gains_life, 0, 99);
             if life > 0 {
                 b.op(Op::Remember { tgt });
             }
-            b.op(Op::PutInLibrary { tgt, depth });
+            if depth == u8::MAX {
+                b.op(Op::Ext(crate::program::Ext::PutInLibraryAtX { tgt }));
+            } else {
+                b.op(Op::PutInLibrary { tgt, depth });
+            }
             if life > 0 {
                 b.op(Op::GainLife { who: Who::LkiController, n: Amount::Fixed(life) });
             }

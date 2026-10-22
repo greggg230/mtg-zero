@@ -313,7 +313,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
         l.deny("CardPrinting.external_cost_reductions", external_cost_reductions);
-        l.deny("CardPrinting.enters_with_counters_from_x", enters_with_counters_from_x);
+        let enters_x_counters = match enters_with_counters_from_x {
+            None => false,
+            Some(enums::XCounterMode::X) => true,
+            Some(other) => {
+                l.unsupported(format!("CardPrinting.enters_with_counters_from_x({other:?})"));
+                false
+            }
+        };
         l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
@@ -478,7 +485,16 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     let subs: Vec<u16> = subtypes.iter().map(|s| l.subtype(s)).collect();
-    let cost = lower_mana_cost(l, "CardPrinting.mana_cost", mana_cost);
+    // {X} in the card's own mana cost (CR 107.3): announced on casting.
+    let x_pips = {
+        let cats::ManaCost::ManaCost(m) = &**mana_cost;
+        l.int("CardPrinting.mana_cost.x_pips", m.x_pips, 0, 3) as u8
+    };
+    let cost = {
+        let cats::ManaCost::ManaCost(m) = &**mana_cost;
+        let plain = cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..m.clone() });
+        lower_mana_cost(l, "CardPrinting.mana_cost", &plain)
+    };
 
     let is_creature = ty & types::CREATURE != 0;
     let (pw, tg) = match (power, toughness) {
@@ -898,6 +914,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         delve: *has_delve,
         kicker: kicker.is_some(),
         discard_land_to_enter: *enters_only_by_discarding_land,
+        x_pips,
+        enters_x_counters,
     }
 }
 
