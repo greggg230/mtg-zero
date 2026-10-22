@@ -3,7 +3,7 @@
 //! cards; new IR classes should lower onto existing ops where the CR
 //! semantics match.
 
-use crate::db::{AbilityDef, Cond, Filter, TargetReq};
+use crate::db::{AbilityDef, Cond, Filter, ManaProd, TargetReq};
 use crate::mana::ManaCost;
 
 /// Which player an op acts on.
@@ -15,12 +15,21 @@ pub enum Who {
     TargetPlayer(u8),
     /// The controller of the object chosen for target requirement `i`.
     ControllerOfTarget(u8),
+    /// The controller of the object last remembered (`Op::Remember`, last
+    /// known information).
+    LkiController,
+    /// The active player / the other player (2p): "each player" effects run
+    /// in APNAP order (CR 101.4).
+    Active,
+    NonActive,
 }
 
 /// A number an op uses.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Amount {
     Fixed(i32),
+    /// The power of the object last remembered (`Op::Remember`).
+    LkiPower,
 }
 
 /// Where a countered spell goes (CR 701.5a; Memory Lapse).
@@ -28,6 +37,8 @@ pub enum Amount {
 pub enum SpellDest {
     Graveyard,
     LibraryTop,
+    Exile,
+    Hand,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -57,6 +68,29 @@ pub enum Op {
     Exile { tgt: u8 },
     /// `who` takes an extra turn after this one (CR 500.7).
     ExtraTurn { who: Who },
+    /// Return each legal target of requirement `tgt` (a permanent or a
+    /// spell) to its owner's hand.
+    ReturnToHand { tgt: u8 },
+    /// Untap each legal target of requirement `tgt`.
+    Untap { tgt: u8 },
+    /// `who` discards `n` cards of their choice, one decision per card
+    /// (CR 701.9a).
+    Discard { who: Who, n: u8 },
+    /// `who` discards their hand.
+    DiscardHand { who: Who },
+    /// `who` loses `n` life (CR 119.3).
+    LoseLife { who: Who, n: Amount },
+    /// Remember the first legal target of requirement `tgt` as it is now
+    /// (power, controller): last known information for later ops after it
+    /// leaves (CR 608.2h).
+    Remember { tgt: u8 },
+    /// Destroy every permanent matching `filter` at once (CR 701.7).
+    DestroyAll { filter: Filter },
+    /// Put each legal target of requirement `tgt` into its owner's library
+    /// with `depth` cards above it (0 = on top).
+    PutInLibrary { tgt: u8, depth: u8 },
+    /// `who` adds one of the productions of `prod` (CR 106.1b: they choose).
+    AddManaChoice { who: Who, prod: ManaProd },
     /// Continue at `to` (the end of a "then" branch).
     Jump { to: u16 },
     /// Unless `cond` holds for the controller now, continue at `to`

@@ -117,6 +117,10 @@ pub enum Filter {
     Controller(bool),
     /// The spell or ability's source itself ("another": `Not(Source)`).
     Source,
+    /// Has any of these colours.
+    Color(ManaMask),
+    /// A player who is an opponent of the controller.
+    Opponent,
     And(Box<Filter>, Box<Filter>),
     Or(Vec<Filter>),
     Not(Box<Filter>),
@@ -329,6 +333,9 @@ pub struct CardDef {
     pub shock_life: u8,
     /// "This spell can't be countered." (CR 101.2)
     pub uncounterable: bool,
+    /// Additional costs to cast it: the caster pays exactly one of these
+    /// (none when empty; their mana parts are unused).
+    pub additional: Vec<Cost>,
 }
 
 impl CardDef {

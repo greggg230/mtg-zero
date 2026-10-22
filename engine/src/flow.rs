@@ -42,7 +42,8 @@ pub(crate) enum Task {
     FinishResolve { id: u32 },
     // activated abilities (CR 602, 605)
     ActPay { id: u32 },
-    ActCosts { id: u32, picked: Vec<CardIdx> },
+    PayCosts { id: u32, picked: Vec<CardIdx> },
+    CastOption { id: u32 },
     ManaNow { src: Src },
     ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
     // entering the battlefield (CR 614.12)
@@ -170,7 +171,8 @@ impl Game {
             Task::Run(f) => self.run_frame(f),
             Task::FinishResolve { id } => self.finish_resolve(id),
             Task::ActPay { id } => self.act_pay(id),
-            Task::ActCosts { id, picked } => self.act_costs(id, picked),
+            Task::PayCosts { id, picked } => self.pay_costs(id, picked),
+            Task::CastOption { id } => self.cast_option(id),
             Task::ManaNow { src } => self.mana_now(src),
             Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
             Task::AsEnters { card } => self.as_enters(card),

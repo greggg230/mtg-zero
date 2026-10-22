@@ -2,7 +2,7 @@
 //! at priority, the activation process (602.2: announce, targets, costs),
 //! free-standing mana abilities, and "as this enters" choices (614.12).
 
-use crate::db::{types, AbilityRef, AbilitySlot, ActEffect, ActivatedDef, Cond, Kw};
+use crate::db::{types, AbilityRef, AbilitySlot, ActEffect, ActivatedDef, Cond, Cost, Kw};
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Pos, StackItem, StackKind};
@@ -80,38 +80,12 @@ impl Game {
         if !self.activation_ready(p, card, ad) {
             return false;
         }
-        let cost = &ad.cost;
-        let pl = &self.players[p as usize];
-        if (cost.life as i32) > pl.life {
-            return false; // CR 119.4
-        }
-        if let Some(s) = &cost.sacrifice {
-            if self.sacrifice_candidates(p, card, s).len() < s.n as usize {
-                return false;
-            }
-        }
-        let in_hand = self.objs[card.i()].zone == Zone::Hand;
-        let others_in_hand = pl.hand.len() - in_hand as usize;
-        if cost.discard as usize > others_in_hand {
-            return false;
-        }
         if mana_ability {
-            // Free-standing (instant-only) mana abilities: no mana cost.
+            // Free-standing (instant-only) mana abilities have no mana cost.
             return !productions(self, p, &ad.mana().unwrap().prod).is_empty();
         }
-        if !cost.mana.is_zero() || cost.mana.has_phyrexian() {
-            let ex = Self::mana_exclude(card, ad);
-            let cls: Vec<Class>;
-            let classes = match ex {
-                Some(x) => {
-                    cls = crate::cast::classes_without(classes, x);
-                    &cls[..]
-                }
-                None => classes,
-            };
-            if !self.can_pay_with(p, &cost.mana, classes, ex, cost.life, cost.discard) {
-                return false;
-            }
+        if !self.cost_payable(p, card, &ad.cost, &ad.cost.mana, classes, Self::mana_exclude(card, ad)) {
+            return false;
         }
         let ActEffect::Stack(ab) = &ad.effect else { unreachable!() };
         let src = self.obj_ref(card);
@@ -148,8 +122,9 @@ impl Game {
             kind: StackKind::Ability { ability, source: self.obj_ref(card) },
             controller: p,
             targets: Vec::new(),
+            cost_option: 0,
         });
-        self.agenda.push(Task::ActCosts { id, picked: Vec::new() });
+        self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });
         if !self.db.ability(ability).targets.is_empty() {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
@@ -165,6 +140,61 @@ impl Game {
         Some((item.controller, source.idx, ad))
     }
 
+    /// The cost of stack item `id` besides its mana: an activated ability's,
+    /// or the additional cost the caster of a spell chose.
+    fn item_cost(&self, id: u32) -> Option<(PlayerId, CardIdx, &'static Cost)> {
+        let pos = self.item_index(id)?;
+        let item = &self.stack[pos];
+        match item.kind {
+            StackKind::Ability { ability, source } => {
+                Some((item.controller, source.idx, &self.db.def(ability.def).activated_def(ability.slot).cost))
+            }
+            StackKind::Spell { card } => {
+                let c = self.db.def(self.objs[card.i()].def).additional.get(item.cost_option as usize)?;
+                Some((item.controller, card, c))
+            }
+        }
+    }
+
+    /// Can `p` pay the non-mana parts of `cost` for the card `card` and,
+    /// together, its `mana` (CR 601.2h; the parts paid after the mana are
+    /// reserved from it)?
+    pub(crate) fn cost_payable(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        cost: &Cost,
+        mana: &crate::mana::ManaCost,
+        classes: &[Class],
+        exclude: Option<CardIdx>,
+    ) -> bool {
+        let pl = &self.players[p as usize];
+        if (cost.life as i32) > pl.life {
+            return false; // CR 119.4
+        }
+        if let Some(s) = &cost.sacrifice {
+            if self.sacrifice_candidates(p, card, s).len() < s.n as usize {
+                return false;
+            }
+        }
+        let in_hand = self.objs[card.i()].zone == Zone::Hand;
+        if cost.discard as usize > pl.hand.len() - in_hand as usize {
+            return false;
+        }
+        if mana.is_zero() {
+            return true;
+        }
+        let cls: Vec<Class>;
+        let classes = match exclude {
+            Some(x) => {
+                cls = crate::cast::classes_without(classes, x);
+                &cls[..]
+            }
+            None => classes,
+        };
+        self.can_pay_with(p, mana, classes, exclude, cost.life, cost.discard)
+    }
+
     /// 601.2g-h for an activation: the mana part first.
     pub(crate) fn act_pay(&mut self, id: u32) {
         let Some((p, card, ad)) = self.act_item(id) else { return };
@@ -178,11 +208,11 @@ impl Game {
         self.agenda.push(Task::PayMana(pm));
     }
 
-    /// The rest of the cost (601.2h): sacrifice and discard choices, one
-    /// decision per object; then {T}, life, and the source's own costs.
-    pub(crate) fn act_costs(&mut self, id: u32, mut picked: Vec<CardIdx>) {
-        let Some((p, card, ad)) = self.act_item(id) else { return };
-        let cost = &ad.cost;
+    /// The rest of a cost after its mana (601.2h): sacrifice and discard
+    /// choices, one decision per object; then {T}, life, and the source's
+    /// own costs.
+    pub(crate) fn pay_costs(&mut self, id: u32, mut picked: Vec<CardIdx>) {
+        let Some((p, card, cost)) = self.item_cost(id) else { return };
         let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
         if let Some(ch) = self.answer.take() {
             let Choice::Card(c) = ch else { unreachable!("cost answer {ch:?}") };
@@ -203,12 +233,12 @@ impl Game {
                 .filter(|c| !picked.contains(c))
                 .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
-            self.ask(Task::ActCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
+            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
             return;
         }
         if picked.len() < n_sac + cost.discard as usize {
             let opts = self.hand_options_except(p, Some(card));
-            self.ask(Task::ActCosts { id, picked }, p, DecisionKind::DiscardCost, opts);
+            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::DiscardCost, opts);
             return;
         }
         // Everything chosen: pay. Sacrificed permanents leave together.

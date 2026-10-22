@@ -88,6 +88,7 @@ impl Game {
             kind: StackKind::Ability { ability, source: t.source },
             controller: t.controller,
             targets: Vec::new(),
+            cost_option: 0,
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if !ab.targets.is_empty() {

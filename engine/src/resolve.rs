@@ -23,6 +23,9 @@ pub(crate) struct Frame {
     pub legal: u64,
     /// Per-op loop counter (reset when `pc` moves).
     pub i: u8,
+    /// Last known information remembered by `Op::Remember`: (power,
+    /// controller).
+    pub lki: Option<(i32, PlayerId)>,
 }
 
 enum Flow {
@@ -70,6 +73,7 @@ impl Game {
             targets: item.targets.clone(),
             legal,
             i: 0,
+            lki: None,
         }));
     }
 
@@ -140,12 +144,16 @@ impl Game {
                 Target::Obj(o) => Some(self.objs[o.idx.i()].controller),
                 Target::Player(_) => None,
             }),
+            Who::LkiController => f.lki.map(|l| l.1),
+            Who::Active => Some(self.turn.active),
+            Who::NonActive => Some(crate::ids::opp(self.turn.active)),
         }
     }
 
-    fn amount(&self, _f: &Frame, a: Amount) -> i32 {
+    fn amount(&self, f: &Frame, a: Amount) -> i32 {
         match a {
             Amount::Fixed(n) => n,
+            Amount::LkiPower => f.lki.map_or(0, |l| l.0),
         }
     }
 
@@ -202,6 +210,8 @@ impl Game {
                             match dest {
                                 SpellDest::Graveyard => self.move_card(o.idx, Zone::Graveyard, Pos::Top),
                                 SpellDest::LibraryTop => self.move_card(o.idx, Zone::Library, Pos::Top),
+                                SpellDest::Exile => self.move_card(o.idx, Zone::Exile, Pos::Top),
+                                SpellDest::Hand => self.move_card(o.idx, Zone::Hand, Pos::Top),
                             };
                         }
                     }
@@ -284,6 +294,97 @@ impl Game {
                     self.extra_turns.push(p);
                 }
                 Flow::Next
+            }
+            Op::ReturnToHand { tgt } => {
+                for t in self.targets_of(f, tgt) {
+                    if let Target::Obj(o) = t {
+                        if matches!(self.objs[o.idx.i()].zone, Zone::Battlefield | Zone::Stack) {
+                            self.move_card(o.idx, Zone::Hand, Pos::Top);
+                        }
+                    }
+                }
+                Flow::Next
+            }
+            Op::Untap { tgt } => {
+                for t in self.targets_of(f, tgt) {
+                    if let Target::Obj(o) = t {
+                        self.objs[o.idx.i()].tapped = false;
+                    }
+                }
+                Flow::Next
+            }
+            Op::Discard { who, n } => {
+                let Some(p) = self.who(f, who) else { return Flow::Next };
+                if let Some(ch) = self.answer.take() {
+                    let Choice::Card(c) = ch else { unreachable!("discard answer {ch:?}") };
+                    self.move_card(c, Zone::Graveyard, Pos::Top);
+                    f.i += 1;
+                }
+                if f.i >= n || self.players[p as usize].hand.is_empty() {
+                    return Flow::Next;
+                }
+                let opts = self.hand_options(p);
+                self.ask(Task::Run(f.clone()), p, DecisionKind::Discard, opts);
+                Flow::Suspend
+            }
+            Op::DiscardHand { who } => {
+                if let Some(p) = self.who(f, who) {
+                    for c in self.hand_sorted(p) {
+                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                    }
+                }
+                Flow::Next
+            }
+            Op::LoseLife { who, n } => {
+                if let Some(p) = self.who(f, who) {
+                    let n = self.amount(f, n);
+                    self.lose_life(p, n);
+                }
+                Flow::Next
+            }
+            Op::Remember { tgt } => {
+                f.lki = self.targets_of(f, tgt).into_iter().find_map(|t| match t {
+                    Target::Obj(o) => Some((self.power(o.idx), self.objs[o.idx.i()].controller)),
+                    Target::Player(_) => None,
+                });
+                Flow::Next
+            }
+            Op::DestroyAll { ref filter } => {
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let all: Vec<crate::ids::CardIdx> =
+                    self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
+                for c in all {
+                    self.destroy(c);
+                }
+                Flow::Next
+            }
+            Op::PutInLibrary { tgt, depth } => {
+                for t in self.targets_of(f, tgt) {
+                    if let Target::Obj(o) = t {
+                        if self.objs[o.idx.i()].zone == Zone::Battlefield {
+                            self.move_card(o.idx, Zone::Library, Pos::FromTop(depth));
+                        }
+                    }
+                }
+                Flow::Next
+            }
+            Op::AddManaChoice { who, ref prod } => {
+                let Some(p) = self.who(f, who) else { return Flow::Next };
+                let prods = crate::pay::productions(self, p, prod);
+                match self.answer.take() {
+                    Some(Choice::Number(k)) => {
+                        self.add_mana(p, &prods[k as usize]);
+                        Flow::Next
+                    }
+                    Some(other) => unreachable!("mana answer {other:?}"),
+                    None => {
+                        let opts = (0..prods.len())
+                            .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
+                            .collect();
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseMana, opts);
+                        Flow::Suspend
+                    }
+                }
             }
             Op::Jump { to } => Flow::Jump(to),
             Op::JumpUnless { ref cond, to } => {

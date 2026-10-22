@@ -84,6 +84,8 @@ pub enum DecisionKind {
     Sacrifice,
     /// A card to discard as a cost.
     DiscardCost,
+    /// Which additional cost to pay (`NUMBER` = option index, CR 601.2b).
+    ChooseCost,
 }
 
 /// What an action means to the task that asked.

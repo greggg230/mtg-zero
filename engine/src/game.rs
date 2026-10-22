@@ -109,6 +109,9 @@ pub struct StackItem {
     pub controller: PlayerId,
     /// (target requirement index, target), in the order chosen.
     pub targets: Vec<(u8, Target)>,
+    /// The additional cost the caster chose (index into the card's
+    /// options, CR 601.2b); 0 when there is at most one.
+    pub cost_option: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -170,6 +173,8 @@ pub struct Outcome {
 pub enum Pos {
     Top,
     Bottom,
+    /// With n cards above it (0 = top).
+    FromTop(u8),
 }
 
 /// The whole game (ENGINE.md 2). `Clone` captures a game suspended anywhere.
@@ -553,6 +558,10 @@ impl Game {
             match pos {
                 Pos::Top => list.push(idx),
                 Pos::Bottom => list.insert(0, idx),
+                Pos::FromTop(n) => {
+                    let at = list.len().saturating_sub(n as usize);
+                    list.insert(at, idx);
+                }
             }
         }
         // A card leaving a hidden zone for a public one is revealed to all

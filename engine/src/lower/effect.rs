@@ -1,9 +1,9 @@
 //! Effects -> programs. One arm per supported IR class; each arm names every
 //! field of its node and lowers onto the shared ops (ENGINE.md 3, 7).
 
-use super::filter::{lower_condition_or_state, lower_pred, lower_pred_or_oneof};
+use super::filter::{lower_card_filter, lower_condition_or_state, lower_pred, lower_pred_or_oneof};
 use super::Lowerer;
-use crate::db::{types, AbilityDef, Filter};
+use crate::db::{types, AbilityDef, Filter, ManaProd};
 use crate::mana::{letter_index, ManaCost};
 use crate::program::{Amount, Builder, Op, SpellDest, Who};
 use card_ir::{cats, enums, generated, nodes, unions, Count};
@@ -103,10 +103,8 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             let dest = match destination {
                 enums::SpellDestination::Graveyard => SpellDest::Graveyard,
                 enums::SpellDestination::LibraryTop => SpellDest::LibraryTop,
-                other => {
-                    l.unsupported(format!("CounterSpell.destination({other:?})"));
-                    SpellDest::Graveyard
-                }
+                enums::SpellDestination::Exile => SpellDest::Exile,
+                enums::SpellDestination::Hand => SpellDest::Hand,
             };
             let tgt = spell_target(b, inner);
             if unless_pays.is_empty() {
@@ -145,13 +143,25 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             l.deny("AddManaToPool.grants_haste_to_creature_spell", grants_haste_to_creature_spell);
             l.deny("AddManaToPool.makes_spell_uncounterable", makes_spell_uncounterable);
             let mut mana = [0u8; 6];
+            let mut any = 0u8;
             for (sym, n) in produces {
+                let n = l.int("AddManaToPool.produces", *n, 0, 20) as u8;
                 match letter_index(sym) {
-                    Some(i) => mana[i] += l.int("AddManaToPool.produces", *n, 0, 20) as u8,
+                    Some(i) => mana[i] += n,
+                    None if sym == "any" => any += n,
                     None => l.unsupported(format!("AddManaToPool.produces({sym})")),
                 }
             }
-            b.op(Op::AddMana { who: Who::You, mana });
+            if any > 0 {
+                if mana.iter().any(|&n| n > 0) {
+                    l.unsupported("AddManaToPool.produces(any mixed with fixed)");
+                }
+                // "N mana in any combination of colors" (Manamorphose).
+                let prod = ManaProd::Combo { mask: crate::mana::COLORS, n: any };
+                b.op(Op::AddManaChoice { who: Who::You, prod });
+            } else {
+                b.op(Op::AddMana { who: Who::You, mana });
+            }
         }
         E::TargetPlayerDiscardsAtRandom(nodes::TargetPlayerDiscardsAtRandom { amount }) => {
             let n = int_amount(l, "TargetPlayerDiscardsAtRandom.amount", amount);
@@ -172,7 +182,17 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             count_from_x,
             targets,
         }) => {
-            l.deny("RemoveTargetPermanents.rider", rider);
+            // Riders read the removed object's last known information.
+            let lki_rider = match rider.as_deref() {
+                None => None,
+                Some(cats::RemovalRider::ControllerGainsLifeEqualToPower(nodes::ControllerGainsLifeEqualToPower {})) => {
+                    Some(Op::GainLife { who: Who::LkiController, n: Amount::LkiPower })
+                }
+                Some(other) => {
+                    l.unsupported(format!("RemovalRider:{}", other.tag()));
+                    None
+                }
+            };
             l.deny("RemoveTargetPermanents.count_from_x", count_from_x);
             l.deny_ne(
                 "RemoveTargetPermanents.count_min",
@@ -208,6 +228,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 }
                 None => None,
             };
+            if lki_rider.is_some() {
+                b.op(Op::Remember { tgt });
+            }
             match action {
                 enums::RemovalAction::Destroy => {
                     b.op(Op::Destroy { tgt });
@@ -215,10 +238,150 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 enums::RemovalAction::Exile => {
                     b.op(Op::Exile { tgt });
                 }
-                other => l.unsupported(format!("RemoveTargetPermanents.action({other:?})")),
+                enums::RemovalAction::Bounce => {
+                    b.op(Op::ReturnToHand { tgt });
+                }
+            }
+            if let Some(op) = lki_rider {
+                b.op(op);
             }
             if let Some(at) = guard {
                 b.patch(at);
+            }
+        }
+        E::Destroy(nodes::Destroy { targets }) => {
+            if let Some(tgt) = lower_targets(l, b, targets, "Destroy") {
+                b.op(Op::Destroy { tgt });
+            }
+        }
+        E::DestroyTargetLand(nodes::DestroyTargetLand { targets, nonbasic_only }) => {
+            // The IR repeats the filter in `targets`; check it agrees.
+            let Some(tgt) = lower_targets(l, b, targets, "DestroyTargetLand") else { return };
+            let land = Filter::Type(types::LAND);
+            let want = if *nonbasic_only {
+                Filter::And(
+                    Box::new(land),
+                    Box::new(Filter::Not(Box::new(Filter::Supertype(crate::db::supertypes::BASIC)))),
+                )
+            } else {
+                land
+            };
+            if b.targets[tgt as usize].filter != want {
+                l.unsupported("DestroyTargetLand.targets(differ from nonbasic_only)");
+            }
+            b.op(Op::Destroy { tgt });
+        }
+        E::RemoveAllMatching(nodes::RemoveAllMatching {
+            permanent_filter,
+            action,
+            can_be_regenerated,
+            max_mana_value_from_x,
+            rider,
+            label,
+        }) => {
+            let _ = label; // display text
+            l.deny("RemoveAllMatching.max_mana_value_from_x", max_mana_value_from_x);
+            l.deny("RemoveAllMatching.rider", rider);
+            // Regeneration does not exist yet: "can't be regenerated" is
+            // the only form that changes nothing (CR 701.15).
+            l.deny_ne(
+                "RemoveAllMatching.can_be_regenerated",
+                can_be_regenerated,
+                &false,
+            );
+            let Some(filter) = lower_pred(l, permanent_filter) else { return };
+            match action {
+                enums::RemovalAction::Destroy => {
+                    b.op(Op::DestroyAll { filter });
+                }
+                other => l.unsupported(format!("RemoveAllMatching.action({other:?})")),
+            }
+        }
+        E::GainLife(nodes::GainLife { amount }) => {
+            let n = Amount::Fixed(l.int("GainLife.amount", *amount, 0, 99));
+            b.op(Op::GainLife { who: Who::You, n });
+        }
+        E::LoseLife(nodes::LoseLife { amount }) => {
+            let n = Amount::Fixed(l.int("LoseLife.amount", *amount, 0, 99));
+            b.op(Op::LoseLife { who: Who::You, n });
+        }
+        E::Bounce(nodes::Bounce { targets }) => {
+            if let Some(tgt) = lower_targets(l, b, targets, "Bounce") {
+                b.op(Op::ReturnToHand { tgt });
+            }
+        }
+        E::ReturnTargetCreatureToOwnersHand(nodes::ReturnTargetCreatureToOwnersHand {
+            targets,
+            allow_nonland_permanent,
+            create_drone_if_was_attacking,
+            optional,
+        }) => {
+            l.deny("ReturnTargetCreatureToOwnersHand.allow_nonland_permanent", allow_nonland_permanent);
+            l.deny("ReturnTargetCreatureToOwnersHand.create_drone_if_was_attacking", create_drone_if_was_attacking);
+            l.deny("ReturnTargetCreatureToOwnersHand.optional", optional);
+            if let Some(tgt) = lower_targets(l, b, targets, "ReturnTargetCreatureToOwnersHand") {
+                b.op(Op::ReturnToHand { tgt });
+            }
+        }
+        E::ReturnTargetSpellToOwnersHand(nodes::ReturnTargetSpellToOwnersHand {}) => {
+            let tgt = spell_target(b, Filter::Any);
+            b.op(Op::ReturnToHand { tgt });
+        }
+        E::Untap(nodes::Untap { targets }) => {
+            if let Some(tgt) = lower_targets(l, b, targets, "Untap") {
+                b.op(Op::Untap { tgt });
+            }
+        }
+        E::DealDamage(nodes::DealDamage { amount, targets }) => {
+            let amount = Amount::Fixed(l.int("DealDamage.amount", *amount, 0, 99));
+            if let Some(to) = lower_targets(l, b, targets, "DealDamage") {
+                b.op(Op::DealDamage { amount, to });
+            }
+        }
+        E::DiscardSelf(nodes::DiscardSelf { amount }) => {
+            let n = l.int("DiscardSelf.amount", *amount, 0, 20) as u8;
+            b.op(Op::Discard { who: Who::You, n });
+        }
+        E::EachPlayerDiscardsHand(nodes::EachPlayerDiscardsHand {}) => {
+            b.op(Op::DiscardHand { who: Who::Active });
+            b.op(Op::DiscardHand { who: Who::NonActive });
+        }
+        E::EachPlayerDraws(nodes::EachPlayerDraws { amount }) => {
+            let n = Amount::Fixed(l.int("EachPlayerDraws.amount", *amount, 0, 99));
+            b.op(Op::Draw { who: Who::Active, n });
+            b.op(Op::Draw { who: Who::NonActive, n });
+        }
+        E::YouAndTargetOpponentEachDraw(nodes::YouAndTargetOpponentEachDraw { amount }) => {
+            let n = Amount::Fixed(l.int("YouAndTargetOpponentEachDraw.amount", *amount, 0, 99));
+            let t = b.target(Filter::And(Box::new(Filter::Player), Box::new(Filter::Opponent)), 1, 1);
+            b.op(Op::Draw { who: Who::You, n });
+            b.op(Op::Draw { who: Who::TargetPlayer(t), n });
+        }
+        E::TargetPlayerTakesExtraTurn(nodes::TargetPlayerTakesExtraTurn {}) => {
+            let t = b.target(Filter::Player, 1, 1);
+            b.op(Op::ExtraTurn { who: Who::TargetPlayer(t) });
+        }
+        E::PutTargetPermanentIntoOwnersLibrary(nodes::PutTargetPermanentIntoOwnersLibrary {
+            card_filter,
+            position,
+            controller_gains_life,
+        }) => {
+            let Some(f) = lower_card_filter(l, card_filter) else { return };
+            let depth = match position {
+                enums::LibraryPosition::SecondFromTop => 1,
+                other => {
+                    l.unsupported(format!("PutTargetPermanentIntoOwnersLibrary.position({other:?})"));
+                    return;
+                }
+            };
+            let tgt = b.target(f, 1, 1);
+            let life = l.int("PutTargetPermanentIntoOwnersLibrary.controller_gains_life", *controller_gains_life, 0, 99);
+            if life > 0 {
+                b.op(Op::Remember { tgt });
+            }
+            b.op(Op::PutInLibrary { tgt, depth });
+            if life > 0 {
+                b.op(Op::GainLife { who: Who::LkiController, n: Amount::Fixed(life) });
             }
         }
         E::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect }) => {

@@ -5,11 +5,11 @@
 
 use super::activated::{lower_activated, prod_mask, From};
 use super::effect::lower_ability;
-use super::filter::lower_condition;
+use super::filter::{lower_card_filter, lower_condition};
 use super::Lowerer;
 use crate::db::{
     supertypes, types, ActEffect, ActivatedDef, CardDef, Cost, EntersTapped, EventKind, Kw, KwSet, ManaAbility,
-    ManaProd, TrigFilter, TriggerDef,
+    ManaProd, SacCost, TrigFilter, TriggerDef,
 };
 use crate::mana::{letter_index, pair_index, ManaCost, ManaMask};
 use card_ir::{cats, enums, generated, nodes};
@@ -358,7 +358,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.has_delve", has_delve);
         l.deny("CardPrinting.buyback_cost", buyback_cost);
         l.deny("CardPrinting.buyback_cost_str", buyback_cost_str);
-        l.deny("CardPrinting.additional_cost_sacrifice_filter", additional_cost_sacrifice_filter);
         l.deny("CardPrinting.additional_cost_pay_x_life", additional_cost_pay_x_life);
         l.deny("CardPrinting.free_cast_condition", free_cast_condition);
         l.deny("CardPrinting.has_storm", has_storm);
@@ -453,7 +452,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.rebound", rebound);
         l.deny("CardPrinting.room_halves", room_halves);
         l.deny("CardPrinting.alternative_costs", alternative_costs);
-        l.deny("CardPrinting.additional_cost_options", additional_cost_options);
         l.deny("CardPrinting.replicate_cost", replicate_cost);
         l.deny("CardPrinting.teamwork_power", teamwork_power);
         l.deny("CardPrinting.roto_statics", roto_statics);
@@ -596,6 +594,25 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     };
     let shock_life = l.int("CardPrinting.shock_land_life_cost", *shock_land_life_cost, 0, 20) as u8;
+
+    // Additional costs (CR 601.2b, 118.8): pay one of the options.
+    let mut additional: Vec<Cost> = Vec::new();
+    for o in additional_cost_options {
+        if let Some(c) = lower_additional_option(l, o) {
+            additional.push(c);
+        }
+    }
+    if let Some(f) = additional_cost_sacrifice_filter {
+        if !additional.is_empty() {
+            l.unsupported("CardPrinting.additional_cost_sacrifice_filter(with options)");
+        }
+        if let Some(filter) = lower_card_filter(l, f) {
+            additional.push(Cost { sacrifice: Some(SacCost { filter, n: 1, another: false }), ..Cost::default() });
+        }
+    }
+    if !additional.is_empty() && !is_spell_card_any(ty) {
+        l.unsupported("CardPrinting.additional_cost(on a permanent card)");
+    }
     if shock_life > 0 && entry != EntersTapped::No {
         l.unsupported("CardPrinting.shock_land_life_cost(with enters_tapped)");
     }
@@ -638,7 +655,42 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         enters_tapped: entry,
         shock_life,
         uncounterable: *spell_is_uncounterable,
+        additional,
     }
+}
+
+/// Spells with additional costs here are instants and sorceries (the cast
+/// path pays them; permanent spells would need the same, untested).
+fn is_spell_card_any(ty: u16) -> bool {
+    ty & (types::INSTANT | types::SORCERY) != 0
+}
+
+fn lower_additional_option(l: &mut Lowerer, o: &cats::AdditionalCostOption) -> Option<Cost> {
+    let cats::AdditionalCostOption::AdditionalCostOption(nodes::AdditionalCostOption {
+        kind,
+        amount,
+        permanent_filter,
+        label,
+    }) = o;
+    let _ = label; // display text
+    let n = l.int("AdditionalCostOption.amount", *amount, 1, 20) as u8;
+    let mut c = Cost::default();
+    match kind {
+        enums::AdditionalCostKind::Discard => c.discard = n,
+        enums::AdditionalCostKind::PayLife => c.life = n,
+        enums::AdditionalCostKind::Sacrifice => {
+            let Some(p) = permanent_filter else {
+                l.unsupported("AdditionalCostOption.permanent_filter(missing)");
+                return None;
+            };
+            let filter = super::filter::lower_pred(l, p)?;
+            c.sacrifice = Some(SacCost { filter, n, another: false });
+        }
+    }
+    if *kind != enums::AdditionalCostKind::Sacrifice && permanent_filter.is_some() {
+        l.unsupported("AdditionalCostOption.permanent_filter(not a sacrifice)");
+    }
+    Some(c)
 }
 
 /// `ManaCost` without X (hybrid pairs and Phyrexian pips included).

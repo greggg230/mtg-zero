@@ -44,7 +44,11 @@ impl Game {
             } else {
                 &classes[..]
             };
-            if !self.can_pay_with(p, &def.cost, cls, Some(c), 0, 0) {
+            if def.additional.is_empty() {
+                if !self.can_pay_with(p, &def.cost, cls, Some(c), 0, 0) {
+                    continue;
+                }
+            } else if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &def.cost, cls, Some(c))) {
                 continue;
             }
             if let Some(ab) = &def.spell {
@@ -72,11 +76,42 @@ impl Game {
         self.note(|g| format!("P{p} casts {}", g.name(card)));
         self.move_card_to_stack(card, p);
         let id = self.new_stack_id();
-        self.stack.push(StackItem { id, kind: StackKind::Spell { card }, controller: p, targets: Vec::new() });
+        self.stack.push(StackItem {
+            id,
+            kind: StackKind::Spell { card },
+            controller: p,
+            targets: Vec::new(),
+            cost_option: 0,
+        });
         self.agenda.push(Task::CastDone { id });
         self.agenda.push(Task::CastPay { id });
         if self.def_of(card).spell.as_ref().is_some_and(|ab| !ab.targets.is_empty()) {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
+        }
+        if self.def_of(card).additional.len() > 1 {
+            self.agenda.push(Task::CastOption { id });
+        }
+    }
+
+    /// 601.2b: choose which additional cost to pay (among those that can
+    /// be paid along with the rest of the cost).
+    pub(crate) fn cast_option(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
+        let StackKind::Spell { card } = item.kind else { return };
+        let p = item.controller;
+        match self.answer.take() {
+            Some(Choice::Number(k)) => self.stack[pos].cost_option = k,
+            Some(other) => unreachable!("cost option answer {other:?}"),
+            None => {
+                let def = self.def_of(card);
+                let classes = self.mana_classes(p, None);
+                let opts: Vec<Opt> = (0..def.additional.len())
+                    .filter(|&k| self.cost_payable(p, card, &def.additional[k], &def.cost, &classes, None))
+                    .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
+                    .collect();
+                self.ask(Task::CastOption { id }, p, DecisionKind::ChooseCost, opts);
+            }
         }
     }
 
@@ -160,9 +195,14 @@ impl Game {
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         let StackKind::Spell { card } = item.kind else { return };
-        let cost = self.def_of(card).cost;
-        let payer = item.controller;
-        self.agenda.push(Task::PayMana(PayMana::new(payer, cost)));
+        let def = self.def_of(card);
+        let mut pm = PayMana::new(item.controller, def.cost);
+        if let Some(extra) = def.additional.get(item.cost_option as usize) {
+            pm.life_keep = extra.life;
+            pm.hand_keep = extra.discard;
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+        }
+        self.agenda.push(Task::PayMana(pm));
     }
 
     /// 601.2i: the spell becomes cast (cast triggers come here later).
@@ -229,8 +269,9 @@ impl Game {
     /// `Spell(f)` (possibly inside `And` / `Or`).
     pub(crate) fn filter_ok(&self, f: &Filter, t: Target, ctx: &Ctx) -> bool {
         match t {
-            Target::Player(_) => match f {
+            Target::Player(p) => match f {
                 Filter::Any | Filter::Player => true,
+                Filter::Opponent => p != ctx.controller,
                 Filter::And(a, b) => self.filter_ok(a, t, ctx) && self.filter_ok(b, t, ctx),
                 Filter::Or(v) => v.iter().any(|x| self.filter_ok(x, t, ctx)),
                 Filter::Not(x) => !self.filter_ok(x, t, ctx),
@@ -251,7 +292,7 @@ impl Game {
 
     fn perm_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
         match f {
-            Filter::Player | Filter::Spell(_) => false,
+            Filter::Player | Filter::Spell(_) | Filter::Opponent => false,
             Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
             Filter::Not(x) => !self.perm_ok(x, c, ctx),
@@ -274,8 +315,9 @@ impl Game {
         let def = self.def_of(c);
         match f {
             Filter::Any => true,
-            Filter::Player | Filter::Spell(_) => false,
+            Filter::Player | Filter::Spell(_) | Filter::Opponent => false,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
+            Filter::Color(m) => def.colors & m != 0,
             Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) + self.toughness(c) <= *n,
             Filter::Subtype(s) => def.subtypes.contains(s),
             Filter::Supertype(bits) => def.supertypes & bits != 0,

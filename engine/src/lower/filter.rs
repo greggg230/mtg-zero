@@ -118,3 +118,55 @@ pub(crate) fn lower_condition_or_state(l: &mut Lowerer, c: &cats::ConditionOrSta
         }
     })
 }
+
+/// A `CardFilter` (characteristics of a card) -> [`Filter`].
+pub(crate) fn lower_card_filter(l: &mut Lowerer, f: &cats::CardFilter) -> Option<Filter> {
+    let cats::CardFilter::CardFilter(nodes::CardFilter {
+        any_types,
+        excluded_types,
+        max_mv,
+        color,
+        supertype,
+        subtype,
+        mana_costs,
+    }) = f;
+    l.deny("CardFilter.mana_costs", mana_costs);
+    let mut parts: Vec<Filter> = Vec::new();
+    let bits = |l: &mut Lowerer, names: &[String]| {
+        let mut b = 0u16;
+        for t in names {
+            match types::from_name(t) {
+                Some(x) => b |= x,
+                None => l.unsupported(format!("CardFilter.types({t})")),
+            }
+        }
+        b
+    };
+    if !any_types.is_empty() {
+        parts.push(Filter::Type(bits(l, any_types)));
+    }
+    if !excluded_types.is_empty() {
+        parts.push(Filter::Not(Box::new(Filter::Type(bits(l, excluded_types)))));
+    }
+    if let Some(n) = max_mv {
+        parts.push(Filter::ManaValueAtMost(l.int("CardFilter.max_mv", *n, 0, 30) as u8));
+    }
+    if let Some(c) = color {
+        match crate::mana::letter_index(c) {
+            Some(i) if i < 5 => parts.push(Filter::Color(1 << i)),
+            _ => l.unsupported(format!("CardFilter.color({c})")),
+        }
+    }
+    if let Some(s) = supertype {
+        match supertypes::from_name(s) {
+            Some(b) => parts.push(Filter::Supertype(b)),
+            None => l.unsupported(format!("CardFilter.supertype({s})")),
+        }
+    }
+    if let Some(s) = subtype {
+        parts.push(Filter::Subtype(l.subtype(s)));
+    }
+    let mut it = parts.into_iter();
+    let first = it.next().unwrap_or(Filter::Any);
+    Some(it.fold(first, |a, x| Filter::And(Box::new(a), Box::new(x))))
+}
