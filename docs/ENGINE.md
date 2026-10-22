@@ -1322,7 +1322,8 @@ Wall clock (2026-10-22): mtg2 11:32-15:07 (3 h 35 min, 5 iterations; stopped wit
 and left stopped); mtg2c 08:34-11:38 (3 h 4 min, 10 iterations; stopped after iteration 10 to
 give mtg2 the CPU, left stopped). The control ran next to the token network's false starts
 (22.1: runs/mtg2a, mtg2b, mtg2n, 08:34-11:31, their data deleted); mtg2 had no other MTG run
-beside it after 11:38. Both shared the machine with the two Kingdom Builder runs.
+beside it after 11:38. Both shared the machine with the two Kingdom Builder runs. Afterwards
+only the last two iterations' shards were kept (mtg2 2.6 GB, mtg2c 2.8 GB on C:).
 
 **mtg2** (token network):
 
