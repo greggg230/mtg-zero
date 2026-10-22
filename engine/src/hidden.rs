@@ -61,8 +61,14 @@ impl Game {
     /// themselves; the state's RNG is reseeded; later private keys are
     /// masked for `viewer`; the pending decision is recomputed.
     pub fn determinize(&mut self, viewer: PlayerId, rng: &mut Rng) {
+        let payer = self.payment_in_progress();
         for owner in 0..2u8 {
-            let slots = self.unknown_to(viewer, owner);
+            let mut slots = self.unknown_to(viewer, owner);
+            if payer == Some(owner) && owner != viewer {
+                // A payment in progress may count on the payer's mana
+                // sources in hand: they are pinned (ENGINE.md 10).
+                slots.retain(|&c| !self.hand_mana_source(c));
+            }
             let mut defs: Vec<DefId> = slots.iter().map(|c| self.objs[c.i()].def).collect();
             rng.shuffle(&mut defs);
             for (c, d) in slots.iter().zip(defs) {
@@ -83,6 +89,21 @@ impl Game {
             c.refresh_pending();
             assert_eq!(c.pending, self.pending, "determinize changed the viewer's decision");
         }
+    }
+
+    /// The player paying a cost (or casting or activating something whose
+    /// cost is still to be paid), if any: from the cast or activation until
+    /// its mana is paid, and through a "pay {X}?" payment during
+    /// resolution.
+    pub(crate) fn payment_in_progress(&self) -> Option<PlayerId> {
+        use crate::flow::Task;
+        self.agenda.iter().rev().find_map(|t| match t {
+            Task::PayMana(pm) => Some(pm.payer),
+            Task::CastPay { id } | Task::ActPay { id } => {
+                self.item_index(*id).map(|i| self.stack[i].controller)
+            }
+            _ => None,
+        })
     }
 
     /// Re-run the asker of the pending decision so its options reflect the

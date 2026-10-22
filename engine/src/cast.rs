@@ -38,13 +38,22 @@ impl Game {
                 continue;
             }
             let cls = &classes[..];
-            if def.additional.is_empty() {
+            if !def.additional.is_empty() {
+                // (Excluding the card itself: on the stack while it is paid.)
+                if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &def.cost, cls, Some(c))) {
+                    continue;
+                }
+            } else if self.hand_mana_source(c) {
+                // A card cast from hand is on the stack while its cost is
+                // paid: its own mana ability (a Spirit Guide's) cannot help.
+                if !self.can_pay_with(p, &def.cost, &classes_without(cls, c), &Default::default()) {
+                    continue;
+                }
+            } else {
                 let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
                 if !self.can_pay_plain(p, &def.cost, cls, plain) {
                     continue;
                 }
-            } else if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &def.cost, cls, Some(c))) {
-                continue;
             }
             if let Some(ab) = &def.spell {
                 if !self.targets_available(ab, p, None) {

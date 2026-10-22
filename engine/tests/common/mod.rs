@@ -109,6 +109,14 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
                 "filter": {"$t": "OneOf", "filters": [{"$t": "IsCreature"}, {"$t": "IsPlayer"}]}}]}),
             none.clone(),
         ),
+        // As an additional cost, discard a card. Draw a card.
+        spell(
+            "Test Rummage",
+            "Instant",
+            cost("{R}"),
+            json!({"$t": "DrawCards", "amount": 1}),
+            json!({"additional_cost_options": [{"$t": "AdditionalCostOption", "kind": "discard", "amount": 1}]}),
+        ),
         // As an additional cost, sacrifice an artifact (Tinker's cost).
         spell(
             "Test Artifact Offering",

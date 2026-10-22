@@ -253,6 +253,10 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         l.unsupported("ActivationCost.sacrifice(more than one kind)");
     }
     cost.sacrifice = sacs.into_iter().next();
+    // A payment reserves candidates for one later choice (ENGINE.md 18).
+    if cost.sacrifice.is_some() && cost.discard > 0 {
+        l.unsupported("ActivationCost.sacrifice(with a discard)");
+    }
 
     // "Activate only if ..." gates stored on the cost.
     if *requires_own_creature_power_at_least > 0 {

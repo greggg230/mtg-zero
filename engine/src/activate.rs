@@ -30,9 +30,8 @@ impl Game {
 
     /// The activated abilities `p` may activate with priority now (CR
     /// 602.2, 117.1b): permanents' abilities, then hand abilities. Mana
-    /// abilities of permanents are activated while paying costs instead
-    /// (ENGINE.md 18), except those that may be activated only as an
-    /// instant; mana abilities of cards in hand only with priority.
+    /// abilities are activated while paying costs instead (ENGINE.md 18),
+    /// except those that may be activated only as an instant.
     pub(crate) fn activation_options(
         &self,
         p: PlayerId,
@@ -47,7 +46,7 @@ impl Game {
                     continue; // paid with while paying a cost (ENGINE.md 18)
                 }
                 let slot = AbilitySlot::Activated(i as u8);
-                if self.can_activate(p, c, slot, ad, classes, sorcery_ok) {
+                if self.can_activate(p, c, ad, classes, sorcery_ok) {
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
@@ -55,7 +54,7 @@ impl Game {
         for &(a, c) in slots {
             for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
                 let slot = AbilitySlot::Hand(i as u8);
-                if self.can_activate(p, c, slot, ad, classes, sorcery_ok) {
+                if self.can_activate(p, c, ad, classes, sorcery_ok) {
                     // One hand ability per card (lowering): the card's slot.
                     out.push(Opt { action: act::HAND_ABILITY + (a - act::HAND), choice: Choice::Ability(c, slot) });
                 }
@@ -70,21 +69,20 @@ impl Game {
         (c.tap || c.sac_self || c.exile_self || c.discard_self).then_some(card)
     }
 
-    /// Could `p` activate `slot` of `card` now and complete the activation
+    /// Could `p` activate `ad` of `card` now and complete the activation
     /// (timing, restrictions, every part of the cost, targets)? An
     /// activation is offered only if it can be completed (ENGINE.md 6).
     fn can_activate(
         &self,
         p: PlayerId,
         card: CardIdx,
-        slot: AbilitySlot,
         ad: &ActivatedDef,
         classes: &[Class],
         sorcery_ok: bool,
     ) -> bool {
         let mana_ability = ad.mana().is_some();
-        if mana_ability && !ad.instant_only && matches!(slot, AbilitySlot::Activated(_)) {
-            return false;
+        if mana_ability && !ad.instant_only {
+            return false; // activated while paying (ENGINE.md 18)
         }
         if ad.sorcery && !sorcery_ok {
             return false; // CR 602.5d
@@ -207,7 +205,13 @@ impl Game {
 
     /// What the parts of `cost` paid after its mana need from that payment.
     pub(crate) fn keep_for(card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Keep {
-        Keep { exclude, life: cost.life, sac: cost.sacrifice.clone().map(|s| (s, card)) }
+        debug_assert!(cost.sacrifice.is_none() || cost.discard == 0, "one reservation per cost (lowering)");
+        Keep {
+            exclude,
+            life: cost.life,
+            sac: cost.sacrifice.clone().map(|s| (s, card)),
+            discard: (cost.discard > 0).then_some((cost.discard, card)),
+        }
     }
 
     /// 601.2g-h for an activation: the mana part first.

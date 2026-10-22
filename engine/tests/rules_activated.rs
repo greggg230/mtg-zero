@@ -477,28 +477,104 @@ fn a_permanent_a_later_sacrifice_needs_is_not_spent_on_mana() {
 }
 
 #[test]
-fn a_spirit_guide_is_activated_with_priority_and_revealed() {
-    // Mana abilities of cards in hand are priority actions (ENGINE.md 18):
-    // a payment never waits on a hidden card. The guide's mana counts once
-    // it is in the pool.
+fn cr_605_3a_a_spirit_guide_is_activated_while_paying_and_revealed() {
+    // Mana abilities of cards in hand are activated while paying, like any
+    // other mana ability (ENGINE.md 18); not as a priority action.
     let mut g = manual()
         .battlefield(0, &["Forest", "Forest"])
         .hand(0, &["Simian Spirit Guide", "Test Double"])
         .at(Step::Main1, 0)
         .start();
     let dbl = g.card(0, "Test Double", Zone::Hand); // {2}{R}
-    assert!(!g.has_option(Choice::Cast(dbl)));
     let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
-    let keys = g.choose(Choice::Ability(guide, AbilitySlot::Hand(0)));
-    assert!(keys.iter().any(|&k| key_kind(k) == KEY_REVEAL && key_player(k) == 0));
-    assert_eq!(g.count_in(0, "Simian Spirit Guide", Zone::Exile), 1);
-    assert_eq!(g.player(0).pool.amt[engine::mana::R], 1);
-    assert_eq!((g.kind(), g.to_move()), (Some(DecisionKind::Priority), Some(0)));
-    assert!(g.has_option(Choice::Cast(dbl)));
+    assert!(!g.has_option(Choice::Ability(guide, AbilitySlot::Hand(0))));
+    assert!(g.has_option(Choice::Cast(dbl)), "the guide's mana counts toward castability");
     g.choose(Choice::Cast(dbl));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana));
+    // The red pip needs the guide; the Forests pay the generic part.
+    // Sources are picked in canonical class order: Forests, then the guide.
+    for _ in 0..2 {
+        let forest = g.pending_decision().unwrap().options[0].choice;
+        assert!(matches!(forest, Choice::Ability(c, _) if g.name(c) == "Forest"));
+        g.choose(forest);
+    }
+    assert!(g.has_option(Choice::Ability(guide, AbilitySlot::Hand(0))));
+    assert!(!g.knows(1, guide), "not revealed before it is activated");
+    let keys = g.choose(Choice::Ability(guide, AbilitySlot::Hand(0)));
+    // 602.2a: activating it from hand reveals it (at once, as it is picked).
+    assert!(keys.iter().any(|&k| key_kind(k) == KEY_REVEAL && key_player(k) == 0));
+    assert!(g.knows(1, guide));
     g.drive_until(at_priority);
+    assert_eq!(g.count_in(0, "Simian Spirit Guide", Zone::Exile), 1);
     assert_eq!(g.stack().len(), 1);
     assert_eq!(g.player(0).pool.total(), 0);
+}
+
+#[test]
+fn cr_605_3a_a_spirit_guide_pays_an_unless_cost_during_resolution() {
+    // Mana Leak resolving: P0 has no priority, but may still activate mana
+    // abilities to pay {3} (605.3a), the Spirit Guide's included.
+    let mut g = manual()
+        .battlefield(0, &["Forest", "Forest", "Mountain", "Mountain"])
+        .hand(0, &["Test Bear", "Elvish Spirit Guide"])
+        .battlefield(1, &["Island", "Island"])
+        .hand(1, &["Mana Leak"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    g.choose(Choice::Cast(bear));
+    while g.kind() == Some(DecisionKind::PayMana) {
+        // The Forest class: both Forests.
+        let forest = g
+            .pending_decision()
+            .unwrap()
+            .options
+            .iter()
+            .map(|o| o.choice)
+            .find(|&c| matches!(c, Choice::Ability(x, _) if g.name(x) == "Forest"))
+            .unwrap();
+        g.choose(forest);
+    }
+    g.drive_until(at_priority);
+    g.pass();
+    let leak = g.card(1, "Mana Leak", Zone::Hand);
+    g.choose(Choice::Cast(leak));
+    g.drive_until(at_priority);
+    g.drive_until(|g| !at_priority(g) || g.stack().len() == 1);
+    assert_eq!((g.kind(), g.to_move()), (Some(DecisionKind::YesNo), Some(0)));
+    assert!(g.has_option(Choice::Yes), "two Mountains and the guide make {{3}}");
+    g.choose(Choice::Yes);
+    for _ in 0..2 {
+        let mountain = g.pending_decision().unwrap().options[0].choice;
+        assert!(matches!(mountain, Choice::Ability(c, _) if g.name(c) == "Mountain"));
+        g.choose(mountain);
+    }
+    let guide = g.card(0, "Elvish Spirit Guide", Zone::Hand);
+    assert_eq!(g.options_desc().len(), 1, "only the guide can pay the rest");
+    assert!(g.has_option(Choice::Ability(guide, AbilitySlot::Hand(0))));
+    g.choose(Choice::Ability(guide, AbilitySlot::Hand(0)));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Battlefield), 1);
+    assert_eq!(g.count_in(0, "Elvish Spirit Guide", Zone::Exile), 1);
+}
+
+#[test]
+fn a_hand_mana_source_leaves_the_cards_a_discard_cost_needs() {
+    // Test Rummage: {R}, discard a card as an additional cost. The Spirit
+    // Guide can pay {R} only if another card is left to discard (601.2h:
+    // the mana is paid first).
+    let alone = manual().hand(0, &["Test Rummage", "Simian Spirit Guide"]).at(Step::Main1, 0).start();
+    let r = alone.card(0, "Test Rummage", Zone::Hand);
+    assert!(!alone.has_option(Choice::Cast(r)));
+    let mut g = manual().hand(0, &["Test Rummage", "Simian Spirit Guide", "Island"]).at(Step::Main1, 0).start();
+    let r = g.card(0, "Test Rummage", Zone::Hand);
+    g.choose(Choice::Cast(r));
+    let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
+    g.choose(Choice::Ability(guide, AbilitySlot::Hand(0)));
+    assert_eq!(g.kind(), Some(DecisionKind::DiscardCost));
+    assert_eq!(g.options_desc().len(), 1, "only the Island is left to discard");
+    g.drive_until(at_priority);
+    assert_eq!(g.count_in(0, "Island", Zone::Graveyard), 1);
 }
 
 #[test]

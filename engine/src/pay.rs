@@ -14,9 +14,8 @@ use crate::game::{DamageSource, Game, Pos};
 use crate::ids::{CardIdx, DefId, PlayerId, Target, Zone};
 use crate::mana::{payable_within, Budget, ManaCost, ManaMask, ManaPool, Unit, COLORS};
 
-/// A mana ability of a permanent that can help pay a cost. (Mana abilities
-/// of cards in hand, the Spirit Guides, are activated with priority only,
-/// so a payment never waits on a hidden card; ENGINE.md 18.)
+/// A mana ability that can help pay a cost: of a permanent, or of a card in
+/// hand (the Spirit Guides, CR 605.3a; ENGINE.md 18).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Src {
     pub card: CardIdx,
@@ -60,6 +59,9 @@ pub(crate) struct Keep {
     /// A later "sacrifice n permanents matching" and the card whose cost it
     /// is ("another").
     pub sac: Option<(SacCost, CardIdx)>,
+    /// A later "discard n cards" and the card whose cost it is (never one
+    /// of the n): mana sources in hand must leave n other cards.
+    pub discard: Option<(u8, CardIdx)>,
 }
 
 /// Paying a mana cost (ENGINE.md 6, 18). Stages: Phyrexian pips (how many
@@ -226,7 +228,36 @@ impl Game {
                 }
             }
         }
+        // Mana abilities of cards in hand (CR 605.3a: activated while
+        // paying like any other; a Spirit Guide exiles itself). One mana
+        // each (the lowering checks), after the permanents.
+        if self.players[p as usize].hand.iter().any(|&c| self.hand_mana_source(c)) {
+            for c in self.hand_sorted(p) {
+                if Some(c) == exclude || !self.hand_mana_source(c) {
+                    continue;
+                }
+                let def = self.objs[c.i()].def;
+                for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
+                    let Some(m) = ad.mana() else { continue };
+                    if ad.instant_only || !self.activation_ready(p, c, ad) {
+                        continue;
+                    }
+                    let src = Src { card: c, slot: AbilitySlot::Hand(i as u8) };
+                    if let Some(cl) = out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == src.slot) {
+                        cl.members.push(src);
+                        continue;
+                    }
+                    let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life) else { continue };
+                    out.push(Class { def, members: vec![src], yld, dmg: m.damage_to_you, sac_self: false });
+                }
+            }
+        }
         out
+    }
+
+    /// A card in hand with a mana ability (a Spirit Guide).
+    pub(crate) fn hand_mana_source(&self, c: CardIdx) -> bool {
+        self.objs[c.i()].zone == Zone::Hand && self.def_of(c).hand_abilities.iter().any(|a| a.mana().is_some())
     }
 
     fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8) -> Option<Yield> {
@@ -260,21 +291,27 @@ impl Game {
     /// out of reach.
     fn budget(&self, p: PlayerId, keep: &Keep, later: u8) -> (Budget, bool) {
         let pl = &self.players[p as usize];
-        let sac = match &keep.sac {
-            Some((s, card)) => self.sacrifice_candidates(p, *card, s).len() as i32 - s.n as i32,
-            None => i32::MAX,
+        // At most one kind of reservation per cost (the lowering checks).
+        let sac = match (&keep.sac, keep.discard) {
+            (Some((s, card)), _) => self.sacrifice_candidates(p, *card, s).len() as i32 - s.n as i32,
+            (None, Some((n, card))) => {
+                let in_hand = self.objs[card.i()].zone == Zone::Hand;
+                pl.hand.len() as i32 - in_hand as i32 - n as i32
+            }
+            (None, None) => i32::MAX,
         };
         (Budget { life: (pl.life - later as i32).max(0), sac: sac.max(0) }, later > 0)
     }
 
-    /// Mana sources whose use takes a permanent a later sacrifice needs.
+    /// Mana sources whose use takes a permanent a later sacrifice needs, or
+    /// a card in hand a later discard needs.
     fn reserved(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> bool {
         match &keep.sac {
             Some((sc, card)) if cl.sac_self => {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
                 !(sc.another && s.card == *card) && self.card_matches(&sc.filter, s.card, &ctx)
             }
-            _ => false,
+            _ => keep.discard.is_some() && matches!(s.slot, AbilitySlot::Hand(_)),
         }
     }
 
@@ -502,6 +539,12 @@ impl Game {
             let src = Src { card, slot };
             let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
             pm.min_class = ci as u8;
+            if matches!(slot, AbilitySlot::Hand(_)) {
+                // CR 602.2a / 605.3b: activating it from hand reveals it. Its
+                // identity is public from the pick on, so no determinize
+                // resamples a card the payment counts on (ENGINE.md 10).
+                self.reveal(card);
+            }
             match &classes[ci].yld {
                 Yield::One(_) => pm.chosen.push(src),
                 Yield::Multi { prods, .. } => {

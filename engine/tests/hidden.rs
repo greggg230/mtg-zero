@@ -199,27 +199,22 @@ fn cr_602_2a_an_ability_activated_from_hand_reveals_its_card() {
 }
 
 #[test]
-fn a_pending_payment_never_waits_on_a_hidden_card() {
-    // A Spirit Guide's mana is floated with priority (public), so a payment
-    // in progress completes in every world the opponent's determinize
-    // samples.
-    let mut g = Scenario::new(db())
-        .spec(|s| s.auto_single = false)
-        .battlefield(0, &["Mountain", "Mountain"])
-        .hand(0, &["Simian Spirit Guide", "Test Double", "Test Bear", "Island"])
-        .library(0, &["Forest", "Simian Spirit Guide", "Plains"])
-        .library(1, &["Forest"; 6])
-        .at(Step::Main1, 0)
-        .start();
-    let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
-    g.choose(Choice::Ability(guide, engine::db::AbilitySlot::Hand(0)));
-    let dbl = g.card(0, "Test Double", Zone::Hand); // {2}{R}
-    g.choose(Choice::Cast(dbl));
-    assert_eq!(g.kind(), Some(DecisionKind::PayMana));
-    for seed in 0..30 {
-        let mut d = g.clone();
-        d.determinize(1, &mut Rng::new(seed));
-        d.check_invariants().unwrap();
+fn a_payment_in_progress_completes_in_every_determinized_world() {
+    // P0 casts Test Double ({2}{R}) with two Islands and a Simian Spirit
+    // Guide in hand. While the payment (or the cast before it) is in
+    // progress, the opponent's determinize pins the payer's mana sources
+    // in hand; a guide already picked is revealed, so public.
+    let start = || {
+        Scenario::new(db())
+            .spec(|s| s.auto_single = false)
+            .battlefield(0, &["Island", "Island"])
+            .hand(0, &["Simian Spirit Guide", "Test Double", "Test Bear", "Island"])
+            .library(0, &["Forest", "Mountain", "Plains", "Swamp", "Lightning Bolt", "Counterspell"])
+            .library(1, &["Forest"; 6])
+            .at(Step::Main1, 0)
+            .start()
+    };
+    let finish = |d: &mut Game| {
         let mut legal = Vec::new();
         for _ in 0..10 {
             if d.kind() == Some(DecisionKind::Priority) {
@@ -231,7 +226,50 @@ fn a_pending_payment_never_waits_on_a_hidden_card() {
         }
         assert_eq!(d.kind(), Some(DecisionKind::Priority));
         assert_eq!(d.stack().len(), 1);
+        assert_eq!(d.count_in(0, "Simian Spirit Guide", Zone::Exile), 1);
+    };
+    let mut g = start();
+    let dbl = g.card(0, "Test Double", Zone::Hand);
+    let guide = g.card(0, "Simian Spirit Guide", Zone::Hand);
+    g.choose(Choice::Cast(dbl));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana));
+    // Before any pick: the guide is hidden from P1 but pinned.
+    assert!(!g.knows(1, guide));
+    let mut resampled = false;
+    for seed in 0..30 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(seed));
+        d.check_invariants().unwrap();
+        assert_eq!(d.obj(guide).def, g.obj(guide).def, "a source the payment needs is pinned");
+        resampled |= d.player(0).hand.iter().any(|&c| d.obj(c).def != g.obj(c).def);
+        finish(&mut d);
     }
+    assert!(resampled, "the rest of the payer's hand is still resampled");
+    // After picking the guide: revealed, so every viewer knows it. (Sources
+    // are picked in canonical class order: the Islands come first.)
+    for _ in 0..2 {
+        let island = g.pending_decision().unwrap().options[0].choice;
+        assert!(matches!(island, Choice::Ability(_, engine::db::AbilitySlot::Activated(0))));
+        g.choose(island);
+    }
+    assert!(!g.knows(1, guide));
+    g.choose(Choice::Ability(guide, engine::db::AbilitySlot::Hand(0)));
+    assert!(g.knows(1, guide));
+    for seed in 0..10 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(seed));
+        finish(&mut d);
+    }
+    // Once the payment is over nothing is pinned any more.
+    let mut done = g.clone();
+    done.drive_until(|g| g.kind() == Some(DecisionKind::Priority));
+    let other = done.card(0, "Test Bear", Zone::Hand);
+    let moved = (0..30).any(|s| {
+        let mut d = done.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.obj(other).def != done.obj(other).def
+    });
+    assert!(moved);
 }
 
 #[test]
