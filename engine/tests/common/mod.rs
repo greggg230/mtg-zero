@@ -83,10 +83,70 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("Test Zero", "{1}", 0, 0, &[], false, none.clone()),
         creature("Test Dies Draw", "{1}{B}", 2, 2, &[], false, dies_draw),
         creature("Test Dies Ping", "{1}{R}", 2, 2, &[], false, dies_ping),
-        creature("Test Giant", "{4}{G}", 5, 5, &["trample", "deathtouch"], false, none),
+        creature("Test Giant", "{4}{G}", 5, 5, &["trample", "deathtouch"], false, none.clone()),
         creature("Test Dies Shock", "{1}{R}", 1, 1, &[], false, dies_shock),
+        // {T}: 1 damage to any target (summoning sickness, CR 302.6).
+        creature("Test Tapper", "{1}{R}", 1, 1, &[], false, tap_ping()),
+        creature("Test Hasty Tapper", "{1}{R}", 1, 1, &["haste"], false, tap_ping()),
+        creature("Test Indestructible", "{2}{W}", 2, 2, &["indestructible"], false, none.clone()),
+        // When this enters, you may draw a card.
+        creature(
+            "Test May Draw",
+            "{1}{U}",
+            1,
+            1,
+            &[],
+            false,
+            json!({"triggered_abilities": [{"$t": "TriggeredAbility", "event": "enters",
+                "predicate": {"$t": "IsSelf"},
+                "effect": {"$t": "MayDo", "inner": {"$t": "DrawCards", "amount": 1}}}]}),
+        ),
+        spell(
+            "Test Phyrexian Shock",
+            "Instant",
+            json!({"$t": "ManaCost", "phyrexian": ["R"]}),
+            json!({"$t": "DealDamageAnyTarget", "amount": 2, "targets": [{"$t": "TargetSpec",
+                "filter": {"$t": "OneOf", "filters": [{"$t": "IsCreature"}, {"$t": "IsPlayer"}]}}]}),
+            none.clone(),
+        ),
+        // As an additional cost, sacrifice an artifact (Tinker's cost).
+        spell(
+            "Test Artifact Offering",
+            "Sorcery",
+            cost("{1}"),
+            json!({"$t": "DrawCards", "amount": 1}),
+            json!({"additional_cost_sacrifice_filter": {"$t": "CardFilter", "any_types": ["Artifact"]}}),
+        ),
     ];
     cards.into_iter().map(|v| serde_json::from_value(v).expect("custom card IR")).collect()
+}
+
+fn tap_ping() -> Value {
+    json!({"activated_abilities": [{"$t": "ActivatedAbility",
+        "cost": {"$t": "ActivationCost", "tap_self": true},
+        "effect": {"$t": "DealDamageAnyTarget", "amount": 1, "targets": [{"$t": "TargetSpec",
+            "filter": {"$t": "OneOf", "filters": [{"$t": "IsCreature"}, {"$t": "IsPlayer"}]}}]}}]})
+}
+
+/// A custom instant or sorcery card in IR form.
+fn spell(name: &str, kind: &str, mana_cost: Value, effect: Value, extra: Value) -> Value {
+    let mut pr = json!({
+        "$t": "CardPrinting",
+        "name": name,
+        "mana_cost_str": "",
+        "mana_cost": mana_cost,
+        "type_line": kind,
+        "supertypes": [],
+        "card_types": [kind],
+        "subtypes": [],
+        "spell_effect": effect,
+    });
+    if let Value::Object(m) = extra {
+        for (k, v) in m {
+            pr[k] = v;
+        }
+    }
+    json!({"name": name, "custom": true, "printing": pr})
 }
 
 /// The cube plus the custom cards, lowered once per test binary.

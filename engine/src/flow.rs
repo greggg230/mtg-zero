@@ -255,12 +255,16 @@ impl Game {
     // ---- turns and steps (CR 500-514) --------------------------------------
 
     fn begin_turn(&mut self) {
+        // CR 500.7: extra turns are inserted; the normal order goes on from
+        // the last normal turn.
         let next = if self.turn.number == 0 {
+            self.turn.normal = self.turn.starting;
             self.turn.starting
         } else if let Some(p) = self.extra_turns.pop() {
             p
         } else {
-            opp(self.turn.active)
+            self.turn.normal = opp(self.turn.normal);
+            self.turn.normal
         };
         if self.turn.number >= self.spec.max_turns {
             self.outcome = Some(Outcome { winner: None, reason: EndReason::TurnLimit });

@@ -270,32 +270,56 @@ fn distribute(
     best
 }
 
-/// One mana a source can make, with what using it costs from a shared
-/// budget: life (CR 119.4) or a card from hand (a Spirit Guide).
+/// One mana a source can make, with what using it takes from a shared
+/// budget: life (CR 119.4), a card from hand (a Spirit Guide), or a
+/// permanent a later part of the cost may need to sacrifice (a Lotus Petal
+/// when Tinker must sacrifice an artifact).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Unit {
     pub mask: ManaMask,
     pub life: u8,
     pub hand: bool,
+    pub sac: bool,
 }
 
 impl Unit {
     pub fn free(mask: ManaMask) -> Unit {
-        Unit { mask, life: 0, hand: false }
+        Unit { mask, life: 0, hand: false, sac: false }
     }
     fn budgeted(&self) -> bool {
-        self.life > 0 || self.hand
+        self.life > 0 || self.hand || self.sac
     }
 }
 
-/// [`payable`] with budgets: the available units used may cost at most
-/// `life` life in total and use at most `hand` cards from hand.
-pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], life: i32, hand: i32) -> bool {
+/// How much life, how many hand cards and how many sacrifice candidates
+/// the units of a payment may use.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Budget {
+    pub life: i32,
+    pub hand: i32,
+    pub sac: i32,
+}
+
+impl Budget {
+    /// No limits that matter.
+    pub const FREE: Budget = Budget { life: i32::MAX, hand: i32::MAX, sac: i32::MAX };
+
+    fn take(&self, u: &Unit, n: i32) -> Option<Budget> {
+        let b = Budget {
+            life: self.life - u.life as i32 * n,
+            hand: self.hand - if u.hand { n } else { 0 },
+            sac: self.sac - if u.sac { n } else { 0 },
+        };
+        (b.life >= 0 && b.hand >= 0 && b.sac >= 0).then_some(b)
+    }
+}
+
+/// [`payable`] within a [`Budget`] for the available units used.
+pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], budget: Budget) -> bool {
     let free: Vec<ManaMask> = available.iter().filter(|u| !u.budgeted()).map(|u| u.mask).collect();
     let paid: Vec<Unit> = available.iter().copied().filter(|u| u.budgeted()).collect();
-    let all_life: i32 = paid.iter().map(|u| u.life as i32).sum();
-    let all_hand = paid.iter().filter(|u| u.hand).count() as i32;
-    if all_life <= life && all_hand <= hand {
+    let all = paid.iter().try_fold(budget, |b, u| b.take(u, 1));
+    if all.is_some() {
         let mut v = free;
         v.extend(paid.iter().map(|u| u.mask));
         return payable(cost, chosen, &v);
@@ -309,24 +333,13 @@ pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], 
             None => groups.push((u, 1)),
         }
     }
-    fn go(
-        cost: &ManaCost,
-        chosen: &[ManaMask],
-        units: &mut Vec<ManaMask>,
-        groups: &[(Unit, u8)],
-        life: i32,
-        hand: i32,
-    ) -> bool {
+    fn go(cost: &ManaCost, chosen: &[ManaMask], units: &mut Vec<ManaMask>, groups: &[(Unit, u8)], b: Budget) -> bool {
         let Some(((u, n), rest)) = groups.split_first() else { return payable(cost, chosen, units) };
         for take in (0..=*n).rev() {
-            let l = u.life as i32 * take as i32;
-            let h = if u.hand { take as i32 } else { 0 };
-            if l > life || h > hand {
-                continue;
-            }
+            let Some(left) = b.take(u, take as i32) else { continue };
             let len = units.len();
             units.extend(std::iter::repeat_n(u.mask, take as usize));
-            let ok = go(cost, chosen, units, rest, life - l, hand - h);
+            let ok = go(cost, chosen, units, rest, left);
             units.truncate(len);
             if ok {
                 return true;
@@ -335,7 +348,7 @@ pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], 
         false
     }
     let mut units = free;
-    go(cost, chosen, &mut units, &groups, life, hand)
+    go(cost, chosen, &mut units, &groups, budget)
 }
 
 #[cfg(test)]
@@ -397,12 +410,16 @@ mod tests {
     #[test]
     fn budgets_limit_life_and_hand_units() {
         let two = ManaCost::parse("{2}").unwrap();
-        let conf = Unit { mask: COLORS, life: 1, hand: false };
-        assert!(payable_within(&two, &[], &[conf, conf], 2, 0));
-        assert!(!payable_within(&two, &[], &[conf, conf], 1, 0));
-        assert!(payable_within(&two, &[], &[conf, conf, Unit::free(MR)], 1, 0));
-        let guide = Unit { mask: MR, life: 0, hand: true };
-        assert!(!payable_within(&two, &[], &[guide, guide], 9, 1));
+        let b = |life, hand, sac| Budget { life, hand, sac };
+        let conf = Unit { life: 1, ..Unit::free(COLORS) };
+        assert!(payable_within(&two, &[], &[conf, conf], b(2, 0, 0)));
+        assert!(!payable_within(&two, &[], &[conf, conf], b(1, 0, 0)));
+        assert!(payable_within(&two, &[], &[conf, conf, Unit::free(MR)], b(1, 0, 0)));
+        let guide = Unit { hand: true, ..Unit::free(MR) };
+        assert!(!payable_within(&two, &[], &[guide, guide], b(9, 1, 0)));
+        let petal = Unit { sac: true, ..Unit::free(COLORS) };
+        assert!(!payable_within(&two, &[], &[petal, petal], b(9, 9, 1)));
+        assert!(payable_within(&two, &[], &[petal, petal], b(9, 9, 2)));
     }
 
     #[test]

@@ -149,6 +149,8 @@ pub struct Turn {
     /// Consecutive passes (CR 117.4).
     pub passes: u8,
     pub starting: PlayerId,
+    /// The player of the most recent normal (not extra) turn (CR 500.7).
+    pub normal: PlayerId,
     /// Another cleanup step follows this one (CR 514.3a).
     pub cleanup_again: bool,
 }
@@ -289,6 +291,7 @@ impl Game {
                 priority: 0,
                 passes: 0,
                 starting: 0,
+                normal: 0,
                 cleanup_again: false,
             },
             agenda: Vec::new(),

@@ -105,8 +105,13 @@ impl Scenario {
         g.turn.active = self.active;
         g.turn.starting = if self.number % 2 == 1 { self.active } else { 1 - self.active };
         g.turn.step = self.step;
+        g.turn.normal = self.active;
         g.players[self.active as usize].last_turn = self.number;
         g.players[1 - self.active as usize].last_turn = self.number.saturating_sub(1);
+        // Turns begun so far: the starting player has had the odd ones.
+        let starting = g.turn.starting as usize;
+        g.players[starting].turns = self.number.div_ceil(2);
+        g.players[1 - starting].turns = self.number / 2;
         for p in &mut g.players {
             p.kept = true;
         }

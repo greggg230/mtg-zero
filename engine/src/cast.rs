@@ -45,7 +45,8 @@ impl Game {
                 &classes[..]
             };
             if def.additional.is_empty() {
-                if !self.can_pay_with(p, &def.cost, cls, Some(c), 0, 0) {
+                let keep = crate::pay::Keep { exclude: Some(c), ..Default::default() };
+                if !self.can_pay_with(p, &def.cost, cls, &keep) {
                     continue;
                 }
             } else if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &def.cost, cls, Some(c))) {
@@ -198,8 +199,7 @@ impl Game {
         let def = self.def_of(card);
         let mut pm = PayMana::new(item.controller, def.cost);
         if let Some(extra) = def.additional.get(item.cost_option as usize) {
-            pm.life_keep = extra.life;
-            pm.hand_keep = extra.discard;
+            pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         }
         self.agenda.push(Task::PayMana(pm));
@@ -340,7 +340,7 @@ pub(crate) fn classes_without(classes: &[crate::pay::Class], card: CardIdx) -> V
         .iter()
         .filter_map(|cl| {
             let members: Vec<_> = cl.members.iter().copied().filter(|s| s.card != card).collect();
-            (!members.is_empty()).then(|| crate::pay::Class { members, yld: cl.yld.clone(), dmg: cl.dmg })
+            (!members.is_empty()).then(|| crate::pay::Class { members, ..cl.clone() })
         })
         .collect()
 }

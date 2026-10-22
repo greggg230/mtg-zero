@@ -479,9 +479,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
 
     // Informational duplicates of `mana_cost` and the type fields.
     let _ = (mana_cost_str, type_line);
-    // Lands pay only through their mana abilities here, so the Python
-    // engine's "no generic fallback" marker needs no code (ENGINE.md 14).
-    let _ = mana_only_from_produces;
 
     let mut ty = 0u16;
     for t in card_types {
@@ -569,6 +566,13 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     if activated.len() > 4 {
         l.unsupported("CardPrinting.activated_abilities(more than 4)");
+    }
+    // Lands pay only through their mana abilities here. The Python engine
+    // lets a land without `mana_only_from_produces` pay one generic mana
+    // anyway; a land with no mana ability in the IR relies on that (Strip
+    // Mine's missing "{T}: Add {C}"), which would play wrong (ENGINE.md 14).
+    if ty & types::LAND != 0 && !*mana_only_from_produces && !activated.iter().any(|a| a.mana().is_some()) {
+        l.unsupported("CardPrinting.mana_only_from_produces(land without a mana ability)");
     }
     let mut hand_abilities = Vec::new();
     for a in hand_activated_abilities {

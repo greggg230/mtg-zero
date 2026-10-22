@@ -7,7 +7,7 @@ use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Pos, StackItem, StackKind};
 use crate::ids::{CardIdx, PlayerId, Zone};
-use crate::pay::{productions, Class, PayMana, Src};
+use crate::pay::{productions, Class, Keep, PayMana, Src};
 
 impl Game {
     /// Does condition `c` hold for player `p`?
@@ -192,7 +192,12 @@ impl Game {
             }
             None => classes,
         };
-        self.can_pay_with(p, mana, classes, exclude, cost.life, cost.discard)
+        self.can_pay_with(p, mana, classes, &Self::keep_for(card, cost, exclude))
+    }
+
+    /// What the parts of `cost` paid after its mana need from that payment.
+    pub(crate) fn keep_for(card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Keep {
+        Keep { exclude, life: cost.life, hand: cost.discard, sac: cost.sacrifice.clone().map(|s| (s, card)) }
     }
 
     /// 601.2g-h for an activation: the mana part first.
@@ -202,9 +207,7 @@ impl Game {
             return;
         }
         let mut pm = PayMana::new(p, ad.cost.mana);
-        pm.exclude = Self::mana_exclude(card, ad);
-        pm.life_keep = ad.cost.life;
-        pm.hand_keep = ad.cost.discard;
+        pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
         self.agenda.push(Task::PayMana(pm));
     }
 

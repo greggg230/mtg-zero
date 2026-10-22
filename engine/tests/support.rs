@@ -111,7 +111,6 @@ const SUPPORTED: &[&str] = &[
     "Steam Vents",
     "Stern Scolding",
     "Stomping Ground",
-    "Strip Mine",
     "Sunbaked Canyon",
     "Swamp",
     "Swords to Plowshares",
