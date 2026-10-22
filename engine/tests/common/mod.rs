@@ -85,6 +85,7 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("Test Dies Ping", "{1}{R}", 2, 2, &[], false, dies_ping),
         creature("Test Giant", "{4}{G}", 5, 5, &["trample", "deathtouch"], false, none.clone()),
         creature("Test Dies Shock", "{1}{R}", 1, 1, &[], false, dies_shock),
+        creature("Test Dwarf", "{1}{R}", 2, 2, &[], false, json!({"subtypes": ["Dwarf"]})),
         // {T}: 1 damage to any target (summoning sickness, CR 302.6).
         creature("Test Tapper", "{1}{R}", 1, 1, &[], false, tap_ping()),
         creature("Test Hasty Tapper", "{1}{R}", 1, 1, &["haste"], false, tap_ping()),

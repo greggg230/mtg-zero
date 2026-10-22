@@ -212,6 +212,7 @@ fn op_code(op: &Op) -> usize {
         Op::PutFromHand { .. } => 34,
         Op::RevealHand { .. } => 35,
         Op::ChooseDiscard { .. } => 36,
+        Op::Ext(_) => 37,
     }
 }
 

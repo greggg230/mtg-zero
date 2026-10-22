@@ -415,7 +415,10 @@ impl Game {
                 }
             }
         }
-        if cost.sac_self || cost.discard_self {
+        if cost.sac_self {
+            self.sacrifice(c);
+        }
+        if cost.discard_self {
             self.move_card(c, Zone::Graveyard, Pos::Top);
         }
         if cost.exile_self {

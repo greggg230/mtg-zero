@@ -6,6 +6,8 @@ use crate::game::{EndReason, Game, Outcome, Pos, Step};
 use crate::ids::{opp, CardIdx, PlayerId, Zone};
 use crate::pay::{PayMana, Src};
 use crate::resolve::Frame;
+use crate::db::EventKind;
+use crate::triggers::Event;
 
 /// One unit of pending work (ENGINE.md 4). The agenda is a stack: the last
 /// task runs next. Tasks that ask follow ask-or-consume.
@@ -286,6 +288,10 @@ impl Game {
         let n = self.turn.number;
         for pl in &mut self.players {
             pl.left_battlefield = false;
+            pl.drawn = 0;
+            pl.spells_cast = 0;
+            pl.noncreature_cast = 0;
+            pl.gained_life = false;
         }
         let pl = &mut self.players[next as usize];
         pl.last_turn = n;
@@ -303,10 +309,14 @@ impl Game {
         match self.turn.step {
             Step::Setup => unreachable!("setup is not a step"),
             Step::Untap => {
-                // CR 502.3; no player gets priority (502.4).
+                // CR 502.3; no player gets priority (502.4). "Doesn't untap
+                // during your untap step"; a stun counter is removed instead
+                // of untapping (122.1d).
                 let mine: Vec<CardIdx> = self.permanents_of(ap).collect();
                 for c in mine {
-                    self.objs[c.i()].tapped = false;
+                    if self.objs[c.i()].tapped && !self.def_of(c).no_untap {
+                        self.untap(c);
+                    }
                 }
                 self.agenda.push(Task::NextStep);
             }
@@ -315,6 +325,7 @@ impl Game {
                 if self.turn.number > 1 {
                     self.draw(ap);
                 }
+                self.event(Event::player(EventKind::BeginningOfDrawStep, ap));
                 self.agenda.push(Task::Priority);
             }
             Step::DeclareAttackers => {
@@ -339,6 +350,18 @@ impl Game {
                 self.agenda.push(Task::CleanupDiscard);
             }
             Step::Upkeep | Step::Main1 | Step::BeginCombat | Step::EndCombat | Step::Main2 | Step::End => {
+                // "At the beginning of ..." triggers (CR 503.1a, 505.1,
+                // 507.1, 513.1a): the active player is the subject.
+                let kind = match self.turn.step {
+                    Step::Upkeep => Some(EventKind::BeginningOfUpkeep),
+                    Step::Main1 => Some(EventKind::BeginningOfPrecombatMain),
+                    Step::BeginCombat => Some(EventKind::BeginningOfCombat),
+                    Step::End => Some(EventKind::BeginningOfEndStep),
+                    _ => None,
+                };
+                if let Some(k) = kind {
+                    self.event(Event::player(k, ap));
+                }
                 self.agenda.push(Task::Priority);
             }
         }
@@ -457,12 +480,14 @@ impl Game {
     }
 
     fn cleanup_rest(&mut self) {
-        // CR 514.2: damage wears off; "until end of turn" effects end (none yet).
+        // CR 514.2: damage wears off and "until end of turn" effects end,
+        // simultaneously.
         for &c in &self.battlefield {
             let o = &mut self.objs[c.i()];
             o.damage = 0;
             o.deathtouched = false;
         }
+        self.end_turn_effects();
         // CR 514.3a: an SBA or a trigger -> priority, then another cleanup.
         if self.sba_needed() || !self.waiting.is_empty() {
             self.turn.cleanup_again = true;

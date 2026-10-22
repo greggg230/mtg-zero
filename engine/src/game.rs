@@ -8,6 +8,7 @@ use crate::ids::{opp, CardIdx, DefId, ObjRef, PlayerId, Target, Zone};
 use crate::mana::ManaPool;
 use crate::rng::Rng;
 use crate::triggers::{Event, PendingTrigger};
+use crate::db::EventKind;
 
 /// Settings of a game (zero-core's `Spec` will wrap this plus the decks).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -67,6 +68,9 @@ pub struct Obj {
     pub struck_first: bool,
     /// Bit p: player p knows the card's identity (hidden zones; ENGINE.md 10).
     pub known: u8,
+    /// The permanent this one (an Equipment) is attached to (CR 301.5);
+    /// stale once the host leaves, until SBA 704.5n unattaches it.
+    pub attached: Option<ObjRef>,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -93,6 +97,13 @@ pub struct Player {
     /// A permanent left the battlefield under this player's control this
     /// turn (revolt).
     pub left_battlefield: bool,
+    /// Cards drawn this turn.
+    pub drawn: u8,
+    /// Spells cast this turn, and noncreature spells.
+    pub spells_cast: u8,
+    pub noncreature_cast: u8,
+    /// Gained life this turn.
+    pub gained_life: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -115,6 +126,8 @@ pub struct StackItem {
     /// The chosen mode instances of a modal spell or ability, in
     /// non-decreasing order (CR 700.2).
     pub modes: Vec<u8>,
+    /// A triggered ability's event (its subjects and amount).
+    pub ev: crate::triggers::EvCtx,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -210,6 +223,8 @@ pub struct Game {
     pub(crate) clouds: Vec<crate::hidden::Cloud>,
     /// Tokens created so far (a cheap "any token?" for the SBA check).
     pub(crate) tokens: u32,
+    /// A simultaneous move off the battlefield is in progress (`leaving`).
+    pub(crate) batching: bool,
     /// Set by `determinize`: private reveals to others are keyed as hidden.
     pub(crate) observer: Option<PlayerId>,
     /// Chance keys of the current `apply`; always empty between calls.
@@ -224,6 +239,16 @@ pub struct Game {
     pub(crate) decisions: u32,
     /// While refreshing a decision after `determinize`: never auto-answer.
     pub(crate) no_auto: bool,
+    /// Continuous effects from resolved spells and abilities (CR 611.2).
+    pub(crate) effects: Vec<crate::layers::Effect>,
+    /// Counters on permanents: (card, kind, number) (CR 122).
+    pub(crate) counters: Vec<(CardIdx, crate::db::Counter, u16)>,
+    /// Permanents with static abilities on the battlefield (a fast path for
+    /// the characteristic accessors).
+    pub(crate) n_static: u16,
+    /// Objects that already left the battlefield in the current
+    /// simultaneous move (their leave triggers look back, CR 603.10a).
+    pub(crate) leaving: Vec<crate::triggers::Lki>,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -287,6 +312,10 @@ impl Game {
             last_turn: 0,
             turns: 0,
             left_battlefield: false,
+            drawn: 0,
+            spells_cast: 0,
+            noncreature_cast: 0,
+            gained_life: false,
         };
         Game {
             db,
@@ -324,6 +353,11 @@ impl Game {
             forced_at: 0,
             decisions: 0,
             no_auto: false,
+            effects: Vec::new(),
+            counters: Vec::new(),
+            n_static: 0,
+            leaving: Vec::new(),
+            batching: false,
             log: if spec.log { Some(Vec::new()) } else { None },
         }
     }
@@ -348,6 +382,7 @@ impl Game {
             blocking: None,
             struck_first: false,
             known: 0,
+            attached: None,
         });
         idx
     }
@@ -420,25 +455,13 @@ impl Game {
         o.inc == r.inc && o.zone != Zone::Nowhere
     }
 
-    // ---- characteristics (layers slot in here later, ENGINE.md 2) ----------
+    // ---- characteristics (the rest in layers.rs, ENGINE.md 2a) -------------
 
-    pub fn types_of(&self, idx: CardIdx) -> u16 {
-        self.def_of(idx).types
-    }
     pub fn is_type(&self, idx: CardIdx, t: u16) -> bool {
         self.types_of(idx) & t != 0
     }
     pub fn is_creature(&self, idx: CardIdx) -> bool {
         self.is_type(idx, types::CREATURE)
-    }
-    pub fn power(&self, idx: CardIdx) -> i32 {
-        self.def_of(idx).power.unwrap_or(0)
-    }
-    pub fn toughness(&self, idx: CardIdx) -> i32 {
-        self.def_of(idx).toughness.unwrap_or(0)
-    }
-    pub fn has_kw(&self, idx: CardIdx, k: Kw) -> bool {
-        self.def_of(idx).keywords.has(k)
     }
     pub fn is_legendary(&self, idx: CardIdx) -> bool {
         self.def_of(idx).supertypes & crate::db::supertypes::LEGENDARY != 0
@@ -508,6 +531,10 @@ impl Game {
         if tapped {
             self.objs[idx.i()].tapped = true;
         }
+        // CR 122.6: "enters with counters".
+        for &(k, n) in &self.def_of(idx).enters_counters {
+            self.add_counters(idx, k, n as u16);
+        }
         if self.def_of(idx).shock_life > 0 {
             self.agenda.push(Task::AsEnters { card: idx });
         }
@@ -538,8 +565,15 @@ impl Game {
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
         let from = self.objs[idx.i()].zone;
         let old = self.obj_ref(idx);
-        let was_creature = from == Zone::Battlefield && self.is_creature(idx);
         let old_controller = self.objs[idx.i()].controller;
+        // Leave-the-battlefield abilities look back in time (CR 603.10a):
+        // the events are recorded before the object moves.
+        if from == Zone::Battlefield {
+            if to == Zone::Graveyard {
+                self.event(Event::obj(EventKind::Dies, old));
+            }
+            self.event(Event::obj(EventKind::LeavesBattlefield, old));
+        }
         if let Some(list) = self.zone_list(idx, from) {
             let i = list.iter().position(|&c| c == idx).expect("card in its zone list");
             list.remove(i);
@@ -577,6 +611,12 @@ impl Game {
             o.blocking = None;
             o.struck_first = false;
             o.known = if to.is_hidden() { known_before } else { 0b11 };
+            o.attached = None;
+        }
+        self.layers_on_move(idx, old, from, to);
+        if from == Zone::Battlefield && self.batching {
+            let def = self.objs[idx.i()].def;
+            self.leaving.push(crate::triggers::Lki { old, def, controller: old_controller });
         }
         if let Some(list) = self.zone_list(idx, to) {
             match pos {
@@ -605,12 +645,7 @@ impl Game {
         let new = self.obj_ref(idx);
         self.note(|g| format!("{} {:?} -> {:?}", g.name(idx), from, to));
         if to == Zone::Battlefield {
-            let c = self.objs[idx.i()].controller;
-            self.event(Event::Enters { obj: new, controller: c });
-        }
-        if was_creature && to == Zone::Graveyard {
-            let def = self.objs[idx.i()].def;
-            self.event(Event::Dies { old, def, controller: old_controller });
+            self.event(Event::obj(EventKind::Enters, new));
         }
         new
     }
@@ -629,6 +664,9 @@ impl Game {
         self.objs[top.i()].known |= 1 << p;
         let def = self.objs[top.i()].def;
         self.emit_private(KEY_DRAW, p, def as u64);
+        let pl = &mut self.players[p as usize];
+        pl.drawn = pl.drawn.saturating_add(1);
+        self.event(Event::player(EventKind::DrawsCard, p));
     }
 
     /// Shuffle a library (CR 701.20): positions become unknown to everyone;
@@ -644,21 +682,50 @@ impl Game {
         self.players[p as usize].library = lib;
     }
 
+    /// Tap a permanent (a "becomes tapped" event if it was untapped).
     pub(crate) fn tap(&mut self, idx: CardIdx) {
-        self.objs[idx.i()].tapped = true;
+        if !self.objs[idx.i()].tapped {
+            self.objs[idx.i()].tapped = true;
+            if self.objs[idx.i()].zone == Zone::Battlefield {
+                let r = self.obj_ref(idx);
+                self.event(Event::obj(EventKind::BecomesTapped, r));
+            }
+        }
+    }
+
+    /// Untap a permanent; with a stun counter, remove one instead (CR
+    /// 122.1d).
+    pub(crate) fn untap(&mut self, idx: CardIdx) {
+        if self.objs[idx.i()].tapped && self.remove_counters(idx, crate::db::Counter::Stun, 1) == 0 {
+            self.objs[idx.i()].tapped = false;
+        }
+    }
+
+    /// Sacrifice a permanent (CR 701.17): to its owner's graveyard, a
+    /// "sacrificed" event first (seen as it was, 603.10a).
+    pub(crate) fn sacrifice(&mut self, idx: CardIdx) {
+        if self.objs[idx.i()].zone != Zone::Battlefield {
+            return;
+        }
+        let r = self.obj_ref(idx);
+        self.event(Event::obj(EventKind::IsSacrificed, r));
+        self.move_card(idx, Zone::Graveyard, Pos::Top);
     }
 
     pub(crate) fn gain_life(&mut self, p: PlayerId, n: i32) {
         if n > 0 {
             self.players[p as usize].life += n;
+            self.players[p as usize].gained_life = true;
         }
     }
 
     /// Deal damage (CR 120.3): to a player as life loss, to a creature as
     /// marked damage; deathtouch marks 704.5h; lifelink gains life.
-    pub(crate) fn deal_damage(&mut self, src: DamageSource, t: Target, amount: i32) {
+    /// Damage to a permanent with protection from the source is prevented
+    /// (702.16e). Returns the damage dealt.
+    pub(crate) fn deal_damage(&mut self, src: DamageSource, t: Target, amount: i32) -> i32 {
         if amount <= 0 {
-            return;
+            return 0;
         }
         match t {
             Target::Player(p) => {
@@ -666,29 +733,56 @@ impl Game {
             }
             Target::Obj(r) => {
                 if !self.live(r) || self.objs[r.idx.i()].zone != Zone::Battlefield {
-                    return;
+                    return 0;
                 }
                 if !self.is_creature(r.idx) {
-                    return; // planeswalkers and battles: later
+                    return 0; // planeswalkers and battles: later
+                }
+                if self.protected_from(r.idx, &src) {
+                    self.note(|g| format!("damage to {} prevented (protection)", g.describe_target(t)));
+                    return 0;
                 }
                 let o = &mut self.objs[r.idx.i()];
                 o.damage = o.damage.saturating_add(amount as u16);
                 if src.deathtouch {
                     o.deathtouched = true;
                 }
+                let mut ev = Event::obj(EventKind::DealtDamage, r);
+                ev.amount = amount.min(u16::MAX as i32) as u16;
+                self.event(ev);
             }
         }
         if src.lifelink {
             self.gain_life(src.controller, amount);
         }
         self.note(|g| format!("{amount} damage to {}", g.describe_target(t)));
+        amount
     }
 
+    /// Does permanent `c` have protection from a source with these
+    /// characteristics (CR 702.16)?
+    pub(crate) fn protected_from(&self, c: CardIdx, src: &DamageSource) -> bool {
+        let p = self.protection_of(c);
+        if p.is_empty() {
+            return false;
+        }
+        p.everything
+            || p.colors & src.colors != 0
+            || (p.colorless && src.colors == 0)
+            || p.types & src.types != 0
+            || (p.opponents && src.controller != self.objs[c.i()].controller)
+    }
+
+    /// The characteristics of a permanent (or spell) as a source of damage
+    /// or of a targeting spell or ability.
     pub(crate) fn damage_source_of(&self, idx: CardIdx) -> DamageSource {
+        let kws = self.keywords_of(idx);
         DamageSource {
             controller: self.objs[idx.i()].controller,
-            deathtouch: self.has_kw(idx, Kw::Deathtouch),
-            lifelink: self.has_kw(idx, Kw::Lifelink),
+            deathtouch: kws.has(Kw::Deathtouch),
+            lifelink: kws.has(Kw::Lifelink),
+            colors: self.colors_of(idx),
+            types: self.types_of(idx),
         }
     }
 
@@ -706,4 +800,7 @@ pub struct DamageSource {
     pub controller: PlayerId,
     pub deathtouch: bool,
     pub lifelink: bool,
+    /// Its colours and card types (protection, CR 702.16).
+    pub colors: crate::mana::ManaMask,
+    pub types: u16,
 }

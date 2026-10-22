@@ -1,5 +1,6 @@
 //! State-based actions (CR 704; ENGINE.md 9).
 
+use crate::db::Counter;
 use crate::decision::{Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{EndReason, Game, Outcome, Pos};
@@ -65,7 +66,13 @@ impl Game {
         if self.tokens > 0 && !self.stray_tokens().is_empty() {
             return true;
         }
+        if !self.counter_pairs().is_empty() {
+            return true;
+        }
         for (i, &c) in self.battlefield.iter().enumerate() {
+            if self.objs[c.i()].attached.is_some() && self.bad_attachments().contains(&c) {
+                return true;
+            }
             if self.is_creature(c) {
                 let o = &self.objs[c.i()];
                 let t = self.toughness(c);
@@ -86,6 +93,35 @@ impl Game {
         false
     }
 
+    /// 704.5q: permanents with both +1/+1 and -1/-1 counters.
+    fn counter_pairs(&self) -> Vec<CardIdx> {
+        if self.counters.is_empty() {
+            return Vec::new();
+        }
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&c| self.counters_on(c, Counter::P1P1) > 0 && self.counters_on(c, Counter::M1M1) > 0)
+            .collect()
+    }
+
+    /// 704.5n: Equipment attached to an illegal permanent (gone, or not a
+    /// creature).
+    fn bad_attachments(&self) -> Vec<CardIdx> {
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&c| {
+                self.objs[c.i()].attached.is_some_and(|h| {
+                    !self.live(h)
+                        || self.objs[h.idx.i()].zone != Zone::Battlefield
+                        || !self.is_creature(h.idx)
+                        || self.protected_from(h.idx, &self.damage_source_of(c))
+                })
+            })
+            .collect()
+    }
+
     /// Tokens in a zone other than the battlefield (704.5d), in slot order.
     fn stray_tokens(&self) -> Vec<CardIdx> {
         if self.tokens == 0 {
@@ -104,6 +140,8 @@ impl Game {
     pub(crate) fn sba_needed(&self) -> bool {
         let (z, d) = self.dying_creatures();
         !self.stray_tokens().is_empty()
+            || !self.counter_pairs().is_empty()
+            || !self.bad_attachments().is_empty()
             || self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty)
             || !z.is_empty()
             || !d.is_empty()
@@ -169,6 +207,17 @@ impl Game {
             return true;
         }
         let (zero, destroyed) = self.dying_creatures();
+        // 704.5q and 704.5n happen at the same time as the rest.
+        let pairs = self.counter_pairs();
+        for &c in &pairs {
+            let n = self.counters_on(c, Counter::P1P1).min(self.counters_on(c, Counter::M1M1));
+            self.remove_counters(c, Counter::P1P1, n);
+            self.remove_counters(c, Counter::M1M1, n);
+        }
+        let unattach = self.bad_attachments();
+        for &c in &unattach {
+            self.objs[c.i()].attached = None;
+        }
         let mut legend_out: Vec<CardIdx> = Vec::new();
         for (_, g) in groups {
             legend_out.extend(g.iter().copied().filter(|c| !keep.contains(c)));
@@ -181,6 +230,7 @@ impl Game {
         }
         // Battlefield order, so simultaneous events are listed canonically.
         all.sort_by_key(|c| self.objs[c.i()].timestamp);
+        self.begin_batch();
         for &c in &all {
             if destroyed.contains(&c) {
                 self.destroy(c);
@@ -188,6 +238,7 @@ impl Game {
                 self.move_card(c, Zone::Graveyard, Pos::Top);
             }
         }
+        self.end_batch();
         // 704.5d: a token outside the battlefield ceases to exist.
         let stray = self.stray_tokens();
         for &c in &stray {
@@ -197,6 +248,6 @@ impl Game {
         for &c in &self.battlefield {
             self.objs[c.i()].deathtouched = false;
         }
-        !all.is_empty() || !stray.is_empty()
+        !all.is_empty() || !stray.is_empty() || !pairs.is_empty() || !unattach.is_empty()
     }
 }

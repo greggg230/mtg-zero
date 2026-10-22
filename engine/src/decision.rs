@@ -110,6 +110,8 @@ pub enum DecisionKind {
     /// non-decreasing order; `PASS` = no more, once enough are chosen; CR
     /// 700.2).
     ChooseMode,
+    /// A colour (`NUMBER` = W U B R G index; 5 = colorless).
+    ChooseColor,
 }
 
 /// What an action means to the task that asked.

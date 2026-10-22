@@ -56,7 +56,7 @@ impl Game {
                 }
             }
             if let Some(ab) = &def.spell {
-                if !self.targets_available(ab, p, None) {
+                if !self.targets_available(ab, p, Some(self.obj_ref(c))) {
                     continue;
                 }
             }
@@ -136,7 +136,7 @@ impl Game {
     /// At least `n` legal candidates for `tr` (the same order and rules as
     /// [`target_candidates`](Self::target_candidates), without building it).
     fn has_candidates(&self, tr: &TargetReq, ctx: &Ctx, n: usize) -> bool {
-        let ok = |t: Target| self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx.controller);
+        let ok = |t: Target| self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx);
         let players = [ctx.controller, crate::ids::opp(ctx.controller)].into_iter().map(Target::Player);
         let perms = self.battlefield.iter().map(|&c| Target::Obj(self.obj_ref(c)));
         let spells = self.stack.iter().rev().filter_map(|s| match s.kind {
@@ -161,6 +161,7 @@ impl Game {
             targets: Vec::new(),
             cost_option: 0,
             modes: Vec::new(),
+            ev: Default::default(),
         });
         self.agenda.push(Task::CastDone { id });
         self.agenda.push(Task::CastPay { id });
@@ -286,8 +287,27 @@ impl Game {
         self.agenda.push(Task::PayMana(pm));
     }
 
-    /// 601.2i: the spell becomes cast (cast triggers come here later).
-    pub(crate) fn cast_done(&mut self, _id: u32) {}
+    /// 601.2i: the spell becomes cast; "whenever you cast" abilities
+    /// trigger.
+    pub(crate) fn cast_done(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
+        let StackKind::Spell { card } = item.kind else { return };
+        let p = item.controller;
+        let pl = &mut self.players[p as usize];
+        pl.spells_cast = pl.spells_cast.saturating_add(1);
+        if !self.def_of(card).is(types::CREATURE) {
+            let pl = &mut self.players[p as usize];
+            pl.noncreature_cast = pl.noncreature_cast.saturating_add(1);
+        }
+        let r = self.obj_ref(card);
+        self.event(crate::triggers::Event {
+            kind: crate::db::EventKind::IsCast,
+            a: crate::triggers::Subj::Obj(r),
+            b: crate::triggers::Subj::Player(p),
+            amount: 0,
+        });
+    }
 
     // ---- targets (CR 115) --------------------------------------------------
 
@@ -299,7 +319,7 @@ impl Game {
     pub(crate) fn target_candidates(&self, tr: &TargetReq, ctx: &Ctx, exclude: &[Target]) -> Vec<Target> {
         let mut out = Vec::new();
         let consider = |t: Target, out: &mut Vec<Target>| {
-            if !exclude.contains(&t) && self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx.controller) {
+            if !exclude.contains(&t) && self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx) {
                 out.push(t);
             }
         };
@@ -320,18 +340,52 @@ impl Game {
         out
     }
 
-    /// Hexproof and shroud (CR 702.11, 702.18); protection and ward later.
-    pub(crate) fn targetable(&self, t: Target, by: PlayerId) -> bool {
+    /// Hexproof and shroud (CR 702.11, 702.18); protection (702.16b: not
+    /// by spells with that quality, nor abilities from sources with it).
+    pub(crate) fn targetable(&self, t: Target, ctx: &Ctx) -> bool {
         match t {
             Target::Player(_) => true,
             Target::Obj(r) => {
                 if self.objs[r.idx.i()].zone != Zone::Battlefield {
                     return true;
                 }
-                !(self.has_kw(r.idx, Kw::Shroud)
-                    || (self.has_kw(r.idx, Kw::Hexproof) && self.objs[r.idx.i()].controller != by))
+                let k = self.keywords_of(r.idx);
+                if k.has(Kw::Shroud) || (k.has(Kw::Hexproof) && self.objs[r.idx.i()].controller != ctx.controller) {
+                    return false;
+                }
+                match self.source_quality(ctx) {
+                    Some(q) => !self.protected_from(r.idx, &q),
+                    None => true,
+                }
             }
         }
+    }
+
+    /// The characteristics of the object a spell or ability comes from:
+    /// the object itself while it exists, else its definition (last known
+    /// information), found through the ability on the stack or waiting to
+    /// be put there (never through the card, which may be hidden now).
+    pub(crate) fn source_quality(&self, ctx: &Ctx) -> Option<crate::game::DamageSource> {
+        let r = ctx.source?;
+        if self.live(r) && matches!(self.objs[r.idx.i()].zone, Zone::Battlefield | Zone::Stack | Zone::Hand) {
+            return Some(crate::game::DamageSource { controller: ctx.controller, ..self.damage_source_of(r.idx) });
+        }
+        let def = self
+            .stack
+            .iter()
+            .find_map(|s| match s.kind {
+                StackKind::Ability { ability, source } if source == r => Some(ability.def),
+                _ => None,
+            })
+            .or_else(|| self.waiting.iter().find(|w| w.source == r).map(|w| w.source_def))?;
+        let d = self.db.def(def);
+        Some(crate::game::DamageSource {
+            controller: ctx.controller,
+            deathtouch: false,
+            lifelink: false,
+            colors: d.colors,
+            types: d.types,
+        })
     }
 
     /// Is `t` (still) a legal choice for `tr` (CR 608.2b)?
@@ -341,7 +395,7 @@ impl Game {
                 return false;
             }
         }
-        self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx.controller)
+        self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx)
     }
 
     /// Top-level filter. Players and permanents are one universe (a bare
@@ -398,9 +452,9 @@ impl Game {
             Filter::Any => true,
             Filter::Player | Filter::Spell(_) | Filter::Opponent => false,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
-            Filter::Color(m) => def.colors & m != 0,
+            Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) + self.toughness(c) <= *n,
-            Filter::Subtype(s) => def.subtypes.contains(s),
+            Filter::Subtype(s) => self.has_subtype(c, *s),
             Filter::Supertype(bits) => def.supertypes & bits != 0,
             Filter::ManaValueAtMost(n) => def.mana_value() <= *n,
             Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n,
@@ -409,6 +463,8 @@ impl Game {
             Filter::Controller(you) => (self.objs[c.i()].controller == ctx.controller) == *you,
             Filter::Source => ctx.source.is_some_and(|s| s.idx == c && self.live(s)),
             Filter::Token => def.token,
+            Filter::Attacking => self.objs[c.i()].attacking,
+            Filter::Tapped => self.objs[c.i()].tapped,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
             Filter::Not(x) => !self.card_matches(x, c, ctx),

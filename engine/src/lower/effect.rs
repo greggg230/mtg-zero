@@ -56,7 +56,7 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
 }
 
 /// The single `TargetSpec` of an effect -> a target requirement index.
-fn lower_targets(l: &mut Lowerer, b: &mut Builder, specs: &[cats::TargetSpec], what: &str) -> Option<u8> {
+pub(crate) fn lower_targets(l: &mut Lowerer, b: &mut Builder, specs: &[cats::TargetSpec], what: &str) -> Option<u8> {
     if specs.len() != 1 {
         l.unsupported(format!("{what}.targets(len {})", specs.len()));
         return None;
@@ -748,7 +748,11 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             let t = b.target(Filter::Player, 1, 1);
             b.op(Op::Discard { who: Who::TargetPlayer(t), n });
         }
-        other => l.unsupported(format!("Effect:{}", other.tag())),
+        other => {
+            if !super::effect_ext::lower_effect_ext(l, b, other) {
+                l.unsupported(format!("Effect:{}", other.tag()))
+            }
+        }
     }
 }
 

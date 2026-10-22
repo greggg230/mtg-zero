@@ -10,9 +10,12 @@
 
 pub mod activated;
 pub mod effect;
+pub mod effect_ext;
 pub mod filter;
 pub mod printing;
+pub mod statics;
 pub mod support;
+pub mod trigger;
 
 use crate::db::CardDef;
 use card_ir::cats;
@@ -55,6 +58,9 @@ pub struct Lowerer<'a> {
     /// Token definitions the cards create (`Op::CreateToken` indexes).
     pub tokens: &'a mut Vec<CardDef>,
     pub errs: Vec<String>,
+    /// The colours of mana the card being lowered produces as a land
+    /// (`produces`), for consistency checks.
+    pub land_colors: crate::mana::ManaMask,
 }
 
 impl Lowerer<'_> {
@@ -115,7 +121,7 @@ pub fn lower_card(
     tokens: &mut Vec<CardDef>,
 ) -> Result<CardDef, Vec<String>> {
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
-    let mut l = Lowerer { subtypes, tokens, errs: Vec::new() };
+    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0 };
     let def = printing::lower_printing(&mut l, p);
     if l.errs.is_empty() {
         Ok(def)

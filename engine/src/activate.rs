@@ -25,6 +25,12 @@ impl Game {
             }
             Cond::Revolt => pl.left_battlefield,
             Cond::YourTurnAtMost(n) => self.turn.active == p && pl.turns <= *n as u32,
+            Cond::HandAtMost(n) => pl.hand.len() <= *n as usize,
+            Cond::GainedLifeThisTurn => pl.gained_life,
+            Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
+            Cond::SpellsCastThisTurn { n, noncreature } => {
+                (if *noncreature { pl.noncreature_cast } else { pl.spells_cast }) == *n
+            }
         }
     }
 
@@ -132,6 +138,7 @@ impl Game {
             targets: Vec::new(),
             cost_option: 0,
             modes: Vec::new(),
+            ev: Default::default(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });
@@ -269,10 +276,12 @@ impl Game {
         }
         let mut sacs: Vec<CardIdx> = picked.iter().copied().take(n_sac).collect();
         sacs.sort_by_key(|c| self.objs[c.i()].timestamp);
+        self.begin_batch();
         for c in sacs {
             self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
-            self.move_card(c, Zone::Graveyard, Pos::Top);
+            self.sacrifice(c);
         }
+        self.end_batch();
         if cost.life > 0 {
             self.lose_life(p, cost.life as i32);
         }
@@ -284,7 +293,7 @@ impl Game {
             }
         }
         if cost.sac_self {
-            self.move_card(card, Zone::Graveyard, Pos::Top);
+            self.sacrifice(card);
         }
         if cost.discard_self {
             self.move_card(card, Zone::Graveyard, Pos::Top);

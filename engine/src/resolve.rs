@@ -31,9 +31,14 @@ pub(crate) struct Frame {
     /// Per-op floor (reset when `pc` moves): the smallest definition the
     /// next pick of a set may take (each set chosen once).
     pub floor: DefId,
+    /// A triggered ability's event ("that player", "that much").
+    pub ev: crate::triggers::EvCtx,
+    /// A number an op remembered for later ops (a revealed card's mana
+    /// value).
+    pub x: i32,
 }
 
-enum Flow {
+pub(crate) enum Flow {
     Next,
     /// Control flow jumps forward.
     Jump(u16),
@@ -65,6 +70,10 @@ impl Game {
             self.note(|_| "fizzles".to_string());
             return;
         }
+        if !self.intervening_holds(ar, item.controller) {
+            self.note(|_| "intervening if: does nothing".to_string());
+            return; // CR 603.4
+        }
         let source = self.item_source(&item);
         let source_def = match item.kind {
             StackKind::Spell { card } => self.objs[card.i()].def,
@@ -82,6 +91,8 @@ impl Game {
             lki: None,
             pile: Vec::new(),
             floor: 0,
+            ev: item.ev,
+            x: 0,
         };
         let Some(modes) = &ab.modes else {
             self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
@@ -163,7 +174,7 @@ impl Game {
     }
 
     /// Targets of requirement `req` that are still legal (608.2b) and exist.
-    fn targets_of(&self, f: &Frame, req: u8) -> Vec<Target> {
+    pub(crate) fn targets_of(&self, f: &Frame, req: u8) -> Vec<Target> {
         f.targets
             .iter()
             .enumerate()
@@ -180,7 +191,7 @@ impl Game {
     }
 
     /// The player `who` names, if any (an illegal target names nobody).
-    fn who(&self, f: &Frame, who: Who) -> Option<PlayerId> {
+    pub(crate) fn who(&self, f: &Frame, who: Who) -> Option<PlayerId> {
         match who {
             Who::You => Some(f.controller),
             Who::TargetPlayer(i) => self.targets_of(f, i).into_iter().find_map(|t| match t {
@@ -195,29 +206,47 @@ impl Game {
             Who::Active => Some(self.turn.active),
             Who::NonActive => Some(crate::ids::opp(self.turn.active)),
             Who::Opponent => Some(crate::ids::opp(f.controller)),
+            Who::EventPlayer => f.ev.player,
         }
     }
 
-    fn amount(&self, f: &Frame, a: Amount) -> i32 {
+    pub(crate) fn amount(&self, f: &Frame, a: Amount) -> i32 {
         match a {
             Amount::Fixed(n) => n,
             Amount::LkiPower => f.lki.map_or(0, |l| l.0),
+            Amount::EventAmount => f.ev.amount as i32,
+            Amount::SourcePower => {
+                if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
+                    self.power(f.source.idx)
+                } else {
+                    self.db.def(f.source_def).power.unwrap_or(0)
+                }
+            }
+            Amount::LkiManaValue => f.x,
         }
     }
 
     /// The damage source of a resolving spell or ability: the spell itself,
     /// or the ability's source (last known information).
     fn frame_damage_source(&self, f: &Frame) -> DamageSource {
-        let kws = self.db.def(f.source_def).keywords;
+        if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
+            // An ability of a permanent: its current characteristics.
+            return DamageSource { controller: f.controller, ..self.damage_source_of(f.source.idx) };
+        }
+        // A spell, or a source that left (last known information: printed).
+        let d = self.db.def(f.source_def);
         DamageSource {
             controller: f.controller,
-            deathtouch: kws.has(Kw::Deathtouch),
-            lifelink: kws.has(Kw::Lifelink),
+            deathtouch: d.keywords.has(Kw::Deathtouch),
+            lifelink: d.keywords.has(Kw::Lifelink),
+            colors: d.colors,
+            types: d.types,
         }
     }
 
     fn exec(&mut self, f: &mut Frame, op: &Op) -> Flow {
         match *op {
+            Op::Ext(ref e) => self.exec_ext(f, e),
             Op::DealDamage { amount, to } => {
                 let n = self.amount(f, amount);
                 let src = self.frame_damage_source(f);
@@ -382,7 +411,7 @@ impl Game {
             Op::Untap { tgt } => {
                 for t in self.targets_of(f, tgt) {
                     if let Target::Obj(o) = t {
-                        self.objs[o.idx.i()].tapped = false;
+                        self.untap(o.idx);
                     }
                 }
                 Flow::Next
@@ -427,9 +456,11 @@ impl Game {
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                 let all: Vec<crate::ids::CardIdx> =
                     self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
+                self.begin_batch();
                 for c in all {
                     self.destroy(c);
                 }
+                self.end_batch();
                 Flow::Next
             }
             Op::PutInLibrary { tgt, depth } => {
@@ -592,7 +623,7 @@ impl Game {
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
-                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                        self.sacrifice(c);
                         Flow::Next
                     }
                     Some(other) => unreachable!("sacrifice answer {other:?}"),

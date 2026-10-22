@@ -20,12 +20,15 @@ pub mod mana;
 mod pay;
 pub mod program;
 mod resolve;
+mod resolve_ext;
 pub mod rng;
 mod sba;
 pub mod testkit;
+pub mod layers;
 mod triggers;
 
 pub use decision::{act, Choice, Decision, DecisionKind, NUM_ACTIONS};
 pub use game::{Game, GameSpec, Outcome, Step};
 pub use ids::{CardIdx, ObjRef, PlayerId, Target, Zone};
-pub use triggers::PendingTrigger;
+pub use triggers::{EvCtx, PendingTrigger};
+pub use layers::{Affected, Effect, Until};

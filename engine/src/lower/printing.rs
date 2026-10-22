@@ -8,8 +8,8 @@ use super::effect::lower_ability;
 use super::filter::{lower_card_filter, lower_condition};
 use super::Lowerer;
 use crate::db::{
-    supertypes, types, ActEffect, ActivatedDef, CardDef, Cost, EntersTapped, EventKind, Kw, KwSet, ManaAbility,
-    ManaProd, SacCost, TrigFilter, TriggerDef,
+    supertypes, types, ActEffect, ActivatedDef, CardDef, Cost, EntersTapped, EventKind, Filter, Kw, KwSet,
+    ManaAbility, ManaProd, Mod, Prot, SacCost, Scope, Slot, StaticDef, TrigPred, TriggerDef,
 };
 use crate::mana::{letter_index, pair_index, ManaCost, ManaMask};
 use card_ir::{cats, enums, generated, nodes};
@@ -299,8 +299,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.ward_discard_random", ward_discard_random);
         l.deny("CardPrinting.ward_discard_chosen", ward_discard_chosen);
         l.deny("CardPrinting.ward_life_cost", ward_life_cost);
-        l.deny("CardPrinting.equipment_bonuses", equipment_bonuses);
-        l.deny("CardPrinting.doesnt_untap_during_untap_step", doesnt_untap_during_untap_step);
         l.deny("CardPrinting.enters_only_by_discarding_land", enters_only_by_discarding_land);
         l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
         l.deny("CardPrinting.equipment_bonus_per_controlled", equipment_bonus_per_controlled);
@@ -315,20 +313,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.opening_hand_action", opening_hand_action);
         l.deny("CardPrinting.enters_choosing_basic_land_type", enters_choosing_basic_land_type);
         l.deny("CardPrinting.is_chosen_basic_land_type", is_chosen_basic_land_type);
-        l.deny("CardPrinting.enters_with_named_counters", enters_with_named_counters);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
         l.deny("CardPrinting.cost_reductions", cost_reductions);
         l.deny("CardPrinting.external_cost_reductions", external_cost_reductions);
-        l.deny("CardPrinting.static_abilities", static_abilities);
         l.deny("CardPrinting.enters_with_counters_from_x", enters_with_counters_from_x);
         l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
         l.deny_ne("CardPrinting.aura_enchant_type", aura_enchant_type, &generated::defaults::d_CardPrinting_aura_enchant_type());
         l.deny("CardPrinting.aura_yours_only", aura_yours_only);
-        l.deny("CardPrinting.dynamic_pt_formula", dynamic_pt_formula);
         l.deny("CardPrinting.restricts_noncreature_spells_to_one_per_turn", restricts_noncreature_spells_to_one_per_turn);
         l.deny("CardPrinting.opponents_cant_draw_more_than_one_card_each_turn", opponents_cant_draw_more_than_one_card_each_turn);
         l.deny("CardPrinting.opponents_cast_spells_only_at_sorcery_speed", opponents_cast_spells_only_at_sorcery_speed);
@@ -348,9 +343,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.combat_damage_cant_be_prevented", combat_damage_cant_be_prevented);
         l.deny("CardPrinting.grants_toughness_as_damage_for_creatures_you_control", grants_toughness_as_damage_for_creatures_you_control);
         l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
-        l.deny("CardPrinting.protection_from_color", protection_from_color);
         l.deny("CardPrinting.has_convoke", has_convoke);
-        l.deny("CardPrinting.can_only_block_creatures_with_flying", can_only_block_creatures_with_flying);
         l.deny("CardPrinting.flashback_cost", flashback_cost);
         l.deny("CardPrinting.flashback_cost_str", flashback_cost_str);
         l.deny("CardPrinting.has_delve", has_delve);
@@ -398,7 +391,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.each_player_one_spell_per_turn", each_player_one_spell_per_turn);
         l.deny("CardPrinting.opponents_nonbasic_lands_enter_tapped", opponents_nonbasic_lands_enter_tapped);
         l.deny("CardPrinting.spell_cost_increases", spell_cost_increases);
-        l.deny("CardPrinting.cant_be_blocked_by", cant_be_blocked_by);
         l.deny("CardPrinting.your_creatures_combat_damage_cant_be_prevented", your_creatures_combat_damage_cant_be_prevented);
         l.deny("CardPrinting.locks_activated_abilities_of", locks_activated_abilities_of);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
@@ -419,7 +411,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.bestow_cost_str", bestow_cost_str);
         l.deny("CardPrinting.bestow_enchanted_bonus", bestow_enchanted_bonus);
         l.deny("CardPrinting.extra_mana_when_you_tap_creature_for_mana", extra_mana_when_you_tap_creature_for_mana);
-        l.deny("CardPrinting.min_blockers", min_blockers);
         l.deny("CardPrinting.squad_cost", squad_cost);
         l.deny("CardPrinting.squad_cost_str", squad_cost_str);
         l.deny("CardPrinting.offspring_cost", offspring_cost);
@@ -524,9 +515,21 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
 
     let mut kws = KwSet::default();
+    let mut protection = Prot::default();
+    let mut keyword_triggers: Vec<TriggerDef> = Vec::new();
     for k in keywords {
-        if let Some(kw) = lower_keyword(l, k) {
-            kws.insert(kw);
+        match lower_keyword_full(l, k) {
+            Some(KwOrProt::Kw(kw)) => kws.insert(kw),
+            Some(KwOrProt::Prot(p)) => protection.union(&p),
+            Some(KwOrProt::Exalted) => keyword_triggers.push(exalted()),
+            Some(KwOrProt::BattleCry) => keyword_triggers.push(battle_cry()),
+            None => {}
+        }
+    }
+    if let Some(c) = protection_from_color {
+        match letter_index(c) {
+            Some(i) if i < 5 => protection.colors |= 1 << i,
+            _ => l.unsupported(format!("CardPrinting.protection_from_color({c})")),
         }
     }
 
@@ -537,6 +540,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             None => l.unsupported(format!("CardPrinting.produces({s})")),
         }
     }
+    let saved_land_colors = l.land_colors;
+    l.land_colors = prod & crate::mana::COLORS;
     if prod != 0 && ty & types::LAND == 0 {
         // `produces` describes lands (CR 305.6 and land rules text).
         l.unsupported("CardPrinting.produces(non-land)");
@@ -666,11 +671,60 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
 
     let mut triggers = Vec::new();
     for t in triggered_abilities {
-        if let Some(td) = lower_trigger(l, t) {
+        if let Some(td) = super::trigger::lower_trigger(l, t, ty) {
             triggers.push(td);
         }
     }
+    triggers.extend(keyword_triggers);
+    let trig_mask = triggers.iter().fold(0u32, |m, t| m | 1 << t.event as u32);
 
+    // Static abilities (CR 604) and equipment bonuses (301.5).
+    let mut statics = Vec::new();
+    for s in static_abilities {
+        if let Some(st) = super::statics::lower_static(l, s) {
+            statics.push(st);
+        }
+    }
+    if let Some((p, t, names)) = equipment_bonuses {
+        if !subs.contains(&l.subtype("Equipment")) {
+            l.unsupported("CardPrinting.equipment_bonuses(not an Equipment)");
+        }
+        let mut mods = Vec::new();
+        if *p != 0 || *t != 0 {
+            mods.push(Mod::Pt(l.int("equipment_bonuses.power", *p, -99, 99), l.int("equipment_bonuses.toughness", *t, -99, 99)));
+        }
+        let mut set = KwSet::default();
+        for n in names {
+            match super::effect_ext::kw_by_name(n) {
+                Some(k) => set.insert(k),
+                None => l.unsupported(format!("CardPrinting.equipment_bonuses({n})")),
+            }
+        }
+        if !set.is_empty() {
+            mods.push(Mod::Keywords(set));
+        }
+        if !mods.is_empty() {
+            statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods });
+        }
+    }
+    let pt_cda = match dynamic_pt_formula.as_deref() {
+        None => None,
+        Some(f) => super::statics::lower_pt_formula(l, f),
+    };
+    if pt_cda.is_some() && !is_creature {
+        l.unsupported("CardPrinting.dynamic_pt_formula(not a creature)");
+    }
+    let unblockable_by = match cant_be_blocked_by.as_deref() {
+        None => None,
+        Some(p) => super::filter::lower_pred(l, p),
+    };
+    let mut enters_counters = Vec::new();
+    for (name, n) in enters_with_named_counters {
+        let k = super::effect_ext::counter_by_name(l, name);
+        enters_counters.push((k, l.int("CardPrinting.enters_with_named_counters", *n, 1, 99) as u8));
+    }
+
+    l.land_colors = saved_land_colors;
     CardDef {
         name: name.clone(),
         types: ty,
@@ -690,6 +744,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         uncounterable: *spell_is_uncounterable,
         token,
         additional,
+        statics,
+        pt_cda,
+        min_blockers: l.int("CardPrinting.min_blockers", *min_blockers, 0, 9) as u8,
+        blocks_only_flyers: *can_only_block_creatures_with_flying,
+        unblockable_by,
+        no_untap: *doesnt_untap_during_untap_step,
+        enters_counters,
+        trig_mask,
+        protection,
     }
 }
 
@@ -753,6 +816,92 @@ pub(crate) fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -
     out
 }
 
+/// A lowered keyword: a keyword the engine knows by name, protection (CR
+/// 702.16), or a keyword that is a triggered ability (exalted, battle cry).
+pub(crate) enum KwOrProt {
+    Kw(Kw),
+    Prot(Prot),
+    Exalted,
+    BattleCry,
+}
+
+pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
+    let cats::Keyword::Keyword(nodes::Keyword { kind, n, quality }) = k;
+    use enums::KeywordKind as K;
+    match kind {
+        K::ProtectionFrom => {
+            l.deny("Keyword.n", n);
+            let Some(q) = quality else {
+                l.unsupported("Keyword.quality(missing)");
+                return None;
+            };
+            use enums::ProtectionQuality as Q;
+            let mut p = Prot::default();
+            match q {
+                Q::White => p.colors = 1,
+                Q::Blue => p.colors = 2,
+                Q::Black => p.colors = 4,
+                Q::Red => p.colors = 8,
+                Q::Green => p.colors = 16,
+                Q::Colorless => p.colorless = true,
+                Q::Everything => p.everything = true,
+                Q::Creatures => p.types = types::CREATURE,
+                Q::Artifacts => p.types = types::ARTIFACT,
+                Q::Enchantments => p.types = types::ENCHANTMENT,
+                Q::Instants => p.types = types::INSTANT,
+                Q::Sorceries => p.types = types::SORCERY,
+                Q::Planeswalkers => p.types = types::PLANESWALKER,
+                Q::EachOfYourOpponents => p.opponents = true,
+                other => {
+                    l.unsupported(format!("Keyword.quality({other:?})"));
+                    return None;
+                }
+            }
+            return Some(KwOrProt::Prot(p));
+        }
+        K::Exalted | K::BattleCry => {
+            l.deny("Keyword.n", n);
+            l.deny("Keyword.quality", quality);
+            return Some(if *kind == K::Exalted { KwOrProt::Exalted } else { KwOrProt::BattleCry });
+        }
+        _ => {}
+    }
+    lower_keyword(l, k).map(KwOrProt::Kw)
+}
+
+/// Exalted (CR 702.83a): "Whenever a creature you control attacks alone,
+/// that creature gets +1/+1 until end of turn."
+fn exalted() -> TriggerDef {
+    let mut b = crate::program::Builder::default();
+    b.op(crate::program::Op::Ext(crate::program::Ext::Apply {
+        on: crate::program::On::EventObj,
+        mods: vec![Mod::Pt(1, 1)],
+        until: crate::layers::Until::EndOfTurn,
+    }));
+    TriggerDef {
+        event: EventKind::AttacksAlone,
+        pred: TrigPred::Controlled(Slot::Default, true),
+        ability: b.finish(),
+        uses_event: true,
+    }
+}
+
+/// Battle cry (CR 702.91a): "Whenever this creature attacks, each other
+/// attacking creature gets +1/+0 until end of turn."
+fn battle_cry() -> TriggerDef {
+    let mut b = crate::program::Builder::default();
+    let others = Filter::And(
+        Box::new(Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Attacking))),
+        Box::new(Filter::Not(Box::new(Filter::Source))),
+    );
+    b.op(crate::program::Op::Ext(crate::program::Ext::Apply {
+        on: crate::program::On::Each(others),
+        mods: vec![Mod::Pt(1, 0)],
+        until: crate::layers::Until::EndOfTurn,
+    }));
+    TriggerDef { event: EventKind::Attacks, pred: TrigPred::IsSelf(Slot::Default), ability: b.finish(), uses_event: false }
+}
+
 fn lower_keyword(l: &mut Lowerer, k: &cats::Keyword) -> Option<Kw> {
     let cats::Keyword::Keyword(nodes::Keyword { kind, n, quality }) = k;
     l.deny("Keyword.n", n);
@@ -779,57 +928,4 @@ fn lower_keyword(l: &mut Lowerer, k: &cats::Keyword) -> Option<Kw> {
             return None;
         }
     })
-}
-
-fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility) -> Option<TriggerDef> {
-    let cats::TriggeredAbility::TriggeredAbility(nodes::TriggeredAbility {
-        effect,
-        requires_void,
-        once_per_turn,
-        tier_threshold,
-        event,
-        predicate,
-        room_half,
-        functions_in_graveyard,
-    }) = t;
-    l.deny("TriggeredAbility.requires_void", requires_void);
-    l.deny("TriggeredAbility.once_per_turn", once_per_turn);
-    l.deny("TriggeredAbility.tier_threshold", tier_threshold);
-    l.deny("TriggeredAbility.room_half", room_half);
-    l.deny("TriggeredAbility.functions_in_graveyard", functions_in_graveyard);
-    use enums::Event as E;
-    let ev = match event {
-        Some(E::Enters) => Some(EventKind::Enters),
-        Some(E::Dies) => Some(EventKind::Dies),
-        Some(other) => {
-            l.unsupported(format!("Event:{other:?}"));
-            None
-        }
-        None => {
-            l.unsupported("TriggeredAbility.event(missing)");
-            None
-        }
-    };
-    let filter = match predicate.as_deref() {
-        Some(cats::TriggerPredicate::IsSelf(nodes::IsSelf { subject })) => {
-            l.deny("IsSelf.subject", subject);
-            Some(TrigFilter::SelfObj)
-        }
-        Some(other) => {
-            l.unsupported(format!("TriggerPredicate:{}", other.tag()));
-            None
-        }
-        None => {
-            l.unsupported("TriggeredAbility.predicate(missing)");
-            None
-        }
-    };
-    let ability = match effect {
-        Some(e) => lower_ability(l, e),
-        None => {
-            l.unsupported("TriggeredAbility.effect(missing)");
-            return None;
-        }
-    };
-    Some(TriggerDef { event: ev?, filter: filter?, ability })
 }

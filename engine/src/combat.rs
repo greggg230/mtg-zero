@@ -1,6 +1,7 @@
 //! Combat (CR 506-511; ENGINE.md 12).
 
-use crate::db::Kw;
+use crate::db::{EventKind, Kw};
+use crate::triggers::{Event, Subj};
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::Game;
@@ -25,14 +26,42 @@ impl Game {
             && !self.has_kw(c, Kw::Defender)
     }
 
-    /// CR 509.1a-b: untapped; flying attackers need flying or reach.
+    /// Can `b` block `a` (CR 509.1b restrictions)? Flying attackers need
+    /// flying or reach (702.9b); "can't be blocked"; protection (702.16e:
+    /// not by creatures with that quality); "can block only creatures with
+    /// flying"; "can't be blocked by" creatures matching a filter.
     pub(crate) fn can_block(&self, b: CardIdx, a: CardIdx) -> bool {
-        !self.has_kw(a, Kw::Flying) || self.has_kw(b, Kw::Flying) || self.has_kw(b, Kw::Reach)
+        let (ka, kb) = (self.keywords_of(a), self.keywords_of(b));
+        if ka.has(Kw::Flying) && !kb.has(Kw::Flying) && !kb.has(Kw::Reach) {
+            return false;
+        }
+        if self.flags_of(a).cant_be_blocked || self.protected_from(a, &self.damage_source_of(b)) {
+            return false;
+        }
+        if self.def_of(b).blocks_only_flyers && !ka.has(Kw::Flying) {
+            return false;
+        }
+        if let Some(f) = &self.def_of(a).unblockable_by {
+            let ctx = crate::cast::Ctx { controller: self.objs[a.i()].controller, source: Some(self.obj_ref(a)) };
+            if self.card_matches(f, b, &ctx) {
+                return false;
+            }
+        }
+        true
     }
 
+    /// The fewest creatures that may block `a` (menace 702.110b: two; "can't
+    /// be blocked except by three or more creatures").
+    pub(crate) fn min_blockers(&self, a: CardIdx) -> usize {
+        let menace = if self.has_kw(a, Kw::Menace) { 2 } else { 1 };
+        menace.max(self.def_of(a).min_blockers as usize)
+    }
+
+    /// Untapped creatures of the defending player that can block (CR
+    /// 509.1a).
     pub(crate) fn potential_blockers(&self) -> Vec<CardIdx> {
         let dp = opp(self.turn.active);
-        self.creatures_of(dp).filter(|&c| !self.objs[c.i()].tapped).collect()
+        self.creatures_of(dp).filter(|&c| !self.objs[c.i()].tapped && !self.flags_of(c).cant_block).collect()
     }
 
     /// Declare attackers (CR 508.1): one creature per decision in increasing
@@ -49,10 +78,23 @@ impl Game {
             }
             Some(Choice::Pass) => {
                 // CR 508.1f: attackers without vigilance tap.
-                for c in self.attackers() {
+                let attackers = self.attackers();
+                for &c in &attackers {
                     if !self.has_kw(c, Kw::Vigilance) {
                         self.tap(c);
                     }
+                }
+                // CR 508.1m: abilities that trigger on attacking.
+                for &c in &attackers {
+                    let r = self.obj_ref(c);
+                    self.event(Event::obj(EventKind::Attacks, r));
+                }
+                if !attackers.is_empty() {
+                    self.event(Event::player(EventKind::YouAttack, ap));
+                }
+                if let [only] = attackers[..] {
+                    let r = self.obj_ref(only);
+                    self.event(Event::obj(EventKind::AttacksAlone, r)); // exalted
                 }
                 return;
             }
@@ -106,18 +148,21 @@ impl Game {
     }
 
     /// With the current blocks plus `extra`, can the creatures in `rest`
-    /// still make the declaration legal? Menace (702.110b): every attacker
-    /// with menace has zero or at least two blockers. A matching of the
-    /// one-short menace attackers to distinct remaining blockers.
+    /// still make the declaration legal? Every attacker that needs n
+    /// blockers (menace 702.110b: two) has zero or at least n. A matching of
+    /// the missing blocker places of the short attackers to distinct
+    /// remaining blockers.
     fn blocks_completable(&self, extra: Option<(CardIdx, CardIdx)>, rest: &[CardIdx]) -> bool {
         let mut short: Vec<CardIdx> = Vec::new();
         for a in self.attackers() {
-            if !self.has_kw(a, Kw::Menace) {
+            let need = self.min_blockers(a);
+            if need < 2 {
                 continue;
             }
             let n = self.blockers_of(a).len() + extra.map_or(0, |(_, x)| (x == a) as usize);
-            if n == 1 {
-                short.push(a);
+            if n > 0 && n < need {
+                // One place per missing blocker.
+                short.extend(std::iter::repeat_n(a, need - n));
             }
         }
         if short.is_empty() {
@@ -220,11 +265,25 @@ impl Game {
         // CR 510.2: all at once. Sources are read before anything changes.
         let list = std::mem::take(&mut self.combat_dmg);
         let sources: Vec<_> = list.iter().map(|&(s, _, _)| self.damage_source_of(s)).collect();
-        for (&(s, t, n), src) in list.iter().zip(sources) {
+        let refs: Vec<_> = list.iter().map(|&(s, _, _)| self.obj_ref(s)).collect();
+        let mut to_players: Vec<(crate::ids::ObjRef, crate::ids::PlayerId, i32)> = Vec::new();
+        for ((&(s, t, n), src), r) in list.iter().zip(sources).zip(refs) {
             if first {
                 self.objs[s.i()].struck_first = true;
             }
-            self.deal_damage(src, t, n as i32);
+            let dealt = self.deal_damage(src, t, n as i32);
+            if let (Target::Player(p), true) = (t, dealt > 0) {
+                to_players.push((r, p, dealt));
+            }
+        }
+        // CR 510.3a: "deals combat damage to a player" triggers.
+        for (r, p, n) in to_players {
+            self.event(Event {
+                kind: EventKind::DealsCombatDamage,
+                a: Subj::Obj(r),
+                b: Subj::Player(p),
+                amount: n.min(u16::MAX as i32) as u16,
+            });
         }
     }
 
@@ -278,11 +337,27 @@ impl Game {
         } else {
             (lethal..=left).collect()
         };
-        assert!(left < act::NUMBER_N, "damage {left} exceeds the NUMBER range");
-        let opts = amounts
-            .into_iter()
-            .map(|n| Opt { action: act::NUMBER + n, choice: Choice::Number(n as u8) })
-            .collect();
+        assert!(left <= u8::MAX as u16, "damage {left} exceeds the choice range");
+        // `NUMBER` n = n damage. With more than 31 to divide, the amounts
+        // offered are 0..=29 exactly, the blocker's lethal damage (id 30)
+        // and all of the rest (id 31): the divisions that differ in what
+        // dies and what tramples over (ENGINE.md 13).
+        let opts = if left < act::NUMBER_N {
+            amounts.into_iter().map(|n| Opt { action: act::NUMBER + n, choice: Choice::Number(n as u8) }).collect()
+        } else {
+            let mut v: Vec<Opt> = amounts
+                .iter()
+                .filter(|&&n| n <= 29)
+                .map(|&n| Opt { action: act::NUMBER + n, choice: Choice::Number(n as u8) })
+                .collect();
+            if lethal > 29 && amounts.contains(&lethal) {
+                v.push(Opt { action: act::NUMBER + 30, choice: Choice::Number(lethal as u8) });
+            }
+            if left > 29 && left != lethal && amounts.contains(&left) {
+                v.push(Opt { action: act::NUMBER + 31, choice: Choice::Number(left as u8) });
+            }
+            v
+        };
         let ap = self.turn.active;
         self.ask(Task::AssignDamage { att, j, left }, ap, DecisionKind::AssignDamage, opts);
     }

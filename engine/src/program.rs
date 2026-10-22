@@ -3,7 +3,8 @@
 //! cards; new IR classes should lower onto existing ops where the CR
 //! semantics match.
 
-use crate::db::{AbilityDef, Cond, Filter, ManaProd, TargetReq};
+use crate::db::{AbilityDef, Cond, Counter, Filter, ManaProd, Mod, TargetReq};
+use crate::layers::Until;
 use crate::mana::ManaCost;
 
 /// Which player an op acts on.
@@ -24,6 +25,8 @@ pub enum Who {
     NonActive,
     /// The controller's opponent ("each opponent", 2p).
     Opponent,
+    /// The player of the triggered ability's event ("that player").
+    EventPlayer,
 }
 
 /// A number an op uses.
@@ -32,6 +35,71 @@ pub enum Amount {
     Fixed(i32),
     /// The power of the object last remembered (`Op::Remember`).
     LkiPower,
+    /// The amount of the triggered ability's event ("that much damage").
+    EventAmount,
+    /// The source's power now (its last known power if it left).
+    SourcePower,
+    /// The mana value of the card last remembered (`Ext::RevealTopToHand`).
+    LkiManaValue,
+}
+
+/// Which objects an `Ext` op acts on.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum On {
+    /// Each legal target of requirement i.
+    Target(u8),
+    /// The ability's source, if it is still the same object on the
+    /// battlefield.
+    Source,
+    /// The object of the triggered ability's event ("that creature"), if
+    /// it is still the same object on the battlefield.
+    EventObj,
+    /// Each permanent matching the filter at resolution ("creatures you
+    /// control"; "you" is the controller, "another" excludes the source).
+    Each(Filter),
+}
+
+/// Effect instructions added after the network layout v1 fixed the list of
+/// ops (`az::encode` encodes them as one kind). Same rules as `Op`: named
+/// after rules actions, never cards.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Ext {
+    /// Each object of `on` gets the mods (CR 611.2; the objects are locked
+    /// in at resolution, 611.2c), until `until`.
+    Apply { on: On, mods: Vec<Mod>, until: Until },
+    /// A rules effect (no characteristic changes) on every permanent
+    /// matching the filter at any time while it lasts ("creatures target
+    /// player controls can't block this turn"); the filter's "you" is
+    /// player `who`.
+    ApplyRules { filter: Filter, who: Who, m: Mod, until: Until },
+    /// Each object of `on` gains protection from the colour of the
+    /// controller's choice (or colorless if `colorless`) until `until`.
+    /// Choice: `NUMBER` = colour index W U B R G, 5 = colorless.
+    ProtectionChoice { on: On, colorless: bool, until: Until },
+    /// Put n counters of a kind on each object of `on` (CR 122.6).
+    PutCounters { on: On, counter: Counter, n: Amount },
+    /// Tap each object of `on`.
+    Tap { on: On },
+    /// Untap each object of `on` (a stun counter is removed instead).
+    Untap { on: On },
+    /// Attach the source (an Equipment) to the first legal target of
+    /// requirement `tgt` (CR 701.3; equip, 702.6).
+    Attach { tgt: u8 },
+    /// The source fights the first legal target of requirement `tgt` (CR
+    /// 701.14): each deals damage equal to its power to the other.
+    Fight { tgt: u8 },
+    /// `who` mills n cards (CR 701.13).
+    Mill { who: Who, n: Amount },
+    /// `who` reveals the top card of their library and puts it into their
+    /// hand; its mana value is remembered (`Amount::LkiManaValue`).
+    RevealTopToHand { who: Who },
+    /// Unless the source is still on the battlefield and matches `filter`,
+    /// continue at `to` ("if this creature is a Spirit").
+    JumpUnlessSource { filter: Filter, to: u16 },
+    /// "You may discard a card. If you do, ...": the controller discards a
+    /// card of their choice, or declines and continues at `skip`. Choice:
+    /// a hand card, or `PASS`.
+    MayDiscard { skip: u16 },
 }
 
 /// Where a countered spell goes (CR 701.5a; Memory Lapse).
@@ -176,15 +244,40 @@ pub enum Op {
     /// it; that player discards that card"). With `optional` the chooser
     /// may choose nothing.
     ChooseDiscard { chooser: Who, whose: Who, filter: Filter, optional: bool },
+    /// The instructions of `Ext`.
+    Ext(Ext),
 }
 
 impl Op {
+    /// Does the op read its triggered ability's event?
+    pub fn uses_event(&self) -> bool {
+        let amt = |a: &Amount| matches!(a, Amount::EventAmount);
+        let who = |w: &Who| matches!(w, Who::EventPlayer);
+        match self {
+            Op::Ext(Ext::Apply { on, .. })
+            | Op::Ext(Ext::ProtectionChoice { on, .. })
+            | Op::Ext(Ext::Tap { on })
+            | Op::Ext(Ext::Untap { on }) => matches!(on, On::EventObj),
+            Op::Ext(Ext::PutCounters { on, n, .. }) => matches!(on, On::EventObj) || amt(n),
+            Op::Ext(Ext::ApplyRules { who: w, .. }) | Op::Ext(Ext::RevealTopToHand { who: w }) => who(w),
+            Op::Ext(Ext::Mill { who: w, n }) => who(w) || amt(n),
+            Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
+            Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
+            Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {
+                who(w) || amt(n)
+            }
+            _ => false,
+        }
+    }
+
     /// The forward jump target of a control-flow op.
     fn jump_target(&mut self) -> Option<&mut u16> {
         match self {
             Op::Jump { to } | Op::JumpUnless { to, .. } | Op::JumpUnlessTarget { to, .. } => Some(to),
             Op::May { skip, .. } => Some(skip),
             Op::OfferPay { if_paid, .. } => Some(if_paid),
+            Op::Ext(Ext::JumpUnlessSource { to, .. }) => Some(to),
+            Op::Ext(Ext::MayDiscard { skip }) => Some(skip),
             _ => None,
         }
     }

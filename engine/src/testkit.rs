@@ -7,6 +7,13 @@ use crate::game::{Game, GameSpec, Step};
 use crate::ids::{CardIdx, PlayerId, Target, Zone};
 use std::hash::{Hash, Hasher};
 
+/// A hash of a value (for `view_of`).
+fn h64<T: Hash>(x: &T) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    x.hash(&mut h);
+    h.finish()
+}
+
 /// Build a game in a chosen position: zones by card name, then start at a
 /// step with its turn-based actions (e.g. `Step::Main1` -> priority).
 pub struct Scenario {
@@ -80,6 +87,9 @@ impl Scenario {
             self.g.objs[c.i()].timestamp = self.g.next_ts;
             self.g.objs[c.i()].control_since = 0;
             self.g.battlefield.push(c);
+            if !self.g.def_of(c).statics.is_empty() {
+                self.g.n_static += 1;
+            }
         }
         self
     }
@@ -245,6 +255,11 @@ impl Game {
             let o = &self.objs[c.i()];
             v.extend([o.def as u64, o.owner as u64, o.controller as u64, o.tapped as u64, o.damage as u64]);
             v.extend([o.attacking as u64, o.blocked as u64, o.blocking.is_some() as u64]);
+            // Counters and attachments (public, CR 122, 301.5).
+            for (k, n) in self.counters_of(c) {
+                v.extend([h64(&k), n as u64]);
+            }
+            v.push(o.attached.map_or(u64::MAX, |h| self.battlefield.iter().position(|&x| x == h.idx).unwrap_or(999) as u64));
         };
         for &c in &self.battlefield {
             obj(&mut v, c);
@@ -299,6 +314,17 @@ impl Game {
         }
         for w in &self.waiting {
             v.extend([w.controller as u64, w.source_def as u64, w.slot as u64]);
+        }
+        v.push(u64::MAX);
+        // Continuous effects (public), with the objects they affect by
+        // place.
+        for e in &self.effects {
+            v.extend([e.ts as u64, e.controller as u64, e.until as u64]);
+            match &e.on {
+                crate::layers::Affected::Obj(r) => v.push(500 + place(r.idx)),
+                crate::layers::Affected::Group(_) => v.push(1),
+            }
+            v.push(h64(&e.m));
         }
         v.push(u64::MAX);
         for p in 0..2u8 {
@@ -370,6 +396,9 @@ impl Game {
         self.clouds.hash(&mut h);
         self.tokens.hash(&mut h);
         self.observer.hash(&mut h);
+        self.effects.hash(&mut h);
+        self.counters.hash(&mut h);
+        self.n_static.hash(&mut h);
         h.finish()
     }
 

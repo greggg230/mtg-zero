@@ -56,7 +56,7 @@ pub mod supertypes {
 }
 
 /// Keyword abilities the engine implements (CR 702).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[repr(u8)]
 pub enum Kw {
     Flying,
@@ -76,6 +76,27 @@ pub enum Kw {
     Indestructible,
 }
 
+impl Kw {
+    /// Keywords a keyword counter can grant (CR 122.1b).
+    pub fn from_counter_name(s: &str) -> Option<Kw> {
+        Some(match s {
+            "flying" => Kw::Flying,
+            "first strike" => Kw::FirstStrike,
+            "double strike" => Kw::DoubleStrike,
+            "deathtouch" => Kw::Deathtouch,
+            "hexproof" => Kw::Hexproof,
+            "indestructible" => Kw::Indestructible,
+            "lifelink" => Kw::Lifelink,
+            "menace" => Kw::Menace,
+            "reach" => Kw::Reach,
+            "trample" => Kw::Trample,
+            "vigilance" => Kw::Vigilance,
+            "haste" => Kw::Haste,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub struct KwSet(pub u32);
 
@@ -87,6 +108,116 @@ impl KwSet {
     pub fn insert(&mut self, k: Kw) {
         self.0 |= 1 << k as u32;
     }
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// What a protection ability protects from (CR 702.16a): a quality of the
+/// other object, or a player.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub struct Prot {
+    /// Colours (W U B R G = bits 0..4).
+    pub colors: ManaMask,
+    pub colorless: bool,
+    /// Protection from everything (702.16k).
+    pub everything: bool,
+    /// Card types of the other object (`types::*`): creatures, instants.
+    pub types: u16,
+    /// From the protected permanent's controller's opponents (702.16j:
+    /// "from each of your opponents"; evaluated against its controller).
+    pub opponents: bool,
+    /// From the player chosen as the permanent entered (True-Name Nemesis).
+    pub chosen_player: bool,
+}
+
+impl Prot {
+    pub fn is_empty(&self) -> bool {
+        *self == Prot::default()
+    }
+    pub fn union(&mut self, o: &Prot) {
+        self.colors |= o.colors;
+        self.colorless |= o.colorless;
+        self.everything |= o.everything;
+        self.types |= o.types;
+        self.opponents |= o.opponents;
+        self.chosen_player |= o.chosen_player;
+    }
+}
+
+/// What a continuous effect or static ability does to an object (CR 613).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Mod {
+    /// Layer 4: gains card types; gains subtypes (with `replace`, its
+    /// creature types become exactly these, CR 205.1b).
+    Types { add: u16, subtypes: Vec<u16>, replace: bool },
+    /// Layer 5: its colours become exactly these.
+    Colors(ManaMask),
+    /// Layer 6: gains keywords.
+    Keywords(KwSet),
+    /// Layer 6: gains protection.
+    Protection(Prot),
+    /// Layer 7b: its base power and toughness become p/t.
+    SetPt(i32, i32),
+    /// Layer 7c: +p/+t.
+    Pt(i32, i32),
+    /// Rules effects (not characteristics): it can't block.
+    CantBlock,
+    /// It can't be blocked.
+    CantBeBlocked,
+}
+
+/// Which objects a static ability affects (CR 611.3a: re-evaluated
+/// continuously).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Scope {
+    /// The permanent itself.
+    This,
+    /// The creature it equips (CR 301.5).
+    Equipped,
+    /// Permanents matching the filter, relative to the source (its
+    /// controller is "you"); `other`: not the source itself. The filter
+    /// uses types, subtypes, controller and token-ness only (never power
+    /// or toughness, which statics change).
+    Matching { filter: Filter, other: bool },
+}
+
+/// A static ability that modifies objects (CR 604, 611.3), while its
+/// condition holds for its controller.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct StaticDef {
+    pub scope: Scope,
+    pub cond: Option<Cond>,
+    pub mods: Vec<Mod>,
+}
+
+/// A counter kind (CR 122).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum Counter {
+    /// +1/+1 (122.1a).
+    P1P1,
+    /// -1/-1.
+    M1M1,
+    /// A keyword counter (122.1b).
+    Kw(Kw),
+    /// A stun counter (122.1d): untapping removes one instead.
+    Stun,
+    /// Any other named counter (interned name: level, story, ...).
+    Named(u16),
+}
+
+/// A characteristic-defining power / toughness (CR 604.3, layer 7a).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum PtCda {
+    /// Power = card types among cards in all graveyards; toughness = that
+    /// plus `plus` (the Lhurgoyfs).
+    GraveyardTypes { plus: i32 },
+    /// Power = the permanents you control matching the filter (a static
+    /// scope filter: types, subtypes, controller); toughness printed.
+    PowerCount(Filter),
+    /// Power and toughness = basic land types among lands you control
+    /// (domain).
+    Domain,
 }
 
 /// A predicate over targets (players and objects). At top level the type
@@ -128,6 +259,10 @@ pub enum Filter {
     Any,
     /// A token (CR 111).
     Token,
+    /// An attacking creature (CR 506.4).
+    Attacking,
+    /// A tapped permanent.
+    Tapped,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -158,6 +293,12 @@ pub struct Modes {
 }
 
 impl AbilityDef {
+    /// Does any op (of any mode) read a triggered ability's event?
+    pub fn uses_event(&self) -> bool {
+        self.program.iter().any(|op| op.uses_event())
+            || self.modes.as_ref().is_some_and(|m| m.list.iter().any(|x| x.uses_event()))
+    }
+
     /// Does any part of it target (any mode, for a modal one)?
     pub fn has_targets(&self) -> bool {
         !self.targets.is_empty() || self.modes.as_ref().is_some_and(|m| m.list.iter().any(|x| x.has_targets()))
@@ -173,27 +314,138 @@ impl AbilityDef {
     }
 }
 
-/// Events triggered abilities listen for (ENGINE.md 8).
+/// Events triggered abilities listen for (ENGINE.md 8). Each kind has one
+/// or two subjects (`Slot`): the event's object or player, as noted.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[repr(u8)]
 pub enum EventKind {
-    /// A permanent entered the battlefield (CR 603.6a).
+    /// A permanent entered the battlefield (CR 603.6a). Subject: obj.
     Enters,
-    /// A creature was put into a graveyard from the battlefield (CR 700.4).
+    /// A permanent was put into a graveyard from the battlefield ("dies"
+    /// for a creature, CR 700.4). Subject: obj (last known information).
     Dies,
+    /// A permanent left the battlefield (603.6c). Subject: obj.
+    LeavesBattlefield,
+    /// A creature was declared as an attacker (508.1m). Subject: attacker.
+    Attacks,
+    /// The active player declared one or more attackers. Subject: player.
+    YouAttack,
+    /// A creature dealt combat damage to a player (510.3a). Subjects:
+    /// source, target (the player); with the amount.
+    DealsCombatDamage,
+    /// A spell was cast (601.2i). Subjects: spell, controller.
+    IsCast,
+    /// A player drew a card (121.2). Subject: player.
+    DrawsCard,
+    /// A permanent became tapped. Subject: obj.
+    BecomesTapped,
+    /// A permanent was sacrificed (701.17). Subject: obj.
+    IsSacrificed,
+    /// The beginning of a step or phase (503.1a, 507.1, ...). Subject: the
+    /// active player.
+    BeginningOfUpkeep,
+    BeginningOfDrawStep,
+    BeginningOfPrecombatMain,
+    BeginningOfCombat,
+    BeginningOfEndStep,
+    /// A permanent was dealt damage. Subject: obj; with the amount.
+    DealtDamage,
+    /// A creature attacks alone (exalted, CR 702.83a). Subject: attacker.
+    AttacksAlone,
 }
 
-/// Which objects a trigger watches.
+impl EventKind {
+    /// The event's subject for a slot (`Default`: its only subject).
+    /// `Some(0)` = the first subject, `Some(1)` = the second.
+    pub fn slot_index(self, s: Slot) -> Option<u8> {
+        use EventKind as E;
+        let names: (&[Slot], &[Slot]) = match self {
+            E::Enters | E::Dies | E::LeavesBattlefield | E::BecomesTapped | E::IsSacrificed | E::DealtDamage => {
+                (&[Slot::Obj], &[])
+            }
+            E::Attacks | E::AttacksAlone => (&[Slot::Attacker], &[]),
+            E::YouAttack
+            | E::DrawsCard
+            | E::BeginningOfUpkeep
+            | E::BeginningOfDrawStep
+            | E::BeginningOfPrecombatMain
+            | E::BeginningOfCombat
+            | E::BeginningOfEndStep => (&[Slot::Player], &[]),
+            E::DealsCombatDamage => (&[Slot::Source], &[Slot::Target]),
+            E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
+        };
+        match s {
+            Slot::Default if names.1.is_empty() => Some(0),
+            Slot::Default => None,
+            s if names.0.contains(&s) => Some(0),
+            s if names.1.contains(&s) => Some(1),
+            _ => None,
+        }
+    }
+}
+
+/// A named subject of an event (the IR's `EventSubject`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum TrigFilter {
-    /// The event's subject is the trigger's own source ("When this ...").
-    SelfObj,
+pub enum Slot {
+    /// The event's only subject.
+    Default,
+    Obj,
+    Attacker,
+    Source,
+    Target,
+    Spell,
+    Controller,
+    Player,
+}
+
+/// When a triggered ability triggers (CR 603.2), over the event's subjects
+/// and the ability's source.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum TrigPred {
+    Always,
+    And(Box<TrigPred>, Box<TrigPred>),
+    Or(Box<TrigPred>, Box<TrigPred>),
+    Not(Box<TrigPred>),
+    /// The subject is the ability's source ("this creature").
+    IsSelf(Slot),
+    /// The subject (an object, or a player) matches the filter.
+    Subject(Slot, Filter),
+    /// The subject (an object: its controller; a player: itself) is the
+    /// ability's controller (`true`) or an opponent.
+    Controlled(Slot, bool),
+    /// An intervening "if" (CR 603.4): checked when the event happens and
+    /// again on resolution.
+    If(Cond),
+    /// A condition of the trigger event itself, checked when it happens
+    /// only ("whenever you cast your second spell each turn").
+    State(Cond),
+}
+
+impl TrigPred {
+    /// The intervening "if" clauses at the top level (re-checked on
+    /// resolution, CR 603.4).
+    pub fn intervening(&self) -> Vec<&Cond> {
+        match self {
+            TrigPred::If(c) => vec![c],
+            TrigPred::And(a, b) => {
+                let mut v = a.intervening();
+                v.extend(b.intervening());
+                v
+            }
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TriggerDef {
     pub event: EventKind,
-    pub filter: TrigFilter,
+    pub pred: TrigPred,
     pub ability: AbilityDef,
+    /// Its effect reads the event ("that creature", "that player", "that
+    /// much"): two instances with different events are not
+    /// interchangeable.
+    pub uses_event: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -224,6 +476,15 @@ pub enum Cond {
     Revolt,
     /// It is your turn and one of your first n turns of the game.
     YourTurnAtMost(u8),
+    /// You have at most n cards in hand.
+    HandAtMost(u8),
+    /// You gained life this turn.
+    GainedLifeThisTurn,
+    /// An opponent has more cards in hand than you.
+    OpponentHasMoreCards,
+    /// You have cast exactly n spells this turn (noncreature ones only if
+    /// `noncreature`).
+    SpellsCastThisTurn { n: u8, noncreature: bool },
 }
 
 /// What a mana ability makes (CR 106.1, 605.1a).
@@ -371,6 +632,25 @@ pub struct CardDef {
     pub additional: Vec<Cost>,
     /// A token's definition (CR 111): created by effects, never in a deck.
     pub token: bool,
+    /// Static abilities that modify objects (CR 604, 613).
+    pub statics: Vec<StaticDef>,
+    /// A characteristic-defining power / toughness (layer 7a).
+    pub pt_cda: Option<PtCda>,
+    /// "Can't be blocked except by n or more creatures" (CR 509.1b; 0 = no
+    /// such ability; menace is the keyword).
+    pub min_blockers: u8,
+    /// "Can block only creatures with flying."
+    pub blocks_only_flyers: bool,
+    /// "Can't be blocked by" creatures matching this filter.
+    pub unblockable_by: Option<Filter>,
+    /// "Doesn't untap during your untap step" (CR 502.3).
+    pub no_untap: bool,
+    /// Counters it enters the battlefield with (CR 122.6).
+    pub enters_counters: Vec<(Counter, u8)>,
+    /// Bit k set: one of its triggered abilities listens for `EventKind` k.
+    pub trig_mask: u32,
+    /// Printed protection (CR 702.16).
+    pub protection: Prot,
 }
 
 impl CardDef {
