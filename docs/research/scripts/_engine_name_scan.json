@@ -1,0 +1,3103 @@
+{
+ "n_hits": 130,
+ "by_layer": {
+  "cards": 27,
+  "parser": 101,
+  "engine": 2
+ },
+ "cube_hits_by_layer": {
+  "cards": 11,
+  "parser": 13,
+  "engine": 1
+ },
+ "by_file": {
+  "src/mtg_bot/cards/parser/cube_enchantments.py": 45,
+  "src/mtg_bot/cards/parser/enchantment_builder.py": 28,
+  "src/mtg_bot/cards/lands.py": 24,
+  "src/mtg_bot/cards/parser/room_builder.py": 15,
+  "src/mtg_bot/cards/parser/precise_grammar.py": 5,
+  "src/mtg_bot/cards/parser/spell_builder.py": 4,
+  "src/mtg_bot/cards/demo_layers.py": 3,
+  "src/mtg_bot/cards/parser/creature_wg_effects.py": 2,
+  "src/mtg_bot/cards/parser/keywords.py": 2,
+  "src/mtg_bot/decks.py": 1,
+  "src/mtg_bot/parity/cross_engine.py": 1
+ },
+ "hits": [
+  {
+   "file": "src/mtg_bot/cards/demo_layers.py",
+   "line": 157,
+   "name": "Blood Moon",
+   "use": "call:make_enchantment",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/demo_layers.py",
+   "line": 163,
+   "name": "Painter's Servant",
+   "use": "call:make_artifact",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/demo_layers.py",
+   "line": 182,
+   "name": "Urborg, Tomb of Yawgmoth",
+   "use": "call:CardPrinting",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 35,
+   "name": "Adagia, Windswept Bastion",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 38,
+   "name": "Uthros, Titanic Godcore",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 41,
+   "name": "Susur Secundi, Void Altar",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 44,
+   "name": "Kavaron, Memorial World",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 47,
+   "name": "Evendo, Waking Haven",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 36,
+   "name": "Adagia, Windswept Bastion",
+   "use": "call:make_planet_land",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 39,
+   "name": "Uthros, Titanic Godcore",
+   "use": "call:make_planet_land",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 42,
+   "name": "Susur Secundi, Void Altar",
+   "use": "call:make_planet_land",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 45,
+   "name": "Kavaron, Memorial World",
+   "use": "call:make_planet_land",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 48,
+   "name": "Evendo, Waking Haven",
+   "use": "call:make_planet_land",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 63,
+   "name": "Secluded Starforge",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 98,
+   "name": "Command Bridge",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 64,
+   "name": "Secluded Starforge",
+   "use": "call:make_utility_land",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 99,
+   "name": "Command Bridge",
+   "use": "call:make_utility_land",
+   "layer": "cards",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 118,
+   "name": "Breeding Pool",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 121,
+   "name": "Godless Shrine",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 124,
+   "name": "Sacred Foundry",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 127,
+   "name": "Stomping Ground",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 130,
+   "name": "Watery Grave",
+   "use": "dict_key_or_value",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 119,
+   "name": "Breeding Pool",
+   "use": "call:make_shock_land",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 122,
+   "name": "Godless Shrine",
+   "use": "call:make_shock_land",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 125,
+   "name": "Sacred Foundry",
+   "use": "call:make_shock_land",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 128,
+   "name": "Stomping Ground",
+   "use": "call:make_shock_land",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/lands.py",
+   "line": 131,
+   "name": "Watery Grave",
+   "use": "call:make_shock_land",
+   "layer": "cards",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/creature_wg_effects.py",
+   "line": 257,
+   "name": "Kona, Rescue Beastie",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/creature_wg_effects.py",
+   "line": 262,
+   "name": "Enduring Courage",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 66,
+   "name": "Aang's Iceberg",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 67,
+   "name": "Aluren",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 68,
+   "name": "Animate Dead",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 69,
+   "name": "Back to Basics",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 70,
+   "name": "Blood Moon",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 71,
+   "name": "Bridge from Below",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 72,
+   "name": "Carpet of Flowers",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 73,
+   "name": "Chains of Mephistopheles",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 74,
+   "name": "Chthonian Nightmare",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 75,
+   "name": "Dream Halls",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 76,
+   "name": "Drop of Honey",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 77,
+   "name": "Earthcraft",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 78,
+   "name": "Exploration",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 79,
+   "name": "Fastbond",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 80,
+   "name": "Goblin Bombardment",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 81,
+   "name": "Grim Reaper's Sprint",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 82,
+   "name": "High Noon",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 83,
+   "name": "Jeskai Ascendancy",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 84,
+   "name": "Leyline Binding",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 87,
+   "name": "Leyline of the Void",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 88,
+   "name": "Moat",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 89,
+   "name": "Momentum Breaker",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 90,
+   "name": "Mystic Remora",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 91,
+   "name": "Necromancy",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 92,
+   "name": "Necropotence",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 93,
+   "name": "Nether Void",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 94,
+   "name": "Oath of Druids",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 95,
+   "name": "Omniscience",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 96,
+   "name": "Opposition",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 97,
+   "name": "Parallax Wave",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 98,
+   "name": "Pernicious Deed",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 99,
+   "name": "Recurring Nightmare",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 100,
+   "name": "Rest in Peace",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 101,
+   "name": "Seal of Cleansing",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 102,
+   "name": "Sneak Attack",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 103,
+   "name": "Squandered Resources",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 104,
+   "name": "Stony Silence",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 105,
+   "name": "Survival of the Fittest",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 106,
+   "name": "Tarmogoyf Nest",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 107,
+   "name": "Temporary Lockdown",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 108,
+   "name": "Touch the Spirit Realm",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 109,
+   "name": "Unable to Scream",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 110,
+   "name": "Underworld Breach",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 111,
+   "name": "Utopia Sprawl",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/cube_enchantments.py",
+   "line": 112,
+   "name": "Yawgmoth's Bargain",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 373,
+   "name": "Cryoshatter",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 374,
+   "name": "Frantic Strength",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 375,
+   "name": "Hardlight Containment",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 376,
+   "name": "Meltstrider's Resolve",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 377,
+   "name": "Pain for All",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 379,
+   "name": "Cracked Skull",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 380,
+   "name": "Duskmourn's Domination",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 381,
+   "name": "Shardmage's Rescue",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 382,
+   "name": "Sheltered by Ghosts",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 383,
+   "name": "Sporogenic Infection",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 384,
+   "name": "Stay Hidden, Stay Silent",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 386,
+   "name": "Moonlit Meditation",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 387,
+   "name": "Tractor Beam",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 393,
+   "name": "Chorale of the Void",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 708,
+   "name": "Leyline of Mutation",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 713,
+   "name": "Deafening Silence",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 714,
+   "name": "Burgeoning",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 718,
+   "name": "Banishing Light",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 719,
+   "name": "Seam Rip",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 720,
+   "name": "Trapped in the Screen",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 725,
+   "name": "Eusocial Engineering",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 729,
+   "name": "Weapons Manufacturing",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 733,
+   "name": "Loading Zone",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 736,
+   "name": "Bioengineered Future",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 739,
+   "name": "Leyline of Mutation",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 742,
+   "name": "Weftwalking",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 751,
+   "name": "Terrasymbiosis",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/enchantment_builder.py",
+   "line": 761,
+   "name": "Sothera, the Supervoid",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/keywords.py",
+   "line": 26,
+   "name": "Flash",
+   "use": "dict_key_or_value",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/keywords.py",
+   "line": 39,
+   "name": "Persist",
+   "use": "dict_key_or_value",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/precise_grammar.py",
+   "line": 46,
+   "name": "Divert Disaster",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/precise_grammar.py",
+   "line": 49,
+   "name": "Don't Make a Sound",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/precise_grammar.py",
+   "line": 52,
+   "name": "Archenemy's Charm",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/precise_grammar.py",
+   "line": 56,
+   "name": "Scorching Dragonfire",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/precise_grammar.py",
+   "line": 61,
+   "name": "Break Down the Door",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 65,
+   "name": "Bottomless Pool // Locker Room",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 66,
+   "name": "Charred Foyer // Warped Space",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 67,
+   "name": "Derelict Attic // Widow's Walk",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 68,
+   "name": "Funeral Room // Awakening Hall",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 69,
+   "name": "Glassworks // Shattered Yard",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 70,
+   "name": "Grand Entryway // Elegant Rotunda",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 71,
+   "name": "Meat Locker // Drowned Diner",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 72,
+   "name": "Mirror Room // Fractured Realm",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 73,
+   "name": "Moldering Gym // Weight Room",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 74,
+   "name": "Restricted Office // Lecture Hall",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 75,
+   "name": "Roaring Furnace // Steaming Sauna",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 76,
+   "name": "Surgical Suite // Hospital Room",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 77,
+   "name": "Ticket Booth // Tunnel of Hate",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 78,
+   "name": "Underwater Tunnel // Slimy Aquarium",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/room_builder.py",
+   "line": 79,
+   "name": "Unholy Annex // Ritual Chamber",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/spell_builder.py",
+   "line": 1034,
+   "name": "Break Down the Door",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/spell_builder.py",
+   "line": 1035,
+   "name": "Get Out",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/spell_builder.py",
+   "line": 1036,
+   "name": "Sheoldred's Edict",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": true
+  },
+  {
+   "file": "src/mtg_bot/cards/parser/spell_builder.py",
+   "line": 1037,
+   "name": "Untimely Malfunction",
+   "use": "call:frozenset",
+   "layer": "parser",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/decks.py",
+   "line": 58,
+   "name": "Paradox Haze",
+   "use": "call:frozenset",
+   "layer": "engine",
+   "in_cube": false
+  },
+  {
+   "file": "src/mtg_bot/parity/cross_engine.py",
+   "line": 24013,
+   "name": "Counterspell",
+   "use": "assign",
+   "layer": "engine",
+   "in_cube": true
+  }
+ ],
+ "flag_consumers": {
+  "field:ActivationCost.tap_self": {
+   "cube_cards": 122,
+   "n_files": 10,
+   "n_lines": 34,
+   "files": {
+    "src/mtg_bot/parity/cross_engine.py": 9,
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/cards/lands.py": 4,
+    "src/mtg_bot/cards/tokens.py": 4,
+    "src/mtg_bot/parity/trajectory.py": 4,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/demo_layers.py": 1
+   }
+  },
+  "field:ActivatedAbility.is_mana_ability": {
+   "cube_cards": 75,
+   "n_files": 16,
+   "n_lines": 49,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 15,
+    "src/mtg_bot/parity/cross_engine.py": 13,
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/cards/tokens.py": 3,
+    "src/mtg_bot/cards/lands.py": 2,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/creature_casting_ub.py": 1,
+    "src/mtg_bot/creature_statics_wg.py": 1,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/roto_restrictions.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1,
+    "src/mtg_bot/effects/generic/damage.py": 1,
+    "src/mtg_bot/effects/generic/mana.py": 1,
+    "src/mtg_bot/effects/generic/roto_keywords.py": 1
+   }
+  },
+  "field:CardPrinting.mana_only_from_produces": {
+   "cube_cards": 74,
+   "n_files": 2,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/cards/base.py": 3
+   }
+  },
+  "field:ActivationCost.sacrifice_self": {
+   "cube_cards": 59,
+   "n_files": 8,
+   "n_lines": 40,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 14,
+    "src/mtg_bot/cards/tokens.py": 8,
+    "src/mtg_bot/parity/cross_engine.py": 6,
+    "src/mtg_bot/actions.py": 5,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/effects/generic/exile.py": 1
+   }
+  },
+  "field:ActivatedAbility.sorcery_speed": {
+   "cube_cards": 44,
+   "n_files": 9,
+   "n_lines": 27,
+   "files": {
+    "src/mtg_bot/parity/cross_engine.py": 10,
+    "src/mtg_bot/legal.py": 5,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/parity/trajectory.py": 3,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/cards/lands.py": 1,
+    "src/mtg_bot/cards/tokens.py": 1,
+    "src/mtg_bot/effects/generic/attach.py": 1,
+    "src/mtg_bot/effects/generic/misc.py": 1
+   }
+  },
+  "field:CardPrinting.color_indicator": {
+   "cube_cards": 32,
+   "n_files": 5,
+   "n_lines": 9,
+   "files": {
+    "src/mtg_bot/cards/review_render.py": 4,
+    "src/mtg_bot/cards/base.py": 2,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_wg.py": 1,
+    "src/mtg_bot/effects/generic/roto_walkers.py": 1
+   }
+  },
+  "field:CardPrinting.enters_tapped": {
+   "cube_cards": 27,
+   "n_files": 5,
+   "n_lines": 43,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 31,
+    "src/mtg_bot/cards/base.py": 8,
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/lands.py": 1,
+    "src/mtg_bot/effects/combinators.py": 1
+   }
+  },
+  "field:CardPrinting.hand_activated_abilities": {
+   "cube_cards": 24,
+   "n_files": 6,
+   "n_lines": 12,
+   "files": {
+    "src/mtg_bot/cards/base.py": 5,
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/review_render.py": 2,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/roto_restrictions.py": 1,
+    "src/mtg_bot/effects/generic/roto_keywords.py": 1
+   }
+  },
+  "field:CardPrinting.loyalty": {
+   "cube_cards": 23,
+   "n_files": 19,
+   "n_lines": 106,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 28,
+    "src/mtg_bot/cards/review_render.py": 8,
+    "src/mtg_bot/effects/generic/cube_glue.py": 8,
+    "src/mtg_bot/effects/generic/roto_walkers.py": 8,
+    "src/mtg_bot/legal.py": 7,
+    "src/mtg_bot/parity/cross_engine.py": 7,
+    "src/mtg_bot/effects/generic/counters.py": 7,
+    "src/mtg_bot/actions.py": 6,
+    "src/mtg_bot/cards/base.py": 6,
+    "src/mtg_bot/effects/base.py": 6,
+    "src/mtg_bot/cube_glue_statics.py": 4,
+    "src/mtg_bot/turn.py": 2,
+    "src/mtg_bot/effects/object_predicates.py": 2,
+    "src/mtg_bot/effects/generic/divided_damage.py": 2,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/serialize.py": 1,
+    "src/mtg_bot/effects/generic/cube_walkers.py": 1,
+    "src/mtg_bot/effects/generic/layout_effects.py": 1,
+    "src/mtg_bot/effects/generic/tap.py": 1
+   }
+  },
+  "field:ActivationCost.loyalty": {
+   "cube_cards": 22,
+   "n_files": 19,
+   "n_lines": 106,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 28,
+    "src/mtg_bot/cards/review_render.py": 8,
+    "src/mtg_bot/effects/generic/cube_glue.py": 8,
+    "src/mtg_bot/effects/generic/roto_walkers.py": 8,
+    "src/mtg_bot/legal.py": 7,
+    "src/mtg_bot/parity/cross_engine.py": 7,
+    "src/mtg_bot/effects/generic/counters.py": 7,
+    "src/mtg_bot/actions.py": 6,
+    "src/mtg_bot/cards/base.py": 6,
+    "src/mtg_bot/effects/base.py": 6,
+    "src/mtg_bot/cube_glue_statics.py": 4,
+    "src/mtg_bot/turn.py": 2,
+    "src/mtg_bot/effects/object_predicates.py": 2,
+    "src/mtg_bot/effects/generic/divided_damage.py": 2,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/serialize.py": 1,
+    "src/mtg_bot/effects/generic/cube_walkers.py": 1,
+    "src/mtg_bot/effects/generic/layout_effects.py": 1,
+    "src/mtg_bot/effects/generic/tap.py": 1
+   }
+  },
+  "field:ActivationCost.discard_self": {
+   "cube_cards": 20,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1,
+    "src/mtg_bot/parity/trajectory.py": 1
+   }
+  },
+  "field:ActivationCost.pay_life": {
+   "cube_cards": 14,
+   "n_files": 6,
+   "n_lines": 29,
+   "files": {
+    "src/mtg_bot/cards/spell_costs.py": 13,
+    "src/mtg_bot/actions.py": 7,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/parity/trajectory.py": 3,
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:CardPrinting.enters_tapped_unless": {
+   "cube_cards": 14,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:CardPrinting.shock_land_life_cost": {
+   "cube_cards": 14,
+   "n_files": 2,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:CardPrinting.transform_back_face": {
+   "cube_cards": 12,
+   "n_files": 6,
+   "n_lines": 13,
+   "files": {
+    "src/mtg_bot/layouts.py": 8,
+    "src/mtg_bot/simulate.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1,
+    "src/mtg_bot/effects/generic/layout_effects.py": 1,
+    "src/mtg_bot/effects/generic/roto_walkers.py": 1
+   }
+  },
+  "field:CardPrinting.face_colors": {
+   "cube_cards": 10,
+   "n_files": 4,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/cards/review_render.py": 3,
+    "src/mtg_bot/game.py": 2,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/effects/generic/roto_walkers.py": 1
+   }
+  },
+  "field:CardPrinting.alternative_costs": {
+   "cube_cards": 9,
+   "n_files": 4,
+   "n_lines": 9,
+   "files": {
+    "src/mtg_bot/actions.py": 5,
+    "src/mtg_bot/cards/spell_costs.py": 2,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.equipment_bonuses": {
+   "cube_cards": 9,
+   "n_files": 4,
+   "n_lines": 19,
+   "files": {
+    "src/mtg_bot/parity/cross_engine.py": 6,
+    "src/mtg_bot/parity/trajectory.py": 6,
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/game.py": 3
+   }
+  },
+  "field:StaticAbility.power_bonus": {
+   "cube_cards": 8,
+   "n_files": 12,
+   "n_lines": 118,
+   "files": {
+    "src/mtg_bot/effects/generic/pump.py": 33,
+    "src/mtg_bot/parity/cross_engine.py": 22,
+    "src/mtg_bot/parity/trajectory.py": 20,
+    "src/mtg_bot/game.py": 16,
+    "src/mtg_bot/effects/generic/roto_board.py": 9,
+    "src/mtg_bot/cards/base.py": 6,
+    "src/mtg_bot/effects/base.py": 4,
+    "src/mtg_bot/effects/combinators.py": 4,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/effects/modifiers.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_wg.py": 1,
+    "src/mtg_bot/effects/generic/roto_zones.py": 1
+   }
+  },
+  "field:CardPrinting.enters_with_named_counters": {
+   "cube_cards": 7,
+   "n_files": 2,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/cards/base.py": 3
+   }
+  },
+  "field:StaticAbility.toughness_bonus": {
+   "cube_cards": 7,
+   "n_files": 12,
+   "n_lines": 122,
+   "files": {
+    "src/mtg_bot/effects/generic/pump.py": 37,
+    "src/mtg_bot/parity/cross_engine.py": 22,
+    "src/mtg_bot/parity/trajectory.py": 20,
+    "src/mtg_bot/game.py": 16,
+    "src/mtg_bot/effects/generic/roto_board.py": 9,
+    "src/mtg_bot/cards/base.py": 6,
+    "src/mtg_bot/effects/base.py": 4,
+    "src/mtg_bot/effects/combinators.py": 4,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/effects/modifiers.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_wg.py": 1,
+    "src/mtg_bot/effects/generic/roto_zones.py": 1
+   }
+  },
+  "field:CardPrinting.kicker_cost": {
+   "cube_cards": 6,
+   "n_files": 5,
+   "n_lines": 34,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 24,
+    "src/mtg_bot/legal.py": 5,
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/base.py": 2,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1
+   }
+  },
+  "field:CardPrinting.kicker_cost_str": {
+   "cube_cards": 6,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/cards/base.py": 2,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:ActivationCost.extra_costs": {
+   "cube_cards": 5,
+   "n_files": 7,
+   "n_lines": 21,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 5,
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/legal.py": 4,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/effects/generic/roto_keywords.py": 2,
+    "src/mtg_bot/effects/generic/roto_mana.py": 2,
+    "src/mtg_bot/effects/generic/roto_zones.py": 2
+   }
+  },
+  "field:ActivationCost.remove_named_counter_from_self": {
+   "cube_cards": 5,
+   "n_files": 3,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/legal.py": 2
+   }
+  },
+  "field:CardPrinting.dynamic_pt_formula": {
+   "cube_cards": 5,
+   "n_files": 9,
+   "n_lines": 49,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 33,
+    "src/mtg_bot/cards/review_render.py": 4,
+    "src/mtg_bot/parity/cross_engine.py": 4,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_wg.py": 1,
+    "src/mtg_bot/effects/generic/layout_effects.py": 1,
+    "src/mtg_bot/effects/generic/roto_board.py": 1
+   }
+  },
+  "field:CardPrinting.evoke_exile_from_hand": {
+   "cube_cards": 5,
+   "n_files": 3,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/evoke.py": 5,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.landcycling": {
+   "cube_cards": 5,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.mdfc_back_face": {
+   "cube_cards": 5,
+   "n_files": 8,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/layouts.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/simulate.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1,
+    "src/mtg_bot/effects/generic/layout_effects.py": 1,
+    "src/mtg_bot/effects/generic/roto_walkers.py": 1
+   }
+  },
+  "field:CardPrinting.produces_life_cost": {
+   "cube_cards": 5,
+   "n_files": 2,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/cards/base.py": 3
+   }
+  },
+  "field:ActivationCost.discard_a_card": {
+   "cube_cards": 4,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/tokens.py": 1,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:ActivationCost.sacrifice_a_land": {
+   "cube_cards": 4,
+   "n_files": 5,
+   "n_lines": 11,
+   "files": {
+    "src/mtg_bot/parity/cross_engine.py": 3,
+    "src/mtg_bot/parity/trajectory.py": 3,
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:CardPrinting.doesnt_untap_during_untap_step": {
+   "cube_cards": 4,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/roto_board_statics.py": 1,
+    "src/mtg_bot/turn.py": 1
+   }
+  },
+  "field:CardPrinting.escape_cost": {
+   "cube_cards": 4,
+   "n_files": 2,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 4,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.escape_cost_str": {
+   "cube_cards": 4,
+   "n_files": 1,
+   "n_lines": 1,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.escape_exile_count": {
+   "cube_cards": 4,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 3,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.spell_is_uncounterable": {
+   "cube_cards": 4,
+   "n_files": 4,
+   "n_lines": 18,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 8,
+    "src/mtg_bot/parity/cross_engine.py": 4,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/effects/generic/stack_control.py": 3
+   }
+  },
+  "field:StaticAbility.granted_keywords": {
+   "cube_cards": 4,
+   "n_files": 13,
+   "n_lines": 123,
+   "files": {
+    "src/mtg_bot/effects/generic/pump.py": 25,
+    "src/mtg_bot/parity/trajectory.py": 23,
+    "src/mtg_bot/parity/cross_engine.py": 22,
+    "src/mtg_bot/effects/generic/become_type.py": 12,
+    "src/mtg_bot/effects/generic/cube_walkers.py": 12,
+    "src/mtg_bot/cards/base.py": 7,
+    "src/mtg_bot/effects/generic/counters.py": 7,
+    "src/mtg_bot/effects/combinators.py": 5,
+    "src/mtg_bot/game.py": 4,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/effects/generic/cube_creatures_wg.py": 1,
+    "src/mtg_bot/effects/generic/roto_board.py": 1,
+    "src/mtg_bot/effects/generic/roto_zones.py": 1
+   }
+  },
+  "field:ActivationCost.crew": {
+   "cube_cards": 3,
+   "n_files": 6,
+   "n_lines": 33,
+   "files": {
+    "src/mtg_bot/actions.py": 18,
+    "src/mtg_bot/legal.py": 5,
+    "src/mtg_bot/interactive.py": 3,
+    "src/mtg_bot/recommend.py": 3,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/parity/trajectory.py": 1
+   }
+  },
+  "field:ActivationCost.requires_control_of_subtype": {
+   "cube_cards": 3,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1,
+    "src/mtg_bot/parity/trajectory.py": 1
+   }
+  },
+  "field:CardPrinting.additional_cost_pay_x_life": {
+   "cube_cards": 3,
+   "n_files": 4,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/alt_casting.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/spell_costs.py": 1
+   }
+  },
+  "field:CardPrinting.additional_cost_sacrifice_filter": {
+   "cube_cards": 3,
+   "n_files": 5,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 3,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/spell_costs.py": 1
+   }
+  },
+  "field:CardPrinting.enters_with_counters_from_x": {
+   "cube_cards": 3,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_wg.py": 1
+   }
+  },
+  "field:CardPrinting.flashback_cost": {
+   "cube_cards": 3,
+   "n_files": 6,
+   "n_lines": 10,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 5,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/effects/generic/graveyard_casting.py": 1,
+    "src/mtg_bot/effects/generic/roto_zones.py": 1
+   }
+  },
+  "field:CardPrinting.flashback_cost_str": {
+   "cube_cards": 3,
+   "n_files": 1,
+   "n_lines": 1,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.grants_play_lands_from_graveyard": {
+   "cube_cards": 3,
+   "n_files": 3,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/cards/base.py": 5,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:CardPrinting.graveyard_activated_abilities": {
+   "cube_cards": 3,
+   "n_files": 6,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/review_render.py": 2,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/roto_restrictions.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/effects/generic/roto_keywords.py": 1
+   }
+  },
+  "field:CardPrinting.watched_in_graveyard": {
+   "cube_cards": 3,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 3,
+    "src/mtg_bot/turn.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:StaticAbility.bonus_per_condition_count": {
+   "cube_cards": 3,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:TriggeredAbility.once_per_turn": {
+   "cube_cards": 3,
+   "n_files": 7,
+   "n_lines": 35,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 24,
+    "src/mtg_bot/turn.py": 4,
+    "src/mtg_bot/combat.py": 2,
+    "src/mtg_bot/parity/cross_engine.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/effects/generic/roto_zones.py": 1
+   }
+  },
+  "field:ActivatedAbility.activate_only_if": {
+   "cube_cards": 2,
+   "n_files": 4,
+   "n_lines": 10,
+   "files": {
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/legal.py": 4,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:ActivatedAbility.cost_reductions": {
+   "cube_cards": 2,
+   "n_files": 6,
+   "n_lines": 63,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 35,
+    "src/mtg_bot/parity/cross_engine.py": 11,
+    "src/mtg_bot/cards/base.py": 9,
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:ActivationCost.exile_self": {
+   "cube_cards": 2,
+   "n_files": 4,
+   "n_lines": 10,
+   "files": {
+    "src/mtg_bot/actions.py": 5,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/parity/trajectory.py": 2,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:ActivationCost.remove_counters_from_self_amount": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:ActivationCost.remove_counters_from_self_kind": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/legal.py": 2
+   }
+  },
+  "field:ActivationCost.return_unblocked_attacker": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:ActivationCost.sacrifice_a_permanent_type": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 9,
+   "files": {
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/legal.py": 2
+   }
+  },
+  "field:ActivationCost.sacrifice_subtype": {
+   "cube_cards": 2,
+   "n_files": 4,
+   "n_lines": 19,
+   "files": {
+    "src/mtg_bot/cards/spell_costs.py": 10,
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/legal.py": 2
+   }
+  },
+  "field:CardPrinting.additional_cost_options": {
+   "cube_cards": 2,
+   "n_files": 5,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/cards/spell_costs.py": 3,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.adventure_face": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/layouts.py": 4,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.can_only_block_creatures_with_flying": {
+   "cube_cards": 2,
+   "n_files": 4,
+   "n_lines": 11,
+   "files": {
+    "src/mtg_bot/cards/base.py": 5,
+    "src/mtg_bot/parity/trajectory.py": 4,
+    "src/mtg_bot/combat.py": 1,
+    "src/mtg_bot/cards/tokens.py": 1
+   }
+  },
+  "field:CardPrinting.chapter_count": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/turn.py": 2,
+    "src/mtg_bot/cards/base.py": 2,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.cost_reductions": {
+   "cube_cards": 2,
+   "n_files": 6,
+   "n_lines": 63,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 35,
+    "src/mtg_bot/parity/cross_engine.py": 11,
+    "src/mtg_bot/cards/base.py": 9,
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.dash_cost": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.dash_cost_str": {
+   "cube_cards": 2,
+   "n_files": 1,
+   "n_lines": 1,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_as_copy_types": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/creature_casting_ub.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.external_cost_reductions": {
+   "cube_cards": 2,
+   "n_files": 5,
+   "n_lines": 45,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 29,
+    "src/mtg_bot/parity/cross_engine.py": 9,
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.grants_additional_land_per_turn": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/legal.py": 4,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/effects/generic/cube_glue.py": 1
+   }
+  },
+  "field:CardPrinting.has_delve": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.opponents_cant_cast_spells_during_your_turn": {
+   "cube_cards": 2,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.opponents_cant_draw_more_than_one_card_each_turn": {
+   "cube_cards": 2,
+   "n_files": 2,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/turn.py": 1
+   }
+  },
+  "field:CardPrinting.splice_cost": {
+   "cube_cards": 2,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.splice_cost_str": {
+   "cube_cards": 2,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.splice_onto": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 2,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.ward_cost": {
+   "cube_cards": 2,
+   "n_files": 3,
+   "n_lines": 37,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 30,
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/game.py": 3
+   }
+  },
+  "field:CardPrinting.ward_cost_str": {
+   "cube_cards": 2,
+   "n_files": 2,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/game.py": 2
+   }
+  },
+  "field:CardPrinting.ward_life_cost": {
+   "cube_cards": 2,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1
+   }
+  },
+  "field:CardPrinting.warp_cost": {
+   "cube_cards": 2,
+   "n_files": 7,
+   "n_lines": 54,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 30,
+    "src/mtg_bot/legal.py": 8,
+    "src/mtg_bot/parity/cross_engine.py": 5,
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/serialize.py": 2,
+    "src/mtg_bot/effects/bespoke.py": 2
+   }
+  },
+  "field:CardPrinting.warp_cost_str": {
+   "cube_cards": 2,
+   "n_files": 5,
+   "n_lines": 13,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 5,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/serialize.py": 2,
+    "src/mtg_bot/parity/cross_engine.py": 2,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:ActivatedAbility.activate_only_as_instant": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:ActivatedAbility.activate_only_during_your_turn": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:ActivatedAbility.boast": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:ActivatedAbility.exhaust": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:ActivationCost.discard_hand": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/effects/base.py": 2
+   }
+  },
+  "field:ActivationCost.exert_self": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:ActivationCost.exile_cards_from_graveyard": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 9,
+   "files": {
+    "src/mtg_bot/actions.py": 4,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/legal.py": 2
+   }
+  },
+  "field:ActivationCost.requires_own_artifact_count_at_least": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1,
+    "src/mtg_bot/parity/trajectory.py": 1
+   }
+  },
+  "field:ActivationCost.requires_own_creature_power_at_least": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1,
+    "src/mtg_bot/parity/trajectory.py": 1
+   }
+  },
+  "field:ActivationCost.sacrifice_another_artifact": {
+   "cube_cards": 1,
+   "n_files": 6,
+   "n_lines": 12,
+   "files": {
+    "src/mtg_bot/parity/cross_engine.py": 3,
+    "src/mtg_bot/parity/trajectory.py": 3,
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/effects/formulas.py": 1
+   }
+  },
+  "field:ActivationCost.sacrifice_another_creature_or_artifact": {
+   "cube_cards": 1,
+   "n_files": 5,
+   "n_lines": 12,
+   "files": {
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/parity/cross_engine.py": 3,
+    "src/mtg_bot/parity/trajectory.py": 3,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:ActivationCost.sacrifice_n_nonland_permanents": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/legal.py": 2
+   }
+  },
+  "field:ActivationCost.sacrifice_nontoken_artifact": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:ActivationCost.saddle": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/legal.py": 3,
+    "src/mtg_bot/effects/base.py": 3,
+    "src/mtg_bot/actions.py": 2
+   }
+  },
+  "field:ActivationCost.tap_permanent_type": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/effects/base.py": 2
+   }
+  },
+  "field:ActivationCost.tap_permanent_you_control": {
+   "cube_cards": 1,
+   "n_files": 5,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/effects/base.py": 2,
+    "src/mtg_bot/parity/trajectory.py": 2,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/parity/cross_engine.py": 1
+   }
+  },
+  "field:ActivationCost.waterbend": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/layouts.py": 4,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:CardPrinting.additional_cost_exile_from_graveyard": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/alt_casting.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.alt_cost_exile_from_hand": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/alt_casting.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.artifact_ability_cost_reduction": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.aura_enchant_type": {
+   "cube_cards": 1,
+   "n_files": 7,
+   "n_lines": 18,
+   "files": {
+    "src/mtg_bot/parity/cross_engine.py": 7,
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/parity/trajectory.py": 2,
+    "src/mtg_bot/turn.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1,
+    "src/mtg_bot/effects/generic/roto_mana.py": 1
+   }
+  },
+  "field:CardPrinting.bestow_cost": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/legal.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.bestow_cost_str": {
+   "cube_cards": 1,
+   "n_files": 1,
+   "n_lines": 1,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.bestow_enchanted_bonus": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.blocks_only_with_subtype": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/combat.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.buyback_cost": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/legal.py": 4,
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.buyback_cost_str": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.cant_be_blocked_by": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.chooses_card_name_as_enters": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.chooses_parity_as_enters": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.chooses_player_as_enters": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:CardPrinting.class_level": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1,
+    "src/mtg_bot/effects/generic/layout_effects.py": 1
+   }
+  },
+  "field:CardPrinting.class_levels": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/layouts.py": 3,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.creature_during_your_turn": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/cube_glue_statics.py": 4,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.crew_power_bonus": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.daybound": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 11,
+   "files": {
+    "src/mtg_bot/layouts.py": 6,
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.each_player_one_spell_per_turn": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.emerge_cost": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.emerge_cost_str": {
+   "cube_cards": 1,
+   "n_files": 1,
+   "n_lines": 1,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.emerge_sacrifice_type": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.enters_as_copy_add_subtypes": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_as_copy_add_type": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_as_copy_base_pt": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_as_copy_exiles_card": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_as_copy_keep_name": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_as_copy_zone": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_choosing_basic_land_type": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:CardPrinting.enters_only_by_discarding_land": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.enters_prepared": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.enters_with_counter_per_kick": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.equipment_bonus_per_controlled": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.equipment_bonus_per_own_counter": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.equipment_granted_triggers": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.exiles_uncast_nontoken_creatures_entering": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.extra_mana_when_you_tap_creature_for_mana": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.extra_mana_when_you_tap_land_subtype": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.free_cast_condition": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 2,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.grants_graveyard_escape_exile_count": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/alt_casting.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.grants_look_at_top_of_library": {
+   "cube_cards": 1,
+   "n_files": 1,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3
+   }
+  },
+  "field:CardPrinting.grants_mayhem_to_graveyard": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/layouts.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.grants_once_per_turn_graveyard_play_mv": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/graveyard_casting_wg.py": 3,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.grants_play_from_top_paying_life": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/graveyard_casting_wg.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.has_graveyard_triggers": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.has_improvise": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.has_storm": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.heals_other_damage_when_dealt_damage": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/combat.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1
+   }
+  },
+  "field:CardPrinting.is_chosen_basic_land_type": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/game.py": 1
+   }
+  },
+  "field:CardPrinting.locks_activated_abilities_of": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.loyalty_abilities_at_instant_speed_if_entered_this_turn": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:CardPrinting.may_skip_turn_to_untap": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/simulate.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.min_blockers": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.miracle_cost": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_ub.py": 2,
+    "src/mtg_bot/turn.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.miracle_cost_str": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_ub.py": 1
+   }
+  },
+  "field:CardPrinting.multikicker": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1
+   }
+  },
+  "field:CardPrinting.named_ability_cost_increase": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.named_spell_cost_increase": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.nightbound": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 7,
+   "files": {
+    "src/mtg_bot/layouts.py": 3,
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.offspring_cost": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.offspring_cost_str": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.opening_hand_action": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/opening_hand.py": 5,
+    "src/mtg_bot/cards/base.py": 3
+   }
+  },
+  "field:CardPrinting.opponents_cant_make_you_discard_or_sacrifice": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/player_protections.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.opponents_cast_spells_only_at_sorcery_speed": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/legal.py": 1
+   }
+  },
+  "field:CardPrinting.opponents_nonbasic_lands_enter_tapped": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.paints_all_objects_chosen_color_at_etb": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 8,
+   "files": {
+    "src/mtg_bot/cards/base.py": 4,
+    "src/mtg_bot/cards/demo_layers.py": 2,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/game.py": 1
+   }
+  },
+  "field:CardPrinting.plot_cost": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.plot_cost_str": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.prepare_spell": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/layouts.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.produces_with_counter": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/game.py": 2
+   }
+  },
+  "field:CardPrinting.reconfigure_cost": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.reconfigure_cost_str": {
+   "cube_cards": 1,
+   "n_files": 1,
+   "n_lines": 1,
+   "files": {
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.replicate_cost": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.spell_cost_increases": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/roto_restrictions.py": 2,
+    "src/mtg_bot/creature_statics_wg.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.split_faces": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 6,
+   "files": {
+    "src/mtg_bot/layouts.py": 3,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1,
+    "src/mtg_bot/effects/card_types.py": 1
+   }
+  },
+  "field:CardPrinting.squad_cost": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 3,
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.squad_cost_str": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_casting_ub.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.sunburst": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.teamwork_power": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.void_exile_replacement": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/game.py": 1,
+    "src/mtg_bot/turn.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.ward_discard_chosen": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/cards/base.py": 3,
+    "src/mtg_bot/actions.py": 1
+   }
+  },
+  "field:CardPrinting.watches_library_graveyard_exile": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 2,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:CardPrinting.x_min": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 4,
+   "files": {
+    "src/mtg_bot/actions.py": 1,
+    "src/mtg_bot/legal.py": 1,
+    "src/mtg_bot/cards/base.py": 1,
+    "src/mtg_bot/cards/review_render.py": 1
+   }
+  },
+  "field:CardPrinting.your_creatures_combat_damage_cant_be_prevented": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/creature_statics_wg.py": 1,
+    "src/mtg_bot/cards/base.py": 1
+   }
+  },
+  "field:StaticAbility.activation_cost_reduction": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/actions.py": 2,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 2,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:StaticAbility.granted_becomes_target_effect": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 2,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:StaticAbility.granted_trigger_limit_per_turn": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 2,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:StaticAbility.grants_no_max_hand_size": {
+   "cube_cards": 1,
+   "n_files": 4,
+   "n_lines": 13,
+   "files": {
+    "src/mtg_bot/parity/trajectory.py": 10,
+    "src/mtg_bot/turn.py": 1,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/effects/generic/roto_walkers.py": 1
+   }
+  },
+  "field:StaticAbility.grants_spells_uncounterable": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/effects/generic/stack_control.py": 1
+   }
+  },
+  "field:StaticAbility.grants_ward_life_cost": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 2,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:StaticAbility.graveyard_permanent_cast_mv_max": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 3,
+   "files": {
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 2,
+    "src/mtg_bot/effects/base.py": 1
+   }
+  },
+  "field:StaticAbility.must_attack_each_combat": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1
+   }
+  },
+  "field:StaticAbility.opponents_enter_tapped_types": {
+   "cube_cards": 1,
+   "n_files": 2,
+   "n_lines": 2,
+   "files": {
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 1
+   }
+  },
+  "field:TriggeredAbility.functions_in_graveyard": {
+   "cube_cards": 1,
+   "n_files": 3,
+   "n_lines": 5,
+   "files": {
+    "src/mtg_bot/actions.py": 3,
+    "src/mtg_bot/effects/base.py": 1,
+    "src/mtg_bot/effects/generic/artifact_mechanics.py": 1
+   }
+  }
+ }
+}

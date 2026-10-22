@@ -1,0 +1,1342 @@
+[
+ {
+  "file": "src/mtg_bot/actions.py",
+  "line": 1902,
+  "token": "echoing_deeps",
+  "cards": [
+   "Echoing Deeps"
+  ],
+  "in_cube": false,
+  "code": "_offer_echoing_deeps_copy(state, player_id, card)"
+ },
+ {
+  "file": "src/mtg_bot/actions.py",
+  "line": 1913,
+  "token": "echoing_deeps",
+  "cards": [
+   "Echoing Deeps"
+  ],
+  "in_cube": false,
+  "code": "def _offer_echoing_deeps_copy("
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 71,
+  "token": "KavaronHarrier",
+  "cards": [
+   "Kavaron Harrier"
+  ],
+  "in_cube": false,
+  "code": "KavaronHarrierAttackEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 72,
+  "token": "PainForAll",
+  "cards": [
+   "Pain for All"
+  ],
+  "in_cube": false,
+  "code": "PainForAllDamageEchoEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 73,
+  "token": "PainForAll",
+  "cards": [
+   "Pain for All"
+  ],
+  "in_cube": false,
+  "code": "PainForAllETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 74,
+  "token": "PerigeeBeckoner",
+  "cards": [
+   "Perigee Beckoner"
+  ],
+  "in_cube": false,
+  "code": "PerigeeBeckonerDiesReturnTappedEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 75,
+  "token": "PossibilityTechnician",
+  "cards": [
+   "Possibility Technician"
+  ],
+  "in_cube": false,
+  "code": "PossibilityTechnicianETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 76,
+  "token": "TerritorialBruntar",
+  "cards": [
+   "Territorial Bruntar"
+  ],
+  "in_cube": false,
+  "code": "TerritorialBruntarLandfallEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 77,
+  "token": "TractorBeam",
+  "cards": [
+   "Tractor Beam"
+  ],
+  "in_cube": false,
+  "code": "TractorBeamETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 82,
+  "token": "RovingActuator",
+  "cards": [
+   "Roving Actuator"
+  ],
+  "in_cube": false,
+  "code": "RovingActuatorETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 87,
+  "token": "SeedshipImpact",
+  "cards": [
+   "Seedship Impact"
+  ],
+  "in_cube": false,
+  "code": "SeedshipImpactEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 149,
+  "token": "CutPropulsion",
+  "cards": [
+   "Cut Propulsion"
+  ],
+  "in_cube": false,
+  "code": "CutPropulsionEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 150,
+  "token": "DiplomaticRelations",
+  "cards": [
+   "Diplomatic Relations"
+  ],
+  "in_cube": false,
+  "code": "DiplomaticRelationsEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 159,
+  "token": "AnticausalVestige",
+  "cards": [
+   "Anticausal Vestige"
+  ],
+  "in_cube": false,
+  "code": "AnticausalVestigeLeavesEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 163,
+  "token": "AlpharaelDreamingAcolyte",
+  "cards": [
+   "Alpharael, Dreaming Acolyte"
+  ],
+  "in_cube": false,
+  "code": "AlpharaelDreamingAcolyteDiscardEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 165,
+  "token": "HouseCartographer",
+  "cards": [
+   "House Cartographer"
+  ],
+  "in_cube": false,
+  "code": "HouseCartographerSurvivalEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 166,
+  "token": "AstelliReclaimer",
+  "cards": [
+   "Astelli Reclaimer"
+  ],
+  "in_cube": false,
+  "code": "AstelliReclaimerETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 167,
+  "token": "AtomicMicrosizer",
+  "cards": [
+   "Atomic Microsizer"
+  ],
+  "in_cube": false,
+  "code": "AtomicMicrosizerAttackEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 170,
+  "token": "BiosynthicBurst",
+  "cards": [
+   "Biosynthic Burst"
+  ],
+  "in_cube": false,
+  "code": "BiosynthicBurstEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 171,
+  "token": "BoilerbilgesRipper",
+  "cards": [
+   "Boilerbilges Ripper"
+  ],
+  "in_cube": false,
+  "code": "BoilerbilgesRipperETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 174,
+  "token": "CloseEncounter",
+  "cards": [
+   "Close Encounter"
+  ],
+  "in_cube": false,
+  "code": "CloseEncounterEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 175,
+  "token": "CommuneWithEvil",
+  "cards": [
+   "Commune with Evil"
+  ],
+  "in_cube": false,
+  "code": "CommuneWithEvilEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 176,
+  "token": "ConsultTheStarCharts",
+  "cards": [
+   "Consult the Star Charts"
+  ],
+  "in_cube": true,
+  "code": "ConsultTheStarChartsEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 181,
+  "token": "FamishedWorldsire",
+  "cards": [
+   "Famished Worldsire"
+  ],
+  "in_cube": false,
+  "code": "FamishedWorldsireETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 182,
+  "token": "FanaticOfTheHarrowing",
+  "cards": [
+   "Fanatic of the Harrowing"
+  ],
+  "in_cube": false,
+  "code": "FanaticOfTheHarrowingETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 209,
+  "token": "CoordinatedClobbering",
+  "cards": [
+   "Coordinated Clobbering"
+  ],
+  "in_cube": false,
+  "code": "CoordinatedClobberingEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 212,
+  "token": "SingularityRupture",
+  "cards": [
+   "Singularity Rupture"
+  ],
+  "in_cube": false,
+  "code": "SingularityRuptureEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 213,
+  "token": "SystemsOverride",
+  "cards": [
+   "Systems Override"
+  ],
+  "in_cube": false,
+  "code": "SystemsOverrideEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 214,
+  "token": "TerrapactIntimidator",
+  "cards": [
+   "Terrapact Intimidator"
+  ],
+  "in_cube": false,
+  "code": "TerrapactIntimidatorETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 215,
+  "token": "TerminalVelocity",
+  "cards": [
+   "Terminal Velocity"
+  ],
+  "in_cube": false,
+  "code": "TerminalVelocityEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 216,
+  "token": "ZeroPointBallad",
+  "cards": [
+   "Zero Point Ballad"
+  ],
+  "in_cube": false,
+  "code": "ZeroPointBalladEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 231,
+  "token": "SelfcraftMechan",
+  "cards": [
+   "Selfcraft Mechan"
+  ],
+  "in_cube": false,
+  "code": "SelfcraftMechanETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 238,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDread,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 239,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDreadThenPutPlusOneCountersOnIt,"
+ },
+ {
+  "file": "src/mtg_bot/cards/base.py",
+  "line": 240,
+  "token": "MutinousMassacre",
+  "cards": [
+   "Mutinous Massacre"
+  ],
+  "in_cube": false,
+  "code": "MutinousMassacreEffect,"
+ },
+ {
+  "file": "src/mtg_bot/cards/spell_costs.py",
+  "line": 217,
+  "token": "DREAM_HALLS",
+  "cards": [
+   "Dream Halls"
+  ],
+  "in_cube": false,
+  "code": "DREAM_HALLS_COST = AlternativeCost(discard_card_sharing_color=True)"
+ },
+ {
+  "file": "src/mtg_bot/cards/spell_costs.py",
+  "line": 231,
+  "token": "DREAM_HALLS",
+  "cards": [
+   "Dream Halls"
+  ],
+  "in_cube": false,
+  "code": "return printed + (DREAM_HALLS_COST,)"
+ },
+ {
+  "file": "src/mtg_bot/cards/spell_costs.py",
+  "line": 495,
+  "token": "DREAM_HALLS",
+  "cards": [
+   "Dream Halls"
+  ],
+  "in_cube": false,
+  "code": "\"DREAM_HALLS_COST\","
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 154,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDread,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 155,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDreadThenAttachSelf,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 156,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDreadThenPutPlusOneCountersOnIt,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 282,
+  "token": "AlpharaelDreamingAcolyte",
+  "cards": [
+   "Alpharael, Dreaming Acolyte"
+  ],
+  "in_cube": false,
+  "code": "AlpharaelDreamingAcolyteDiscardEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 283,
+  "token": "AnticausalVestige",
+  "cards": [
+   "Anticausal Vestige"
+  ],
+  "in_cube": false,
+  "code": "AnticausalVestigeLeavesEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 285,
+  "token": "AstelliReclaimer",
+  "cards": [
+   "Astelli Reclaimer"
+  ],
+  "in_cube": false,
+  "code": "AstelliReclaimerETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 286,
+  "token": "AtomicMicrosizer",
+  "cards": [
+   "Atomic Microsizer"
+  ],
+  "in_cube": false,
+  "code": "AtomicMicrosizerAttackEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 287,
+  "token": "BiosynthicBurst",
+  "cards": [
+   "Biosynthic Burst"
+  ],
+  "in_cube": false,
+  "code": "BiosynthicBurstEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 288,
+  "token": "BoilerbilgesRipper",
+  "cards": [
+   "Boilerbilges Ripper"
+  ],
+  "in_cube": false,
+  "code": "BoilerbilgesRipperETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 289,
+  "token": "CloseEncounter",
+  "cards": [
+   "Close Encounter"
+  ],
+  "in_cube": false,
+  "code": "CloseEncounterEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 290,
+  "token": "CommuneWithEvil",
+  "cards": [
+   "Commune with Evil"
+  ],
+  "in_cube": false,
+  "code": "CommuneWithEvilEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 291,
+  "token": "ConsultTheStarCharts",
+  "cards": [
+   "Consult the Star Charts"
+  ],
+  "in_cube": true,
+  "code": "ConsultTheStarChartsEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 292,
+  "token": "CoordinatedClobbering",
+  "cards": [
+   "Coordinated Clobbering"
+  ],
+  "in_cube": false,
+  "code": "CoordinatedClobberingEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 293,
+  "token": "CutPropulsion",
+  "cards": [
+   "Cut Propulsion"
+  ],
+  "in_cube": false,
+  "code": "CutPropulsionEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 295,
+  "token": "DiplomaticRelations",
+  "cards": [
+   "Diplomatic Relations"
+  ],
+  "in_cube": false,
+  "code": "DiplomaticRelationsEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 300,
+  "token": "FamishedWorldsire",
+  "cards": [
+   "Famished Worldsire"
+  ],
+  "in_cube": false,
+  "code": "FamishedWorldsireETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 301,
+  "token": "FanaticOfTheHarrowing",
+  "cards": [
+   "Fanatic of the Harrowing"
+  ],
+  "in_cube": false,
+  "code": "FanaticOfTheHarrowingETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 303,
+  "token": "HouseCartographer",
+  "cards": [
+   "House Cartographer"
+  ],
+  "in_cube": false,
+  "code": "HouseCartographerSurvivalEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 304,
+  "token": "KavaronHarrier",
+  "cards": [
+   "Kavaron Harrier"
+  ],
+  "in_cube": false,
+  "code": "KavaronHarrierAttackEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 305,
+  "token": "MutinousMassacre",
+  "cards": [
+   "Mutinous Massacre"
+  ],
+  "in_cube": false,
+  "code": "MutinousMassacreEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 306,
+  "token": "PainForAll",
+  "cards": [
+   "Pain for All"
+  ],
+  "in_cube": false,
+  "code": "PainForAllDamageEchoEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 307,
+  "token": "PainForAll",
+  "cards": [
+   "Pain for All"
+  ],
+  "in_cube": false,
+  "code": "PainForAllETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 308,
+  "token": "PerigeeBeckoner",
+  "cards": [
+   "Perigee Beckoner"
+  ],
+  "in_cube": false,
+  "code": "PerigeeBeckonerDiesReturnTappedEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 309,
+  "token": "PossibilityTechnician",
+  "cards": [
+   "Possibility Technician"
+  ],
+  "in_cube": false,
+  "code": "PossibilityTechnicianETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 310,
+  "token": "RovingActuator",
+  "cards": [
+   "Roving Actuator"
+  ],
+  "in_cube": false,
+  "code": "RovingActuatorETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 312,
+  "token": "SeedshipImpact",
+  "cards": [
+   "Seedship Impact"
+  ],
+  "in_cube": false,
+  "code": "SeedshipImpactEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 313,
+  "token": "SelfcraftMechan",
+  "cards": [
+   "Selfcraft Mechan"
+  ],
+  "in_cube": false,
+  "code": "SelfcraftMechanETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 314,
+  "token": "SingularityRupture",
+  "cards": [
+   "Singularity Rupture"
+  ],
+  "in_cube": false,
+  "code": "SingularityRuptureEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 315,
+  "token": "SurveyMechan",
+  "cards": [
+   "Survey Mechan"
+  ],
+  "in_cube": false,
+  "code": "SurveyMechanActivationEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 316,
+  "token": "SystemsOverride",
+  "cards": [
+   "Systems Override"
+  ],
+  "in_cube": false,
+  "code": "SystemsOverrideEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 318,
+  "token": "TerrapactIntimidator",
+  "cards": [
+   "Terrapact Intimidator"
+  ],
+  "in_cube": false,
+  "code": "TerrapactIntimidatorETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 319,
+  "token": "TerritorialBruntar",
+  "cards": [
+   "Territorial Bruntar"
+  ],
+  "in_cube": false,
+  "code": "TerritorialBruntarLandfallEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 320,
+  "token": "TractorBeam",
+  "cards": [
+   "Tractor Beam"
+  ],
+  "in_cube": false,
+  "code": "TractorBeamETBEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 321,
+  "token": "TerminalVelocity",
+  "cards": [
+   "Terminal Velocity"
+  ],
+  "in_cube": false,
+  "code": "TerminalVelocityEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/__init__.py",
+  "line": 323,
+  "token": "ZeroPointBallad",
+  "cards": [
+   "Zero Point Ballad"
+  ],
+  "in_cube": false,
+  "code": "ZeroPointBalladEffect,"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 26,
+  "token": "AstelliReclaimer",
+  "cards": [
+   "Astelli Reclaimer"
+  ],
+  "in_cube": false,
+  "code": "class AstelliReclaimerETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 94,
+  "token": "FamishedWorldsire",
+  "cards": [
+   "Famished Worldsire"
+  ],
+  "in_cube": false,
+  "code": "class FamishedWorldsireETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 202,
+  "token": "SelfcraftMechan",
+  "cards": [
+   "Selfcraft Mechan"
+  ],
+  "in_cube": false,
+  "code": "class SelfcraftMechanETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 315,
+  "token": "TerritorialBruntar",
+  "cards": [
+   "Territorial Bruntar"
+  ],
+  "in_cube": false,
+  "code": "class TerritorialBruntarLandfallEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 357,
+  "token": "PainForAll",
+  "cards": [
+   "Pain for All"
+  ],
+  "in_cube": false,
+  "code": "class PainForAllETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 441,
+  "token": "PainForAll",
+  "cards": [
+   "Pain for All"
+  ],
+  "in_cube": false,
+  "code": "class PainForAllDamageEchoEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 479,
+  "token": "TractorBeam",
+  "cards": [
+   "Tractor Beam"
+  ],
+  "in_cube": false,
+  "code": "class TractorBeamETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 597,
+  "token": "PossibilityTechnician",
+  "cards": [
+   "Possibility Technician"
+  ],
+  "in_cube": false,
+  "code": "class PossibilityTechnicianETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 641,
+  "token": "RovingActuator",
+  "cards": [
+   "Roving Actuator"
+  ],
+  "in_cube": false,
+  "code": "class RovingActuatorETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 734,
+  "token": "AtomicMicrosizer",
+  "cards": [
+   "Atomic Microsizer"
+  ],
+  "in_cube": false,
+  "code": "class AtomicMicrosizerAttackEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 815,
+  "token": "KavaronHarrier",
+  "cards": [
+   "Kavaron Harrier"
+  ],
+  "in_cube": false,
+  "code": "class KavaronHarrierAttackEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 871,
+  "token": "AnticausalVestige",
+  "cards": [
+   "Anticausal Vestige"
+  ],
+  "in_cube": false,
+  "code": "class AnticausalVestigeLeavesEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 924,
+  "token": "TerrapactIntimidator",
+  "cards": [
+   "Terrapact Intimidator"
+  ],
+  "in_cube": false,
+  "code": "class TerrapactIntimidatorETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1078,
+  "token": "CloseEncounter",
+  "cards": [
+   "Close Encounter"
+  ],
+  "in_cube": false,
+  "code": "class CloseEncounterEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1152,
+  "token": "ConsultTheStarCharts",
+  "cards": [
+   "Consult the Star Charts"
+  ],
+  "in_cube": true,
+  "code": "class ConsultTheStarChartsEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1238,
+  "token": "SeedshipImpact",
+  "cards": [
+   "Seedship Impact"
+  ],
+  "in_cube": false,
+  "code": "class SeedshipImpactEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1305,
+  "token": "MutinousMassacre",
+  "cards": [
+   "Mutinous Massacre"
+  ],
+  "in_cube": false,
+  "code": "class MutinousMassacreEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1391,
+  "token": "SystemsOverride",
+  "cards": [
+   "Systems Override"
+  ],
+  "in_cube": false,
+  "code": "class SystemsOverrideEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1490,
+  "token": "BiosynthicBurst",
+  "cards": [
+   "Biosynthic Burst"
+  ],
+  "in_cube": false,
+  "code": "class BiosynthicBurstEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1624,
+  "token": "SingularityRupture",
+  "cards": [
+   "Singularity Rupture"
+  ],
+  "in_cube": false,
+  "code": "class SingularityRuptureEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1702,
+  "token": "ZeroPointBallad",
+  "cards": [
+   "Zero Point Ballad"
+  ],
+  "in_cube": false,
+  "code": "class ZeroPointBalladEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1845,
+  "token": "CutPropulsion",
+  "cards": [
+   "Cut Propulsion"
+  ],
+  "in_cube": false,
+  "code": "class CutPropulsionEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 1908,
+  "token": "DiplomaticRelations",
+  "cards": [
+   "Diplomatic Relations"
+  ],
+  "in_cube": false,
+  "code": "class DiplomaticRelationsEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2049,
+  "token": "PerigeeBeckoner",
+  "cards": [
+   "Perigee Beckoner"
+  ],
+  "in_cube": false,
+  "code": "``PerigeeBeckonerDiesReturnTappedEffect`` precedent): the dying"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2131,
+  "token": "PerigeeBeckoner",
+  "cards": [
+   "Perigee Beckoner"
+  ],
+  "in_cube": false,
+  "code": "class PerigeeBeckonerDiesReturnTappedEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2195,
+  "token": "AlpharaelDreamingAcolyte",
+  "cards": [
+   "Alpharael, Dreaming Acolyte"
+  ],
+  "in_cube": false,
+  "code": "class AlpharaelDreamingAcolyteDiscardEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2389,
+  "token": "CoordinatedClobbering",
+  "cards": [
+   "Coordinated Clobbering"
+  ],
+  "in_cube": false,
+  "code": "class CoordinatedClobberingEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2427,
+  "token": "DiplomaticRelations",
+  "cards": [
+   "Diplomatic Relations"
+  ],
+  "in_cube": false,
+  "code": "Mirrors ``DiplomaticRelationsEffect``'s two-slot skeleton with"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2600,
+  "token": "CommuneWithEvil",
+  "cards": [
+   "Commune with Evil"
+  ],
+  "in_cube": false,
+  "code": "class CommuneWithEvilEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2696,
+  "token": "HouseCartographer",
+  "cards": [
+   "House Cartographer"
+  ],
+  "in_cube": false,
+  "code": "class HouseCartographerSurvivalEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2767,
+  "token": "BoilerbilgesRipper",
+  "cards": [
+   "Boilerbilges Ripper"
+  ],
+  "in_cube": false,
+  "code": "class BoilerbilgesRipperETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 2859,
+  "token": "FanaticOfTheHarrowing",
+  "cards": [
+   "Fanatic of the Harrowing"
+  ],
+  "in_cube": false,
+  "code": "class FanaticOfTheHarrowingETBEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 3077,
+  "token": "TerminalVelocity",
+  "cards": [
+   "Terminal Velocity"
+  ],
+  "in_cube": false,
+  "code": "class TerminalVelocityEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/bespoke.py",
+  "line": 3207,
+  "token": "SurveyMechan",
+  "cards": [
+   "Survey Mechan"
+  ],
+  "in_cube": false,
+  "code": "class SurveyMechanActivationEffect(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/combinators.py",
+  "line": 1424,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "(optional=True)`` in a Sequence with ``ManifestDread()``): the"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/__init__.py",
+  "line": 245,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDread,"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/__init__.py",
+  "line": 246,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDreadThenAttachSelf,"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/__init__.py",
+  "line": 247,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDreadThenPutPlusOneCountersOnIt,"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/__init__.py",
+  "line": 517,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "\"ManifestDread\","
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/__init__.py",
+  "line": 518,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "\"ManifestDreadThenAttachSelf\","
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/__init__.py",
+  "line": 519,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "\"ManifestDreadThenPutPlusOneCountersOnIt\","
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/draw_mill.py",
+  "line": 280,
+  "token": "AllFatesScroll",
+  "cards": [
+   "All-Fates Scroll"
+  ],
+  "in_cube": false,
+  "code": "Replaces the bespoke ``AllFatesScrollDrawEffect`` for the"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/emblem.py",
+  "line": 40,
+  "token": "TEZZERET_CRUEL_CAPTAIN",
+  "cards": [
+   "Tezzeret, Cruel Captain"
+  ],
+  "in_cube": true,
+  "code": "TEZZERET_CRUEL_CAPTAIN_EMBLEM = \"tezzeret_cruel_captain\""
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/emblem.py",
+  "line": 40,
+  "token": "tezzeret_cruel_captain",
+  "cards": [
+   "Tezzeret, Cruel Captain"
+  ],
+  "in_cube": true,
+  "code": "TEZZERET_CRUEL_CAPTAIN_EMBLEM = \"tezzeret_cruel_captain\""
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/emblem.py",
+  "line": 52,
+  "token": "TEZZERET_CRUEL_CAPTAIN",
+  "cards": [
+   "Tezzeret, Cruel Captain"
+  ],
+  "in_cube": true,
+  "code": "if emblem_kind == TEZZERET_CRUEL_CAPTAIN_EMBLEM:"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/emblem.py",
+  "line": 82,
+  "token": "TEZZERET_CRUEL_CAPTAIN",
+  "cards": [
+   "Tezzeret, Cruel Captain"
+  ],
+  "in_cube": true,
+  "code": "emblem_kind: str = TEZZERET_CRUEL_CAPTAIN_EMBLEM"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 328,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "class ManifestDread(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 412,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "class ManifestDreadThenPutPlusOneCountersOnIt(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 422,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "other examined card goes to the graveyard per ``ManifestDread``'s"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 426,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "left in the library ``ManifestDread`` may manifest one or zero"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 440,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDread(count=1).resolve(state, controller_id, ())"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 471,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "class ManifestDreadThenAttachSelf(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 479,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "``ManifestDreadThenPutPlusOneCountersOnIt`` resolves), so the"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 483,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "Implementation parallels ``ManifestDreadThenPutPlusOneCountersOnIt``:"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 485,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "``ManifestDread(count=1)``, then identify the new face-down"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 487,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "the library, ``ManifestDread`` may manifest one or zero cards \u2014"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/library_lookat.py",
+  "line": 504,
+  "token": "ManifestDread",
+  "cards": [
+   "Manifest Dread"
+  ],
+  "in_cube": false,
+  "code": "ManifestDread(count=1).resolve(state, controller_id, ())"
+ },
+ {
+  "file": "src/mtg_bot/effects/generic/roto_zones.py",
+  "line": 2576,
+  "token": "ScrollRack",
+  "cards": [
+   "Scroll Rack"
+  ],
+  "in_cube": false,
+  "code": "class ScrollRackSwap(Effect):"
+ },
+ {
+  "file": "src/mtg_bot/game.py",
+  "line": 1982,
+  "token": "harmonious_grovestrider",
+  "cards": [
+   "Harmonious Grovestrider"
+  ],
+  "in_cube": false,
+  "code": "if formula == \"harmonious_grovestrider\":"
+ },
+ {
+  "file": "src/mtg_bot/game.py",
+  "line": 1996,
+  "token": "emissary_escort",
+  "cards": [
+   "Emissary Escort"
+  ],
+  "in_cube": false,
+  "code": "if formula == \"emissary_escort\":"
+ },
+ {
+  "file": "src/mtg_bot/game.py",
+  "line": 2420,
+  "token": "magus_of_the_moon",
+  "cards": [
+   "Magus of the Moon"
+  ],
+  "in_cube": false,
+  "code": "def magus_of_the_moon_active(state: \"GameState\") -> bool:"
+ }
+]

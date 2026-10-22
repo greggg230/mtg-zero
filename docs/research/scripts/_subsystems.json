@@ -1,0 +1,215 @@
+[
+ {
+  "subsystem": "Game-state model + copy-on-write cloning",
+  "lines": 2322,
+  "parts": [
+   "game.py (2322: GameState@3712+925, GameObject@445+592, _CowList@37+374)"
+  ]
+ },
+ {
+  "subsystem": "Turn structure, steps, priority loop",
+  "lines": 798,
+  "parts": [
+   "simulate.py (237: run_step@389+132, priority_loop@326+61, run_turn@589+21)",
+   "turn.py (473: run_cleanup_step@1687+199, run_untap_step@93+130, draw_card@293+59)",
+   "roto_turns.py (88: turn_structure_next_step@74+26, end_the_turn@107+25, schedule_at_your_next_end_step@49+23)"
+  ]
+ },
+ {
+  "subsystem": "Legal-action generation (priority, timing, castability)",
+  "lines": 1862,
+  "parts": [
+   "legal.py (whole, 1862)"
+  ]
+ },
+ {
+  "subsystem": "Casting spells + alternative/additional costs",
+  "lines": 3536,
+  "parts": [
+   "actions.py (1678: _cast_spell@2333+1067, _select_spell_targets@2084+148, CastSpell@77+69)",
+   "alt_casting.py (whole, 491)",
+   "evoke.py (whole, 142)",
+   "creature_casting_ub.py (whole, 534)",
+   "graveyard_casting_wg.py (whole, 187)",
+   "cards/spell_costs.py (whole, 504)"
+  ]
+ },
+ {
+  "subsystem": "Mana pool, mana abilities, auto-payment (convoke/improvise/delve/phyrexian)",
+  "lines": 1179,
+  "parts": [
+   "actions.py (1109: auto_tap_for_cost@1405+148, _coin_satisfies_context@353+95, _activate_sac_for_mana_for_cost@1326+77)",
+   "game.py (70: effective_land_produces@2506+48, _granted_tap_mana@2556+22)"
+  ]
+ },
+ {
+  "subsystem": "Activated abilities (incl. loyalty, hand/graveyard abilities, station)",
+  "lines": 1356,
+  "parts": [
+   "actions.py (1239: _activate_ability@3857+903, _activate_hand_ability@3685+109, _effective_ability_mana_cost@3575+68)",
+   "game.py (117: effective_activated_abilities@2580+117)"
+  ]
+ },
+ {
+  "subsystem": "Stack + resolution (fizzle, copies on stack, counters)",
+  "lines": 583,
+  "parts": [
+   "actions.py (564: _resolve_top_of_stack_item@5255+300, move_spell_off_stack@5118+82, _send_to_graveyard_or_library@5016+68)",
+   "keyword_rules.py (19: targets_all_illegal_on_resolution@224+19)"
+  ]
+ },
+ {
+  "subsystem": "Triggered abilities (dispatch, delayed, state-triggers)",
+  "lines": 1427,
+  "parts": [
+   "actions.py (521: dispatch_event@6347+199, push_triggered_ability@6176+169, _fire_unlock_door_triggers@4891+38)",
+   "turn.py (637: run_delayed_end_step_triggers@1373+78, _fire_dies_triggers@1253+48, fire_landfall_triggers@1166+46)",
+   "game.py (83: effective_triggered_abilities@2699+48, etb_trigger_multiplier@2781+35)",
+   "roto_board_statics.py (186: fire_granted_triggers@301+30, _registry_granted@276+23, fire_combat_damage_dealt@346+23)"
+  ]
+ },
+ {
+  "subsystem": "Layers 1-7 / continuous effects / characteristic queries",
+  "lines": 1614,
+  "parts": [
+   "game.py (1381: effective_subtypes@2099+189, _static_bonuses@1459+160, _compute_effective_pt@3082+133)",
+   "effects/modifiers.py (71: active_static_abilities@657+36, walk_continuous_modifiers@695+35)",
+   "roto_board_statics.py (65: lands_without_rules_text@57+19, abilities_suppressed@37+18, rules_in_play@91+12)",
+   "cube_glue_statics.py (whole, 84)",
+   "creature_statics_wg.py (13: apply_ascend@352+13)"
+  ]
+ },
+ {
+  "subsystem": "Replacement + prevention effects",
+  "lines": 637,
+  "parts": [
+   "effects/modifiers.py (218: _collect_replacement_effects@534+99, dispatch_replacement@436+89, _subject_filters_match@635+20)",
+   "turn.py (128: win_the_game@259+32, apply_graveyard_exile_replacement@1963+27, apply_void_exile_replacement@1938+23)",
+   "actions.py (138: apply_land_etb_replacements@1805+106, _discard_land_to_enter@6103+32)",
+   "game.py (107: effective_draw_count@2749+30, _counter_doubling_factor@2818+29, player_damage_prevented@2927+14)",
+   "creature_statics_wg.py (46: exile_instead_of_entering@320+25, combat_damage_unpreventable@182+21)"
+  ]
+ },
+ {
+  "subsystem": "State-based actions",
+  "lines": 344,
+  "parts": [
+   "turn.py (344: _state_based_actions_pass@1995+296, state_based_actions@1888+48)"
+  ]
+ },
+ {
+  "subsystem": "Zone changes (ETB/LTB, sacrifice, destroy, land play)",
+  "lines": 1338,
+  "parts": [
+   "actions.py (609: put_into_battlefield@5760+341, apply_aura_static_grants_on_attach@5557+131, _play_land@1700+98)",
+   "turn.py (572: move_off_battlefield@466+374, _release_exiled_until_leaves@912+42, sacrifice@1044+39)",
+   "game.py (157: gain_life@2018+27, add_plus_one_counters@2849+26, add_counters@2985+26)"
+  ]
+ },
+ {
+  "subsystem": "Combat (attack/block legality, damage, combat triggers)",
+  "lines": 1276,
+  "parts": [
+   "combat.py (whole, 1060)",
+   "actions.py (96: _declare_blockers@4947+67, _declare_attackers@4931+14, DeclareBlockers@226+8)",
+   "roto_board_statics.py (77: CantAttack@148+19, CantBlock@170+18, WithoutKeyword@118+12)",
+   "designations.py (30: forced_attackers@73+20, goad@59+6, clear_goad_for@67+4)",
+   "game.py (13: crew_candidates@2956+10, crew_power@2968+3)"
+  ]
+ },
+ {
+  "subsystem": "Copy effects (clones, token copies, spell copies)",
+  "lines": 488,
+  "parts": [
+   "actions.py (118: apply_clone_enters_as_copy_replacement@5690+68, _offer_echoing_deeps_copy@1913+50)",
+   "creature_casting_ub.py (98: apply_copy_on_entry@195+77, push_exile_copied_card@274+21)",
+   "effects/generic/spell_copies.py (whole, 272)"
+  ]
+ },
+ {
+  "subsystem": "Control-changing effects",
+  "lines": 217,
+  "parts": [
+   "game.py (44: effective_controller@1621+44)",
+   "effects/generic/control.py (whole, 173)"
+  ]
+ },
+ {
+  "subsystem": "Face-down (manifest / morph-like), turn face up",
+  "lines": 63,
+  "parts": [
+   "actions.py (46: _turn_face_up@1667+31, TurnFaceUp@198+15)",
+   "effects/generic/roto_layers.py (17: turning_face_up_prevented@215+17)"
+  ]
+ },
+ {
+  "subsystem": "Multi-face layouts (transform/MDFC/adventure/split/class/saga/room/prepare/day-night)",
+  "lines": 1021,
+  "parts": [
+   "layouts.py (whole, 590)",
+   "game.py (9: restore_mdfc_front@1039+9)",
+   "actions.py (91: _unlock_room_half@4819+70, UnlockRoomHalf@149+21)",
+   "effects/generic/layout_effects.py (whole, 331)"
+  ]
+ },
+ {
+  "subsystem": "Designations: monarch / initiative / Undercity dungeon",
+  "lines": 320,
+  "parts": [
+   "designations.py (whole, 320)"
+  ]
+ },
+ {
+  "subsystem": "Extra turns / extra combats / skip turn",
+  "lines": 63,
+  "parts": [
+   "simulate.py (44: _maybe_skip_turn@541+24, _pick_next_active_player@567+20)",
+   "effects/generic/stack_control.py (19: TakeExtraTurnAfterThisOne@250+19)"
+  ]
+ },
+ {
+  "subsystem": "Outside-the-game (wish/sideboard), conspiracies, pregame",
+  "lines": 873,
+  "parts": [
+   "roto_turns.py (38: take_from_outside_the_game@155+25, sideboard_printings@140+13)",
+   "conspiracies.py (whole, 228)",
+   "opening_hand.py (whole, 257)",
+   "mulligan.py (whole, 136)",
+   "simulate.py (214: setup_game@110+214)"
+  ]
+ },
+ {
+  "subsystem": "Tokens (predefined token printings)",
+  "lines": 306,
+  "parts": [
+   "cards/tokens.py (whole, 306)"
+  ]
+ },
+ {
+  "subsystem": "Emblems",
+  "lines": 192,
+  "parts": [
+   "effects/generic/emblem.py (whole, 192)"
+  ]
+ },
+ {
+  "subsystem": "Restrictions, protection, ward, hexproof, taxes",
+  "lines": 1435,
+  "parts": [
+   "keyword_rules.py (whole, 266)",
+   "roto_restrictions.py (whole, 565)",
+   "player_protections.py (whole, 43)",
+   "creature_statics_wg.py (224: choose_card_name_as_enters@130+37, spell_cost_increase@81+31, activation_locked@242+28)",
+   "actions.py (107: _apply_ward_check@3466+107)",
+   "roto_board_statics.py (230: untap_step_held@661+56, _drop_stale_grants@518+21, _apply_role_uniqueness@541+21)"
+  ]
+ },
+ {
+  "subsystem": "Hidden information + determinization",
+  "lines": 231,
+  "parts": [
+   "game.py (74: hide_hand_moved_into_library@1117+20, reveal_to@1079+14, shuffle_library@1150+13)",
+   "search/determinize.py (whole, 157)"
+  ]
+ }
+]

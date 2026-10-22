@@ -1,0 +1,553 @@
+{
+ "\"Name Sticker\" Goblin": {
+  "$t": "mtg_bot.cards.base.CardPrinting",
+  "name": "\"Name Sticker\" Goblin",
+  "mana_cost_str": "{2}{R}",
+  "mana_cost": {
+   "$t": "mtg_bot.cards.base.ManaCost",
+   "generic": 2,
+   "colored": [
+    [
+     "R",
+     1
+    ]
+   ]
+  },
+  "type_line": "Creature \u2014 Goblin Guest",
+  "supertypes": [],
+  "card_types": [
+   "Creature"
+  ],
+  "subtypes": [
+   "Goblin",
+   "Guest"
+  ],
+  "power": 2,
+  "toughness": 2,
+  "triggered_abilities": [
+   {
+    "$t": "mtg_bot.effects.base.TriggeredAbility",
+    "effect": {
+     "$t": "mtg_bot.effects.generic.cube_creatures_rmc.RollDieTable",
+     "table": [
+      [
+       1,
+       6,
+       {
+        "$t": "mtg_bot.effects.generic.mana.AddManaToPool",
+        "produces": [
+         [
+          "R",
+          4
+         ]
+        ]
+       }
+      ],
+      [
+       7,
+       14,
+       {
+        "$t": "mtg_bot.effects.generic.mana.AddManaToPool",
+        "produces": [
+         [
+          "R",
+          5
+         ]
+        ]
+       }
+      ],
+      [
+       15,
+       20,
+       {
+        "$t": "mtg_bot.effects.generic.mana.AddManaToPool",
+        "produces": [
+         [
+          "R",
+          6
+         ]
+        ]
+       }
+      ]
+     ],
+     "gate": {
+      "$t": "mtg_bot.effects.generic.cube_creatures_rmc.NameStickerGate",
+      "name": "\"Name Sticker\" Goblin"
+     }
+    },
+    "event": {
+     "$e": "mtg_bot.effects.predicates.Event",
+     "v": "ENTERS"
+    },
+    "predicate": {
+     "$t": "mtg_bot.effects.predicates.And",
+     "left": {
+      "$t": "mtg_bot.effects.predicates.And",
+      "left": {
+       "$t": "mtg_bot.effects.predicates.IsSelf"
+      },
+      "right": {
+       "$t": "mtg_bot.effects.generic.cube_creatures_rmc.EnteredNotFromZones"
+      }
+     },
+     "right": {
+      "$t": "mtg_bot.effects.generic.cube_creatures_rmc.ControlsAtMostNamed",
+      "name": "\"Name Sticker\" Goblin"
+     }
+    }
+   }
+  ]
+ },
+ "Aang, Swift Savior // Aang and La, Ocean's Fury": {
+  "$t": "mtg_bot.cards.base.CardPrinting",
+  "name": "Aang, Swift Savior // Aang and La, Ocean's Fury",
+  "mana_cost_str": "{1}{W}{U}",
+  "mana_cost": {
+   "$t": "mtg_bot.cards.base.ManaCost",
+   "generic": 1,
+   "colored": [
+    [
+     "U",
+     1
+    ],
+    [
+     "W",
+     1
+    ]
+   ]
+  },
+  "type_line": "Legendary Creature \u2014 Human Avatar Ally",
+  "supertypes": [
+   "Legendary"
+  ],
+  "card_types": [
+   "Creature"
+  ],
+  "subtypes": [
+   "Human",
+   "Avatar",
+   "Ally"
+  ],
+  "power": 2,
+  "toughness": 3,
+  "keywords": {
+   "$fs": [
+    "flash",
+    "flying"
+   ]
+  },
+  "triggered_abilities": [
+   {
+    "$t": "mtg_bot.effects.base.TriggeredAbility",
+    "effect": {
+     "$t": "mtg_bot.effects.generic.layout_face_effects.Airbend"
+    },
+    "event": {
+     "$e": "mtg_bot.effects.predicates.Event",
+     "v": "ENTERS"
+    },
+    "predicate": {
+     "$t": "mtg_bot.effects.predicates.IsSelf"
+    }
+   }
+  ],
+  "activated_abilities": [
+   {
+    "$t": "mtg_bot.effects.base.ActivatedAbility",
+    "cost": {
+     "$t": "mtg_bot.effects.base.ActivationCost",
+     "mana": {
+      "$t": "mtg_bot.cards.base.ManaCost",
+      "generic": 8
+     },
+     "mana_str": "{8}",
+     "waterbend": true
+    },
+    "effect": {
+     "$t": "mtg_bot.effects.generic.layout_effects.TransformSource"
+    }
+   }
+  ],
+  "transform_back_face": {
+   "$t": "mtg_bot.cards.base.CardPrinting",
+   "name": "Aang and La, Ocean's Fury",
+   "mana_cost_str": "",
+   "mana_cost": {
+    "$t": "mtg_bot.cards.base.ManaCost",
+    "generic": 1,
+    "colored": [
+     [
+      "U",
+      1
+     ],
+     [
+      "W",
+      1
+     ]
+    ]
+   },
+   "type_line": "Legendary Creature \u2014 Avatar Spirit Ally",
+   "supertypes": [
+    "Legendary"
+   ],
+   "card_types": [
+    "Creature"
+   ],
+   "subtypes": [
+    "Avatar",
+    "Spirit",
+    "Ally"
+   ],
+   "power": 5,
+   "toughness": 5,
+   "keywords": {
+    "$fs": [
+     "reach",
+     "trample"
+    ]
+   },
+   "triggered_abilities": [
+    {
+     "$t": "mtg_bot.effects.base.TriggeredAbility",
+     "effect": {
+      "$t": "mtg_bot.effects.generic.layout_face_effects.PutPlusOneCounterOnEachMatching",
+      "predicate": {
+       "$t": "mtg_bot.effects.object_predicates.ObjectAnd",
+       "left": {
+        "$t": "mtg_bot.effects.object_predicates.IsCreature"
+       },
+       "right": {
+        "$t": "mtg_bot.effects.object_predicates.IsTapped"
+       }
+      }
+     },
+     "event": {
+      "$e": "mtg_bot.effects.predicates.Event",
+      "v": "ATTACKS"
+     },
+     "predicate": {
+      "$t": "mtg_bot.effects.predicates.IsSelf"
+     }
+    }
+   ],
+   "face_colors": {
+    "$fs": []
+   }
+  }
+ },
+ "Abandoned Air Temple": {
+  "$t": "mtg_bot.cards.base.CardPrinting",
+  "name": "Abandoned Air Temple",
+  "mana_cost_str": "",
+  "mana_cost": {
+   "$t": "mtg_bot.cards.base.ManaCost"
+  },
+  "type_line": "Land",
+  "supertypes": [],
+  "card_types": [
+   "Land"
+  ],
+  "subtypes": [],
+  "produces": {
+   "$fs": [
+    "W"
+   ]
+  },
+  "enters_tapped_unless": {
+   "$t": "mtg_bot.effects.conditions.ControlPermanent",
+   "filter": {
+    "$t": "mtg_bot.effects.object_predicates.ObjectAnd",
+    "left": {
+     "$t": "mtg_bot.effects.object_predicates.IsLand"
+    },
+    "right": {
+     "$t": "mtg_bot.effects.object_predicates.IsBasic"
+    }
+   }
+  },
+  "mana_only_from_produces": true,
+  "activated_abilities": [
+   {
+    "$t": "mtg_bot.effects.base.ActivatedAbility",
+    "cost": {
+     "$t": "mtg_bot.effects.base.ActivationCost",
+     "mana": {
+      "$t": "mtg_bot.cards.base.ManaCost",
+      "generic": 3,
+      "colored": [
+       [
+        "W",
+        1
+       ]
+      ]
+     },
+     "mana_str": "{3}{W}",
+     "tap_self": true
+    },
+    "effect": {
+     "$t": "mtg_bot.effects.generic.counters.PutPlusOneCounterOnEachCreatureYouControl"
+    }
+   }
+  ]
+ },
+ "Lightning Bolt": {
+  "$t": "mtg_bot.cards.base.CardPrinting",
+  "name": "Lightning Bolt",
+  "mana_cost_str": "{R}",
+  "mana_cost": {
+   "$t": "mtg_bot.cards.base.ManaCost",
+   "colored": [
+    [
+     "R",
+     1
+    ]
+   ]
+  },
+  "type_line": "Instant",
+  "supertypes": [],
+  "card_types": [
+   "Instant"
+  ],
+  "subtypes": [],
+  "spell_effect": {
+   "$t": "mtg_bot.effects.generic.damage.DealDamageAnyTarget",
+   "amount": 3,
+   "targets": [
+    {
+     "$t": "mtg_bot.effects.targets.TargetSpec",
+     "filter": {
+      "$t": "mtg_bot.effects.target_filter.OneOf",
+      "filters": [
+       {
+        "$t": "mtg_bot.effects.object_predicates.IsCreature"
+       },
+       {
+        "$t": "mtg_bot.effects.object_predicates.IsPlaneswalker"
+       },
+       {
+        "$t": "mtg_bot.effects.object_predicates.IsBattle"
+       },
+       {
+        "$t": "mtg_bot.effects.object_predicates.IsPlayer"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ },
+ "Oko, Thief of Crowns": {
+  "$t": "mtg_bot.cards.base.CardPrinting",
+  "name": "Oko, Thief of Crowns",
+  "mana_cost_str": "{1}{G}{U}",
+  "mana_cost": {
+   "$t": "mtg_bot.cards.base.ManaCost",
+   "generic": 1,
+   "colored": [
+    [
+     "G",
+     1
+    ],
+    [
+     "U",
+     1
+    ]
+   ]
+  },
+  "type_line": "Legendary Planeswalker \u2014 Oko",
+  "supertypes": [
+   "Legendary"
+  ],
+  "card_types": [
+   "Planeswalker"
+  ],
+  "subtypes": [
+   "Oko"
+  ],
+  "loyalty": 4,
+  "activated_abilities": [
+   {
+    "$t": "mtg_bot.effects.base.ActivatedAbility",
+    "cost": {
+     "$t": "mtg_bot.effects.base.ActivationCost",
+     "loyalty": -2
+    },
+    "effect": {
+     "$t": "mtg_bot.effects.generic.tokens.CreateToken",
+     "token_printing": {
+      "$t": "mtg_bot.cards.base.CardPrinting",
+      "name": "Food",
+      "mana_cost_str": "",
+      "mana_cost": {
+       "$t": "mtg_bot.cards.base.ManaCost"
+      },
+      "type_line": "Token Artifact \u2014 Food",
+      "supertypes": [
+       "Token"
+      ],
+      "card_types": [
+       "Artifact"
+      ],
+      "subtypes": [
+       "Food"
+      ],
+      "activated_abilities": [
+       {
+        "$t": "mtg_bot.effects.base.ActivatedAbility",
+        "cost": {
+         "$t": "mtg_bot.effects.base.ActivationCost",
+         "mana": {
+          "$t": "mtg_bot.cards.base.ManaCost",
+          "generic": 2
+         },
+         "mana_str": "{2}",
+         "tap_self": true,
+         "sacrifice_self": true
+        },
+        "effect": {
+         "$t": "mtg_bot.effects.generic.life.GainLife",
+         "amount": 3
+        }
+       }
+      ]
+     }
+    },
+    "sorcery_speed": true
+   },
+   {
+    "$t": "mtg_bot.effects.base.ActivatedAbility",
+    "cost": {
+     "$t": "mtg_bot.effects.base.ActivationCost",
+     "loyalty": -1
+    },
+    "effect": {
+     "$t": "mtg_bot.effects.generic.cube_glue.TargetBecomesCreatureIndefinitely",
+     "targets": [
+      {
+       "$t": "mtg_bot.effects.targets.TargetSpec",
+       "filter": {
+        "$t": "mtg_bot.effects.object_predicates.ObjectOr",
+        "left": {
+         "$t": "mtg_bot.effects.object_predicates.IsArtifact"
+        },
+        "right": {
+         "$t": "mtg_bot.effects.object_predicates.IsCreature"
+        }
+       }
+      }
+     ],
+     "lose_all_abilities": true,
+     "colors": {
+      "$fs": [
+       "G"
+      ]
+     },
+     "creature_subtypes": [
+      "Elk"
+     ],
+     "base_pt": [
+      3,
+      3
+     ]
+    },
+    "sorcery_speed": true
+   },
+   {
+    "$t": "mtg_bot.effects.base.ActivatedAbility",
+    "cost": {
+     "$t": "mtg_bot.effects.base.ActivationCost",
+     "loyalty": 5
+    },
+    "effect": {
+     "$t": "mtg_bot.effects.generic.cube_glue.ExchangeControlOfTargets",
+     "targets": [
+      {
+       "$t": "mtg_bot.effects.targets.TargetSpec",
+       "filter": {
+        "$t": "mtg_bot.effects.object_predicates.ObjectAnd",
+        "left": {
+         "$t": "mtg_bot.effects.object_predicates.ObjectOr",
+         "left": {
+          "$t": "mtg_bot.effects.object_predicates.IsArtifact"
+         },
+         "right": {
+          "$t": "mtg_bot.effects.object_predicates.IsCreature"
+         }
+        },
+        "right": {
+         "$t": "mtg_bot.effects.object_predicates.ControlledByYou"
+        }
+       }
+      },
+      {
+       "$t": "mtg_bot.effects.targets.TargetSpec",
+       "filter": {
+        "$t": "mtg_bot.effects.object_predicates.ObjectAnd",
+        "left": {
+         "$t": "mtg_bot.effects.object_predicates.ObjectAnd",
+         "left": {
+          "$t": "mtg_bot.effects.object_predicates.IsCreature"
+         },
+         "right": {
+          "$t": "mtg_bot.effects.object_predicates.ControlledByOpponent"
+         }
+        },
+        "right": {
+         "$t": "mtg_bot.effects.object_predicates.HasPowerAtMost",
+         "n": 3
+        }
+       }
+      }
+     ]
+    },
+    "sorcery_speed": true
+   }
+  ]
+ },
+ "Snapcaster Mage": {
+  "$t": "mtg_bot.cards.base.CardPrinting",
+  "name": "Snapcaster Mage",
+  "mana_cost_str": "{1}{U}",
+  "mana_cost": {
+   "$t": "mtg_bot.cards.base.ManaCost",
+   "generic": 1,
+   "colored": [
+    [
+     "U",
+     1
+    ]
+   ]
+  },
+  "type_line": "Creature \u2014 Human Wizard",
+  "supertypes": [],
+  "card_types": [
+   "Creature"
+  ],
+  "subtypes": [
+   "Human",
+   "Wizard"
+  ],
+  "power": 2,
+  "toughness": 1,
+  "keywords": {
+   "$fs": [
+    "flash"
+   ]
+  },
+  "triggered_abilities": [
+   {
+    "$t": "mtg_bot.effects.base.TriggeredAbility",
+    "effect": {
+     "$t": "mtg_bot.effects.generic.graveyard_casting.GrantFlashbackToTargetCardUEOT"
+    },
+    "event": {
+     "$e": "mtg_bot.effects.predicates.Event",
+     "v": "ENTERS"
+    },
+    "predicate": {
+     "$t": "mtg_bot.effects.predicates.IsSelf"
+    }
+   }
+  ]
+ }
+}

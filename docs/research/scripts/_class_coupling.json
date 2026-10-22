@@ -1,0 +1,3044 @@
+{
+ "mtg_bot.effects.predicates.IsSelf": {
+  "cube_cards": 162,
+  "external_refs": 23,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.targets.TargetSpec": {
+  "cube_cards": 129,
+  "external_refs": 151,
+  "isinstance_refs": 19,
+  "isinstance_files": {
+   "src/mtg_bot/effects/base.py": 3,
+   "src/mtg_bot/effects/combinators.py": 1,
+   "src/mtg_bot/effects/generic/bounce.py": 2,
+   "src/mtg_bot/effects/generic/counters.py": 1,
+   "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 2,
+   "src/mtg_bot/effects/generic/damage.py": 1,
+   "src/mtg_bot/effects/generic/destroy.py": 2,
+   "src/mtg_bot/effects/generic/enchantment_mechanics.py": 1,
+   "src/mtg_bot/effects/generic/exile.py": 1,
+   "src/mtg_bot/effects/generic/grant_keywords.py": 1,
+   "src/mtg_bot/effects/generic/pump.py": 1,
+   "src/mtg_bot/effects/generic/tap.py": 2,
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.object_predicates.IsCreature": {
+  "cube_cards": 107,
+  "external_refs": 125,
+  "isinstance_refs": 7,
+  "isinstance_files": {
+   "src/mtg_bot/combat.py": 1,
+   "src/mtg_bot/effects/generic/targets_helpers.py": 6
+  }
+ },
+ "mtg_bot.effects.generic.draw_mill.DrawCards": {
+  "cube_cards": 82,
+  "external_refs": 13,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.And": {
+  "cube_cards": 79,
+  "external_refs": 13,
+  "isinstance_refs": 5,
+  "isinstance_files": {
+   "src/mtg_bot/combat.py": 1,
+   "src/mtg_bot/effects/base.py": 1,
+   "src/mtg_bot/effects/generic/cube_creatures_rmc.py": 3
+  }
+ },
+ "mtg_bot.effects.predicates.Controlled": {
+  "cube_cards": 79,
+  "external_refs": 16,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates._Controller": {
+  "cube_cards": 79,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.Sequence": {
+  "cube_cards": 77,
+  "external_refs": 38,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/actions.py": 2
+  }
+ },
+ "mtg_bot.effects.object_predicates.ObjectAnd": {
+  "cube_cards": 70,
+  "external_refs": 4,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/combat.py": 1,
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.generic.mana.AddManaToPool": {
+  "cube_cards": 67,
+  "external_refs": 21,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/actions.py": 1
+  }
+ },
+ "mtg_bot.effects.generic.card_flow.CardFilter": {
+  "cube_cards": 66,
+  "external_refs": 48,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.tokens.CreateToken": {
+  "cube_cards": 50,
+  "external_refs": 55,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.Subject": {
+  "cube_cards": 48,
+  "external_refs": 10,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/combat.py": 1,
+   "src/mtg_bot/effects/base.py": 1
+  }
+ },
+ "mtg_bot.effects.object_predicates.IsArtifact": {
+  "cube_cards": 42,
+  "external_refs": 27,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/effects/base.py": 1,
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.object_predicates.IsPlayer": {
+  "cube_cards": 42,
+  "external_refs": 38,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 2
+  }
+ },
+ "mtg_bot.effects.object_predicates.ObjectNot": {
+  "cube_cards": 42,
+  "external_refs": 2,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.object_predicates.IsLand": {
+  "cube_cards": 40,
+  "external_refs": 26,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 2
+  }
+ },
+ "mtg_bot.effects.object_predicates.ObjectOr": {
+  "cube_cards": 37,
+  "external_refs": 4,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.object_predicates.IsPlaneswalker": {
+  "cube_cards": 35,
+  "external_refs": 7,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.SearchLibrary": {
+  "cube_cards": 21,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.RemoveTargetPermanents": {
+  "cube_cards": 21,
+  "external_refs": 6,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.IsBattle": {
+  "cube_cards": 21,
+  "external_refs": 7,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.target_filter.OneOf": {
+  "cube_cards": 21,
+  "external_refs": 10,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.generic.life.GainLife": {
+  "cube_cards": 20,
+  "external_refs": 6,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.MayDo": {
+  "cube_cards": 16,
+  "external_refs": 4,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.ControlledByYou": {
+  "cube_cards": 16,
+  "external_refs": 13,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.object_predicates.IsEnchantment": {
+  "cube_cards": 16,
+  "external_refs": 9,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.combinators.IfConditionElse": {
+  "cube_cards": 14,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.destroy.Destroy": {
+  "cube_cards": 14,
+  "external_refs": 18,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counterspells.CounterSpell": {
+  "cube_cards": 13,
+  "external_refs": 4,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.discard.DiscardSelf": {
+  "cube_cards": 13,
+  "external_refs": 9,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.library_lookat.Surveil": {
+  "cube_cards": 13,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.IsPermanent": {
+  "cube_cards": 12,
+  "external_refs": 7,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.damage.DealDamageAnyTarget": {
+  "cube_cards": 12,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.mana.AddNManaOfChosenColor": {
+  "cube_cards": 12,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.search.SearchLibraryForLandCardToBattlefield": {
+  "cube_cards": 12,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.ControlledByOpponent": {
+  "cube_cards": 12,
+  "external_refs": 35,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 2
+  }
+ },
+ "mtg_bot.effects.conditions.ControlsAtMost": {
+  "cube_cards": 10,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.IsSource": {
+  "cube_cards": 10,
+  "external_refs": 16,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.StateBound": {
+  "cube_cards": 10,
+  "external_refs": 5,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/base.py": 1
+  }
+ },
+ "mtg_bot.cards.spell_costs.AlternativeCost": {
+  "cube_cards": 9,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.SourceDealsDamageToController": {
+  "cube_cards": 9,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutPlusOneCounterOnSelf": {
+  "cube_cards": 9,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.reanimation.ReturnCardFromGraveyardToBattlefield": {
+  "cube_cards": 9,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.HasSubtype": {
+  "cube_cards": 9,
+  "external_refs": 8,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.Source": {
+  "cube_cards": 9,
+  "external_refs": 14,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.ModalChooseOne": {
+  "cube_cards": 8,
+  "external_refs": 8,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/actions.py": 2
+  }
+ },
+ "mtg_bot.effects.generic.attach.EquipToTargetCreatureYouControl": {
+  "cube_cards": 8,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.Not": {
+  "cube_cards": 8,
+  "external_refs": 9,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.LookAtTopCardsPutIntoHand": {
+  "cube_cards": 7,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ExileTopCardsWithPlayPermission": {
+  "cube_cards": 7,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.CreateEmblemWithAbilities": {
+  "cube_cards": 7,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.keyword_actions.TakeInitiative": {
+  "cube_cards": 7,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.TransformSource": {
+  "cube_cards": 7,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.PerControlled": {
+  "cube_cards": 6,
+  "external_refs": 5,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.formulas.CountControlledMatching": {
+  "cube_cards": 6,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.UntapSelf": {
+  "cube_cards": 6,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.TargetPlayerRevealsHandYouChooseDiscard": {
+  "cube_cards": 6,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.DealDamageFromEvent": {
+  "cube_cards": 6,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.IfCondition": {
+  "cube_cards": 6,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.exile.Exile": {
+  "cube_cards": 6,
+  "external_refs": 80,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.search.SearchLibraryForCard": {
+  "cube_cards": 6,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.EventPattern": {
+  "cube_cards": 6,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.ReplacementEffect": {
+  "cube_cards": 6,
+  "external_refs": 7,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.IfYouDo": {
+  "cube_cards": 5,
+  "external_refs": 4,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.PutNamedCountersOnSelf": {
+  "cube_cards": 5,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.IsThisSpell": {
+  "cube_cards": 5,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.PutPlusOneCountersOnTargetThenGrantKeywordsUEOT": {
+  "cube_cards": 5,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.draw_mill.EachPlayerDraws": {
+  "cube_cards": 5,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.multi_modal.ChooseModes": {
+  "cube_cards": 5,
+  "external_refs": 5,
+  "isinstance_refs": 2,
+  "isinstance_files": {
+   "src/mtg_bot/actions.py": 2
+  }
+ },
+ "mtg_bot.effects.generic.pump.PumpTargetCreatureUntilEOT": {
+  "cube_cards": 5,
+  "external_refs": 4,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.value_predicates.IsPermanent": {
+  "cube_cards": 5,
+  "external_refs": 6,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.evoke.SacrificeSelfIfEvoked": {
+  "cube_cards": 5,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.evoke.WasEvoked": {
+  "cube_cards": 5,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.cards.base.CostReduction": {
+  "cube_cards": 4,
+  "external_refs": 9,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.ApplyEffect": {
+  "cube_cards": 4,
+  "external_refs": 108,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.durations.EndOfTurn": {
+  "cube_cards": 4,
+  "external_refs": 92,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.formulas.ResolvingX": {
+  "cube_cards": 4,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.become_type.BecomeType": {
+  "cube_cards": 4,
+  "external_refs": 20,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.bounce.Bounce": {
+  "cube_cards": 4,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.HasPrintedCardType": {
+  "cube_cards": 4,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.damage.DealDamageToTargetCreature": {
+  "cube_cards": 4,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.destroy.DestroyTargetArtifact": {
+  "cube_cards": 4,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.divided_damage.DealDamageDividedAmongTargets": {
+  "cube_cards": 4,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.keyword_actions.BecomeMonarch": {
+  "cube_cards": 4,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.ExileSourceThenReturnTransformed": {
+  "cube_cards": 4,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.library_lookat.SelfMill": {
+  "cube_cards": 4,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.pump.PumpCreaturesYouControlUntilEOT": {
+  "cube_cards": 4,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.stack_control.CounterTargetSpell": {
+  "cube_cards": 4,
+  "external_refs": 15,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.RemoveAllMatching": {
+  "cube_cards": 4,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.HasPowerAtMost": {
+  "cube_cards": 4,
+  "external_refs": 6,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.IsAttacking": {
+  "cube_cards": 4,
+  "external_refs": 13,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.object_predicates.IsLegendary": {
+  "cube_cards": 4,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.IsNontoken": {
+  "cube_cards": 4,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.Or": {
+  "cube_cards": 4,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.ControlPermanent": {
+  "cube_cards": 3,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.DeliriumActive": {
+  "cube_cards": 3,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.AddManaInAnyCombination": {
+  "cube_cards": 3,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.become_type.BecomeLandCreatureUEOT": {
+  "cube_cards": 3,
+  "external_refs": 4,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.bounce.ReturnTargetCreatureToOwnersHand": {
+  "cube_cards": 3,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.EachPlayerShufflesZonesIntoLibrary": {
+  "cube_cards": 3,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cast_conditionals.AlternativeCostWasPaid": {
+  "cube_cards": 3,
+  "external_refs": 2,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/combinators.py": 1
+  }
+ },
+ "mtg_bot.effects.generic.cast_conditionals.SpellWasKicked": {
+  "cube_cards": 3,
+  "external_refs": 3,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/combinators.py": 1
+  }
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.LinkExiledCardsToSource": {
+  "cube_cards": 3,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.damage.DealDamage": {
+  "cube_cards": 3,
+  "external_refs": 9,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.ExileTargetReturnAtNextEndStep": {
+  "cube_cards": 3,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.exile.ExileTargetCardFromGraveyard": {
+  "cube_cards": 3,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.exile.SacrificeSelf": {
+  "cube_cards": 3,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.ReturnTargetCardFromYourGraveyardToHand": {
+  "cube_cards": 3,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.life.EachOpponentLosesLife": {
+  "cube_cards": 3,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.life.LoseLife": {
+  "cube_cards": 3,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.pump.PumpSelfUntilEOT": {
+  "cube_cards": 3,
+  "external_refs": 5,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.stack_control.TakeExtraTurnAfterThisOne": {
+  "cube_cards": 3,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.tap.Untap": {
+  "cube_cards": 3,
+  "external_refs": 17,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.ControllerSearchesForBasicLand": {
+  "cube_cards": 3,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.tokens.CreateTokenAndAttachSelf": {
+  "cube_cards": 3,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.ContinuousModifier": {
+  "cube_cards": 3,
+  "external_refs": 14,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.IsBasic": {
+  "cube_cards": 3,
+  "external_refs": 5,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.IsTapped": {
+  "cube_cards": 3,
+  "external_refs": 12,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/generic/targets_helpers.py": 1
+  }
+ },
+ "mtg_bot.effects.predicates.Always": {
+  "cube_cards": 3,
+  "external_refs": 21,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.CompletedADungeon": {
+  "cube_cards": 3,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.cards.base.ExternalCostReduction": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.cards.spell_costs.AdditionalCostOption": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.HandSizeAtMost": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.formulas.Scaled": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.FlickerUpToOneOtherTargetNonlandPermanentYouControl": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.ScheduleDelayedEffect": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.ReorderTopCards": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.TargetPlayerDiscards": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.TargetPlayerDiscardsAtRandom": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cheat_into_play.PutCreatureFromHandHasteSacrificeAtNextEndStep": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CardTypeOrSubtypeFilter": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CastOrCopy": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CreaturesCantBlockThisTurn": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.DiscardUpToNThenDrawThatMany": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ExileSelfFromGraveyardCost": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.MayDoThenReflexive": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.OneOrMoreBatch": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.PutIntoGraveyardFromAnywhere": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ResolvingDamageAmount": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.RollDieTable": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.SacrificeSelfUnlessEscaped": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.SourceBecomesIfSubtype": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.SourceFightsTarget": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.TargetCreatureCantBlockThisTurn": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.CounterTargetStackObject": {
+  "cube_cards": 2,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.CreateTokenCopiesOfSelf": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.PutSourceOntoBattlefieldTappedAndAttacking": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.RevealTopCardToHandLoseLifeEqualMV": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CreateTokenCopyOfSource": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.EnteringWithXAtLeast": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ReflexiveWhenYouDo": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ThisSpellWasKicked": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.HasManaValueAtMost": {
+  "cube_cards": 2,
+  "external_refs": 7,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.LookTopNMayRevealMatchingToHandRestBottomRandom": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.PutCardsFromHandOnTopOfLibrary": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.UntapUpToNPermanents": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.WinTheGame": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.damage.DealDamageEachOpponent": {
+  "cube_cards": 2,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.destroy.DestroyTargetLand": {
+  "cube_cards": 2,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.draw_mill.MillTargetPlayer": {
+  "cube_cards": 2,
+  "external_refs": 10,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.LinkedCreatureControllerSacrifices": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.ReanimateAndAttachSource": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.exile.ExileOpponentsNonlandPermanentUntilLeaves": {
+  "cube_cards": 2,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.graveyard.ReturnFromGraveyard": {
+  "cube_cards": 2,
+  "external_refs": 13,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.graveyard_casting.GrantFlashbackToTargetCardUEOT": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.keyword_actions.GrantProtectionOfChoiceUEOT": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.PutPlusOneCounterOnEachMatching": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.library_lookat.Scry": {
+  "cube_cards": 2,
+  "external_refs": 9,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.mana.AddManaOfColorPerCount": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.mass_effects.PumpAllCreaturesUEOT": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.reanimation.PutTargetPermanentIntoOwnersLibrary": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_misc.CreateTokensScaledByX": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.ControllerGainsLifeEqualToPower": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.GrantKeyword": {
+  "cube_cards": 2,
+  "external_refs": 2,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/game.py": 1
+  }
+ },
+ "mtg_bot.effects.modifiers.Replace": {
+  "cube_cards": 2,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.DrawIsFirstInOwnDrawStep": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.HasPowerAtLeast": {
+  "cube_cards": 2,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.CardsInGraveyardAtLeast": {
+  "cube_cards": 2,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.HasInitiative": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.value_predicates.HasColor": {
+  "cube_cards": 2,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.bespoke.EnduringDiesReturnAsEnchantmentEffect": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.ConditionalIfCastFromHand": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.OptionalManaCostThenEffect": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.OptionalPutLandFromHandOntoBattlefield": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.combinators.ThenTargetControllerResolves": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.FirstSpellYouCastThisGame": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.HandSizeExactly": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.PerBasicLandTypeAmongLandsYouControl": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.SourceHasCounter": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.SpellCastFromGraveyard": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.SpellCastFromOutsideHand": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.conditions.YourTurnOfGameAtMost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.formulas.MVOfCostPaidObjectPlus": {
+  "cube_cards": 1,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.AddOneManaOfColorAmongControlled": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.AddOneManaOfImprintedColors": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.CreateTokenCopyOfTargetTokenYouControl": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.CreateTokenThenMayAttachSelf": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.DrawCardsPerCounterOnSource": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.EachOpponentSacrificesN": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.EachPlayerExilesHandDrawsNReturnsLater": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.ExileThatCreature": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.FlipCoinIfLost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.GainProtectionFromEverythingUntilYourNextTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.HarnessSelf": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.IfSourceHasNoCounters": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.ImprintCardFromHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.LookAtRandomCardInTargetPlayersHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.LookAtTopCardOfTargetPlayersLibrary": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.LoseLifePerCounterOnSource": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.MayExileThatCardFromYourGraveyard": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.MayTapOrUntapTarget": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.MillTwoRepeatWhileShareColor": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.OpponentGainsControlOfSource": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.PutSourceOnTopOfOwnersLibrary": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.ReanimateTargetCreatureCardFromAGraveyard": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.ReturnExiledWithSourceToGraveyardThenToken": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.ReturnThisCardFromGraveyardThenAttachToThatCreature": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.TargetOpponentMayLetYouDrawElseMill": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.ThatPlayerDrawsAndGainsControlOfSource": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.artifact_mechanics.UntapXTargets": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.bounce.ReturnCreatureFromYourGraveyardToHand": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.ChooseNameExileThenRevealUntilNamed": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.DrawDiscardThenTokensPerDiscardedType": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.EachPlayerDiscardsHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.ExileThisSpell": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.LookAtTargetPlayersHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.LookAtTopCardsDistribute": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.LookAtTopRepeatPayLifeThenStackTop": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.ReturnAllPermanentsToOwnersHands": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.ReturnTargetSpellOrNonlandPermanentToHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.ReturnTargetSpellToOwnersHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.ShuffleYourLibrary": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.TargetPlayerDraws": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.TargetPlayerTakesExtraTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.card_flow.UntapUpToNLands": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cast_conditionals.AnOpponentDrawsCards": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cast_conditionals.OptionalAdditionalCostPaid": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cast_conditionals.PermanentLeftYourControlThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cheat_into_play.PutCreatureFromHandSacrificeUnlessPay": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cheat_into_play.SacrificeArtifactTutorArtifactPayDifference": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutChargeCountersOnSelf": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutLoyaltyCounterOnSelf": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutPlusOneCounterOnCreatureYouControl": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutPlusOneCounterOnEachCreatureYouControl": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutPlusOneCounterOnEachOfUpToNTargetCreatures": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutPlusOneCounterOnOpponentsCreature": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutPlusOneCounterOnTargetCreature": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.counters.PutStunCounterOnTappedCreature": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CardsExiledFromLibraryOrGraveyard": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.Cascade": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ControlsAtMostNamed": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CopyTargetInstantOrSorcerySpellYouControl": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CountAttackingCreatures": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CountPermanentsOfPlayer": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.CreateTokenPerFormula": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.DealDamageByFormula": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.DealPowerDamageToEachOfUpToKickedTargets": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.DefendingPlayerSacrificesPermanents": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.DiscardThenDrawTokensPerNonland": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.DiscardYourHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.EachOpponentChoiceDestroyOneAtRandom": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.EnteredNotFromZones": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.EnteredViaCast": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.EventSubjectManaValue": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.EventSubjectPower": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ExileRandomGraveyardCardWithPlayPermission": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ExileTargetGraveyardCardWithPlayPermission": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ExileUpToOneTargetCardFromGraveyard": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ExperienceCounters": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.GetExperienceCounter": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.Monstrosity": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.NameStickerGate": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.OpponentHasMoreCardsInHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.OwnerShufflesGraveyardIntoLibrary": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.PumpTargetCreatureByFormulaUEOT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.RemoveCountersFromSelfCost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.ReturnThisCardFromGraveyardToBattlefield": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.RevealTopLandToBattlefieldElseHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.RevealTopNOnePerCardTypeToHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.RevealUntilCreatureOntoBattlefieldAttacking": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.SacrificeAPermanent": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.SacrificePermanentsCost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.StateCondition": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.SwapArtifactWithGraveyardArtifact": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.TapUntappedPermanentsCost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.TargetConnives": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_rmc.TargetOpponentCreatesToken": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.Adapt": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.Amass": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.BecomeSaddled": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.BindEventPlayer": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ChooseNoMode": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ChooseOpponentsExiledCardWithCounterMayPlayFree": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.DevotionTo": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ExileUntilNonlandThenCounterOrMayCastIt": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ExileUpToOneTargetGraveyardCardWithSource": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.FormulaCoversLibrary": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.GainControlOfTargetThenAttachIfEquipment": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.LookAtHandMayExileNonlandUntilSourceLeaves": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.LookTopNKeepUpToOneOnTopRestBottom": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.LootThenMayCastDiscardedFreeIfCounters": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.MayCastSpellFromGraveyardNow": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.MayCastTargetGraveyardCardThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.MayMillDamageThenMayTakeCreature": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ModalChooseOneNotYetChosen": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.OwnerPutsTargetSecondFromTopOrBottom": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.OwnerPutsTargetSpellOnTopOrBottom": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ReanimateExiledWithSourceFinalityHasteSacrifice": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ShuffleThenExileTopMayPlayFree": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.SourceCantBeBlockedThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.SpellMVHasSourceParity": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.TapSelf": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.TargetOpponentExilesThreeMayCastOneFree": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.TargetPlayerExilesTopNYouMayPlayThem": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.TargetPlayerPerformsActions": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ThenItsControllerDraws": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_ub.ThenTargetLosesAbilitiesWhileSourceRemains": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.Backup": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CardTypesAmongExiledWithSourceAtLeast": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CastAnotherSpellThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CopyEachTokenYouControlEnteredThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CopyThisSpell": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CounterThenWhenItAttacksMonarch": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CreateAttackingTokenForEachOpponent": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.CreateTokensEqualToSourcePower": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.DealCombatDamageAmountToTarget": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.DoublePlusOneCountersOnEach": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.Earthbend": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ExileGraveyardCardCounterIfPermanent": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ExileUntilOpponentBecomesMonarch": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ExiledCardOwnerCreatesManaValueToken": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.GrantKeywordsUEOTAndPutCounters": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.GrantKeywordsUEOTThenExplores": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.LookAtHandExileNonlandOwnerMayPlayTaxed": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.MillChooseOpponentAttackPump": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.MillThenMayPutLandIntoHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.Mobilize": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.PayEnergy": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.PayToCopyEnchantedCreatureElseToken": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.PowerEqualsCount": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.PutCardFromHandOntoBattlefield": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.PutCounterDoublingOnSecondResolution": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.PutCountersOnTargetAndAddSubtype": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ReconfigureAttach": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ReconfigureUnattach": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.RemoveACounterFromSelf": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.ShuffleSourceIntoOwnersLibrary": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.TargetPlayerPutsGraveyardOnBottomRandom": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.UntapAllMatching": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.UntapChosenPermanents": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_creatures_wg.YouAndTargetOpponentEachDraw": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.AdditionalCombatPhaseAfterThisPhase": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.AdjustSourceLoyalty": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.ChooseNameRevealTopPutNamedIntoHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.CounterThenDelayedManaEqualToMV": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.CreateThenTheyGainKeywordsUEOT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.DrawPerOpponentWhoLostLifeThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.ExchangeControlOfTargets": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.ExileTopCardMayCastOtherwise": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.GrantExtraLoyaltyActivationsThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.HideawayLookExileOneFaceDown": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.PlayExiledCardFreeIfAnyLibraryAtMost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.PutCountersUntapItBecomesCreature": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.RemoveAllCountersAddManaPerCounter": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.ReturnCardsExiledWithSourceToOwnersHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.ReturnChosenGraveyardCardToHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.ReturnTargetGraveyardCardToHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.SearchAnyNumberExileCastFreeThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.SearchAnyNumberOntoBattlefield": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.SourceDealsLoyaltyDamageToChosen": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.TapTargetPutStunCounters": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_glue.TargetBecomesCreatureIndefinitely": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.AtBeginningOfNextEndStep": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.ExileTargetPlayersLibraryThenShuffleHandIn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.GainControlOfTargetPermanently": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.GainControlOfTriggeringSpellTargets": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.HasManaValueAtLeast": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.IsColorless": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.LookAtTopCardOfTargetPlayersLibraryMayBottom": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.MayCastSorceriesAsThoughFlashUntilYourNextTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.PutCardYouOwnWithCounterFromExileIntoHand": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.PutPlusOneCounterOnEachCreatureYouControlThenGrantKeywords": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.PutTargetIntoOwnersLibraryNthFromTop": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.RevealTopNOpponentChoosesOneRestExiledWithCounter": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.SacrificeCreatureThenDamageEqualToItsPower": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.SpellTargetsMatching": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.TargetBecomesCopyOfAnotherTargetUEOT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.TargetPlayerDrawsThenDiscards": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.cube_walkers.YourLibraryHasNoCards": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.damage.DealDamageToControllerAndAddMana": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.damage.DealNDamageToEachCreature": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.destroy.DestroyTargetNoncreaturePermanent": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.discard.TargetOpponentDiscardsCasterChoice": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.emblem.CreateEmblem": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.AddOneManaSacrificedLandCouldProduce": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.EachPlayerReturnsCardsExiledWithSource": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.ExileLinkedToSource": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.ExileTargetUntilSourceLeaves": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.OathRevealUntilCreature": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.enchantment_mechanics.RemoveNamedCounterFromSelfOrSacrifice": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.exile.ExileEachOpponentsGraveyard": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.exile.PutEachCreatureCardExiledWithSourceOntoBattlefieldUnderYourControl": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.exile.SacrificeSelfIfNoNamedCounters": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.grant_keywords.GrantActivatedAbility": {
+  "cube_cards": 1,
+  "external_refs": 5,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.grant_keywords.GrantUnblockableUEOT": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.graveyard.ReturnCreatureFromYourGraveyardToBattlefield": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.graveyard_casting.ExileInsteadOfGraveyardThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.graveyard_casting.MayPlayFromGraveyardThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.incubate.ExileAllCreaturesThenIncubate": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.keyword_actions.Explore": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.keyword_actions.GetEnergy": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.CreateTokenCopyOfTargetWithKeywordsSacAtEndStep": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.GainClassLevel": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.LevelCountersInRange": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.LevelerPT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.ThenTargetBecomesCreatureIfNot": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_effects.YourPermanentsBecomeCreaturesUEOT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.Airbend": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.CardsInYourGraveyardAtLeast": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.ControlOtherPermanentOfColor": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.CreateEmblemWithStatics": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.CreateTriggersUntilYourNextTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.DrawHalfLibraryRoundedUp": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.EachChoosesOneOfEachTypeSacrificesRest": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.EachPlayerExilesUntilNonlandMayCastFree": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.EventSubjectGetsUEOT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.LifeAtMostHalfStartingLife": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.LoseLifeEqualToEventAmount": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.MayCastTargetGraveyardCardThisTurnExileInstead": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.NthCardDrawnThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.PoisonCountersEqualToDamage": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.PumpTargetUntilYourNextTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.SourceBecomesPrepared": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.SourceConnives": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.TargetOpponentMills": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.layout_face_effects.YouControlAtLeast": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.library_lookat.ManifestDread": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.life.TargetOpponentLosesLife": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.life.TargetPlayerLosesLife": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.mana.AddOneOfManaCombinations": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.mass_effects.BalanceEffect": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.mass_effects.GrantAbilityToPermanentsYouControlUEOT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.mass_effects.VoteExileNonlandPermanent": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.misc.SourceBecomesCopyOfTargetGraveyardCardUEOT": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.opponent_punishers.EachOpponentSacrificesCreature": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.pump.SetBasePTUntilEOT": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.reanimation.EachPlayerPutsCardFromGraveyardOntoBattlefield": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.search.SearchLibraryForGreenCreatureWithMVAtMostX": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_copies.DealDamageThenChainCopy": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_copies.FlipCoinStealOrCounterTargetSpell": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_copies.TargetPlayerMayCopyThisSpell": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_damage.DealDamageExileIfDiesThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_damage.DealDamagePaidInEnergy": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_damage.DealXDamage": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_misc.CreateThisTurnTriggeredAbility": {
+  "cube_cards": 1,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.spell_misc.CreateTokenCopyOfTargetPermanent": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.tap.Tap": {
+  "cube_cards": 1,
+  "external_refs": 25,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.tap.TapUpToOneTargetCreature": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.tap.UntapTargetArtifactOrCreatureConditionalCounter": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.tap.UntapTargetOtherPermanent": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.ControllerCreatesTokens": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.EachOpponentSacrificesMatching": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.IfYouControlledItDraw": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.generic.targeted_removal.OtherPlayersCreateTokenCopy": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.AddToCount": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.CantBeBlocked": {
+  "cube_cards": 1,
+  "external_refs": 4,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/game.py": 1
+  }
+ },
+ "mtg_bot.effects.modifiers.InsteadForSourceController": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.MultiplyCount": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.modifiers.PowerToughnessBonus": {
+  "cube_cards": 1,
+  "external_refs": 4,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/game.py": 1
+  }
+ },
+ "mtg_bot.effects.modifiers.WinTheGameInstead": {
+  "cube_cards": 1,
+  "external_refs": 1,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.HasDrawnNCardsThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.HasKeyword": {
+  "cube_cards": 1,
+  "external_refs": 5,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.HasPowerToughness": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.HasToughnessAtMost": {
+  "cube_cards": 1,
+  "external_refs": 3,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.IsHarnessed": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.ManaValueAtMostSourceX": {
+  "cube_cards": 1,
+  "external_refs": 2,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.OffspringCostPaid": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.object_predicates.SquadCostPaid": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.FirstAttackThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.HostAttacksWithAnother": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.predicates.IsFormerHost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.Delirium": {
+  "cube_cards": 1,
+  "external_refs": 8,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.GainedLifeThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.HasCitysBlessing": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.IsMonarch": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.LandsPlayedThisTurnAtLeast": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.NoncreatureSpellsCastThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.state_predicates.SpellsCastThisTurn": {
+  "cube_cards": 1,
+  "external_refs": 3,
+  "isinstance_refs": 1,
+  "isinstance_files": {
+   "src/mtg_bot/effects/base.py": 1
+  }
+ },
+ "mtg_bot.effects.value_predicates.HasManaValueAtMost": {
+  "cube_cards": 1,
+  "external_refs": 6,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.value_predicates.HasManaValueAtMostColorsSpent": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.effects.value_predicates.HasTotalPowerAndToughnessAtMost": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ },
+ "mtg_bot.opening_hand.BeginGameOnBattlefield": {
+  "cube_cards": 1,
+  "external_refs": 0,
+  "isinstance_refs": 0,
+  "isinstance_files": {}
+ }
+}

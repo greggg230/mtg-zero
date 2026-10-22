@@ -1,0 +1,52 @@
+{
+ "cards": 546,
+ "encoded": 546,
+ "blockers": [],
+ "not_equal_after_roundtrip": [],
+ "not_fixpoint": [],
+ "json_bytes_total": 502870,
+ "json_bytes_mean": 921.007326007326,
+ "json_bytes_gzip": 52282,
+ "largest_cards": [
+  [
+   "Ajani, Nacatl Pariah // Ajani, Nacatl Avenger",
+   4021
+  ],
+  [
+   "Does Machines",
+   3958
+  ],
+  [
+   "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar",
+   3663
+  ],
+  [
+   "Jennifer Walters // The Sensational She-Hulk",
+   3565
+  ],
+  [
+   "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+   3296
+  ],
+  [
+   "Ugin, Eye of the Storms",
+   3139
+  ],
+  [
+   "Jace, Vryn's Prodigy // Jace, Telepath Unbound",
+   2688
+  ],
+  [
+   "Norman Osborn // Green Goblin",
+   2645
+  ],
+  [
+   "Oko, Thief of Crowns",
+   2591
+  ],
+  [
+   "Minsc & Boo, Timeless Heroes",
+   2547
+  ]
+ ]
+}

@@ -1,0 +1,52 @@
+{
+ "cards": 546,
+ "encoded": 546,
+ "blockers": [],
+ "not_equal_after_roundtrip": [],
+ "not_fixpoint": [],
+ "json_bytes_total": 5749553,
+ "json_bytes_mean": 10530.31684981685,
+ "json_bytes_gzip": 166496,
+ "largest_cards": [
+  [
+   "Ajani, Nacatl Pariah // Ajani, Nacatl Avenger",
+   38230
+  ],
+  [
+   "Retrofitter Foundry",
+   37482
+  ],
+  [
+   "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+   36200
+  ],
+  [
+   "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar",
+   32499
+  ],
+  [
+   "Does Machines",
+   30116
+  ],
+  [
+   "Currency Converter",
+   28814
+  ],
+  [
+   "Reckoner Bankbuster",
+   28554
+  ],
+  [
+   "Ivora, Insatiable Heir",
+   27898
+  ],
+  [
+   "Minsc & Boo, Timeless Heroes",
+   27885
+  ],
+  [
+   "Generous Plunderer",
+   27818
+  ]
+ ]
+}
