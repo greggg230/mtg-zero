@@ -33,13 +33,15 @@ PRESETS = {
                       p_full=0.25, temp_moves=30, hidden=32, blocks=1, batch=128, min_window_samples=0,
                       min_steps=10, lr_warmup_steps=0, yardstick='heuristic', eval_games=8, eval_sims=4,
                       eval_random_games=4, elo_games=4, ref_games=8, threads=2, max_steps=20_000),
-    # the first small self-play run (M5a; CPU inference while other projects use the GPU): a few
-    # iterations at modest sims, evaluated against the heuristic (the Elo anchor) and random
-    'mtg-1': dict(game='mtg', spec=SPEC, players=[2], iters=8, games=400, conc=192, sims=32, sims_fast=8,
-                  p_full=0.25, temp_moves=30, chance_k=0, hidden=256, blocks=3, batch=512, reuse=4.0,
+    # the first small self-play run (M5a, docs/ENGINE.md 21.6; CPU inference while other
+    # projects' runs use the GPU): a few iterations at modest sims, evaluated against the
+    # heuristic (the Elo anchor) and random. Rolling self-play keeps 384 games in flight (CPU
+    # inference needs large batches: 96 games in flight gave batches of ~22 and 5.7k leaves/s)
+    'mtg-1': dict(game='mtg', spec=SPEC, players=[2], iters=10, games=400, rolling=1, conc=384, sims=32,
+                  sims_fast=8, p_full=0.25, temp_moves=60, chance_k=0, hidden=256, blocks=3, batch=512, reuse=4.0,
                   window=4, window_grow=1, min_window_samples=20_000, value_q=0.5, value_q_warmup=3,
-                  yardstick='heuristic', eval_games=100, eval_sims=32, eval_random_games=50, elo_games=50,
-                  ref_games=200, threads=8, groups=2, torch_threads=4, max_steps=20_000),
+                  yardstick='heuristic', eval_games=100, eval_sims=32, eval_random_games=50, elo_games=40,
+                  ref_games=100, threads=8, groups=2, torch_threads=6, max_steps=20_000),
 }
 
 PACKAGE = register(GamePackage(
