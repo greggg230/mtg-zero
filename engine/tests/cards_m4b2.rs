@@ -441,3 +441,190 @@ fn cr_603_3c_a_modal_trigger_chooses_its_mode_as_it_goes_on_the_stack() {
     assert_eq!(g.obj(bear).damage, 1);
     assert_eq!(g.life(0), 20);
 }
+
+// ---- tokens (CR 111) ----------------------------------------------------------
+
+#[test]
+fn cr_111_a_token_is_a_new_object_and_ceases_to_exist_off_the_battlefield() {
+    // Thraben Inspector investigates: a Clue token ({2}, sacrifice: draw).
+    let mut g = scen().battlefield(0, &["Plains", "Island", "Island"]).hand(0, &["Thraben Inspector"]).at(Step::Main1, 0).start();
+    let n = g.objs().len();
+    cast(&mut g, 0, "Thraben Inspector");
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g) && g.waiting_triggers().is_empty());
+    assert_eq!(g.objs().len(), n + 1, "one new object slot");
+    let clue = g.card(0, "Clue", Zone::Battlefield);
+    assert!(g.def_of(clue).token && g.is_type(clue, engine::db::types::ARTIFACT));
+    assert_eq!(g.obj(clue).owner, 0);
+    g.check_invariants().unwrap();
+    // Sacrifice it to draw: it goes to the graveyard (where "dies"-style
+    // triggers would see it), then ceases to exist (704.5d).
+    let hand = g.player(0).hand.len();
+    g.choose(Choice::Ability(clue, engine::db::AbilitySlot::Activated(0)));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.player(0).hand.len(), hand + 1);
+    assert_eq!(g.obj(clue).zone, Zone::Nowhere);
+    assert!(g.player(0).graveyard.iter().all(|&c| c != clue));
+    g.check_invariants().unwrap();
+}
+
+#[test]
+fn cr_704_5d_a_token_put_into_a_library_ceases_to_exist() {
+    // Oust puts the Golem token into its owner's library: gone at the next
+    // state-based action check; its controller still gains 3 life.
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Sol Ring"])
+        .battlefield(0, &["Legion Extruder"])
+        .battlefield(1, &["Plains"])
+        .hand(1, &["Oust"])
+        .at(Step::Main1, 0)
+        .start();
+    let ext = g.card(0, "Legion Extruder", Zone::Battlefield);
+    g.choose(Choice::Ability(ext, engine::db::AbilitySlot::Activated(0)));
+    // Sacrifice another artifact: Sol Ring (after paying {2} with Mountains).
+    while g.kind() != Some(DecisionKind::Sacrifice) {
+        let first = g.pending_decision().unwrap().options[0].choice;
+        g.choose(first);
+    }
+    let ring = g.card(0, "Sol Ring", Zone::Battlefield);
+    g.choose(Choice::Card(ring));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    let golem = g.card(0, "Golem", Zone::Battlefield);
+    assert_eq!((g.power(golem), g.toughness(golem)), (3, 3));
+    g.drive_until(|g| g.turn().number == 4 && g.turn().step == Step::Main1);
+    let oust = g.card(1, "Oust", Zone::Hand);
+    g.choose(Choice::Cast(oust));
+    g.choose(g.tgt(golem));
+    g.drive_until(at_priority);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.obj(golem).zone, Zone::Nowhere);
+    assert_eq!(g.life(0), 23);
+    assert!(!g.player(0).library.contains(&golem));
+    g.check_invariants().unwrap();
+    for s in 0..10 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        d.check_invariants().unwrap();
+    }
+}
+
+#[test]
+fn malevolent_rumble_reveals_four_takes_a_permanent_and_makes_a_spawn() {
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Forest", "Forest"])
+        .hand(0, &["Malevolent Rumble", "Test Double"])
+        .library(0, &["Lightning Bolt", "Test Bear", "Forest", "Counterspell", "Island", "Island"])
+        .library(1, &["Island"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Malevolent Rumble");
+    let keys = resolve(&mut g);
+    let shown: Vec<u16> = keys.iter().filter(|&&k| key_kind(k) == KEY_REVEAL).map(|&k| key_payload(k) as u16).collect();
+    assert_eq!(shown, ["Lightning Bolt", "Test Bear", "Forest", "Counterspell"].map(def).to_vec(), "revealed, top first");
+    assert_eq!(g.kind(), Some(DecisionKind::PutInHand));
+    let mut names = offered_names(&g);
+    names.sort();
+    assert_eq!(names, vec!["Forest", "Test Bear", "pass"], "permanent cards; may take none");
+    pick(&mut g, "Test Bear");
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Hand), 1);
+    for n in ["Lightning Bolt", "Forest", "Counterspell"] {
+        assert_eq!(g.count_in(0, n, Zone::Graveyard), 1, "{n}: the rest into the graveyard");
+    }
+    let spawn = g.card(0, "Eldrazi Spawn", Zone::Battlefield);
+    assert_eq!((g.power(spawn), g.toughness(spawn)), (0, 1));
+    // "Sacrifice this token: Add {C}" pays for Test Double ({2}{R})... with
+    // no red source it cannot; Test Bear ({1}{G}): Forest + Spawn after
+    // untapping. Here: the Spawn is a mana source while paying.
+    g.drive_until(|g| g.turn().number == 5 && g.turn().step == Step::Main1);
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    g.choose(Choice::Cast(bear));
+    // Sources in canonical class order: a Forest, then the Spawn may pay
+    // the generic part.
+    let forest = g.pending_decision().unwrap().options[0].choice;
+    g.choose(forest);
+    let spawn_opt = g
+        .pending_decision()
+        .unwrap()
+        .options
+        .iter()
+        .any(|o| matches!(o.choice, Choice::Ability(c, _) if g.name(c) == "Eldrazi Spawn"));
+    assert!(spawn_opt, "{:?}", g.options_desc());
+}
+
+#[test]
+fn thopter_foundry_sacrifices_only_nontoken_artifacts() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Thopter Foundry", "Mind Stone"])
+        .at(Step::Main1, 0)
+        .start();
+    let tf = g.card(0, "Thopter Foundry", Zone::Battlefield);
+    g.choose(Choice::Ability(tf, engine::db::AbilitySlot::Activated(0)));
+    while g.kind() != Some(DecisionKind::Sacrifice) {
+        let first = g.pending_decision().unwrap().options[0].choice;
+        g.choose(first);
+    }
+    let stone = g.card(0, "Mind Stone", Zone::Battlefield);
+    g.choose(Choice::Card(stone));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    let thopter = g.card(0, "Thopter", Zone::Battlefield);
+    assert!(g.has_kw(thopter, engine::db::Kw::Flying));
+    assert_eq!(g.def_of(thopter).colors, 1 << engine::mana::U, "a blue token (colour indicator)");
+    assert_eq!(g.life(0), 21);
+    // Now only the Foundry itself is a nontoken artifact: it can still be
+    // sacrificed to itself, but the Thopter cannot.
+    g.choose(Choice::Ability(tf, engine::db::AbilitySlot::Activated(0)));
+    while g.kind() != Some(DecisionKind::Sacrifice) {
+        let first = g.pending_decision().unwrap().options[0].choice;
+        g.choose(first);
+    }
+    assert!(!g.has_option(Choice::Card(thopter)));
+    assert!(g.has_option(Choice::Card(tf)));
+}
+
+#[test]
+fn sheoldreds_edict_makes_each_opponent_sacrifice_their_choice() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Sheoldred's Edict"])
+        .battlefield(1, &["Test Bear", "Test Flyer"])
+        .at(Step::Main1, 0)
+        .start();
+    let se = g.card(0, "Sheoldred's Edict", Zone::Hand);
+    g.choose(Choice::Cast(se));
+    assert_eq!(modes_offered(&g), vec![0, 1, 2], "no targets: every mode");
+    g.choose(Choice::Number(0));
+    g.drive_until(at_priority);
+    g.drive_until(|g| !at_priority(g) || g.stack().is_empty());
+    // The opponent chooses which nontoken creature.
+    assert_eq!((g.kind(), g.to_move()), (Some(DecisionKind::Sacrifice), Some(1)));
+    let flyer = g.card(1, "Test Flyer", Zone::Battlefield);
+    g.choose(Choice::Card(flyer));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.count_in(1, "Test Flyer", Zone::Graveyard), 1);
+    assert_eq!(g.count_in(1, "Test Bear", Zone::Battlefield), 1);
+}
+
+#[test]
+fn generous_ent_forestcycles_or_makes_food() {
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Mountain"])
+        .hand(0, &["Generous Ent"])
+        .library(0, &["Breeding Pool", "Island", "Forest"])
+        .library(1, &["Island"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let ent = g.card(0, "Generous Ent", Zone::Hand);
+    g.choose(Choice::Ability(ent, engine::db::AbilitySlot::Hand(0)));
+    g.drive_until(at_priority);
+    resolve(&mut g);
+    let mut d = g.pending_decision().unwrap().options.iter().filter_map(|o| match o.choice {
+        Choice::Def(x) => Some(x),
+        _ => None,
+    }).collect::<Vec<_>>();
+    d.sort();
+    let mut want = vec![def("Breeding Pool"), def("Forest")];
+    want.sort();
+    assert_eq!(d, want, "Forest cards: Breeding Pool is a Forest");
+}

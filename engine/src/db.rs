@@ -126,6 +126,8 @@ pub enum Filter {
     Not(Box<Filter>),
     /// Matches anything (a spell with no restriction: `Spell(Any)`).
     Any,
+    /// A token (CR 111).
+    Token,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -367,6 +369,8 @@ pub struct CardDef {
     /// Additional costs to cast it: the caster pays exactly one of these
     /// (none when empty; their mana parts are unused).
     pub additional: Vec<Cost>,
+    /// A token's definition (CR 111): created by effects, never in a deck.
+    pub token: bool,
 }
 
 impl CardDef {
@@ -392,7 +396,9 @@ impl CardDef {
 /// All supported cards of a pool, plus the blockers of the unsupported ones.
 #[derive(Debug, Default)]
 pub struct CardDb {
+    /// Card definitions, then token definitions from `token_base` on.
     defs: Vec<CardDef>,
+    token_base: DefId,
     by_name: BTreeMap<String, DefId>,
     unsupported: BTreeMap<String, Vec<String>>,
     subtypes: Vec<String>,
@@ -403,8 +409,9 @@ impl CardDb {
     /// recorded with every feature that blocks them.
     pub fn from_cards(cards: &[card_ir::Card]) -> CardDb {
         let mut db = CardDb::default();
+        let mut tokens: Vec<CardDef> = Vec::new();
         for card in cards {
-            match lower::lower_card(card, &mut db.subtypes) {
+            match lower::lower_card(card, &mut db.subtypes, &mut tokens) {
                 Ok(def) => {
                     let id = db.defs.len() as DefId;
                     assert!(
@@ -419,7 +426,15 @@ impl CardDb {
                 }
             }
         }
+        // Tokens the cards create (CR 111), interned during lowering.
+        db.token_base = db.defs.len() as DefId;
+        db.defs.extend(tokens);
         db
+    }
+
+    /// The definition of token `t` (an index of `Op::CreateToken`).
+    pub fn token_def(&self, t: u16) -> DefId {
+        self.token_base + t
     }
 
     pub fn from_document(doc: &card_ir::Document) -> CardDb {

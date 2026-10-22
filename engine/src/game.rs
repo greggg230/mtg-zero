@@ -208,6 +208,8 @@ pub struct Game {
     pub(crate) outcome: Option<Outcome>,
     /// Partial knowledge (ENGINE.md 10).
     pub(crate) clouds: Vec<crate::hidden::Cloud>,
+    /// Tokens created so far (a cheap "any token?" for the SBA check).
+    pub(crate) tokens: u32,
     /// Set by `determinize`: private reveals to others are keyed as hidden.
     pub(crate) observer: Option<PlayerId>,
     /// Chance keys of the current `apply`; always empty between calls.
@@ -309,6 +311,7 @@ impl Game {
             next_stack_id: 1,
             outcome: None,
             clouds: Vec::new(),
+            tokens: 0,
             observer: None,
             keys: Vec::new(),
             decisions: 0,
@@ -501,6 +504,20 @@ impl Game {
             self.agenda.push(Task::AsEnters { card: idx });
         }
         r
+    }
+
+    /// Create a token (CR 111.2): a new object slot, put onto the
+    /// battlefield under `controller` (its owner, CR 111.2), entering like
+    /// any permanent (triggers, "enters tapped").
+    pub(crate) fn create_token(&mut self, def: DefId, controller: PlayerId, tapped: bool) -> CardIdx {
+        let idx = self.add_card(def, controller, Zone::Nowhere);
+        self.tokens += 1;
+        self.note(|g| format!("P{controller} creates a {} token", g.name(idx)));
+        self.put_onto_battlefield(idx, controller);
+        if tapped {
+            self.tap(idx);
+        }
+        idx
     }
 
     /// Lose life (CR 119.3; paying life is losing it, 119.4).

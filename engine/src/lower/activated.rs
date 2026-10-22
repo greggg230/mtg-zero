@@ -151,8 +151,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     l.deny("ActivationCost.exile_granting_equipment", exile_granting_equipment);
     l.deny("ActivationCost.mana_reduced_by_source_power", mana_reduced_by_source_power);
     l.deny("ActivationCost.tap_x_untapped_artifacts_you_control", tap_x_untapped_artifacts_you_control);
-    // Tokens do not exist yet; "nontoken" would be vacuous until they do.
-    l.deny("ActivationCost.sacrifice_nontoken_artifact", sacrifice_nontoken_artifact);
     l.deny("ActivationCost.remove_counters_from_self_kind", remove_counters_from_self_kind);
     l.deny("ActivationCost.remove_counters_from_self_amount", remove_counters_from_self_amount);
     l.deny("ActivationCost.crew", crew);
@@ -199,6 +197,10 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     }
     if *sacrifice_another_artifact {
         sacs.push(SacCost { filter: t(types::ARTIFACT), n: 1, another: true });
+    }
+    if *sacrifice_nontoken_artifact {
+        let nontoken = Filter::Not(Box::new(Filter::Token));
+        sacs.push(SacCost { filter: Filter::And(Box::new(t(types::ARTIFACT)), Box::new(nontoken)), n: 1, another: false });
     }
     if *sacrifice_a_land {
         sacs.push(SacCost { filter: t(types::LAND), n: 1, another: false });

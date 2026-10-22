@@ -294,8 +294,13 @@ impl Game {
             }
         }
         for (i, &n) in seen.iter().enumerate() {
-            if n != 1 {
+            // A token that ceased to exist is in no zone (CR 704.5d).
+            let want = (self.objs[i].zone != Zone::Nowhere) as u8;
+            if n != want {
                 return Err(format!("card {i} ({}) appears {n} times", self.name(CardIdx(i as u16))));
+            }
+            if self.objs[i].zone == Zone::Nowhere && !self.def_of(CardIdx(i as u16)).token {
+                return Err(format!("card {i} is nowhere"));
             }
         }
         if !self.keys.is_empty() {

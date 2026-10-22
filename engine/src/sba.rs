@@ -62,6 +62,9 @@ impl Game {
         if self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty) {
             return true;
         }
+        if self.tokens > 0 && !self.stray_tokens().is_empty() {
+            return true;
+        }
         for (i, &c) in self.battlefield.iter().enumerate() {
             if self.is_creature(c) {
                 let o = &self.objs[c.i()];
@@ -83,10 +86,25 @@ impl Game {
         false
     }
 
+    /// Tokens in a zone other than the battlefield (704.5d), in slot order.
+    fn stray_tokens(&self) -> Vec<CardIdx> {
+        if self.tokens == 0 {
+            return Vec::new();
+        }
+        (0..self.objs.len())
+            .map(|i| CardIdx(i as u16))
+            .filter(|&c| {
+                let z = self.objs[c.i()].zone;
+                self.def_of(c).token && z != Zone::Battlefield && z != Zone::Nowhere
+            })
+            .collect()
+    }
+
     /// Would an SBA happen now? (Cleanup, 514.3a.)
     pub(crate) fn sba_needed(&self) -> bool {
         let (z, d) = self.dying_creatures();
-        self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty)
+        !self.stray_tokens().is_empty()
+            || self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty)
             || !z.is_empty()
             || !d.is_empty()
             || !self.legend_groups().is_empty()
@@ -170,9 +188,15 @@ impl Game {
                 self.move_card(c, Zone::Graveyard, Pos::Top);
             }
         }
+        // 704.5d: a token outside the battlefield ceases to exist.
+        let stray = self.stray_tokens();
+        for &c in &stray {
+            self.note(|g| format!("{} token ceases to exist", g.name(c)));
+            self.move_card(c, Zone::Nowhere, Pos::Top);
+        }
         for &c in &self.battlefield {
             self.objs[c.i()].deathtouched = false;
         }
-        !all.is_empty()
+        !all.is_empty() || !stray.is_empty()
     }
 }

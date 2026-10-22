@@ -43,6 +43,7 @@ macro_rules! lower_object_predicate {
             E::ControlledByYou(nodes::ControlledByYou {}) => Some(Filter::Controller(true)),
             E::ControlledByOpponent(nodes::ControlledByOpponent {}) => Some(Filter::Controller(false)),
             E::IsSource(nodes::IsSource {}) => Some(Filter::Source),
+            E::IsNontoken(nodes::IsNontoken {}) => Some(Filter::Not(Box::new(Filter::Token))),
             E::HasColor(nodes::HasColor { color }) => match crate::mana::letter_index(color) {
                 Some(i) if i < 5 => Some(Filter::Color(1 << i)),
                 _ => {

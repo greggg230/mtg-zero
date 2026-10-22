@@ -48,9 +48,12 @@ impl<T> IsDefault for Option<T> {
     }
 }
 
-/// Lowering context: the subtype interner and the blockers found so far.
+/// Lowering context: the subtype and token interners and the blockers found
+/// so far.
 pub struct Lowerer<'a> {
     pub subtypes: &'a mut Vec<String>,
+    /// Token definitions the cards create (`Op::CreateToken` indexes).
+    pub tokens: &'a mut Vec<CardDef>,
     pub errs: Vec<String>,
 }
 
@@ -71,6 +74,17 @@ impl Lowerer<'_> {
     pub fn deny_ne<T: PartialEq>(&mut self, what: &str, v: &T, d: &T) {
         if v != d {
             self.errs.push(what.to_string());
+        }
+    }
+
+    /// The index of a token definition (equal definitions share one).
+    pub fn token(&mut self, def: CardDef) -> u16 {
+        match self.tokens.iter().position(|t| *t == def) {
+            Some(i) => i as u16,
+            None => {
+                self.tokens.push(def);
+                (self.tokens.len() - 1) as u16
+            }
         }
     }
 
@@ -95,9 +109,13 @@ impl Lowerer<'_> {
 }
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.
-pub fn lower_card(card: &card_ir::Card, subtypes: &mut Vec<String>) -> Result<CardDef, Vec<String>> {
+pub fn lower_card(
+    card: &card_ir::Card,
+    subtypes: &mut Vec<String>,
+    tokens: &mut Vec<CardDef>,
+) -> Result<CardDef, Vec<String>> {
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
-    let mut l = Lowerer { subtypes, errs: Vec::new() };
+    let mut l = Lowerer { subtypes, tokens, errs: Vec::new() };
     let def = printing::lower_printing(&mut l, p);
     if l.errs.is_empty() {
         Ok(def)

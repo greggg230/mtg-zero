@@ -156,6 +156,12 @@ pub enum Op {
     /// The ability's source, if it is still the same permanent, goes on top
     /// of its owner's library.
     SourceToLibraryTop,
+    /// The controller creates `n` tokens of token definition `token` (CR
+    /// 111.2, 701.6), tapped if `tapped`.
+    CreateToken { token: u16, n: u8, tapped: bool },
+    /// `who` sacrifices a permanent matching `filter` of their choice, if
+    /// they control one (CR 701.17). Choice: one of their permanents.
+    Sacrifice { who: Who, filter: Filter },
     /// `whose` hand is revealed to everyone (`to: None`, CR 701.16) or
     /// looked at by `to`. Keys per card, in definition order.
     RevealHand { whose: Who, to: Option<Who> },

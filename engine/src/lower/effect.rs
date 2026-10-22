@@ -659,6 +659,41 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
             b.op(Op::ChooseDiscard { chooser: Who::You, whose: Who::TargetPlayer(t), filter, optional: *optional });
         }
+        E::CreateToken(nodes::CreateToken {
+            token_printing,
+            count,
+            tapped,
+            each_player,
+            attacking,
+            schedule_end_of_combat_sacrifice,
+        }) => {
+            // "Create N <token>" (CR 111.2): the token's definition is
+            // lowered like a card's and interned.
+            l.deny("CreateToken.each_player", each_player);
+            l.deny("CreateToken.attacking", attacking);
+            l.deny("CreateToken.schedule_end_of_combat_sacrifice", schedule_end_of_combat_sacrifice);
+            let n = l.int("CreateToken.count", *count, 1, 20) as u8;
+            let cats::CardPrinting::CardPrinting(tp) = &**token_printing;
+            let def = super::printing::lower_printing(l, tp);
+            if !def.token {
+                l.unsupported("CreateToken.token_printing(not a token)");
+            }
+            let token = l.token(def);
+            b.op(Op::CreateToken { token, n, tapped: *tapped });
+        }
+        E::EachOpponentSacrificesCreature(nodes::EachOpponentSacrificesCreature {}) => {
+            // "Each opponent sacrifices a nontoken creature of their choice."
+            let filter = Filter::And(
+                Box::new(Filter::Type(types::CREATURE)),
+                Box::new(Filter::Not(Box::new(Filter::Token))),
+            );
+            b.op(Op::Sacrifice { who: Who::Opponent, filter });
+        }
+        E::EachOpponentSacrificesMatching(nodes::EachOpponentSacrificesMatching { permanent_filter, label }) => {
+            let _ = label; // display text
+            let Some(filter) = lower_pred(l, permanent_filter) else { return };
+            b.op(Op::Sacrifice { who: Who::Opponent, filter });
+        }
         E::DestroyTargetArtifact(nodes::DestroyTargetArtifact { targets }) => {
             let Some(tgt) = lower_targets(l, b, targets, "DestroyTargetArtifact") else { return };
             if b.targets[tgt as usize].filter != Filter::Type(types::ARTIFACT) {

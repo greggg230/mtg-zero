@@ -574,6 +574,37 @@ impl Game {
                 }
                 Flow::Next
             }
+            Op::CreateToken { token, n, tapped } => {
+                let def = self.db.token_def(token);
+                for _ in 0..n {
+                    self.create_token(def, f.controller, tapped);
+                }
+                Flow::Next
+            }
+            Op::Sacrifice { who, ref filter } => {
+                let Some(p) = self.who(f, who) else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
+                        self.move_card(c, Zone::Graveyard, Pos::Top);
+                        Flow::Next
+                    }
+                    Some(other) => unreachable!("sacrifice answer {other:?}"),
+                    None => {
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let opts: Vec<Opt> = self
+                            .permanents_of(p)
+                            .filter(|&c| self.card_matches(filter, c, &ctx))
+                            .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                            .collect();
+                        if opts.is_empty() {
+                            return Flow::Next;
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::Sacrifice, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
             Op::SourceToLibraryTop => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     self.move_card(f.source.idx, Zone::Library, Pos::Top);

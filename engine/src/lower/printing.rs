@@ -349,7 +349,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_toughness_as_damage_for_creatures_you_control", grants_toughness_as_damage_for_creatures_you_control);
         l.deny("CardPrinting.grants_toughness_as_station_power_for_creatures_you_control", grants_toughness_as_station_power_for_creatures_you_control);
         l.deny("CardPrinting.protection_from_color", protection_from_color);
-        l.deny("CardPrinting.color_indicator", color_indicator);
         l.deny("CardPrinting.has_convoke", has_convoke);
         l.deny("CardPrinting.can_only_block_creatures_with_flying", can_only_block_creatures_with_flying);
         l.deny("CardPrinting.flashback_cost", flashback_cost);
@@ -487,10 +486,22 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     let mut sup = 0u8;
+    let mut token = false;
     for s in supertypes {
         match supertypes::from_name(s) {
             Some(b) => sup |= b,
+            // CR 111: "Token" marks a token's definition (on a type line
+            // it is not a supertype).
+            None if s == "Token" => token = true,
             None => l.unsupported(format!("Supertype:{s}")),
+        }
+    }
+    // A colour indicator (CR 204) adds its colours to the mana cost's.
+    let mut indicator: ManaMask = 0;
+    for c in color_indicator {
+        match letter_index(c) {
+            Some(i) if i < 5 => indicator |= 1 << i,
+            _ => l.unsupported(format!("CardPrinting.color_indicator({c})")),
         }
     }
     let subs: Vec<u16> = subtypes.iter().map(|s| l.subtype(s)).collect();
@@ -665,7 +676,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         types: ty,
         supertypes: sup,
         subtypes: subs,
-        colors: cost.colors(),
+        colors: cost.colors() | indicator,
         cost,
         power: pw,
         toughness: tg,
@@ -677,6 +688,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         enters_tapped: entry,
         shock_life,
         uncounterable: *spell_is_uncounterable,
+        token,
         additional,
     }
 }
