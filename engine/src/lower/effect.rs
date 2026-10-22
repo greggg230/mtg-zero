@@ -694,6 +694,32 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             let Some(filter) = lower_pred(l, permanent_filter) else { return };
             b.op(Op::Sacrifice { who: Who::Opponent, filter });
         }
+        E::EachPlayerShufflesZonesIntoLibrary(nodes::EachPlayerShufflesZonesIntoLibrary { zones }) => {
+            // "Each player shuffles their hand and graveyard into their
+            // library" (APNAP; nothing observes the order).
+            let mut hand = false;
+            let mut graveyard = false;
+            for z in zones {
+                match z {
+                    enums::ZoneName::Hand => hand = true,
+                    enums::ZoneName::Graveyard => graveyard = true,
+                    other => l.unsupported(format!("EachPlayerShufflesZonesIntoLibrary.zones({other:?})")),
+                }
+            }
+            for who in [Who::Active, Who::NonActive] {
+                b.op(Op::ShuffleIntoLibrary { who, hand, graveyard });
+            }
+        }
+        E::PutCardFromHandOntoBattlefield(nodes::PutCardFromHandOntoBattlefield { card_filter, optional, tapped }) => {
+            let filter = match card_filter {
+                Some(f) => match lower_card_filter(l, f) {
+                    Some(f) => f,
+                    None => return,
+                },
+                None => Filter::Any,
+            };
+            b.op(Op::PutFromHand { who: Who::You, filter, tapped: *tapped, optional: *optional });
+        }
         E::DestroyTargetArtifact(nodes::DestroyTargetArtifact { targets }) => {
             let Some(tgt) = lower_targets(l, b, targets, "DestroyTargetArtifact") else { return };
             if b.targets[tgt as usize].filter != Filter::Type(types::ARTIFACT) {

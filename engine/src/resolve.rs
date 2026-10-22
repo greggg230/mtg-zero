@@ -605,6 +605,53 @@ impl Game {
                     }
                 }
             }
+            Op::ShuffleIntoLibrary { who, hand, graveyard } => {
+                if let Some(p) = self.who(f, who) {
+                    let pl = &self.players[p as usize];
+                    let mut cards: Vec<CardIdx> = Vec::new();
+                    if hand {
+                        cards.extend(self.hand_sorted(p));
+                    }
+                    if graveyard {
+                        cards.extend(pl.graveyard.iter().copied());
+                    }
+                    for c in cards {
+                        self.move_card(c, Zone::Library, Pos::Top);
+                    }
+                    self.shuffle_library(p);
+                }
+                Flow::Next
+            }
+            Op::PutFromHand { who, ref filter, tapped, optional } => {
+                let Some(p) = self.who(f, who) else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        self.put_onto_battlefield(c, p);
+                        if tapped {
+                            self.tap(c);
+                        }
+                        Flow::Next
+                    }
+                    Some(Choice::Pass) => Flow::Next,
+                    Some(other) => unreachable!("put-from-hand answer {other:?}"),
+                    None => {
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let mut opts: Vec<Opt> = self
+                            .hand_options(p)
+                            .into_iter()
+                            .filter(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(filter, c, &ctx)))
+                            .collect();
+                        if opts.is_empty() {
+                            return Flow::Next;
+                        }
+                        if optional {
+                            opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseHandCard, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
             Op::SourceToLibraryTop => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     self.move_card(f.source.idx, Zone::Library, Pos::Top);

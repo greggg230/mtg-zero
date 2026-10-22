@@ -162,6 +162,12 @@ pub enum Op {
     /// `who` sacrifices a permanent matching `filter` of their choice, if
     /// they control one (CR 701.17). Choice: one of their permanents.
     Sacrifice { who: Who, filter: Filter },
+    /// `who` shuffles their hand and/or graveyard into their library.
+    ShuffleIntoLibrary { who: Who, hand: bool, graveyard: bool },
+    /// `who` puts a card matching `filter` from their hand onto the
+    /// battlefield (tapped if `tapped`); with `optional` they may not.
+    /// Choice: a card in their hand.
+    PutFromHand { who: Who, filter: Filter, tapped: bool, optional: bool },
     /// `whose` hand is revealed to everyone (`to: None`, CR 701.16) or
     /// looked at by `to`. Keys per card, in definition order.
     RevealHand { whose: Who, to: Option<Who> },

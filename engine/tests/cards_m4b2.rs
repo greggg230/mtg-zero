@@ -628,3 +628,34 @@ fn generous_ent_forestcycles_or_makes_food() {
     want.sort();
     assert_eq!(d, want, "Forest cards: Breeding Pool is a Forest");
 }
+
+#[test]
+fn timetwister_shuffles_hands_and_graveyards_away_and_forgets_their_places() {
+    // P1 knew the Time Walk in P0's hand. After Timetwister it is in P0's
+    // library or new hand: P1 knows nothing more about it.
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island", "Island", "Island"])
+        .hand(0, &["Timetwister", "Forest"])
+        .hand_known(0, &["Time Walk"])
+        .graveyard(0, &["Lightning Bolt"])
+        .graveyard(1, &["Counterspell", "Plains"])
+        .hand(1, &["Mountain"])
+        .library(0, &["Island"; 10])
+        .library(1, &["Forest"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Timetwister");
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    for p in 0..2 {
+        assert_eq!(g.player(p).hand.len(), 7);
+    }
+    // Only Timetwister itself is in a graveyard.
+    assert!(g.player(1).graveyard.is_empty());
+    assert_eq!(g.player(0).graveyard.len(), 1);
+    assert_eq!(g.player(0).library.len(), 10 + 2 + 1 - 7);
+    assert_eq!(g.player(1).library.len(), 10 + 1 + 2 - 7);
+    g.check_invariants().unwrap();
+    assert!(g.clouds().is_empty(), "{:?}", g.clouds());
+    assert!(g.player(0).hand.iter().all(|&c| !g.knows(1, c)));
+}
