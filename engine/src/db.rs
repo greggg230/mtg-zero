@@ -267,6 +267,8 @@ pub enum Filter {
     Tapped,
     /// A player who has drawn exactly n cards this turn.
     DrewThisTurn(u8),
+    /// A permanent whose evoke cost was paid (CR 702.74a).
+    Evoked,
     /// A card in a graveyard matching the inner filter (a target).
     InGraveyard(Box<Filter>),
     /// Owned by the ability's controller (`true`) or an opponent.
@@ -287,6 +289,9 @@ pub struct AbilityDef {
     pub targets: Vec<TargetReq>,
     pub program: Vec<Op>,
     pub modes: Option<Box<Modes>>,
+    /// "n damage divided as you choose among" the targets of requirement
+    /// `.0`: the division is announced with the targets (CR 601.2d).
+    pub divide: Option<(u8, u8)>,
 }
 
 /// The modes of a modal spell or ability (CR 700.2): choose between `min`
@@ -431,6 +436,9 @@ pub enum TrigPred {
     /// An intervening "if" (CR 603.4): checked when the event happens and
     /// again on resolution.
     If(Cond),
+    /// The ability's source matches the filter when the event happens
+    /// ("if it was evoked").
+    Source(Filter),
     /// A condition of the trigger event itself, checked when it happens
     /// only ("whenever you cast your second spell each turn").
     State(Cond),
@@ -558,6 +566,27 @@ pub struct Cost {
     pub sacrifice: Option<SacCost>,
     /// Discard n cards of your choice.
     pub discard: u8,
+    /// Exile a card matching the filter from your hand (not this card).
+    pub exile_from_hand: Option<Filter>,
+    /// Return n permanents you control matching the filter to their
+    /// owner's hand.
+    pub bounce: Option<SacCost>,
+}
+
+/// An alternative cost (CR 118.9): paid instead of the mana cost.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct AltCost {
+    /// Its mana (zero: none).
+    pub mana: ManaCost,
+    /// The rest: life, a card exiled from hand, permanents returned or
+    /// sacrificed.
+    pub cost: Cost,
+    /// Only during your turn (`Some(true)`) or not (`Some(false)`).
+    pub turn: Option<bool>,
+    /// Only if this holds for you ("if you control a Swamp").
+    pub only_if: Option<Cond>,
+    /// Evoke (CR 702.74): the permanent knows it was evoked.
+    pub evoke: bool,
 }
 
 /// What an activated ability does.
@@ -678,6 +707,8 @@ pub struct CardDef {
     /// "If damage would be dealt to this, instead that damage is dealt, but
     /// all other damage already dealt to it is healed." (CR 614.1a)
     pub heals_on_damage: bool,
+    /// Alternative costs (CR 118.9; evoke, 702.74).
+    pub alt_costs: Vec<AltCost>,
 }
 
 impl CardDef {

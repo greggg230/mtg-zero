@@ -414,6 +414,67 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::DealDivided { to } => {
+                let src = self.frame_damage_source(f);
+                let mut k = 0;
+                for (i, &(r, t)) in f.targets.clone().iter().enumerate() {
+                    if r != *to {
+                        continue;
+                    }
+                    let share = f.division.get(k).copied().unwrap_or(0) as i32;
+                    k += 1;
+                    let live = match t {
+                        Target::Obj(o) => self.live(o),
+                        Target::Player(_) => true,
+                    };
+                    // CR 608.2b: an illegal target is not dealt its share.
+                    if f.legal & (1 << i) != 0 && live {
+                        self.deal_damage(src, t, share);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::SpellToLibraryOwnerChooses { tgt } => {
+                let spells: Vec<CardIdx> = self
+                    .targets_of(f, *tgt)
+                    .into_iter()
+                    .filter_map(|t| match t {
+                        Target::Obj(o) if self.objs[o.idx.i()].zone == Zone::Stack => Some(o.idx),
+                        _ => None,
+                    })
+                    .collect();
+                let Some(&c) = spells.first() else { return Flow::Next };
+                let owner = self.objs[c.i()].owner;
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        self.move_card(c, Zone::Library, Pos::Top);
+                        Flow::Next
+                    }
+                    Some(_) => {
+                        self.move_card(c, Zone::Library, Pos::Bottom);
+                        Flow::Next
+                    }
+                    None => {
+                        let opts =
+                            vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
+                        self.ask(Task::Run(f.clone()), owner, DecisionKind::TopOrBottom, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::JumpUnlessAlt { to } => {
+                if f.alt {
+                    Flow::Next
+                } else {
+                    Flow::Jump(*to)
+                }
+            }
+            Ext::SacrificeSource => {
+                if let Some(&c) = self.objs_on(f, &On::Source).first() {
+                    self.sacrifice(c);
+                }
+                Flow::Next
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

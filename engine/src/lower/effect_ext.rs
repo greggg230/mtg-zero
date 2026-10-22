@@ -706,6 +706,63 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let Some(filter) = super::filter::lower_card_filter(l, card_filter) else { return true };
             b.op(Op::Ext(Ext::EachPutFromGraveyard { filter }));
         }
+        E::DealDamageDividedAmongTargets(nodes::DealDamageDividedAmongTargets {
+            amount,
+            max_targets,
+            include_planeswalkers,
+            double_if_x_at_least,
+        }) => {
+            // "N damage divided as you choose among any number of target
+            // creatures [and/or planeswalkers]" (CR 601.2d: each target at
+            // least 1, so at most N targets).
+            l.deny("DealDamageDividedAmongTargets.double_if_x_at_least", double_if_x_at_least);
+            let n = match amount {
+                card_ir::unions::IntOrFormula::Int(n) => l.int("DealDamageDividedAmongTargets.amount", *n, 1, 20) as u8,
+                card_ir::unions::IntOrFormula::Formula(f) => {
+                    l.unsupported(format!("Formula:{}", f.tag()));
+                    return true;
+                }
+            };
+            let most = match max_targets {
+                Some(m) => (l.int("DealDamageDividedAmongTargets.max_targets", *m, 1, 20) as u8).min(n),
+                None => n,
+            };
+            let f = if *include_planeswalkers { Filter::Type(types::CREATURE | types::PLANESWALKER) } else { creature() };
+            if b.divide.is_some() {
+                l.unsupported("DealDamageDividedAmongTargets(twice)");
+            }
+            let t = b.target(f, 1, most);
+            b.divide = Some((t, n));
+            b.op(Op::Ext(Ext::DealDivided { to: t }));
+        }
+        E::OwnerPutsTargetSpellOnTopOrBottom(nodes::OwnerPutsTargetSpellOnTopOrBottom { card_types, up_to_one }) => {
+            let mut bits = 0u16;
+            for t in card_types {
+                match types::from_name(t) {
+                    Some(x) => bits |= x,
+                    None => l.unsupported(format!("OwnerPutsTargetSpellOnTopOrBottom.card_types({t})")),
+                }
+            }
+            let f = Filter::Spell(Box::new(Filter::Type(bits)));
+            let t = b.target(f, if *up_to_one { 0 } else { 1 }, 1);
+            b.op(Op::Ext(Ext::SpellToLibraryOwnerChooses { tgt: t }));
+        }
+        E::SacrificeSelfIfEvoked(nodes::SacrificeSelfIfEvoked {}) => {
+            // (The "if evoked" is the trigger's: Source(WasEvoked).)
+            b.op(Op::Ext(Ext::SacrificeSource));
+        }
+        E::AnOpponentDrawsCards(nodes::AnOpponentDrawsCards { amount }) => {
+            let n = Amount::Fixed(l.int("AnOpponentDrawsCards.amount", *amount, 0, 99));
+            b.op(Op::Draw { who: Who::Opponent, n });
+        }
+        E::TargetOpponentDiscardsCasterChoice(nodes::TargetOpponentDiscardsCasterChoice {}) => {
+            // "Target opponent reveals their hand. You choose a nonland card
+            // from it. That player discards that card." (Grief)
+            let t = b.target(and(Filter::Player, Filter::Opponent), 1, 1);
+            b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
+            let filter = not(Filter::Type(types::LAND));
+            b.op(Op::ChooseDiscard { chooser: Who::You, whose: Who::TargetPlayer(t), filter, optional: false });
+        }
         _ => return false,
     }
     true

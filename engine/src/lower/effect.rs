@@ -8,7 +8,7 @@ use super::Lowerer;
 use crate::db::{types, AbilityDef, Filter, ManaProd, Modes};
 use crate::mana::{letter_index, ManaCost};
 use crate::program::{Amount, Builder, Op, PileDest, SearchDest, SpellDest, Who, PILE_ANY};
-use card_ir::{cats, enums, generated, nodes, unions, Count};
+use card_ir::{cats, enums, nodes, unions, Count};
 
 pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     use cats::Effect as E;
@@ -52,7 +52,15 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     if list.len() > crate::decision::act::NUMBER_N as usize || min > max {
         l.unsupported("ModalChooseOne(mode count)");
     }
-    AbilityDef { targets: Vec::new(), program: Vec::new(), modes: Some(Box::new(Modes { list, min, max, repeat })) }
+    if list.iter().any(|x| x.divide.is_some()) {
+        l.unsupported("ModalChooseOne(divided damage in a mode)");
+    }
+    AbilityDef {
+        targets: Vec::new(),
+        program: Vec::new(),
+        modes: Some(Box::new(Modes { list, min, max, repeat })),
+        divide: None,
+    }
 }
 
 /// The single `TargetSpec` of an effect -> a target requirement index.
@@ -261,28 +269,20 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 }
             };
             l.deny("RemoveTargetPermanents.count_from_x", count_from_x);
-            l.deny_ne(
-                "RemoveTargetPermanents.count_min",
-                count_min,
-                &generated::defaults::d_RemoveTargetPermanents_count_min(),
-            );
-            l.deny_ne(
-                "RemoveTargetPermanents.count_max",
-                count_max,
-                &generated::defaults::d_RemoveTargetPermanents_count_max(),
-            );
-            // Regeneration does not exist yet, so "can't be regenerated"
-            // would be the only difference; it is a blocker until it does.
-            l.deny_ne(
-                "RemoveTargetPermanents.can_be_regenerated",
-                can_be_regenerated,
-                &generated::defaults::d_RemoveTargetPermanents_can_be_regenerated(),
-            );
+            // No card in the cube regenerates (no regeneration shield
+            // exists), so "can't be regenerated" changes nothing (CR
+            // 701.15).
+            let _ = can_be_regenerated;
             // The IR repeats the target filter; the two must agree.
             let tf = lower_pred(l, target_filter);
             let Some(tgt) = lower_targets(l, b, targets, "RemoveTargetPermanents") else { return };
             if tf.as_ref() != Some(&b.targets[tgt as usize].filter) {
                 l.unsupported("RemoveTargetPermanents.target_filter(differs from targets)");
+            }
+            // The IR repeats the target counts too.
+            let req = &b.targets[tgt as usize];
+            if (*count_min, *count_max) != (req.min as i64, req.max as i64) {
+                l.unsupported("RemoveTargetPermanents.count(differs from targets)");
             }
             // "Destroy target creature if it has mana value 2 or less": a
             // check on resolution, not a targeting restriction.
@@ -467,6 +467,17 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             if life > 0 {
                 b.op(Op::GainLife { who: Who::LkiController, n: Amount::Fixed(life) });
             }
+        }
+        E::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect })
+            if matches!(**condition, cats::ConditionOrStatePredicate::AlternativeCostWasPaid(_)) =>
+        {
+            // "If the alternative cost was paid" (a spell's own cost).
+            if else_effect.is_some() {
+                l.unsupported("IfConditionElse(AlternativeCostWasPaid with an else)");
+            }
+            let at = b.op(Op::Ext(crate::program::Ext::JumpUnlessAlt { to: 0 }));
+            lower_effect(l, b, then_effect);
+            b.patch(at);
         }
         E::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect }) => {
             let Some(cond) = lower_condition_or_state(l, condition) else { return };

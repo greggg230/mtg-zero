@@ -22,6 +22,7 @@ const SUPPORTED: &[&str] = &[
     "Auriok Salvagers",
     "Avacyn's Pilgrim",
     "Badlands",
+    "Baleful Mastery",
     "Baleful Strix",
     "Baloth Prime",
     "Basalt Monolith",
@@ -59,6 +60,7 @@ const SUPPORTED: &[&str] = &[
     "Dark Confidant",
     "Dark Ritual",
     "Darkslick Shores",
+    "Daze",
     "Demonic Tutor",
     "Dismember",
     "Displacer Kitten",
@@ -83,8 +85,12 @@ const SUPPORTED: &[&str] = &[
     "Flame Slash",
     "Flametongue Kavu",
     "Flooded Strand",
+    "Force of Negation",
+    "Force of Vigor",
+    "Force of Will",
     "Forest",
     "Frantic Search",
+    "Fury",
     "Gaea's Cradle",
     "Generous Ent",
     "Gitaxian Probe",
@@ -93,6 +99,7 @@ const SUPPORTED: &[&str] = &[
     "Goblin Bombardment",
     "Goblin Engineer",
     "Godless Shrine",
+    "Grief",
     "Grim Monolith",
     "Griselbrand",
     "Guerrilla Gorilla",
@@ -139,6 +146,7 @@ const SUPPORTED: &[&str] = &[
     "Memory Lapse",
     "Meticulous Archive",
     "Mind Stone",
+    "Mine Collapse",
     "Misty Rainforest",
     "Mother of Runes",
     "Mountain",
@@ -168,6 +176,7 @@ const SUPPORTED: &[&str] = &[
     "Prismatic Vista",
     "Pyrite Spellbomb",
     "Pyroblast",
+    "Pyrokinesis",
     "Raffine's Tower",
     "Raucous Theater",
     "Raugrin Triome",
@@ -195,7 +204,9 @@ const SUPPORTED: &[&str] = &[
     "Simian Spirit Guide",
     "Skateboard",
     "Skullclamp",
+    "Snuff Out",
     "Sol Ring",
+    "Solitude",
     "Soul-Guide Lantern",
     "Spara's Headquarters",
     "Spectacular Spider-Man",
@@ -208,6 +219,7 @@ const SUPPORTED: &[&str] = &[
     "Stock Up",
     "Stomping Ground",
     "Stoneforge Mystic",
+    "Subtlety",
     "Sunbaked Canyon",
     "Super Shredder",
     "Swamp",
@@ -331,8 +343,8 @@ fn unsupported_cards_fail_loudly() {
     let db = CardDb::cube();
     let err = db.expect_id("Mana Drain").unwrap_err();
     assert!(err.contains("Effect:CounterThenDelayedManaEqualToMV"), "{err}");
-    let err = db.expect_id("Force of Will").unwrap_err();
-    assert!(err.contains("CardPrinting.alternative_costs"), "{err}");
+    let err = db.expect_id("Jace, the Mind Sculptor").unwrap_err();
+    assert!(err.contains("CardPrinting.loyalty"), "{err}");
     assert!(db.expect_id("No Such Card").is_err());
 }
 

@@ -117,6 +117,19 @@ pub enum DecisionKind {
     ChoosePermanent,
     /// A card in the decider's graveyard (`GRAVEYARD` slot).
     ChooseGraveyardCard,
+    /// Which cost to cast a spell for: `NUMBER` 0 = its mana cost, k + 1 =
+    /// alternative cost k (CR 118.9, 601.2b).
+    ChooseAltCost,
+    /// A card in the decider's hand to exile as a cost.
+    ExileCost,
+    /// A permanent to return to its owner's hand as a cost.
+    BounceCost,
+    /// The amount of divided damage for the next target (`NUMBER`, CR
+    /// 601.2d).
+    DivideDamage,
+    /// Put a spell on top of (`YES`) or on the bottom of (`PASS`) its
+    /// owner's library.
+    TopOrBottom,
 }
 
 /// What an action means to the task that asked.

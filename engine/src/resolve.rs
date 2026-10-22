@@ -40,6 +40,10 @@ pub(crate) struct Frame {
     pub picked: Vec<CardIdx>,
     /// The token the last `CreateToken` made.
     pub made: Option<CardIdx>,
+    /// The spell was cast for an alternative cost (CR 118.9).
+    pub alt: bool,
+    /// Divided damage per target of the divided requirement (CR 601.2d).
+    pub division: Vec<u8>,
 }
 
 pub(crate) enum Flow {
@@ -99,6 +103,8 @@ impl Game {
             x: 0,
             picked: Vec::new(),
             made: None,
+            alt: item.alt > 0,
+            division: item.division.clone(),
         };
         let Some(modes) = &ab.modes else {
             self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
@@ -138,6 +144,8 @@ impl Game {
                 if self.objs[card.i()].zone == Zone::Stack {
                     if self.def_of(card).is_permanent_card() {
                         self.entering_cast = true;
+                        self.entering_evoked = item.alt > 0
+                            && self.def_of(card).alt_costs[item.alt as usize - 1].evoke;
                         self.put_onto_battlefield(card, item.controller);
                     } else {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
@@ -235,7 +243,7 @@ impl Game {
 
     /// The damage source of a resolving spell or ability: the spell itself,
     /// or the ability's source (last known information).
-    fn frame_damage_source(&self, f: &Frame) -> DamageSource {
+    pub(crate) fn frame_damage_source(&self, f: &Frame) -> DamageSource {
         if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
             // An ability of a permanent: its current characteristics.
             return DamageSource { controller: f.controller, ..self.damage_source_of(f.source.idx) };

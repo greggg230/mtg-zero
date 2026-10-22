@@ -139,6 +139,8 @@ impl Game {
             cost_option: 0,
             modes: Vec::new(),
             ev: Default::default(),
+            alt: 0,
+            division: Vec::new(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });
@@ -170,7 +172,12 @@ impl Game {
                 Some((item.controller, source.idx, &self.db.def(ability.def).activated_def(ability.slot).cost))
             }
             StackKind::Spell { card } => {
-                let c = self.db.def(self.objs[card.i()].def).additional.get(item.cost_option as usize)?;
+                let def = self.db.def(self.objs[card.i()].def);
+                let c = if item.alt > 0 {
+                    &def.alt_costs[item.alt as usize - 1].cost
+                } else {
+                    def.additional.get(item.cost_option as usize)?
+                };
                 Some((item.controller, card, c))
             }
         }
@@ -201,6 +208,16 @@ impl Game {
         if cost.discard as usize > pl.hand.len() - in_hand as usize {
             return false;
         }
+        if let Some(f) = &cost.exile_from_hand {
+            if self.exile_candidates(p, card, f).is_empty() {
+                return false;
+            }
+        }
+        if let Some(b) = &cost.bounce {
+            if self.sacrifice_candidates(p, card, b).len() < b.n as usize {
+                return false;
+            }
+        }
         if mana.is_zero() {
             return true;
         }
@@ -215,14 +232,28 @@ impl Game {
         self.can_pay_with(p, mana, classes, &Self::keep_for(card, cost, exclude))
     }
 
+    /// Cards in `p`'s hand matching `f` other than `card`, one per
+    /// definition (canonical slots).
+    pub(crate) fn exile_candidates(&self, p: PlayerId, card: CardIdx, f: &crate::db::Filter) -> Vec<crate::decision::Opt> {
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+        self.hand_options_except(p, Some(card))
+            .into_iter()
+            .filter(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)))
+            .collect()
+    }
+
     /// What the parts of `cost` paid after its mana need from that payment.
     pub(crate) fn keep_for(card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Keep {
-        debug_assert!(cost.sacrifice.is_none() || cost.discard == 0, "one reservation per cost (lowering)");
+        debug_assert!(
+            [cost.sacrifice.is_some(), cost.discard > 0, cost.exile_from_hand.is_some()].iter().filter(|&&x| x).count() <= 1,
+            "one reservation per cost (lowering)"
+        );
         Keep {
             exclude,
             life: cost.life,
             sac: cost.sacrifice.clone().map(|s| (s, card)),
             discard: (cost.discard > 0).then_some((cost.discard, card)),
+            exile: cost.exile_from_hand.clone().map(|f| (f, card)),
         }
     }
 
@@ -243,14 +274,23 @@ impl Game {
     pub(crate) fn pay_costs(&mut self, id: u32, mut picked: Vec<CardIdx>) {
         let Some((p, card, cost)) = self.item_cost(id) else { return };
         let n_sac = cost.sacrifice.as_ref().map_or(0, |s| s.n) as usize;
+        let n_disc = n_sac + cost.discard as usize;
+        let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
+        let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
         if let Some(ch) = self.answer.take() {
             let Choice::Card(c) = ch else { unreachable!("cost answer {ch:?}") };
             if picked.len() < n_sac {
                 picked.push(c);
-            } else {
+            } else if picked.len() < n_disc {
                 // Discards happen one at a time: a chosen hand card is never
                 // left hidden while another decision is pending.
                 self.discard(c);
+                picked.push(c);
+            } else if picked.len() < n_exile {
+                // Likewise the card exiled from hand (revealed as it moves).
+                self.move_card(c, Zone::Exile, Pos::Top);
+                picked.push(c);
+            } else {
                 picked.push(c);
             }
         }
@@ -265,10 +305,34 @@ impl Game {
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
             return;
         }
-        if picked.len() < n_sac + cost.discard as usize {
+        if picked.len() < n_disc {
             let opts = self.hand_options_except(p, Some(card));
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::DiscardCost, opts);
             return;
+        }
+        if picked.len() < n_exile {
+            let f = cost.exile_from_hand.as_ref().unwrap();
+            let opts = self.exile_candidates(p, card, f);
+            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ExileCost, opts);
+            return;
+        }
+        if picked.len() < n_bounce {
+            let b = cost.bounce.as_ref().unwrap();
+            let opts: Vec<Opt> = self
+                .sacrifice_candidates(p, card, b)
+                .into_iter()
+                .filter(|c| !picked[n_exile..].contains(c))
+                .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                .collect();
+            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::BounceCost, opts);
+            return;
+        }
+        // Permanents returned as a cost leave together.
+        let mut bounced: Vec<CardIdx> = picked[n_exile..n_bounce].to_vec();
+        bounced.sort_by_key(|c| self.objs[c.i()].timestamp);
+        for c in bounced {
+            self.note(|g| format!("P{p} returns {}", g.name(c)));
+            self.move_card(c, Zone::Hand, Pos::Top);
         }
         // Everything chosen: pay. Sacrificed permanents leave together.
         if cost.tap {

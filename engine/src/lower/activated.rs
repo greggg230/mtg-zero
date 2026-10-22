@@ -174,6 +174,8 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         discard_hand: *discard_hand,
         sacrifice: None,
         discard: *discard_a_card as u8,
+        exile_from_hand: None,
+        bounce: None,
     };
     match from {
         From::Battlefield => {

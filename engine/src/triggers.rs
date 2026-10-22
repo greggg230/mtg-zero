@@ -169,6 +169,10 @@ impl Game {
                 (who == src.controller) == *you
             }
             TrigPred::If(c) | TrigPred::State(c) => self.cond_holds(c, src.controller),
+            TrigPred::Source(f) => {
+                let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
+                self.live(src.r) && self.subject_matches(f, src.r.idx, &ctx)
+            }
             TrigPred::FormerHost(s) => match ev.subject(*s) {
                 // Evaluated as the host leaves (look back): the Equipment
                 // is still attached to it.
@@ -249,8 +253,13 @@ impl Game {
             cost_option: 0,
             modes: Vec::new(),
             ev: t.ev,
+            alt: 0,
+            division: Vec::new(),
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
+        if ab.divide.is_some() {
+            self.agenda.push(Task::Divide { id }); // CR 603.3d, 601.2d
+        }
         if ab.has_targets() {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
         }

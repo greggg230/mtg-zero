@@ -478,9 +478,13 @@ impl Game {
             let mut pinned: Vec<CardIdx> = Vec::new();
             if payer == Some(owner) && owner != viewer {
                 // A payment in progress may count on the payer's mana
-                // sources in hand: they are pinned (ENGINE.md 10).
+                // sources in hand, and on the cards a cost exiles from hand:
+                // they are pinned (ENGINE.md 10).
+                let exile = self.exile_filters_in_progress();
                 slots.retain(|&c| {
-                    let pin = self.hand_mana_source(c);
+                    let pin = self.hand_mana_source(c)
+                        || (self.objs[c.i()].zone == Zone::Hand
+                            && exile.iter().any(|(f, ctx)| self.card_matches(f, c, ctx)));
                     if pin {
                         pinned.push(c);
                     }
@@ -586,11 +590,32 @@ impl Game {
         use crate::flow::Task;
         self.agenda.iter().rev().find_map(|t| match t {
             Task::PayMana(pm) => Some(pm.payer),
-            Task::CastPay { id } | Task::ActPay { id } => {
+            Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } => {
                 self.item_index(*id).map(|i| self.stack[i].controller)
             }
             _ => None,
         })
+    }
+
+    /// The filters of "exile a card from your hand" costs a spell being
+    /// cast may still pay (any of its alternative costs), with their
+    /// context.
+    pub(crate) fn exile_filters_in_progress(&self) -> Vec<(crate::db::Filter, crate::cast::Ctx)> {
+        use crate::flow::Task;
+        let mut out = Vec::new();
+        for t in &self.agenda {
+            let Task::CastDone { id } = t else { continue };
+            let Some(i) = self.item_index(*id) else { continue };
+            let item = &self.stack[i];
+            let crate::game::StackKind::Spell { card } = item.kind else { continue };
+            let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)) };
+            for a in &self.def_of(card).alt_costs {
+                if let Some(f) = &a.cost.exile_from_hand {
+                    out.push((f.clone(), ctx));
+                }
+            }
+        }
+        out
     }
 
     /// Re-run the asker of the pending decision so its options reflect the

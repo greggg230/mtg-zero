@@ -71,6 +71,8 @@ pub struct Obj {
     /// The permanent this one (an Equipment) is attached to (CR 301.5);
     /// stale once the host leaves, until SBA 704.5n unattaches it.
     pub attached: Option<ObjRef>,
+    /// It entered as an evoked spell (CR 702.74a).
+    pub evoked: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -128,6 +130,12 @@ pub struct StackItem {
     pub modes: Vec<u8>,
     /// A triggered ability's event (its subjects and amount).
     pub ev: crate::triggers::EvCtx,
+    /// The cost a spell was cast for: 0 = its mana cost, k = alternative
+    /// cost k - 1 (CR 118.9).
+    pub alt: u8,
+    /// Divided damage: the amount for each target of the divided
+    /// requirement, in the order chosen (CR 601.2d).
+    pub division: Vec<u8>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -228,6 +236,8 @@ pub struct Game {
     /// The permanent being put onto the battlefield is a resolving spell
     /// (it was cast).
     pub(crate) entering_cast: bool,
+    /// ... cast for its evoke cost.
+    pub(crate) entering_evoked: bool,
     /// Set by `determinize`: private reveals to others are keyed as hidden.
     pub(crate) observer: Option<PlayerId>,
     /// Chance keys of the current `apply`; always empty between calls.
@@ -362,6 +372,7 @@ impl Game {
             leaving: Vec::new(),
             batching: false,
             entering_cast: false,
+            entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
         }
     }
@@ -387,6 +398,7 @@ impl Game {
             struck_first: false,
             known: 0,
             attached: None,
+            evoked: false,
         });
         idx
     }
@@ -533,6 +545,7 @@ impl Game {
         // CR 614.1a: "If a nontoken creature would enter and it wasn't
         // cast, exile it instead."
         let cast = std::mem::take(&mut self.entering_cast);
+        let evoked = std::mem::take(&mut self.entering_evoked);
         if !cast && self.def_of(idx).is(types::CREATURE) && !self.def_of(idx).token {
             let replaced = self
                 .battlefield
@@ -544,6 +557,7 @@ impl Game {
             }
         }
         let tapped = self.enters_tapped(idx, controller);
+        self.entering_evoked = evoked; // read as it moves (its ETB sees it)
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
         if tapped {
             self.objs[idx.i()].tapped = true;
@@ -629,6 +643,7 @@ impl Game {
             o.struck_first = false;
             o.known = if to.is_hidden() { known_before } else { 0b11 };
             o.attached = None;
+            o.evoked = to == Zone::Battlefield && std::mem::take(&mut self.entering_evoked);
         }
         self.layers_on_move(idx, old, from, to);
         if from == Zone::Battlefield && self.batching {

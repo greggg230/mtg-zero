@@ -62,6 +62,9 @@ pub(crate) struct Keep {
     /// A later "discard n cards" and the card whose cost it is (never one
     /// of the n): mana sources in hand must leave n other cards.
     pub discard: Option<(u8, CardIdx)>,
+    /// A later "exile a card matching the filter from your hand": mana
+    /// sources in hand must leave one such card.
+    pub exile: Option<(crate::db::Filter, CardIdx)>,
 }
 
 /// Paying a mana cost (ENGINE.md 6, 18). Stages: Phyrexian pips (how many
@@ -306,13 +309,18 @@ impl Game {
     fn budget(&self, p: PlayerId, keep: &Keep, later: u8) -> (Budget, bool) {
         let pl = &self.players[p as usize];
         // At most one kind of reservation per cost (the lowering checks).
-        let sac = match (&keep.sac, keep.discard) {
-            (Some((s, card)), _) => self.sacrifice_candidates(p, *card, s).len() as i32 - s.n as i32,
-            (None, Some((n, card))) => {
+        let sac = match (&keep.sac, keep.discard, &keep.exile) {
+            (Some((s, card)), _, _) => self.sacrifice_candidates(p, *card, s).len() as i32 - s.n as i32,
+            (None, Some((n, card)), _) => {
                 let in_hand = self.objs[card.i()].zone == Zone::Hand;
                 pl.hand.len() as i32 - in_hand as i32 - n as i32
             }
-            (None, None) => i32::MAX,
+            (None, None, Some((f, card))) => {
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
+                let n = pl.hand.iter().filter(|&&c| c != *card && self.card_matches(f, c, &ctx)).count();
+                n as i32 - 1
+            }
+            (None, None, None) => i32::MAX,
         };
         (Budget { life: (pl.life - later as i32).max(0), sac: sac.max(0) }, later > 0)
     }
@@ -325,7 +333,14 @@ impl Game {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
                 !(sc.another && s.card == *card) && self.card_matches(&sc.filter, s.card, &ctx)
             }
-            _ => keep.discard.is_some() && matches!(s.slot, AbilitySlot::Hand(_)),
+            _ => {
+                matches!(s.slot, AbilitySlot::Hand(_))
+                    && (keep.discard.is_some()
+                        || keep.exile.as_ref().is_some_and(|(f, card)| {
+                            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
+                            self.card_matches(f, s.card, &ctx)
+                        }))
+            }
         }
     }
 

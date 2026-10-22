@@ -91,7 +91,7 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         TrigPred::IsSelf(s) | TrigPred::Subject(s, _) | TrigPred::Controlled(s, _) | TrigPred::FormerHost(s) => {
             vec![*s]
         }
-        TrigPred::Always | TrigPred::If(_) | TrigPred::State(_) => Vec::new(),
+        TrigPred::Always | TrigPred::If(_) | TrigPred::State(_) | TrigPred::Source(_) => Vec::new(),
     }
 }
 
@@ -144,6 +144,7 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
             let you = *by == enums::Controller::You;
             Some(TrigPred::Controlled(slot(l, subject)?, you))
         }
+        P::Source(nodes::Source { inner }) => Some(TrigPred::Source(lower_pred(l, inner)?)),
         P::StateBound(nodes::StateBound { inner }) => {
             let (c, intervening) = lower_state_pred(l, inner)?;
             Some(if intervening { TrigPred::If(c) } else { TrigPred::State(c) })

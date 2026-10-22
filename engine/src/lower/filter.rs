@@ -62,6 +62,7 @@ macro_rules! lower_object_predicate {
                 Some(Filter::Or(vec![a?, b?]))
             }
             E::ObjectNot(nodes::ObjectNot { inner }) => Some(Filter::Not(Box::new(lower_pred($l, inner)?))),
+            E::WasEvoked(nodes::WasEvoked {}) => Some(Filter::Evoked),
             E::HasDrawnNCardsThisTurn(nodes::HasDrawnNCardsThisTurn { n }) => {
                 Some(Filter::DrewThisTurn($l.int("HasDrawnNCardsThisTurn.n", *n, 0, 99) as u8))
             }

@@ -9,7 +9,7 @@ use super::filter::{lower_card_filter, lower_condition};
 use super::Lowerer;
 use crate::db::{
     supertypes, types, ActEffect, ActivatedDef, CardDef, Cost, EntersTapped, EventKind, Filter, Kw, KwSet,
-    ManaAbility, ManaProd, Mod, Prot, SacCost, Scope, Slot, StaticDef, TrigPred, TriggerDef,
+    AltCost, ManaAbility, ManaProd, Mod, Prot, SacCost, Scope, Slot, StaticDef, TrigPred, TriggerDef,
 };
 use crate::mana::{letter_index, pair_index, ManaCost, ManaMask};
 use card_ir::{cats, enums, generated, nodes};
@@ -352,8 +352,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.additional_cost_pay_x_life", additional_cost_pay_x_life);
         l.deny("CardPrinting.free_cast_condition", free_cast_condition);
         l.deny("CardPrinting.has_storm", has_storm);
-        l.deny("CardPrinting.alt_cost_exile_from_hand", alt_cost_exile_from_hand);
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
+        let _ = alt_cost_exile_from_hand_count; // 1 (checked above)
         l.deny("CardPrinting.splice_onto", splice_onto);
         l.deny("CardPrinting.splice_cost", splice_cost);
         l.deny("CardPrinting.splice_cost_str", splice_cost_str);
@@ -385,7 +385,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_with_counter_per_kick", enters_with_counter_per_kick);
         l.deny("CardPrinting.evoke_cost", evoke_cost);
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
-        l.deny("CardPrinting.evoke_exile_from_hand", evoke_exile_from_hand);
         l.deny("CardPrinting.opponents_cant_cast_spells_during_your_turn", opponents_cant_cast_spells_during_your_turn);
         l.deny("CardPrinting.each_player_one_spell_per_turn", each_player_one_spell_per_turn);
         l.deny("CardPrinting.opponents_nonbasic_lands_enter_tapped", opponents_nonbasic_lands_enter_tapped);
@@ -436,7 +435,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
         l.deny("CardPrinting.room_halves", room_halves);
-        l.deny("CardPrinting.alternative_costs", alternative_costs);
         l.deny("CardPrinting.replicate_cost", replicate_cost);
         l.deny("CardPrinting.teamwork_power", teamwork_power);
         l.deny("CardPrinting.roto_statics", roto_statics);
@@ -715,6 +713,34 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         None => None,
         Some(p) => super::filter::lower_pred(l, p),
     };
+    // Alternative costs (CR 118.9): the IR's list, "exile a card from your
+    // hand rather than pay" (Pyrokinesis), evoke (702.74).
+    let mut alt_costs = Vec::new();
+    for a in alternative_costs {
+        if let Some(a) = lower_alt_cost(l, a) {
+            alt_costs.push(a);
+        }
+    }
+    if let Some(f) = alt_cost_exile_from_hand {
+        if let Some(f) = lower_card_filter(l, f) {
+            alt_costs.push(AltCost { cost: Cost { exile_from_hand: Some(f), ..Cost::default() }, ..AltCost::default() });
+        }
+    }
+    if let Some(f) = evoke_exile_from_hand {
+        if ty & types::CREATURE == 0 {
+            l.unsupported("CardPrinting.evoke_exile_from_hand(not a creature)");
+        }
+        if let Some(f) = lower_card_filter(l, f) {
+            alt_costs.push(AltCost {
+                cost: Cost { exile_from_hand: Some(f), ..Cost::default() },
+                evoke: true,
+                ..AltCost::default()
+            });
+        }
+    }
+    if !alt_costs.is_empty() && !additional.is_empty() {
+        l.unsupported("CardPrinting.alternative_costs(with additional costs)");
+    }
     let mut spell_tax = Vec::new();
     for (f, n) in spell_cost_increases {
         if let Some(f) = lower_card_filter(l, f) {
@@ -767,6 +793,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         locks_activated,
         exiles_uncast_creatures: *exiles_uncast_nontoken_creatures_entering,
         heals_on_damage: *heals_other_damage_when_dealt_damage,
+        alt_costs,
     }
 }
 
@@ -774,6 +801,71 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
 /// path pays them; permanent spells would need the same, untested).
 fn is_spell_card_any(ty: u16) -> bool {
     ty & (types::INSTANT | types::SORCERY) != 0
+}
+
+/// An IR alternative cost -> [`AltCost`].
+fn lower_alt_cost(l: &mut Lowerer, a: &cats::AlternativeCost) -> Option<AltCost> {
+    let cats::AlternativeCost::AlternativeCost(nodes::AlternativeCost {
+        mana,
+        pay_life,
+        exile_card_color,
+        return_subtype,
+        sacrifice_subtype,
+        turn,
+        requires_control_subtype,
+        return_count,
+        sacrifice_count,
+        opponent_gains_life,
+        discard_card_sharing_color,
+        overload,
+        condition,
+    }) = a;
+    l.deny("AlternativeCost.opponent_gains_life", opponent_gains_life);
+    l.deny("AlternativeCost.discard_card_sharing_color", discard_card_sharing_color);
+    // Overload changes "target" to "each" (CR 702.96): another ability.
+    l.deny("AlternativeCost.overload", overload);
+    l.deny("AlternativeCost.condition", condition);
+    let mut out = AltCost::default();
+    if !mana.is_empty() {
+        match ManaCost::parse(mana) {
+            Some(m) => out.mana = m,
+            None => {
+                l.unsupported(format!("AlternativeCost.mana({mana})"));
+                return None;
+            }
+        }
+    }
+    out.cost.life = l.int("AlternativeCost.pay_life", *pay_life, 0, 99) as u8;
+    if !exile_card_color.is_empty() {
+        match letter_index(exile_card_color) {
+            Some(i) if i < 5 => out.cost.exile_from_hand = Some(Filter::Color(1 << i)),
+            _ => l.unsupported(format!("AlternativeCost.exile_card_color({exile_card_color})")),
+        }
+    }
+    let n_ret = l.int("AlternativeCost.return_count", *return_count, 1, 9) as u8;
+    if !return_subtype.is_empty() {
+        let f = Filter::Subtype(l.subtype(return_subtype));
+        out.cost.bounce = Some(SacCost { filter: f, n: n_ret, another: false });
+    } else if n_ret != 1 {
+        l.unsupported("AlternativeCost.return_count(without return_subtype)");
+    }
+    let n_sac = l.int("AlternativeCost.sacrifice_count", *sacrifice_count, 1, 9) as u8;
+    if !sacrifice_subtype.is_empty() {
+        let f = Filter::Subtype(l.subtype(sacrifice_subtype));
+        out.cost.sacrifice = Some(SacCost { filter: f, n: n_sac, another: false });
+    } else if n_sac != 1 {
+        l.unsupported("AlternativeCost.sacrifice_count(without sacrifice_subtype)");
+    }
+    out.turn = turn.map(|t| t == enums::AlternativeCostTurn::Yours);
+    if !requires_control_subtype.is_empty() {
+        let f = Filter::Subtype(l.subtype(requires_control_subtype));
+        out.only_if = Some(crate::db::Cond::ControlAtLeast(f, 1));
+    }
+    let parts = [out.cost.sacrifice.is_some(), out.cost.exile_from_hand.is_some()];
+    if parts.iter().filter(|&&x| x).count() > 1 {
+        l.unsupported("AlternativeCost(more than one reservation)");
+    }
+    Some(out)
 }
 
 fn lower_additional_option(l: &mut Lowerer, o: &cats::AdditionalCostOption) -> Option<Cost> {

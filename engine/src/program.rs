@@ -134,6 +134,18 @@ pub enum Ext {
     EachPutFromGraveyard { filter: Filter },
     /// Exile every card in `who`'s graveyard.
     ExileGraveyard { who: Who },
+    /// Unless the spell was cast for an alternative cost, continue at `to`.
+    JumpUnlessAlt { to: u16 },
+    /// The source deals each legal target of requirement `to` its share of
+    /// the divided damage (CR 601.2d).
+    DealDivided { to: u8 },
+    /// Each legal target of requirement `tgt` (a spell) goes on top of or
+    /// on the bottom of its owner's library, as its owner chooses. Choice:
+    /// `YES` = top, `PASS` = bottom.
+    SpellToLibraryOwnerChooses { tgt: u8 },
+    /// The controller sacrifices the source, if it is still the same
+    /// permanent.
+    SacrificeSource,
     /// Each object of `on` explores (CR 701.44): its controller reveals the
     /// top card of their library; a land goes into their hand; otherwise a
     /// +1/+1 counter on the creature, and they may put the card into their
@@ -328,6 +340,7 @@ impl Op {
             Op::Ext(Ext::DiscardThen { skip, .. }) => Some(skip),
             Op::Ext(Ext::FlipCoin { won }) => Some(won),
             Op::Ext(Ext::JumpUnlessLkiYours { to }) => Some(to),
+            Op::Ext(Ext::JumpUnlessAlt { to }) => Some(to),
             _ => None,
         }
     }
@@ -344,6 +357,8 @@ pub struct Builder {
     /// mismatch.
     pub reuse: Option<usize>,
     pub reuse_failed: bool,
+    /// A divided amount among the targets of a requirement (CR 601.2d).
+    pub divide: Option<(u8, u8)>,
 }
 
 impl Builder {
@@ -378,6 +393,6 @@ impl Builder {
     }
 
     pub fn finish(self) -> AbilityDef {
-        AbilityDef { targets: self.targets, program: self.program, modes: None }
+        AbilityDef { targets: self.targets, program: self.program, modes: None, divide: self.divide }
     }
 }

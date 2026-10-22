@@ -55,7 +55,11 @@ impl Game {
             }
             let cls = &classes[..];
             let cost = self.spell_cost(c, p);
-            if !def.additional.is_empty() {
+            let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
+            if alt_ok {
+                // castable for an alternative cost (601.2b); the mana cost
+                // may be payable too (asked on casting)
+            } else if !def.additional.is_empty() {
                 // (Excluding the card itself: on the stack while it is paid.)
                 if !def.additional.iter().any(|o| self.cost_payable(p, c, o, &cost, cls, Some(c))) {
                     continue;
@@ -170,6 +174,101 @@ impl Game {
 
     // ---- casting (CR 601.2) ------------------------------------------------
 
+    /// CR 601.2d: divide the amount among the chosen targets of the divided
+    /// requirement, at least 1 each: one decision per target but the last
+    /// (`NUMBER` = its amount), the last gets the rest.
+    pub(crate) fn divide(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
+        let Some(ar) = self.item_ability(item) else { return };
+        let Some((req, amount)) = self.db.ability(ar).divide else { return };
+        let n = item.targets.iter().filter(|(r, _)| *r == req).count();
+        if let Some(Choice::Number(k)) = self.answer.take() {
+            self.stack[pos].division.push(k);
+        }
+        let item = &self.stack[pos];
+        let given: u8 = item.division.iter().sum();
+        let k = item.division.len();
+        if n == 0 || k >= n {
+            return;
+        }
+        let left = amount - given;
+        if k + 1 == n {
+            self.stack[pos].division.push(left);
+            return;
+        }
+        // Leave at least 1 for each target after this one.
+        let most = left - (n - k - 1) as u8;
+        let opts = (1..=most).map(|a| Opt { action: act::NUMBER + a as u16, choice: Choice::Number(a) }).collect();
+        let p = item.controller;
+        self.ask(Task::Divide { id }, p, DecisionKind::DivideDamage, opts);
+    }
+
+    /// Can `p` cast `card` for alternative cost `k` now (its condition,
+    /// its mana plus taxes, and the rest of it)?
+    pub(crate) fn alt_payable(&self, p: PlayerId, card: CardIdx, k: usize, classes: &[crate::pay::Class]) -> bool {
+        let a = &self.def_of(card).alt_costs[k];
+        if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
+            return false;
+        }
+        if a.only_if.as_ref().is_some_and(|c| !self.cond_holds(c, p)) {
+            return false;
+        }
+        let mana = self.alt_mana(card, p, k);
+        // (A card cast from hand is on the stack while its cost is paid.)
+        self.cost_payable(p, card, &a.cost, &mana, &classes_without(classes, card), Some(card))
+    }
+
+    /// The mana of alternative cost `k` with cost increases (CR 601.2f:
+    /// they apply to alternative costs too).
+    pub(crate) fn alt_mana(&self, card: CardIdx, p: PlayerId, k: usize) -> crate::mana::ManaCost {
+        let tax = self.spell_cost(card, p).generic.saturating_sub(self.def_of(card).cost.generic);
+        let mut m = self.def_of(card).alt_costs[k].mana;
+        m.generic = m.generic.saturating_add(tax);
+        m
+    }
+
+    /// Can `p` cast `card` for its mana cost (with its additional cost, if
+    /// any)?
+    pub(crate) fn normal_payable(&self, p: PlayerId, card: CardIdx, classes: &[crate::pay::Class]) -> bool {
+        let def = self.def_of(card);
+        let cost = self.spell_cost(card, p);
+        if !def.additional.is_empty() {
+            def.additional.iter().any(|o| self.cost_payable(p, card, o, &cost, classes, Some(card)))
+        } else {
+            self.can_pay_with(p, &cost, &classes_without(classes, card), &Default::default())
+        }
+    }
+
+    /// 601.2b: choose to pay the mana cost (`NUMBER` 0) or alternative cost
+    /// k (`NUMBER` k + 1), among those that can be paid.
+    pub(crate) fn cast_alt(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
+        let StackKind::Spell { card } = item.kind else { return };
+        let p = item.controller;
+        match self.answer.take() {
+            Some(Choice::Number(k)) => {
+                self.stack[pos].alt = k;
+                self.note(|_| format!("cost {k}"));
+            }
+            Some(other) => unreachable!("cost answer {other:?}"),
+            None => {
+                let classes = self.mana_classes(p, None);
+                let mut opts = Vec::new();
+                if self.normal_payable(p, card, &classes) {
+                    opts.push(Opt { action: act::NUMBER, choice: Choice::Number(0) });
+                }
+                for k in 0..self.def_of(card).alt_costs.len() {
+                    if self.alt_payable(p, card, k, &classes) {
+                        opts.push(Opt { action: act::NUMBER + 1 + k as u16, choice: Choice::Number(k as u8 + 1) });
+                    }
+                }
+                self.ask(Task::CastAlt { id }, p, DecisionKind::ChooseAltCost, opts);
+            }
+        }
+    }
+
     /// 601.2a: the card moves to the stack; then targets (601.2c), cost
     /// (601.2f-h) and "becomes cast" (601.2i) run as tasks.
     pub(crate) fn begin_cast(&mut self, p: PlayerId, card: CardIdx) {
@@ -184,9 +283,14 @@ impl Game {
             cost_option: 0,
             modes: Vec::new(),
             ev: Default::default(),
+            alt: 0,
+            division: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
         self.agenda.push(Task::CastPay { id });
+        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
+            self.agenda.push(Task::Divide { id }); // CR 601.2d
+        }
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.has_targets()) {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
         }
@@ -195,6 +299,9 @@ impl Game {
         }
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.modes.is_some()) {
             self.agenda.push(Task::ChooseModes { id }); // CR 601.2b, 700.2a
+        }
+        if !self.def_of(card).alt_costs.is_empty() {
+            self.agenda.push(Task::CastAlt { id }); // CR 601.2b
         }
     }
 
@@ -302,7 +409,18 @@ impl Game {
         let item = &self.stack[pos];
         let StackKind::Spell { card } = item.kind else { return };
         let def = self.def_of(card);
-        let mut pm = PayMana::new(item.controller, self.spell_cost(card, item.controller));
+        let p = item.controller;
+        if item.alt > 0 {
+            let k = item.alt as usize - 1;
+            let mut pm = PayMana::new(p, self.alt_mana(card, p, k));
+            pm.keep = Self::keep_for(card, &def.alt_costs[k].cost, None);
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            if !pm.cost.is_zero() {
+                self.agenda.push(Task::PayMana(pm));
+            }
+            return;
+        }
+        let mut pm = PayMana::new(p, self.spell_cost(card, p));
         if let Some(extra) = def.additional.get(item.cost_option as usize) {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
@@ -512,6 +630,7 @@ impl Game {
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
+            Filter::Evoked => self.objs[c.i()].evoked,
             Filter::Owner(you) => (self.objs[c.i()].owner == ctx.controller) == *you,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
