@@ -1,12 +1,12 @@
-//! The network input of the `mtg` game (ENGINE.md 21.2): a fixed-width f32
-//! vector for a viewer, with no hidden information. Layout v1 (13,532
+//! The network input of the `mtg` game (ENGINE.md 21.2, 22.2): a fixed-width
+//! f32 vector for a viewer, with no hidden information. Layout v2 (23,324
 //! floats), in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
 //! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary |
-//! | context | 384 | the pending decision: kind, decider, the asking task, its card (one-hot) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
-//! | bags | 13 x 256 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds |
+//! | context | 192 | the pending decision: kind, decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
+//! | bags | 13 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds |
 //! | tops | 2 x 3 x 50 | the top three library positions of each player: present, known to the viewer, the card code |
 //! | permanents | 2 x 32 x 88 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat, keywords, decision flags, options) |
 //! | hand | 16 x 56 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options, known to the opponent |
@@ -14,10 +14,12 @@
 //! | triggers | 4 x 52 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 40 x 52 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
 //!
-//! A card code (48 floats) is the definition's index in the card table
-//! (`CardDb` order: the supported cards by name, then tokens; capacity 256)
-//! as two one-hots (index / 16, index % 16) plus a descriptor (card types,
-//! colours, mana value, printed power and toughness, token, legendary).
+//! A card code (48 floats) is the card's stable identity (`identity.rs`: its
+//! position in the cube's IR card list, tokens from a registry; capacity
+//! 1024) as three one-hots (index / 64, index / 8 % 8, index % 8: 16 + 8 + 8)
+//! plus a descriptor (card types, colours, mana value, printed power and
+//! toughness, token, legendary). Layout v1 (M5a, 13,532 floats) used the
+//! card table's index (capacity 256), which renumbers as support grows.
 //! "Me" is the viewer. Options of the pending decision are encoded only
 //! when the viewer decides (its own legal actions); the list block too.
 //! Everything else is public or the viewer's own knowledge, so the vector is
@@ -30,12 +32,14 @@ use crate::game::{Game, StackKind};
 use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::program::Op;
 
-/// Identity width: the capacity of the card table.
-pub const D: usize = 256;
+use super::identity;
+
+/// Identity width: the capacity of the stable card identities (`identity.rs`).
+pub const D: usize = identity::D;
 /// Card code: id / 16 one-hot, id % 16 one-hot, descriptor.
 pub const CODE: usize = 48;
 pub const GLOBALS: usize = 128;
-pub const CONTEXT: usize = 384;
+pub const CONTEXT: usize = 192;
 pub const BAGS: usize = 13;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
@@ -115,12 +119,12 @@ pub mod perm {
     pub const STOLEN: usize = 38;
 }
 
-/// The descriptor part of a card code: types, colours, size.
-fn code(out: &mut [f32], db: &CardDb, def: DefId) {
-    let i = def as usize;
-    debug_assert!(i < D, "card table capacity {D}");
-    out[(i >> 4) & 15] = 1.0;
-    out[16 + (i & 15)] = 1.0;
+/// A card code: the identity's digits (16, 8, 8), then types, colours, size.
+fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
+    let i = ids[def as usize] as usize;
+    out[(i >> 6) & 15] = 1.0;
+    out[16 + ((i >> 3) & 7)] = 1.0;
+    out[24 + (i & 7)] = 1.0;
     let d = db.def(def);
     for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
         .iter()
@@ -142,8 +146,8 @@ fn code(out: &mut [f32], db: &CardDb, def: DefId) {
     out[47] = (d.supertypes & crate::db::supertypes::LEGENDARY != 0) as u8 as f32;
 }
 
-fn bag_add(out: &mut [f32], b: usize, def: DefId) {
-    out[O_BAGS + b * D + def as usize] += 0.25;
+fn bag_add(out: &mut [f32], ids: &[u16], b: usize, def: DefId) {
+    out[O_BAGS + b * D + ids[def as usize] as usize] += 0.25;
 }
 
 /// Kinds of the asking task (context block).
@@ -221,8 +225,8 @@ pub(crate) mod ctx {
     pub const DECIDER_IS_VIEWER: usize = 32;
     pub const PENDING: usize = 33;
     pub const TASK: usize = 34; // 20
-    pub const CARD: usize = 54; // D
-    pub const HAS_CARD: usize = 54 + super::D;
+    pub const CARD: usize = 54; // a card code
+    pub const HAS_CARD: usize = 54 + super::CODE;
     pub const SLOT_KIND: usize = HAS_CARD + 1; // 4
     pub const SLOT_INDEX: usize = SLOT_KIND + 4;
     pub const MODE: usize = SLOT_INDEX + 1;
@@ -248,7 +252,7 @@ impl Game {
     /// [`NUM_FEATURES`] floats, zeroed by the caller.
     pub fn encode_features(&self, viewer: PlayerId, out: &mut [f32]) {
         assert_eq!(out.len(), NUM_FEATURES);
-        assert!(self.db.len() <= D, "card table larger than the encoding's capacity {D}");
+        let ids = identity::identities(self.db);
         let me = viewer;
         let op_ = opp(me);
         let decision = self.pending.as_ref();
@@ -257,7 +261,7 @@ impl Game {
             mine_to_decide && decision.is_some_and(|d| d.options.binary_search_by_key(&a, |o| o.action).is_ok())
         };
         self.encode_globals(me, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
-        self.encode_bags(me, out);
+        self.encode_bags(me, ids, out);
         // Tops of the libraries.
         for (side, p) in [me, op_].into_iter().enumerate() {
             let lib = &self.players[p as usize].library;
@@ -267,7 +271,7 @@ impl Game {
                 out[o] = 1.0;
                 if self.knows(me, c) {
                     out[o + 1] = 1.0;
-                    code(&mut out[o + 2..o + 2 + CODE], self.db, self.objs[c.i()].def);
+                    code(&mut out[o + 2..o + 2 + CODE], self.db, ids, self.objs[c.i()].def);
                 }
             }
         }
@@ -295,7 +299,7 @@ impl Game {
             for (s, &c) in list.iter().enumerate().take(PERMS) {
                 let o = base + s * PERM_W;
                 let ob = &self.objs[c.i()];
-                code(&mut out[o..o + CODE], self.db, ob.def);
+                code(&mut out[o..o + CODE], self.db, ids, ob.def);
                 let st = &mut out[o + CODE..o + PERM_W];
                 st[perm::PRESENT] = 1.0;
                 st[perm::TAPPED] = ob.tapped as u8 as f32;
@@ -337,7 +341,7 @@ impl Game {
         for (s, &c) in hand.iter().enumerate().take(HANDS) {
             let o = O_HAND + s * HAND_W;
             let def = self.objs[c.i()].def;
-            code(&mut out[o..o + CODE], self.db, def);
+            code(&mut out[o..o + CODE], self.db, ids, def);
             let st = &mut out[o + CODE..o + HAND_W];
             st[0] = 1.0;
             st[1] = hand.iter().filter(|&&x| self.objs[x.i()].def == def).count() as f32 / 4.0;
@@ -355,7 +359,7 @@ impl Game {
                     (ability.def, if matches!(ability.slot, AbilitySlot::Trigger(_)) { 3 } else { 2 })
                 }
             };
-            code(&mut out[o..o + CODE], self.db, def);
+            code(&mut out[o..o + CODE], self.db, ids, def);
             let st = &mut out[o + CODE..o + STACK_W];
             st[0] = 1.0;
             st[kind] = 1.0;
@@ -392,7 +396,7 @@ impl Game {
         // The viewer's waiting triggers (the `TRIGGER` slots when it orders them).
         for (k, t) in self.waiting.iter().filter(|t| t.controller == me).enumerate().take(TRIGS) {
             let o = O_TRIG + k * TRIG_W;
-            code(&mut out[o..o + CODE], self.db, t.source_def);
+            code(&mut out[o..o + CODE], self.db, ids, t.source_def);
             out[o + CODE] = 1.0;
             out[o + CODE + 1] = (t.slot as f32 + 1.0) / 4.0;
             out[o + CODE + 2] = legal(act::TRIGGER + k as u16) as u8 as f32;
@@ -402,55 +406,55 @@ impl Game {
             let list = self.decision_list(me);
             for (k, &def) in list.iter().enumerate().take(LIST) {
                 let o = O_LIST + k * LIST_W;
-                code(&mut out[o..o + CODE], self.db, def);
+                code(&mut out[o..o + CODE], self.db, ids, def);
                 out[o + CODE] = 1.0;
                 out[o + CODE + 1] = legal(act::LIBRARY + k as u16) as u8 as f32;
                 out[o + CODE + 2] = list.iter().filter(|&&x| x == def).count() as f32 / 4.0;
             }
         }
-        self.encode_context(me, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
+        self.encode_context(me, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
     }
 
     /// Per-identity counts.
-    fn encode_bags(&self, me: PlayerId, out: &mut [f32]) {
+    fn encode_bags(&self, me: PlayerId, ids: &[u16], out: &mut [f32]) {
         let op_ = opp(me);
         for &c in &self.players[me as usize].hand {
-            bag_add(out, bag::MY_HAND, self.objs[c.i()].def);
+            bag_add(out, ids, bag::MY_HAND, self.objs[c.i()].def);
         }
         for &c in &self.battlefield {
             let o = &self.objs[c.i()];
-            bag_add(out, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, o.def);
+            bag_add(out, ids, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, o.def);
         }
         for p in [me, op_] {
             for &c in &self.players[p as usize].graveyard {
-                bag_add(out, if p == me { bag::MY_GRAVEYARD } else { bag::OPP_GRAVEYARD }, self.objs[c.i()].def);
+                bag_add(out, ids, if p == me { bag::MY_GRAVEYARD } else { bag::OPP_GRAVEYARD }, self.objs[c.i()].def);
             }
         }
         for &c in &self.exile {
             let o = &self.objs[c.i()];
-            bag_add(out, if o.owner == me { bag::MY_EXILE } else { bag::OPP_EXILE }, o.def);
+            bag_add(out, ids, if o.owner == me { bag::MY_EXILE } else { bag::OPP_EXILE }, o.def);
         }
         for &c in &self.players[me as usize].library {
-            bag_add(out, bag::MY_LIBRARY, self.objs[c.i()].def);
+            bag_add(out, ids, bag::MY_LIBRARY, self.objs[c.i()].def);
             if self.knows(me, c) {
-                bag_add(out, bag::MY_LIBRARY_KNOWN, self.objs[c.i()].def);
+                bag_add(out, ids, bag::MY_LIBRARY_KNOWN, self.objs[c.i()].def);
             }
         }
         let opl = &self.players[op_ as usize];
         for &c in opl.hand.iter().chain(opl.library.iter()) {
             let d = self.objs[c.i()].def;
             if !self.knows(me, c) {
-                bag_add(out, bag::OPP_HIDDEN, d);
+                bag_add(out, ids, bag::OPP_HIDDEN, d);
             } else if self.objs[c.i()].zone == Zone::Hand {
-                bag_add(out, bag::OPP_HAND_KNOWN, d);
+                bag_add(out, ids, bag::OPP_HAND_KNOWN, d);
             } else {
-                bag_add(out, bag::OPP_LIBRARY_KNOWN, d);
+                bag_add(out, ids, bag::OPP_LIBRARY_KNOWN, d);
             }
         }
         for k in self.clouds.iter().filter(|k| k.viewer == me && k.owner == op_) {
             let b = if k.hand { bag::OPP_HAND_CLOUD } else { bag::OPP_LIBRARY_KNOWN };
             for &d in &k.defs {
-                bag_add(out, b, d);
+                bag_add(out, ids, b, d);
             }
         }
     }
@@ -573,7 +577,7 @@ impl Game {
         cards.iter().map(|c| self.objs[c.i()].def).collect()
     }
 
-    fn encode_context(&self, me: PlayerId, x: &mut [f32]) {
+    fn encode_context(&self, me: PlayerId, ids: &[u16], x: &mut [f32]) {
         let Some(d) = &self.pending else { return };
         x[ctx::KIND + d.kind as usize] = 1.0;
         x[ctx::DECIDER_IS_VIEWER] = (d.player == me) as u8 as f32;
@@ -653,7 +657,7 @@ impl Game {
             _ => card = frame_card(task),
         }
         if let Some((def, slot, mode)) = card {
-            x[ctx::CARD + def as usize] = 1.0;
+            code(&mut x[ctx::CARD..ctx::CARD + CODE], self.db, ids, def);
             x[ctx::HAS_CARD] = 1.0;
             if let Some(s) = slot {
                 let (k, i) = match s {
@@ -673,29 +677,36 @@ impl Game {
 }
 
 /// The object layout of this encoding for zero-core's token network (arch `tokens`, zero-core
-/// `python/zero/net.py` `TokenNet`; ENGINE.md 22): JSON with the card table's capacity as the
+/// `python/zero/net.py` `TokenNet`; ENGINE.md 22): JSON with the identity capacity as the
 /// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
-/// two one-hot digits of 16, the action ids each slot scores) and the bags (13 multisets of
-/// 256 identities). Every other feature (the 128 globals) is the global token's input. Checked
-/// in as `mtgz/az/layout_v1.json` (a test keeps the two equal). `cards` (the card table's names,
-/// for analysis) is not read by the network.
-pub fn layout_json(db: &CardDb) -> String {
+/// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (13 multisets of
+/// 1024 identities). Every other feature (the 128 globals) is the global token's input.
+/// Checked in as `mtgz/az/layout_v2.json` (a test keeps the two equal). `cards` (the name behind
+/// each identity of `db`, for analysis; null where none) is not read by the network.
+pub fn layout_json(db: &'static CardDb) -> String {
     use serde_json::json;
-    let id = json!({"at": 0, "radix": [16, 16]});
+    let id = json!({"at": 0, "radix": [16, 8, 8]});
     let seg = |name: &str, offset: usize, count: usize, width: usize, present: usize, actions: serde_json::Value| {
         json!({"name": name, "offset": offset, "count": count, "width": width, "present": present,
                "id": id.clone(), "actions": actions})
     };
     let a = |base: u16, stride: u16| json!([base, stride]);
+    let ids = identity::identities(db);
+    let mut cards: Vec<Option<String>> = vec![None; D];
+    for (def, &i) in ids.iter().enumerate() {
+        if i != identity::UNKNOWN {
+            cards[i as usize] = Some(db.def(def as DefId).name.clone());
+        }
+    }
     let v = json!({
-        "version": 1,
+        "version": 2,
         "features": NUM_FEATURES,
         "vocab": D,
         "segments": [
             {"name": "context", "offset": O_CONTEXT, "count": 1, "width": CONTEXT, "present": null,
-             "id": {"at": ctx::CARD, "radix": [D]}},
+             "id": {"at": ctx::CARD, "radix": [16, 8, 8]}},
             {"name": "tops", "offset": O_TOPS, "count": 2 * TOPS, "width": TOP_W, "present": 1,
-             "id": {"at": 2, "radix": [16, 16]}},
+             "id": {"at": 2, "radix": [16, 8, 8]}},
             seg("my_permanents", O_MY_PERM, PERMS, PERM_W, CODE + perm::PRESENT,
                 json!([a(act::MY_PERM, 1), a(act::ACTIVATE, 4), a(act::ACTIVATE + 1, 4), a(act::ACTIVATE + 2, 4),
                        a(act::ACTIVATE + 3, 4)])),
@@ -706,7 +717,7 @@ pub fn layout_json(db: &CardDb) -> String {
             seg("list", O_LIST, LIST, LIST_W, CODE, json!([a(act::LIBRARY, 1)])),
         ],
         "bags": [{"name": "bags", "offset": O_BAGS, "count": BAGS, "width": D}],
-        "cards": (0..db.len()).map(|i| db.def(i as DefId).name.clone()).collect::<Vec<_>>(),
+        "cards": cards,
     });
     serde_json::to_string_pretty(&v).unwrap() + "\n"
 }

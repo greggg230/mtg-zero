@@ -16,6 +16,7 @@
 pub mod bots;
 pub mod decks;
 pub mod encode;
+pub mod identity;
 
 use crate::db::CardDb;
 use crate::game::{Game, GameSpec};

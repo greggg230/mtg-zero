@@ -20,7 +20,7 @@ def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg']
     info = G.info('mtg')
-    assert info['num_actions'] == 1024 and info['num_features'] == 13532
+    assert info['num_actions'] == 1024 and info['num_features'] == 23324
     assert info['min_players'] == info['max_players'] == 2
     assert info['bots'] == ['random', 'heuristic']
 
@@ -35,7 +35,7 @@ def test_game_through_the_bindings():
         assert len(legal) >= 1 and list(legal) == sorted(set(legal)) and max(legal) < 1024
         p = g.to_move
         x = np.asarray(g.encode(p))
-        assert x.shape == (13532,) and np.isfinite(x).all()
+        assert x.shape == (23324,) and np.isfinite(x).all()
         if steps % 25 == 0:
             d = g.clone()
             d.determinize(p, 99)
@@ -72,7 +72,7 @@ def test_selfplay_records_samples():
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
     parts.append(drv.take_samples())
     s = protocol.concat_samples(parts)
-    protocol.validate_samples(s, 13532)
+    protocol.validate_samples(s, 23324)
     assert len(s['x']) > 50
     res = drv.take_results()
     assert len(res) == 2 and all(r['over'] for r in res)
@@ -143,7 +143,7 @@ def test_layout_and_token_network_read_the_encoding():
     from zero.net import make_net, tokens_layout
     info = G.info('mtg')
     lay = tokens_layout(A.LAYOUT, info['num_features'], info['num_actions'])
-    assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 256
+    assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 1024 and A.LAYOUT['version'] == 2
     names = A.LAYOUT['cards']
     torch.manual_seed(0)
     m = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)
@@ -162,7 +162,8 @@ def test_layout_and_token_network_read_the_encoding():
             o = hand['offset'] + s * hand['width']
             if x[0, o + hand['present']] > 0.5:
                 ident = int(m._identity(x[0, o:o + hand['width']][None], hand['id'])[0])
-                assert ident < len(names) and int(x[0, o:o + 16].argmax()) * 16 + int(x[0, o + 16:o + 32].argmax()) == ident
+                digits = (int(x[0, o:o + 16].argmax()), int(x[0, o + 16:o + 24].argmax()), int(x[0, o + 24:o + 32].argmax()))
+                assert digits[0] * 64 + digits[1] * 8 + digits[2] == ident and names[ident]      # a card of the cube
                 seen += 1
         # the slot of every legal HAND / MY_PERM / OPP_PERM id is a token
         start, pos = 1, {}

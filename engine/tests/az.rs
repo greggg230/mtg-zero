@@ -9,6 +9,7 @@
 use engine::az::bots::Heuristic;
 use engine::az::decks::{self, DeckGen};
 use engine::az::encode::{self, CODE, NUM_FEATURES};
+use engine::az::identity;
 use engine::az::{DeckMode, MtgAz, MtgSpec};
 use engine::db::CardDb;
 use engine::decision::act;
@@ -297,15 +298,21 @@ fn forced_keys_are_consumed_in_order_and_impossible_ones_fall_back() {
     assert!(checked >= 3, "{checked}");
 }
 
+/// The identity in a card code (digits 16, 8, 8).
 fn decode_id(code: &[f32]) -> usize {
-    let hi = code[..16].iter().position(|&v| v == 1.0).unwrap();
-    let lo = code[16..32].iter().position(|&v| v == 1.0).unwrap();
-    hi * 16 + lo
+    let a = code[..16].iter().position(|&v| v == 1.0).unwrap();
+    let b = code[16..24].iter().position(|&v| v == 1.0).unwrap();
+    let c = code[24..32].iter().position(|&v| v == 1.0).unwrap();
+    a * 64 + b * 8 + c
+}
+
+fn ident(def: engine::ids::DefId) -> usize {
+    identity::identities(CardDb::cube())[def as usize] as usize
 }
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 13_532);
+    assert_eq!(NUM_FEATURES, 23_324);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -316,7 +323,7 @@ fn encoding_slots_name_the_action_slots() {
         let hand = g.g.hand_sorted(me as u8);
         for (s, &c) in hand.iter().enumerate().take(encode::HANDS) {
             let o = encode::O_HAND + s * encode::HAND_W;
-            assert_eq!(decode_id(&x[o..o + CODE]), g.g.obj(c).def as usize);
+            assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.obj(c).def));
             assert_eq!(x[o + CODE + 2] == 1.0, l.contains(&(act::HAND + s as u16)));
         }
         // permanents
@@ -325,7 +332,7 @@ fn encoding_slots_name_the_action_slots() {
             let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
             for (s, c) in g.g.permanents_of(p).enumerate().take(encode::PERMS) {
                 let o = base + s * encode::PERM_W;
-                assert_eq!(decode_id(&x[o..o + CODE]), g.g.obj(c).def as usize);
+                assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.obj(c).def));
                 assert_eq!(x[o + CODE + encode::perm::TAPPED] == 1.0, g.g.obj(c).tapped);
                 assert_eq!(x[o + CODE + encode::perm::OPTION] == 1.0, l.contains(&(range + s as u16)));
             }
@@ -337,8 +344,8 @@ fn encoding_slots_name_the_action_slots() {
                 let k = (o.action - act::LIBRARY) as usize;
                 let off = encode::O_LIST + k * encode::LIST_W;
                 let want = match o.choice {
-                    engine::Choice::Def(d) => d as usize,
-                    engine::Choice::Card(c) => g.g.obj(c).def as usize,
+                    engine::Choice::Def(d) => ident(d),
+                    engine::Choice::Card(c) => ident(g.g.obj(c).def),
                     _ => unreachable!(),
                 };
                 assert_eq!(decode_id(&x[off..off + CODE]), want);
@@ -354,9 +361,9 @@ fn encoding_slots_name_the_action_slots() {
 
 #[test]
 fn layout_json_is_checked_in() {
-    // mtgz/az/layout_v1.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it)
+    // mtgz/az/layout_v2.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it)
     let want = encode::layout_json(CardDb::cube());
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v1.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v2.json");
     if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
         std::fs::write(&path, &want).unwrap();
     }
@@ -364,7 +371,69 @@ fn layout_json_is_checked_in() {
     assert!(have == want, "{} differs from encode::layout_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az layout)", path.display());
     let v: serde_json::Value = serde_json::from_str(&want).unwrap();
     assert_eq!(v["features"], NUM_FEATURES);
-    assert_eq!(v["cards"].as_array().unwrap().len(), CardDb::cube().len());
+    assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
+}
+
+#[test]
+fn token_registry_and_stable_identities() {
+    // every token of the cube's card table is registered (MTGZ_WRITE_TOKENS=1 appends the
+    // missing keys to engine/src/az/tokens.txt; a registered key never moves)
+    let db = CardDb::cube();
+    let reg = identity::registry();
+    let mut keys = Vec::new();
+    for i in db.num_cards()..db.len() {
+        keys.push(identity::token_key(db, db.def(i as engine::ids::DefId)));
+    }
+    let missing: Vec<&String> = keys.iter().filter(|k| !reg.contains(&k.as_str())).collect();
+    if !missing.is_empty() && std::env::var("MTGZ_WRITE_TOKENS").is_ok_and(|v| v == "1") {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/az/tokens.txt");
+        let mut text = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
+        let mut seen = std::collections::BTreeSet::new();
+        for k in &missing {
+            if seen.insert(k.as_str()) {
+                text.push_str(k);
+                text.push('\n');
+            }
+        }
+        std::fs::write(&path, text).unwrap();
+        panic!("appended {} token keys to {}: rebuild and rerun", seen.len(), path.display());
+    }
+    assert!(missing.is_empty(), "unregistered tokens (MTGZ_WRITE_TOKENS=1 cargo test -p engine --test az token_registry): {missing:?}");
+    let uniq: std::collections::BTreeSet<&String> = keys.iter().collect();
+    assert_eq!(uniq.len(), keys.len(), "two token definitions share a key: {keys:?}");
+    // identities: cube cards at their IR position, tokens above CUBE_CAP, all distinct
+    let ids = identity::identities(db);
+    let names = identity::cube_names();
+    assert_eq!(names.len(), 546);
+    for i in 0..db.len() {
+        let d = db.def(i as engine::ids::DefId);
+        let id = ids[i] as usize;
+        assert!(id != identity::UNKNOWN as usize, "{} has no identity", d.name);
+        if d.token {
+            assert!((identity::CUBE_CAP..identity::D - 1).contains(&id));
+        } else {
+            assert_eq!(names[id], d.name);
+        }
+    }
+    let distinct: std::collections::BTreeSet<u16> = ids.iter().copied().collect();
+    assert_eq!(distinct.len(), ids.len());
+    // the identity does not depend on what else is supported: a card table of a few cards
+    // gives them the same identities as the full one
+    let doc = engine::db::load_cube_document();
+    let few: Vec<_> = doc.cards.iter().filter(|c| ["Forest", "Lightning Bolt", "Island", "Wurmcoil Engine"].contains(&c.name.as_str()) || c.name.starts_with("Young Pyro")).cloned().collect();
+    let small = CardDb::from_cards(&few).leak();
+    let sids = identity::identities(small);
+    for i in 0..small.len() {
+        let d = small.def(i as engine::ids::DefId);
+        let full = if d.token {
+            (db.num_cards()..db.len()).find(|&j| identity::token_key(db, db.def(j as engine::ids::DefId)) == identity::token_key(small, d))
+        } else {
+            db.id(&d.name).map(|x| x as usize)
+        };
+        if let Some(j) = full {
+            assert_eq!(sids[i], ids[j], "{}", d.name);
+        }
+    }
 }
 
 #[test]
