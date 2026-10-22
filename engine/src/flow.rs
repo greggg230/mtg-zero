@@ -293,6 +293,7 @@ impl Game {
         let n = self.turn.number;
         for pl in &mut self.players {
             pl.attacked_with.clear();
+            pl.draw_step_draws = 0;
             pl.left_battlefield = false;
             pl.drawn = 0;
             pl.spells_cast = 0;

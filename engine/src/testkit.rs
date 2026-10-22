@@ -255,6 +255,7 @@ impl Game {
             let o = &self.objs[c.i()];
             v.extend([o.def as u64, o.owner as u64, o.controller as u64, o.tapped as u64, o.damage as u64]);
             v.extend([o.attacking as u64, o.blocked as u64, o.blocking.is_some() as u64, o.escaped as u64]);
+            v.extend([o.chosen_player.map_or(9, |p| p as u64), o.monstrous as u64]);
             // Counters and attachments (public, CR 122, 301.5).
             for (k, n) in self.counters_of(c) {
                 v.extend([h64(&k), n as u64]);

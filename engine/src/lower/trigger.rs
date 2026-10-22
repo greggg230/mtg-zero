@@ -42,6 +42,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::BeginningOfEndStep) => Some(EventKind::BeginningOfEndStep),
         Some(E::DealtDamage) => Some(EventKind::DealtDamage),
         Some(E::CardDiscarded) => Some(EventKind::CardDiscarded),
+        Some(E::BecomesMonstrous) => Some(EventKind::BecomesMonstrous),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -91,7 +92,11 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         TrigPred::IsSelf(s) | TrigPred::Subject(s, _) | TrigPred::Controlled(s, _) | TrigPred::FormerHost(s) => {
             vec![*s]
         }
-        TrigPred::Always | TrigPred::If(_) | TrigPred::State(_) | TrigPred::Source(_) => Vec::new(),
+        TrigPred::Always
+        | TrigPred::If(_)
+        | TrigPred::State(_)
+        | TrigPred::Source(_)
+        | TrigPred::HostAttacksWithAnother => Vec::new(),
     }
 }
 
@@ -145,6 +150,7 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
             Some(TrigPred::Controlled(slot(l, subject)?, you))
         }
         P::Source(nodes::Source { inner }) => Some(TrigPred::Source(lower_pred(l, inner)?)),
+        P::HostAttacksWithAnother(nodes::HostAttacksWithAnother {}) => Some(TrigPred::HostAttacksWithAnother),
         P::StateBound(nodes::StateBound { inner }) => {
             let (c, intervening) = lower_state_pred(l, inner)?;
             Some(if intervening { TrigPred::If(c) } else { TrigPred::State(c) })

@@ -281,6 +281,7 @@ impl Game {
         let sources: Vec<_> = list.iter().map(|&(s, _, _)| self.damage_source_of(s)).collect();
         let refs: Vec<_> = list.iter().map(|&(s, _, _)| self.obj_ref(s)).collect();
         let mut to_players: Vec<(crate::ids::ObjRef, crate::ids::PlayerId, i32)> = Vec::new();
+        self.combat_damage_now = true;
         for ((&(s, t, n), src), r) in list.iter().zip(sources).zip(refs) {
             if first {
                 self.objs[s.i()].struck_first = true;
@@ -290,6 +291,7 @@ impl Game {
                 to_players.push((r, p, dealt));
             }
         }
+        self.combat_damage_now = false;
         // CR 510.3a: "deals combat damage to a player" triggers.
         for (r, p, n) in to_players {
             self.event(Event {

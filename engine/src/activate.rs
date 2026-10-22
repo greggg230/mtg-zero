@@ -6,7 +6,7 @@ use crate::db::{types, AbilityRef, AbilitySlot, ActEffect, ActivatedDef, Cond, C
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Pos, StackItem, StackKind};
-use crate::ids::{CardIdx, PlayerId, Zone};
+use crate::ids::{Target, CardIdx, PlayerId, Zone};
 use crate::pay::{productions, Class, Keep, PayMana, Src};
 
 impl Game {
@@ -26,6 +26,7 @@ impl Game {
             Cond::Revolt => pl.left_battlefield,
             Cond::YourTurnAtMost(n) => self.turn.active == p && pl.turns <= *n as u32,
             Cond::HandAtMost(n) => pl.hand.len() <= *n as usize,
+            Cond::DevotionCoversLibrary(color) => self.devotion(p, *color) as usize >= pl.library.len(),
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::SpellsCastThisTurn { n, noncreature } => {
@@ -430,7 +431,29 @@ impl Game {
             return;
         }
         let p = o.controller;
+        if self.def_of(card).chooses_player && self.objs[card.i()].chosen_player.is_none() {
+            // "As this enters, choose a player." Choice: `PLAYER` (2 = you,
+            // 3 = the opponent).
+            match self.answer.take() {
+                Some(Choice::Target(Target::Player(q))) => {
+                    self.objs[card.i()].chosen_player = Some(q);
+                    self.note(|_| format!("chosen player: P{q}"));
+                }
+                Some(other) => unreachable!("player answer {other:?}"),
+                None => {
+                    let opts = vec![
+                        Opt { action: act::PLAYER, choice: Choice::Target(Target::Player(p)) },
+                        Opt { action: act::PLAYER + 1, choice: Choice::Target(Target::Player(crate::ids::opp(p))) },
+                    ];
+                    self.ask(Task::AsEnters { card }, p, DecisionKind::Target, opts);
+                }
+            }
+            return;
+        }
         let n = self.def_of(card).shock_life as i32;
+        if n == 0 {
+            return;
+        }
         match self.answer.take() {
             Some(Choice::Yes) => {
                 self.note(|_| format!("P{p} pays {n} life"));

@@ -877,6 +877,100 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::Amass { token, army, subtype, n } => {
+                let p = f.controller;
+                let armies: Vec<CardIdx> = self.permanents_of(p).filter(|&c| self.has_subtype(c, *army)).collect();
+                let target = match self.answer.take() {
+                    Some(Choice::Card(c)) => c,
+                    Some(other) => unreachable!("army answer {other:?}"),
+                    None => match armies[..] {
+                        [] => {
+                            let def = self.db.token_def(*token);
+                            self.create_token(def, p, false)
+                        }
+                        [one] => one,
+                        _ => {
+                            let opts = armies.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
+                            self.ask(Task::Run(f.clone()), p, DecisionKind::ChoosePermanent, opts);
+                            return Flow::Suspend;
+                        }
+                    },
+                };
+                self.add_counters(target, crate::db::Counter::P1P1, *n as u16);
+                if !self.has_subtype(target, *subtype) {
+                    let r = self.obj_ref(target);
+                    let m = Mod::Types { add: 0, subtypes: vec![*subtype], replace: false };
+                    self.add_effect(Affected::Obj(r), m, crate::layers::Until::Forever, p);
+                }
+                Flow::Next
+            }
+            Ext::ReturnDiedWithCounter { counter } => {
+                let Some(r) = f.ev.obj else { return Flow::Next };
+                let o = &self.objs[r.idx.i()];
+                // The card it became in the graveyard (one move later).
+                if o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1) && !self.def_of(r.idx).token {
+                    let owner = o.owner;
+                    self.put_onto_battlefield(r.idx, owner);
+                    if self.objs[r.idx.i()].zone == Zone::Battlefield {
+                        self.add_counters(r.idx, *counter, 1);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::LinkedOwnersCreateMvToken { token } => {
+                let cards: Vec<crate::ids::ObjRef> =
+                    self.links.iter().filter(|l| l.source == f.source).map(|l| l.card).collect();
+                let def = self.db.token_def(*token);
+                for card in cards {
+                    let owner = self.objs[card.idx.i()].owner;
+                    let x = self.def_of(card.idx).mana_value() as i32;
+                    let t = self.create_token(def, owner, false);
+                    if self.objs[t.i()].zone == Zone::Battlefield {
+                        let r = self.obj_ref(t);
+                        self.add_effect(Affected::Obj(r), Mod::SetPt(x, x), crate::layers::Until::Forever, owner);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::Monstrosity { n } => {
+                if let Some(&c) = self.objs_on(f, &On::Source).first() {
+                    if !self.objs[c.i()].monstrous {
+                        self.add_counters(c, crate::db::Counter::P1P1, *n as u16);
+                        self.objs[c.i()].monstrous = true;
+                        let r = self.obj_ref(c);
+                        self.event(crate::triggers::Event::obj(crate::db::EventKind::BecomesMonstrous, r));
+                    }
+                }
+                Flow::Next
+            }
+            Ext::CreateTokenAttachSource { token } => {
+                let def = self.db.token_def(*token);
+                let t = self.create_token(def, f.controller, false);
+                if let Some(&eq) = self.objs_on(f, &On::Source).first() {
+                    if self.objs[t.i()].zone == Zone::Battlefield {
+                        let host = self.obj_ref(t);
+                        self.objs[eq.i()].attached = Some(host);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::LookTopN { who, n } => {
+                if let Some(p) = self.who(f, *who) {
+                    let n = self.amount(f, *n).clamp(0, 60) as u8;
+                    if n > 0 {
+                        self.look_top(f, p, n, false);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::WinGame => {
+                // CR 104.2b: an effect states that a player wins.
+                let p = f.controller;
+                self.note(|_| format!("P{p} wins the game"));
+                self.players[crate::ids::opp(p) as usize].lost = true;
+                self.outcome = Some(crate::game::Outcome { winner: Some(p), reason: crate::game::EndReason::Effect });
+                Flow::Next
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

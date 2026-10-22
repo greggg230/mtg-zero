@@ -300,7 +300,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.ward_life_cost", ward_life_cost);
         l.deny("CardPrinting.enters_only_by_discarding_land", enters_only_by_discarding_land);
         l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
-        l.deny("CardPrinting.equipment_bonus_per_controlled", equipment_bonus_per_controlled);
         l.deny("CardPrinting.crew_power_bonus", crew_power_bonus);
         l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
         l.deny("CardPrinting.sunburst", sunburst);
@@ -333,7 +332,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.all_permanents_gain_card_type", all_permanents_gain_card_type);
         l.deny("CardPrinting.all_objects_colorless", all_objects_colorless);
         l.deny("CardPrinting.mana_spendable_as_any_color", mana_spendable_as_any_color);
-        l.deny("CardPrinting.chooses_player_as_enters", chooses_player_as_enters);
+        let chooses_player = *chooses_player_as_enters;
         l.deny("CardPrinting.looks_at_opponents_face_down_creatures", looks_at_opponents_face_down_creatures);
         l.deny("CardPrinting.wipes_all_creature_abilities", wipes_all_creature_abilities);
         l.deny("CardPrinting.sets_all_creature_pt_to_1_1", sets_all_creature_pt_to_1_1);
@@ -382,7 +381,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.opponents_cant_cast_spells_during_your_turn", opponents_cant_cast_spells_during_your_turn);
         l.deny("CardPrinting.each_player_one_spell_per_turn", each_player_one_spell_per_turn);
         l.deny("CardPrinting.opponents_nonbasic_lands_enter_tapped", opponents_nonbasic_lands_enter_tapped);
-        l.deny("CardPrinting.your_creatures_combat_damage_cant_be_prevented", your_creatures_combat_damage_cant_be_prevented);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
         l.deny("CardPrinting.grants_once_per_turn_graveyard_play_mv", grants_once_per_turn_graveyard_play_mv);
@@ -512,6 +510,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::Exalted) => keyword_triggers.push(exalted()),
             Some(KwOrProt::BattleCry) => keyword_triggers.push(battle_cry()),
             Some(KwOrProt::Prowess) => keyword_triggers.push(prowess()),
+            Some(KwOrProt::Persist) => keyword_triggers.push(persist()),
             None => {}
         }
     }
@@ -706,6 +705,22 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             statics.push(st);
         }
     }
+    if let Some((tys, p, t)) = equipment_bonus_per_controlled {
+        // "Equipped creature gets +p/+t for each <type> you control."
+        if !subs.contains(&l.subtype("Equipment")) {
+            l.unsupported("CardPrinting.equipment_bonus_per_controlled(not an Equipment)");
+        }
+        let mut bits = 0u16;
+        for name in tys {
+            match types::from_name(name) {
+                Some(b) => bits |= b,
+                None => l.unsupported(format!("CardPrinting.equipment_bonus_per_controlled({name})")),
+            }
+        }
+        let filter = Filter::And(Box::new(Filter::Type(bits)), Box::new(Filter::Controller(true)));
+        let (p, t) = (l.int("equipment_bonus_per_controlled.p", *p, -9, 9), l.int("equipment_bonus_per_controlled.t", *t, -9, 9));
+        statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::PtPer { filter, p, t }] });
+    }
     if let Some((p, t, names)) = equipment_bonuses {
         if !subs.contains(&l.subtype("Equipment")) {
             l.unsupported("CardPrinting.equipment_bonuses(not an Equipment)");
@@ -840,6 +855,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         flashback,
         escape,
         lands_from_graveyard: *grants_play_lands_from_graveyard,
+        combat_unpreventable: *your_creatures_combat_damage_cant_be_prevented,
+        chooses_player,
     }
 }
 
@@ -977,6 +994,7 @@ pub(crate) enum KwOrProt {
     Exalted,
     BattleCry,
     Prowess,
+    Persist,
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
@@ -1006,6 +1024,8 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
                 Q::Sorceries => p.types = types::SORCERY,
                 Q::Planeswalkers => p.types = types::PLANESWALKER,
                 Q::EachOfYourOpponents => p.opponents = true,
+                // (The player chosen as it entered; CR 614.12.)
+                Q::TheChosenPlayer => p.chosen_player = true,
                 other => {
                     l.unsupported(format!("Keyword.quality({other:?})"));
                     return None;
@@ -1013,12 +1033,13 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
             }
             return Some(KwOrProt::Prot(p));
         }
-        K::Exalted | K::BattleCry | K::Prowess => {
+        K::Exalted | K::BattleCry | K::Prowess | K::Persist => {
             l.deny("Keyword.n", n);
             l.deny("Keyword.quality", quality);
             return Some(match kind {
                 K::Exalted => KwOrProt::Exalted,
                 K::BattleCry => KwOrProt::BattleCry,
+                K::Persist => KwOrProt::Persist,
                 _ => KwOrProt::Prowess,
             });
         }
@@ -1039,6 +1060,24 @@ fn exalted() -> TriggerDef {
     TriggerDef {
         event: EventKind::AttacksAlone,
         pred: TrigPred::Controlled(Slot::Default, true),
+        ability: b.finish(),
+        uses_event: true,
+    }
+}
+
+/// Persist (CR 702.79a): "When this permanent is put into a graveyard from
+/// the battlefield, if it had no -1/-1 counters on it, return it to the
+/// battlefield under its owner's control with a -1/-1 counter on it" (the
+/// counters seen as it left).
+fn persist() -> TriggerDef {
+    let mut b = crate::program::Builder::default();
+    b.op(crate::program::Op::Ext(crate::program::Ext::ReturnDiedWithCounter { counter: crate::db::Counter::M1M1 }));
+    TriggerDef {
+        event: EventKind::Dies,
+        pred: TrigPred::And(
+            Box::new(TrigPred::IsSelf(Slot::Default)),
+            Box::new(TrigPred::Subject(Slot::Default, Filter::NoCounters(crate::db::Counter::M1M1))),
+        ),
         ability: b.finish(),
         uses_event: true,
     }

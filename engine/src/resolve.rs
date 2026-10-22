@@ -240,6 +240,7 @@ impl Game {
                 }
             }
             Amount::LkiManaValue => f.x,
+            Amount::Devotion(color) => self.devotion(f.controller, color) as i32,
             Amount::EventObjPower => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => self.power(r.idx),
                 Some(r) => match self.objs[r.idx.i()].lki_power {
@@ -799,7 +800,7 @@ impl Game {
     /// 701.42a): each is keyed for the looker (or revealed to all); the
     /// other player loses track of which is which as `p` holds them
     /// (ENGINE.md 10). They become the frame's pile.
-    fn look_top(&mut self, f: &mut Frame, p: PlayerId, n: u8, reveal: bool) {
+    pub(crate) fn look_top(&mut self, f: &mut Frame, p: PlayerId, n: u8, reveal: bool) {
         let lib = &self.players[p as usize].library;
         let pile: Vec<CardIdx> = lib.iter().rev().take(n as usize).copied().collect();
         for &c in &pile {

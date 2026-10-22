@@ -167,6 +167,9 @@ pub enum Mod {
     CantBeBlocked,
     /// It attacks each combat if able (CR 508.1d).
     MustAttack,
+    /// Layer 7c: +p/+t for each permanent matching the filter (relative to
+    /// the static ability's controller; a static ability only).
+    PtPer { filter: Filter, p: i32, t: i32 },
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated
@@ -273,6 +276,11 @@ pub enum Filter {
     InGraveyard(Box<Filter>),
     /// Owned by the ability's controller (`true`) or an opponent.
     Owner(bool),
+    /// A player drawing the first card of their own draw step (as the
+    /// draw happens).
+    FirstDrawInDrawStep,
+    /// A permanent with no counters of this kind.
+    NoCounters(Counter),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -367,6 +375,8 @@ pub enum EventKind {
     AttacksAlone,
     /// A player discarded a card (701.9). Subjects: player, card.
     CardDiscarded,
+    /// A permanent became monstrous (701.37b). Subject: obj.
+    BecomesMonstrous,
     /// Never emitted: the trigger is a delayed triggered ability (CR 603.7)
     /// an effect creates (`Ext::Delay`).
     Delayed,
@@ -389,7 +399,13 @@ impl EventKind {
     pub fn slot_index(self, s: Slot) -> Option<u8> {
         use EventKind as E;
         let names: (&[Slot], &[Slot]) = match self {
-            E::Enters | E::Dies | E::LeavesBattlefield | E::BecomesTapped | E::IsSacrificed | E::DealtDamage => {
+            E::Enters
+            | E::Dies
+            | E::LeavesBattlefield
+            | E::BecomesTapped
+            | E::IsSacrificed
+            | E::DealtDamage
+            | E::BecomesMonstrous => {
                 (&[Slot::Obj], &[])
             }
             E::Attacks | E::AttacksAlone => (&[Slot::Attacker], &[]),
@@ -448,6 +464,9 @@ pub enum TrigPred {
     /// The subject is the permanent this source (an Equipment) was
     /// attached to ("whenever equipped creature dies"; seen as it was).
     FormerHost(Slot),
+    /// "Whenever equipped creature and at least one other creature
+    /// attack": the source's host attacks, with another attacker.
+    HostAttacksWithAnother,
     /// An intervening "if" (CR 603.4): checked when the event happens and
     /// again on resolution.
     If(Cond),
@@ -516,6 +535,9 @@ pub enum Cond {
     YourTurnAtMost(u8),
     /// You have at most n cards in hand.
     HandAtMost(u8),
+    /// Your devotion to the colour (index W U B R G) is at least the
+    /// number of cards in your library (Thassa's Oracle).
+    DevotionCoversLibrary(u8),
     /// You gained life this turn.
     GainedLifeThisTurn,
     /// An opponent has more cards in hand than you.
@@ -743,6 +765,11 @@ pub struct CardDef {
     pub escape: Option<(ManaCost, Cost)>,
     /// "You may play lands from your graveyard."
     pub lands_from_graveyard: bool,
+    /// "Combat damage that would be dealt by creatures you control can't
+    /// be prevented."
+    pub combat_unpreventable: bool,
+    /// "As this enters, choose a player" (CR 614.12).
+    pub chooses_player: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.

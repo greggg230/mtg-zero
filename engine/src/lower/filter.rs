@@ -63,6 +63,7 @@ macro_rules! lower_object_predicate {
             }
             E::ObjectNot(nodes::ObjectNot { inner }) => Some(Filter::Not(Box::new(lower_pred($l, inner)?))),
             E::WasEvoked(nodes::WasEvoked {}) => Some(Filter::Evoked),
+            E::DrawIsFirstInOwnDrawStep(nodes::DrawIsFirstInOwnDrawStep {}) => Some(Filter::FirstDrawInDrawStep),
             E::HasDrawnNCardsThisTurn(nodes::HasDrawnNCardsThisTurn { n }) => {
                 Some(Filter::DrewThisTurn($l.int("HasDrawnNCardsThisTurn.n", *n, 0, 99) as u8))
             }
@@ -112,6 +113,22 @@ macro_rules! lower_condition {
             E::HandSizeExactly(nodes::HandSizeExactly { n }) => {
                 Some(Cond::HandExactly($l.int("HandSizeExactly.n", *n, 0, 99) as u8))
             }
+            E::HandSizeAtMost(nodes::HandSizeAtMost { n }) => {
+                Some(Cond::HandAtMost($l.int("HandSizeAtMost.n", *n, 0, 99) as u8))
+            }
+            E::FormulaCoversLibrary(nodes::FormulaCoversLibrary { formula }) => match &**formula {
+                cats::Formula::DevotionTo(nodes::DevotionTo { color }) => match crate::mana::letter_index(color) {
+                    Some(i) if i < 5 => Some(Cond::DevotionCoversLibrary(i as u8)),
+                    _ => {
+                        $l.unsupported(format!("DevotionTo({color})"));
+                        None
+                    }
+                },
+                other => {
+                    $l.unsupported(format!("FormulaCoversLibrary({})", other.tag()));
+                    None
+                }
+            },
             E::DeliriumActive(nodes::DeliriumActive { min_card_types }) => {
                 Some(Cond::Delirium($l.int("DeliriumActive.min_card_types", *min_card_types, 1, 9) as u8))
             }

@@ -382,6 +382,13 @@ impl Game {
     /// library" (a cloud over the library: the owner's own determinize
     /// keeps them there, so it stays true in every world).
     pub(crate) fn forget_order(&mut self, owner: PlayerId, cards: &[CardIdx]) {
+        // A cloud naming one of these slots now covers the whole library
+        // (the owner's determinize may move what is there within it).
+        for k in self.clouds.iter_mut().filter(|k| k.owner == owner) {
+            if k.slots.iter().any(|c| cards.contains(c)) {
+                k.library = true;
+            }
+        }
         for q in 0..2u8 {
             if q == owner {
                 continue;

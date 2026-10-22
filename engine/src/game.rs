@@ -81,6 +81,10 @@ pub struct Obj {
     pub flashback: bool,
     /// It entered as a spell cast with escape (CR 702.138c).
     pub escaped: bool,
+    /// The player chosen as it entered (CR 614.12).
+    pub chosen_player: Option<PlayerId>,
+    /// It is monstrous (CR 701.37b).
+    pub monstrous: bool,
 }
 
 /// How a spell was cast (CR 601.2a-b, 118.9).
@@ -158,6 +162,8 @@ pub struct Player {
     /// Creatures declared as attackers this turn ("during any turn you
     /// attacked with a Rogue").
     pub attacked_with: Vec<ObjRef>,
+    /// Cards drawn in this player's own draw step this turn.
+    pub draw_step_draws: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -239,6 +245,8 @@ pub enum EndReason {
     Sba,
     /// Engine cap (`GameSpec.max_turns`).
     TurnLimit,
+    /// An effect says a player wins (CR 104.2b; Thassa's Oracle).
+    Effect,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -353,6 +361,8 @@ pub struct Game {
     pub(crate) resolved: Vec<(ObjRef, u8)>,
     /// Permissions to play cards from other zones (CR 601.2a).
     pub(crate) permissions: Vec<Permission>,
+    /// Combat damage is being dealt (CR 510.2).
+    pub(crate) combat_damage_now: bool,
     /// ... cast with escape; cast for its dash cost (delayed ability k).
     pub(crate) entering_escaped: bool,
     pub(crate) entering_dash: Option<u8>,
@@ -425,6 +435,7 @@ impl Game {
             gained_life: false,
             cant_gain_life: false,
             attacked_with: Vec::new(),
+            draw_step_draws: 0,
         };
         Game {
             db,
@@ -470,6 +481,7 @@ impl Game {
             delayed: Vec::new(),
             resolved: Vec::new(),
             permissions: Vec::new(),
+            combat_damage_now: false,
             entering_escaped: false,
             entering_dash: None,
             batching: false,
@@ -504,6 +516,8 @@ impl Game {
             lki_power: None,
             flashback: false,
             escaped: false,
+            chosen_player: None,
+            monstrous: false,
         });
         idx
     }
@@ -695,7 +709,7 @@ impl Game {
         for &(k, n) in &self.def_of(idx).enters_counters {
             self.add_counters(idx, k, n as u16);
         }
-        if self.def_of(idx).shock_life > 0 {
+        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player {
             self.agenda.push(Task::AsEnters { card: idx });
         }
         r
@@ -780,6 +794,8 @@ impl Game {
                 o.lki_power = lki_power;
             }
             o.flashback = false;
+            o.chosen_player = None;
+            o.monstrous = false;
             o.escaped = to == Zone::Battlefield && std::mem::take(&mut self.entering_escaped);
         }
         self.layers_on_move(idx, old, from, to);
@@ -850,6 +866,10 @@ impl Game {
 
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.
     pub(crate) fn draw(&mut self, p: PlayerId) {
+        if self.turn.step == Step::Draw && self.turn.active == p {
+            let pl = &mut self.players[p as usize];
+            pl.draw_step_draws = pl.draw_step_draws.saturating_add(1);
+        }
         if let Some(&top) = self.players[p as usize].library.last() {
             self.force_library_card(top, crate::hidden::KEY_DRAW, p);
         }
@@ -960,7 +980,7 @@ impl Game {
                 if !self.is_creature(r.idx) {
                     return 0; // planeswalkers and battles: later
                 }
-                if self.protected_from(r.idx, &src) {
+                if self.protected_from(r.idx, &src) && !(self.combat_damage_now && self.combat_unpreventable(src.controller)) {
                     self.note(|g| format!("damage to {} prevented (protection)", g.describe_target(t)));
                     return 0;
                 }
@@ -986,6 +1006,12 @@ impl Game {
         amount
     }
 
+    /// "Combat damage that would be dealt by creatures you control can't be
+    /// prevented" (Questing Beast) for `p`.
+    pub(crate) fn combat_unpreventable(&self, p: PlayerId) -> bool {
+        self.permanents_of(p).any(|c| self.def_of(c).combat_unpreventable)
+    }
+
     /// Does permanent `c` have protection from a source with these
     /// characteristics (CR 702.16)?
     pub(crate) fn protected_from(&self, c: CardIdx, src: &DamageSource) -> bool {
@@ -998,6 +1024,7 @@ impl Game {
             || (p.colorless && src.colors == 0)
             || p.types & src.types != 0
             || (p.opponents && src.controller != self.objs[c.i()].controller)
+            || (p.chosen_player && self.objs[c.i()].chosen_player == Some(src.controller))
     }
 
     /// The characteristics of a permanent (or spell) as a source of damage

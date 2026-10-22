@@ -751,6 +751,11 @@ impl Game {
                 Filter::Any | Filter::Player => true,
                 Filter::Opponent => p != ctx.controller,
                 Filter::DrewThisTurn(n) => self.players[p as usize].drawn == *n,
+                Filter::FirstDrawInDrawStep => {
+                    self.turn.step == crate::game::Step::Draw
+                        && self.turn.active == p
+                        && self.players[p as usize].draw_step_draws == 1
+                }
                 Filter::And(a, b) => self.filter_ok(a, t, ctx) && self.filter_ok(b, t, ctx),
                 Filter::Or(v) => v.iter().any(|x| self.filter_ok(x, t, ctx)),
                 Filter::Not(x) => !self.filter_ok(x, t, ctx),
@@ -776,6 +781,7 @@ impl Game {
             | Filter::Spell(_)
             | Filter::Opponent
             | Filter::DrewThisTurn(_)
+            | Filter::FirstDrawInDrawStep
             | Filter::InGraveyard(_) => false,
             Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
@@ -827,6 +833,8 @@ impl Game {
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
             Filter::Owner(you) => (self.objs[c.i()].owner == ctx.controller) == *you,
+            Filter::FirstDrawInDrawStep => false,
+            Filter::NoCounters(k) => self.counters_on(c, *k) == 0,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
             Filter::Not(x) => !self.card_matches(x, c, ctx),

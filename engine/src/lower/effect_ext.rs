@@ -34,7 +34,8 @@ pub(crate) fn keyword_mods(l: &mut Lowerer, kws: &[cats::Keyword]) -> Vec<Mod> {
             Some(
                 super::printing::KwOrProt::Exalted
                 | super::printing::KwOrProt::BattleCry
-                | super::printing::KwOrProt::Prowess,
+                | super::printing::KwOrProt::Prowess
+                | super::printing::KwOrProt::Persist,
             ) => {
                 l.unsupported("Keyword(granted trigger)")
             }
@@ -851,6 +852,12 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             }));
         }
         E::LinkExiledCardsToSource(nodes::LinkExiledCardsToSource { inner }) => match &**inner {
+            // "Exile [up to one] target <...>" remembered by the source
+            // (CR 607.2a; Skyclave Apparition).
+            E::Exile(nodes::Exile { targets }) => {
+                let Some(t) = lower_targets(l, b, targets, "Exile") else { return true };
+                b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: false }));
+            }
             // "Target opponent reveals their hand and you choose a nonland
             // card from it. Exile that card." (Tidehollow Sculler: its
             // leave trigger returns it.)
@@ -1171,6 +1178,95 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 apply(b, On::Target(t), mods, Until::EndOfTurn);
                 b.patch(at);
             }
+        }
+        E::DiscardYourHand(nodes::DiscardYourHand {}) => {
+            b.op(Op::DiscardHand { who: Who::You });
+        }
+        E::Amass(nodes::Amass { subtype, amount }) => {
+            // Amass <subtype> n (CR 701.47).
+            let n = l.int("Amass.amount", *amount, 1, 20) as u8;
+            let json = format!(r#"{{"$t": "CardPrinting", "card_types": ["Creature"], "color_indicator": ["B"], "mana_cost": {{"$t": "ManaCost"}}, "mana_cost_str": "", "name": "{subtype} Army", "power": 0, "subtypes": ["{subtype}", "Army"], "supertypes": ["Token"], "toughness": 0, "type_line": "Token Creature - {subtype} Army"}}"#);
+            let p: cats::CardPrinting = serde_json::from_str(&json).expect("an Army token printing");
+            let cats::CardPrinting::CardPrinting(tp) = &p;
+            let def = super::printing::lower_printing(l, tp);
+            let token = l.token(def);
+            let (army, sub) = (l.subtype("Army"), l.subtype(subtype));
+            b.op(Op::Ext(Ext::Amass { token, army, subtype: sub, n }));
+        }
+        E::DealCombatDamageAmountToTarget(nodes::DealCombatDamageAmountToTarget { targets }) => {
+            // "It deals that much damage to target <...>."
+            let Some(t) = lower_targets(l, b, targets, "DealCombatDamageAmountToTarget") else { return true };
+            b.op(Op::DealDamage { amount: Amount::EventAmount, to: t });
+        }
+        E::DestroyTargetNoncreaturePermanent(nodes::DestroyTargetNoncreaturePermanent { targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "DestroyTargetNoncreaturePermanent") else { return true };
+            b.op(Op::Destroy { tgt: t });
+        }
+        E::ExiledCardOwnerCreatesManaValueToken(nodes::ExiledCardOwnerCreatesManaValueToken { color, subtype }) => {
+            // "The exiled card's owner creates an X/X <color> <subtype>
+            // creature token, where X is the mana value of the exiled card."
+            let json = format!(r#"{{"$t": "CardPrinting", "card_types": ["Creature"], "color_indicator": ["{color}"], "mana_cost": {{"$t": "ManaCost"}}, "mana_cost_str": "", "name": "{subtype}", "power": 0, "subtypes": ["{subtype}"], "supertypes": ["Token"], "toughness": 0, "type_line": "Token Creature - {subtype}"}}"#);
+            let p: cats::CardPrinting = serde_json::from_str(&json).expect("a token printing");
+            let cats::CardPrinting::CardPrinting(tp) = &p;
+            let def = super::printing::lower_printing(l, tp);
+            let token = l.token(def);
+            b.op(Op::Ext(Ext::LinkedOwnersCreateMvToken { token }));
+        }
+        E::Monstrosity(nodes::Monstrosity { count }) => {
+            let n = l.int("Monstrosity.count", *count, 1, 20) as u8;
+            b.op(Op::Ext(Ext::Monstrosity { n }));
+        }
+        E::CreateTokenAndAttachSelf(nodes::CreateTokenAndAttachSelf { token_printing }) => {
+            // Living weapon / For Mirrodin! (CR 702.92a, 702.163a).
+            let cats::CardPrinting::CardPrinting(tp) = &**token_printing;
+            let def = super::printing::lower_printing(l, tp);
+            if !def.token {
+                l.unsupported("CreateTokenAndAttachSelf.token_printing(not a token)");
+            }
+            let token = l.token(def);
+            b.op(Op::Ext(Ext::CreateTokenAttachSource { token }));
+        }
+        E::LookTopNKeepUpToOneOnTopRestBottom(nodes::LookTopNKeepUpToOneOnTopRestBottom { count }) => {
+            // "Look at the top X cards of your library. Put up to one of
+            // them on top of your library and the rest on the bottom of your
+            // library in a random order."
+            let n = match count {
+                card_ir::unions::IntOrFormula::Int(n) => Amount::Fixed(l.int("LookTopNKeepUpToOneOnTopRestBottom.count", *n, 1, 20)),
+                card_ir::unions::IntOrFormula::Formula(f) => match &**f {
+                    cats::Formula::DevotionTo(nodes::DevotionTo { color }) => match crate::mana::letter_index(color) {
+                        Some(i) if i < 5 => Amount::Devotion(i as u8),
+                        _ => {
+                            l.unsupported(format!("DevotionTo({color})"));
+                            return true;
+                        }
+                    },
+                    other => {
+                        l.unsupported(format!("Formula:{}", other.tag()));
+                        return true;
+                    }
+                },
+            };
+            b.op(Op::Ext(Ext::LookTopN { who: Who::You, n }));
+            b.op(Op::PileTo {
+                who: Who::You,
+                dest: crate::program::PileDest::Top,
+                filter: Filter::Any,
+                min: 0,
+                max: 1,
+                rest: false,
+                reveal: false,
+            });
+            b.op(Op::Ext(Ext::PileRestBottomRandom));
+        }
+        E::IfCondition(nodes::IfCondition { condition, then }) => {
+            // "If <condition>, <effect>" (checked as it resolves).
+            let Some(cond) = super::filter::lower_condition(l, condition) else { return true };
+            let at = b.op(Op::JumpUnless { cond, to: 0 });
+            lower_effect(l, b, then);
+            b.patch(at);
+        }
+        E::WinTheGame(nodes::WinTheGame {}) => {
+            b.op(Op::Ext(Ext::WinGame));
         }
         E::SacrificeSelfUnlessEscaped(nodes::SacrificeSelfUnlessEscaped {}) => {
             b.op(Op::Ext(Ext::SacrificeSourceUnlessEscaped));

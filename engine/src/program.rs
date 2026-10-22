@@ -41,6 +41,8 @@ pub enum Amount {
     SourcePower,
     /// The mana value of the card last remembered (`Ext::RevealTopToHand`).
     LkiManaValue,
+    /// The controller's devotion to a colour (index W U B R G; CR 700.5).
+    Devotion(u8),
     /// The power of the triggered ability's event object ("its power"):
     /// now if it is still on the battlefield, else as it last existed there
     /// (CR 608.2h).
@@ -245,6 +247,28 @@ pub enum Ext {
     /// Return the object of the event to its owner's hand, if it is still
     /// that permanent (dash).
     ReturnEventObjToHand,
+    /// Amass (CR 701.47): if the controller controls no Army (`army`
+    /// subtype), create `token` (a 0/0 Army); put n +1/+1 counters on an
+    /// Army they control (their choice); it becomes a `subtype` too.
+    Amass { token: u16, army: u16, subtype: u16, n: u8 },
+    /// The card that died in the event ("return it"): if it is still that
+    /// card in its owner's graveyard, it returns to the battlefield under
+    /// its owner's control with a counter of this kind (persist).
+    ReturnDiedWithCounter { counter: crate::db::Counter },
+    /// For each card exiled with the source (CR 607.2a), its owner creates
+    /// `token` with base power and toughness equal to the card's mana value.
+    LinkedOwnersCreateMvToken { token: u16 },
+    /// Monstrosity n (CR 701.37): unless the source is monstrous, put n
+    /// +1/+1 counters on it; it becomes monstrous ("becomes monstrous"
+    /// event).
+    Monstrosity { n: u8 },
+    /// Create `token`, then attach the source (an Equipment) to it (living
+    /// weapon, For Mirrodin!).
+    CreateTokenAttachSource { token: u16 },
+    /// `who` looks at the top n cards of their library (a pile).
+    LookTopN { who: Who, n: Amount },
+    /// The controller wins the game (CR 104.2b).
+    WinGame,
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -429,6 +453,7 @@ impl Op {
             Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
             Op::Ext(Ext::Reflexive { .. }) | Op::Ext(Ext::ReturnEventObjToHand) => true,
+            Op::Ext(Ext::ReturnDiedWithCounter { .. }) => true,
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
             | Op::Ext(Ext::TapOrUntap { on })

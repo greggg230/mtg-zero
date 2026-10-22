@@ -282,6 +282,17 @@ impl Game {
         if let Some(&(_, a, b)) = sets.iter().max_by_key(|x| x.0) {
             (p, t) = (a, b);
         }
+        // "+1/+1 for each artifact and/or enchantment you control".
+        for (s, st) in self.statics_on(c) {
+            for m in &st.mods {
+                if let Mod::PtPer { filter, p: a, t: b } = m {
+                    let ctl = self.objs[s.i()].controller;
+                    let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as i32;
+                    dp += a * n;
+                    dt += b * n;
+                }
+            }
+        }
         for &(x, cn, n) in &self.counters {
             if x == c {
                 match cn {
@@ -331,6 +342,24 @@ impl Game {
                 (n, n)
             }
         }
+    }
+
+    /// Devotion to a colour (CR 700.5): its mana symbols (hybrid and
+    /// Phyrexian included) in the mana costs of permanents `p` controls.
+    pub fn devotion(&self, p: PlayerId, color: u8) -> u32 {
+        let k = color as usize;
+        self.permanents_of(p)
+            .map(|c| {
+                let m = &self.def_of(c).cost;
+                let hy: u8 = crate::mana::PAIRS
+                    .iter()
+                    .zip(m.hybrid.iter())
+                    .filter(|((a, b), _)| *a == k || *b == k)
+                    .map(|(_, &n)| n)
+                    .sum();
+                (m.pips[k] + hy + m.phyrexian[k]) as u32
+            })
+            .sum()
     }
 
     /// Domain: basic land types among lands `p` controls (CR 305.6).

@@ -173,6 +173,10 @@ impl Game {
                 let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
                 self.live(src.r) && self.subject_matches(f, src.r.idx, &ctx)
             }
+            TrigPred::HostAttacksWithAnother => {
+                let host = self.objs[src.r.idx.i()].attached;
+                host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
+            }
             TrigPred::FormerHost(s) => match ev.subject(*s) {
                 // Evaluated as the host leaves (look back): the Equipment
                 // is still attached to it.
