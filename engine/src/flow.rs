@@ -349,6 +349,7 @@ impl Game {
         self.lki_counters.clear();
         self.lki_copy.clear();
         self.spell_lki.clear();
+        self.may_copies = 0;
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
         self.permissions = perms.into_iter().filter(|p| p.turn.is_none_or(|t| t >= n) && self.live(p.card)).collect();

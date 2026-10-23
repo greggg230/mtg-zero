@@ -373,9 +373,9 @@ fn a_copy_of_a_spell_can_be_countered_and_ceases_to_exist_cr_707_10a() {
 
 #[test]
 fn copies_are_public_and_survive_determinize() {
-    // A Metamorph copying the opponent's creature, a token copy, and a spell
-    // copy on the stack: everything copied is public, so a world sampled for
-    // the other player keeps it, and its encoding is the same.
+    // A Metamorph copying the opponent's creature: what is copied is public,
+    // so a world sampled for either player keeps the pending choice and the
+    // copy, and its encoding is the same.
     let mut g = scen()
         .battlefield(0, &["Island"; 4])
         .battlefield(1, &["Thraben Inspector"])
@@ -406,6 +406,50 @@ fn copies_are_public_and_survive_determinize() {
             let mut rng = engine::rng::Rng::new(seed);
             w.determinize(viewer, &mut rng);
             assert!(w.is_copy(m) && w.copiable(m) == g.copiable(m));
+            let mut x1 = vec![0.0; n];
+            w.encode_features(viewer, &mut x1);
+            assert!(x0 == x1, "viewer {viewer}: the encoding differs in a sampled world");
+        }
+    }
+}
+
+#[test]
+fn a_copy_of_a_spell_choosing_new_targets_survives_determinize_cr_707_10c() {
+    // P1 pays {R}{R} and copies Chain Lightning; the copy's new-target
+    // decision is pending with both hands hidden: every sampled world keeps
+    // it, the copy on the stack and the encoding.
+    let mut g = scen()
+        .battlefield(0, &["Mountain"])
+        .battlefield(1, &["Mountain", "Mountain", "Thraben Inspector"])
+        .hand(0, &["Chain Lightning", "Island", "Forest"])
+        .hand(1, &["Island", "Lightning Bolt", "Forest"])
+        .start();
+    let cl = g.card(0, "Chain Lightning", Zone::Hand);
+    g.choose(Choice::Cast(cl));
+    for _ in 0..100 {
+        if g.kind() == Some(DecisionKind::NewTarget) {
+            break;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::Target) => player(1),
+            Some(DecisionKind::YesNo) => Choice::Yes,
+            Some(DecisionKind::Priority) => Choice::Pass,
+            _ => g.pending_decision().unwrap().options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::NewTarget));
+    assert_eq!(g.to_move(), Some(1));
+    let n = engine::az::encode::NUM_FEATURES;
+    for viewer in [0u8, 1] {
+        let mut x0 = vec![0.0; n];
+        g.encode_features(viewer, &mut x0);
+        for seed in 0..4 {
+            let mut w = g.clone();
+            let mut rng = engine::rng::Rng::new(seed);
+            w.determinize(viewer, &mut rng);
+            assert_eq!(w.pending_decision(), g.pending_decision());
+            assert_eq!(w.view_of(viewer), g.view_of(viewer));
             let mut x1 = vec![0.0; n];
             w.encode_features(viewer, &mut x1);
             assert!(x0 == x1, "viewer {viewer}: the encoding differs in a sampled world");

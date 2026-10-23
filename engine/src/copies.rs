@@ -119,6 +119,13 @@ pub struct CopyFx {
 /// not cast; "whenever you cast or copy" sees it, `TrigPred::OrCopy`).
 pub(crate) const COPIED: u16 = 1;
 
+/// At most this many copies a turn by "may copy this spell" effects. Chain
+/// of Smog's copies cost nothing, so players who always copy would loop
+/// forever; CR 732.4 has a player choose how many times to repeat a loop
+/// of optional actions. 31 (the `NUMBER` range) keeps the drain loop of
+/// Chain of Smog and a magecraft creature lethal (ENGINE.md 26.11).
+pub(crate) const MAY_COPY_CAP: u8 = 31;
+
 impl Game {
     /// The copy effect that gives `c` its copiable values now (the latest),
     /// if any.
@@ -404,8 +411,9 @@ impl Game {
                 // `f.i`: the copies made so far (the "may" is asked first).
                 if *may && f.i == 0 {
                     match self.answer.take() {
-                        Some(Choice::Yes) => {}
+                        Some(Choice::Yes) => self.may_copies = self.may_copies.saturating_add(1),
                         Some(_) => return Flow::Next,
+                        None if self.may_copies >= MAY_COPY_CAP => return Flow::Next,
                         None => {
                             let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
                             self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);

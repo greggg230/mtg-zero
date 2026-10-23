@@ -181,7 +181,7 @@ impl Game {
             // castable for an alternative cost (601.2b); the mana cost
             // may be payable too (asked on casting)
         } else if let Some(extras) = &extras {
-            if !extras.iter().any(|x| payable(&base.plus(x))) {
+            if !extras.iter().any(|x| payable(&self.delve_reduced(c, p, self.cost_with(c, p, def.cost.plus(x)), 0))) {
                 return false;
             }
         } else if !payable(&base) {
@@ -323,21 +323,31 @@ impl Game {
     /// The mana to pay to cast `card` the way `from` says, with increases
     /// and reductions.
     pub(crate) fn route_mana(&self, card: CardIdx, p: PlayerId, from: crate::game::CastFrom) -> crate::mana::ManaCost {
+        self.route_mana_plus(card, p, from, &Default::default())
+    }
+
+    /// [`route_mana`](Self::route_mana) with the mana of additional costs
+    /// `extra` (spree modes, squad, offspring, replicate): CR 601.2f, the
+    /// total cost is the mana cost (or alternative cost) plus additional
+    /// costs and increases, less reductions, so a reduction can reduce the
+    /// additional costs too.
+    pub(crate) fn route_mana_plus(&self, card: CardIdx, p: PlayerId, from: crate::game::CastFrom, extra: &crate::mana::ManaCost) -> crate::mana::ManaCost {
         use crate::game::CastFrom;
         let def = self.def_of(card);
+        let with = |base: crate::mana::ManaCost| self.cost_with(card, p, base.plus(extra));
         match from {
-            CastFrom::Hand => self.spell_cost(card, p),
+            CastFrom::Hand => with(def.cost),
             // "The flashback cost is equal to its mana cost" when granted.
-            CastFrom::Flashback => self.cost_with(card, p, def.flashback.unwrap_or(def.cost)),
-            CastFrom::Escape => self.cost_with(card, p, def.escape.as_ref().map_or(def.cost, |e| e.0)),
+            CastFrom::Flashback => with(def.flashback.unwrap_or(def.cost)),
+            CastFrom::Escape => with(def.escape.as_ref().map_or(def.cost, |e| e.0)),
             // "Without paying its mana cost" (an alternative cost of no
             // mana, CR 118.9; increases still apply, 601.2f).
-            CastFrom::Permission { free: true, .. } => self.cost_with(card, p, Default::default()),
+            CastFrom::Permission { free: true, .. } => with(Default::default()),
             CastFrom::Permission { free: false, any_mana: true } => {
                 // "Spend mana as though it were mana of any color" (CR
                 // 609.4b): every coloured, hybrid and Phyrexian symbol is
                 // paid by any mana ({C} stays {C}).
-                let mut c = self.spell_cost(card, p);
+                let mut c = with(def.cost);
                 let colored: u8 = c.pips[..5].iter().sum::<u8>() + c.hybrid.iter().sum::<u8>() + c.phyrexian.iter().sum::<u8>();
                 c.generic = c.generic.saturating_add(colored);
                 c.pips[..5].fill(0);
@@ -345,11 +355,11 @@ impl Game {
                 c.phyrexian = Default::default();
                 c
             }
-            CastFrom::Permission { .. } => self.spell_cost(card, p),
-            CastFrom::Retrace => self.spell_cost(card, p),
+            CastFrom::Permission { .. } => with(def.cost),
+            CastFrom::Retrace => with(def.cost),
             // "The mayhem cost is equal to its mana cost" (an alternative
             // cost, CR 702.187b; increases apply, 601.2f).
-            CastFrom::Mayhem => self.spell_cost(card, p),
+            CastFrom::Mayhem => with(def.cost),
         }
     }
 
@@ -396,7 +406,9 @@ impl Game {
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let ok = match self.spree_extras(card, p) {
-            Some(extras) => extras.iter().any(|x| paid(&mana.plus(x))),
+            Some(extras) => extras
+                .iter()
+                .any(|x| paid(&self.delve_reduced(card, p, self.route_mana_plus(card, p, from, x), self.escape_exiles(card, from)))),
             None => paid(&mana),
         };
         if !ok {
@@ -441,7 +453,7 @@ impl Game {
         let item = &self.stack[pos];
         let k = self.def_of(card).x_pips;
         let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. });
-        let base = self.route_mana(card, p, item.from).plus(&self.extra_costs(item));
+        let base = self.route_mana_plus(card, p, item.from, &self.extra_costs(item));
         let mut most = 0u8;
         if !free {
             while most < (act::NUMBER_N - 1) as u8 {
@@ -533,7 +545,7 @@ impl Game {
             None => {}
         }
         let item = &self.stack[pos];
-        let mut cost = self.route_mana(card, p, item.from).less_generic(item.delved);
+        let mut cost = self.route_mana_plus(card, p, item.from, &self.extra_costs(item)).less_generic(item.delved);
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             cost = cost.plus(&extra.mana);
         }
@@ -743,9 +755,8 @@ impl Game {
         // paid with the others chosen can't be chosen.
         if !m.costs.is_empty() {
             if let StackKind::Spell { card } = item.kind {
-                let base = self.announced_cost(card, item);
                 for (k, a) in avail.iter_mut().enumerate() {
-                    *a = *a && self.can_pay(p, &base.plus(&m.costs[k]));
+                    *a = *a && self.can_pay(p, &self.announced_cost(card, item, &m.costs[k]));
                 }
             }
         }
@@ -819,16 +830,16 @@ impl Game {
         c
     }
 
-    /// The mana of spell `card`'s cost as announced so far (CR 601.2b): its
-    /// mana cost or alternative cost, with increases, plus the additional
-    /// costs announced.
-    fn announced_cost(&self, card: CardIdx, item: &StackItem) -> crate::mana::ManaCost {
+    /// The mana of spell `card`'s cost as announced so far (CR 601.2b) and
+    /// `more`: its mana cost or alternative cost plus the additional costs,
+    /// with increases and reductions (601.2f).
+    fn announced_cost(&self, card: CardIdx, item: &StackItem, more: &crate::mana::ManaCost) -> crate::mana::ManaCost {
         let p = item.controller;
+        let extra = self.extra_costs(item).plus(more);
         match item.alt {
-            0 => self.route_mana(card, p, item.from),
-            k => self.alt_mana(card, p, k as usize - 1),
+            0 => self.route_mana_plus(card, p, item.from, &extra),
+            k => self.alt_mana(card, p, k as usize - 1).plus(&extra),
         }
-        .plus(&self.extra_costs(item))
     }
 
     /// A spree spell's mode costs (CR 702.172a) for the modes whose targets
@@ -866,12 +877,11 @@ impl Game {
             None => {}
         }
         let Some(tc) = self.def_of(card).times_cost.clone() else { return };
-        let base = self.announced_cost(card, &self.stack[pos]);
         let mut most = 0u8;
-        let mut c = base;
+        let mut more = crate::mana::ManaCost::default();
         while most < tc.max.min(act::NUMBER_N as u8 - 1) {
-            c = c.plus(&tc.mana);
-            if !self.can_pay(p, &c) {
+            more = more.plus(&tc.mana);
+            if !self.can_pay(p, &self.announced_cost(card, &self.stack[pos], &more)) {
                 break;
             }
             most += 1;
@@ -1277,7 +1287,7 @@ impl Game {
             }
             return;
         }
-        let mut cost = self.route_mana(card, p, item.from).plus(&extra).less_generic(item.delved);
+        let mut cost = self.route_mana_plus(card, p, item.from, &extra).less_generic(item.delved);
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             cost = cost.plus(&extra.mana);
         }

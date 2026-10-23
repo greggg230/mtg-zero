@@ -188,6 +188,45 @@ fn thundertrap_trainer_offspring_makes_a_1_1_copy_cr_702_175a() {
 }
 
 #[test]
+fn a_cost_reduction_reduces_the_offspring_cost_too_cr_601_2f() {
+    // CR 601.2f: the total cost is the mana cost plus additional costs,
+    // less reductions. Green Goblin's "spells you cast from your graveyard
+    // cost {2} less" on a Thundertrap Trainer cast with mayhem: {1}{U} plus
+    // offspring {4}, less {2} = {3}{U}, payable with four Islands (the
+    // reduction isn't lost on the {1} of the mana cost).
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .library(0, &[TRAINER, "Island", "Island", "Island", "Island"])
+        .library(1, &["Forest"; 10])
+        .battlefield(0, &["Norman Osborn // Green Goblin", "Mountain", "Island", "Island", "Island", "Island"])
+        .transformed(0, "Norman Osborn // Green Goblin")
+        .hand(0, &["Faithless Looting"])
+        .start();
+    let loot = g.card(0, "Faithless Looting", Zone::Hand);
+    let t = g.objs().iter().enumerate().find(|(_, o)| o.zone == Zone::Library && db().def(o.def).name == TRAINER).map(|(i, _)| CardIdx(i as u16)).unwrap();
+    g.choose(Choice::Cast(loot));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Discard) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c == Choice::Card(t)),
+        Some(DecisionKind::PayMana) => {
+            // The Mountain pays {R}.
+            let m = g.card(0, "Mountain", Zone::Battlefield);
+            g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|c| matches!(c, Choice::Ability(x, _) if *x == m))
+        }
+        _ => None,
+    });
+    assert_eq!(g.obj(t).zone, Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(t)), "mayhem");
+    g.choose(Choice::Cast(t));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(opts, vec![Choice::Number(0), Choice::Number(1)], "{{3}}{{U}} with offspring: payable");
+    g.choose(Choice::Number(1));
+    resolve_with(&mut g, |_| None);
+    assert_eq!(tokens_named(&g, TRAINER).len(), 1);
+    assert_eq!(g.lands_of(0).filter(|&c| g.obj(c).tapped).count(), 5);
+}
+
+#[test]
 fn thundertrap_trainer_offspring_needs_its_mana() {
     let mut g = scen().battlefield(0, &["Island"; 5]).hand(0, &[TRAINER]).start();
     let t = g.card(0, TRAINER, Zone::Hand);
@@ -272,6 +311,55 @@ fn chain_of_smog_the_target_player_may_copy_it_cr_707_10() {
     });
     assert_eq!(g.player(1).hand.len(), 1);
     assert_eq!(g.player(0).hand.len(), 0);
+}
+
+#[test]
+fn chain_of_smog_copied_forever_stops_at_the_engine_limit_cr_732_4() {
+    // P0 targets itself with an empty hand and always copies, keeping the
+    // target: a loop of optional actions (CR 732.4). The engine offers 31
+    // copies a turn, then the loop ends.
+    let mut g = scen().battlefield(0, &["Swamp", "Swamp"]).hand(0, &["Chain of Smog"]).start();
+    let cs = g.card(0, "Chain of Smog", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    let asked = std::cell::Cell::new(0);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(player(0)),
+        Some(DecisionKind::YesNo) => {
+            asked.set(asked.get() + 1);
+            Some(Choice::Yes)
+        }
+        Some(DecisionKind::NewTarget) => Some(Choice::Pass),
+        _ => None,
+    });
+    assert_eq!(asked.get(), 31);
+    assert!(g.stack().is_empty());
+    assert_eq!(g.obj(cs).zone, Zone::Graveyard);
+}
+
+#[test]
+fn chain_of_smog_with_a_magecraft_creature_drains_the_opponent_out() {
+    // "Whenever you cast or copy an instant or sorcery spell, each opponent
+    // loses 1 life and you gain 1 life" (Witherbloom Apprentice): each copy
+    // drains 1; twenty copies end the game.
+    let mut g = scen().battlefield(0, &["Swamp", "Swamp", "Witherbloom Apprentice"]).hand(0, &["Chain of Smog"]).start();
+    let cs = g.card(0, "Chain of Smog", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    for _ in 0..2000 {
+        if g.outcome().is_some() {
+            break;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::Target) => player(0),
+            Some(DecisionKind::YesNo) => Choice::Yes,
+            Some(DecisionKind::NewTarget) => Choice::Pass,
+            Some(DecisionKind::Priority) => Choice::Pass,
+            _ => g.pending_decision().unwrap().options[0].choice,
+        };
+        g.choose(c);
+    }
+    let o = g.outcome().expect("the drain ends the game");
+    assert_eq!(o.winner, Some(0));
+    assert!(g.life(1) <= 0);
 }
 
 // ---- Lose Focus (replicate) -----------------------------------------------------------------

@@ -509,6 +509,11 @@ pub struct Game {
     /// Prepared permanents (CR 722.3a) and the copy of their prepare spell
     /// in exile (722.3c).
     pub(crate) prepared: Vec<(ObjRef, CardIdx)>,
+    /// Copies made this turn by "may copy this spell" effects (Chain of
+    /// Smog, Chain Lightning): at `copies::MAY_COPY_CAP` no more are offered
+    /// (an engine limit on a loop of optional actions, CR 732.4; ENGINE.md
+    /// 26.11).
+    pub(crate) may_copies: u8,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -653,6 +658,7 @@ impl Game {
             enter_note: 0,
             defer_enters: false,
             prepared: Vec::new(),
+            may_copies: 0,
             batching: false,
             batch_start: 0,
             entering_cast: false,

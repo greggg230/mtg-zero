@@ -548,6 +548,7 @@ impl Game {
         self.prepared.hash(&mut h);
         self.lki_copy.hash(&mut h);
         self.spell_lki.hash(&mut h);
+        self.may_copies.hash(&mut h);
         h.finish()
     }
 
