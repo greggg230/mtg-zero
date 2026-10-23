@@ -38,13 +38,7 @@ impl Game {
         // Then reductions (CR 601.2f: increases, then reductions; generic
         // mana only, not below zero).
         for d in &self.def_of(card).discounts {
-            let less = match d {
-                crate::db::Discount::PerBasicLandType(n) => self.basic_land_types(p) * n,
-                crate::db::Discount::PerControlled(f, n) => {
-                    self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u8 * n
-                }
-            };
-            cost.generic = cost.generic.saturating_sub(less);
+            cost.generic = cost.generic.saturating_sub(self.discount(d, p));
         }
         // "Spells you cast from your graveyard cost {n} less" (Green
         // Goblin): the card is in its owner's graveyard (castability) or a
@@ -60,6 +54,17 @@ impl Game {
             }
         }
         cost
+    }
+
+    /// How much a cost reduction takes off for `p` now (generic mana).
+    pub(crate) fn discount(&self, d: &crate::db::Discount, p: PlayerId) -> u8 {
+        let ctx = Ctx { controller: p, source: None };
+        match d {
+            crate::db::Discount::PerBasicLandType(n) => self.basic_land_types(p).saturating_mul(*n),
+            crate::db::Discount::PerControlled(f, n) => {
+                (self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u8).saturating_mul(*n)
+            }
+        }
     }
 
     /// Mayhem (CR 702.187b): `card`, a nonland card `p` discarded this turn,
@@ -1389,11 +1394,14 @@ impl Game {
         if !self.prepared.is_empty() {
             self.prepared.retain(|x| x.1 != card);
         }
+        // The event's amount: the spells cast before it this turn, by any
+        // player (storm, CR 702.40a).
+        let before = self.players.iter().map(|pl| pl.spells_cast as u16).sum::<u16>() - 1;
         self.event(crate::triggers::Event {
             kind: crate::db::EventKind::IsCast,
             a: crate::triggers::Subj::Obj(r),
             b: crate::triggers::Subj::Player(p),
-            amount: 0,
+            amount: before,
         });
     }
 

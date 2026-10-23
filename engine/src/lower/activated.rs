@@ -37,7 +37,6 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         exhaust,
         boast,
     }) = a;
-    l.deny("ActivatedAbility.cost_reductions", cost_reductions);
     l.deny("ActivatedAbility.room_half", room_half);
     l.deny("ActivatedAbility.tier_threshold", tier_threshold);
     l.deny("ActivatedAbility.activate_only_once", activate_only_once);
@@ -115,6 +114,12 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     if only_if.len() > 1 {
         l.unsupported("ActivatedAbility.only_if(more than one condition)");
     }
+    // "This ability costs {1} less to activate for each legendary creature
+    // you control" (CR 602.2b, 601.2f); a mana ability pays no mana here.
+    let discounts = super::printing::lower_discounts(l, cost_reductions);
+    if !discounts.is_empty() && (cost.mana.is_zero() || matches!(effect, ActEffect::Mana(_))) {
+        l.unsupported("ActivatedAbility.cost_reductions(no mana cost to reduce)");
+    }
     Some(ActivatedDef {
         cost,
         effect,
@@ -123,6 +128,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         only_if: only_if.into_iter().next(),
         your_turn: *activate_only_during_your_turn,
         loyalty,
+        discounts,
     })
 }
 

@@ -159,15 +159,19 @@ impl Game {
                 f.made_all = made;
                 Flow::Next
             }
-            Ext::DiscardThenDraw { discard, draw } => {
-                // `f.i`: cards discarded so far; `f.x`: nonland ones.
+            Ext::DiscardThenDraw { discard, draw, types: by_type } => {
+                // `f.i`: cards discarded so far; `f.x`: nonland ones, or
+                // the card types among them (a mask until the end).
                 let p = f.controller;
                 if f.i == 0 && self.answer.is_none() {
                     f.x = 0;
                 }
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
-                        if !self.def_of(c).is(types::LAND) {
+                        let t = self.def_of(c).types;
+                        if *by_type {
+                            f.x |= t as i32;
+                        } else if t & types::LAND == 0 {
                             f.x += 1;
                         }
                         self.discard(c);
@@ -176,10 +180,14 @@ impl Game {
                     Some(other) => unreachable!("discard answer {other:?}"),
                     None => {}
                 }
-                if f.i < *discard && !self.players[p as usize].hand.is_empty() {
+                let n = self.amount(f, *discard).max(0) as u32;
+                if (f.i as u32) < n && !self.players[p as usize].hand.is_empty() {
                     let opts = self.hand_options(p);
                     self.ask(Task::Run(f.clone()), p, DecisionKind::Discard, opts);
                     return Flow::Suspend;
+                }
+                if *by_type {
+                    f.x = (f.x as u32).count_ones() as i32;
                 }
                 for _ in 0..*draw {
                     self.draw(p);

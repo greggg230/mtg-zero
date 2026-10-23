@@ -102,7 +102,7 @@ pub(crate) fn lower_target_spec(l: &mut Lowerer, s: &cats::TargetSpec) -> Option
     Some((f, min, max))
 }
 
-fn int_amount(l: &mut Lowerer, what: &str, v: &unions::IntOrFormula) -> Amount {
+pub(crate) fn int_amount(l: &mut Lowerer, what: &str, v: &unions::IntOrFormula) -> Amount {
     match v {
         unions::IntOrFormula::Int(n) => Amount::Fixed(l.int(what, *n, 0, 99)),
         // The spell's X (CR 107.3).

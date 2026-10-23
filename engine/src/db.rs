@@ -882,6 +882,9 @@ pub struct ActivatedDef {
     /// A loyalty ability (CR 606.2): the change in loyalty its cost makes
     /// (+1 = put a loyalty counter, -3 = remove three; 606.4).
     pub loyalty: Option<i8>,
+    /// "This ability costs {n} less to activate for each ..." (CR 602.2b,
+    /// 601.2f; Otawara's channel).
+    pub discounts: Vec<Discount>,
 }
 
 impl ActivatedDef {
@@ -1138,6 +1141,10 @@ pub struct CardDef {
     /// Abilities activated from its owner's graveyard (CR 602.2, 113.6:
     /// "exile this card from your graveyard", eternalize). At most one.
     pub gy_abilities: Vec<ActivatedDef>,
+    /// "Activated abilities of artifacts you control cost {n} less to
+    /// activate. This effect can't reduce the mana in that cost to less than
+    /// one mana." (Forensic Gadgeteer.)
+    pub artifact_ability_discount: u8,
 }
 
 /// A ward cost (CR 702.21a-b): mana, life, or a card to discard.
@@ -1148,7 +1155,8 @@ pub enum WardCost {
     Discard,
 }
 
-/// A cost reduction of a spell (CR 601.2f), in generic mana.
+/// A cost reduction of a spell or an activated ability (CR 601.2f, 602.2b),
+/// in generic mana.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Discount {
     /// n less per basic land type among lands you control (domain).

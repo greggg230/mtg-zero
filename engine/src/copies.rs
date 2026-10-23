@@ -125,8 +125,10 @@ pub struct CopyFx {
 }
 
 /// `Event::amount` of an `IsCast` event for a copy of a spell (CR 707.10:
-/// not cast; "whenever you cast or copy" sees it, `TrigPred::OrCopy`).
-pub(crate) const COPIED: u16 = 1;
+/// not cast; "whenever you cast or copy" sees it, `TrigPred::OrCopy`). A
+/// cast spell's event amount is the number of spells cast before it this
+/// turn (storm), never this.
+pub(crate) const COPIED: u16 = u16::MAX;
 
 /// At most this many copies a turn by "may copy this spell" effects. Chain
 /// of Smog's copies cost nothing, so players who always copy would loop

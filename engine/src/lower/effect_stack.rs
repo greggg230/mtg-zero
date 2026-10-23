@@ -90,6 +90,78 @@ pub(crate) fn lower_effect_stack(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             b.op(Op::Ext(Ext::GainControlOfSpell { tgt: t }));
             b.patch(end);
         }
+        // "<Tap up to one target creature>. It loses all abilities for as
+        // long as this creature remains on the battlefield" (The Wondrous
+        // Wasp; CR 611.2b: nothing if it already left).
+        E::ThenTargetLosesAbilitiesWhileSourceRemains(nodes::ThenTargetLosesAbilitiesWhileSourceRemains { inner }) => {
+            let t0 = b.targets.len();
+            lower_effect(l, b, inner);
+            if b.targets.len() != t0 + 1 {
+                l.unsupported("ThenTargetLosesAbilitiesWhileSourceRemains.inner(not one target)");
+                return true;
+            }
+            b.op(Op::Ext(Ext::Apply { on: On::Target(t0 as u8), mods: vec![Mod::LoseAllAbilities], until: Until::WhileSource }));
+        }
+        // Mobilize N (CR 702.181a): "Whenever this creature attacks, create
+        // N 1/1 red Warrior creature tokens. Those tokens enter tapped and
+        // attacking. Sacrifice them at the beginning of the next end step."
+        E::Mobilize(nodes::Mobilize { n }) => {
+            let n = l.int("Mobilize.n", *n, 1, 10) as u8;
+            let warrior = json_token(l, WARRIOR);
+            b.op(Op::Ext(Ext::CreateTokensAttacking { token: warrior, n, tapped: true }));
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::SacrificeEventObj));
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::Delay { k, when: crate::db::DelayedWhen::NextEndStep, about: crate::program::About::EachMade }));
+            b.op(Op::Ext(Ext::TokensCreated));
+        }
+        // "<Destroy target ...>. That player may search their library for a
+        // land card with a basic land type, put it onto the battlefield,
+        // then shuffle." (Boseiju: "that player" is the target's controller
+        // as the effect began, CR 608.2h; remembered first.)
+        E::ThenTargetControllerResolves(nodes::ThenTargetControllerResolves { first, then }) => {
+            let (at, t0) = (b.program.len(), b.targets.len());
+            lower_effect(l, b, first);
+            if b.targets.len() != t0 + 1 {
+                l.unsupported("ThenTargetControllerResolves.first(not one target)");
+                return true;
+            }
+            b.insert(at, Op::Remember { tgt: t0 as u8 });
+            let from = b.program.len();
+            lower_effect(l, b, then);
+            if b.targets.len() != t0 + 1 {
+                l.unsupported("ThenTargetControllerResolves.then(with targets)");
+                return true;
+            }
+            for op in &mut b.program[from..] {
+                match op {
+                    Op::Search { who, .. } if *who == Who::You => *who = Who::LkiController,
+                    _ => {
+                        l.unsupported("ThenTargetControllerResolves.then(not a search)");
+                        return true;
+                    }
+                }
+            }
+        }
+        // "That player exiles the top N cards of their library. Until end of
+        // turn, you may play those cards [without paying their mana costs]."
+        // (Fallen Shinobi: "that player" is the player dealt combat damage,
+        // the trigger's event player; CR 601.2a, 305.1: a land uses the land
+        // play.)
+        E::TargetPlayerExilesTopNYouMayPlayThem(nodes::TargetPlayerExilesTopNYouMayPlayThem { amount, free }) => {
+            let n = l.int("TargetPlayerExilesTopNYouMayPlayThem.amount", *amount, 1, 10) as u8;
+            let kind = crate::game::PermKind::Play { free: *free, cast_only: false, any_mana: false, attacked_subtype: None };
+            b.op(Op::Ext(Ext::ExileTopWithPermission { who: Who::EventPlayer, n, kind, this_turn: true }));
+        }
+        // "Tap up to one target creature." (The Wondrous Wasp.)
+        E::TapUpToOneTargetCreature(nodes::TapUpToOneTargetCreature { targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "TapUpToOneTargetCreature") else { return true };
+            let tr = &b.targets[t as usize];
+            if (tr.min, tr.max) != (0, 1) {
+                l.unsupported("TapUpToOneTargetCreature.targets(not up to one)");
+            }
+            b.op(Op::Ext(Ext::Tap { on: On::Target(t) }));
+        }
         // "You take the initiative" (CR 725.2).
         E::TakeInitiative(nodes::TakeInitiative {}) => {
             initiative_defs(l);
@@ -183,8 +255,28 @@ pub(crate) fn lower_effect_stack(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let discard = l.int("DiscardThenDrawTokensPerNonland.discard", *discard, 1, 9) as u8;
             let draw = l.int("DiscardThenDrawTokensPerNonland.draw", *draw, 0, 9) as u8;
             let Some((token, tapped, attacking)) = token_of(l, token_effect.as_deref(), "DiscardThenDrawTokensPerNonland") else { return true };
-            b.op(Op::Ext(Ext::DiscardThenDraw { discard, draw }));
+            b.op(Op::Ext(Ext::DiscardThenDraw { discard: Amount::Fixed(discard as i32), draw, types: false }));
             b.op(Op::Ext(Ext::CreateTokensN { token, n: Amount::Remembered, tapped, attacking }));
+            b.op(Op::Ext(Ext::TokensCreated));
+        }
+        // "Draw X cards, then discard X cards. Create a 1/1 white Spirit
+        // creature token with flying for each card type among cards
+        // discarded this way." (Occult Epiphany; CR 205.2a.)
+        E::DrawDiscardThenTokensPerDiscardedType(nodes::DrawDiscardThenTokensPerDiscardedType { amount, token_printing }) => {
+            let n = super::effect::int_amount(l, "DrawDiscardThenTokensPerDiscardedType.amount", amount);
+            let Some(tp) = token_printing.as_deref() else {
+                l.unsupported("DrawDiscardThenTokensPerDiscardedType.token_printing(missing)");
+                return true;
+            };
+            let cats::CardPrinting::CardPrinting(tp) = tp;
+            let def = super::printing::lower_printing(l, tp);
+            if !def.token {
+                l.unsupported("DrawDiscardThenTokensPerDiscardedType.token_printing(not a token)");
+            }
+            let token = l.token(def);
+            b.op(Op::Draw { who: Who::You, n });
+            b.op(Op::Ext(Ext::DiscardThenDraw { discard: n, draw: 0, types: true }));
+            b.op(Op::Ext(Ext::CreateTokensN { token, n: Amount::Remembered, tapped: false, attacking: false }));
             b.op(Op::Ext(Ext::TokensCreated));
         }
         // "Return this card from your graveyard to the battlefield
@@ -267,6 +359,9 @@ pub(crate) fn ward_trigger(cost: WardCost, granted: bool) -> TriggerDef {
 /// write them (Bejeweled Warg's Treasure, Gut's Skeleton).
 const TREASURE: &str = r#"{"$t": "CardPrinting", "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "sacrifice_self": true, "tap_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["any", 1]]}, "is_mana_ability": true}], "card_types": ["Artifact"], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Treasure", "subtypes": ["Treasure"], "supertypes": ["Token"], "type_line": "Token Artifact — Treasure"}"#;
 const SKELETON: &str = r#"{"$t": "CardPrinting", "card_types": ["Creature"], "color_indicator": ["B"], "keywords": [{"$t": "Keyword", "kind": "menace"}], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Skeleton", "power": 4, "subtypes": ["Skeleton"], "supertypes": ["Token"], "toughness": 1, "type_line": "Token Creature — Skeleton"}"#;
+
+/// Mobilize's token (CR 702.181a): a 1/1 red Warrior creature token.
+const WARRIOR: &str = r#"{"$t": "CardPrinting", "card_types": ["Creature"], "color_indicator": ["R"], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Warrior", "power": 1, "subtypes": ["Warrior"], "supertypes": ["Token"], "toughness": 1, "type_line": "Token Creature — Warrior"}"#;
 
 fn json_token(l: &mut Lowerer, json: &str) -> u16 {
     let p: cats::CardPrinting = serde_json::from_str(json).expect("predefined token printing");

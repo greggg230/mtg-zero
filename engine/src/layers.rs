@@ -30,6 +30,11 @@ pub enum Until {
     /// "For as long as <this object> remains on the battlefield" (CR
     /// 611.2b): ends when that object leaves (Tishana's Tidebinder).
     WhileOnBattlefield(ObjRef),
+    /// The lowered form of "for as long as <the source> remains on the
+    /// battlefield" (The Wondrous Wasp): an op makes it
+    /// `WhileOnBattlefield(source)` as it resolves (`Game::until_for`); an
+    /// effect never has it.
+    WhileSource,
 }
 
 /// What a continuous effect from a resolved spell or ability applies to.
@@ -620,6 +625,7 @@ impl Game {
 
     /// Add a continuous effect (CR 611.2).
     pub(crate) fn add_effect(&mut self, on: Affected, m: Mod, until: Until, controller: PlayerId) {
+        debug_assert!(until != Until::WhileSource, "a lowered duration (Game::until_for)");
         self.next_ts += 1;
         let ts = self.next_ts;
         self.effects.push(Effect { ts, until, on, m, controller });

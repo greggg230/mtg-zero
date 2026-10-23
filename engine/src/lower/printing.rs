@@ -339,7 +339,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let _ = flashback_cost_str; // display form of `flashback_cost`
         let _ = buyback_cost_str; // display form of `buyback_cost`
         l.deny("CardPrinting.additional_cost_pay_x_life", additional_cost_pay_x_life);
-        l.deny("CardPrinting.has_storm", has_storm);
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
         let _ = alt_cost_exile_from_hand_count; // 1 (checked above)
         l.deny("CardPrinting.splice_onto", splice_onto);
@@ -379,7 +378,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.miracle_cost", miracle_cost);
         l.deny("CardPrinting.miracle_cost_str", miracle_cost_str);
         l.deny("CardPrinting.additional_cost_exile_from_graveyard", additional_cost_exile_from_graveyard);
-        l.deny("CardPrinting.artifact_ability_cost_reduction", artifact_ability_cost_reduction);
         l.deny("CardPrinting.chooses_parity_as_enters", chooses_parity_as_enters);
         l.deny("CardPrinting.x_min", x_min);
         l.deny("CardPrinting.blocks_only_with_subtype", blocks_only_with_subtype);
@@ -574,6 +572,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 only_if: None,
                 your_turn: false,
                 loyalty: None,
+                discounts: Vec::new(),
             },
         );
     } else if life > 0 {
@@ -821,6 +820,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             }
             None => l.unsupported(format!("CardPrinting.replicate_cost({replicate_cost})")),
         }
+    }
+    // Storm (CR 702.40a): a triggered ability of an instant or sorcery
+    // spell.
+    if *has_storm {
+        if ty & (types::INSTANT | types::SORCERY) == 0 {
+            l.unsupported("CardPrinting.has_storm(not an instant or sorcery)");
+        }
+        keyword_triggers.push(storm());
     }
     if times_cost.is_some() && (!additional.is_empty() || x_pips > 0) {
         l.unsupported("CardPrinting(a repeatable cost with other additional costs or X)");
@@ -1079,23 +1086,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if !alt_costs.is_empty() && !additional.is_empty() {
         l.unsupported("CardPrinting.alternative_costs(with additional costs)");
     }
-    let mut discounts = Vec::new();
-    for r in cost_reductions {
-        let cats::CostReduction::CostReduction(nodes::CostReduction { amount, condition }) = r;
-        let n = l.int("CostReduction.amount", *amount, 1, 9) as u8;
-        match &**condition {
-            cats::Condition::PerBasicLandTypeAmongLandsYouControl(nodes::PerBasicLandTypeAmongLandsYouControl {}) => {
-                discounts.push(crate::db::Discount::PerBasicLandType(n))
-            }
-            // Affinity-like: "{1} less for each <permanent> you control".
-            cats::Condition::PerControlled(nodes::PerControlled { filter }) => {
-                if let Some(f) = super::filter::lower_pred(l, filter) {
-                    discounts.push(crate::db::Discount::PerControlled(f, n));
-                }
-            }
-            other => l.unsupported(format!("CostReduction.condition({})", other.tag())),
-        }
-    }
+    let discounts = lower_discounts(l, cost_reductions);
     // (A reduction applies to an alternative cost too, CR 601.2f, 118.9d:
     // `Game::alt_mana`.)
     let mut spell_tax = Vec::new();
@@ -1352,6 +1343,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         improvise: *has_improvise,
         rules: false,
         gy_abilities,
+        artifact_ability_discount: l.int("CardPrinting.artifact_ability_cost_reduction", *artifact_ability_cost_reduction, 0, 9) as u8,
     };
     // The bestowed face (CR 702.103b): an Aura enchantment with enchant
     // creature (an Aura spell targets a creature, 303.4a) whose enchanted
@@ -1476,6 +1468,44 @@ fn replicate() -> TriggerDef {
         ability: b.finish(),
         uses_event: true,
     }
+}
+
+/// "This spell / ability costs {n} less ... for each ..." (CR 601.2f).
+pub(crate) fn lower_discounts(l: &mut Lowerer, cost_reductions: &[cats::CostReduction]) -> Vec<crate::db::Discount> {
+    let mut discounts = Vec::new();
+    for r in cost_reductions {
+        let cats::CostReduction::CostReduction(nodes::CostReduction { amount, condition }) = r;
+        let n = l.int("CostReduction.amount", *amount, 1, 9) as u8;
+        match &**condition {
+            cats::Condition::PerBasicLandTypeAmongLandsYouControl(nodes::PerBasicLandTypeAmongLandsYouControl {}) => {
+                discounts.push(crate::db::Discount::PerBasicLandType(n))
+            }
+            // Affinity-like: "{1} less for each <permanent> you control".
+            cats::Condition::PerControlled(nodes::PerControlled { filter }) => {
+                if let Some(f) = super::filter::lower_pred(l, filter) {
+                    discounts.push(crate::db::Discount::PerControlled(f, n));
+                }
+            }
+            other => l.unsupported(format!("CostReduction.condition({})", other.tag())),
+        }
+    }
+    discounts
+}
+
+/// Storm's triggered ability (CR 702.40a): "When you cast this spell, copy
+/// it for each other spell that was cast before it this turn. If the spell
+/// has any targets, you may choose new targets for any of the copies." (The
+/// cast event's amount is that number, `Game::cast_done`.)
+fn storm() -> TriggerDef {
+    let mut b = crate::program::Builder::default();
+    b.op(crate::program::Op::Ext(crate::program::Ext::CopySpell {
+        of: crate::program::SpellOf::EventSpell,
+        who: crate::program::Who::You,
+        n: crate::program::Amount::EventAmount,
+        may: false,
+        new_targets: true,
+    }));
+    TriggerDef { event: EventKind::IsCast, pred: TrigPred::IsSelf(Slot::Spell), ability: b.finish(), uses_event: true }
 }
 
 /// The chapter number of a chapter ability's predicate (CR 714.2b).

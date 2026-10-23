@@ -557,8 +557,9 @@ pub enum Ext {
     CreateTokensN { token: u16, n: Amount, tapped: bool, attacking: bool },
     /// The controller discards `discard` cards (a decision each), then
     /// draws `draw`; the nonland cards discarded are remembered
-    /// (`Amount::Remembered`).
-    DiscardThenDraw { discard: u8, draw: u8 },
+    /// (`Amount::Remembered`), or with `types` the number of card types
+    /// among the cards discarded (Occult Epiphany, CR 205.2a).
+    DiscardThenDraw { discard: Amount, draw: u8, types: bool },
     /// The source card, if it is still that card in its owner's graveyard,
     /// returns to the battlefield under its owner's control [tapped].
     SourceFromGraveyard { tapped: bool },

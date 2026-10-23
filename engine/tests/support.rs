@@ -47,7 +47,9 @@ const SUPPORTED: &[&str] = &[
     "Blooming Marsh",
     "Bone Shards",
     "Boomerang Basics",
+    "Boseiju, Who Endures",
     "Botanical Sanctum",
+    "Brain Freeze",
     "Brainstorm",
     "Brazen Borrower // Petty Theft",
     "Breeding Pool",
@@ -118,6 +120,7 @@ const SUPPORTED: &[&str] = &[
     "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
     "Faerie Mastermind",
     "Faithless Looting",
+    "Fallen Shinobi",
     "Fanatic of Rhonas",
     "Fatal Push",
     "Feywild Caretaker",
@@ -134,6 +137,7 @@ const SUPPORTED: &[&str] = &[
     "Force of Negation",
     "Force of Vigor",
     "Force of Will",
+    "Forensic Gadgeteer",
     "Forest",
     "Formidable Speaker",
     "Fractured Identity",
@@ -249,11 +253,13 @@ const SUPPORTED: &[&str] = &[
     "Norman Osborn // Green Goblin",
     "Nurturing Peatland",
     "Oath of Druids",
+    "Occult Epiphany",
     "Oko, Thief of Crowns",
     "Okoye, Mighty and Adored",
     "Oliphaunt",
     "Once Upon a Time",
     "Orcish Bowmasters",
+    "Otawara, Soaring City",
     "Otharri, Suns' Glory",
     "Ouroboroid",
     "Oust",
@@ -375,6 +381,7 @@ const SUPPORTED: &[&str] = &[
     "Thassa's Oracle",
     "The Fantasticar",
     "The Wandering Emperor",
+    "The Wondrous Wasp",
     "Thopter Foundry",
     "Thornspire Verge",
     "Thoughtseize",
@@ -418,6 +425,7 @@ const SUPPORTED: &[&str] = &[
     "Vaultborn Tyrant",
     "Verdant Catacombs",
     "Vindicate",
+    "Voice of Victory",
     "Volcanic Island",
     "Voltaic Key",
     "Walking Ballista",
@@ -519,10 +527,10 @@ fn a_new_ir_field_value_is_a_blocker() {
     let mut cards = engine::db::load_cube_document().cards;
     let bolt = cards.iter_mut().find(|c| c.name == "Lightning Bolt").unwrap();
     let card_ir::cats::CardPrinting::CardPrinting(p) = &mut bolt.printing;
-    p.has_storm = true;
+    p.has_convoke = true;
     let db = CardDb::from_cards(&cards);
     let err = db.expect_id("Lightning Bolt").unwrap_err();
-    assert!(err.contains("CardPrinting.has_storm"), "{err}");
+    assert!(err.contains("CardPrinting.has_convoke"), "{err}");
 }
 
 #[test]

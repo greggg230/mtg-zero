@@ -129,6 +129,32 @@ impl Game {
         }
     }
 
+    /// The mana `p` pays to activate `ad` of `card` (CR 602.2b, 601.2f):
+    /// its mana cost less its own reductions ("costs {1} less for each
+    /// legendary creature you control"), and, for an artifact `p` controls,
+    /// "activated abilities of artifacts you control cost {1} less", which
+    /// leaves at least one mana. Generic mana only.
+    pub(crate) fn act_mana(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef) -> crate::mana::ManaCost {
+        let mut m = ad.cost.mana;
+        if m.is_zero() {
+            return m;
+        }
+        for d in &ad.discounts {
+            m.generic = m.generic.saturating_sub(self.discount(d, p));
+        }
+        let ob = &self.objs[card.i()];
+        if ob.zone == Zone::Battlefield && ob.controller == p && self.is_type(card, types::ARTIFACT) {
+            for c in self.permanents_of(p) {
+                let n = self.abilities(c).artifact_ability_discount;
+                if n > 0 {
+                    let floor = m.total().saturating_sub(1);
+                    m.generic = m.generic.saturating_sub(n.min(floor));
+                }
+            }
+        }
+        m
+    }
+
     /// The source is excluded from paying the ability's mana when the cost
     /// also taps or moves it (ENGINE.md 18).
     fn mana_exclude(card: CardIdx, ad: &ActivatedDef) -> Option<CardIdx> {
@@ -179,7 +205,7 @@ impl Game {
             // Free-standing (instant-only) mana abilities have no mana cost.
             return !productions(self, p, &ad.mana().unwrap().prod).is_empty();
         }
-        if !self.cost_payable(p, card, &ad.cost, &ad.cost.mana, classes, Self::mana_exclude(card, ad)) {
+        if !self.cost_payable(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad)) {
             return false;
         }
         let ActEffect::Stack(ab) = &ad.effect else { unreachable!() };
@@ -409,10 +435,11 @@ impl Game {
     /// 601.2g-h for an activation: the mana part first.
     pub(crate) fn act_pay(&mut self, id: u32) {
         let Some((p, card, ad)) = self.act_item(id) else { return };
-        if ad.cost.mana.is_zero() {
+        let mana = self.act_mana(p, card, ad);
+        if mana.is_zero() {
             return;
         }
-        let mut pm = PayMana::new(p, ad.cost.mana);
+        let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
         self.agenda.push(Task::PayMana(pm));
     }

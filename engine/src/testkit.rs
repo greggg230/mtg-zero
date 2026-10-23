@@ -442,6 +442,7 @@ impl Game {
                 crate::layers::Until::Forever => 1,
                 crate::layers::Until::YourNextTurn => 2,
                 crate::layers::Until::WhileOnBattlefield(r) => 3000 + live_place(r),
+                crate::layers::Until::WhileSource => unreachable!("a lowered duration"),
             };
             v.extend([e.ts as u64, e.controller as u64, until]);
             match &e.on {

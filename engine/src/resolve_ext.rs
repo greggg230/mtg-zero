@@ -83,26 +83,41 @@ impl Game {
         });
     }
 
+    /// An op's duration as it resolves: "for as long as <the source>
+    /// remains on the battlefield" names the source, and is `None` (the
+    /// effect does nothing) if it already left (CR 611.2b).
+    fn until_for(&self, f: &Frame, until: crate::layers::Until) -> Option<crate::layers::Until> {
+        use crate::layers::Until;
+        match until {
+            Until::WhileSource => (self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield)
+                .then_some(Until::WhileOnBattlefield(f.source)),
+            u => Some(u),
+        }
+    }
+
     pub(crate) fn exec_ext(&mut self, f: &mut Frame, op: &Ext) -> Flow {
         match op {
             Ext::Apply { on, mods, until } => {
+                let Some(until) = self.until_for(f, *until) else { return Flow::Next };
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
                     for m in mods {
-                        self.add_effect(Affected::Obj(r), m.clone(), *until, f.controller);
+                        self.add_effect(Affected::Obj(r), m.clone(), until, f.controller);
                     }
                     self.note(|g| format!("{} gets {mods:?} ({until:?})", g.name(c)));
                 }
                 Flow::Next
             }
             Ext::ApplyRules { filter, who, m, until } => {
+                let Some(until) = self.until_for(f, *until) else { return Flow::Next };
                 if let Some(p) = self.who(f, *who) {
-                    self.add_effect(Affected::Group(filter.clone()), m.clone(), *until, p);
+                    self.add_effect(Affected::Group(filter.clone()), m.clone(), until, p);
                 }
                 Flow::Next
             }
             Ext::ProtectionChoice { on, colorless, until } => {
                 let objs = self.objs_on(f, on);
+                let Some(until) = self.until_for(f, *until) else { return Flow::Next };
                 if objs.is_empty() {
                     return Flow::Next;
                 }
@@ -115,7 +130,7 @@ impl Game {
                         };
                         for c in objs {
                             let r = self.obj_ref(c);
-                            self.add_effect(Affected::Obj(r), Mod::Protection(prot), *until, f.controller);
+                            self.add_effect(Affected::Obj(r), Mod::Protection(prot), until, f.controller);
                         }
                         Flow::Next
                     }
