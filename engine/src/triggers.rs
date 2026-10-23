@@ -107,9 +107,15 @@ impl Game {
         let mut obs: Vec<Observer> = Vec::new();
         // Permanents (not one that lost all its abilities, CR 613.1f), then
         // emblems (their abilities function in the command zone, 114.4).
-        for &c in self.battlefield.iter().chain(self.command.iter()) {
+        for &c in &self.battlefield {
             let o = &self.objs[c.i()];
             if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) {
+                obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false });
+            }
+        }
+        for &c in &self.command {
+            let o = &self.objs[c.i()];
+            if self.db.def(o.def).trig_mask & bit != 0 {
                 obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false });
             }
         }

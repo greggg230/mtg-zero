@@ -86,7 +86,7 @@ impl Game {
             }
             Ext::ExtraLoyaltyActivations { n } => {
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
-                    let turn = self.turn.number;
+                    let turn = self.turn.number as u16;
                     let o = &mut self.objs[c.i()];
                     if o.pw_turn != turn {
                         o.pw_turn = turn;

@@ -79,14 +79,17 @@ impl Game {
     /// in timestamp order (the battlefield's order, then emblems: CR
     /// 114.4, their abilities function in the command zone).
     fn statics_on(&self, c: CardIdx) -> impl Iterator<Item = (CardIdx, &'static StaticDef)> + '_ {
-        let on_bf = self.objs[c.i()].zone == Zone::Battlefield;
-        let active = on_bf && self.n_static > 0;
-        self.battlefield
-            .iter()
-            .chain(self.command.iter())
-            .copied()
-            .filter(move |_| active)
-            .flat_map(move |s| self.abilities(s).statics.iter().map(move |st| (s, st)))
+        let active = self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield;
+        let (bf, cmd) = if active { (self.battlefield.len(), self.command.len()) } else { (0, 0) };
+        // (Indices over both lists and the loss flag read once: this is the
+        // hottest loop of the engine.)
+        let loss = self.any_loss;
+        (0..bf + cmd)
+            .map(move |i| if i < bf { self.battlefield[i] } else { self.command[i - bf] })
+            .flat_map(move |s| {
+                let d = if loss { self.abilities(s) } else { self.db.def(self.objs[s.i()].def) };
+                d.statics.iter().map(move |st| (s, st))
+            })
             .filter(move |&(s, st)| self.static_applies(s, st, c))
     }
 
@@ -198,7 +201,7 @@ impl Game {
     /// Card types (layer 4).
     pub fn types_of(&self, c: CardIdx) -> u16 {
         let mut base = self.def_of(c).types;
-        if self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield {
+        if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
                 if let Mod::Types { add, .. } = m {
                     base |= add;
@@ -224,7 +227,7 @@ impl Game {
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
         let mut printed = self.def_of(c).subtypes.contains(&s);
-        if self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield {
+        if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
                 if let Mod::Types { subtypes, .. } = m {
                     printed |= subtypes.contains(&s);
@@ -557,6 +560,14 @@ impl Game {
             if to == Zone::Battlefield {
                 self.n_static += 1;
             }
+            if self_typed(d) {
+                if from == Zone::Battlefield {
+                    self.n_self_types -= 1;
+                }
+                if to == Zone::Battlefield {
+                    self.n_self_types += 1;
+                }
+            }
         }
     }
 
@@ -586,4 +597,11 @@ impl Game {
         self.effects.retain(|e| !(e.until == Until::YourNextTurn && e.controller == p));
         self.effects_changed();
     }
+}
+
+/// Does the definition have a static ability that changes its own types
+/// ("during your turn, he's a 3/4 Ninja creature")? Counted in
+/// `Game::n_self_types` while such a permanent is on the battlefield.
+pub(crate) fn self_typed(d: &crate::db::CardDef) -> bool {
+    d.statics.iter().any(|st| st.scope == Scope::This && st.mods.iter().any(|m| matches!(m, Mod::Types { .. })))
 }

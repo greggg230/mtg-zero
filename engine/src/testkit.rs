@@ -90,6 +90,9 @@ impl Scenario {
             if !self.g.def_of(c).statics.is_empty() {
                 self.g.n_static += 1;
             }
+            if crate::layers::self_typed(self.g.def_of(c)) {
+                self.g.n_self_types += 1;
+            }
             // A planeswalker entered with its printed loyalty (CR 306.5b).
             if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
                 self.g.add_counters(c, crate::db::Counter::Loyalty, n as u16);
@@ -469,6 +472,7 @@ impl Game {
         self.lki_counters.hash(&mut h);
         self.counters.hash(&mut h);
         self.n_static.hash(&mut h);
+        self.n_self_types.hash(&mut h);
         h.finish()
     }
 

@@ -131,13 +131,11 @@ impl Game {
         if sorcery_ok {
             return true;
         }
-        if self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
-            return false;
-        }
         let def = self.def_of(card);
-        def.is(types::INSTANT)
+        let instant_speed = def.is(types::INSTANT)
             || def.keywords.has(Kw::Flash)
-            || (def.is(types::SORCERY) && self.players[p as usize].flash_sorceries)
+            || (def.is(types::SORCERY) && self.players[p as usize].flash_sorceries);
+        instant_speed && !self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed)
     }
 
     /// Does permission `pm` let `p` play its card now?

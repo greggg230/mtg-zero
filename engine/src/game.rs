@@ -89,11 +89,12 @@ pub struct Obj {
     /// defending player, `Some(pw)` = that planeswalker (attacking nothing
     /// once it is removed from combat, 506.4c).
     pub attacks: Option<ObjRef>,
-    /// The turn it entered the battlefield (0 = never).
-    pub entered: u32,
+    /// The turn it entered the battlefield (0 = never; turn numbers as
+    /// u16, which the turn cap keeps far from).
+    pub entered: u16,
     /// Loyalty abilities activated this turn (CR 606.3): in turn `pw_turn`,
     /// `pw_used` of them, `pw_extra` more allowed than one (Comet).
-    pub pw_turn: u32,
+    pub pw_turn: u16,
     pub pw_used: u8,
     pub pw_extra: u8,
 }
@@ -391,6 +392,9 @@ pub struct Game {
     /// Permanents with static abilities on the battlefield (a fast path for
     /// the characteristic accessors).
     pub(crate) n_static: u16,
+    /// Permanents with a static ability that changes their own types
+    /// (Kaito; a fast path for `types_of`).
+    pub(crate) n_self_types: u16,
     /// Objects that already left the battlefield in the current
     /// simultaneous move (their leave triggers look back, CR 603.10a).
     pub(crate) leaving: Vec<crate::triggers::Lki>,
@@ -532,6 +536,7 @@ impl Game {
             any_loss: false,
             counters: Vec::new(),
             n_static: 0,
+            n_self_types: 0,
             leaving: Vec::new(),
             links: Vec::new(),
             delayed: Vec::new(),
@@ -862,6 +867,7 @@ impl Game {
 
     /// The definition whose abilities a permanent has: its own, or none
     /// once it lost all abilities (CR 613.1f; Oko's Elk).
+    #[inline]
     pub(crate) fn abilities(&self, c: CardIdx) -> &'static CardDef {
         if self.lost_abilities(c) {
             return blank_def();
@@ -936,7 +942,7 @@ impl Game {
             o.chosen_player = None;
             o.monstrous = false;
             o.attacks = None;
-            o.entered = if to == Zone::Battlefield { turn } else { 0 };
+            o.entered = if to == Zone::Battlefield { turn as u16 } else { 0 };
             o.pw_turn = 0;
             o.pw_used = 0;
             o.pw_extra = 0;
@@ -1244,6 +1250,7 @@ impl Game {
 
 /// A definition with no abilities (what a permanent that lost all its
 /// abilities has, CR 613.1f).
+#[cold]
 pub(crate) fn blank_def() -> &'static CardDef {
     static BLANK: std::sync::OnceLock<CardDef> = std::sync::OnceLock::new();
     BLANK.get_or_init(CardDef::default)

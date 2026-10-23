@@ -73,14 +73,15 @@ impl Game {
             if self.objs[c.i()].attached.is_some() && self.bad_attachments().contains(&c) {
                 return true;
             }
-            if self.is_creature(c) {
+            let ty = self.types_of(c);
+            if ty & crate::db::types::CREATURE != 0 {
                 let o = &self.objs[c.i()];
                 let t = self.toughness(c);
                 if t <= 0 || ((o.damage as i32 >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c)) {
                     return true;
                 }
             }
-            if self.is_type(c, crate::db::types::PLANESWALKER) && self.counters_on(c, Counter::Loyalty) == 0 {
+            if ty & crate::db::types::PLANESWALKER != 0 && self.counters_on(c, Counter::Loyalty) == 0 {
                 return true;
             }
             if self.is_legendary(c) {

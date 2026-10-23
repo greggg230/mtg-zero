@@ -46,12 +46,12 @@ impl Game {
     /// turn (or fewer than the extra activations an effect allows).
     pub(crate) fn loyalty_ready(&self, card: CardIdx) -> bool {
         let o = &self.objs[card.i()];
-        o.pw_turn != self.turn.number || o.pw_used < 1 + o.pw_extra
+        o.pw_turn != self.turn.number as u16 || o.pw_used < 1 + o.pw_extra
     }
 
     /// A loyalty ability of `card` is being activated (CR 606.3).
     fn note_loyalty_activation(&mut self, card: CardIdx) {
-        let turn = self.turn.number;
+        let turn = self.turn.number as u16;
         let o = &mut self.objs[card.i()];
         if o.pw_turn != turn {
             o.pw_turn = turn;
@@ -124,7 +124,7 @@ impl Game {
             // loyalty.
             Some(d) => {
                 let instant_ok =
-                    self.abilities(card).loyalty_instant_if_entered && self.objs[card.i()].entered == self.turn.number;
+                    self.abilities(card).loyalty_instant_if_entered && self.objs[card.i()].entered == self.turn.number as u16;
                 if !(sorcery_ok || instant_ok) || !self.loyalty_ready(card) {
                     return false;
                 }
