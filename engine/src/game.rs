@@ -417,6 +417,10 @@ pub struct Game {
     pub(crate) clouds: Vec<crate::hidden::Cloud>,
     /// Tokens created so far (a cheap "any token?" for the SBA check).
     pub(crate) tokens: u32,
+    /// The lowest slot made as a token or a copy (`u16::MAX`: none yet).
+    /// Slots below it are cards, which are never tokens: the 704.5d check
+    /// looks only from here (ENGINE.md 17).
+    pub(crate) first_token: u16,
     /// A simultaneous move off the battlefield is in progress (`leaving`).
     pub(crate) batching: bool,
     /// `waiting` as the current batch began ("whenever one or more ...":
@@ -648,6 +652,7 @@ impl Game {
             outcome: None,
             clouds: Vec::new(),
             tokens: 0,
+            first_token: u16::MAX,
             observer: None,
             keys: Vec::new(),
             forced: Vec::new(),
@@ -696,6 +701,12 @@ impl Game {
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
         }
+    }
+
+    /// Slot `idx` was just made as a token or a copy (CR 111, 707.10).
+    pub(crate) fn token_slot_made(&mut self, idx: CardIdx) {
+        self.tokens += 1;
+        self.first_token = self.first_token.min(idx.0);
     }
 
     /// Append a card slot (not yet in any zone list).
@@ -1033,7 +1044,7 @@ impl Game {
     /// effects create tokens through [`create_tokens`](Self::create_tokens).
     pub(crate) fn create_token(&mut self, def: DefId, controller: PlayerId, tapped: bool) -> CardIdx {
         let idx = self.add_card(def, controller, Zone::Nowhere);
-        self.tokens += 1;
+        self.token_slot_made(idx);
         self.note(|g| format!("P{controller} creates a {} token", g.name(idx)));
         self.put_onto_battlefield(idx, controller);
         if tapped {

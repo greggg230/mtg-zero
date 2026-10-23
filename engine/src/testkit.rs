@@ -255,7 +255,7 @@ impl Game {
         let def = self.db.token_by_name(name).unwrap_or_else(|| panic!("no token named {name}"));
         let c = self.add_card(def, p, Zone::Graveyard);
         self.objs[c.i()].known = 0b11;
-        self.tokens += 1;
+        self.token_slot_made(c);
         self.players[p as usize].graveyard.push(c);
         c
     }
@@ -684,6 +684,10 @@ impl Game {
             + self.command.iter().filter(|&&c| !self.def_of(c).statics.is_empty()).count();
         if n_static != self.n_static as usize {
             return Err(format!("n_static {} but {n_static} permanents and emblems with static abilities", self.n_static));
+        }
+        // The 704.5d check looks only from the first token slot.
+        if let Some(i) = (0..(self.first_token as usize).min(self.objs.len())).find(|&i| self.is_token(CardIdx(i as u16))) {
+            return Err(format!("slot {i} is a token below the first token slot {}", self.first_token));
         }
         if !self.keys.is_empty() {
             return Err("chance keys left in the state".into());

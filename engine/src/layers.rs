@@ -415,12 +415,19 @@ impl Game {
             (Some(cda), None) => self.cda_pt(c, cda, printed),
             _ => printed,
         };
-        // 7b in timestamp order, 7c summed.
-        let mut sets: Vec<(u32, i32, i32)> = Vec::new();
+        // 7b: the latest base P/T set (the last of equal timestamps, in
+        // `mods_on` order: effects, then statics); 7c summed. The statics
+        // are walked once for their sets, modifications and "+1/+1 for each
+        // artifact and/or enchantment you control".
+        let mut set: Option<(u32, i32, i32)> = None;
         let (mut dp, mut dt) = (0, 0);
-        for (ts, m) in self.mods_on(c) {
-            match *m {
-                Mod::SetPt(a, b) => sets.push((ts, a, b)),
+        for e in self.effects_on(c) {
+            match e.m {
+                Mod::SetPt(a, b) => {
+                    if set.is_none_or(|x| e.ts >= x.0) {
+                        set = Some((e.ts, a, b));
+                    }
+                }
                 Mod::Pt(a, b) => {
                     dp += a;
                     dt += b;
@@ -428,19 +435,31 @@ impl Game {
                 _ => {}
             }
         }
-        if let Some(&(_, a, b)) = sets.iter().max_by_key(|x| x.0) {
-            (p, t) = (a, b);
-        }
-        // "+1/+1 for each artifact and/or enchantment you control".
         for (s, st) in self.statics_on(c) {
+            let ts = self.objs[s.i()].timestamp;
             for m in &st.mods {
-                if let Mod::PtPer { filter, p: a, t: b } = m {
-                    let ctl = self.objs[s.i()].controller;
-                    let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as i32;
-                    dp += a * n;
-                    dt += b * n;
+                match m {
+                    Mod::SetPt(a, b) => {
+                        if set.is_none_or(|x| ts >= x.0) {
+                            set = Some((ts, *a, *b));
+                        }
+                    }
+                    Mod::Pt(a, b) => {
+                        dp += a;
+                        dt += b;
+                    }
+                    Mod::PtPer { filter, p: a, t: b } => {
+                        let ctl = self.objs[s.i()].controller;
+                        let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as i32;
+                        dp += a * n;
+                        dt += b * n;
+                    }
+                    _ => {}
                 }
             }
+        }
+        if let Some((_, a, b)) = set {
+            (p, t) = (a, b);
         }
         for &(x, cn, n) in &self.counters {
             if x == c {

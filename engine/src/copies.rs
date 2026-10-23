@@ -272,7 +272,7 @@ impl Game {
         for _ in 0..n {
             let idx = self.add_card(vals.def, controller, Zone::Nowhere);
             self.copy_objs.push(idx);
-            self.tokens += 1;
+            self.token_slot_made(idx);
             self.note(|g| format!("P{controller} creates a token copy of {}", g.db.def(vals.def).name));
             self.entering_copy = Some(vals);
             self.put_onto_battlefield(idx, controller);
@@ -289,7 +289,7 @@ impl Game {
     pub(crate) fn put_spell_copy(&mut self, def: DefId, item: &StackItem, controller: PlayerId) -> u32 {
         let idx = self.add_card(def, controller, Zone::Nowhere);
         self.copy_objs.push(idx);
-        self.tokens += 1;
+        self.token_slot_made(idx);
         let r = self.move_card_to_stack(idx, controller);
         self.objs[idx.i()].def = def;
         let id = self.new_stack_id();
@@ -486,7 +486,7 @@ impl Game {
         let p = self.objs[c.i()].controller;
         let copy = self.add_card(face, p, Zone::Nowhere);
         self.copy_objs.push(copy);
-        self.tokens += 1;
+        self.token_slot_made(copy);
         let card = self.move_card(copy, Zone::Exile, crate::game::Pos::Top);
         // (Its characteristics are the prepare spell's in exile too.)
         self.objs[copy.i()].def = face;

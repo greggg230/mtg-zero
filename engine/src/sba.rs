@@ -68,14 +68,14 @@ impl Game {
         if self.dungeons.iter().any(|d| d.obj.is_some() && d.room == crate::dungeon::BOTTOM) && !self.finished_dungeons().is_empty() {
             return true;
         }
-        if self.tokens > 0 && !self.stray_tokens().is_empty() {
+        if self.tokens > 0 && self.token_range().any(|c| self.stray_token(c)) {
             return true;
         }
-        if !self.counter_pairs().is_empty() {
+        if !self.counters.is_empty() && self.battlefield.iter().any(|&c| self.counter_pair(c)) {
             return true;
         }
         for (i, &c) in self.battlefield.iter().enumerate() {
-            if (self.objs[c.i()].attached.is_some() || self.def_of(c).bestowed) && self.bad_attachments().contains(&c) {
+            if (self.objs[c.i()].attached.is_some() || self.def_of(c).bestowed) && self.bad_attachment(c) {
                 return true;
             }
             let ty = self.types_of(c);
@@ -122,38 +122,37 @@ impl Game {
         if self.counters.is_empty() {
             return Vec::new();
         }
-        self.battlefield
-            .iter()
-            .copied()
-            .filter(|&c| self.counters_on(c, Counter::P1P1) > 0 && self.counters_on(c, Counter::M1M1) > 0)
-            .collect()
+        self.battlefield.iter().copied().filter(|&c| self.counter_pair(c)).collect()
+    }
+
+    fn counter_pair(&self, c: CardIdx) -> bool {
+        self.counters_on(c, Counter::P1P1) > 0 && self.counters_on(c, Counter::M1M1) > 0
     }
 
     /// 704.5n: Equipment attached to an illegal permanent (gone, or not a
     /// creature); 702.103f: a bestowed Aura attached to an illegal object or
     /// to none.
     fn bad_attachments(&self) -> Vec<CardIdx> {
-        let equipment = self.db.equipment_subtype();
-        self.battlefield
-            .iter()
-            .copied()
-            .filter(|&c| {
-                let illegal = |h: crate::ids::ObjRef| {
-                    !self.live(h)
-                        || self.objs[h.idx.i()].zone != Zone::Battlefield
-                        || !self.is_creature(h.idx)
-                        || self.protected_from(h.idx, &self.damage_source_of(c))
-                };
-                // 704.5p: a creature, or a permanent that is no longer an
-                // Equipment (a copy effect ended), becomes unattached.
-                let attachable =
-                    || !self.is_creature(c) && (self.def_of(c).bestowed || equipment.is_some_and(|s| self.has_subtype(c, s)));
-                match self.objs[c.i()].attached {
-                    Some(h) => illegal(h) || !attachable(),
-                    None => self.def_of(c).bestowed,
-                }
-            })
-            .collect()
+        self.battlefield.iter().copied().filter(|&c| self.bad_attachment(c)).collect()
+    }
+
+    fn bad_attachment(&self, c: CardIdx) -> bool {
+        let illegal = |h: crate::ids::ObjRef| {
+            !self.live(h)
+                || self.objs[h.idx.i()].zone != Zone::Battlefield
+                || !self.is_creature(h.idx)
+                || self.protected_from(h.idx, &self.damage_source_of(c))
+        };
+        // 704.5p: a creature, or a permanent that is no longer an
+        // Equipment (a copy effect ended), becomes unattached.
+        let attachable = || {
+            !self.is_creature(c)
+                && (self.def_of(c).bestowed || self.db.equipment_subtype().is_some_and(|s| self.has_subtype(c, s)))
+        };
+        match self.objs[c.i()].attached {
+            Some(h) => illegal(h) || !attachable(),
+            None => self.def_of(c).bestowed,
+        }
     }
 
     /// Tokens in a zone other than the battlefield (704.5d), in slot order.
@@ -161,19 +160,24 @@ impl Game {
         if self.tokens == 0 {
             return Vec::new();
         }
-        (0..self.objs.len())
-            .map(|i| CardIdx(i as u16))
-            .filter(|&c| {
-                // (704.5e: a copy of a spell or of a card is a token here;
-                // one leaving the stack ceases to exist at once, `move_card`.)
-                let z = self.objs[c.i()].zone;
-                z != Zone::Battlefield
-                    && z != Zone::Nowhere
-                    && z != Zone::Stack
-                    && self.is_token(c)
-                    && !(z == Zone::Exile && self.prepare_copy_live(c))
-            })
-            .collect()
+        self.token_range().filter(|&c| self.stray_token(c)).collect()
+    }
+
+    /// The slots that may be tokens or copies (from the first one made;
+    /// cards are never tokens).
+    fn token_range(&self) -> impl Iterator<Item = CardIdx> {
+        (self.first_token as usize..self.objs.len()).map(|i| CardIdx(i as u16))
+    }
+
+    fn stray_token(&self, c: CardIdx) -> bool {
+        // (704.5e: a copy of a spell or of a card is a token here; one
+        // leaving the stack ceases to exist at once, `move_card`.)
+        let z = self.objs[c.i()].zone;
+        z != Zone::Battlefield
+            && z != Zone::Nowhere
+            && z != Zone::Stack
+            && self.is_token(c)
+            && !(z == Zone::Exile && self.prepare_copy_live(c))
     }
 
     /// Would an SBA happen now? (Cleanup, 514.3a.)
