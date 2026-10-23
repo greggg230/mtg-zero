@@ -333,6 +333,7 @@ impl Game {
         }
         self.resolved.clear();
         self.done_once.clear();
+        self.discarded.clear();
         self.lki_counters.clear();
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);

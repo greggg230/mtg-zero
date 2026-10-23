@@ -160,6 +160,7 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
                         "effect": {"$t": "DrawCards", "amount": 1}}]}))}),
         ),
         creature("Test Not Flipper", "{1}", 1, 1, &[], false, json!({"activated_abilities": [transform_ability()]})),
+        creature("Test Cat", "{1}{W}", 2, 1, &[], false, json!({"subtypes": ["Cat"]})),
         spell(
             "Test Phyrexian Shock",
             "Instant",

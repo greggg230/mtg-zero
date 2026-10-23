@@ -117,6 +117,7 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::State(_)
         | TrigPred::Source(_)
         | TrigPred::Chapter(_)
+        | TrigPred::Batch
         | TrigPred::HostAttacksWithAnother => Vec::new(),
     }
 }
@@ -173,6 +174,8 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         }
         P::Source(nodes::Source { inner }) => Some(TrigPred::Source(lower_pred(l, inner)?)),
         P::HostAttacksWithAnother(nodes::HostAttacksWithAnother {}) => Some(TrigPred::HostAttacksWithAnother),
+        // "Whenever one or more ..." (one trigger per simultaneous batch).
+        P::OneOrMoreBatch(nodes::OneOrMoreBatch {}) => Some(TrigPred::Batch),
         // A chapter ability (CR 714.2b).
         P::ChapterReached(nodes::ChapterReached { n }) => Some(TrigPred::Chapter(l.int("ChapterReached.n", *n, 1, 20) as u8)),
         // "When you draw your nth card in a turn": the drawing player (the

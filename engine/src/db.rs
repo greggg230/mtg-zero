@@ -571,6 +571,9 @@ pub enum TrigPred {
     /// A chapter ability (CR 714.2b): this Saga's lore counters reached
     /// chapter n (a `Chapter` event of the source with amount n).
     Chapter(u8),
+    /// "Whenever one or more ...": triggers once for the events of one
+    /// simultaneous move (a batch, `Game::begin_batch`), however many match.
+    Batch,
 }
 
 impl TrigPred {
@@ -653,6 +656,9 @@ pub enum Cond {
     YourTurn,
     /// Your life total is at most half your starting life total.
     LifeAtMostHalfStart,
+    /// You control a permanent of one of these colours other than the
+    /// ability's source (evaluated with the source: `cond_holds_from`).
+    ControlOtherOfColor(crate::mana::ManaMask),
     /// All of these hold (a static ability's own conditions included).
     All(Vec<Cond>),
 }
@@ -987,6 +993,15 @@ pub struct CardDef {
     pub latent: u8,
     /// "You have no maximum hand size" (CR 402.2).
     pub no_max_hand: bool,
+    /// A split card (CR 709): its left and right halves (faces). The card
+    /// itself has the halves' characteristics combined (709.4) and is cast
+    /// as one half (709.3).
+    pub halves: Option<(DefId, DefId)>,
+    /// "Spells you cast from your graveyard cost {n} less to cast."
+    pub gy_spell_discount: u8,
+    /// "Each nonland card in your graveyard has mayhem. The mayhem cost is
+    /// equal to its mana cost." (CR 702.187)
+    pub grants_mayhem: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.
@@ -1078,6 +1093,7 @@ impl CardDb {
             let adventure = card.adventure.map(|k| base + k);
             card.back = back;
             card.adventure = adventure;
+            card.halves = card.halves.map(|(a, b)| (base + a, base + b));
             for (k, mut f) in fs.into_iter().enumerate() {
                 f.front = Some(id);
                 if back == Some(base + k as DefId) {

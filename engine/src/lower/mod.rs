@@ -99,6 +99,8 @@ pub enum Face {
     ModalBack,
     /// An Adventure (CR 715.2).
     Adventure,
+    /// A half of a split card (CR 709).
+    Half,
 }
 
 impl Lowerer<'_> {
@@ -174,6 +176,12 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // "Boo, a legendary 1/1 red Hamster creature token": the IR's token
     // printing has no colour indicator (it would be colourless).
     ("Minsc & Boo, Timeless Heroes", "IR:CreateToken.token_printing.color_indicator(Boo is red)"),
+    // Ajani, Nacatl Avenger's 0: "Create a 2/1 white Cat Warrior creature
+    // token. When you do, if you control a red permanent other than Ajani,
+    // he deals damage ... to any target": the IR flattens the reflexive
+    // triggered ability (CR 603.12) into an IfCondition of the loyalty
+    // ability, whose target would be chosen on activation.
+    ("Ajani, Nacatl Pariah // Ajani, Nacatl Avenger", "IR:IfCondition(a reflexive trigger flattened: Ajani's 0)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

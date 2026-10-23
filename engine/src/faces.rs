@@ -145,6 +145,78 @@ impl Game {
                 Flow::Suspend
             }
             Ext::EachExileUntilNonlandCastFree => self.exile_until_nonland_cast_free(f),
+            Ext::KeepOneOfEachType { types, nonland } => {
+                // `f.i`: the next card type; `f.picked`: the kept permanents.
+                let q = crate::ids::opp(f.controller);
+                if self.shielded_from(q, f.controller) {
+                    return Flow::Next; // (Tamiyo, Collector of Tales)
+                }
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        if !f.picked.contains(&c) {
+                            f.picked.push(c);
+                        }
+                        f.i += 1;
+                    }
+                    Some(other) => unreachable!("keep answer {other:?}"),
+                    None => {}
+                }
+                let candidates = |g: &Game, bits: u16| -> Vec<CardIdx> {
+                    g.permanents_of(q).filter(|&c| g.types_of(c) & bits != 0 && !(*nonland && g.is_type(c, types::LAND))).collect()
+                };
+                while (f.i as usize) < types.len() {
+                    let cands = candidates(self, types[f.i as usize]);
+                    if cands.is_empty() {
+                        f.i += 1;
+                        continue;
+                    }
+                    let opts = cands.into_iter().map(|c| Opt { action: self.perm_action(q, c), choice: Choice::Card(c) }).collect();
+                    self.ask(Task::Run(f.clone()), q, DecisionKind::ChoosePermanent, opts);
+                    return Flow::Suspend;
+                }
+                // Then the rest are sacrificed at once.
+                let rest: Vec<CardIdx> = self
+                    .permanents_of(q)
+                    .filter(|&c| !f.picked.contains(&c) && !(*nonland && self.is_type(c, types::LAND)))
+                    .collect();
+                f.picked.clear();
+                self.begin_batch();
+                for c in rest {
+                    self.sacrifice(c);
+                }
+                self.end_batch();
+                Flow::Next
+            }
+            Ext::Connive => {
+                // CR 701.50a-b: the source's controller (as it last existed)
+                // draws, then discards; a nonland card discarded puts a
+                // +1/+1 counter on it if it is still that permanent.
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        let nonland = !self.def_of(c).is(types::LAND);
+                        self.discard(c);
+                        if nonland {
+                            if let Some(&s) = self.objs_on(f, &On::Source).first() {
+                                self.add_counters(s, crate::db::Counter::P1P1, 1);
+                            }
+                        }
+                        return Flow::Next;
+                    }
+                    Some(other) => unreachable!("connive answer {other:?}"),
+                    None => {}
+                }
+                if f.i == 0 {
+                    f.i = 1;
+                    self.draw(p);
+                }
+                if self.players[p as usize].hand.is_empty() {
+                    return Flow::Next;
+                }
+                let opts = self.hand_options(p);
+                self.ask(Task::Run(f.clone()), p, DecisionKind::Discard, opts);
+                Flow::Suspend
+            }
             other => unreachable!("not a face instruction: {other:?}"),
         }
     }
@@ -248,6 +320,9 @@ impl Game {
     /// adventurer card's Adventure (715.3).
     pub(crate) fn other_face(&self, c: CardIdx) -> Option<DefId> {
         let d = self.def_of(c);
+        if let Some(h) = d.halves {
+            return Some(h.1); // a split card's right half (CR 709.3)
+        }
         if d.modal {
             d.back
         } else {
@@ -282,24 +357,38 @@ impl Game {
         if self.db.def(face).is(types::LAND) {
             return if land_ok { OTHER_PLAY } else { 0 };
         }
+        if self.face_castable(p, c, face, sorcery_ok, classes) {
+            OTHER_CAST
+        } else {
+            0
+        }
+    }
+
+    /// `FACE_CAST` if `p` may cast split card `c`'s left half now (a split
+    /// card is always cast as one of its halves, CR 709.3).
+    pub(crate) fn split_left_options(&self, p: PlayerId, c: CardIdx, sorcery_ok: bool, classes: &[crate::pay::Class]) -> u8 {
+        match self.def_of(c).halves {
+            Some((left, _)) if self.face_castable(p, c, left, sorcery_ok, classes) => FACE_CAST,
+            _ => 0,
+        }
+    }
+
+    /// Can `p` cast card `c` with face `face` up now (a spell face)?
+    fn face_castable(&self, p: PlayerId, c: CardIdx, face: DefId, sorcery_ok: bool, classes: &[crate::pay::Class]) -> bool {
+        let zone = self.objs[c.i()].zone;
         // How the card may be cast from where it is comes from the card as
         // it is there (its front: "instant and sorcery cards in your
         // graveyard have retrace" doesn't reach an adventurer creature card,
         // CR 715.4); whether that face can be cast, from the face alone.
         let route = if zone == Zone::Hand { None } else { self.cast_route(p, c) };
         if zone != Zone::Hand && route.is_none() {
-            return 0;
+            return false;
         }
         let mut g = self.clone();
         g.objs[c.i()].def = face;
-        let ok = match route {
+        match route {
             None => g.hand_castable(p, c, sorcery_ok, classes, &mut None),
             Some(from) => g.castable_via(p, c, from, classes, sorcery_ok),
-        };
-        if ok {
-            OTHER_CAST
-        } else {
-            0
         }
     }
 

@@ -120,6 +120,9 @@ pub enum CastFrom {
     /// From its owner's graveyard with retrace (CR 702.81a): its mana cost
     /// and a land card discarded.
     Retrace,
+    /// From its owner's graveyard with mayhem (CR 702.187b), discarded this
+    /// turn: for its mana cost.
+    Mayhem,
 }
 
 /// A permission to play a card from a zone other than a hand (CR 601.2a,
@@ -252,6 +255,8 @@ pub struct StackItem {
     /// An ability's source's `Obj::flips` as the ability was put on the
     /// stack (CR 701.27f).
     pub flips: u8,
+    /// The zone a spell was cast from (`Nowhere` for an ability).
+    pub origin: Zone,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -393,6 +398,9 @@ pub struct Game {
     pub(crate) tokens: u32,
     /// A simultaneous move off the battlefield is in progress (`leaving`).
     pub(crate) batching: bool,
+    /// `waiting` as the current batch began ("whenever one or more ...":
+    /// one trigger per batch).
+    pub(crate) batch_start: usize,
     /// The permanent being put onto the battlefield is a resolving spell
     /// (it was cast).
     pub(crate) entering_cast: bool,
@@ -459,6 +467,9 @@ pub struct Game {
     /// Optional actions done this turn that may be done "only once each
     /// turn": (source, its triggered ability).
     pub(crate) done_once: Vec<(ObjRef, u8)>,
+    /// Cards discarded this turn, as the objects they became in a graveyard
+    /// (mayhem, CR 702.187b).
+    pub(crate) discarded: Vec<ObjRef>,
     /// Triggered abilities a player has until their next turn ("until your
     /// next turn, whenever ..."; `Ext::TriggerUntilYourNextTurn`).
     pub(crate) temp_triggers: Vec<TempTrigger>,
@@ -598,9 +609,11 @@ impl Game {
             entering_face: None,
             day: None,
             done_once: Vec::new(),
+            discarded: Vec::new(),
             temp_triggers: Vec::new(),
             gy_exile: Vec::new(),
             batching: false,
+            batch_start: 0,
             entering_cast: false,
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
@@ -1203,6 +1216,9 @@ impl Game {
     pub(crate) fn discard(&mut self, idx: CardIdx) {
         let owner = self.objs[idx.i()].owner;
         let r = self.move_card(idx, Zone::Graveyard, Pos::Top);
+        if self.objs[idx.i()].zone == Zone::Graveyard {
+            self.discarded.push(r);
+        }
         self.event(Event {
             kind: EventKind::CardDiscarded,
             a: crate::triggers::Subj::Player(owner),

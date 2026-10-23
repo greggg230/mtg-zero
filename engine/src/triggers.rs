@@ -86,6 +86,15 @@ struct Observer {
     spell: bool,
 }
 
+/// Does the predicate say "one or more" (`Batch`)?
+fn has_batch(p: &TrigPred) -> bool {
+    match p {
+        TrigPred::Batch => true,
+        TrigPred::And(a, b) | TrigPred::Or(a, b) => has_batch(a) || has_batch(b),
+        _ => false,
+    }
+}
+
 /// Does the predicate name "this spell" (`IsSelf(Spell)`)?
 fn names_this_spell(p: &TrigPred) -> bool {
     match p {
@@ -158,6 +167,15 @@ impl Game {
             // trigger only as such.)
             for (i, t) in def.triggers.iter().enumerate().take(def.delayed_base as usize) {
                 if t.event == ev.kind && (!o.spell || names_this_spell(&t.pred)) && self.pred_matches(&t.pred, &ev, o) {
+                    // "Whenever one or more ...": once per simultaneous batch.
+                    if self.batching
+                        && has_batch(&t.pred)
+                        && self.waiting[self.batch_start.min(self.waiting.len())..]
+                            .iter()
+                            .any(|w| w.source == o.r && w.slot == i as u8)
+                    {
+                        continue;
+                    }
                     self.waiting.push(PendingTrigger {
                         controller: o.controller,
                         source: o.r,
@@ -229,6 +247,7 @@ impl Game {
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
             }
             TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u16,
+            TrigPred::Batch => true,
             TrigPred::FormerHost(s) => match ev.subject(*s) {
                 // Evaluated as the host leaves (look back): the Equipment
                 // is still attached to it.
@@ -335,6 +354,7 @@ impl Game {
             attack_as: None,
             noted,
             flips: if self.live(t.source) { self.objs[t.source.idx.i()].flips } else { 0 },
+            origin: Zone::Nowhere,
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {
@@ -385,6 +405,7 @@ impl Game {
     pub(crate) fn begin_batch(&mut self) {
         self.leaving.clear();
         self.batching = true;
+        self.batch_start = self.waiting.len();
     }
 
     pub(crate) fn end_batch(&mut self) {

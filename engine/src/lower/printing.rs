@@ -310,7 +310,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
-        l.deny("CardPrinting.external_cost_reductions", external_cost_reductions);
         let enters_x_counters = match enters_with_counters_from_x {
             None => false,
             Some(enums::XCounterMode::X) => true,
@@ -354,8 +353,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // `daybound`, `nightbound`, `adventure_face`): below.
         l.deny("CardPrinting.class_level", class_level);
         l.deny("CardPrinting.class_levels", class_levels);
-        l.deny("CardPrinting.split_faces", split_faces);
-        l.deny("CardPrinting.grants_mayhem_to_graveyard", grants_mayhem_to_graveyard);
         l.deny("CardPrinting.prepare_spell", prepare_spell);
         l.deny("CardPrinting.enters_prepared", enters_prepared);
         l.deny("CardPrinting.plot_cost", plot_cost);
@@ -763,7 +760,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.unsupported("CardPrinting.spell_effect(on a permanent card)");
             None
         }
-        None if is_spell_card => {
+        // A split card's spells are its halves' (CR 709.3).
+        None if is_spell_card && split_faces.is_empty() => {
             l.unsupported("CardPrinting.spell_effect(missing)");
             None
         }
@@ -1082,6 +1080,47 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             adventure = Some(k);
         }
     }
+    // A split card (CR 709): its two halves, each a face of its own; the
+    // card's characteristics are the halves' combined (709.4: the IR states
+    // them, and they must agree).
+    let mut halves = None;
+    if !split_faces.is_empty() {
+        if face != super::Face::Card || split_faces.len() != 2 || back.is_some() || adventure.is_some() || spell_effect.is_some() {
+            l.unsupported("CardPrinting.split_faces(shape)");
+        } else {
+            let mut ks = [0u16; 2];
+            let mut sum = ManaCost::default();
+            let mut tys = 0u16;
+            for (i, h) in split_faces.iter().enumerate() {
+                let cats::CardPrinting::CardPrinting(h) = h;
+                l.face = super::Face::Half;
+                let d = lower_printing(l, h);
+                if d.spell.is_none() {
+                    l.unsupported("CardPrinting.split_faces(a half without a spell)");
+                }
+                sum = sum.plus(&d.cost);
+                tys |= d.types;
+                l.faces.push(d);
+                ks[i] = (l.faces.len() - 1) as u16;
+            }
+            if sum != cost || tys != ty {
+                l.unsupported("CardPrinting.split_faces(differ from the card's mana cost or types)");
+            }
+            halves = Some((ks[0], ks[1]));
+        }
+    }
+    // "Spells you cast from your graveyard cost {n} less to cast" (an
+    // effect on its controller's spells, CR 601.2f).
+    let mut gy_spell_discount = 0u8;
+    for r in external_cost_reductions {
+        let cats::ExternalCostReduction::ExternalCostReduction(nodes::ExternalCostReduction { amount, condition }) = r;
+        match &**condition {
+            cats::Condition::SpellCastFromGraveyard(nodes::SpellCastFromGraveyard {}) => {
+                gy_spell_discount += l.int("ExternalCostReduction.amount", *amount, 1, 9) as u8;
+            }
+            other => l.unsupported(format!("ExternalCostReduction.condition({})", other.tag())),
+        }
+    }
     // Daybound and nightbound (CR 702.145) are on the two faces of one
     // double-faced card.
     match face {
@@ -1174,6 +1213,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         opp_no_spells_your_turn: *opponents_cant_cast_spells_during_your_turn,
         latent: n_latent,
         no_max_hand: repl.no_max_hand,
+        halves,
+        gy_spell_discount,
+        grants_mayhem: *grants_mayhem_to_graveyard,
     }
 }
 

@@ -176,6 +176,14 @@ macro_rules! lower_condition {
             // "If your life total is less than or equal to half your starting
             // life total".
             E::LifeAtMostHalfStartingLife(nodes::LifeAtMostHalfStartingLife {}) => Some(Cond::LifeAtMostHalfStart),
+            // "If you control a <colour> permanent other than <this>".
+            E::ControlOtherPermanentOfColor(nodes::ControlOtherPermanentOfColor { color }) => match crate::mana::letter_index(color) {
+                Some(i) if i < 5 => Some(Cond::ControlOtherOfColor(1 << i)),
+                _ => {
+                    $l.unsupported(format!("ControlOtherPermanentOfColor.color({color})"));
+                    None
+                }
+            },
             $($extra)*
             other => {
                 $l.unsupported(format!("Condition:{}", other.tag()));

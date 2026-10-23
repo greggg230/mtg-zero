@@ -12,6 +12,12 @@ use crate::pay::{productions, Class, Keep, PayMana, Src};
 impl Game {
     /// Does condition `c` hold for player `p`?
     pub(crate) fn cond_holds(&self, c: &Cond, p: PlayerId) -> bool {
+        self.cond_holds_from(c, p, None)
+    }
+
+    /// A condition for `p`, of an ability whose source is `source` ("other
+    /// than this").
+    pub(crate) fn cond_holds_from(&self, c: &Cond, p: PlayerId, source: Option<crate::ids::ObjRef>) -> bool {
         let pl = &self.players[p as usize];
         match c {
             Cond::ControlAtLeast(f, n) => self.count_controlled(p, f) >= *n as u32,
@@ -39,7 +45,10 @@ impl Game {
             Cond::LibraryEmpty => pl.library.is_empty(),
             Cond::YourTurn => self.turn.active == p,
             Cond::LifeAtMostHalfStart => pl.life * 2 <= self.spec.starting_life,
-            Cond::All(v) => v.iter().all(|c| self.cond_holds(c, p)),
+            Cond::ControlOtherOfColor(m) => {
+                self.permanents_of(p).any(|x| self.colors_of(x) & m != 0 && Some(self.obj_ref(x)) != source)
+            }
+            Cond::All(v) => v.iter().all(|c| self.cond_holds_from(c, p, source)),
         }
     }
 
@@ -201,6 +210,7 @@ impl Game {
             attack_as: None,
             noted: Vec::new(),
             flips: self.objs[card.i()].flips,
+            origin: Zone::Nowhere,
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });

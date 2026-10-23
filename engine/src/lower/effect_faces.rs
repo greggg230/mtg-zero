@@ -148,6 +148,55 @@ pub(crate) fn lower_effect_faces(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let n = l.int("DiscardUpToNThenDrawThatMany.n", *n, 1, 7) as u8;
             b.op(Op::Ext(Ext::DiscardUpToThenDraw { n }));
         }
+        // "Put a +1/+1 counter on each <permanent> you control."
+        E::PutPlusOneCounterOnEachMatching(nodes::PutPlusOneCounterOnEachMatching { predicate }) => {
+            let f = match predicate.as_deref() {
+                Some(p) => match super::filter::lower_pred(l, p) {
+                    Some(f) => f,
+                    None => return true,
+                },
+                None => Filter::Any,
+            };
+            let mine = Filter::And(Box::new(f), Box::new(Filter::Controller(true)));
+            b.op(Op::Ext(Ext::PutCounters { on: On::Each(mine), counter: crate::db::Counter::P1P1, n: Amount::Fixed(1) }));
+        }
+        // "Each opponent chooses an artifact, a creature, an enchantment, and
+        // a planeswalker from among the nonland permanents they control, then
+        // sacrifices the rest" (a permanent of several of the types may be
+        // chosen for each of them).
+        E::EachChoosesOneOfEachTypeSacrificesRest(nodes::EachChoosesOneOfEachTypeSacrificesRest {
+            card_types,
+            opponents_only,
+            nonland_only,
+        }) => {
+            if !*opponents_only {
+                l.unsupported("EachChoosesOneOfEachTypeSacrificesRest.opponents_only(false)");
+            }
+            let mut types = Vec::new();
+            for t in card_types {
+                match types::from_name(t) {
+                    Some(b) => types.push(b),
+                    None => l.unsupported(format!("EachChoosesOneOfEachTypeSacrificesRest.card_types({t})")),
+                }
+            }
+            b.op(Op::Ext(Ext::KeepOneOfEachType { types, nonland: *nonland_only }));
+        }
+        // "<This creature> connives" (CR 701.50a).
+        E::SourceConnives(nodes::SourceConnives {}) => {
+            b.op(Op::Ext(Ext::Connive));
+        }
+        // "All <lands> you control become p/t creatures until end of turn.
+        // They're still lands." (Life)
+        E::YourPermanentsBecomeCreaturesUEOT(nodes::YourPermanentsBecomeCreaturesUEOT { card_type, power, toughness }) => {
+            let Some(bits) = types::from_name(card_type) else {
+                l.unsupported(format!("YourPermanentsBecomeCreaturesUEOT.card_type({card_type})"));
+                return true;
+            };
+            let (p, t) = (l.int("YourPermanentsBecomeCreaturesUEOT.power", *power, 0, 99), l.int("YourPermanentsBecomeCreaturesUEOT.toughness", *toughness, 0, 99));
+            let mine = Filter::And(Box::new(Filter::Type(bits)), Box::new(Filter::Controller(true)));
+            let mods = vec![Mod::Types { add: types::CREATURE, subtypes: Vec::new(), replace: false }, Mod::SetPt(p, t)];
+            b.op(Op::Ext(Ext::Apply { on: On::Each(mine), mods, until: Until::EndOfTurn }));
+        }
         _ => return false,
     }
     true

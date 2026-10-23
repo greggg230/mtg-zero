@@ -1505,7 +1505,9 @@ impl Game {
             | Ext::TriggerUntilYourNextTurn { .. }
             | Ext::EachExileUntilNonlandCastFree
             | Ext::Poison { .. }
-            | Ext::DiscardUpToThenDraw { .. } => self.exec_faces(f, op),
+            | Ext::DiscardUpToThenDraw { .. }
+            | Ext::KeepOneOfEachType { .. }
+            | Ext::Connive => self.exec_faces(f, op),
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

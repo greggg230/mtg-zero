@@ -4,12 +4,12 @@
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
-//! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash |
+//! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash; M7b part 2: poison, cards on an adventure, temporary triggered abilities, no maximum hand size; day and night |
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
 //! | bags | 15 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them) |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 100 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options) |
-//! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options, known to the opponent |
+//! | permanents | 2 x 32 x 100 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up) |
+//! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
 //! | stack | 8 x 76 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 40 x 56 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
@@ -18,7 +18,8 @@
 //! position in the cube's IR card list, tokens from a registry; capacity
 //! 1024) as three one-hots (index / 64, index / 8 % 8, index % 8: 16 + 8 + 8)
 //! plus a descriptor (card types, colours, mana value, printed power and
-//! toughness, token, legendary; M7b: planeswalker, printed loyalty, emblem).
+//! toughness, token, legendary; M7b: planeswalker, printed loyalty, emblem, a
+//! face other than the front is up: then the descriptor is that face's).
 //! Layout v1 (M5a, 13,532 floats) used the
 //! card table's index (capacity 256), which renumbers as support grows;
 //! v2 (M5b, 23,324 floats) had a 192-float context block with room for 32
@@ -29,7 +30,7 @@
 //! the same in every world `determinize(viewer)` can produce (tested).
 
 use crate::db::{types, AbilitySlot, CardDb, Kw};
-use crate::decision::act;
+use crate::decision::{act, Choice, FACE_CAST, FACE_PLAY, OTHER_CAST, OTHER_PLAY};
 use crate::flow::Task;
 use crate::game::{Game, StackKind};
 use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
@@ -136,6 +137,10 @@ pub mod perm {
     pub const ATTACKED_BY: usize = 43;
     /// The attacker the pending `AttackTarget` decision is about.
     pub const ASKED_ATTACKER: usize = 44;
+    /// Lore counters / 4 (a Saga, CR 714.3).
+    pub const LORE: usize = 45;
+    /// Its back face is up (transformed, CR 701.27g; an MDFC's back face).
+    pub const BACK_FACE: usize = 46;
 }
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
@@ -166,6 +171,10 @@ fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
     out[48] = d.is(types::PLANESWALKER) as u8 as f32;
     out[49] = d.loyalty.unwrap_or(0) as f32 / 8.0;
     out[50] = d.emblem as u8 as f32;
+    // M7b part 2: a face other than the card's front is up (a transformed
+    // permanent, an MDFC's back face, an Adventure on the stack; ENGINE.md
+    // 25). The identity is the card's; the descriptor is the face's.
+    out[51] = d.front.is_some() as u8 as f32;
 }
 
 fn bag_add(out: &mut [f32], ids: &[u16], b: usize, def: DefId) {
@@ -274,7 +283,10 @@ pub(crate) mod ctx {
     pub const OPTIONS: usize = PILE + 1;
     pub const MODES_CHOSEN: usize = OPTIONS + 1;
     pub const PICKED: usize = MODES_CHOSEN + 1;
-    pub const END: usize = PICKED + 1;
+    /// A `ChooseFace` decision: the front face is cast / played, the other
+    /// face is cast / played (ENGINE.md 25).
+    pub const FACES: usize = PICKED + 1;
+    pub const END: usize = FACES + 4;
 }
 const _: () = assert!(ctx::END <= CONTEXT);
 
@@ -384,6 +396,8 @@ impl Game {
                     st[perm::ATTACKED_BY] = by as f32 / 4.0;
                 }
                 st[perm::ASKED_ATTACKER] = (asked_attacker == Some(c)) as u8 as f32;
+                st[perm::LORE] = self.counters_on(c, crate::db::Counter::Lore) as f32 / 4.0;
+                st[perm::BACK_FACE] = self.db.is_face(ob.def) as u8 as f32;
             }
         }
         // The viewer's hand.
@@ -400,6 +414,19 @@ impl Game {
             st[3] = legal(act::HAND_ABILITY + s as u16) as u8 as f32;
             st[4] = opp_knows(c) as u8 as f32;
             st[5] = self.def_of(c).is(types::LAND) as u8 as f32;
+            // What its `HAND` id does: cast or play its front face, its other
+            // face (an MDFC's back face, an Adventure), or both (a face
+            // choice follows, ENGINE.md 25).
+            if mine_to_decide {
+                let (front, other) = match decision.and_then(|d| d.choice_of(act::HAND + s as u16)) {
+                    Some(Choice::Cast(_)) | Some(Choice::Play(_)) => (true, false),
+                    Some(Choice::CastFace(_)) | Some(Choice::PlayFace(_)) => (false, true),
+                    Some(Choice::Faces(_, m)) => (m & (FACE_CAST | FACE_PLAY) != 0, m & (OTHER_CAST | OTHER_PLAY) != 0),
+                    _ => (false, false),
+                };
+                st[6] = front as u8 as f32;
+                st[7] = other as u8 as f32;
+            }
         }
         // The stack, top first.
         for (s, item) in self.stack.iter().rev().enumerate().take(STACKS) {
@@ -583,7 +610,20 @@ impl Game {
             o[27] = self.extra_turns.iter().filter(|&&x| x == p).count() as f32;
             o[28] = pl.lost_life as u8 as f32;
             o[29] = pl.flash_sorceries as u8 as f32;
+            // M7b part 2 (ENGINE.md 25).
+            o[30] = pl.poison as f32 / 10.0;
+            o[31] = self
+                .permissions
+                .iter()
+                .filter(|pm| pm.player == p && pm.kind == crate::game::PermKind::Adventure && self.live(pm.card))
+                .count() as f32
+                / 4.0;
+            o[32] = self.temp_triggers.iter().filter(|t| t.controller == p).count() as f32 / 2.0;
+            o[33] = self.no_max_hand(p) as u8 as f32;
         }
+        // Day and night (CR 731).
+        g[104] = (self.day == Some(true)) as u8 as f32;
+        g[105] = (self.day == Some(false)) as u8 as f32;
     }
 
     /// The potential blocker being asked (DeclareBlockers), and the attacker
@@ -714,7 +754,12 @@ impl Game {
             }
             Task::DeclareAttackers { next } => x[ctx::NEXT_ATTACKER] = *next as f32 / 32.0,
             Task::AttackTarget { card: c } => card = Some((self.objs[c.i()].def, None, None)),
-            Task::ChooseFace { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
+            Task::ChooseFace { card: c, mask, .. } => {
+                card = Some((self.objs[c.i()].def, None, None));
+                for (k, bit) in [FACE_CAST, FACE_PLAY, OTHER_CAST, OTHER_PLAY].into_iter().enumerate() {
+                    x[ctx::FACES + k] = (mask & bit != 0) as u8 as f32;
+                }
+            }
             Task::DeclareBlockers { i } => x[ctx::BLOCKER_INDEX] = *i as f32 / 16.0,
             Task::MulliganBottom { left, .. } => x[ctx::BOTTOMS_LEFT] = *left as f32 / 7.0,
             Task::ManaNow { src } => card = Some((self.objs[src.card.i()].def, Some(src.slot), None)),

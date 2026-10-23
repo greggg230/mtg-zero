@@ -473,6 +473,16 @@ pub enum Ext {
     /// The controller may discard up to n cards (one decision per card,
     /// `PASS` = no more), then draws as many as they discarded.
     DiscardUpToThenDraw { n: u8 },
+    /// The controller's opponent chooses, for each card type in `types` in
+    /// order, a [nonland] permanent of that type they control (one decision
+    /// each; a permanent may be chosen for several types), then sacrifices
+    /// the other [nonland] permanents they control at once. Choice: a
+    /// permanent.
+    KeepOneOfEachType { types: Vec<u16>, nonland: bool },
+    /// The source connives (CR 701.50a): its controller draws a card, then
+    /// discards a card (a decision); if a nonland card was discarded, a
+    /// +1/+1 counter on the source if it is still that permanent.
+    Connive,
 }
 
 /// What a delayed trigger is about ("that card", "that much").

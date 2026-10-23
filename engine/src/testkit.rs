@@ -411,6 +411,18 @@ impl Game {
             v.extend([live_place(r), k as u64]);
         }
         v.push(u64::MAX);
+        // Discarded this turn (public), triggered abilities until a next
+        // turn (public), spells exiled instead of going to a graveyard.
+        for &r in &self.discarded {
+            v.push(live_place(r));
+        }
+        for t in &self.temp_triggers {
+            v.extend([t.controller as u64, t.source_def as u64, t.slot as u64]);
+        }
+        for &c in &self.gy_exile {
+            v.push(place(c));
+        }
+        v.push(u64::MAX);
         for pm in &self.permissions {
             v.extend([live_place(pm.card), pm.player as u64, pm.turn.unwrap_or(0) as u64, h64(&pm.kind)]);
         }
@@ -435,7 +447,7 @@ impl Game {
             let pl = &self.players[p as usize];
             v.extend([pl.life as i64 as u64, pl.hand.len() as u64, pl.library.len() as u64, pl.lands_played as u64]);
             v.push(pl.cant_gain_life as u64);
-            v.extend([pl.lost_life as u64, pl.flash_sorceries as u64]);
+            v.extend([pl.lost_life as u64, pl.flash_sorceries as u64, pl.poison as u64]);
             v.extend(pl.pool.amt.iter().map(|&n| n as u64));
             v.extend(pl.graveyard.iter().map(|&c| self.objs[c.i()].def as u64));
             v.push(u64::MAX);
@@ -517,6 +529,10 @@ impl Game {
         self.day.hash(&mut h);
         self.entering_face.hash(&mut h);
         self.done_once.hash(&mut h);
+        self.discarded.hash(&mut h);
+        self.temp_triggers.hash(&mut h);
+        self.gy_exile.hash(&mut h);
+        self.batch_start.hash(&mut h);
         h.finish()
     }
 

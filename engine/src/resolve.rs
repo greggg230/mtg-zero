@@ -591,7 +591,7 @@ impl Game {
             }
             Op::Jump { to } => Flow::Jump(to),
             Op::JumpUnless { ref cond, to } => {
-                if self.cond_holds(cond, f.controller) {
+                if self.cond_holds_from(cond, f.controller, Some(f.source)) {
                     Flow::Next
                 } else {
                     Flow::Jump(to)

@@ -1091,6 +1091,17 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let amount = match amount.as_deref() {
                 Some(cats::Formula::EventSubjectPower(nodes::EventSubjectPower {})) => Amount::EventObjPower,
                 Some(cats::Formula::ResolvingDamageAmount(nodes::ResolvingDamageAmount {})) => Amount::EventAmount,
+                // "Damage equal to the number of creatures you control" (as
+                // it resolves).
+                Some(cats::Formula::CountControlledMatching(nodes::CountControlledMatching { predicate })) => {
+                    match super::filter::lower_pred(l, predicate) {
+                        Some(Filter::Type(bits)) => Amount::CountTypes(bits),
+                        _ => {
+                            l.unsupported("Formula:CountControlledMatching(not a card type)");
+                            return true;
+                        }
+                    }
+                }
                 Some(other) => {
                     l.unsupported(format!("Formula:{}", other.tag()));
                     return true;

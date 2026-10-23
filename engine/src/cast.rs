@@ -46,7 +46,30 @@ impl Game {
             };
             cost.generic = cost.generic.saturating_sub(less);
         }
+        // "Spells you cast from your graveyard cost {n} less" (Green
+        // Goblin): the card is in its owner's graveyard (castability) or a
+        // spell cast from there.
+        let from_gy = match self.objs[card.i()].zone {
+            Zone::Graveyard => true,
+            Zone::Stack => self.stack.iter().any(|s| s.kind == StackKind::Spell { card } && s.origin == Zone::Graveyard),
+            _ => false,
+        };
+        if from_gy {
+            for c in self.permanents_of(p) {
+                cost.generic = cost.generic.saturating_sub(self.abilities(c).gy_spell_discount);
+            }
+        }
         cost
+    }
+
+    /// Mayhem (CR 702.187b): `card`, a nonland card `p` discarded this turn,
+    /// in `p`'s graveyard, while `p` controls a permanent that gives the
+    /// nonland cards in their graveyard mayhem for their mana cost.
+    pub(crate) fn mayhem_ok(&self, p: PlayerId, card: CardIdx) -> bool {
+        let r = self.obj_ref(card);
+        !self.def_of(card).is(types::LAND)
+            && self.discarded.contains(&r)
+            && self.permanents_of(p).any(|c| self.abilities(c).grants_mayhem)
     }
 
     // ---- priority options (CR 117.1, 116.2a, 307.1, 602.2) ----------------
@@ -94,7 +117,9 @@ impl Game {
         let slots = self.hand_slots(p);
         for &(action, c) in &slots {
             let def = self.def_of(c);
-            let front = if def.is(types::LAND) {
+            let front = if def.halves.is_some() {
+                self.split_left_options(p, c, sorcery_ok, &classes)
+            } else if def.is(types::LAND) {
                 if land_ok {
                     FACE_PLAY
                 } else {
@@ -257,6 +282,8 @@ impl Game {
                 } else if def.additional.is_empty() && self.retrace_granted(p, card) {
                     // (Likewise not with the card's own additional costs.)
                     Some(CastFrom::Retrace)
+                } else if self.mayhem_ok(p, card) {
+                    Some(CastFrom::Mayhem)
                 } else {
                     None
                 }
@@ -298,6 +325,9 @@ impl Game {
             }
             CastFrom::Permission { .. } => self.spell_cost(card, p),
             CastFrom::Retrace => self.spell_cost(card, p),
+            // "The mayhem cost is equal to its mana cost" (an alternative
+            // cost, CR 702.187b; increases apply, 601.2f).
+            CastFrom::Mayhem => self.spell_cost(card, p),
         }
     }
 
@@ -577,7 +607,9 @@ impl Game {
             }
             let action = act::EXILE + k;
             k += 1;
-            let front = if self.def_of(c).is(types::LAND) {
+            let front = if self.def_of(c).halves.is_some() {
+                self.split_left_options(p, c, sorcery_ok, classes)
+            } else if self.def_of(c).is(types::LAND) {
                 if land_ok && !cast_only {
                     FACE_PLAY
                 } else {
@@ -595,7 +627,9 @@ impl Game {
         }
         let lands_ok = land_ok && self.lands_from_graveyard(p);
         for &c in &self.players[p as usize].graveyard {
-            let front = if self.def_of(c).is(types::LAND) {
+            let front = if self.def_of(c).halves.is_some() {
+                self.split_left_options(p, c, sorcery_ok, classes)
+            } else if self.def_of(c).is(types::LAND) {
                 if lands_ok {
                     FACE_PLAY
                 } else {
@@ -834,6 +868,10 @@ impl Game {
         // instead": a permission from a graveyard that says so (unless
         // flashback, which exiles it anyway, is how it is cast).
         let r = self.obj_ref(card);
+        let origin = self.objs[card.i()].zone;
+        // A split card is cast as one of its halves (CR 709.3): the left one
+        // unless the right one is chosen.
+        let face = face.or(self.def_of(card).halves.map(|h| h.0));
         let exile_after = self.objs[card.i()].zone == Zone::Graveyard
             && from != crate::game::CastFrom::Flashback
             && self.permissions.iter().any(|pm| pm.card == r && pm.kind == crate::game::PermKind::CastThenExile && self.permission_ok(pm, p));
@@ -867,6 +905,7 @@ impl Game {
             attack_as: None,
             noted: Vec::new(),
             flips: 0,
+            origin,
         });
         self.agenda.push(Task::CastDone { id });
         if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
