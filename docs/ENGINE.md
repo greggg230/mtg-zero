@@ -1818,8 +1818,8 @@ card code from 48 to 52 floats (planeswalker, printed loyalty / 8, emblem, one s
 slot that holds a card code grows by 4 (tops 54, hand 60, stack 76, triggers and list 56); the
 permanent status from 40 to 48 floats (88 to 100 a slot); two more bags (15: each player's
 emblems); two globals per player in the spare floats. `mtgz/az/layout_v3.json` and the token
-registry must be regenerated (`MTGZ_WRITE_LAYOUT=1` and `MTGZ_WRITE_TOKENS=1 cargo test -p
-engine --test az ...`; not run on the M7b branch).
+registry were regenerated on merge (`MTGZ_WRITE_LAYOUT=1` and `MTGZ_WRITE_TOKENS=1 cargo test -p
+engine --test az ...`).
 
 M7b part 2 (faces, section 25.8) adds fields only in spare floats (still 26,500): the card
 code's spare float (a face other than the front is up), permanent status 45-46 (lore counters,
@@ -1827,8 +1827,8 @@ back face up), hand status 6-7 (which face the slot's `HAND` id casts or plays),
 and four context floats (`ChooseFace` and its mask; 11 context floats stay spare), four
 globals per player (poison, cards on an adventure, temporary triggered abilities, no maximum
 hand size) and two game globals (day, night). The `cards` list gains the 16 new cards (faces
-share their card's identity and are skipped); no new token kind. `layout_v3.json` must be
-regenerated (not run on the branch).
+share their card's identity and are skipped); no new token kind. `layout_v3.json` was
+regenerated on merge.
 
 M7b part 3 (copies, section 26.9) widens it to 29,092 floats (still version 3): the permanent
 status from 48 to 88 floats (100 to 140 a slot: a copy and the identity of what it copies,
@@ -1836,7 +1836,8 @@ what it is attached to, prepared; four spare), the stack status from 24 to 28 (7
 slot: a copy of a spell, the times an additional cost was paid, bestowed; one spare); task
 codes 21-23. A permanent's identity is what it is without copy effects, its descriptor the
 copied face. `layout_v3.json` and the token registry (one new kind, `Insect 1/1 G c Insect`)
-must be regenerated (not run on the branch).
+were regenerated on merge; a token copy takes the copied card's identity, so registry line 807
+(Vaultborn Tyrant's token copy of itself) is unused from here on.
 
 M7b part 3b (section 27.10) widens it to 29,860 floats (still version 3): the permanent status
 from 88 to 96 floats (148 a slot: ward and its costs, lost all abilities, goaded, exiled if it
@@ -1846,8 +1847,13 @@ end, scoring the `GY_ABILITY` ids), the initiative, dungeon and experience globa
 floats, the context's ability-slot kind from 4 to 5 floats (the fields after it move by one).
 The descriptor of a copy shows its exceptions. `layout_v3.json` and the token registry (four new
 keys: `Undercity rules`, `The initiative rules`, `Elemental 1/1 R c Elemental`, `Warrior 1/1 R c
-Warrior`) must be regenerated (not run on the branch). The M7b card batch ends here; v3 can be
-frozen at the first run.
+Warrior`) were regenerated on merge.
+
+**Frozen** at the end of the M7b card batch (2026-10-23, the merge of `m7b-stack`): 29,860
+floats, 9 segments, 15 bags, 1024 identities. At every step of the batch no card identity moved
+(newly supported cards and new registry keys filled empty identities). From here on a change to
+any width, offset, segment or identity is layout v4; newly supported cards and appended token
+keys keep v3 (22.2).
 
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 

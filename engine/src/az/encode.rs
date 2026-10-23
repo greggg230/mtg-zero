@@ -1,7 +1,6 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
-//! f32 vector for a viewer, with no hidden information. Layout v3 (M7b: 26,500
-//! floats; M7b part 3, copies: 29,092; part 3b, the stack, ward, the
-//! initiative: 29,860), in order:
+//! f32 vector for a viewer, with no hidden information. Layout v3 (29,860
+//! floats; frozen at the end of the M7b card batch, ENGINE.md 22.6), in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|

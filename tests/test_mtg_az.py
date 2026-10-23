@@ -20,7 +20,7 @@ def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg']
     info = G.info('mtg')
-    assert info['num_actions'] == 1024 and info['num_features'] == 29092
+    assert info['num_actions'] == 1024 and info['num_features'] == 29860
     assert info['min_players'] == info['max_players'] == 2
     assert info['bots'] == ['random', 'heuristic']
 
@@ -35,7 +35,7 @@ def test_game_through_the_bindings():
         assert len(legal) >= 1 and list(legal) == sorted(set(legal)) and max(legal) < 1024
         p = g.to_move
         x = np.asarray(g.encode(p))
-        assert x.shape == (29092,) and np.isfinite(x).all()
+        assert x.shape == (29860,) and np.isfinite(x).all()
         if steps % 25 == 0:
             d = g.clone()
             d.determinize(p, 99)
@@ -72,7 +72,7 @@ def test_selfplay_records_samples():
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
     parts.append(drv.take_samples())
     s = protocol.concat_samples(parts)
-    protocol.validate_samples(s, 29092)
+    protocol.validate_samples(s, 29860)
     assert len(s['x']) > 50
     res = drv.take_results()
     assert len(res) == 2 and all(r['over'] for r in res)

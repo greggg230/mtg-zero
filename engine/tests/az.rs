@@ -262,7 +262,9 @@ fn forced_keys_are_consumed_in_order_and_impossible_ones_fall_back() {
     let mut zr = zero_search::rng::Rng::new(6);
     let mut rng = Rng::new(6);
     let mut checked = 0;
-    for g in states(scale(30), 8, 6) {
+    // 90 games: steps with two or more draws for the viewer are rare (30 games gave 2 at 438
+    // supported cards, 3 needed).
+    for g in states(scale(90), 8, 6) {
         let viewer = g.to_move().unwrap();
         let l = legal(&g);
         let x = l[rng.below(l.len() as u32) as usize];

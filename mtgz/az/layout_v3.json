@@ -60,9 +60,9 @@
     null,
     "Bone Shards",
     "Boomerang Basics",
-    null,
+    "Boseiju, Who Endures",
     "Botanical Sanctum",
-    null,
+    "Brain Freeze",
     "Brainstorm",
     "Brazen Borrower // Petty Theft",
     "Breeding Pool",
@@ -74,7 +74,7 @@
     "Carnage Interpreter",
     "Cathar Commando",
     null,
-    null,
+    "Caves of Chaos Adventurer",
     "Cecil, Dark Knight // Cecil, Redeemed Paladin",
     null,
     "Chain Lightning",
@@ -144,7 +144,7 @@
     "Enlightened Tutor",
     "Entomb",
     "Erode",
-    null,
+    "Ertai Resurrected",
     "Esika's Chariot",
     "Etali, Primal Conqueror // Etali, Primal Sickness",
     "Exhume",
@@ -154,12 +154,12 @@
     "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
     "Faerie Mastermind",
     "Faithless Looting",
-    null,
-    null,
+    "Fallen Shinobi",
+    "Fanatic of Rhonas",
     null,
     "Fatal Push",
     null,
-    null,
+    "Feywild Caretaker",
     "Fiery Confluence",
     "Fiery Islet",
     "Figure of Destiny",
@@ -174,13 +174,13 @@
     "Force of Negation",
     "Force of Vigor",
     "Force of Will",
-    null,
+    "Forensic Gadgeteer",
     "Forest",
     "Formidable Speaker",
     null,
     "Fractured Identity",
     "Frantic Search",
-    null,
+    "From the Catacombs",
     "Fury",
     "Gaea's Cradle",
     "Galvanic Discharge",
@@ -215,7 +215,7 @@
     null,
     "Hedge Maze",
     "Hexdrinker",
-    null,
+    "Hexing Squelcher",
     "Horizon Canopy",
     null,
     "Hymn to Tourach",
@@ -226,7 +226,7 @@
     "Inquisition of Kozilek",
     "Inspiring Vantage",
     null,
-    null,
+    "Invert Polarity",
     "Iron-Shield Elf",
     "Island",
     "Ivora, Insatiable Heir",
@@ -238,7 +238,7 @@
     "Jetmir's Garden",
     "Kaito, Bane of Nightmares",
     "Kaldra Compleat",
-    null,
+    "Kappa Cannoneer",
     "Karakas",
     "Karn, Scion of Urza",
     null,
@@ -248,7 +248,7 @@
     null,
     "Leatherhead, Swamp Stalker",
     "Legion Extruder",
-    null,
+    "Leovold, Emissary of Trest",
     "Leyline Binding",
     "Library of Alexandria",
     "Life // Death",
@@ -318,7 +318,7 @@
     "Norman Osborn // Green Goblin",
     "Nurturing Peatland",
     "Oath of Druids",
-    null,
+    "Occult Epiphany",
     null,
     "Oko, Thief of Crowns",
     "Okoye, Mighty and Adored",
@@ -326,8 +326,8 @@
     "Once Upon a Time",
     "Orcish Bowmasters",
     null,
-    null,
-    null,
+    "Otawara, Soaring City",
+    "Otharri, Suns' Glory",
     "Ouroboroid",
     "Oust",
     "Outland Liberator // Frenzied Trapbreaker",
@@ -336,7 +336,7 @@
     "Palace Jailer",
     null,
     null,
-    null,
+    "Passageway Seer",
     "Path to Exile",
     null,
     null,
@@ -362,7 +362,7 @@
     null,
     "Questing Beast",
     "Raffine's Tower",
-    null,
+    "Raffine, Scheming Seer",
     "Ragavan, Nimble Pilferer",
     null,
     "Raph & Mikey, Troublemakers",
@@ -390,9 +390,9 @@
     "Scythecat Cub",
     "Seachrome Coast",
     "Sear",
-    null,
-    null,
-    null,
+    "Seasoned Dungeoneer",
+    "Seasoned Pyromancer",
+    "Sedgemoor Witch",
     "Sensei's Divining Top",
     "Sentinel of the Nameless City",
     null,
@@ -439,11 +439,11 @@
     "Sunbaked Canyon",
     null,
     null,
-    null,
+    "Sunset Saboteur",
     "Super Shredder",
     "Superior Spider-Man",
     "Suplex",
-    null,
+    "Surrak, Elusive Hunter",
     "Swamp",
     null,
     "Swords to Plowshares",
@@ -471,7 +471,7 @@
     null,
     null,
     "The Wandering Emperor",
-    null,
+    "The Wondrous Wasp",
     null,
     "Thopter Foundry",
     null,
@@ -489,7 +489,7 @@
     "Time Warp",
     "Timetwister",
     "Tinker",
-    null,
+    "Tishana's Tidebinder",
     "Titania, Protector of Argoth",
     "Tolarian Academy",
     "Torsten, Founder of Benalia",
@@ -508,7 +508,7 @@
     "Undercity Sewers",
     "Underground Mortuary",
     "Underground Sea",
-    null,
+    "Undermountain Adventurer",
     "Underworld Breach",
     "Unearth",
     "Unexpectedly Absent",
@@ -524,7 +524,7 @@
     "Verdant Catacombs",
     null,
     "Vindicate",
-    null,
+    "Voice of Victory",
     "Volcanic Island",
     "Voltaic Key",
     "Walking Ballista",
@@ -534,7 +534,7 @@
     "Watery Grave",
     null,
     "Wheel of Fortune",
-    null,
+    "White Plume Adventurer",
     null,
     "Windswept Heath",
     "Wishclaw Talisman",
@@ -818,10 +818,10 @@
     null,
     "Squirrel",
     "Insect",
-    null,
-    null,
-    null,
-    null,
+    "Undercity",
+    "The initiative",
+    "Elemental",
+    "Warrior",
     null,
     null,
     null,
@@ -1033,7 +1033,7 @@
     null,
     null
   ],
-  "features": 29092,
+  "features": 29860,
   "segments": [
     {
       "count": 1,
@@ -1100,7 +1100,7 @@
       "name": "my_permanents",
       "offset": 16068,
       "present": 52,
-      "width": 140
+      "width": 148
     },
     {
       "actions": [
@@ -1119,9 +1119,9 @@
         ]
       },
       "name": "opponent_permanents",
-      "offset": 20548,
+      "offset": 20804,
       "present": 52,
-      "width": 140
+      "width": 148
     },
     {
       "actions": [
@@ -1144,7 +1144,7 @@
         ]
       },
       "name": "hand",
-      "offset": 25028,
+      "offset": 25540,
       "present": 52,
       "width": 60
     },
@@ -1165,9 +1165,9 @@
         ]
       },
       "name": "stack",
-      "offset": 25988,
+      "offset": 26500,
       "present": 52,
-      "width": 80
+      "width": 84
     },
     {
       "actions": [
@@ -1186,7 +1186,7 @@
         ]
       },
       "name": "triggers",
-      "offset": 26628,
+      "offset": 27172,
       "present": 52,
       "width": 56
     },
@@ -1207,7 +1207,28 @@
         ]
       },
       "name": "list",
-      "offset": 26852,
+      "offset": 27396,
+      "present": 52,
+      "width": 56
+    },
+    {
+      "actions": [
+        [
+          1012,
+          1
+        ]
+      ],
+      "count": 4,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "graveyard_abilities",
+      "offset": 29636,
       "present": 52,
       "width": 56
     }
