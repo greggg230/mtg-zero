@@ -34,7 +34,10 @@ fn player(p: PlayerId) -> Choice {
 
 fn pay(g: &mut Game) {
     let paying = |g: &Game| {
-        matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana) | Some(DecisionKind::ChooseGraveyardCard))
+        matches!(
+            g.kind(),
+            Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana) | Some(DecisionKind::ChooseGraveyardCard)
+        )
     };
     g.drive_until(|g| at_priority(g) || !paying(g));
     while paying(g) {
@@ -120,7 +123,14 @@ fn tutors_put_the_found_card_on_top() {
     let rows: &[(&str, &str, &[&str], &str, bool, i32)] = &[
         ("Enlightened Tutor", "Plains", &["Sol Ring", "Oath of Druids"], "Oath of Druids", true, 20),
         ("Worldly Tutor", "Forest", &["Test Bear"], "Test Bear", true, 20),
-        ("Imperial Seal", "Swamp", &["Lightning Bolt", "Sol Ring", "Oath of Druids", "Test Bear", "Island", "Swamp"], "Sol Ring", false, 18),
+        (
+            "Imperial Seal",
+            "Swamp",
+            &["Lightning Bolt", "Sol Ring", "Oath of Druids", "Test Bear", "Island", "Swamp"],
+            "Sol Ring",
+            false,
+            18,
+        ),
     ];
     for &(tutor, land, offered, pick, revealed, life) in rows {
         let mut g = Scenario::new(db())
@@ -147,7 +157,11 @@ fn tutors_put_the_found_card_on_top() {
         assert_eq!(g.player(0).library.len(), LIB.len());
     }
     // Worldly and Enlightened are instants, Imperial Seal a sorcery.
-    let g = scen().battlefield(0, &["Forest", "Swamp"]).hand(0, &["Worldly Tutor", "Imperial Seal"]).at(Step::Upkeep, 0).start();
+    let g = scen()
+        .battlefield(0, &["Forest", "Swamp"])
+        .hand(0, &["Worldly Tutor", "Imperial Seal"])
+        .at(Step::Upkeep, 0)
+        .start();
     assert!(g.has_option(Choice::Cast(g.card(0, "Worldly Tutor", Zone::Hand))));
     assert!(!g.has_option(Choice::Cast(g.card(0, "Imperial Seal", Zone::Hand))));
 }
@@ -168,7 +182,9 @@ fn natural_order_sacrifices_a_green_creature_for_a_green_creature_card() {
     let bear = bf(&g, 0, "Test Bear");
     let no = g.card(0, "Natural Order", Zone::Hand);
     g.choose(Choice::Cast(no));
-    g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana)));
+    g.drive_until(|g| {
+        at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana))
+    });
     pay(&mut g);
     if g.kind() == Some(DecisionKind::Sacrifice) {
         assert!(!g.has_option(Choice::Card(bf(&g, 0, "Test Flyer"))), "a green creature: the Flyer is blue");
@@ -181,7 +197,11 @@ fn natural_order_sacrifices_a_green_creature_for_a_green_creature_card() {
     settle(&mut g);
     assert_eq!(g.count_in(0, "Test Giant", Zone::Battlefield), 1);
     // Without a green creature it can't be cast.
-    let g = scen().battlefield(0, &["Forest", "Forest", "Forest", "Forest", "Test Flyer"]).hand(0, &["Natural Order"]).at(Step::Main1, 0).start();
+    let g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest", "Forest", "Test Flyer"])
+        .hand(0, &["Natural Order"])
+        .at(Step::Main1, 0)
+        .start();
     assert!(!g.has_option(Choice::Cast(g.card(0, "Natural Order", Zone::Hand))));
 }
 
@@ -201,7 +221,9 @@ fn cr_601_2h_natural_order_may_sacrifice_the_elf_that_paid_for_it() {
     assert!(g.has_option(Choice::Cast(no)), "Elvish Mystic pays {{G}} and is then sacrificed");
     g.choose(Choice::Cast(no));
     pay(&mut g);
-    g.drive_until(|g| !matches!(g.kind(), Some(DecisionKind::Sacrifice)) || g.has_option(Choice::Card(bf(g, 0, "Elvish Mystic"))));
+    g.drive_until(|g| {
+        !matches!(g.kind(), Some(DecisionKind::Sacrifice)) || g.has_option(Choice::Card(bf(g, 0, "Elvish Mystic")))
+    });
     if g.kind() == Some(DecisionKind::Sacrifice) {
         g.choose(Choice::Card(bf(&g, 0, "Elvish Mystic")));
     }
@@ -227,7 +249,9 @@ fn crop_rotation_sacrifices_a_land_to_put_any_land_card_onto_the_battlefield() {
         .start();
     let cr = g.card(0, "Crop Rotation", Zone::Hand);
     g.choose(Choice::Cast(cr)); // an instant: in the upkeep
-    g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana)));
+    g.drive_until(|g| {
+        at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana))
+    });
     pay(&mut g);
     if g.kind() == Some(DecisionKind::Sacrifice) {
         g.choose(Choice::Card(bf(&g, 0, "Island")));
@@ -273,7 +297,8 @@ fn dig_through_time_delves_and_takes_two_of_the_top_seven() {
     // "Delve. Look at the top seven cards of your library. Put two of them
     // into your hand and the rest on the bottom of your library in any
     // order."
-    let lib = ["Lightning Bolt", "Counterspell", "Sol Ring", "Forest", "Plains", "Swamp", "Mountain", "Island", "Island"];
+    let lib =
+        ["Lightning Bolt", "Counterspell", "Sol Ring", "Forest", "Plains", "Swamp", "Mountain", "Island", "Island"];
     let mut g = Scenario::new(db())
         .spec(|s| s.auto_single = false)
         .battlefield(0, &["Island", "Island"])
@@ -407,7 +432,12 @@ fn exorcise_exiles_an_artifact_an_enchantment_or_a_big_creature() {
     pay(&mut g);
     settle(&mut g);
     assert_eq!(g.obj(tr).zone, Zone::Exile);
-    let g = scen().battlefield(0, &["Plains", "Plains"]).hand(0, &["Exorcise"]).battlefield(1, &["Sol Ring"]).at(Step::Upkeep, 0).start();
+    let g = scen()
+        .battlefield(0, &["Plains", "Plains"])
+        .hand(0, &["Exorcise"])
+        .battlefield(1, &["Sol Ring"])
+        .at(Step::Upkeep, 0)
+        .start();
     assert!(!g.has_option(Choice::Cast(g.card(0, "Exorcise", Zone::Hand))), "a sorcery");
 }
 
@@ -460,7 +490,9 @@ fn boomerang_basics_bounces_a_nonland_permanent_and_draws_if_it_was_yours() {
     let bb = g.card(0, "Boomerang Basics", Zone::Hand);
     let bear = bf(&g, 1, "Test Bear");
     g.choose(Choice::Cast(bb));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g.kind() == Some(DecisionKind::Target) {
         g.choose(g.tgt(bear));
     }
@@ -516,9 +548,19 @@ fn mine_collapse_sacrifices_a_mountain_on_your_turn_for_five_damage() {
     assert_eq!(g.to_move(), Some(0));
     assert!(!g.has_option(Choice::Cast(g.card(0, "Mine Collapse", Zone::Hand))), "the opponent's turn");
     // A Mountain is needed: Taiga is one.
-    let g = scen().battlefield(0, &["Taiga"]).hand(0, &["Mine Collapse"]).battlefield(1, &["Test Bear"]).at(Step::Main1, 0).start();
+    let g = scen()
+        .battlefield(0, &["Taiga"])
+        .hand(0, &["Mine Collapse"])
+        .battlefield(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
     assert!(g.has_option(Choice::Cast(g.card(0, "Mine Collapse", Zone::Hand))));
-    let g = scen().battlefield(0, &["Forest"]).hand(0, &["Mine Collapse"]).battlefield(1, &["Test Bear"]).at(Step::Main1, 0).start();
+    let g = scen()
+        .battlefield(0, &["Forest"])
+        .hand(0, &["Mine Collapse"])
+        .battlefield(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
     assert!(!g.has_option(Choice::Cast(g.card(0, "Mine Collapse", Zone::Hand))));
 }
 
@@ -566,11 +608,7 @@ fn force_of_vigor_exiles_a_green_card_on_the_opponents_turn_to_destroy_two() {
     assert_eq!(g.obj(oath).zone, Zone::Graveyard);
     assert_eq!(g.count_in(1, "Mox Jet", Zone::Battlefield), 1);
     // On your own turn only the mana cost: no lands, no cast.
-    let g = scen()
-        .hand(0, &["Force of Vigor", "Test Bear"])
-        .battlefield(1, &["Sol Ring"])
-        .at(Step::Main1, 0)
-        .start();
+    let g = scen().hand(0, &["Force of Vigor", "Test Bear"]).battlefield(1, &["Sol Ring"]).at(Step::Main1, 0).start();
     assert!(!g.has_option(Choice::Cast(g.card(0, "Force of Vigor", Zone::Hand))), "your turn");
 }
 
@@ -755,7 +793,9 @@ fn flashback_grants_flashback_for_its_mana_cost_to_an_instant_or_sorcery_card() 
     assert!(!g.has_option(Choice::Cast(bolt)));
     let fb = g.card(0, "Flashback", Zone::Hand);
     g.choose(Choice::Cast(fb));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g.kind() == Some(DecisionKind::Target) {
         assert!(!g.has_option(g.tgt(g.card(0, "Test Bear", Zone::Graveyard))), "an instant or sorcery card");
         assert!(!g.has_option(g.tgt(g.card(1, "Counterspell", Zone::Graveyard))), "your graveyard");
@@ -846,7 +886,9 @@ fn touch_the_spirit_realm_exiles_until_it_leaves() {
     assert_eq!(g2.obj(bear).zone, Zone::Exile);
     let bb = g2.card(0, "Boomerang Basics", Zone::Hand);
     g2.choose(Choice::Cast(bb));
-    g2.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    g2.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g2.kind() == Some(DecisionKind::Target) {
         let t = bf(&g2, 0, "Touch the Spirit Realm");
         g2.choose(g2.tgt(t));
@@ -872,7 +914,9 @@ fn touch_the_spirit_realm_channel_flickers_until_the_next_end_step() {
     let t = g.card(0, "Touch the Spirit Realm", Zone::Hand);
     let bear = bf(&g, 1, "Test Bear");
     g.choose(Choice::Ability(t, AbilitySlot::Hand(0)));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g.kind() == Some(DecisionKind::Target) {
         assert!(!g.has_option(Choice::Pass), "exactly one target");
         g.choose(g.tgt(bear));
@@ -881,7 +925,12 @@ fn touch_the_spirit_realm_channel_flickers_until_the_next_end_step() {
     assert_eq!(g.obj(t).zone, Zone::Graveyard, "discarded");
     settle(&mut g);
     assert_eq!(g.obj(bear).zone, Zone::Exile);
-    quiet_until(&mut g, |g| g.turn().step == Step::End && g.stack().is_empty() && at_priority(g) && g.count_in(1, "Test Bear", Zone::Battlefield) == 1);
+    quiet_until(&mut g, |g| {
+        g.turn().step == Step::End
+            && g.stack().is_empty()
+            && at_priority(g)
+            && g.count_in(1, "Test Bear", Zone::Battlefield) == 1
+    });
     let back = bf(&g, 1, "Test Bear");
     assert_eq!(g.obj(back).controller, 1);
     assert_eq!(g.turn().number, 3, "this turn's end step");

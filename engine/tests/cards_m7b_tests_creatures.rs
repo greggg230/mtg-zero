@@ -41,11 +41,15 @@ fn subtype(g: &Game, c: CardIdx, s: &str) -> bool {
 /// Pay with the first source offered (and the first production) until the
 /// payment is done.
 fn pay(g: &mut Game) {
-    g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+    g.drive_until(|g| {
+        at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana))
+    });
     while matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)) {
         let c = g.pending_decision().unwrap().options[0].choice;
         g.choose(c);
-        g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+        g.drive_until(|g| {
+            at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana))
+        });
     }
 }
 
@@ -53,7 +57,9 @@ fn pay(g: &mut Game) {
 /// mana cost), then pay with the first sources.
 fn cast_card(g: &mut Game, c: CardIdx, alt: u8) {
     g.choose(Choice::Cast(c));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::ChooseAltCost) || g.kind() == Some(DecisionKind::PayMana));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::ChooseAltCost) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g.kind() == Some(DecisionKind::ChooseAltCost) {
         g.choose(Choice::Number(alt));
     }
@@ -298,7 +304,8 @@ fn bejeweled_warg_combat_damage_to_a_player_counter_on_a_wolf_or_a_treasure() {
         }
     }
     // Blocked and dealing no damage to the player: no trigger.
-    let mut g = scen().battlefield(0, &["Bejeweled Warg"]).battlefield(1, &["Test Wall"]).at(Step::DeclareAttackers, 0).start();
+    let mut g =
+        scen().battlefield(0, &["Bejeweled Warg"]).battlefield(1, &["Test Wall"]).at(Step::DeclareAttackers, 0).start();
     let warg = bf(&g, 0, "Bejeweled Warg");
     let wall = bf(&g, 1, "Test Wall");
     g.choose(Choice::Card(warg));
@@ -358,11 +365,7 @@ fn bristly_bill_landfall_counter_and_doubling() {
     assert_eq!(g.counters_on(bill, Counter::P1P1), 0);
     assert_eq!(g.pt(bear), (4, 4));
     // An opponent's land entering doesn't trigger it.
-    let mut g = scen()
-        .battlefield(0, &["Bristly Bill, Spine Sower"])
-        .hand(1, &["Forest"])
-        .at(Step::Main1, 1)
-        .start();
+    let mut g = scen().battlefield(0, &["Bristly Bill, Spine Sower"]).hand(1, &["Forest"]).at(Step::Main1, 1).start();
     let f = g.card(1, "Forest", Zone::Hand);
     g.choose(Choice::Play(f));
     g.drive_until(|g| !at_priority(g) || g.stack().is_empty());
@@ -531,7 +534,9 @@ fn goblin_engineer_entombs_an_artifact_and_reanimates_a_cheap_one() {
     assert!(!g.has_option(g.tgt(g.card(0, "Kaldra Compleat", Zone::Graveyard))), "mana value 7");
     assert!(!g.has_option(g.tgt(g.card(1, "Grim Monolith", Zone::Graveyard))), "your graveyard");
     g.choose(g.tgt(stone));
-    g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana)));
+    g.drive_until(|g| {
+        at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana))
+    });
     pay(&mut g);
     if g.kind() == Some(DecisionKind::Sacrifice) {
         g.choose(Choice::Card(ring));
@@ -557,7 +562,9 @@ fn grief_evoked_takes_a_nonland_card_from_the_revealed_hand_then_is_sacrificed()
         .start();
     let grief = g.card(0, "Grief", Zone::Hand);
     g.choose(Choice::Cast(grief));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::ChooseAltCost) || g.kind() == Some(DecisionKind::ExileCost));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::ChooseAltCost) || g.kind() == Some(DecisionKind::ExileCost)
+    });
     if g.kind() == Some(DecisionKind::ChooseAltCost) {
         g.choose(Choice::Number(1));
     }
@@ -584,12 +591,8 @@ fn grief_evoked_takes_a_nonland_card_from_the_revealed_hand_then_is_sacrificed()
 
 #[test]
 fn grief_hard_cast_stays_with_menace() {
-    let mut g = scen()
-        .battlefield(0, &["Swamp"; 4])
-        .hand(0, &["Grief"])
-        .hand(1, &["Island"])
-        .at(Step::Main1, 0)
-        .start();
+    let mut g =
+        scen().battlefield(0, &["Swamp"; 4]).hand(0, &["Grief"]).hand(1, &["Island"]).at(Step::Main1, 0).start();
     let grief = g.card(0, "Grief", Zone::Hand);
     cast_card(&mut g, grief, 0);
     resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then(|| player(1)));

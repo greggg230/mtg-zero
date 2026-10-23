@@ -242,12 +242,8 @@ fn fast_lands_enter_untapped_with_two_or_fewer_other_lands() {
 /// "{T}, Pay 1 life: Add A or B. {1}, {T}, Sacrifice this land: Draw a card."
 #[test]
 fn horizon_lands_pay_one_life_per_mana_and_sacrifice_to_draw() {
-    let rows: &[(&str, &str)] = &[
-        ("Fiery Islet", "UR"),
-        ("Nurturing Peatland", "BG"),
-        ("Sunbaked Canyon", "WR"),
-        ("Waterlogged Grove", "UG"),
-    ];
+    let rows: &[(&str, &str)] =
+        &[("Fiery Islet", "UR"), ("Nurturing Peatland", "BG"), ("Sunbaked Canyon", "WR"), ("Waterlogged Grove", "UG")];
     for &(name, colors) in rows {
         assert_eq!(land_colors(name), colors, "{name}");
         // Paying a spell's {1} with it costs 1 life.

@@ -42,7 +42,9 @@ fn pay(g: &mut Game) {
     while matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)) {
         let c = g.pending_decision().unwrap().options[0].choice;
         g.choose(c);
-        g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+        g.drive_until(|g| {
+            at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana))
+        });
     }
 }
 
@@ -140,8 +142,7 @@ fn talismans_tap_for_colorless_or_one_of_two_colors_for_one_damage() {
 /// once (302.6 applies to creatures only).
 #[test]
 fn moxen_and_gleemox_cost_zero_and_tap_for_their_mana_at_once() {
-    let rows: &[(&str, &str)] =
-        &[("Mox Emerald", "G"), ("Mox Ruby", "R"), ("Mox Sapphire", "U"), ("Gleemox", "WUBRG")];
+    let rows: &[(&str, &str)] = &[("Mox Emerald", "G"), ("Mox Ruby", "R"), ("Mox Sapphire", "U"), ("Gleemox", "WUBRG")];
     for &(name, colors) in rows {
         assert_eq!(colors_of_source(name), colors, "{name}");
         let g = scen().battlefield(0, &[name]).at(Step::Main1, 0).start();
@@ -321,11 +322,8 @@ fn manifold_key_untaps_another_artifact_or_makes_a_creature_unblockable() {
 
 #[test]
 fn retrofitter_foundry_makes_servos_thopters_and_constructs() {
-    let mut g = scen()
-        .battlefield(0, &["Retrofitter Foundry"])
-        .battlefield(0, &["Island"; 6])
-        .at(Step::Main1, 0)
-        .start();
+    let mut g =
+        scen().battlefield(0, &["Retrofitter Foundry"]).battlefield(0, &["Island"; 6]).at(Step::Main1, 0).start();
     let rf = bf(&g, 0, "Retrofitter Foundry");
     // Nothing to sacrifice: the Thopter and Construct abilities can't be
     // activated.
@@ -505,13 +503,7 @@ fn cori_steel_cutter_makes_a_monk_on_your_second_spell_and_may_attach() {
     // to it."
     bolt(&mut g);
     let mut asked = false;
-    resolve_with(&mut g, |g| {
-        if g.kind() == Some(DecisionKind::YesNo) {
-            Some(Choice::Yes)
-        } else {
-            None
-        }
-    });
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::YesNo) { Some(Choice::Yes) } else { None });
     let monk = bf(&g, 0, "Monk");
     asked |= g.obj(cutter).attached.is_some();
     assert!(asked, "attached");
@@ -531,10 +523,8 @@ fn cori_steel_cutter_makes_a_monk_on_your_second_spell_and_may_attach() {
 #[test]
 fn cori_steel_cutter_equips_for_one_and_red_at_sorcery_speed() {
     // "Equip {1}{R}"
-    let mut g = scen()
-        .battlefield(0, &["Cori-Steel Cutter", "Mountain", "Mountain", "Test Bear"])
-        .at(Step::Main1, 0)
-        .start();
+    let mut g =
+        scen().battlefield(0, &["Cori-Steel Cutter", "Mountain", "Mountain", "Test Bear"]).at(Step::Main1, 0).start();
     let cutter = bf(&g, 0, "Cori-Steel Cutter");
     let bear = bf(&g, 0, "Test Bear");
     g.choose(act(cutter, 0));
@@ -544,9 +534,7 @@ fn cori_steel_cutter_equips_for_one_and_red_at_sorcery_speed() {
     assert_eq!(g.pt(bear), (3, 3));
     assert!(g.has_kw(bear, Kw::Trample) && g.has_kw(bear, Kw::Haste));
     // Not at instant speed (the upkeep).
-    let g = scen()
-        .battlefield(0, &["Cori-Steel Cutter", "Mountain", "Mountain", "Test Bear"])
-        .at(Step::Upkeep, 0)
-        .start();
+    let g =
+        scen().battlefield(0, &["Cori-Steel Cutter", "Mountain", "Mountain", "Test Bear"]).at(Step::Upkeep, 0).start();
     assert!(!g.has_option(act(bf(&g, 0, "Cori-Steel Cutter"), 0)));
 }

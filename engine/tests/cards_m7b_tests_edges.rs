@@ -178,7 +178,11 @@ fn cr_610_3c_touch_the_spirit_realm_gone_before_its_trigger_resolves_exiles_noth
     // Resolve the spell; stop with the trigger (its target chosen) on the
     // stack.
     for _ in 0..50 {
-        if g.stack().len() == 1 && at_priority(&g) && g.to_move() == Some(0) && g.count_in(0, "Touch the Spirit Realm", Zone::Battlefield) == 1 {
+        if g.stack().len() == 1
+            && at_priority(&g)
+            && g.to_move() == Some(0)
+            && g.count_in(0, "Touch the Spirit Realm", Zone::Battlefield) == 1
+        {
             break;
         }
         match g.kind() {
@@ -198,7 +202,9 @@ fn cr_610_3c_touch_the_spirit_realm_gone_before_its_trigger_resolves_exiles_noth
     assert_eq!(g.stack().len(), 1, "the enters trigger waits");
     let tsr = bf(&g, 0, "Touch the Spirit Realm");
     g.choose(act(cc, 0));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g.kind() == Some(DecisionKind::Target) {
         g.choose(g.tgt(tsr));
     }
@@ -226,7 +232,9 @@ fn erode_lets_the_controller_search_even_if_the_creature_isnt_destroyed() {
     let ind = bf(&g, 1, "Test Indestructible");
     let erode = g.card(0, "Erode", Zone::Hand);
     g.choose(Choice::Cast(erode));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g.kind() == Some(DecisionKind::Target) {
         g.choose(g.tgt(ind));
     }
@@ -296,7 +304,9 @@ fn flashback_granted_by_flashback_ends_at_end_of_turn() {
         .start();
     let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
     cast(&mut g, 0, "Flashback");
-    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then(|| g.tgt(g.card(0, "Lightning Bolt", Zone::Graveyard))));
+    resolve_with(&mut g, |g| {
+        (g.kind() == Some(DecisionKind::Target)).then(|| g.tgt(g.card(0, "Lightning Bolt", Zone::Graveyard)))
+    });
     assert!(g.has_option(Choice::Cast(bolt)));
     let t0 = g.turn().number;
     quiet_until(&mut g, |g| g.turn().number == t0 + 1 && g.to_move() == Some(0) && at_priority(g));
@@ -377,7 +387,9 @@ fn cr_602_2b_goblin_engineer_may_sacrifice_the_mox_that_paid_its_red() {
     let mox = bf(&g, 0, "Mox Ruby");
     assert!(g.has_option(act(ge, 0)), "the Mox pays {{R}} and is the artifact sacrificed");
     g.choose(act(ge, 0));
-    g.drive_until(|g| !matches!(g.kind(), Some(DecisionKind::Target)) || g.pending_decision().unwrap().options.len() > 1);
+    g.drive_until(|g| {
+        !matches!(g.kind(), Some(DecisionKind::Target)) || g.pending_decision().unwrap().options.len() > 1
+    });
     let stone = g.card(0, "Mind Stone", Zone::Graveyard);
     if g.kind() == Some(DecisionKind::Target) {
         g.choose(g.tgt(stone));
@@ -461,7 +473,9 @@ fn cr_614_1c_crop_rotation_puts_a_triome_or_fast_land_in_as_it_would_enter() {
             .start();
         let cr = g.card(0, "Crop Rotation", Zone::Hand);
         g.choose(Choice::Cast(cr));
-        g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana)));
+        g.drive_until(|g| {
+            at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana))
+        });
         pay(&mut g);
         if g.kind() == Some(DecisionKind::Sacrifice) {
             // Sacrifice an Island (the Forest paid {G} or not; keep the

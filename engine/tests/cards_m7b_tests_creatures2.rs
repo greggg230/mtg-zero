@@ -39,17 +39,23 @@ fn subtype(g: &Game, c: CardIdx, s: &str) -> bool {
 }
 
 fn pay(g: &mut Game) {
-    g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+    g.drive_until(|g| {
+        at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana))
+    });
     while matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)) {
         let c = g.pending_decision().unwrap().options[0].choice;
         g.choose(c);
-        g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+        g.drive_until(|g| {
+            at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana))
+        });
     }
 }
 
 fn cast_card(g: &mut Game, c: CardIdx, alt: u8) {
     g.choose(Choice::Cast(c));
-    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::ChooseAltCost) || g.kind() == Some(DecisionKind::PayMana));
+    g.drive_until(|g| {
+        at_priority(g) || g.kind() == Some(DecisionKind::ChooseAltCost) || g.kind() == Some(DecisionKind::PayMana)
+    });
     if g.kind() == Some(DecisionKind::ChooseAltCost) {
         g.choose(Choice::Number(alt));
     }
@@ -98,7 +104,12 @@ fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
 
 /// Declare `attackers` (P0's declare attackers decision pending), no
 /// blocks; answer the rest with `answer` until `stop`.
-fn attack_until(g: &mut Game, attackers: &[CardIdx], answer: impl Fn(&Game) -> Option<Choice>, stop: impl Fn(&Game) -> bool) {
+fn attack_until(
+    g: &mut Game,
+    attackers: &[CardIdx],
+    answer: impl Fn(&Game) -> Option<Choice>,
+    stop: impl Fn(&Game) -> bool,
+) {
     assert_eq!(g.kind(), Some(DecisionKind::DeclareAttackers));
     let mut sorted = attackers.to_vec();
     sorted.sort_by_key(|&c| g.battlefield().iter().position(|&x| x == c));
@@ -181,7 +192,11 @@ fn knight_of_autumn_enters_with_one_of_three_modes() {
     }
     // 700.2: with no artifact or enchantment, the destroy mode can't be
     // chosen.
-    let mut g = scen().battlefield(0, &["Forest", "Plains", "Plains"]).hand(0, &["Knight of Autumn"]).at(Step::Main1, 0).start();
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Plains", "Plains"])
+        .hand(0, &["Knight of Autumn"])
+        .at(Step::Main1, 0)
+        .start();
     cast(&mut g, 0, "Knight of Autumn");
     g.drive_until(|g| !at_priority(g) || g.stack().is_empty());
     assert_eq!(g.kind(), Some(DecisionKind::ChooseMode));
@@ -366,10 +381,8 @@ fn phelia_flickers_a_nonland_permanent_until_the_end_step() {
     assert_eq!(g.obj(bear).controller, 1, "under its owner's control");
     assert_eq!(g.counters_on(phelia, Counter::P1P1), 0, "it entered under P1's control");
     // Your own permanent: it returns under your control, Phelia grows.
-    let mut g = scen()
-        .battlefield(0, &["Phelia, Exuberant Shepherd", "Sol Ring"])
-        .at(Step::DeclareAttackers, 0)
-        .start();
+    let mut g =
+        scen().battlefield(0, &["Phelia, Exuberant Shepherd", "Sol Ring"]).at(Step::DeclareAttackers, 0).start();
     let phelia = bf(&g, 0, "Phelia, Exuberant Shepherd");
     attack_until(
         &mut g,
