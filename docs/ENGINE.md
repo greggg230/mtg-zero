@@ -2,8 +2,8 @@
 
 Status: M7a (threats first: layers and continuous effects, counters, generic triggers,
 protection and combat restrictions, alternative costs, X, kicker, delve, casting from
-graveyards and exile, linked exile, delayed and reflexive triggers; 340 supported cube cards;
-section 23), 2026-10-22; M5b a token network and stable card identities (section 22); M5a
+graveyards and exile, linked exile, delayed and reflexive triggers, the monarch; 360
+supported cube cards; section 23), 2026-10-22; M5b a token network and stable card identities (section 22); M5a
 the zero-core game `mtg` (`SearchGame`, `force_chance`, `encode`, decks, bots, the `mtgz`
 package and a first self-play run; section 21); M4b-2 added hidden
 information (library searches, looking at libraries and hands, partial knowledge; modal
@@ -556,35 +556,38 @@ turn, counters, generic triggers with event subjects and delayed / reflexive tri
 protection and combat restrictions, equipment, alternative costs (evoke, dash, the Forces),
 cost changes, kicker, X, delve, crew, graveyard and counter costs, flashback, escape,
 permissions to play exiled cards, lands from graveyards, extra land drops, linked exile,
-graveyard targets, coin flips, energy, amass, persist, monstrosity, living weapon, devotion.
+graveyard targets, coin flips, energy, amass, persist, monstrosity, living weapon, devotion,
+buyback, overload, escalate, level up, the monarch, token copies of tokens and of the card
+itself.
 
-Supported cube cards: 340 (M4b-2: 191, M4b-1: 133, M4a: 31); creatures 104 (M4b-2: 20).
-New in M7a (149): Abandoned Air Temple, Adeline, Agent Bishop, Alpha Deathclaw, Archon of
-Cruelty, Arwen, Atraxa, Auriok Salvagers, Baleful Mastery, Baloth Prime, Barrowgoyf, Basalt
+Supported cube cards: 360 (M4b-2: 191, M4b-1: 133, M4a: 31); creatures 113 (M4b-2: 20).
+New in M7a (169): Abandoned Air Temple, Adeline, Agent Bishop, Alpha Deathclaw, Aragorn,
+Archon of Cruelty, Archon of Emeria, Arwen, Atraxa, Auriok Salvagers, Baleful Mastery, Baloth Prime, Barrowgoyf, Basalt
 Monolith, Bejeweled Warg, Bloodtithe Harvester, Boomerang Basics, Bristly Bill, Burst
 Lightning, Carnage Interpreter, Chaos Defiler, Clarion Conqueror, Consult the Star Charts,
-Containment Priest, Cori-Steel Cutter, Council's Judgment, Crucible of Worlds, Cryogen Relic,
-Dark Confidant, Daze, Death-Greeter's Champion, Deep-Cavern Bat, Dig Through Time, Dismember,
-Displacer Kitten, Dragon's Rage Channeler, Eagles of the North, Echo of Eons, Endurance,
-Exhume, Expressive Iteration, Faerie Mastermind, Faithless Looting, Figure of Destiny, Figure
+Collective Brutality, Containment Priest, Cori-Steel Cutter, Corpse Dance, Council's
+Judgment, Crucible of Worlds, Cryogen Relic, Damn, Dark Confidant, Daze, Death-Greeter's Champion, Deep-Cavern Bat, Dig Through Time, Dismember,
+Displacer Kitten, Dragon's Rage Channeler, Eagles of the North, Echo of Eons, Emry, Endurance,
+Esika's Chariot, Exhume, Expressive Iteration, Faerie Mastermind, Faithless Looting, Figure of Destiny, Figure
 of Fable, Flash, Flashback, Flickerwisp, Force of Negation, Force of Vigor, Force of Will,
 Formidable Speaker, Frantic Search, Fury, Galvanic Discharge, Get Lost, Ghost Vacuum, Giver
 of Runes, Glimmer Lens, Goblin Engineer, Golos, Grief, Grim Monolith, Grindstone, Guide of
-Souls, Gut, Harvester of Misery, Icetill Explorer, Ignoble Hierarch, Iron-Shield Elf, Ivora,
-Knight of Autumn, Kolaghan's Command, Leatherhead, Leyline Binding, Lightning Greaves,
+Souls, Gut, Harvester of Misery, Hexdrinker, Icetill Explorer, Ignoble Hierarch, Iron-Shield Elf, Ivora,
+Kaldra Compleat, Knight of Autumn, Kolaghan's Command, Leatherhead, Leyline Binding, Lightning Greaves,
 Lingering Souls, Lotus Cobra, Luminarch Aspirant, Magda, Mana Crypt, Mana Drain, Manifold
 Key, Mind Twist, Mine Collapse, Mishra's Bauble, Mole Man, Mother of Runes, Mox Diamond,
-Nettlecyst, Noble Hierarch, Oath of Druids, Oliphaunt, Once Upon a Time, Orcish Bowmasters,
-Ouroboroid, Phelia, Phlage, Portable Hole, Psychic Frog, Pyrogoyf, Pyrokinesis, Questing
-Beast, Ragavan, Ravenous Robots, Reanimate, Restless Vinestalk, Retrofitter Foundry, Robber
+Nettlecyst, Noble Hierarch, Oath of Druids, Okoye, Oliphaunt, Once Upon a Time, Orcish Bowmasters,
+Ouroboroid, Palace Jailer, Phelia, Phlage, Portable Hole, Psychic Frog, Pyrogoyf, Pyrokinesis, Questing
+Beast, Ragavan, Raph & Mikey, Ravenous Robots, Reanimate, Reckoner Bankbuster, Restless Vinestalk, Retrofitter Foundry, Robber
 of the Rich, Sanguine Evangelist, Screaming Nemesis, Scythecat Cub, Sentinel of the Nameless
 City, Sewer-veillance Cam, Shallow Grave, Sheoldred, the Apocalypse, Skateboard, Skullclamp,
 Skyclave Apparition, Smuggler's Copter, Snapcaster Mage, Sneak Attack, Snuff Out, Solitude,
-Soul-Guide Lantern, Spectacular Spider-Man, Subtlety, Super Shredder, Sylvan Safekeeper, Tear
-Asunder, Territorial Kavu, Thalia, Thassa's Oracle, The Fantasticar, Tidehollow Sculler,
+Soul-Guide Lantern, Spectacular Spider-Man, Spider-Woman, Staff of the Storyteller,
+Subtlety, Super Shredder, Suplex, Sylvan Safekeeper, Tear
+Asunder, Territorial Kavu, Thalia, Thassa's Oracle, The Fantasticar, Tidehollow Sculler, Time Spiral,
 Titania, Torsten, Touch the Spirit Realm, Traumatic Critique, Treasure Cruise, Troll of
-Khazad-dûm, True-Name Nemesis, Unearth, Unexpectedly Absent, Upheaval, Uro, Urza's Bauble,
-Walking Ballista, Witherbloom Apprentice, Wolverine, Woodfall Primus. New in M4b-2 (58): the fetch lands Arid
+Khazad-dûm, True-Name Nemesis, Underworld Breach, Unearth, Unexpectedly Absent, Upheaval, Uro, Urza's Bauble,
+Vaultborn Tyrant, Walking Ballista, Wishclaw Talisman, Witherbloom Apprentice, Wolverine, Woodfall Primus. New in M4b-2 (58): the fetch lands Arid
 Mesa, Bloodstained Mire, Flooded Strand, Marsh Flats, Misty Rainforest, Polluted Delta,
 Scalding Tarn, Verdant Catacombs, Windswept Heath, Wooded Foothills, Prismatic Vista; the
 surveil lands Commercial District, Elegant Parlor, Hedge Maze, Lush Portico, Meticulous
@@ -615,8 +618,8 @@ Caryatid, the six Talismans, Time Warp, Unholy Heat, Vindicate, Voltaic Key, Whe
 Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED`.
 
 Not yet (later milestones; each is a blocker in the support report, never a silent no-op):
-planeswalkers and loyalty (and attacking them), battles, copies (of spells, token copies,
-"enters as a copy"), transform and double-faced cards, adventures, ward, targeting abilities
+planeswalkers and loyalty (and attacking them), battles, copies (of spells, token copies of
+nontoken permanents, "enters as a copy"), transform and double-faced cards, adventures, ward, targeting abilities
 on the stack, the initiative and the monarch, sagas, replacement and prevention effects beyond
 the ones above, escalate and spree, multikicker, mana with spend restrictions, mana abilities
 whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic Star),
@@ -771,7 +774,7 @@ Separately, 30 games are replayed from their seed and action list and must repro
 final state hash, the outcome and the chance-key sequence exactly. `FUZZ_GAMES=n` sets the
 game count (default 300). A failing game prints its seed; `FUZZ_FIRST=s FUZZ_GAMES=1
 FUZZ_LOG=1` reruns it with the game log in the panic message. M4b-2: 20,000 games in release,
-no failure (see section 17 for the time). M7a: 20,000 games over the 340 cards, no failure.
+no failure (see section 17 for the time). M7a: 20,000 games over the 360 cards, no failure.
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
@@ -821,14 +824,14 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 `tests/perf.rs`; random decks of every supported card as in the fuzzer, mulligans on,
 `auto_single` on.
 
-| Measure | M7a (340 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
+| Measure | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
 |---|---|---|---|---|
-| Random play | 905 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
-| Per exposed decision (`apply`, running to the next decision) | 5.0 us (220 decisions, 29 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
-| `Game::clone` (mean over mid-game states) | 0.98 us (6,160 states); `size_of::<Game>()` = 880 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
+| Random play | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
+| Per exposed decision (`apply`, running to the next decision) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
+| `Game::clone` (mean over mid-game states) | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
 | `clone` + `determinize(to_move)` (one search simulation's setup) | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
 | `legal_actions` (copies cached ids) | 4 ns | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 79 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+| Fuzzer, 20,000 games, release | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
@@ -1494,8 +1497,8 @@ Readout:
 
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
-M7a grew the supported cube from 191 to 340 cards, creatures from 20 to 104 (threats, i.e.
-creatures, Vehicles, Equipment, manlands, token makers and burn, from 37 to 125). The work
+M7a grew the supported cube from 191 to 360 cards, creatures from 20 to 113 (threats, i.e.
+creatures, Vehicles, Equipment, manlands, token makers and burn, from 37 to 139). The work
 went feature by feature in the order the threat view of the support report (23.9) gave:
 threats unlocked per unit of work. Every card's IR was read against its Oracle text; a
 mismatch is a blocker, not a guess (23.10).
@@ -1576,7 +1579,11 @@ control can't be prevented" overrides protection's prevention.
   cast without paying its mana cost), paid as generic mana, read by `Amount::X`, counted in
   the mana value on the stack (202.3e), "enters with X +1/+1 counters".
 * **Delve** (702.66): graveyard cards exiled while paying, one decision per card in
-  increasing slot order, never leaving the rest unpayable.
+  increasing slot order, never leaving the rest unpayable (nor taking what escape exiles).
+* **Buyback** (702.27): an optional additional cost; the spell goes to hand as it resolves.
+  **Overload** (702.96): the alternative cost picks the "each" effect, a mode given by the
+  cost like kicker. **Escalate** (702.120): each mode beyond the first needs a card to
+  discard (and the mana payable while keeping it); the discards follow the mana.
 * **Other cost parts**: exile a card of a kind from your hand, return permanents to hand,
   exile n cards from your graveyard (a set: increasing positions), remove counters from the
   source (by kind or name), crew n (702.122: untapped creatures other than the Vehicle, one
@@ -1588,8 +1595,9 @@ control can't be prevented" overrides protection's prevention.
 `cast_route` says how a card may be cast from where it is: from hand; from its owner's
 graveyard with **flashback** (702.34; printed, or granted for its mana cost by Snapcaster
 Mage or Flashback; the card is exiled whenever it would leave the stack) or **escape**
-(702.138; the permanent knows it escaped); from exile with a **permission**
-(`Game.permissions`: Golos, Ragavan, Robber of the Rich, Expressive Iteration; this turn or
+(702.138; the permanent knows it escaped; Underworld Breach gives every nonland card escape
+for its mana cost and three other cards); from exile or a graveyard with a **permission**
+(`Game.permissions`: Golos, Ragavan, Robber of the Rich, Expressive Iteration, Emry; this turn or
 while exiled, free, "mana as though of any colour", "during any turn you attacked with a
 Rogue"). Lands may be played from exile with a permission or from the graveyard ("you may
 play lands from your graveyard"); additional land drops (305.2) count. Priority ids: a
@@ -1597,6 +1605,19 @@ graveyard card is its `GRAVEYARD` slot; an exiled card with a permission is `EXI
 k-th such card in exile order (980-1011, section 11). A card cast this way is its own source
 for protection and never its own graveyard target. "Without paying its mana cost" is an
 alternative cost; flashback, escape and permissions don't combine with another one (118.9a).
+
+### 23.5a The monarch, level up, token copies
+
+* **The monarch** (724): `Game.monarch`; becoming it, the end-step draw, combat damage to the
+  monarch taking it, "until an opponent becomes the monarch" exile (Palace Jailer), "if you're
+  the monarch".
+* **Level up** (711): level counters pick the base P/T (`PtCda::Leveler`) and the statics
+  (`Cond::SourceCountersIn`, read against the static's own source).
+* **Token copies**: of a token (its definition, 707.2); of the card itself ("except it's an
+  artifact", 707.9b): a placeholder token index the lowering fills with the card's own
+  definition once the card is lowered (Vaultborn Tyrant).
+* **Counters as they last existed** (608.2h): `Game.lki_counters` keeps a leaving
+  permanent's counters for the rest of the turn ("if there are no charge counters on it").
 
 ### 23.6 Linked and delayed exile (607.2a, 610.3)
 
@@ -1641,7 +1662,7 @@ bipartite matching of chosen cards to card types).
 `cargo test -p engine --test support threat_report -- --nocapture` classifies every cube
 card as a threat (creature; Vehicle; Equipment; manland; token maker; burn) or not, and ranks
 features by the threats they block alone and in total, with a greedy staging over threats.
-At the end of M7a: threats 125 supported (104 creatures), 121 blocked (105 creatures).
+At the end of M7a: threats 139 supported (113 creatures), 107 blocked (96 creatures).
 
 ### 23.10 Blocked by the IR, not by the engine
 
@@ -1666,6 +1687,11 @@ At the end of M7a: threats 125 supported (104 creatures), 121 blocked (105 creat
   supported effect puts it onto the battlefield).
 * Escape granted by Underworld Breach isn't offered for a card with its own additional
   costs (Bitter Triumph): the two costs would have to be paid as one.
+* The monarch's end-step draw and "combat damage to the monarch" happen at once, not as
+  triggered abilities on the stack; so does Okoye's "whenever that creature attacks the
+  monarch this turn" (as the attack is declared).
+* A graveyard card's castability is checked on a clone with the card on the stack (leaving
+  the graveyard can change a goyf's power and so what is targetable).
 * "True-Name Nemesis": choosing yourself is offered (a `Target` decision with `PLAYER` ids;
   dominated, but legal).
 * The tap-or-untap choice, a counter kind to remove, an energy amount and X use `ChooseMode`
