@@ -297,7 +297,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.ward_discard_chosen", ward_discard_chosen);
         l.deny("CardPrinting.ward_life_cost", ward_life_cost);
         l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
-        l.deny("CardPrinting.crew_power_bonus", crew_power_bonus);
         l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
         l.deny("CardPrinting.sunburst", sunburst);
         l.deny("CardPrinting.grants_play_from_top_paying_life", grants_play_from_top_paying_life);
@@ -378,8 +377,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.evoke_cost", evoke_cost);
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.opponents_cant_cast_spells_during_your_turn", opponents_cant_cast_spells_during_your_turn);
-        l.deny("CardPrinting.each_player_one_spell_per_turn", each_player_one_spell_per_turn);
-        l.deny("CardPrinting.opponents_nonbasic_lands_enter_tapped", opponents_nonbasic_lands_enter_tapped);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
         l.deny("CardPrinting.grants_once_per_turn_graveyard_play_mv", grants_once_per_turn_graveyard_play_mv);
@@ -674,7 +671,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                         l.unsupported("CardPrinting.kicker_cost(modal effect)");
                     }
                     Some(crate::db::AbilityDef {
-                        modes: Some(Box::new(crate::db::Modes { list: vec![plain, kicked], min: 1, max: 1, repeat: false })),
+                        modes: Some(Box::new(crate::db::Modes { list: vec![plain, kicked], min: 1, max: 1, repeat: false, escalate_discard: false })),
                         ..Default::default()
                     })
                 }
@@ -703,7 +700,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                     l.unsupported("AlternativeCost.overload(shape)");
                 }
                 Some(crate::db::AbilityDef {
-                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, each], min: 1, max: 1, repeat: false })),
+                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, each], min: 1, max: 1, repeat: false, escalate_discard: false })),
                     ..Default::default()
                 })
             }
@@ -894,6 +891,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             cats::Condition::PerBasicLandTypeAmongLandsYouControl(nodes::PerBasicLandTypeAmongLandsYouControl {}) => {
                 discounts.push(crate::db::Discount::PerBasicLandType(n))
             }
+            // Affinity-like: "{1} less for each <permanent> you control".
+            cats::Condition::PerControlled(nodes::PerControlled { filter }) => {
+                if let Some(f) = super::filter::lower_pred(l, filter) {
+                    discounts.push(crate::db::Discount::PerControlled(f, n));
+                }
+            }
             other => l.unsupported(format!("CostReduction.condition({})", other.tag())),
         }
     }
@@ -968,6 +971,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         extra_lands: l.int("CardPrinting.grants_additional_land_per_turn", *grants_additional_land_per_turn, 0, 3) as u8,
         buyback,
         overload: overloaded.is_some(),
+        one_spell_each_turn: *each_player_one_spell_per_turn,
+        crew_bonus: l.int("CardPrinting.crew_power_bonus", *crew_power_bonus, 0, 9),
+        opp_enter_tapped: l.opp_enter_tapped,
+        opp_nonbasic_enter_tapped: *opponents_nonbasic_lands_enter_tapped,
         grants_escape: (*grants_graveyard_escape_exile_count > 0).then(|| Cost {
             exile_graveyard: l.int("CardPrinting.grants_graveyard_escape_exile_count", *grants_graveyard_escape_exile_count, 1, 20) as u8,
             ..Cost::default()

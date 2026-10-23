@@ -28,6 +28,9 @@ impl Game {
             Cond::HandAtMost(n) => pl.hand.len() <= *n as usize,
             Cond::DevotionCoversLibrary(color) => self.devotion(p, *color) as usize >= pl.library.len(),
             Cond::FirstSpellThisGame => pl.spells_game == 0,
+            Cond::IsMonarch => self.monarch == Some(p),
+            // (Only a static ability's own condition; read in layers.rs.)
+            Cond::SourceCountersIn(..) => false,
             Cond::GainedLifeThisTurn => pl.gained_life,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::SpellsCastThisTurn { n, noncreature } => {
@@ -259,7 +262,13 @@ impl Game {
 
     /// The most power `p` can tap to crew `vehicle`.
     pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx) -> i32 {
-        self.crew_eligible(p, vehicle).into_iter().map(|c| self.power(c).max(0)).sum()
+        self.crew_eligible(p, vehicle).into_iter().map(|c| self.crew_power_of(c).max(0)).sum()
+    }
+
+    /// A creature's power for crewing (a Pilot crews as though its power
+    /// were greater).
+    pub(crate) fn crew_power_of(&self, c: CardIdx) -> i32 {
+        self.power(c) + self.def_of(c).crew_bonus
     }
 
     /// Cards in `p`'s hand matching `f` other than `card`, one per
@@ -389,7 +398,7 @@ impl Game {
             // total power is enough. A pick must leave the total reachable.
             let need = cost.crew as i32;
             let tapped_in: Vec<CardIdx> = picked[n_gy..].to_vec();
-            let have: i32 = tapped_in.iter().map(|&c| self.power(c)).sum();
+            let have: i32 = tapped_in.iter().map(|&c| self.crew_power_of(c)).sum();
             let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
             let cands: Vec<CardIdx> = self
                 .crew_eligible(p, card)
@@ -398,8 +407,8 @@ impl Game {
                 .collect();
             let mut opts: Vec<Opt> = Vec::new();
             for (k, &c) in cands.iter().enumerate() {
-                let rest: i32 = cands[k + 1..].iter().map(|&x| self.power(x).max(0)).sum();
-                if have + self.power(c) + rest >= need {
+                let rest: i32 = cands[k + 1..].iter().map(|&x| self.crew_power_of(x).max(0)).sum();
+                if have + self.crew_power_of(c) + rest >= need {
                     opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
                 }
             }
@@ -542,6 +551,19 @@ impl Game {
     /// 614.1c)? Checked before it moves, so "other lands" are the lands
     /// already there.
     pub(crate) fn enters_tapped(&self, card: CardIdx, p: PlayerId) -> bool {
+        // "<Types> / nonbasic lands your opponents control enter tapped."
+        let d = self.def_of(card);
+        let q = crate::ids::opp(p);
+        let forced = self.permanents_of(q).any(|c| {
+            let od = self.def_of(c);
+            od.opp_enter_tapped & d.types != 0
+                || (od.opp_nonbasic_enter_tapped
+                    && d.is(crate::db::types::LAND)
+                    && d.supertypes & crate::db::supertypes::BASIC == 0)
+        });
+        if forced {
+            return true;
+        }
         match &self.def_of(card).enters_tapped {
             crate::db::EntersTapped::No => false,
             crate::db::EntersTapped::Always => true,

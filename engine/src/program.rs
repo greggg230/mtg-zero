@@ -332,6 +332,23 @@ pub enum Ext {
     /// Exile the event's second object ("that creature"), if it is still
     /// that permanent.
     ExileEventObj2,
+    /// The controller becomes the monarch (CR 724).
+    BecomeMonarch,
+    /// Exile each legal target of `tgt` until an opponent of the controller
+    /// becomes the monarch (Palace Jailer).
+    ExileUntilMonarch { tgt: u8 },
+    /// Exile this spell (Time Spiral).
+    ExileThisSpell,
+    /// Unless the source has no counters of this kind (now, or as it last
+    /// existed on the battlefield), continue at `to`.
+    JumpUnlessSourceNoCounters { counter: crate::db::Counter, to: u16 },
+    /// The controller may cast each legal target of `tgt` (a card in
+    /// their graveyard) this turn.
+    GraveyardCastPermission { tgt: u8 },
+    /// A "whenever you create one or more creature tokens" event for the
+    /// controller (after an effect that may have created some: emitted if
+    /// it did, `made` set).
+    TokensCreated,
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -550,6 +567,7 @@ impl Op {
             Op::Ext(Ext::MayRemoveCounterThen { skip }) => Some(skip),
             Op::Ext(Ext::MayPayEnergyThen { skip, .. }) => Some(skip),
             Op::Ext(Ext::SacrificeSourceThen { skip }) => Some(skip),
+            Op::Ext(Ext::JumpUnlessSourceNoCounters { to, .. }) => Some(to),
             _ => None,
         }
     }

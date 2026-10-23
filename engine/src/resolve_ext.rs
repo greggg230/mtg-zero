@@ -501,7 +501,7 @@ impl Game {
                     let Target::Obj(o) = t else { continue };
                     let back = self.objs[o.idx.i()].zone;
                     let card = self.move_card(o.idx, Zone::Exile, Pos::Top);
-                    self.links.push(crate::game::Link { source: f.source, card, until: *until, back });
+                    self.links.push(crate::game::Link { source: f.source, card, until: *until, back, until_monarch: None });
                 }
                 Flow::Next
             }
@@ -514,7 +514,7 @@ impl Game {
                     Some(Choice::Card(c)) => {
                         self.note(|g| format!("P{p} exiles {} from P{owner}'s hand", g.name(c)));
                         let card = self.move_card(c, Zone::Exile, Pos::Top);
-                        self.links.push(crate::game::Link { source: f.source, card, until: *until, back: Zone::Hand });
+                        self.links.push(crate::game::Link { source: f.source, card, until: *until, back: Zone::Hand, until_monarch: None });
                         Flow::Next
                     }
                     Some(Choice::Pass) => Flow::Next,
@@ -1353,7 +1353,8 @@ impl Game {
                 if let Some(&c) = self.objs_on(f, &On::Target(*tgt)).first() {
                     if self.def_of(c).token {
                         let def = self.objs[c.i()].def;
-                        self.create_token(def, f.controller, false);
+                        let t = self.create_token(def, f.controller, false);
+                        f.made = Some(t);
                     }
                 }
                 Flow::Next
@@ -1374,6 +1375,62 @@ impl Game {
                     if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
                         self.move_card(r.idx, Zone::Exile, Pos::Top);
                     }
+                }
+                Flow::Next
+            }
+            Ext::JumpUnlessSourceNoCounters { counter, to } => {
+                let n = match self.objs_on(f, &On::Source).first() {
+                    Some(&c) => self.counters_on(c, *counter),
+                    None => self.lki_counters.iter().filter(|x| x.0 == f.source && x.1 == *counter).map(|x| x.2).sum(),
+                };
+                if n == 0 {
+                    Flow::Next
+                } else {
+                    Flow::Jump(*to)
+                }
+            }
+            Ext::GraveyardCastPermission { tgt } => {
+                for t in self.targets_of(f, *tgt) {
+                    let Target::Obj(o) = t else { continue };
+                    if self.objs[o.idx.i()].zone == Zone::Graveyard {
+                        self.permissions.push(crate::game::Permission {
+                            card: o,
+                            player: f.controller,
+                            turn: Some(self.turn.number),
+                            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None },
+                        });
+                    }
+                }
+                Flow::Next
+            }
+            Ext::BecomeMonarch => {
+                self.set_monarch(f.controller);
+                Flow::Next
+            }
+            Ext::ExileUntilMonarch { tgt } => {
+                for t in self.targets_of(f, *tgt) {
+                    let Target::Obj(o) = t else { continue };
+                    let card = self.move_card(o.idx, Zone::Exile, Pos::Top);
+                    self.links.push(crate::game::Link {
+                        source: f.source,
+                        card,
+                        until: false,
+                        back: Zone::Battlefield,
+                        until_monarch: Some(f.controller),
+                    });
+                }
+                Flow::Next
+            }
+            Ext::ExileThisSpell => {
+                let c = f.source.idx;
+                if self.live(f.source) && self.objs[c.i()].zone == Zone::Stack {
+                    self.move_card(c, Zone::Exile, Pos::Top);
+                }
+                Flow::Next
+            }
+            Ext::TokensCreated => {
+                if f.made.is_some_and(|c| self.def_of(c).is(crate::db::types::CREATURE)) {
+                    self.event(crate::triggers::Event::player(crate::db::EventKind::CreatureTokensCreated, f.controller));
                 }
                 Flow::Next
             }

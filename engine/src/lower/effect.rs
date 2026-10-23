@@ -14,7 +14,9 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     use cats::Effect as E;
     // A modal spell or ability (CR 700.2): every mode is an ability.
     let modal = match e {
-        E::ModalChooseOne(nodes::ModalChooseOne { modes, or_both }) => Some((modes, 1, if *or_both { 2 } else { 1 }, false)),
+        E::ModalChooseOne(nodes::ModalChooseOne { modes, or_both }) => {
+            Some((modes, 1, if *or_both { 2 } else { 1 }, false, false))
+        }
         E::ChooseModes(nodes::ChooseModes {
             modes,
             min_modes,
@@ -26,14 +28,13 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
         }) => {
             let _ = header; // display text ("Choose two")
             l.deny("ChooseModes.mode_mana_costs", mode_mana_costs);
-            l.deny("ChooseModes.escalate_discard", escalate_discard);
             let min = l.int("ChooseModes.min_modes", *min_modes, 0, 8) as u8;
             let max = l.int("ChooseModes.max_modes", *max_modes, 1, 8) as u8;
-            Some((modes, min, max, *repeats))
+            Some((modes, min, max, *repeats, *escalate_discard))
         }
         _ => None,
     };
-    let Some((modes, mut min, max, repeat)) = modal else {
+    let Some((modes, mut min, max, repeat, escalate_discard)) = modal else {
         let mut b = Builder::default();
         lower_effect(l, &mut b, e);
         return b.finish();
@@ -58,7 +59,7 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     AbilityDef {
         targets: Vec::new(),
         program: Vec::new(),
-        modes: Some(Box::new(Modes { list, min, max, repeat })),
+        modes: Some(Box::new(Modes { list, min, max, repeat, escalate_discard })),
         divide: None,
     }
 }
@@ -744,6 +745,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             } else {
                 b.op(Op::CreateToken { token, n, tapped: *tapped });
             }
+            b.op(Op::Ext(crate::program::Ext::TokensCreated));
         }
         E::EachOpponentSacrificesCreature(nodes::EachOpponentSacrificesCreature {}) => {
             // "Each opponent sacrifices a nontoken creature of their choice."

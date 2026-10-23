@@ -117,6 +117,20 @@ macro_rules! lower_condition {
             E::HandSizeAtMost(nodes::HandSizeAtMost { n }) => {
                 Some(Cond::HandAtMost($l.int("HandSizeAtMost.n", *n, 0, 99) as u8))
             }
+            E::StateCondition(nodes::StateCondition { predicate }) => match predicate.as_deref() {
+                Some(p) => super::trigger::lower_state_pred($l, p).map(|(c, _)| c),
+                None => {
+                    $l.unsupported("StateCondition.predicate(missing)");
+                    None
+                }
+            },
+            // Level up (CR 711): the static's own source.
+            E::LevelCountersInRange(nodes::LevelCountersInRange { lo, hi }) => {
+                let k = super::effect_ext::counter_by_name($l, "level");
+                let lo = $l.int("LevelCountersInRange.lo", *lo, 0, 99) as u8;
+                let hi = hi.map(|h| $l.int("LevelCountersInRange.hi", h, 0, 99) as u8);
+                Some(Cond::SourceCountersIn(k, lo, hi))
+            }
             E::FormulaCoversLibrary(nodes::FormulaCoversLibrary { formula }) => match &**formula {
                 cats::Formula::DevotionTo(nodes::DevotionTo { color }) => match crate::mana::letter_index(color) {
                     Some(i) if i < 5 => Some(Cond::DevotionCoversLibrary(i as u8)),

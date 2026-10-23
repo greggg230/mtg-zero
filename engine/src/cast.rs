@@ -52,6 +52,16 @@ impl Game {
     // ---- priority options (CR 117.1, 116.2a, 307.1, 602.2) ----------------
 
     pub(crate) fn priority_options(&self, p: PlayerId) -> Vec<Opt> {
+        let mut opts = self.priority_options_all(p);
+        // "Each player can't cast more than one spell each turn" (Archon of
+        // Emeria).
+        if self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.def_of(c).one_spell_each_turn) {
+            opts.retain(|o| !matches!(o.choice, Choice::Cast(_)));
+        }
+        opts
+    }
+
+    fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let drops = 1 + self.permanents_of(p).map(|c| self.def_of(c).extra_lands as u32).sum::<u32>();
@@ -159,8 +169,13 @@ impl Game {
                 let granted = self.permissions.iter().any(|pm| {
                     pm.card == r && pm.kind == crate::game::PermKind::Flashback && self.permission_ok(pm, p)
                 });
+                let permitted = self.permissions.iter().any(|pm| {
+                    pm.card == r && matches!(pm.kind, crate::game::PermKind::Play { .. }) && self.permission_ok(pm, p)
+                });
                 if def.flashback.is_some() || granted {
                     Some(CastFrom::Flashback)
+                } else if permitted {
+                    Some(CastFrom::Permission { free: false, any_mana: false })
                 } else if def.escape.is_some()
                     // (Granted escape with the card's own additional costs is
                     // not offered: one combined cost isn't built; ENGINE.md
@@ -239,7 +254,27 @@ impl Game {
             _ if !def.additional.is_empty() => self.options_payable(p, card, &mana, classes, None),
             _ => self.can_pay_with(p, &mana, classes, &Default::default()),
         };
-        paid && def.spell.as_ref().is_none_or(|ab| self.targets_available(ab, p, Some(self.obj_ref(card))))
+        if !paid {
+            return false;
+        }
+        // Not from hand, an overload spell can't be overloaded (one
+        // alternative cost at most, 118.9a): its own target is needed.
+        let spell = match &def.spell {
+            Some(ab) if def.overload => ab.modes.as_ref().map(|m| &m.list[0]),
+            other => other.as_ref(),
+        };
+        match spell {
+            None => true,
+            // Leaving the graveyard can change what is targetable (a goyf's
+            // power counts graveyard card types): check with the card on
+            // the stack (CR 601.2a before 601.2c).
+            Some(ab) if self.objs[card.i()].zone == Zone::Graveyard => {
+                let mut g = self.clone();
+                let r = g.move_card_to_stack(card, p);
+                g.targets_available(ab, p, Some(r))
+            }
+            Some(ab) => self.targets_available(ab, p, Some(self.obj_ref(card))),
+        }
     }
 
     /// CR 601.2b: announce X, from 0 to the most the caster can pay (31 at
@@ -380,6 +415,23 @@ impl Game {
         self.ask(Task::Delve { id }, p, DecisionKind::ChooseGraveyardCard, opts);
     }
 
+    /// Escalate (CR 702.120a): discard a card for each mode beyond the
+    /// first, one decision per card.
+    pub(crate) fn escalate(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let p = self.stack[pos].controller;
+        if let Some(Choice::Card(c)) = self.answer.take() {
+            self.discard(c);
+            self.stack[pos].delve_floor += 1; // (discards paid so far)
+        }
+        let item = &self.stack[pos];
+        let owed = item.modes.len().saturating_sub(1);
+        if (item.delve_floor as usize) < owed && !self.players[p as usize].hand.is_empty() {
+            let opts = self.hand_options(p);
+            self.ask(Task::Escalate { id }, p, DecisionKind::DiscardCost, opts);
+        }
+    }
+
     /// Mox Diamond as it resolves: discard a land card (it enters) or not
     /// (it goes to the graveyard).
     pub(crate) fn enter_by_discard(&mut self, id: u32) {
@@ -506,6 +558,15 @@ impl Game {
         if chosen >= m.max as usize {
             return;
         }
+        // Escalate (702.120a): another mode needs another card to discard.
+        let escalate_cap = m.escalate_discard && chosen >= 1 && {
+            let StackKind::Spell { card } = item.kind else { return };
+            let p = item.controller;
+            // Enough other cards, and the mana payable while keeping them.
+            let mana = self.route_mana(card, p, item.from);
+            let keep = crate::pay::Keep { discard: Some((chosen as u8, card)), ..Default::default() };
+            self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
+        };
         let (p, source) = (item.controller, Some(self.item_source(item)));
         let avail: Vec<bool> = m.list.iter().map(|x| self.targets_available(x, p, source)).collect();
         let floor = item.modes.last().map_or(0, |&l| if m.repeat { l } else { l + 1 }) as usize;
@@ -515,7 +576,7 @@ impl Game {
             // After k, the later picks come from k on (k itself if modes
             // repeat): enough must be available.
             let later = if m.repeat { avail[k] as usize * need } else { avail[k + 1..].iter().filter(|&&a| a).count() };
-            if avail[k] && later >= need {
+            if avail[k] && later >= need && !escalate_cap {
                 opts.push(Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) });
             }
         }
@@ -679,10 +740,16 @@ impl Game {
             division: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
+        if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
+            // CR 702.120a: the discards, after the mana (which keeps the
+            // cards they need).
+            self.agenda.push(Task::Escalate { id });
+        }
         self.agenda.push(Task::CastPay { id });
         if self.def_of(card).delve {
             self.agenda.push(Task::Delve { id }); // CR 702.66a: while paying
         }
+
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
             self.agenda.push(Task::Divide { id }); // CR 601.2d
         }
@@ -850,6 +917,10 @@ impl Game {
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+        }
+        let escalated = item.modes.len().saturating_sub(1) as u8;
+        if escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
+            pm.keep.discard = Some((escalated, card));
         }
         let _ = def;
         self.agenda.push(Task::PayMana(pm));

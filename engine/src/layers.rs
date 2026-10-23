@@ -11,7 +11,7 @@
 //! types, subtypes, controller and token-ness only, so nothing here
 //! recurses.
 
-use crate::db::{types, Counter, Filter, Kw, KwSet, Mod, Prot, PtCda, Scope, StaticDef};
+use crate::db::{Cond, types, Counter, Filter, Kw, KwSet, Mod, Prot, PtCda, Scope, StaticDef};
 use crate::game::Game;
 use crate::ids::{CardIdx, ObjRef, PlayerId, Zone};
 use crate::mana::ManaMask;
@@ -57,6 +57,7 @@ pub struct Flags {
     pub cant_block: bool,
     pub cant_be_blocked: bool,
     pub must_attack: bool,
+    pub exile_if_dies: bool,
 }
 
 impl Game {
@@ -91,7 +92,15 @@ impl Game {
             Scope::Equipped => self.objs[s.i()].attached.is_some_and(|h| h.idx == c && self.live(h)),
             Scope::Matching { filter, other } => !(*other && s == c) && self.scope_matches(filter, c, ctl),
         };
-        covers && st.cond.as_ref().is_none_or(|k| self.cond_holds(k, ctl))
+        covers
+            && st.cond.as_ref().is_none_or(|k| match k {
+                // A level range reads the static's own source (CR 711).
+                Cond::SourceCountersIn(kind, lo, hi) => {
+                    let n = self.counters_on(s, *kind);
+                    n >= *lo as u16 && hi.is_none_or(|h| n <= h as u16)
+                }
+                _ => self.cond_holds(k, ctl),
+            })
     }
 
     /// A static ability's affected-object filter (types, subtypes, colours,
@@ -246,6 +255,7 @@ impl Game {
                 Mod::CantBlock => f.cant_block = true,
                 Mod::CantBeBlocked => f.cant_be_blocked = true,
                 Mod::MustAttack => f.must_attack = true,
+                Mod::ExileIfDies => f.exile_if_dies = true,
                 _ => {}
             }
         }
@@ -337,6 +347,13 @@ impl Game {
                 let n = self.battlefield.iter().filter(|&&x| self.scope_matches(f, x, ctl)).count();
                 (n as i32, printed.1)
             }
+            PtCda::Leveler { counter, ranges } => {
+                let n = self.counters_on(c, *counter);
+                ranges
+                    .iter()
+                    .find(|(lo, hi, _, _)| n >= *lo as u16 && hi.is_none_or(|h| n <= h as u16))
+                    .map_or(printed, |&(_, _, p, t)| (p, t))
+            }
             PtCda::Domain => {
                 let n = self.basic_land_types(self.objs[c.i()].controller) as i32;
                 (n, n)
@@ -419,6 +436,13 @@ impl Game {
     /// follows the battlefield.
     pub(crate) fn layers_on_move(&mut self, c: CardIdx, old: ObjRef, from: Zone, to: Zone) {
         if !self.counters.is_empty() {
+            if from == Zone::Battlefield {
+                for &(x, k, n) in &self.counters {
+                    if x == c && n > 0 {
+                        self.lki_counters.push((old, k, n));
+                    }
+                }
+            }
             self.counters.retain(|x| x.0 != c);
         }
         if !self.effects.is_empty() {

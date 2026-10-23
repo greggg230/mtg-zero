@@ -167,6 +167,8 @@ pub enum Mod {
     CantBeBlocked,
     /// It attacks each combat if able (CR 508.1d).
     MustAttack,
+    /// "If it would die this turn, exile it instead" (CR 614).
+    ExileIfDies,
     /// Layer 7c: +p/+t for each permanent matching the filter (relative to
     /// the static ability's controller; a static ability only).
     PtPer { filter: Filter, p: i32, t: i32 },
@@ -223,6 +225,9 @@ pub enum PtCda {
     /// Power and toughness = basic land types among lands you control
     /// (domain).
     Domain,
+    /// Level up (CR 711): base power and toughness by the number of
+    /// counters of this kind, per range (lo, hi or none, p, t).
+    Leveler { counter: Counter, ranges: Vec<(u8, Option<u8>, i32, i32)> },
 }
 
 /// A predicate over targets (players and objects). At top level the type
@@ -314,6 +319,9 @@ pub struct Modes {
     pub min: u8,
     pub max: u8,
     pub repeat: bool,
+    /// Escalate: discard a card for each mode beyond the first (CR
+    /// 702.120).
+    pub escalate_discard: bool,
 }
 
 impl AbilityDef {
@@ -380,6 +388,9 @@ pub enum EventKind {
     CardDiscarded,
     /// A permanent became monstrous (701.37b). Subject: obj.
     BecomesMonstrous,
+    /// A player created one or more creature tokens (one event per
+    /// effect). Subject: player.
+    CreatureTokensCreated,
     /// A creature dealt combat damage to a creature (510.2). Subjects:
     /// source, target.
     DealsCombatDamageToCreature,
@@ -425,7 +436,8 @@ impl EventKind {
             | E::BeginningOfDrawStep
             | E::BeginningOfPrecombatMain
             | E::BeginningOfCombat
-            | E::BeginningOfEndStep => (&[Slot::Player], &[]),
+            | E::BeginningOfEndStep
+            | E::CreatureTokensCreated => (&[Slot::Player], &[]),
             E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
             E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
@@ -554,6 +566,11 @@ pub enum Cond {
     DevotionCoversLibrary(u8),
     /// You have cast no spell this game.
     FirstSpellThisGame,
+    /// You are the monarch (CR 724).
+    IsMonarch,
+    /// A static ability's source has between lo and hi (none: no upper
+    /// bound) counters of this kind (level up).
+    SourceCountersIn(Counter, u8, Option<u8>),
     /// You gained life this turn.
     GainedLifeThisTurn,
     /// An opponent has more cards in hand than you.
@@ -817,6 +834,14 @@ pub struct CardDef {
     /// "Each nonland card in your graveyard has escape": the rest of the
     /// escape cost (the mana cost is the card's).
     pub grants_escape: Option<Cost>,
+    /// "Each player can't cast more than one spell each turn."
+    pub one_spell_each_turn: bool,
+    /// "Crews Vehicles as though its power were n greater."
+    pub crew_bonus: i32,
+    /// "<Types> your opponents control enter tapped" (card-type bits), and
+    /// "nonbasic lands your opponents control enter tapped".
+    pub opp_enter_tapped: u16,
+    pub opp_nonbasic_enter_tapped: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.

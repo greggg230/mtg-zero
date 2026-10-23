@@ -45,6 +45,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::BecomesMonstrous) => Some(EventKind::BecomesMonstrous),
         Some(E::Blocks) => Some(EventKind::Blocks),
         Some(E::DealsCombatDamageToCreature) => Some(EventKind::DealsCombatDamageToCreature),
+        Some(E::CreatureTokensCreated) => Some(EventKind::CreatureTokensCreated),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -182,6 +183,7 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
             (Cond::Delirium(l.int("Delirium.min_card_types", *min_card_types, 1, 9) as u8), true)
         }
         S::GainedLifeThisTurn(nodes::GainedLifeThisTurn {}) => (Cond::GainedLifeThisTurn, true),
+        S::IsMonarch(nodes::IsMonarch {}) => (Cond::IsMonarch, true),
         S::OpponentHasMoreCardsInHand(nodes::OpponentHasMoreCardsInHand {}) => (Cond::OpponentHasMoreCards, true),
         S::YouControlAtLeast(nodes::YouControlAtLeast { n, card_type }) => {
             let Some(bits) = types::from_name(card_type) else {

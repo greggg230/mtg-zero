@@ -1058,6 +1058,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             }
             let token = l.token(def);
             b.op(Op::Ext(Ext::CreateTokensAttacking { token, n: 1, tapped: true }));
+            b.op(Op::Ext(Ext::TokensCreated));
         }
         E::DealDamageFromEvent(nodes::DealDamageFromEvent {
             amount,
@@ -1250,6 +1251,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             }
             let token = l.token(def);
             b.op(Op::Ext(Ext::CreateTokenAttachSource { token }));
+            b.op(Op::Ext(Ext::TokensCreated));
         }
         E::LookTopNKeepUpToOneOnTopRestBottom(nodes::LookTopNKeepUpToOneOnTopRestBottom { count }) => {
             // "Look at the top X cards of your library. Put up to one of
@@ -1294,10 +1296,61 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let Some(t) = lower_targets(l, b, targets, "Exile") else { return true };
             b.op(Op::Exile { tgt: t });
         }
+        E::BecomeMonarch(nodes::BecomeMonarch {}) => {
+            b.op(Op::Ext(Ext::BecomeMonarch));
+        }
+        E::ExileUntilOpponentBecomesMonarch(nodes::ExileUntilOpponentBecomesMonarch { targets }) => {
+            let Some(t) = lower_targets(l, b, targets, "ExileUntilOpponentBecomesMonarch") else { return true };
+            b.op(Op::Ext(Ext::ExileUntilMonarch { tgt: t }));
+        }
+        E::TargetOpponentLosesLife(nodes::TargetOpponentLosesLife { amount }) => {
+            let n = l.int("TargetOpponentLosesLife.amount", *amount, 0, 99);
+            let t = b.target(and(Filter::Player, Filter::Opponent), 1, 1);
+            b.op(Op::LoseLife { who: Who::TargetPlayer(t), n: Amount::Fixed(n) });
+        }
+        E::IfSourceHasNoCounters(nodes::IfSourceHasNoCounters { kind, inner }) => {
+            // "Then if there are no <kind> counters on this, ..."
+            let counter = counter_by_name(l, kind);
+            let at = b.op(Op::Ext(Ext::JumpUnlessSourceNoCounters { counter, to: 0 }));
+            lower_effect(l, b, inner);
+            b.patch(at);
+        }
+        E::ExileThisSpell(nodes::ExileThisSpell {}) => {
+            b.op(Op::Ext(Ext::ExileThisSpell));
+        }
+        E::UntapUpToNLands(nodes::UntapUpToNLands { amount }) => {
+            // "You untap up to n lands" (not targeted; only tapped ones are
+            // offered, section 23.11).
+            let n = l.int("UntapUpToNLands.amount", *amount, 1, 20) as u8;
+            let filter = and(and(Filter::Type(types::LAND), Filter::Controller(true)), Filter::Tapped);
+            b.op(Op::Ext(Ext::Choose { who: Who::You, filter, min: 0, max: n, act: ChooseAct::Untap }));
+        }
+        E::DealDamageExileIfDiesThisTurn(nodes::DealDamageExileIfDiesThisTurn { amount, targets }) => {
+            // "Deals n damage to target creature. If that creature would die
+            // this turn, exile it instead."
+            let n = l.int("DealDamageExileIfDiesThisTurn.amount", *amount, 0, 99);
+            let Some(t) = lower_targets(l, b, targets, "DealDamageExileIfDiesThisTurn") else { return true };
+            apply(b, On::Target(t), vec![Mod::ExileIfDies], Until::EndOfTurn);
+            b.op(Op::DealDamage { amount: Amount::Fixed(n), to: t });
+        }
+        E::MayCastTargetGraveyardCardThisTurn(nodes::MayCastTargetGraveyardCardThisTurn { card_filter }) => {
+            // "Choose target <card> in your graveyard. You may cast that card
+            // this turn."
+            let cf = match card_filter {
+                Some(f) => match super::filter::lower_card_filter(l, f) {
+                    Some(f) => f,
+                    None => return true,
+                },
+                None => Filter::Any,
+            };
+            let t = b.target(Filter::InGraveyard(Box::new(and(cf, Filter::Owner(true)))), 1, 1);
+            b.op(Op::Ext(Ext::GraveyardCastPermission { tgt: t }));
+        }
         E::CreateTokenCopyOfTargetTokenYouControl(nodes::CreateTokenCopyOfTargetTokenYouControl {}) => {
             // "Create a token that's a copy of target token you control."
             let t = b.target(and(Filter::Token, Filter::Controller(true)), 1, 1);
             b.op(Op::Ext(Ext::CopyTargetToken { tgt: t }));
+            b.op(Op::Ext(Ext::TokensCreated));
         }
         E::OpponentGainsControlOfSource(nodes::OpponentGainsControlOfSource {}) => {
             b.op(Op::Ext(Ext::GiveSourceToOpponent));

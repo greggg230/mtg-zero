@@ -59,6 +59,8 @@ pub(crate) enum Task {
     EnterByDiscard { id: u32 },
     /// Announce X (CR 601.2b, 107.3).
     ChooseX { id: u32 },
+    /// Discard for escalate (CR 702.120a).
+    Escalate { id: u32 },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -201,6 +203,7 @@ impl Game {
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
             Task::ChooseX { id } => self.choose_x(id),
+            Task::Escalate { id } => self.escalate(id),
         }
     }
 
@@ -310,6 +313,7 @@ impl Game {
             pl.gained_life = false;
         }
         self.resolved.clear();
+        self.lki_counters.clear();
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
         self.permissions = perms.into_iter().filter(|p| p.turn.is_none_or(|t| t >= n) && self.live(p.card)).collect();
@@ -381,6 +385,11 @@ impl Game {
                 };
                 if let Some(k) = kind {
                     self.event(Event::player(k, ap));
+                }
+                // CR 724.2: at the beginning of the monarch's end step, they
+                // draw a card (here as the step begins, not on the stack).
+                if self.turn.step == Step::End && self.monarch == Some(ap) {
+                    self.draw(ap);
                 }
                 // Delayed triggered abilities whose moment it is (603.7).
                 if !self.delayed.is_empty() {

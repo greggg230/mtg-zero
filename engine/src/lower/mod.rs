@@ -60,6 +60,8 @@ pub struct Lowerer<'a> {
     /// The card refers to "cards exiled with this": its exile effects
     /// link (CR 607.2a).
     pub link_exiles: bool,
+    /// "<Types> your opponents control enter tapped" from a static ability.
+    pub opp_enter_tapped: u16,
     pub errs: Vec<String>,
     /// The colours of mana the card being lowered produces as a land
     /// (`produces`), for consistency checks.
@@ -144,7 +146,7 @@ pub fn lower_card(
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
     // A card that refers to "cards exiled with this" links its exiles.
     let link_exiles = format!("{p:?}").contains("ExiledWithSource");
-    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0, delayed: Vec::new(), link_exiles };
+    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0, delayed: Vec::new(), link_exiles, opp_enter_tapped: 0 };
     let def = printing::lower_printing(&mut l, p);
     if l.errs.is_empty() {
         Ok(def)

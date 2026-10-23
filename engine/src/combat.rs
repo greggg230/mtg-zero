@@ -314,6 +314,16 @@ impl Game {
                 amount: n.min(u16::MAX as i32) as u16,
             });
         }
+        // CR 724.2: a creature dealing combat damage to the monarch makes
+        // its controller the monarch (here at once, not on the stack).
+        for &(r, p, _) in &to_players {
+            if self.monarch == Some(p) {
+                let c = self.objs[r.idx.i()].controller;
+                if c != p {
+                    self.set_monarch(c);
+                }
+            }
+        }
         // CR 510.3a: "deals combat damage to a player" triggers.
         for (r, p, n) in to_players {
             self.event(Event {

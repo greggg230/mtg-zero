@@ -279,6 +279,9 @@ pub struct Link {
     /// `back` (its previous zone; a permanent under its owner's control).
     pub until: bool,
     pub back: Zone,
+    /// "Until an opponent of this player becomes the monarch" (Palace
+    /// Jailer): then it returns to the battlefield.
+    pub until_monarch: Option<PlayerId>,
 }
 
 /// A delayed triggered ability (CR 603.7): it triggers once, at `when`.
@@ -375,6 +378,11 @@ pub struct Game {
     pub(crate) permissions: Vec<Permission>,
     /// Combat damage is being dealt (CR 510.2).
     pub(crate) combat_damage_now: bool,
+    /// The monarch (CR 724).
+    pub(crate) monarch: Option<PlayerId>,
+    /// Counters on permanents that left the battlefield this turn, as they
+    /// last existed there (CR 608.2h).
+    pub(crate) lki_counters: Vec<(ObjRef, crate::db::Counter, u16)>,
     /// ... cast with escape; cast for its dash cost (delayed ability k).
     pub(crate) entering_escaped: bool,
     /// ... the X it was cast with.
@@ -498,6 +506,8 @@ impl Game {
             resolved: Vec::new(),
             permissions: Vec::new(),
             combat_damage_now: false,
+            monarch: None,
+            lki_counters: Vec::new(),
             entering_escaped: false,
             entering_x: 0,
             entering_dash: None,
@@ -772,6 +782,12 @@ impl Game {
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
         // CR 702.34a: a flashback spell leaving the stack is exiled instead.
         let to = if from == Zone::Stack && self.objs[idx.i()].flashback { Zone::Exile } else { to };
+        // "If it would die this turn, exile it instead" (Suplex).
+        let to = if from == Zone::Battlefield && to == Zone::Graveyard && self.flags_of(idx).exile_if_dies {
+            Zone::Exile
+        } else {
+            to
+        };
         if let Some(list) = self.zone_list(idx, from) {
             let i = list.iter().position(|&c| c == idx).expect("card in its zone list");
             list.remove(i);
@@ -1025,6 +1041,25 @@ impl Game {
         }
         self.note(|g| format!("{amount} damage to {}", g.describe_target(t)));
         amount
+    }
+
+    /// `p` becomes the monarch (CR 724.1); a card exiled "until an
+    /// opponent becomes the monarch" returns.
+    pub(crate) fn set_monarch(&mut self, p: PlayerId) {
+        if self.monarch == Some(p) {
+            return;
+        }
+        self.monarch = Some(p);
+        self.note(|_| format!("P{p} becomes the monarch"));
+        let (back, keep): (Vec<Link>, Vec<Link>) =
+            self.links.iter().copied().partition(|l| l.until_monarch.is_some_and(|q| q != p));
+        self.links = keep;
+        for l in back {
+            if self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile {
+                let owner = self.objs[l.card.idx.i()].owner;
+                self.put_onto_battlefield(l.card.idx, owner);
+            }
+        }
     }
 
     /// "Combat damage that would be dealt by creatures you control can't be

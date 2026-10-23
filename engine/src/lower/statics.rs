@@ -54,7 +54,6 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility) -> Option<S
     l.deny("StaticAbility.grants_creature_spells_uncounterable", grants_creature_spells_uncounterable);
     l.deny("StaticAbility.grants_spells_uncounterable", grants_spells_uncounterable);
     l.deny("StaticAbility.grants_ward_life_cost", grants_ward_life_cost);
-    l.deny("StaticAbility.opponents_enter_tapped_types", opponents_enter_tapped_types);
     l.deny("StaticAbility.activation_cost_reduction", activation_cost_reduction);
     l.deny_ne(
         "StaticAbility.graveyard_permanent_cast_mv_max",
@@ -99,6 +98,21 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility) -> Option<S
                 ))
             }
             (other, n) => l.unsupported(format!("LayerPayload:{}(layer {n})", other.tag())),
+        }
+    }
+    // "<Types> your opponents control enter tapped" (a rule, on the card).
+    if !opponents_enter_tapped_types.is_empty() {
+        if !matches!(scope, Scope::This) || cond.is_some() {
+            l.unsupported("StaticAbility.opponents_enter_tapped_types(scoped)");
+        }
+        for t in opponents_enter_tapped_types {
+            match types::from_name(t) {
+                Some(b) => l.opp_enter_tapped |= b,
+                None => l.unsupported(format!("StaticAbility.opponents_enter_tapped_types({t})")),
+            }
+        }
+        if mods.is_empty() {
+            return None;
         }
     }
     if mods.is_empty() {
@@ -147,6 +161,26 @@ fn lower_scope(l: &mut Lowerer, s: &cats::StaticScope) -> Option<Scope> {
 pub(crate) fn lower_pt_formula(l: &mut Lowerer, f: &cats::PTFormula) -> Option<PtCda> {
     use cats::PTFormula as F;
     Some(match f {
+        // Level up (CR 711): base P/T by level counters, per range.
+        F::LevelerPT(nodes::LevelerPT { ranges }) => {
+            let counter = super::effect_ext::counter_by_name(l, "level");
+            let mut out = Vec::new();
+            for r in ranges {
+                match r[..] {
+                    [Some(lo), hi, Some(p), Some(t)] => out.push((
+                        l.int("LevelerPT.lo", lo, 0, 99) as u8,
+                        hi.map(|h| l.int("LevelerPT.hi", h, 0, 99) as u8),
+                        l.int("LevelerPT.p", p, -99, 99),
+                        l.int("LevelerPT.t", t, -99, 99),
+                    )),
+                    _ => {
+                        l.unsupported("LevelerPT.ranges(shape)");
+                        return None;
+                    }
+                }
+            }
+            PtCda::Leveler { counter, ranges: out }
+        }
         F::CardTypesInAllGraveyardsPT(nodes::CardTypesInAllGraveyardsPT { toughness_plus }) => {
             PtCda::GraveyardTypes { plus: l.int("CardTypesInAllGraveyardsPT.toughness_plus", *toughness_plus, 0, 9) }
         }
@@ -162,10 +196,6 @@ pub(crate) fn lower_pt_formula(l: &mut Lowerer, f: &cats::PTFormula) -> Option<P
                 return None;
             }
             PtCda::PowerCount(f)
-        }
-        other => {
-            l.unsupported(format!("PTFormula:{}", other.tag()));
-            return None;
         }
     })
 }
