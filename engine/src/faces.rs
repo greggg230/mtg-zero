@@ -319,15 +319,7 @@ impl Game {
     /// a modal double-faced card's back face (CR 712.11b, 712.12) or an
     /// adventurer card's Adventure (715.3).
     pub(crate) fn other_face(&self, c: CardIdx) -> Option<DefId> {
-        let d = self.def_of(c);
-        if let Some(h) = d.halves {
-            return Some(h.1); // a split card's right half (CR 709.3)
-        }
-        if d.modal {
-            d.back
-        } else {
-            d.adventure
-        }
+        self.def_of(c).other_face()
     }
 
     /// Is `def` an Adventure (CR 715.2)?
@@ -574,8 +566,9 @@ impl Game {
     pub(crate) fn finished_sagas(&self) -> Vec<CardIdx> {
         let mut out = Vec::new();
         for &c in &self.battlefield {
+            // (A Saga is an enchantment, CR 714.1.)
             let last = self.abilities(c).chapters as u16;
-            if last == 0 || self.counters_on(c, Counter::Lore) < last {
+            if last == 0 || self.counters_on(c, Counter::Lore) < last || !self.is_type(c, types::ENCHANTMENT) {
                 continue;
             }
             let r = self.obj_ref(c);

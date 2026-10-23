@@ -135,7 +135,7 @@ impl Game {
             };
             // An MDFC's back face or an Adventure (CR 712.11b, 712.12,
             // 715.3).
-            let other = self.other_face_options(p, c, sorcery_ok, land_ok, &classes);
+            let other = if def.other_face().is_some() { self.other_face_options(p, c, sorcery_ok, land_ok, &classes) } else { 0 };
             if let Some(choice) = crate::faces::face_choice(c, front | other) {
                 opts.push(Opt { action, choice });
             }
@@ -625,7 +625,7 @@ impl Game {
             } else {
                 0
             };
-            let other = self.other_face_options(p, c, sorcery_ok, land_ok && !cast_only, classes);
+            let other = if self.def_of(c).other_face().is_some() { self.other_face_options(p, c, sorcery_ok, land_ok && !cast_only, classes) } else { 0 };
             if let Some(choice) = crate::faces::face_choice(c, front | other) {
                 opts.push(Opt { action, choice });
             }
@@ -645,7 +645,7 @@ impl Game {
             } else {
                 0
             };
-            let other = self.other_face_options(p, c, sorcery_ok, lands_ok, classes);
+            let other = if self.def_of(c).other_face().is_some() { self.other_face_options(p, c, sorcery_ok, lands_ok, classes) } else { 0 };
             if let Some(choice) = crate::faces::face_choice(c, front | other) {
                 opts.push(Opt { action: self.graveyard_action(p, c), choice });
             }

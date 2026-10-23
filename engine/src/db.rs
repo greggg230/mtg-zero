@@ -1033,6 +1033,19 @@ impl CardDef {
     pub fn card_def(&self, me: DefId) -> DefId {
         self.front.unwrap_or(me)
     }
+    /// The face the card may be cast or played with instead of its front: a
+    /// split card's right half (CR 709.3), a modal double-faced card's back
+    /// face (712.11b, 712.12), an adventurer card's Adventure (715.3).
+    #[inline]
+    pub fn other_face(&self) -> Option<DefId> {
+        if let Some(h) = self.halves {
+            Some(h.1)
+        } else if self.modal {
+            self.back
+        } else {
+            self.adventure
+        }
+    }
     /// The activated ability in `slot` (`Activated` or `Hand`).
     pub fn activated_def(&self, slot: AbilitySlot) -> &ActivatedDef {
         match slot {

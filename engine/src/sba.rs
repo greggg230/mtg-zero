@@ -84,9 +84,11 @@ impl Game {
             if ty & crate::db::types::PLANESWALKER != 0 && self.counters_on(c, Counter::Loyalty) == 0 {
                 return true;
             }
-            let ch = self.db.def(self.objs[c.i()].def).chapters as u16;
-            if ch > 0 && self.counters_on(c, Counter::Lore) >= ch && self.finished_sagas().contains(&c) {
-                return true;
+            if ty & crate::db::types::ENCHANTMENT != 0 {
+                let ch = self.abilities(c).chapters as u16;
+                if ch > 0 && self.counters_on(c, Counter::Lore) >= ch && self.finished_sagas().contains(&c) {
+                    return true;
+                }
             }
             if self.is_legendary(c) {
                 let (ctl, name) = (self.objs[c.i()].controller, &self.def_of(c).name);
