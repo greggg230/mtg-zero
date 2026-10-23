@@ -191,8 +191,12 @@ impl Game {
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
                 self.can_pay_without(p, &cost, cls, &Default::default(), Some(c))
             } else {
-                let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
-                self.can_pay_plain(p, &cost, cls, plain)
+                // (The cheap test first: the candidates are built only for
+                // a cost that might be paid.)
+                self.might_pay(p, &cost, cls, None) && {
+                    let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
+                    self.can_pay_plain(p, &cost, cls, plain)
+                }
             }
         };
         if alt_ok {

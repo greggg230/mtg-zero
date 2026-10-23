@@ -87,6 +87,8 @@ impl Game {
         sorcery_ok: bool,
         out: &mut Vec<Opt>,
     ) {
+        // (The battlefield's activation locks, read once.)
+        let locks = self.activation_locks();
         for c in self.permanents_of(p) {
             let d = self.abilities(c);
             for (i, ad) in d.activated.iter().enumerate() {
@@ -97,7 +99,7 @@ impl Game {
                     continue; // a latent ability it hasn't gained
                 }
                 let slot = AbilitySlot::Activated(i as u8);
-                if self.can_activate(p, c, ad, classes, sorcery_ok) {
+                if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
@@ -105,7 +107,7 @@ impl Game {
         for &(a, c) in slots {
             for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
                 let slot = AbilitySlot::Hand(i as u8);
-                if self.can_activate(p, c, ad, classes, sorcery_ok) {
+                if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
                     // One hand ability per card (lowering): the card's slot.
                     out.push(Opt { action: act::HAND_ABILITY + (a - act::HAND), choice: Choice::Ability(c, slot) });
                 }
@@ -123,7 +125,7 @@ impl Game {
             }
             let action = act::GY_ABILITY + k;
             k += 1;
-            if self.can_activate(p, c, ad, classes, sorcery_ok) {
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
                 out.push(Opt { action, choice: Choice::Ability(c, AbilitySlot::Graveyard(0)) });
             }
         }
@@ -172,6 +174,7 @@ impl Game {
         ad: &ActivatedDef,
         classes: &[Class],
         sorcery_ok: bool,
+        locks: u16,
     ) -> bool {
         let mana_ability = ad.mana().is_some();
         if mana_ability && !ad.instant_only {
@@ -198,7 +201,7 @@ impl Game {
                 }
             }
         }
-        if !self.activation_ready(p, card, ad) {
+        if !self.activation_ready(p, card, ad, locks) {
             return false;
         }
         if mana_ability {

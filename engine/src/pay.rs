@@ -208,14 +208,9 @@ impl Game {
     /// The parts of an activated ability's cost and restrictions that do not
     /// depend on choices: {T} (untapped; a creature also free of summoning
     /// sickness, CR 302.6 / 602.5a), "only during your turn", "only if".
-    pub(crate) fn activation_ready(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef) -> bool {
-        self.activation_ready_locks(p, card, ad, None)
-    }
-
-    /// [`activation_ready`](Self::activation_ready) with the battlefield's
-    /// [`activation_locks`](Self::activation_locks) when the caller has
-    /// them (one walk of the battlefield for many sources).
-    fn activation_ready_locks(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, locks: Option<u16>) -> bool {
+    /// `locks`: the battlefield's [`activation_locks`](Self::activation_locks),
+    /// read once by the caller for many abilities.
+    pub(crate) fn activation_ready(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, locks: u16) -> bool {
         if self.activation_locked_by(card, locks) {
             return false;
         }
@@ -238,13 +233,12 @@ impl Game {
     /// "Activated abilities of [types] can't be activated" (CR 602.5) by a
     /// static ability of a permanent on the battlefield (mana abilities
     /// included).
-    fn activation_locked_by(&self, card: CardIdx, locks: Option<u16>) -> bool {
+    fn activation_locked_by(&self, card: CardIdx, locks: u16) -> bool {
         if self.objs[card.i()].zone != Zone::Battlefield {
             return false;
         }
         // (Some permanent's lock covers one of its types iff the union of
         // the locks does; its types are read only when there is a lock.)
-        let locks = locks.unwrap_or_else(|| self.activation_locks());
         locks != 0 && self.types_of(card) & locks != 0
     }
 
@@ -260,7 +254,7 @@ impl Game {
     pub(crate) fn mana_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
         let mut out: Vec<Class> = Vec::with_capacity(8);
         let mut n_multi = 0;
-        let locks = Some(self.activation_locks());
+        let locks = self.activation_locks();
         // "Whenever you tap a <land subtype> for mana, add an additional
         // <mana>" (triggered mana abilities, CR 605.1b: they resolve at once,
         // so such a land makes more mana).
@@ -276,7 +270,7 @@ impl Game {
             let d = self.abilities(c);
             for (i, ad) in d.activated.iter().enumerate() {
                 let Some(m) = ad.mana() else { continue };
-                if ad.instant_only || !self.activation_ready_locks(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
+                if ad.instant_only || !self.activation_ready(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
                     continue;
                 }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
@@ -315,7 +309,7 @@ impl Game {
                 let def = self.objs[c.i()].def;
                 for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
                     let Some(m) = ad.mana() else { continue };
-                    if ad.instant_only || !self.activation_ready_locks(p, c, ad, locks) {
+                    if ad.instant_only || !self.activation_ready(p, c, ad, locks) {
                         continue;
                     }
                     let src = Src { card: c, slot: AbilitySlot::Hand(i as u8) };
@@ -473,7 +467,31 @@ impl Game {
     /// Can `p` pay `cost` (Phyrexian pips included) from their pool and the
     /// sources in `classes`, leaving what `keep` needs?
     pub(crate) fn can_pay_with(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], keep: &Keep) -> bool {
-        self.phyrexian_feasible(p, cost, classes, keep, keep.life, None)
+        self.might_pay(p, cost, classes, None) && self.phyrexian_feasible(p, cost, classes, keep, keep.life, None)
+    }
+
+    /// A cheap necessary condition for paying `cost` from the pool and
+    /// `classes` (but card `without`'s sources): every non-Phyrexian pip
+    /// takes one mana, and every source makes at most its largest
+    /// production (ENGINE.md 17: most unaffordable costs fail here, before
+    /// any candidates are built).
+    pub(crate) fn might_pay(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], without: Option<CardIdx>) -> bool {
+        let need = cost.total() as u32 - cost.phyrexian.iter().map(|&n| n as u32).sum::<u32>();
+        if need == 0 {
+            return true;
+        }
+        let mut have = self.players[p as usize].pool.total() as u32;
+        for cl in classes {
+            if have >= need {
+                return true;
+            }
+            let most = match &cl.yld {
+                Yield::One(_) => 1,
+                Yield::Multi { prods, .. } => prods.iter().map(|v| v.iter().map(|&n| n as u32).sum::<u32>()).max().unwrap_or(0),
+            };
+            have += most * cl.members.iter().filter(|s| Some(s.card) != without).count() as u32;
+        }
+        have >= need
     }
 
     /// [`can_pay_with`](Self::can_pay_with) without the sources of card
@@ -487,7 +505,7 @@ impl Game {
         keep: &Keep,
         without: Option<CardIdx>,
     ) -> bool {
-        self.phyrexian_feasible(p, cost, classes, keep, keep.life, without)
+        self.might_pay(p, cost, classes, without) && self.phyrexian_feasible(p, cost, classes, keep, keep.life, without)
     }
 
     /// Some split of the Phyrexian pips into life and mana leaves the rest
