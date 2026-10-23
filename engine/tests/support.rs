@@ -101,6 +101,7 @@ const SUPPORTED: &[&str] = &[
     "Elvish Mystic",
     "Elvish Spirit Guide",
     "Embereth Shieldbreaker // Battle Display",
+    "Emeritus of Abundance // Regrowth",
     "Emry, Lurker of the Loch",
     "Endurance",
     "Enlightened Tutor",
@@ -487,8 +488,8 @@ fn unsupported_cards_fail_loudly() {
     let db = CardDb::cube();
     let err = db.expect_id("Balance").unwrap_err();
     assert!(err.contains("Effect:BalanceEffect"), "{err}");
-    let err = db.expect_id("Emeritus of Abundance // Regrowth").unwrap_err();
-    assert!(err.contains("Effect:SourceBecomesPrepared"), "{err}");
+    let err = db.expect_id("Tishana's Tidebinder").unwrap_err();
+    assert!(err.contains("Effect:CounterTargetStackObject"), "{err}");
     assert!(db.expect_id("No Such Card").is_err());
 }
 

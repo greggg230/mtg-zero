@@ -325,7 +325,7 @@ impl Game {
             v.push(o.attached.map_or(u64::MAX, |h| self.battlefield.iter().position(|&x| x == h.idx).unwrap_or(999) as u64));
             // Copies (public, CR 707): what it is without copy effects, its
             // copy effects' exceptions, token-ness.
-            v.extend([self.own_def(c) as u64, h64(&self.exc(c)), self.is_token(c) as u64]);
+            v.extend([self.own_def(c) as u64, h64(&self.exc(c)), self.is_token(c) as u64, self.is_prepared(c) as u64]);
         };
         for &c in &self.battlefield {
             obj(&mut v, c);
@@ -429,7 +429,12 @@ impl Game {
         }
         v.push(u64::MAX);
         for pm in &self.permissions {
-            v.extend([live_place(pm.card), pm.player as u64, pm.turn.unwrap_or(0) as u64, h64(&pm.kind)]);
+            // (A prepared permanent by its place, CR 722.3c.)
+            let kind = match pm.kind {
+                crate::game::PermKind::Prepared { source } => 5_000_000 + live_place(source),
+                k => h64(&k),
+            };
+            v.extend([live_place(pm.card), pm.player as u64, pm.turn.unwrap_or(0) as u64, kind]);
         }
         v.push(u64::MAX);
         for p in 0..2usize {
@@ -540,6 +545,7 @@ impl Game {
         self.batch_start.hash(&mut h);
         self.copies.hash(&mut h);
         self.copy_objs.hash(&mut h);
+        self.prepared.hash(&mut h);
         self.lki_copy.hash(&mut h);
         self.spell_lki.hash(&mut h);
         h.finish()
@@ -599,7 +605,12 @@ impl Game {
             }
             // CR 712.8a, 715.4: only a permanent or a spell has a face up
             // other than its front.
-            if self.db.is_face(self.objs[i].def) && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack) {
+            // (A copy of a prepare spell in exile has its characteristics,
+            // CR 722.3c.)
+            if self.db.is_face(self.objs[i].def)
+                && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack)
+                && !(self.objs[i].zone == Zone::Exile && self.is_copy_obj(CardIdx(i as u16)))
+            {
                 return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx(i as u16)), self.objs[i].zone));
             }
         }

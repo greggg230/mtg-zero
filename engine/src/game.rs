@@ -152,6 +152,10 @@ pub enum PermKind {
     /// Cast it from a graveyard (for its mana cost); if that spell would be
     /// put into a graveyard, it is exiled instead (Jace, Telepath Unbound).
     CastThenExile,
+    /// A copy of a prepare spell in exile (CR 722.3c): the controller of
+    /// `source`, the prepared permanent, may cast it (for its mana cost)
+    /// while `source` stays prepared on the battlefield.
+    Prepared { source: ObjRef },
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -502,6 +506,9 @@ pub struct Game {
     pub(crate) entering_times: u8,
     pub(crate) enter_note: u16,
     pub(crate) defer_enters: bool,
+    /// Prepared permanents (CR 722.3a) and the copy of their prepare spell
+    /// in exile (722.3c).
+    pub(crate) prepared: Vec<(ObjRef, CardIdx)>,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -645,6 +652,7 @@ impl Game {
             entering_times: 0,
             enter_note: 0,
             defer_enters: false,
+            prepared: Vec::new(),
             batching: false,
             batch_start: 0,
             entering_cast: false,
@@ -877,7 +885,8 @@ impl Game {
         self.entering_escaped = escaped && cast;
         // Its `Enters` event says whether it was cast and how many times an
         // additional cost was paid ("if you cast it", squad, offspring).
-        let note = cast as u16 | (times as u16) << 1;
+        // (A copy of a spell resolving wasn't cast, CR 707.10.)
+        let note = (cast && !self.is_copy_obj(idx)) as u16 | (times as u16) << 1;
         self.enter_note = note;
         self.defer_enters = copy_choice;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
@@ -941,6 +950,10 @@ impl Game {
         if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player {
             self.agenda.push(Task::AsEnters { card: idx });
         }
+        // "This creature enters prepared" (CR 722.3a).
+        if self.def_of(idx).enters_prepared {
+            self.become_prepared(idx);
+        }
     }
 
     /// Create `n` tokens (CR 111.2) under `controller`, with the
@@ -952,16 +965,20 @@ impl Game {
     }
 
     /// How many tokens `controller` creates instead of n ("twice that many
-    /// of those tokens", CR 614.1a; at most 64).
+    /// of those tokens", CR 614.1a; at most 64), and no more than leave them
+    /// 96 permanents (an engine limit: the `MY_PERM` / `OPP_PERM` action
+    /// slots; ENGINE.md 26.11).
     pub(crate) fn token_count(&self, controller: PlayerId, n: u32) -> u32 {
         let mut n = n;
+        let mut have = 0u32;
         for c in self.permanents_of(controller) {
+            have += 1;
             let f = self.abilities(c).token_factor;
             if f > 1 {
                 n = n.saturating_mul(f as u32).min(64);
             }
         }
-        n
+        n.min((crate::decision::act::PERM_N as u32).saturating_sub(have))
     }
 
     /// Create one token (CR 111.2): a new object slot, put onto the

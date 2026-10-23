@@ -509,6 +509,8 @@ pub enum Ext {
     /// Exile the card of the triggered ability's event, if it is still that
     /// card in a graveyard ("exile that card").
     ExileEventCard,
+    /// Each object of `on` becomes prepared (CR 722.3a).
+    BecomePrepared { on: On },
 }
 
 /// What a delayed trigger is about ("that card", "that much").

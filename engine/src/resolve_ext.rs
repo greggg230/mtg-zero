@@ -969,7 +969,7 @@ impl Game {
             Ext::CreateTokenAttachSource { token } => {
                 let def = self.db.token_def(*token);
                 // (With a token doubler, it is attached to the first one.)
-                let t = self.create_tokens(def, f.controller, 1, false)[0];
+                let Some(&t) = self.create_tokens(def, f.controller, 1, false).first() else { return Flow::Next };
                 if let Some(&eq) = self.objs_on(f, &On::Source).first() {
                     if self.objs[t.i()].zone == Zone::Battlefield {
                         let host = self.obj_ref(t);
@@ -1510,7 +1510,11 @@ impl Game {
             | Ext::DiscardUpToThenDraw { .. }
             | Ext::KeepOneOfEachType { .. }
             | Ext::Connive => self.exec_faces(f, op),
-            Ext::CreateTokenCopy { .. } | Ext::BecomeCopy { .. } | Ext::CopySpell { .. } | Ext::ExileEventCard => {
+            Ext::CreateTokenCopy { .. }
+            | Ext::BecomeCopy { .. }
+            | Ext::CopySpell { .. }
+            | Ext::ExileEventCard
+            | Ext::BecomePrepared { .. } => {
                 self.exec_copies(f, op)
             }
             Ext::RevealTopToHand { who } => {

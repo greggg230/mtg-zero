@@ -394,3 +394,87 @@ fn sage_of_the_skies_alone_makes_no_copy() {
     resolve_with(&mut g, |_| None);
     assert!(tokens_named(&g, SAGE).is_empty());
 }
+
+// ---- Emeritus of Abundance // Regrowth (prepare, CR 722) ------------------------------------
+
+const EMERITUS: &str = "Emeritus of Abundance // Regrowth";
+
+/// The copy of a prepare spell in exile, if any.
+fn prepare_copy(g: &Game) -> Option<CardIdx> {
+    g.exile_zone().iter().copied().find(|&c| g.is_copy_obj(c))
+}
+
+#[test]
+fn emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3() {
+    // "Vigilance. This creature enters prepared. Whenever this creature
+    // attacks, if you control eight or more lands, this creature becomes
+    // prepared." Prepare spell: "Regrowth {1}{G} Sorcery: Return target card
+    // from your graveyard to your hand."
+    let mut g = scen().battlefield(0, &["Forest"; 5]).graveyard(0, &["Lightning Bolt"]).hand(0, &[EMERITUS]).start();
+    let e = g.card(0, EMERITUS, Zone::Hand);
+    g.choose(Choice::Cast(e));
+    resolve_with(&mut g, |_| None);
+    assert!(g.is_prepared(e));
+    assert!(g.has_kw(e, Kw::Vigilance));
+    // CR 722.3c: a copy in exile with only the prepare spell's
+    // characteristics; its controller may cast it.
+    let copy = prepare_copy(&g).expect("a copy in exile");
+    assert_eq!(g.name(copy), "Regrowth");
+    assert!(g.def_of(copy).is(types::SORCERY));
+    assert_eq!(g.own_def(copy), g.obj(copy).def);
+    let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+    g.choose(Choice::Cast(copy));
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then(|| Choice::Target(Target::Obj(g.obj_ref(bolt)))));
+    assert_eq!(g.obj(bolt).zone, Zone::Hand);
+    assert!(!g.is_prepared(e), "unprepared as the copy was cast");
+    assert_eq!(g.obj(copy).zone, Zone::Nowhere, "a copy of a card ceases to exist off the stack (CR 704.5e)");
+    assert_eq!(g.lands_of(0).filter(|&c| g.obj(c).tapped).count(), 5);
+}
+
+#[test]
+fn emeritus_of_abundance_attacking_with_eight_lands_becomes_prepared_cr_722_3a() {
+    let mut g = scen().battlefield(0, &[EMERITUS]).battlefield(0, &["Forest"; 8]).start();
+    let e = bf(&g, 0, EMERITUS);
+    assert!(!g.is_prepared(e));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    while g.kind() != Some(DecisionKind::DeclareAttackers) {
+        g.pass();
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    }
+    g.choose(Choice::Card(e));
+    g.choose(Choice::Pass);
+    resolve_with(&mut g, |_| None);
+    assert!(g.is_prepared(e));
+    assert!(prepare_copy(&g).is_some());
+}
+
+#[test]
+fn emeritus_of_abundance_attacking_with_seven_lands_isnt_prepared() {
+    let mut g = scen().battlefield(0, &[EMERITUS]).battlefield(0, &["Forest"; 7]).start();
+    let e = bf(&g, 0, EMERITUS);
+    while g.kind() != Some(DecisionKind::DeclareAttackers) {
+        g.pass();
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    }
+    g.choose(Choice::Card(e));
+    g.choose(Choice::Pass);
+    resolve_with(&mut g, |_| None);
+    assert!(!g.is_prepared(e));
+}
+
+#[test]
+fn emeritus_of_abundance_leaving_takes_its_copy_cr_722_3c() {
+    // Prepared, then exiled by Swords to Plowshares: the copy of Regrowth
+    // ceases to exist (the exception to 704.5e ends).
+    let mut g = scen().battlefield(0, &["Forest", "Forest", "Forest", "Plains"]).hand(0, &[EMERITUS, "Swords to Plowshares"]).start();
+    let e = g.card(0, EMERITUS, Zone::Hand);
+    g.choose(Choice::Cast(e));
+    resolve_with(&mut g, |_| None);
+    let copy = prepare_copy(&g).unwrap();
+    let s = g.card(0, "Swords to Plowshares", Zone::Hand);
+    g.choose(Choice::Cast(s));
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then(|| g.tgt(e)));
+    assert_eq!(g.obj(e).zone, Zone::Exile);
+    assert_eq!(g.obj(copy).zone, Zone::Nowhere);
+    assert!(!g.has_option(Choice::Cast(copy)));
+}

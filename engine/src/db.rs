@@ -1070,6 +1070,11 @@ pub struct CardDef {
     /// card). On that face: `bestowed`.
     pub bestow: Option<DefId>,
     pub bestowed: bool,
+    /// A preparation card's prepare spell (CR 722.2a): a face (an instant or
+    /// sorcery) that copies of the card in exile have (722.3c).
+    pub prepare: Option<DefId>,
+    /// "This creature enters prepared" (CR 722.3a).
+    pub enters_prepared: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.
@@ -1133,6 +1138,8 @@ pub struct CardDb {
     by_name: BTreeMap<String, DefId>,
     unsupported: BTreeMap<String, Vec<String>>,
     subtypes: Vec<String>,
+    /// The interned "Equipment" subtype, if any card has it.
+    equipment: Option<u16>,
 }
 
 impl CardDb {
@@ -1162,6 +1169,7 @@ impl CardDb {
                 }
             }
         }
+        db.equipment = db.subtype_id("Equipment");
         // Tokens the cards create (CR 111), interned during lowering.
         db.token_base = db.defs.len() as DefId;
         db.defs.extend(tokens);
@@ -1175,6 +1183,7 @@ impl CardDb {
             card.back = back;
             card.adventure = adventure;
             card.bestow = card.bestow.map(|k| base + k);
+            card.prepare = card.prepare.map(|k| base + k);
             card.halves = card.halves.map(|(a, b)| (base + a, base + b));
             for (k, mut f) in fs.into_iter().enumerate() {
                 f.front = Some(id);
@@ -1284,6 +1293,11 @@ impl CardDb {
 
     pub fn subtype_name(&self, id: u16) -> &str {
         &self.subtypes[id as usize]
+    }
+
+    /// The "Equipment" subtype's id.
+    pub fn equipment_subtype(&self) -> Option<u16> {
+        self.equipment
     }
 }
 

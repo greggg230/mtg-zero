@@ -156,6 +156,9 @@ pub mod perm {
     pub const ATTACHED: usize = 80;
     pub const ATTACHED_SLOT: usize = 81;
     pub const ATTACHED_OPP: usize = 82;
+    /// Prepared (CR 722.3a): a copy of its prepare spell in exile may be
+    /// cast.
+    pub const PREPARED: usize = 83;
 }
 
 /// Offsets inside a stack slot's status (after its card code).
@@ -449,6 +452,7 @@ impl Game {
                     st[perm::ATTACHED_SLOT] = slot_of(h.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
                     st[perm::ATTACHED_OPP] = (self.objs[h.idx.i()].controller != me) as u8 as f32;
                 }
+                st[perm::PREPARED] = self.is_prepared(c) as u8 as f32;
             }
         }
         // The viewer's hand.

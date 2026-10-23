@@ -222,7 +222,15 @@ impl Game {
 
     /// Does permission `pm` let `p` play its card now?
     pub(crate) fn permission_ok(&self, pm: &crate::game::Permission, p: PlayerId) -> bool {
-        if pm.player != p || !self.live(pm.card) || pm.turn.is_some_and(|t| t != self.turn.number) {
+        if !self.live(pm.card) || pm.turn.is_some_and(|t| t != self.turn.number) {
+            return false;
+        }
+        // CR 722.3c: the prepared permanent's controller, while it stays
+        // prepared.
+        if let crate::game::PermKind::Prepared { source } = pm.kind {
+            return self.prepare_copy_live(pm.card.idx) && self.objs[source.idx.i()].controller == p;
+        }
+        if pm.player != p {
             return false;
         }
         match pm.kind {
@@ -250,9 +258,11 @@ impl Game {
             .iter()
             .find(|pm| pm.card == r && self.permission_ok(pm, p) && matches!(pm.kind, crate::game::PermKind::Play { .. }))
             .or_else(|| {
-                self.permissions
-                    .iter()
-                    .find(|pm| pm.card == r && self.permission_ok(pm, p) && pm.kind == crate::game::PermKind::Adventure)
+                self.permissions.iter().find(|pm| {
+                    pm.card == r
+                        && self.permission_ok(pm, p)
+                        && matches!(pm.kind, crate::game::PermKind::Adventure | crate::game::PermKind::Prepared { .. })
+                })
             })
             .map(|pm| pm.kind)
     }
@@ -302,6 +312,8 @@ impl Game {
                 crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
                 // CR 715.3d: cast it (not as an Adventure) for its mana cost.
                 crate::game::PermKind::Adventure => Some(CastFrom::Permission { free: false, any_mana: false }),
+                // CR 722.3c: a copy of a prepare spell, for its mana cost.
+                crate::game::PermKind::Prepared { .. } => Some(CastFrom::Permission { free: false, any_mana: false }),
                 crate::game::PermKind::Flashback | crate::game::PermKind::CastThenExile => None,
             },
             _ => None,
@@ -615,6 +627,8 @@ impl Game {
                 // CR 715.3d: an adventurer card on an adventure (a creature
                 // card: cast only).
                 Some(crate::game::PermKind::Adventure) => true,
+                // CR 722.3c: a copy of a prepare spell (cast only).
+                Some(crate::game::PermKind::Prepared { .. }) => true,
                 _ => continue,
             };
             if k >= act::EXILE_N {
@@ -1296,6 +1310,11 @@ impl Game {
             pl.noncreature_cast = pl.noncreature_cast.saturating_add(1);
         }
         let r = self.obj_ref(card);
+        // CR 722.3c: casting the copy of its prepare spell unprepares the
+        // permanent.
+        if !self.prepared.is_empty() {
+            self.prepared.retain(|x| x.1 != card);
+        }
         self.event(crate::triggers::Event {
             kind: crate::db::EventKind::IsCast,
             a: crate::triggers::Subj::Obj(r),

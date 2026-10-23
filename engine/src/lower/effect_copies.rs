@@ -224,6 +224,12 @@ pub(crate) fn lower_effect_copies(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
         E::CopyThisSpell(nodes::CopyThisSpell {}) => {
             b.op(Op::Ext(Ext::CopySpell { of: SpellOf::EventSpell, who: Who::You, n: Amount::Fixed(1), may: false, new_targets: false }));
         }
+        // "This creature becomes prepared" (CR 722.3a; the card's prepare
+        // spell is checked by `lower_printing`).
+        E::SourceBecomesPrepared(nodes::SourceBecomesPrepared {}) => {
+            l.uses_prepare = true;
+            b.op(Op::Ext(Ext::BecomePrepared { on: On::Source }));
+        }
         _ => return false,
     }
     true

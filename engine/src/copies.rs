@@ -426,6 +426,12 @@ impl Game {
                 }
                 Flow::Suspend
             }
+            Ext::BecomePrepared { on } => {
+                for c in self.objs_on(f, on) {
+                    self.become_prepared(c);
+                }
+                Flow::Next
+            }
             Ext::ExileEventCard => {
                 if let Some(r) = f.ev.obj {
                     if self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard {
@@ -436,6 +442,45 @@ impl Game {
             }
             other => unreachable!("not a copy instruction: {other:?}"),
         }
+    }
+
+    /// Permanent `c` becomes prepared (CR 722.3a, c): if it has a prepare
+    /// spell and isn't prepared, its controller creates a copy of it in
+    /// exile with only its prepare spell's characteristics, which they may
+    /// cast while `c` stays prepared (`PermKind::Prepared`).
+    pub(crate) fn become_prepared(&mut self, c: CardIdx) {
+        let r = self.obj_ref(c);
+        let Some(face) = self.def_of(c).prepare else { return };
+        if self.objs[c.i()].zone != Zone::Battlefield || self.prepared.iter().any(|x| x.0 == r) {
+            return;
+        }
+        let p = self.objs[c.i()].controller;
+        let copy = self.add_card(face, p, Zone::Nowhere);
+        self.copy_objs.push(copy);
+        self.tokens += 1;
+        let card = self.move_card(copy, Zone::Exile, crate::game::Pos::Top);
+        // (Its characteristics are the prepare spell's in exile too.)
+        self.objs[copy.i()].def = face;
+        self.prepared.push((r, copy));
+        self.permissions.push(crate::game::Permission {
+            card,
+            player: p,
+            turn: None,
+            kind: crate::game::PermKind::Prepared { source: r },
+        });
+        self.note(|g| format!("{} becomes prepared", g.name(c)));
+    }
+
+    /// Is `c` a copy of a prepare spell in exile whose permanent is still
+    /// prepared on the battlefield (the exception to 704.5e, CR 722.3c)?
+    pub(crate) fn prepare_copy_live(&self, c: CardIdx) -> bool {
+        self.prepared.iter().any(|&(s, x)| x == c && self.live(s) && self.objs[s.idx.i()].zone == Zone::Battlefield)
+    }
+
+    /// Is permanent `c` prepared (CR 722.3a)?
+    pub fn is_prepared(&self, c: CardIdx) -> bool {
+        let r = self.obj_ref(c);
+        !self.prepared.is_empty() && self.prepared.iter().any(|x| x.0 == r)
     }
 
     /// CR 707.10c: the controller of copy `id` may choose new targets: for

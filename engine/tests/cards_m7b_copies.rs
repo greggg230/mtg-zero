@@ -318,6 +318,39 @@ fn saheeli_minus_two_needs_two_different_permanents_cr_115_3() {
     assert!(g.has_option(Choice::Ability(sa, AbilitySlot::Activated(0))));
 }
 
+#[test]
+fn saheeli_copy_of_an_equipment_becomes_unattached_when_it_reverts_cr_704_5p() {
+    // The Sol Ring becomes a copy of Lightning Greaves (Equipment, equip
+    // {0}) and is attached to a creature; at end of turn it is a Sol Ring
+    // again, no longer an Equipment, and becomes unattached (CR 704.5p).
+    let mut g = scen().battlefield(0, &[SAHEELI, "Sol Ring", "Lightning Greaves", "Test Bear"]).start();
+    let sa = bf(&g, 0, SAHEELI);
+    let ring = bf(&g, 0, "Sol Ring");
+    let greaves = bf(&g, 0, "Lightning Greaves");
+    let bear = bf(&g, 0, "Test Bear");
+    g.choose(Choice::Ability(sa, AbilitySlot::Activated(0)));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) if g.has_option(g.tgt(ring)) => Some(g.tgt(ring)),
+        Some(DecisionKind::Target) => Some(g.tgt(greaves)),
+        _ => None,
+    });
+    assert_eq!(g.name(ring), "Lightning Greaves");
+    // Equip {0}: the copy's ability.
+    let slot = (0..g.def_of(ring).activated.len() as u8).find(|&i| g.has_option(Choice::Ability(ring, AbilitySlot::Activated(i)))).expect("equip offered");
+    g.choose(Choice::Ability(ring, AbilitySlot::Activated(slot)));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(g.tgt(bear)),
+        _ => None,
+    });
+    assert_eq!(g.obj(ring).attached.map(|h| h.idx), Some(bear));
+    assert!(g.has_kw(bear, Kw::Haste));
+    quiet_until(&mut g, |g| g.turn().number == 4);
+    assert_eq!(g.name(ring), "Sol Ring");
+    assert_eq!(g.obj(ring).attached, None, "no longer an Equipment: unattached (CR 704.5p)");
+    assert_eq!(g.obj(ring).zone, Zone::Battlefield);
+    assert!(!g.has_kw(bear, Kw::Haste));
+}
+
 // ---- Shifting Woodland ----------------------------------------------------------------
 
 const WOODLAND: &str = "Shifting Woodland";

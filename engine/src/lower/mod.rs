@@ -83,6 +83,9 @@ pub struct Lowerer<'a> {
     /// Latent activated abilities the printing's effects grant it ("this
     /// Saga gains ..."), appended to its activated abilities.
     pub latent: Vec<crate::db::ActivatedDef>,
+    /// An effect makes the card prepared (CR 722.3a): it needs a prepare
+    /// spell.
+    pub uses_prepare: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -100,6 +103,8 @@ pub enum Face {
     Adventure,
     /// A half of a split card (CR 709).
     Half,
+    /// A preparation card's prepare spell (CR 722.2a).
+    Prepare,
 }
 
 impl Lowerer<'_> {
@@ -204,8 +209,12 @@ pub fn lower_card(
         faces: Vec::new(),
         face: Face::Card,
         latent: Vec::new(),
+        uses_prepare: false,
     };
     let def = printing::lower_printing(&mut l, p);
+    if l.uses_prepare && def.prepare.is_none() {
+        l.unsupported("Effect:SourceBecomesPrepared(without a prepare spell)");
+    }
     if let Some(&(_, blocker)) = IR_DEFECTS.iter().find(|(n, _)| *n == card.name) {
         l.unsupported(blocker);
     }

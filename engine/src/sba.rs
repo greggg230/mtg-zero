@@ -129,6 +129,7 @@ impl Game {
     /// creature); 702.103f: a bestowed Aura attached to an illegal object or
     /// to none.
     fn bad_attachments(&self) -> Vec<CardIdx> {
+        let equipment = self.db.equipment_subtype();
         self.battlefield
             .iter()
             .copied()
@@ -139,8 +140,11 @@ impl Game {
                         || !self.is_creature(h.idx)
                         || self.protected_from(h.idx, &self.damage_source_of(c))
                 };
+                // 704.5p: a permanent that is no longer an Equipment (a copy
+                // effect ended) becomes unattached.
+                let attachable = || self.def_of(c).bestowed || equipment.is_some_and(|s| self.has_subtype(c, s));
                 match self.objs[c.i()].attached {
-                    Some(h) => illegal(h),
+                    Some(h) => illegal(h) || !attachable(),
                     None => self.def_of(c).bestowed,
                 }
             })
@@ -158,7 +162,11 @@ impl Game {
                 // (704.5e: a copy of a spell or of a card is a token here;
                 // one leaving the stack ceases to exist at once, `move_card`.)
                 let z = self.objs[c.i()].zone;
-                z != Zone::Battlefield && z != Zone::Nowhere && z != Zone::Stack && self.is_token(c)
+                z != Zone::Battlefield
+                    && z != Zone::Nowhere
+                    && z != Zone::Stack
+                    && self.is_token(c)
+                    && !(z == Zone::Exile && self.prepare_copy_live(c))
             })
             .collect()
     }
@@ -294,6 +302,11 @@ impl Game {
         for &c in &stray {
             self.note(|g| format!("{} token ceases to exist", g.name(c)));
             self.move_card(c, Zone::Nowhere, Pos::Top);
+        }
+        // (Prepared designations whose permanent or copy is gone.)
+        if !self.prepared.is_empty() {
+            let objs = &self.objs;
+            self.prepared.retain(|&(s, c)| objs[s.idx.i()].inc == s.inc && objs[s.idx.i()].zone == Zone::Battlefield && objs[c.i()].zone == Zone::Exile);
         }
         for &c in &self.battlefield {
             self.objs[c.i()].deathtouched = false;

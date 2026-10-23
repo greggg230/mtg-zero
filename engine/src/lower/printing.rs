@@ -353,8 +353,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // `daybound`, `nightbound`, `adventure_face`): below.
         l.deny("CardPrinting.class_level", class_level);
         l.deny("CardPrinting.class_levels", class_levels);
-        l.deny("CardPrinting.prepare_spell", prepare_spell);
-        l.deny("CardPrinting.enters_prepared", enters_prepared);
         l.deny("CardPrinting.plot_cost", plot_cost);
         l.deny("CardPrinting.plot_cost_str", plot_cost_str);
         let _ = escape_cost_str; // display form of `escape_cost`
@@ -1145,6 +1143,25 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             adventure = Some(k);
         }
     }
+    // A preparation card (CR 722): its prepare spell is a face of its own
+    // (an instant or sorcery) that copies of the card in exile have
+    // (722.3c); "this creature enters prepared" (722.3a).
+    let mut prepare = None;
+    match prepare_spell.as_deref() {
+        Some(cats::CardPrinting::CardPrinting(ps)) => {
+            if face != super::Face::Card || ty & types::PERMANENT == 0 {
+                l.unsupported("CardPrinting.prepare_spell(not on a permanent card)");
+            }
+            l.face = super::Face::Prepare;
+            let d = lower_printing(l, ps);
+            if d.types & (types::INSTANT | types::SORCERY) == 0 || d.types & types::PERMANENT != 0 {
+                l.unsupported("CardPrinting.prepare_spell(not an instant or sorcery)");
+            }
+            l.faces.push(d);
+            prepare = Some((l.faces.len() - 1) as u16);
+        }
+        None => l.deny("CardPrinting.enters_prepared(without a prepare spell)", enters_prepared),
+    }
     // A split card (CR 709): its two halves, each a face of its own; the
     // card's characteristics are the halves' combined (709.4: the IR states
     // them, and they must agree).
@@ -1285,6 +1302,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         times_cost,
         bestow: None,
         bestowed: false,
+        prepare,
+        enters_prepared: *enters_prepared,
     };
     // The bestowed face (CR 702.103b): an Aura enchantment with enchant
     // creature (an Aura spell targets a creature, 303.4a) whose enchanted
