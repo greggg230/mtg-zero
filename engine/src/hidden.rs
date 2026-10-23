@@ -226,7 +226,10 @@ impl Game {
     pub fn unknown_to(&self, viewer: PlayerId, owner: PlayerId) -> Vec<CardIdx> {
         let pl = &self.players[owner as usize];
         let hand = if owner != viewer { &pl.hand[..] } else { &[][..] };
-        hand.iter().chain(pl.library.iter()).copied().filter(|&c| !self.knows(viewer, c)).collect()
+        // (Sized once: a filtered chain has no useful size hint.)
+        let mut out = Vec::with_capacity(hand.len() + pl.library.len());
+        out.extend(hand.iter().chain(pl.library.iter()).copied().filter(|&c| !self.knows(viewer, c)));
+        out
     }
 
     // ---- knowledge events (ENGINE.md 10) ----------------------------------
