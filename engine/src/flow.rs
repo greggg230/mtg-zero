@@ -346,7 +346,7 @@ impl Game {
                 // of untapping (122.1d).
                 let mine: Vec<CardIdx> = self.permanents_of(ap).collect();
                 for c in mine {
-                    if self.objs[c.i()].tapped && !self.def_of(c).no_untap {
+                    if self.objs[c.i()].tapped && !self.abilities(c).no_untap {
                         self.untap(c);
                     }
                 }

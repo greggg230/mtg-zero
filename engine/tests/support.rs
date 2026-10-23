@@ -201,7 +201,6 @@ const SUPPORTED: &[&str] = &[
     "Mind Stone",
     "Mind Twist",
     "Mine Collapse",
-    "Minsc & Boo, Timeless Heroes",
     "Mishra's Bauble",
     "Misty Rainforest",
     "Mole Man, Moloid Master",

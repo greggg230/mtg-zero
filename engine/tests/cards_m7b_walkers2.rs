@@ -162,12 +162,60 @@ fn karn_minus_two_makes_a_construct_that_counts_artifacts() {
 }
 
 // ---- Minsc & Boo, Timeless Heroes ----------------------------------------------
+//
+// The cube card stays blocked: its IR's Boo has no colour (Boo is red;
+// ENGINE.md 24.8). Its effects are tested on a copy of its IR with the
+// colour fixed, under a test name.
 
-const MINSC: &str = "Minsc & Boo, Timeless Heroes";
+const MINSC: &str = "Test Minsc & Boo";
+
+/// The cube, the custom cards and the fixed Minsc & Boo.
+fn minsc_db() -> &'static engine::db::CardDb {
+    static DB: std::sync::OnceLock<&'static engine::db::CardDb> = std::sync::OnceLock::new();
+    DB.get_or_init(|| {
+        let doc: serde_json::Value = serde_json::from_str(engine::db::CUBE_IR).unwrap();
+        let mut v = doc["cards"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "Minsc & Boo, Timeless Heroes")
+            .unwrap()
+            .clone();
+        v["name"] = serde_json::json!(MINSC);
+        v["printing"]["name"] = serde_json::json!(MINSC);
+        fn fix(v: &mut serde_json::Value) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    if m.get("name") == Some(&serde_json::json!("Boo")) {
+                        m.insert("color_indicator".into(), serde_json::json!(["R"]));
+                    }
+                    m.values_mut().for_each(fix);
+                }
+                serde_json::Value::Array(a) => a.iter_mut().for_each(fix),
+                _ => {}
+            }
+        }
+        fix(&mut v["printing"]);
+        let mut cards = engine::db::load_cube_document().cards;
+        cards.extend(common::custom_cards());
+        cards.push(serde_json::from_value(v).unwrap());
+        engine::db::CardDb::from_cards(&cards).leak()
+    })
+}
+
+fn minsc_scen() -> Scenario {
+    Scenario::new(minsc_db()).spec(|s| s.auto_single = false).library(0, &["Island"; 10]).library(1, &["Forest"; 10])
+}
+
+#[test]
+fn minsc_and_boo_is_blocked_by_its_ir() {
+    let err = engine::db::CardDb::cube().expect_id("Minsc & Boo, Timeless Heroes").unwrap_err();
+    assert!(err.contains("IR:CreateToken.token_printing.color_indicator"), "{err}");
+}
 
 #[test]
 fn minsc_and_boo_make_boo_and_fling_a_hamster() {
-    let mut g = scen()
+    let mut g = minsc_scen()
         .battlefield(0, &["Mountain", "Forest", "Mountain", "Forest"])
         .hand(0, &[MINSC])
         .battlefield(1, &["Test Bear"])
@@ -179,6 +227,7 @@ fn minsc_and_boo_make_boo_and_fling_a_hamster() {
     let m = bf(&g, 0, MINSC);
     let boo = bf(&g, 0, "Boo");
     assert!(g.has_kw(boo, Kw::Trample) && g.has_kw(boo, Kw::Haste));
+    assert_eq!(g.colors_of(boo), 1 << 3, "red");
     assert!(g.def_of(boo).supertypes & engine::db::supertypes::LEGENDARY != 0);
     // +1: three +1/+1 counters on up to one target creature with trample
     // or haste.
@@ -207,7 +256,7 @@ fn minsc_and_boo_make_boo_and_fling_a_hamster() {
 
 #[test]
 fn minsc_and_boo_sacrificing_a_non_hamster_draws_nothing() {
-    let mut g = scen().battlefield(0, &[MINSC, "Test Giant"]).at(Step::Main1, 0).start();
+    let mut g = minsc_scen().battlefield(0, &[MINSC, "Test Giant"]).at(Step::Main1, 0).start();
     let m = bf(&g, 0, MINSC);
     let hand = g.player(0).hand.len();
     activate(&mut g, m, 1, none);
@@ -651,6 +700,10 @@ fn ugin_cast_triggers_exile_colored_permanents() {
     // "When you cast this spell, exile up to one target permanent that's
     // one or more colors."
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    // One trigger: the spell's "whenever you cast a colorless spell" works
+    // only on the battlefield (CR 113.6).
+    assert_eq!(g.stack().len(), 2);
+    assert!(g.waiting_triggers().is_empty());
     assert!(!g.has_option(g.tgt(jet)), "colorless");
     g.choose(g.tgt(bear));
     resolve_with(&mut g, none);
@@ -773,4 +826,23 @@ fn wrenn_and_six_regrows_a_land_pings_and_gives_retrace() {
     // Without a land card in hand: no retrace.
     let g = scen().emblem(0, W6).battlefield(0, &["Mountain"]).graveyard(0, &["Lightning Bolt"]).hand(0, &["Test Bear"]).at(Step::Main1, 0).start();
     assert!(!g.has_option(Choice::Cast(g.card(0, "Lightning Bolt", Zone::Graveyard))));
+}
+
+#[test]
+fn oko_an_elked_thalia_taxes_nothing() {
+    // Her tax is a static ability: gone with all her abilities (CR 613.1f).
+    let mut g = scen()
+        .battlefield(0, &[OKO, "Mountain"])
+        .hand(0, &["Lightning Bolt"])
+        .battlefield(1, &["Thalia, Guardian of Thraben"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(bolt)), "{{R}} + {{1}}");
+    let oko = bf(&g, 0, OKO);
+    let thalia = bf(&g, 1, "Thalia, Guardian of Thraben");
+    activate(&mut g, oko, 1, target(thalia));
+    resolve_with(&mut g, none);
+    assert!(!g.has_kw(thalia, Kw::FirstStrike));
+    assert!(g.has_option(Choice::Cast(bolt)));
 }

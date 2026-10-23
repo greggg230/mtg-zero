@@ -29,7 +29,7 @@ impl Game {
         let mut cost = base;
         let ctx = Ctx { controller: p, source: None };
         for &c in &self.battlefield {
-            for (f, n) in &self.def_of(c).spell_tax {
+            for (f, n) in &self.abilities(c).spell_tax {
                 if self.card_matches(f, card, &ctx) {
                     cost.generic = cost.generic.saturating_add(*n);
                 }
@@ -55,7 +55,7 @@ impl Game {
         let mut opts = self.priority_options_all(p);
         // "Each player can't cast more than one spell each turn" (Archon of
         // Emeria).
-        if self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.def_of(c).one_spell_each_turn) {
+        if self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.abilities(c).one_spell_each_turn) {
             opts.retain(|o| !matches!(o.choice, Choice::Cast(_)));
         }
         opts
@@ -64,7 +64,7 @@ impl Game {
     fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
-        let drops = 1 + self.permanents_of(p).map(|c| self.def_of(c).extra_lands as u32).sum::<u32>();
+        let drops = 1 + self.permanents_of(p).map(|c| self.abilities(c).extra_lands as u32).sum::<u32>();
         let land_ok = sorcery_ok && (self.players[p as usize].lands_played as u32) < drops;
         let classes = self.mana_classes(p, None);
         let mut plain = None;
@@ -265,7 +265,7 @@ impl Game {
                 Some(e) => Some(&e.1),
                 None => {
                     let p = self.objs[card.i()].owner;
-                    self.escape_granter(p).and_then(|g| self.def_of(g).grants_escape.as_ref())
+                    self.escape_granter(p).and_then(|g| self.abilities(g).grants_escape.as_ref())
                 }
             },
             _ => def.additional.get(option as usize),
@@ -494,12 +494,12 @@ impl Game {
     /// A permanent of `p` giving the nonland cards in their graveyard
     /// escape (Underworld Breach).
     pub(crate) fn escape_granter(&self, p: PlayerId) -> Option<CardIdx> {
-        self.permanents_of(p).find(|&c| self.def_of(c).grants_escape.is_some())
+        self.permanents_of(p).find(|&c| self.abilities(c).grants_escape.is_some())
     }
 
     /// "You may play lands from your graveyard" (Crucible of Worlds).
     pub(crate) fn lands_from_graveyard(&self, p: PlayerId) -> bool {
-        self.permanents_of(p).any(|c| self.def_of(c).lands_from_graveyard)
+        self.permanents_of(p).any(|c| self.abilities(c).lands_from_graveyard)
     }
 
     /// Priority options for cards in exile with a permission (`EXILE`

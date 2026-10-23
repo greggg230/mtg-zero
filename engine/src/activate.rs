@@ -319,7 +319,7 @@ impl Game {
     /// A creature's power for crewing (a Pilot crews as though its power
     /// were greater).
     pub(crate) fn crew_power_of(&self, c: CardIdx) -> i32 {
-        self.power(c) + self.def_of(c).crew_bonus
+        self.power(c) + self.abilities(c).crew_bonus
     }
 
     /// Cards in `p`'s hand matching `f` other than `card`, one per
@@ -630,7 +630,7 @@ impl Game {
         let d = self.def_of(card);
         let q = crate::ids::opp(p);
         let forced = self.permanents_of(q).any(|c| {
-            let od = self.def_of(c);
+            let od = self.abilities(c);
             od.opp_enter_tapped & d.types != 0
                 || (od.opp_nonbasic_enter_tapped
                     && d.is(crate::db::types::LAND)

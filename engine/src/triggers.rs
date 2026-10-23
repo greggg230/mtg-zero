@@ -80,6 +80,20 @@ struct Observer {
     r: ObjRef,
     def: DefId,
     controller: PlayerId,
+    /// A spell being cast: only its "when you cast this spell" abilities
+    /// function (CR 113.6: a permanent card's other abilities work on the
+    /// battlefield).
+    spell: bool,
+}
+
+/// Does the predicate name "this spell" (`IsSelf(Spell)`)?
+fn names_this_spell(p: &TrigPred) -> bool {
+    match p {
+        TrigPred::IsSelf(Slot::Spell) => true,
+        TrigPred::And(a, b) | TrigPred::Or(a, b) => names_this_spell(a) || names_this_spell(b),
+        TrigPred::Not(a) => names_this_spell(a),
+        _ => false,
+    }
 }
 
 impl Game {
@@ -96,13 +110,13 @@ impl Game {
         for &c in self.battlefield.iter().chain(self.command.iter()) {
             let o = &self.objs[c.i()];
             if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) {
-                obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller });
+                obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false });
             }
         }
         if matches!(ev.kind, EventKind::Dies | EventKind::LeavesBattlefield | EventKind::IsSacrificed) {
             for l in &self.leaving {
                 if self.db.def(l.def).trig_mask & bit != 0 {
-                    obs.push(Observer { r: l.old, def: l.def, controller: l.controller });
+                    obs.push(Observer { r: l.old, def: l.def, controller: l.controller, spell: false });
                 }
             }
         }
@@ -110,7 +124,7 @@ impl Game {
             if let Subj::Obj(r) = ev.a {
                 let o = &self.objs[r.idx.i()];
                 if self.db.def(o.def).trig_mask & bit != 0 {
-                    obs.push(Observer { r, def: o.def, controller: o.controller });
+                    obs.push(Observer { r, def: o.def, controller: o.controller, spell: true });
                 }
             }
         }
@@ -134,7 +148,7 @@ impl Game {
         };
         for o in obs {
             for (i, t) in self.db.def(o.def).triggers.iter().enumerate() {
-                if t.event == ev.kind && self.pred_matches(&t.pred, &ev, o) {
+                if t.event == ev.kind && (!o.spell || names_this_spell(&t.pred)) && self.pred_matches(&t.pred, &ev, o) {
                     self.waiting.push(PendingTrigger {
                         controller: o.controller,
                         source: o.r,

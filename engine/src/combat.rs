@@ -97,10 +97,10 @@ impl Game {
         if self.flags_of(a).cant_be_blocked || self.protected_from(a, &self.damage_source_of(b)) {
             return false;
         }
-        if self.def_of(b).blocks_only_flyers && !ka.has(Kw::Flying) {
+        if self.abilities(b).blocks_only_flyers && !ka.has(Kw::Flying) {
             return false;
         }
-        if let Some(f) = &self.def_of(a).unblockable_by {
+        if let Some(f) = &self.abilities(a).unblockable_by {
             let ctx = crate::cast::Ctx { controller: self.objs[a.i()].controller, source: Some(self.obj_ref(a)) };
             if self.card_matches(f, b, &ctx) {
                 return false;
@@ -113,7 +113,7 @@ impl Game {
     /// be blocked except by three or more creatures").
     pub(crate) fn min_blockers(&self, a: CardIdx) -> usize {
         let menace = if self.has_kw(a, Kw::Menace) { 2 } else { 1 };
-        menace.max(self.def_of(a).min_blockers as usize)
+        menace.max(self.abilities(a).min_blockers as usize)
     }
 
     /// Untapped creatures of the defending player that can block (CR

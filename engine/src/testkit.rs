@@ -319,6 +319,7 @@ impl Game {
                 _ => 2000 + self.objs[c.i()].def as u64,
             }
         };
+        let live_place = |r: crate::ids::ObjRef| -> u64 { if self.live(r) { place(r.idx) } else { 7777 } };
         for s in &self.stack {
             match s.kind {
                 crate::game::StackKind::Spell { card } => v.extend([1, self.objs[card.i()].def as u64]),
@@ -359,13 +360,15 @@ impl Game {
         }
         v.push(u64::MAX);
         for l in &self.links {
-            v.extend([l.until as u64, l.back as u64, place(l.source.idx), place(l.card.idx)]);
+            // (A stale reference names no object: its slot's place would
+            // tell which physical card a hidden choice was.)
+            v.extend([l.until as u64, l.back as u64, live_place(l.source), live_place(l.card)]);
             v.push(l.until_monarch.map_or(9, |p| p as u64));
         }
         v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
         for pm in &self.permissions {
-            v.extend([place(pm.card.idx), pm.player as u64, pm.turn.unwrap_or(0) as u64, h64(&pm.kind)]);
+            v.extend([live_place(pm.card), pm.player as u64, pm.turn.unwrap_or(0) as u64, h64(&pm.kind)]);
         }
         v.push(u64::MAX);
         for p in 0..2usize {
@@ -381,7 +384,7 @@ impl Game {
         v.push(u64::MAX);
         for d in &self.delayed {
             v.extend([d.when as u64, d.controller as u64, d.source_def as u64, d.slot as u64, d.ev.amount as u64]);
-            v.push(d.ev.obj.map_or(u64::MAX, |r| place(r.idx)));
+            v.push(d.ev.obj.map_or(u64::MAX, live_place));
         }
         v.push(u64::MAX);
         for p in 0..2u8 {
@@ -457,6 +460,7 @@ impl Game {
         self.tokens.hash(&mut h);
         self.observer.hash(&mut h);
         self.effects.hash(&mut h);
+        self.any_loss.hash(&mut h);
         self.links.hash(&mut h);
         self.delayed.hash(&mut h);
         self.resolved.hash(&mut h);

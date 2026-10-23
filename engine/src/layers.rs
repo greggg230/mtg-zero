@@ -129,15 +129,22 @@ impl Game {
     }
 
     /// It lost all abilities (CR 613.1f: "loses all abilities").
+    #[inline]
     pub(crate) fn lost_abilities(&self, c: CardIdx) -> bool {
-        !self.effects.is_empty() && self.loss_ts(c).is_some()
+        self.any_loss && self.loss_ts(c).is_some()
+    }
+
+    /// Recompute the "loses all abilities" fast path after the effects
+    /// changed.
+    fn effects_changed(&mut self) {
+        self.any_loss = self.effects.iter().any(|e| e.m == Mod::LoseAllAbilities);
     }
 
     /// The timestamp of the latest "loses all abilities" effect on `c`:
     /// abilities from effects and statics with later timestamps survive it
     /// (CR 613.7).
     fn loss_ts(&self, c: CardIdx) -> Option<u32> {
-        if self.objs[c.i()].zone != Zone::Battlefield {
+        if !self.any_loss || self.objs[c.i()].zone != Zone::Battlefield {
             return None;
         }
         let r = self.obj_ref(c);
@@ -275,7 +282,7 @@ impl Game {
         }
         // "Loses all abilities" (CR 613.1f): printed keywords, keyword
         // counters and earlier grants are gone; later grants stay.
-        let loss = if self.effects.is_empty() { None } else { self.loss_ts(c) };
+        let loss = self.loss_ts(c);
         if loss.is_some() {
             k = KwSet::default();
         } else {
@@ -307,7 +314,7 @@ impl Game {
         if self.printed_only(c) {
             return p;
         }
-        let loss = if self.effects.is_empty() { None } else { self.loss_ts(c) };
+        let loss = self.loss_ts(c);
         if loss.is_some() {
             p = Prot::default();
         }
@@ -540,6 +547,7 @@ impl Game {
         }
         if !self.effects.is_empty() {
             self.effects.retain(|e| e.on != Affected::Obj(old));
+            self.effects_changed();
         }
         let d = self.def_of(c);
         if !d.statics.is_empty() {
@@ -563,16 +571,19 @@ impl Game {
         self.next_ts += 1;
         let ts = self.next_ts;
         self.effects.push(Effect { ts, until, on, m, controller });
+        self.effects_changed();
     }
 
     /// CR 514.2: "until end of turn" effects end in the cleanup step.
     pub(crate) fn end_turn_effects(&mut self) {
         self.effects.retain(|e| e.until != Until::EndOfTurn);
+        self.effects_changed();
     }
 
     /// "Until your next turn" effects of `p` end as `p`'s turn begins (CR
     /// 611.2b).
     pub(crate) fn end_until_next_turn(&mut self, p: PlayerId) {
         self.effects.retain(|e| !(e.until == Until::YourNextTurn && e.controller == p));
+        self.effects_changed();
     }
 }

@@ -383,6 +383,9 @@ pub struct Game {
     pub(crate) no_auto: bool,
     /// Continuous effects from resolved spells and abilities (CR 611.2).
     pub(crate) effects: Vec<crate::layers::Effect>,
+    /// Some effect makes a permanent lose all abilities (a fast path for
+    /// [`abilities`](Self::abilities)).
+    pub(crate) any_loss: bool,
     /// Counters on permanents: (card, kind, number) (CR 122).
     pub(crate) counters: Vec<(CardIdx, crate::db::Counter, u16)>,
     /// Permanents with static abilities on the battlefield (a fast path for
@@ -526,6 +529,7 @@ impl Game {
             decisions: 0,
             no_auto: false,
             effects: Vec::new(),
+            any_loss: false,
             counters: Vec::new(),
             n_static: 0,
             leaving: Vec::new(),
@@ -734,7 +738,7 @@ impl Game {
             let replaced = self
                 .battlefield
                 .iter()
-                .any(|&c| self.def_of(c).exiles_uncast_creatures);
+                .any(|&c| self.abilities(c).exiles_uncast_creatures);
             if replaced {
                 self.note(|g| format!("{} is exiled instead (not cast)", g.name(idx)));
                 return self.move_card(idx, Zone::Exile, Pos::Top);
@@ -1199,7 +1203,7 @@ impl Game {
     /// "Combat damage that would be dealt by creatures you control can't be
     /// prevented" (Questing Beast) for `p`.
     pub(crate) fn combat_unpreventable(&self, p: PlayerId) -> bool {
-        self.permanents_of(p).any(|c| self.def_of(c).combat_unpreventable)
+        self.permanents_of(p).any(|c| self.abilities(c).combat_unpreventable)
     }
 
     /// Does permanent `c` have protection from a source with these

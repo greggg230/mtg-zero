@@ -142,6 +142,15 @@ impl Lowerer<'_> {
     }
 }
 
+/// IR defects found by reading cards' IR against their Oracle text (ENGINE.md
+/// 20, 24.8): what the IR lost cannot be lowered from it, so the card stays
+/// blocked, with this blocker, until the IR is fixed in mtg-bot.
+const IR_DEFECTS: &[(&str, &str)] = &[
+    // "Boo, a legendary 1/1 red Hamster creature token": the IR's token
+    // printing has no colour indicator (it would be colourless).
+    ("Minsc & Boo, Timeless Heroes", "IR:CreateToken.token_printing.color_indicator(Boo is red)"),
+];
+
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.
 pub fn lower_card(
     card: &card_ir::Card,
@@ -163,6 +172,9 @@ pub fn lower_card(
         self_copy: None,
     };
     let def = printing::lower_printing(&mut l, p);
+    if let Some(&(_, blocker)) = IR_DEFECTS.iter().find(|(n, _)| *n == card.name) {
+        l.unsupported(blocker);
+    }
     if let Some((idx, extra)) = l.self_copy {
         // "A token that's a copy of it, except it's an artifact" (CR
         // 707.9b): the card's own definition, as a token.
