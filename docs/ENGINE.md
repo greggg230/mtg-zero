@@ -1,6 +1,8 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7b part 2 (cards with more than one face: transforming and modal double-faced cards,
+Status: M7b part 3 (copies: copy effects, token copies, copies of spells, entering as a copy;
+squad, offspring, replicate, spree, bestow, prepare; 410 supported cube cards; section 26),
+2026-10-23; M7b part 2 (cards with more than one face: transforming and modal double-faced cards,
 Adventures, Sagas, day and night, a split card; 394 supported cube cards; section 25),
 2026-10-23; M7b part 1 (planeswalkers: loyalty abilities, attacking planeswalkers, damage to
 planeswalkers, emblems and the command zone; 378 supported cube cards; section 24),
@@ -58,9 +60,11 @@ order must be deterministic); no threads, callbacks or interior mutability.
 * `PlayerId = u8` (0, 1). Two players only for now; nothing below assumes more except the
   places marked "2p" (APNAP order, "the opponent").
 * **`CardIdx(u16)`** indexes `Game.objs`, one slot per physical card for the whole match
-  (cards 0..39 belong to player 0's deck, 40..79 to player 1's). Tokens append slots (spell
-  copies will too); a slot is never reused, so `CardIdx` is stable. A token that ceased to
-  exist (CR 704.5d) keeps its slot in `Zone::Nowhere`, in no zone list.
+  (cards 0..39 belong to player 0's deck, 40..79 to player 1's). Tokens append slots, and so
+  do copies of spells and the copies a prepared permanent makes (M7b part 3, `Game.copy_objs`);
+  a slot is never reused, so `CardIdx` is stable. A token or copy that ceased to exist (CR
+  704.5d, 704.5e) keeps its slot in `Zone::Nowhere`, in no zone list. Copy effects are kept in
+  `Game.copies`, not in `Obj` (section 26.1).
 * **`ObjRef { idx, inc }`** names an *object* (CR 109). Each zone change bumps the slot's
   incarnation `inc` (CR 400.7: the object that moved is a new object), so a reference held by
   a target, a trigger or an effect goes stale automatically. `game.live(r)` is the one check.
@@ -349,8 +353,10 @@ which legendary permanent with the same name to keep, one decision per group, be
 simultaneous move), 704.5d (a token outside the battlefield ceases to exist: to
 `Zone::Nowhere`, after a "dies" event could see it in the graveyard). Losing ends
 the game at once; if all players lose simultaneously the game is a draw (104.4a). Later SBAs
-are new arms of the same pass (M7a added 704.5n and 704.5q, M7b 704.5i; poison, auras and
-battles are not built).
+are new arms of the same pass (M7a added 704.5n and 704.5q, M7b 704.5i, M7b part 2 704.5c
+and 704.5s, M7b part 3 704.5p and 702.103f, an unattached bestowed Aura; Auras other than
+bestowed ones and battles are not built). A copy of a spell that leaves the stack ceases to exist
+at once (704.5e, section 26.4).
 
 ## 10. Randomness, chance keys and hidden information
 
@@ -520,8 +526,10 @@ slot, `Choice::Def`; `PASS` = a name of no card there; Tamiyo's +1). A loyalty a
 activated like any other (`ACTIVATE` ids). M7b part 2: `ChooseFace` (`NUMBER` 0 = the card's
 front face, 1 = its other face: a modal double-faced card's back face, an Adventure, a split
 card's right half; asked after a `HAND`, `GRAVEYARD` or `EXILE` id whose card can be cast or
-played with either face, section 25.3). There are 36 decision kinds; the context block holds
-64 since layout v3 (section 22.6).
+played with either face, section 25.3). M7b part 3: `NewTarget` (a copy of a spell may get new
+targets, 707.10c: one decision per target in order, `PASS` = keep it, else a target id for the
+same requirement; section 26.4). There are 37 decision kinds; the context block holds 64 since
+layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
@@ -600,9 +608,20 @@ damage"; poison counters; "do this only once each turn"; triggered abilities unt
 turn; activated abilities a permanent gains ("this Saga gains ..."); connive; mayhem; graveyard
 spell discounts; divided X damage; "one or more" batch triggers; no maximum hand size.
 
-Supported cube cards: 394 (M7b part 1: 378, M7a: 360, M4b-2: 191, M4b-1: 133, M4a: 31);
-creatures 125 by their front faces (M7b part 1: 113, M4b-2: 20); planeswalkers 18 (Jace's and
-Tamiyo's back faces not counted). New in M7b part 2 (16): Brazen Borrower // Petty Theft; Cecil, Dark Knight; Concealing
+Implemented (M7b part 3, section 26): copy effects in layer 1 with exceptions (707.2, 707.9),
+becoming a copy until end of turn, entering as a copy of a permanent or a graveyard card, token
+copies (of permanents now or as they last existed, of the source, "sacrifice it at the
+beginning of the next end step"), copies of spells with new targets (707.10), "cast or copy"
+triggers, squad, offspring, replicate, spree, bestow, "another target", prepare (722), 704.5p.
+
+Supported cube cards: 410 (M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2: 191, M4b-1: 133,
+M4a: 31); creatures 133 by their front faces (M7b part 2: 125, M7b part 1: 113, M4b-2: 20);
+planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in M7b part 3 (16): Chain
+Lightning; Chain of Smog; Emeritus of Abundance // Regrowth; Fable of the Mirror-Breaker //
+Reflection of Kiki-Jiki; Fractured Identity; Lose Focus; Lutri, the Spellchaser; Phyrexian
+Metamorph; Sage of the Skies; Saheeli, Sublime Artificer; Shifting Woodland; Sicarian
+Infiltrator; Springheart Nantuko; Superior Spider-Man; Three Steps Ahead; Thundertrap Trainer.
+New in M7b part 2 (16): Brazen Borrower // Petty Theft; Cecil, Dark Knight; Concealing
 Curtains; Embereth Shieldbreaker // Battle Display; Etali, Primal Conqueror; Jace, Vryn's
 Prodigy; Jennifer Walters // The Sensational She-Hulk; Life // Death; Norman Osborn // Green
 Goblin; Outland Liberator; Shatterskull Smashing; Sink into Stupor; Tamiyo, Inquisitive
@@ -668,12 +687,10 @@ Caryatid, the six Talismans, Time Warp, Unholy Heat, Vindicate, Voltaic Key, Whe
 Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED`.
 
 Not yet (later milestones; each is a blocker in the support report, never a silent no-op):
-battles, copies (of spells, token copies of nontoken permanents, "enters as a copy"; Saheeli,
-Sublime Artificer; Fable of the Mirror-Breaker's Reflection), meld, flip cards, convert,
-"cast transformed", read ahead, prepare (Emeritus of Abundance), fuse, "this ability triggers
-only once each turn", ward, targeting abilities on the stack, the initiative, replacement and
-prevention effects beyond
-the ones above, escalate and spree, multikicker, mana with spend restrictions, mana abilities
+battles, meld, flip cards, convert, "cast transformed", read ahead, fuse, "this ability
+triggers only once each turn", ward, targeting spells and abilities on the stack (Tishana's
+Tidebinder, Ertai Resurrected), "becomes the target" triggers, the initiative, replacement and
+prevention effects beyond the ones above, Auras other than bestowed ones, multikicker, mana with spend restrictions, mana abilities
 whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic Star),
 granted triggered abilities (Kaldra Compleat), activated abilities in graveyards, naming a
 card other than Tamiyo's (Demonic Consultation, "as this enters, choose a card name"),
@@ -700,7 +717,7 @@ Deliberate simplifications and limits (each is small and local to change):
   with repeats offers each multiset of modes once.
 * Events are recorded only for the kinds some permanent listens for (`trig_mask`); section
   23.2 lists the kinds.
-* M7a's own simplifications are in section 23.11; M7b's in sections 24.7 and 25.10.
+* M7a's own simplifications are in section 23.11; M7b's in sections 24.7, 25.10 and 26.11.
 * Waiting triggers with the same definition and ability are offered once in the ordering
   decision (their order cannot matter while effects ignore their source's per-object state).
 * Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide offers the
@@ -813,6 +830,51 @@ Deliberate simplifications and limits (each is small and local to change):
   illegal (608.2b) goes to its owner's graveyard without resolving. M7a's engine finished it
   as if it had resolved: a buyback spell went back to its owner's hand (702.27a applies only as
   the spell resolves).
+* M7b part 3: a copy of a spell (707.10). Python's copy keeps only the targets and X
+  (`push_spell_copy`); the modes, kicker and squad or offspring payments are dropped (a copy of
+  a spree spell resolves its first mode). Here a copy has every choice made for the original:
+  modes, X, divided damage, alternative and additional costs, the times paid. Python lets the
+  copy's controller change at most one target; here each target in turn (707.10c). A copy whose
+  targets all became illegal goes to the graveyard in Python; here it ceases to exist (707.10a).
+* M7b part 3: replicate (702.56a) is a triggered ability here ("when you cast this spell, copy it
+  for each time its replicate cost was paid"): players can respond before the copies exist, and
+  the spell's other cast triggers may resolve first. Python makes the copies while casting, and
+  doesn't offer replicate when the spell is cast without paying its mana cost (an additional
+  cost may still be paid, 601.2b, 601.2f).
+* M7b part 3: "copy it" when the spell is gone (Sage of the Skies, replicate): Python copies only
+  a spell still on the stack; here a spell that left the stack is copied as it last existed
+  (608.2h; the Lose Focus ruling: a countered spell's replicate copies are still made).
+* M7b part 3: Chain of Smog. Python offers the copy only if a player it could target has cards in
+  hand (the IR's `needs_target_with_cards_in_hand`, a guard against endless copying); here the
+  copy is always offered (the Oracle text), with an engine limit of 31 such copies a turn
+  (26.11): copying with an empty hand still triggers "cast or copy" abilities (Witherbloom
+  Apprentice).
+* M7b part 3: entering as a copy (707.5, 614.1c) applies however the card enters (Exhume, a
+  flicker); Python asks only as the spell resolves. A card copying a token isn't a token here
+  (token-ness isn't copiable, 707.2); Python's Metamorph copying a token ceases to exist when
+  it leaves the battlefield. Copy effects apply in timestamp order (613.7): a Metamorph made a
+  copy of something else until end of turn (Saheeli's -2) is the Metamorph's copy again
+  afterwards; Python keeps the later copy.
+* M7b part 3: token copies. Fractured Identity's token is created like any token here (token
+  doublers apply, 614.1a); Python creates it directly. Springheart Nantuko's landfall copies the
+  enchanted creature as it is when the ability resolves (if Nantuko is still attached, else an
+  Insect), as in Python.
+* M7b part 3: bestow (702.103). Python offers a bestow cast without checking that a creature can
+  be targeted (it is then cast with no target); here castability is evaluated as the Aura spell
+  (702.103d: its target, noncreature spell taxes). On the stack it is an Aura spell, not a
+  creature spell (702.103b: no creature-spell triggers). With its target illegal for any reason
+  (hexproof, protection, gone) it resolves as a creature (702.103e); Python resolves it as a
+  creature only when the target left or stopped being a creature, and otherwise puts it into the
+  graveyard. A bestowed Aura whose creature stops being a creature or gains protection becomes
+  unattached and an enchantment creature (702.103f, an exception to 704.5m); Python leaves it
+  attached.
+* M7b part 3: spree (702.172a). Python adds the chosen modes' costs after cost reductions; here
+  reductions apply to the total cost (601.2f), so a reduction larger than the mana cost's generic
+  part reduces the mode costs (and squad, offspring and replicate costs) too.
+* M7b part 3: squad and offspring on a copy of the creature spell (707.10): the copy has the
+  times paid; Python's copy has none. ("Another target", 115.3: Python removes every target
+  already chosen from every later choice; here only for the requirements that say "another" or
+  belong to the same "target" word, so separate "target" words may name the same object.)
 
 ## 15. Tests
 
@@ -845,8 +907,11 @@ they isolate one keyword or trigger each.
 | `tests/rules_faces.rs` | M7b part 2, on custom double-faced test cards (Test Flipper, Test Walker Flip, Test Not Flipper, Test Werewolf): 712.18 (the same object: counters, damage, effects), 701.27f, 701.27c, 306.5b / 704.5i (transformed into a planeswalker), 712.8a (a back face dies as its front card), a transform is public, 702.145b (daybound) |
 | `tests/cards_m7b_faces.rs` | M7b part 2, the transforming double-faced cards: Ulvenwald Oddity, Concealing Curtains, Cecil, Jace, Vryn's Prodigy (712.14a; every loyalty ability), Tamiyo, Inquisitive Student (every loyalty ability), Etali (608.2g in any order; 704.5c poison), Outland Liberator (731.2, 702.145b), Jennifer Walters |
 | `tests/cards_m7b_faces2.rs` | M7b part 2, MDFCs and Adventures: Shatterskull Smashing (712.12, divided X damage), Sink into Stupor, Witch Enchanter, The Sensational She-Hulk (712.11b, 603.2h), Brazen Borrower (715.3d; countered and fizzled Adventures), Embereth Shieldbreaker; hidden information (a face choice survives determinize, a card on an adventure is public, no face up in a hidden zone) |
-| `tests/cards_m7b_faces3.rs` | M7b part 2, Sagas: Urza's Saga (714.2b, 714.3a, 714.3c, latent abilities), 704.5s (not while the last chapter waits), Fable of the Mirror-Breaker on a copy of its IR without Reflection's copy ability |
+| `tests/cards_m7b_faces3.rs` | M7b part 2, Sagas: Urza's Saga (714.2b, 714.3a, 714.3c, latent abilities), 704.5s (not while the last chapter waits), Fable of the Mirror-Breaker (the real card since part 3) |
 | `tests/cards_m7b_faces4.rs` | M7b part 2: Norman Osborn // Green Goblin (701.50 connive, mayhem, graveyard discount), Life // Death (709.3), Ajani on a renamed copy of its IR (batch triggers, the -4), the encoding of faces in every world of the viewer |
+| `tests/rules_copies.rs` | M7b part 3, the rules of copies with cube cards: 707.2 (no counters or effects copied), 613.2 (counters after layer 1), 707.4 (no enter trigger), 707.3, 707.8a (a token copy of a transformed permanent), 704.5j (a token copy of a legend), 707.9b (a copy of a copy keeps the exceptions), 608.2h (a token copy of an exiled permanent), 707.10 / 707.12 (a copy of a spell isn't cast; X copied; 707.10a ceases to exist, countered too), 608.3f / 111.13 (a copy of a permanent spell becomes a token, not created); hidden information (a pending copy choice and a copy's new targets survive determinize; the same encoding in every world) |
+| `tests/cards_m7b_copies.rs` | M7b part 3: Phyrexian Metamorph (707.5, 707.9b, a legend of the opponent's, copying nothing: 704.5f), Superior Spider-Man (a graveyard card, his name, 704.5j), Saheeli's -2 (until end of turn, "another target" 115.3, 704.5p: a copy of an Equipment that reverts, an Equipment made a copy of a creature), Shifting Woodland (delirium), Reflection of Kiki-Jiki (haste, sacrificed at the end step), Fractured Identity (608.2h, the other player's copy), Springheart Nantuko (bestow 702.103b, e, f; landfall copy or Insect) |
+| `tests/cards_m7b_copies2.rs` | M7b part 3: Three Steps Ahead (spree 702.172a, 700.2h payable modes), Sicarian Infiltrator (squad 702.157a), Thundertrap Trainer (offspring 702.175a; 601.2f, a reduction reduces the offspring cost), Chain Lightning (707.10c, a creature's controller is asked), Chain of Smog (the 31-copy limit, 732.2a, 732.3; with Witherbloom Apprentice), Lose Focus (replicate 702.56a), Lutri (cast or not, 603.4), Sage of the Skies (707.10f), Emeritus of Abundance (prepare 722.3: enters prepared, attacking with eight lands, leaving takes the copy; a Metamorph copying it enters prepared, 722.2b) |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
@@ -873,7 +938,8 @@ FUZZ_LOG=1` reruns it with the game log in the panic message. M4b-2: 20,000 game
 no failure (see section 17 for the time). M7a: 20,000 games over the 360 cards, no failure.
 M7b: 20,000 games over the 378 cards, no failure; on the way it found two faults, both fixed
 (24.10). M7b part 2: 20,000 games over the 394 cards, no failure; two faults found on the way,
-both fixed (25.9). The check also asserts that no face is up in a hidden zone.
+both fixed (25.9). The check also asserts that no face is up in a hidden zone. M7b part 3:
+20,000 games over the 410 cards, no failure; three faults found on the way, all fixed (26.10).
 `POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
 earlier milestone's games (section 17).
 
@@ -925,14 +991,14 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 `tests/perf.rs`; random decks of every supported card as in the fuzzer, mulligans on,
 `auto_single` on.
 
-| Measure | M7b part 2 (394 cards; pinned, below) | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
-|---|---|---|---|---|---|---|
-| Random play | 635 games/s (M7b part 1's code, the same day: 648 on its own pool) | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
-| Per exposed decision (`apply`, running to the next decision) | 6.97 us (226 decisions per game); on M7b part 1's pool 7.01 us against its code's 6.81 us, the same 906,266 decisions | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
-| `Game::clone` (mean over mid-game states) | 1.27 us (6,484 states); 1,040 B (part 1's code the same day: 1.24 us) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
-| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
-| `legal_actions` (copies cached ids) | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+| Measure | M7b part 3 (410 cards; pinned, below) | M7b part 2 (394 cards; pinned, below) | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
+|---|---|---|---|---|---|---|---|
+| Random play | 615 games/s (main's code, the same day: 674 on its own pool) | 635 games/s (M7b part 1's code, the same day: 648 on its own pool) | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
+| Per exposed decision (`apply`, running to the next decision) | 7.14 us (228 decisions per game); on main's pool 6.95 us against its code's 6.57 us, nearly the same games (903,244 decisions against 903,215) | 6.97 us (226 decisions per game); on M7b part 1's pool 7.01 us against its code's 6.81 us, the same 906,266 decisions | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
+| `Game::clone` (mean over mid-game states) | 1.23 us (6,244 states); 1,200 B (main's code the same day: 1.17 us, 1,040 B) | 1.27 us (6,484 states); 1,040 B (part 1's code the same day: 1.24 us) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
+| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.80 us (main's code the same day: 1.82 us) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
+| `legal_actions` (copies cached ids) | 4-5 ns | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
+| Fuzzer, 20,000 games, release | 93-110 s (the last three runs), no failure | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -961,6 +1027,19 @@ without the face checks matched part 1's time, so the rest is those checks (the 
 turn-based action, "deals damage" events, the day and night checks). `Obj` stays 64 bytes;
 `Game` grew from 928 to 1,040 bytes (four vectors: optional actions done this turn, cards
 discarded this turn, temporary triggers, spells exiled instead of going to a graveyard).
+
+M7b part 3's column is measured the same way, interleaved with main's code (3ab5fb5) and best of
+four. On main's card pool (`POOL_EXCLUDE` leaves the 16 new cards out) the branch takes 3-7% more
+per decision in four interleaved sets the same day (6.95 against 6.57 us, 7.35 against 6.85,
+7.44 against 7.22, 7.65 against 7.38: the machine drifted by 10% over the day, so only pairs
+compare). The games are nearly the same (29 more decisions in 4,000 games: the rule changes reach
+a few of main's games). Builds with one change stubbed out each locate the cost: without the copy
+lookups in the characteristic accessors (`types_of`, `keywords_of`, `pt`, `has_subtype`, `name`,
+`own_def`, `is_token`: one length check each while no copy effect exists) the branch was within 1%
+of main; reverting the state-based 704.5p and bestow checks, or the last-known copiable values
+recorded as permanents leave, made no measurable difference; moving the copy search out of line
+(a cold function) didn't either. `Game` grew from 1,040 to 1,200 bytes (copy effects, copy
+slots, last known copiable values and spells, prepared permanents, the entering copy's state).
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
@@ -1109,6 +1188,12 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
   The modal double-faced cards that can also transform (Jennifer Walters, Norman Osborn)
   describe their back face twice, as `mdfc_back_face` and `transform_back_face`; the two agree
   (the lowering checks it). Apart from these, the 16 cards' IR matches their Oracle text.
+* M7b part 3 (26.12): the IR of the 16 copy cards matches their Oracle text; no new defect.
+  Two more effect classes carry their targets only in Python (Shifting Woodland's graveyard
+  card, Lutri's spell: docs/ir_defects.md 11, re-derived in the lowering), and Chain of Smog's
+  `needs_target_with_cards_in_hand` is a Python behaviour switch (section 14). The repeatable
+  and alternative costs new here (squad, offspring, bestow, Springheart Nantuko's {1}{G}) are
+  checked against their `*_str` twins (replicate's cost is a string only).
 * Lowering: the `*_str` cost twins (`mana_cost_str`, `kicker_cost_str`, `mana_str`, ...) are
   ignored as display forms; checking them against the structured cost (rule 4a, section 3) would
   have caught the lost `{C}`.
@@ -1683,6 +1768,14 @@ hand size) and two game globals (day, night). The `cards` list gains the 16 new 
 share their card's identity and are skipped); no new token kind. `layout_v3.json` must be
 regenerated (not run on the branch).
 
+M7b part 3 (copies, section 26.9) widens it to 29,092 floats (still version 3): the permanent
+status from 48 to 88 floats (100 to 140 a slot: a copy and the identity of what it copies,
+what it is attached to, prepared; four spare), the stack status from 24 to 28 (76 to 80 a
+slot: a copy of a spell, the times an additional cost was paid, bestowed; one spare); task
+codes 21-23. A permanent's identity is what it is without copy effects, its descriptor the
+copied face. `layout_v3.json` and the token registry (one new kind, `Insect 1/1 G c Insect`)
+must be regenerated (not run on the branch).
+
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
 M7a grew the supported cube from 191 to 360 cards, creatures from 20 to 113 (threats, i.e.
@@ -1803,7 +1896,9 @@ alternative cost; flashback, escape and permissions don't combine with another o
   (`Cond::SourceCountersIn`, read against the static's own source).
 * **Token copies**: of a token (its definition, 707.2); of the card itself ("except it's an
   artifact", 707.9b): a placeholder token index the lowering fills with the card's own
-  definition once the card is lowered (Vaultborn Tyrant).
+  definition once the card is lowered (Vaultborn Tyrant). M7b part 3 replaced both with the
+  general token copy (section 26.2): a copy effect with the exception, read as the card last
+  existed.
 * **Counters as they last existed** (608.2h): `Game.lki_counters` keeps a leaving
   permanent's counters for the rest of the turn ("if there are no charge counters on it").
 
@@ -1891,8 +1986,8 @@ At the end of M7a: threats 139 supported (113 creatures), 107 blocked (96 creatu
 M7b part 1 grew the supported cube from 360 to 378 cards: 18 of the cube's 20 planeswalkers
 and the rules they need, which also reach cards already supported (damage to "any target",
 "creature or planeswalker" removal, "combat damage to a player"). Saheeli, Sublime Artificer
-needs copy effects (`Effect:TargetBecomesCopyOfAnotherTargetUEOT`); Minsc & Boo, Timeless
-Heroes is blocked by its IR (24.8). Every card's IR was read against its Oracle text.
+needed copy effects (`Effect:TargetBecomesCopyOfAnotherTargetUEOT`; supported in M7b part 3,
+section 26); Minsc & Boo, Timeless Heroes is blocked by its IR (24.8). Every card's IR was read against its Oracle text.
 
 ### 24.1 Loyalty and loyalty abilities (CR 306, 606)
 
@@ -2360,7 +2455,7 @@ Every new field uses spare floats of layout v3; no width changed.
 * Mayhem is tied to the graveyard object discarded this turn: a card that left the graveyard
   and came back is a new object (400.7) and has no mayhem.
 * Split cards: only Life // Death (no fuse, no split permanent). Meld, flip cards, convert,
-  "cast transformed", read ahead and prepare are not built.
+  "cast transformed" and read ahead are not built (prepare is, in part 3: 26.7).
 * Latent activated abilities: at most four activated abilities per permanent in all (the
   `ACTIVATE` slots), checked by the lowering.
 
@@ -2368,8 +2463,7 @@ Every new field uses spare floats of layout v3; no width changed.
 
 * Fable of the Mirror-Breaker // Reflection of Kiki-Jiki: Reflection's "create a token that's a
   copy of another target nonlegendary creature you control" (token copies of nontoken
-  permanents, part 3). Its chapters and the transform are tested on a copy of its IR without
-  that ability (`cards_m7b_faces3.rs`).
+  permanents). Supported in part 3 (26.2); `cards_m7b_faces3.rs` now plays the real card.
 * Ajani, Nacatl Pariah // Ajani, Nacatl Avenger: its IR flattens the 0's reflexive trigger
   ("When you do, if you control a red permanent other than Ajani, he deals damage ... to any
   target", 603.12) into an `IfCondition` of the loyalty ability, whose target would be chosen
@@ -2380,3 +2474,252 @@ Every new field uses spare floats of layout v3; no width changed.
   cost that taps artifacts and creatures for mana) and airbend (`Effect:Airbend`).
 * Emeritus of Abundance // Regrowth: prepare (`CardPrinting.enters_prepared`,
   `CardPrinting.prepare_spell`, `Effect:SourceBecomesPrepared`), a copy of the prepared spell.
+  Supported in part 3 (26.7).
+
+## 26. Copies (M7b part 3)
+
+M7b part 3 grew the supported cube from 394 to 410 cards with copies (CR 707) and the cube cards
+that need them: permanents that enter as copies (Phyrexian Metamorph, Superior Spider-Man) or
+become copies (Saheeli, Sublime Artificer; Shifting Woodland), token copies (Fable of the
+Mirror-Breaker's Reflection of Kiki-Jiki, Fractured Identity, Three Steps Ahead, Springheart
+Nantuko, Sicarian Infiltrator, Thundertrap Trainer), copies of spells (Chain Lightning, Chain of
+Smog, Lose Focus, Lutri, the Spellchaser, Sage of the Skies) and a preparation card (Emeritus of
+Abundance // Regrowth, CR 722). On the way: squad, offspring, replicate, spree, bestow,
+"another target", prepare. Esika's Chariot and Vaultborn Tyrant moved to the general token copy.
+Every card's IR was read against its Oracle text and its Gatherer rulings; none is blocked by its
+IR (26.12). The code is `copies.rs`, its lowering `lower/effect_copies.rs`.
+
+### 26.1 Copiable values and copy effects (CR 707.2, 613.2)
+
+* A permanent's `Obj.def` is the definition whose copiable values it has, as for a face (25.1):
+  a copy effect turns the copied face up, so every rule that reads the definition (abilities,
+  triggers, statics, mana abilities, costs, types) reads the copy, and layers 2-7 apply on top
+  (613.2: copy effects are layer 1a).
+* `Game.copies` holds the copy effects (`CopyFx { obj, ts, until, vals, own }`, timestamp
+  order). Each copy effect sets all copiable values, so the latest on an object wins; it
+  remembers `own`, the definition the object has without copy effects: what it reverts to, and
+  what it is (its identity, 26.8). `Game::copiable(c)` is the latest effect's values, else the
+  face up (a bestowed Aura's card: being bestowed is not a copy effect, 702.103b).
+* `CopyVals { def, exc }`: the face copied and the copy's exceptions (`Except`, 707.9a-b): card
+  types and subtypes "in addition", keywords ("except it has haste"), base power and toughness
+  ("except it's 1/1"; then no characteristic-defining ability sets them, 707.9d) and a name
+  ("his name is Superior Spider-Man"). The exceptions are copiable values (707.9b): a copy of a
+  copy has them, and its own on top (`Except::over`; 707.3). The accessors `types_of`,
+  `has_subtype`, `keywords_of`, `pt` and `name` read them.
+* Becoming a copy (707.4) keeps the object: counters, damage, effects, attachments and
+  summoning sickness stay; no enter or leave ability triggers. "Until end of turn" copy effects
+  end in the cleanup step with the others (514.2); every copy effect ends when its object
+  changes zones (400.7): `move_card` gives it its own definition back after the leave events and
+  the look-back (603.10a) saw the copy.
+* Last known information (608.2h): as a permanent leaves the battlefield its copiable values are
+  recorded (`Game.lki_copy`, this turn): "create a token that's a copy of it" after it left
+  (Vaultborn Tyrant, squad, offspring) and Fractured Identity (exile, then copy) read them.
+* Token-ness is not a copiable value: `Game::is_token(c)` is the object's (its own definition is a
+  token's, or it is a slot made as a copy); a card copying a token isn't a token.
+* Double-faced permanents (707.8): a copy copies the face up. A token created as a copy of one is
+  a double-faced token (707.8a): it can transform (its copy effect follows the face). A card
+  that is copying a double-faced permanent doesn't transform (it isn't a double-faced card,
+  701.27c).
+* 704.5p: an attached permanent that is a creature, or that is no longer an Equipment (or a
+  bestowed Aura), becomes unattached: a Saheeli copy of an Equipment that reverts, an Equipment
+  made a copy of a creature.
+
+### 26.2 Token copies (CR 707.2, 111)
+
+* `Game::create_token_copies(vals, controller, n)`: n new slots (`Game.copy_objs`: slots made
+  as copies, not cards), each with the copied face as its definition and a copy effect with the
+  exceptions for as long as it exists, in place before it is seen entering (so "enters"
+  triggers, "enters tapped" and its own enter replacements see the copy, 707.5). The token
+  multipliers apply (614.1a); no token copy of an instant or sorcery card is created (111.5).
+* `Ext::CreateTokenCopy { of, who, n, exc }`, `of` = a target (a permanent now, or as it last
+  existed: Fractured Identity), the source (as it last existed: squad, offspring, Vaultborn
+  Tyrant), the source's enchanted creature (Springheart Nantuko). Reflection of Kiki-Jiki's
+  "sacrifice it at the beginning of the next end step" is a delayed ability about each token
+  made (`About::EachMade`: two with a token doubler).
+* Fractured Identity's "each player other than its controller" (2p: `Who::NotLkiController`).
+* "Whenever you create one or more creature tokens" is for the player who created them now
+  (Fractured Identity: the other player).
+
+### 26.3 Entering as a copy (CR 707.5, 707.9, 614.1c)
+
+* `CardDef.enters_as_copy` (the IR's `enters_as_copy_*`): what it may copy (permanents on the
+  battlefield matching a filter, other than itself, or cards in any graveyard), the exceptions,
+  "keeps its name", and "when you do, exile that card" (a triggered ability linked to the copy
+  effect: 603.11, 707.9g).
+* `put_onto_battlefield` moves such a card with its `Enters` event held back
+  (`Game.defer_enters`) and pushes `Task::EnterAsCopy`: its controller chooses
+  (`ChoosePermanent` / `ChooseGraveyardCard`, `PASS` = nothing); the copy effect applies (no
+  duration); then what it entered as enters: "enters tapped", "enters with" counters, a
+  planeswalker's loyalty, "as this enters" choices (707.5, 707.6; X is 0), and its `Enters`
+  event. Superior Spider-Man's "when you do, exile that card" waits as a triggered ability about
+  the chosen card.
+* Phyrexian Metamorph that copies nothing is a 0/0 and dies (704.5f).
+
+### 26.4 Copies of spells (CR 707.10)
+
+* `Game::put_spell_copy`: a new slot on the stack (`copy_objs`), owned and controlled by the
+  player who copies, with the original's definition (the face cast) and its item's targets,
+  modes, X, divided damage, alternative and additional costs (707.10; the times paid, 26.5).
+  It isn't cast: no spell is counted, "whenever you cast" doesn't see it; an `IsCast` event
+  marked as a copy (`copies::COPIED`) triggers only "cast or copy" abilities (`TrigPred::OrCopy`,
+  Witherbloom Apprentice's magecraft).
+* `Ext::CopySpell { of, who, n, may, new_targets }`: this spell (Chain Lightning, Chain of
+  Smog), the triggered ability's spell (Sage of the Skies, replicate) or a target spell (Lutri).
+  A spell that left the stack before its "copy it" ability resolves is copied as it last existed
+  (608.2h; `Game.spell_lki`, kept while an ability about it waits: the Lose Focus ruling).
+* New targets (707.10c): `Task::CopyTargets` asks the copy's controller, target by target in
+  order (`NewTarget`): `PASS` keeps the target (even an illegal one), else a legal target for
+  that requirement (not one chosen for the same "target" word, 115.3, nor for an "another"
+  requirement). Not asked when no other target is legal.
+* A copy of a spell leaving the stack ceases to exist (707.10a, 704.5e) at once (`move_card`
+  sends it to `Zone::Nowhere`). A copy of a permanent spell becomes a token as it resolves
+  (707.10f, 608.3f); it isn't created (111.13: no token doubling, no "whenever you create").
+* Chain Lightning: the damaged player, or the damaged permanent's controller
+  (`Who::TargetOrItsController`), may pay {R}{R} (`OfferPay`), then may copy it (`YesNo`).
+* "May copy this spell" is offered at most 31 times a turn (`copies::MAY_COPY_CAP`,
+  `Game.may_copies`): Chain of Smog's copies cost nothing, so players who always copy (the
+  heuristic bot) would loop forever within a turn; the CR repeats a loop of optional actions a
+  chosen number of times (732.2a) and breaks one that comes back to the same game state
+  (732.3). 31 keeps Chain of Smog with Witherbloom Apprentice (a drain per copy)
+  lethal.
+
+### 26.5 Additional costs paid a number of times: squad, offspring, replicate (CR 601.2b)
+
+* `CardDef.times_cost` (`TimesCost { mana, max }`): squad (702.157a, any number), offspring
+  (702.175a, once), replicate (702.56a, any number). `Task::ChooseTimes` announces the number
+  after the modes and before X (`ChooseMode`, `NUMBER` = times, from 0 to what the caster can
+  pay), `StackItem.times` keeps it, the payment adds it.
+* The permanent's `Enters` event carries a note (`Game::put_onto_battlefield`: bit 0 = it was
+  cast, the rest = the times paid): "if you cast it" (Lutri, `TrigPred::EnteredCast`), "if its
+  squad / offspring cost was paid" (`TrigPred::EnteredPaid`) and "that many" (`Amount::
+  EventTimes`) read it. A copy of a spell keeps the times paid (707.10) but wasn't cast.
+* Replicate's triggered ability is synthesized by the lowering ("when you cast this spell, if a
+  replicate cost was paid, copy it for each time"; `TrigPred::SpellPaid`, `Amount::
+  EventSpellTimes`).
+
+### 26.6 Spree, bestow, "another target"
+
+* **Spree** (702.172a, 700.2h): `Modes.costs`, a mana cost per mode. A mode is offered only if its
+  cost can be paid with the others chosen; the spell is castable if some mode whose targets can
+  be chosen is payable; the chosen modes' costs are added to the cost (also when the spell is cast
+  without paying its mana cost).
+* **The total cost** (601.2f) is the mana cost plus these additional costs (spree modes, squad,
+  offspring, replicate) and increases, less reductions: a reduction larger than the generic part
+  of the mana cost reduces them too (`Game::route_mana_plus`; Green Goblin's discount on a
+  Thundertrap Trainer cast with offspring). Kicker and the other additional cost options of
+  M4b-1 and M7a are still added after reductions, a known difference left for later: Tear
+  Asunder kicked, cast with mayhem under Green Goblin's {2} discount, costs {1}{G}{B} here, not
+  {G}{B}.
+* **Bestow** (702.103): an alternative cost (`AltCost.bestow`) and a bestowed face lowered from
+  the card (`CardDef.bestow`): an Aura enchantment with enchant creature (no creature types, power
+  or toughness), "enchanted creature gets +p/+t" as a static of `Scope::Equipped`, the card's
+  other abilities. Castability is evaluated as that Aura spell (702.103d: noncreature spell
+  taxes apply, a creature to target; on a copy of the game with the face up). Cast bestowed, the
+  face is turned up and its target chosen; as it resolves, an illegal target makes it a creature
+  spell again (702.103e, 608.3b), else it enters attached (608.3c). Unattached, or attached to
+  an illegal object (no longer a creature, protection from it), it becomes unattached and ceases
+  to be bestowed: the enchantment creature again (702.103f, an exception to 704.5m; checked
+  with the state-based actions).
+* **"Another target"** (115.3): `TargetReq.distinct` (the IR's `distinct_from`): its targets must
+  differ from those of the named requirements. Castability searches for distinct choices; a
+  choice that would leave a later requirement without a target isn't offered (Saheeli's -2 with
+  one artifact creature is not offered at all).
+
+### 26.7 Prepare (CR 722)
+
+* A preparation card's prepare spell is a face of its own (`CardDef.prepare`, an instant or
+  sorcery; the card's identity). "Enters prepared" (`CardDef.enters_prepared`) and "becomes
+  prepared" (`Ext::BecomePrepared`) make a permanent with a prepare spell prepared, once
+  (722.3a): its controller creates a copy of the card in exile with only the prepare spell's
+  characteristics (722.3c; a `copy_objs` slot), listed in `Game.prepared` with its permanent.
+  The prepare spell is a copiable value (722.2b): a Phyrexian Metamorph copying Emeritus enters
+  prepared.
+* The prepared permanent's current controller may cast the copy (for its mana cost,
+  `PermKind::Prepared`, an `EXILE` id) while it stays prepared on the battlefield; as the copy is
+  cast the permanent is no longer prepared. The copy is the exception to 704.5e while its
+  permanent stays prepared; otherwise it ceases to exist. Being prepared is not a copiable
+  value.
+* Emeritus of Abundance // Regrowth: "This creature enters prepared. Whenever this creature
+  attacks, if you control eight or more lands, this creature becomes prepared." Regrowth: "Return
+  target card from your graveyard to your hand."
+
+### 26.8 Decisions, identities and the bot
+
+* One new kind (37 in all): `NewTarget` (707.10c). The rest use existing kinds: what to enter as a
+  copy of is `ChoosePermanent` or `ChooseGraveyardCard` (`PASS` = nothing); the times paid is a
+  `ChooseMode` (`NUMBER`), like X; "may copy" and Chain Lightning's {R}{R} are `YesNo`; bestow is
+  `ChooseAltCost` (`NUMBER` 1); the prepare copy is cast with its `EXILE` id.
+* Identity (22.2): a permanent with copy effects keeps the identity of what it is (`own`: the
+  Metamorph card); a token copy takes the identity of the card it copies (its definition is that
+  card's face), as faces and emblems take their card's; a copy of a spell, the copied card's; a
+  copy of a token, the token kind's. Token copies need no registry line of their own: the
+  registry keeps one line per token kind defined by a token printing. (Vaultborn Tyrant's token
+  copy was a token definition of its own, `Vaultborn Tyrant 6/6 G ac Dinosaur trample`; it is now
+  a token copy of the card, and the line is unused.)
+* The heuristic bot enters as a copy of the most valuable permanent (or the costliest card),
+  keeps a copy's targets (the first option, `PASS`), pays no repeatable cost (`NUMBER` 0), says
+  yes to "may copy".
+
+### 26.9 Encoding (layout v3, 29,092 floats)
+
+* Card code of a permanent: the identity digits are what it is (`own_def`), the descriptor the
+  copiable values it has (the copied face); float 46 (token) is `is_token`.
+* Permanent status 48 -> 88 floats (`PERM_W` 100 -> 140): `perm::COPY` (47, a copy effect
+  applies), `perm::COPY_OF` (48-79, the identity digits of what it copies), `perm::ATTACHED`,
+  `ATTACHED_SLOT`, `ATTACHED_OPP` (80-82: what an Equipment or a bestowed Aura is attached to;
+  M7a's Equipment had no such field), `perm::PREPARED` (83); 84-87 spare.
+* Stack status 24 -> 28 floats (`STACK_W` 76 -> 80): `stack::COPY` (a copy of a spell),
+  `stack::TIMES` (times paid / 4), `stack::BESTOWED`; one spare.
+* Context: task codes 21 (`EnterAsCopy`, its card = what it is), 22 (`CopyTargets`, its card = the
+  copy's; `ctx::REQ` = the target's position / 4), 23 (`ChooseTimes`).
+* Bags: a permanent counts under what it is (`own_def`).
+* New token kind to register: `Insect 1/1 G c Insect` (Springheart Nantuko). Servo, Goblin
+  Shaman and Treasure have lines.
+* `mtgz/az/layout_v3.json` must be regenerated (`MTGZ_WRITE_LAYOUT=1`) and the token registry
+  appended (`MTGZ_WRITE_TOKENS=1`); `tests/az.rs` expects 29,092 features and checks a copy's
+  `COPY_OF` digits (not run on this branch).
+
+### 26.10 Hidden information and fuzzing
+
+* Everything copied is public (battlefield, stack, graveyard cards); the copy choices are
+  between public objects; spell copies never enter a hidden zone, and token copies moved to one
+  are known to all (as every token). `determinize` keeps copies and a pending "enter as a copy"
+  choice, and their encoding is the same in every world of either viewer
+  (`rules_copies.rs::copies_are_public_and_survive_determinize`); so does a copy of a spell whose
+  new targets are being chosen while both hands are hidden
+  (`a_copy_of_a_spell_choosing_new_targets_survives_determinize_cr_707_10c`). `view_of` names a
+  prepared permanent's copy by the permanent's place.
+* The fuzzer found three faults on the way, all fixed: bestow's castability ignored the tax on
+  noncreature spells (Thalia; now evaluated as the Aura spell), `view_of` hashed a prepared
+  permanent's slot index (a check-only fault), and a player could control more than the 96
+  permanents the action layout has slots for (Retrofitter Foundry with a token doubler: an old
+  limit the new pool reached, 26.11).
+
+### 26.11 Simplifications
+
+* A copy of a spell leaving the stack ceases to exist at once, not at the next state-based check
+  (nothing can see it in the other zone first).
+* The "enter as a copy" choice is made right after the card moves (its `Enters` event and enter
+  replacements wait for it, so nothing can see the difference), except that a permanent entering
+  at the same time (Exhume) can be chosen (the Metamorph ruling says it can't).
+* A double-faced card that is copying something doesn't transform.
+* "Another target" requirements choose at most one target each (the lowering checks).
+* A copy effect's exceptions hold at most four subtypes.
+* A player controls at most 96 permanents (the `MY_PERM` / `OPP_PERM` slots): token creations
+  beyond that create fewer tokens.
+* At most 31 copies a turn by "may copy this spell" effects (26.4; a loop of optional actions,
+  732.2a, is cut there rather than asked as a number).
+* Kicker's and the other M7a optional additional costs are added after cost reductions (26.6).
+* Chain of Smog's IR flag `needs_target_with_cards_in_hand` (a Python shortcut) is ignored: the
+  copy is always offered (section 14).
+
+### 26.12 IR
+
+* The 16 cards' IR matches their Oracle text, with a few things the IR leaves to code: Shifting
+  Woodland's "target permanent card in your graveyard" and Lutri's "target instant or sorcery
+  spell you control" have no target specification (re-derived in the lowering, as in
+  docs/ir_defects.md 11); Chain of Smog's "that player" is the spell's target player (found
+  among the lowered targets); Lutri's companion ability isn't in the IR (it works from outside
+  the game, before it starts: these games have no sideboard; here Lutri is a flash creature).
+  The `*_cost_str` twins of squad, offspring, bestow and Springheart's payment are checked
+  against the structured costs (section 3, rule 4a).

@@ -3,7 +3,9 @@
 Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tests`); IR
 `data/cards/powerlsv.ir.json` (546 cube cards, 360 supported). Updated 2026-10-23 for M7b part 2
 (cards with more than one face, branch `m7b-faces`, 394 supported): entries 9, 13 and 14; mtg-bot read at commit
-`3073a633` (branch main). The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
+defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
+defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -318,8 +320,10 @@ Jace, Vryn's Prodigy; Outland Liberator; Tamiyo, Inquisitive Student; Ulvenwald 
 `effects/generic/counters.py:596`), `ExileTargetCardFromGraveyard` (Soul-Guide Lantern),
 `ReturnCreatureFromYourGraveyardToHand` and `TargetPlayerDiscards` (Kolaghan's Command),
 `GrantFlashbackToTargetCardUEOT` (Flashback), `ReturnTargetSpellToOwnersHand` (Reprieve),
-`CounterSpell` (Mana Tithe). The IR is then not self-describing: a consumer has to know each
-class's targets. The engine re-derives them per class in `engine/src/lower/effect.rs` and
+`CounterSpell` (Mana Tithe); M7b part 3: `SourceBecomesCopyOfTargetGraveyardCardUEOT` (Shifting
+Woodland: "target permanent card in your graveyard") and `CopyTargetInstantOrSorcerySpellYouControl`
+(Lutri: "target instant or sorcery spell you control"). The IR is then not self-describing: a
+consumer has to know each class's targets. The engine re-derives them per class in `engine/src/lower/effect.rs` and
 `effect_ext.rs` (for the cards above the M7b tests check the targets against the Oracle text).
 Suggested direction: export a `TargetSpec` list for every targeting effect (computed from the same
 methods at export time), so new classes don't need a hand-written lowering of their targets.
@@ -373,3 +377,12 @@ once each turn."
 * Fast lands' `enters_tapped_unless: ControlsAtMost(IsLand, 2)` says "lands", not "other lands";
   it is evaluated before the land enters, so the two agree (ENGINE.md 19).
 * Hybrid pips are stored in alphabetical order (`{W/B}` as `["B", "W"]`); same meaning.
+* M7b part 3, the copy cards: `TargetPlayerMayCopyThisSpell.needs_target_with_cards_in_hand`
+  (Chain of Smog) is a Python engine switch (offer the copy only if a player it could target has
+  cards in hand, a guard against endless copying), not Oracle text; the engine ignores it
+  (ENGINE.md 14, 26.11). Lutri's companion condition isn't in the IR; it works outside the game
+  (no sideboards here). `CardPrinting.replicate_cost` is a string with no structured twin (the
+  other new costs, squad, offspring, bestow and Springheart Nantuko's payment, agree with their
+  `*_str` twins). Chain of Smog's "that player" is the spell's target player, found among its
+  targets. Apart from these (and entry 11), the 16 cards' IR matches their Oracle text and
+  rulings.
