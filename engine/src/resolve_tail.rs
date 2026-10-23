@@ -66,6 +66,55 @@ impl Game {
             Ext::SacrificeTutorPayDifference => self.transmute(f),
             Ext::LookTopRepeatPayLife { n, life } => self.look_repeat_pay_life(f, *n, *life),
             Ext::LootMayCastFree { counter, n } => self.loot_may_cast_free(f, *counter, *n),
+            Ext::ExileFromHandTaxed { whose, filter, tax } => {
+                let Some(owner) = self.who(f, *whose) else { return Flow::Next };
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        self.note(|g| format!("P{} exiles {} from P{owner}'s hand", f.controller, g.name(c)));
+                        let card = self.move_card(c, Zone::Exile, Pos::Top);
+                        self.permissions.push(crate::game::Permission {
+                            card,
+                            player: owner,
+                            turn: None,
+                            kind: crate::game::PermKind::Taxed(*tax),
+                        });
+                        Flow::Next
+                    }
+                    Some(_) => Flow::Next,
+                    None => {
+                        let mut opts = self.seen_hand_options(f, owner, filter);
+                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        self.ask(Task::Run(f.clone()), f.controller, DecisionKind::ChooseDiscard, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::ExileHandCardOrTargetUntil { whose, filter, tgt } => {
+                let Some(owner) = self.who(f, *whose) else { return Flow::Next };
+                let Some(&src) = self.objs_on(f, &On::Source).first() else { return Flow::Next };
+                let _ = src;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        let back = self.objs[c.i()].zone;
+                        self.note(|g| format!("P{} exiles {}", f.controller, g.name(c)));
+                        let card = self.move_card(c, Zone::Exile, Pos::Top);
+                        self.links.push(crate::game::Link { source: f.source, card, until: true, back, until_monarch: None });
+                        Flow::Next
+                    }
+                    Some(_) => Flow::Next,
+                    None => {
+                        let p = f.controller;
+                        let mut opts = self.seen_hand_options(f, owner, filter);
+                        for c in self.objs_on(f, &On::Target(*tgt)) {
+                            opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
+                        }
+                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseDiscard, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::ExileUntilNonlandCounterOrCast => self.exile_until_nonland_counter_or_cast(f),
             other => unreachable!("not a tail instruction: {other:?}"),
         }
     }
@@ -479,6 +528,81 @@ impl Game {
                 Flow::Suspend
             }
         }
+    }
+
+    /// The options of a choice of a card matching `filter` in `owner`'s hand,
+    /// which the controller has seen: a `LIBRARY` slot of the hand sorted by
+    /// definition, one per definition.
+    fn seen_hand_options(&self, f: &Frame, owner: PlayerId, filter: &Filter) -> Vec<Opt> {
+        let p = f.controller;
+        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+        let hand = self.hand_sorted(owner);
+        let mut opts = Vec::new();
+        for (k, &c) in hand.iter().enumerate() {
+            let d = self.objs[c.i()].def;
+            if k > 0 && self.objs[hand[k - 1].i()].def == d {
+                continue;
+            }
+            debug_assert!(self.knows(p, c), "the chooser has seen the hand");
+            if self.card_matches(filter, c, &ctx) {
+                assert!((k as u16) < act::LIBRARY_N, "hand slot {k} out of range");
+                opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
+            }
+        }
+        opts
+    }
+
+    /// Black Widow: `f.picked[0]` = the nonland card exiled (none: empty).
+    fn exile_until_nonland_counter_or_cast(&mut self, f: &mut Frame) -> Flow {
+        let p = f.controller;
+        match self.answer.take() {
+            Some(Choice::Yes) => {
+                if let Some(&c) = self.objs_on(f, &On::Source).first() {
+                    self.add_counters(c, Counter::P1P1, 1);
+                }
+                return Flow::Next;
+            }
+            Some(_) => {
+                if let Some(&c) = f.picked.first() {
+                    if self.objs[c.i()].zone == Zone::Exile {
+                        let card = self.obj_ref(c);
+                        self.permissions.push(crate::game::Permission {
+                            card,
+                            player: p,
+                            turn: Some(self.turn.number),
+                            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: true, attacked_subtype: None },
+                        });
+                    }
+                }
+                return Flow::Next;
+            }
+            None => {}
+        }
+        if f.i == 0 {
+            f.i = 1;
+            f.picked.clear();
+            if let Some(q) = f.ev.player {
+                // Until a nonland card (CR 701.20a), each revealed as it is
+                // exiled.
+                while let Some(&top) = self.players[q as usize].library.last() {
+                    self.force_library_card(top, crate::hidden::KEY_REVEAL, q);
+                    self.move_card(top, Zone::Exile, Pos::Top);
+                    if !self.def_of(top).is(types::LAND) {
+                        f.picked.push(top);
+                        break;
+                    }
+                }
+            }
+        }
+        // "You may put a +1/+1 counter on it. If you don't, you may cast the
+        // card": yes = the counter (only with the source still there), no =
+        // the permission.
+        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        if !self.objs_on(f, &On::Source).is_empty() {
+            opts.push(Opt { action: act::YES, choice: Choice::Yes });
+        }
+        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+        Flow::Suspend
     }
 
     /// Discard `c`; the card it became in the graveyard (none if it went

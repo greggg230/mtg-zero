@@ -19,6 +19,9 @@ pub(crate) enum Task {
     MulliganBottom { p: PlayerId, left: u8 },
     // turn structure (CR 500-514)
     BeginTurn,
+    /// "You may skip that turn instead" (Time Vault): `p`'s turn is about
+    /// to begin while `vault` is tapped (ENGINE.md 28).
+    MaySkipTurn { p: PlayerId, vault: CardIdx },
     BeginStep,
     NextStep,
     /// Before priority: SBAs and triggers until stable (CR 117.5), then ask.
@@ -187,6 +190,7 @@ impl Game {
             Task::MulliganRun => self.mulligan_run(),
             Task::MulliganBottom { p, left } => self.mulligan_bottom(p, left),
             Task::BeginTurn => self.begin_turn(),
+            Task::MaySkipTurn { p, vault } => self.may_skip_turn(p, vault),
             Task::BeginStep => self.begin_step(),
             Task::NextStep => self.next_step(),
             Task::Priority => {
@@ -323,6 +327,37 @@ impl Game {
             self.outcome = Some(Outcome { winner: None, reason: EndReason::TurnLimit });
             return;
         }
+        // "If you would begin your turn while this artifact is tapped, you
+        // may skip that turn instead" (a replacement effect, CR 614.10: the
+        // turn is skipped, the next one is computed as usual).
+        let vault = self
+            .permanents_of(next)
+            .find(|&c| self.objs[c.i()].tapped && self.abilities(c).skip_turn_untap);
+        match vault {
+            Some(vault) => self.agenda.push(Task::MaySkipTurn { p: next, vault }),
+            None => self.start_turn(next),
+        }
+    }
+
+    /// Time Vault's choice (ENGINE.md 28): skip the turn and untap it, or
+    /// begin the turn.
+    fn may_skip_turn(&mut self, p: PlayerId, vault: CardIdx) {
+        match self.answer.take() {
+            Some(Choice::Yes) => {
+                self.note(|g| format!("P{p} skips a turn to untap {}", g.name(vault)));
+                self.untap(vault);
+                self.agenda.push(Task::BeginTurn);
+            }
+            Some(_) => self.start_turn(p),
+            None => {
+                let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
+                self.ask(Task::MaySkipTurn { p, vault }, p, DecisionKind::YesNo, opts);
+            }
+        }
+    }
+
+    /// `next`'s turn begins (CR 500.1).
+    fn start_turn(&mut self, next: PlayerId) {
         // CR 731.2: the previous turn's active player's spells decide
         // whether day becomes night or night becomes day (checked as the
         // untap step's second part, below).

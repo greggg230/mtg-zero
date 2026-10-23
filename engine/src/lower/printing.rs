@@ -293,7 +293,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
         l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
         l.deny("CardPrinting.ward_discard_random", ward_discard_random);
-        l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
         l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
         l.deny("CardPrinting.sunburst", sunburst);
         l.deny("CardPrinting.grants_play_from_top_paying_life", grants_play_from_top_paying_life);
@@ -1345,6 +1344,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         rules: false,
         gy_abilities,
         artifact_ability_discount: l.int("CardPrinting.artifact_ability_cost_reduction", *artifact_ability_cost_reduction, 0, 9) as u8,
+        skip_turn_untap: *may_skip_turn_to_untap,
     };
     // The bestowed face (CR 702.103b): an Aura enchantment with enchant
     // creature (an Aura spell targets a creature, 303.4a) whose enchanted

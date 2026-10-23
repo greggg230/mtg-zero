@@ -127,6 +127,40 @@ pub(crate) fn lower_effect_tail(l: &mut Lowerer, b: &mut Builder, e: &cats::Effe
             let n = l.int("LootThenMayCastDiscardedFreeIfCounters.threshold", *threshold, 0, 20) as u8;
             b.op(Op::Ext(Ext::LootMayCastFree { counter, n }));
         }
+        // "Look at target opponent's hand. You may exile a nonland card from
+        // it. For as long as that card remains exiled, its owner may play
+        // it. A spell cast this way costs {2} more to cast." (Elite
+        // Spellbinder.)
+        E::LookAtHandExileNonlandOwnerMayPlayTaxed(nodes::LookAtHandExileNonlandOwnerMayPlayTaxed { surcharge }) => {
+            let tax = l.int("LookAtHandExileNonlandOwnerMayPlayTaxed.surcharge", *surcharge, 0, 20) as u8;
+            let t = b.target(and(Filter::Player, Filter::Opponent), 1, 1);
+            b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: Some(Who::You) });
+            let filter = Filter::Not(Box::new(Filter::Type(types::LAND)));
+            b.op(Op::Ext(Ext::ExileFromHandTaxed { whose: Who::TargetPlayer(t), filter, tax }));
+        }
+        // "Choose target opponent and up to one target creature they
+        // control. They reveal their hand. You may exile a nonland card from
+        // their hand or the chosen creature until this leaves the
+        // battlefield." (Cloak and Dagger, Entwined; two players: "they
+        // control" is "an opponent controls".)
+        E::RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves(
+            nodes::RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves { card_filter },
+        ) => {
+            let filter = match card_filter {
+                Some(f) => match super::filter::lower_card_filter(l, f) {
+                    Some(f) => f,
+                    None => return true,
+                },
+                None => Filter::Any,
+            };
+            let t = b.target(and(Filter::Player, Filter::Opponent), 1, 1);
+            let c = b.target(and(Filter::Type(types::CREATURE), Filter::Controller(false)), 0, 1);
+            b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
+            b.op(Op::Ext(Ext::ExileHandCardOrTargetUntil { whose: Who::TargetPlayer(t), filter, tgt: c }));
+        }
+        E::ExileUntilNonlandThenCounterOrMayCastIt(nodes::ExileUntilNonlandThenCounterOrMayCastIt {}) => {
+            b.op(Op::Ext(Ext::ExileUntilNonlandCounterOrCast));
+        }
         _ => return false,
     }
     true

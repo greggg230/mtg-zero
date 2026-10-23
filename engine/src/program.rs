@@ -610,6 +610,24 @@ pub enum Ext {
     /// may cast the discarded card without paying its mana cost (CR
     /// 608.2g). Choices: `Discard`, yes/no.
     LootMayCastFree { counter: Counter, n: u8 },
+    /// The controller chooses a card matching `filter` from `whose`'s hand
+    /// (which they have seen) or may choose none; it is exiled and its owner
+    /// may play it for as long as it stays exiled, a spell cast this way
+    /// costing {tax} more (Elite Spellbinder). Choice: a card of the seen
+    /// hand (`LIBRARY` slot) or `PASS`.
+    ExileFromHandTaxed { whose: Who, filter: Filter, tax: u8 },
+    /// The controller may exile a card matching `filter` from `whose`'s
+    /// hand (seen) or the first legal target of requirement `tgt` (a
+    /// permanent), until the source leaves the battlefield (CR 610.3; Cloak
+    /// and Dagger). Choice: a card of the seen hand (`LIBRARY` slot), the
+    /// permanent's slot, or `PASS`.
+    ExileHandCardOrTargetUntil { whose: Who, filter: Filter, tgt: u8 },
+    /// The event's player exiles cards from the top of their library until
+    /// a nonland card (revealed). The controller may put a +1/+1 counter on
+    /// the source; if they don't, they may cast that card this turn,
+    /// spending mana as though it were mana of any type (CR 609.4b; Black
+    /// Widow). Choice: yes/no (`YES` = the counter).
+    ExileUntilNonlandCounterOrCast,
 }
 
 /// What a delayed trigger is about ("that card", "that much").

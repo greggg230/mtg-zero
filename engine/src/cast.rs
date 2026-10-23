@@ -278,7 +278,11 @@ impl Game {
         // too, CR 715.3d.)
         self.permissions
             .iter()
-            .find(|pm| pm.card == r && self.permission_ok(pm, p) && matches!(pm.kind, crate::game::PermKind::Play { .. }))
+            .find(|pm| {
+                pm.card == r
+                    && self.permission_ok(pm, p)
+                    && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::Taxed(_))
+            })
             .or_else(|| {
                 self.permissions.iter().find(|pm| {
                     pm.card == r
@@ -348,6 +352,7 @@ impl Game {
                 crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
                 // CR 715.3d: cast it (not as an Adventure) for its mana cost.
                 crate::game::PermKind::Adventure => Some(CastFrom::Permission { free: false, any_mana: false }),
+                crate::game::PermKind::Taxed(n) => Some(CastFrom::Taxed(n)),
                 // CR 722.3c: a copy of a prepare spell, for its mana cost.
                 crate::game::PermKind::Prepared { .. } => Some(CastFrom::Permission { free: false, any_mana: false }),
                 crate::game::PermKind::Flashback | crate::game::PermKind::CastThenExile => None,
@@ -396,6 +401,8 @@ impl Game {
             // "The mayhem cost is equal to its mana cost" (an alternative
             // cost, CR 702.187b; increases apply, 601.2f).
             CastFrom::Mayhem => with(def.cost),
+            // "A spell cast this way costs {n} more" (CR 601.2f).
+            CastFrom::Taxed(n) => with(def.cost.plus(&crate::mana::ManaCost { generic: n, ..Default::default() })),
         }
     }
 
@@ -692,6 +699,8 @@ impl Game {
         for &c in &self.exile {
             let cast_only = match self.exile_permission(p, c) {
                 Some(crate::game::PermKind::Play { cast_only, .. }) => cast_only,
+                // (Its owner may play it: a land too.)
+                Some(crate::game::PermKind::Taxed(_)) => false,
                 // CR 715.3d: an adventurer card on an adventure (a creature
                 // card: cast only).
                 Some(crate::game::PermKind::Adventure) => true,

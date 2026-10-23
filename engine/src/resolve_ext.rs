@@ -1550,7 +1550,10 @@ impl Game {
             | Ext::MillAttackPump { .. }
             | Ext::SacrificeTutorPayDifference
             | Ext::LookTopRepeatPayLife { .. }
-            | Ext::LootMayCastFree { .. } => self.exec_tail(f, op),
+            | Ext::LootMayCastFree { .. }
+            | Ext::ExileFromHandTaxed { .. }
+            | Ext::ExileHandCardOrTargetUntil { .. }
+            | Ext::ExileUntilNonlandCounterOrCast => self.exec_tail(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

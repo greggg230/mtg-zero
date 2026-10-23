@@ -669,3 +669,148 @@ fn chromatic_star_is_blocked_by_its_ir_event() {
     let err = engine::db::CardDb::cube().expect_id("Chromatic Star").unwrap_err();
     assert!(err.contains("IR:TriggeredAbility.event"), "{err}");
 }
+
+// ---- Time Vault ------------------------------------------------------------
+
+/// "If you would begin your turn while this artifact is tapped, you may skip
+/// that turn instead. If you do, untap this artifact" (a replacement effect,
+/// CR 614.10). "{T}: Take an extra turn after this one" (500.7).
+#[test]
+fn time_vault_skips_a_turn_to_untap_cr614_10_and_taps_for_an_extra_turn_cr500_7() {
+    let mut g = scen().battlefield(0, &["Time Vault"]).at(Step::Main1, 0).start();
+    let v = bf(&g, 0, "Time Vault");
+    let t = g.turn().number;
+    g.choose(act(v, 0));
+    settle(&mut g);
+    assert!(g.obj(v).tapped);
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::YesNo));
+    assert_eq!(g.pending_decision().unwrap().player, 0, "the extra turn is about to begin");
+    g.choose(Choice::Pass);
+    g.drive_until(at_priority);
+    assert_eq!((g.turn().number, g.turn().active), (t + 1, 0), "the extra turn");
+    assert!(g.obj(v).tapped, "it doesn't untap");
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::YesNo));
+    assert_eq!(g.turn().active, 1, "asked as P0's next turn would begin (P1's turn was the last)");
+    g.choose(Choice::Yes);
+    g.drive_until(at_priority);
+    assert!(!g.obj(v).tapped, "skipped: untapped");
+    assert_eq!((g.turn().number, g.turn().active), (t + 3, 1), "P1's turn follows the skipped one");
+}
+
+// ---- Elite Spellbinder -----------------------------------------------------
+
+/// "Look at target opponent's hand. You may exile a nonland card from it.
+/// For as long as that card remains exiled, its owner may play it. A spell
+/// cast this way costs {2} more to cast" (CR 601.2f).
+#[test]
+fn elite_spellbinder_exiles_a_card_its_owner_may_cast_for_2_more_cr601_2f() {
+    for (mountains, castable) in [(2usize, false), (3, true)] {
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Plains", "Plains"])
+            .battlefield(1, &vec!["Mountain"; mountains])
+            .hand(0, &["Elite Spellbinder"])
+            .hand(1, &["Lightning Bolt", "Mountain"])
+            .at(Step::Main1, 0)
+            .start();
+        let e = g.card(0, "Elite Spellbinder", Zone::Hand);
+        g.choose(Choice::Cast(e));
+        pay(&mut g);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseDiscard));
+        let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+        assert_eq!(opts(&g).len(), 2, "the Bolt (not the land) or nothing");
+        g.choose(Choice::Card(bolt));
+        g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+        assert_eq!(g.obj(bolt).zone, Zone::Exile);
+        g.pass();
+        assert_eq!(g.pending_decision().unwrap().player, 1);
+        assert_eq!(g.has_option(Choice::Cast(bolt)), castable, "{{R}} + {{2}} with {mountains} Mountains");
+    }
+}
+
+// ---- Cloak and Dagger, Entwined --------------------------------------------
+
+/// "Choose target opponent and up to one target creature they control. They
+/// reveal their hand. You may exile a nonland card from their hand or the
+/// chosen creature until Cloak and Dagger leave the battlefield" (CR 610.3).
+#[test]
+fn cloak_and_dagger_exiles_a_hand_card_or_the_creature_until_it_leaves_cr610_3() {
+    for take_creature in [true, false] {
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Swamp", "Mountain", "Mountain"])
+            .battlefield(1, &["Test Bear"])
+            .hand(0, &["Cloak and Dagger, Entwined", "Lightning Bolt"])
+            .hand(1, &["Counterspell", "Island"])
+            .at(Step::Main1, 0)
+            .start();
+        let cd = g.card(0, "Cloak and Dagger, Entwined", Zone::Hand);
+        g.choose(Choice::Cast(cd));
+        // Pay with the Plains, the Swamp and a Mountain.
+        while g.kind() == Some(DecisionKind::PayMana) {
+            let c = opts(&g)[0];
+            g.choose(c);
+        }
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target) && g.has_option(Choice::Pass));
+        let bear = bf(&g, 1, "Test Bear");
+        g.choose(g.tgt(bear));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseDiscard));
+        let cs = g.card(1, "Counterspell", Zone::Hand);
+        assert_eq!(opts(&g).len(), 3, "the Counterspell, the Bear, or nothing");
+        let pick = if take_creature { bear } else { cs };
+        g.choose(Choice::Card(pick));
+        g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+        assert_eq!(g.obj(pick).zone, Zone::Exile);
+        // Bolt Cloak and Dagger: the card comes back.
+        let cd = bf(&g, 0, "Cloak and Dagger, Entwined");
+        let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+        g.choose(Choice::Cast(bolt));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(g.tgt(cd));
+        pay(&mut g);
+        settle(&mut g);
+        if take_creature {
+            assert_eq!(g.count_in(1, "Test Bear", Zone::Battlefield), 1, "the creature returns");
+        } else {
+            assert_eq!(g.count_in(1, "Counterspell", Zone::Hand), 1, "the card returns to the hand");
+        }
+    }
+}
+
+// ---- Black Widow, Super Spy ------------------------------------------------
+
+/// "Whenever Black Widow deals combat damage to a player, that player exiles
+/// cards from the top of their library until they exile a nonland card. You
+/// may put a +1/+1 counter on Black Widow. If you don't, you may cast the
+/// exiled nonland card until end of turn and mana of any type can be spent
+/// to cast that spell" (CR 609.4b).
+#[test]
+fn black_widow_counter_or_cast_their_card_with_any_mana_cr609_4b() {
+    for counter in [true, false] {
+        let mut g = scen()
+            .battlefield(0, &["Black Widow, Super Spy", "Swamp"])
+            .library(1, &["Forest", "Forest", "Lightning Bolt"])
+            .at(Step::DeclareAttackers, 0)
+            .start();
+        let w = bf(&g, 0, "Black Widow, Super Spy");
+        g.choose(Choice::Card(w));
+        g.choose(Choice::Pass);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+        let bolt = g.card(1, "Lightning Bolt", Zone::Exile);
+        assert_eq!(g.exile_zone().len(), 3, "two Forests, then the Bolt");
+        g.choose(if counter { Choice::Yes } else { Choice::Pass });
+        g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+        if counter {
+            assert_eq!(g.counters_on(w, Counter::P1P1), 1);
+            assert!(!g.has_option(Choice::Cast(bolt)));
+        } else {
+            assert_eq!(g.counters_on(w, Counter::P1P1), 0);
+            assert!(g.has_option(Choice::Cast(bolt)), "a Swamp's {{B}} pays {{R}}");
+            g.choose(Choice::Cast(bolt));
+            g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+            g.choose(Choice::Target(Target::Player(1)));
+            pay(&mut g);
+            settle(&mut g);
+            assert_eq!(g.life(1), 20 - 2 - 3);
+            assert_eq!(g.obj(bolt).zone, Zone::Graveyard, "its owner's graveyard");
+        }
+    }
+}

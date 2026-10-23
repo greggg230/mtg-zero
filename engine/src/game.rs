@@ -125,6 +125,9 @@ pub enum CastFrom {
     /// From its owner's graveyard with mayhem (CR 702.187b), discarded this
     /// turn: for its mana cost.
     Mayhem,
+    /// With a permission that taxes it (from exile): its mana cost plus {n}
+    /// (Elite Spellbinder).
+    Taxed(u8),
 }
 
 /// A permission to play a card from a zone other than a hand (CR 601.2a,
@@ -148,6 +151,9 @@ pub enum PermKind {
     /// It has flashback; the flashback cost is its mana cost (Snapcaster
     /// Mage).
     Flashback,
+    /// Its owner may play it for as long as it stays exiled; a spell cast
+    /// this way costs {n} more (Elite Spellbinder; CR 601.2f).
+    Taxed(u8),
     /// An adventurer card on an adventure (CR 715.3d): its owner may cast
     /// it for as long as it stays exiled, but not as an Adventure.
     Adventure,

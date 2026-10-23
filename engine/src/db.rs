@@ -1171,6 +1171,11 @@ pub struct CardDef {
     /// activate. This effect can't reduce the mana in that cost to less than
     /// one mana." (Forensic Gadgeteer.)
     pub artifact_ability_discount: u8,
+    // ---- M7c: the single-card tail (ENGINE.md 28) ----
+    /// "If you would begin your turn while this artifact is tapped, you may
+    /// skip that turn instead. If you do, untap this artifact." (Time
+    /// Vault; CR 614.1b, 614.10.)
+    pub skip_turn_untap: bool,
 }
 
 /// A ward cost (CR 702.21a-b): mana, life, or a card to discard.
