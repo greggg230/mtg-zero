@@ -564,6 +564,13 @@ pub struct Game {
 pub enum Mark {
     /// Its exhaust ability k was activated (CR 702.177a).
     Exhausted(u8),
+    /// A spell with converge being paid for: the colours of the pool mana
+    /// spent so far.
+    ConvergePending(u8),
+    /// The number of colours of mana spent to cast this spell (converge).
+    Converge(u8),
+    /// The colour (index W U B R G) chosen as it entered (CR 614.12).
+    ChosenColor(u8),
 }
 
 impl Game {
@@ -1024,7 +1031,7 @@ impl Game {
         if self.def_of(idx).daybound || self.def_of(idx).nightbound {
             self.day_night_check();
         }
-        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player {
+        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player || self.def_of(idx).paints {
             self.agenda.push(Task::AsEnters { card: idx });
         }
         // "This creature enters prepared" (CR 722.3a).

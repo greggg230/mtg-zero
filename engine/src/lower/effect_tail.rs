@@ -158,6 +158,12 @@ pub(crate) fn lower_effect_tail(l: &mut Lowerer, b: &mut Builder, e: &cats::Effe
             b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
             b.op(Op::Ext(Ext::ExileHandCardOrTargetUntil { whose: Who::TargetPlayer(t), filter, tgt: c }));
         }
+        // "Exile all creatures. Incubate X, where X is the number of
+        // creatures exiled this way." (Sunfall.)
+        E::ExileAllCreaturesThenIncubate(nodes::ExileAllCreaturesThenIncubate {}) => {
+            let Some(token) = super::effect_ext::named_token(l, "Incubator") else { return true };
+            b.op(Op::Ext(Ext::ExileAllCreaturesIncubate { token }));
+        }
         E::ExileUntilNonlandThenCounterOrMayCastIt(nodes::ExileUntilNonlandThenCounterOrMayCastIt {}) => {
             b.op(Op::Ext(Ext::ExileUntilNonlandCounterOrCast));
         }

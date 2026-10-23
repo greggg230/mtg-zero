@@ -384,6 +384,11 @@ impl Game {
         }
         self.resolved.clear();
         self.done_once.clear();
+        if !self.marks.is_empty() {
+            // Facts about objects that are gone (CR 400.7).
+            let marks = std::mem::take(&mut self.marks);
+            self.marks = marks.into_iter().filter(|&(r, _)| self.live(r)).collect();
+        }
         self.discarded.clear();
         self.lki_counters.clear();
         self.lki_copy.clear();

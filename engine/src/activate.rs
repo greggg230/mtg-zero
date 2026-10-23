@@ -786,6 +786,23 @@ impl Game {
             }
             return;
         }
+        if self.def_of(card).paints {
+            // "As this enters, choose a color" (CR 614.12). Choice:
+            // `ChooseColor`.
+            let r = self.obj_ref(card);
+            match self.answer.take() {
+                Some(Choice::Number(k)) => {
+                    self.marks.push((r, crate::game::Mark::ChosenColor(k)));
+                    self.note(|_| format!("chosen colour: {}", crate::mana::LETTERS[k as usize]));
+                }
+                Some(other) => unreachable!("colour answer {other:?}"),
+                None => {
+                    let opts = (0..5u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
+                    self.ask(Task::AsEnters { card }, p, DecisionKind::ChooseColor, opts);
+                }
+            }
+            return;
+        }
         let n = self.def_of(card).shock_life as i32;
         if n == 0 {
             return;

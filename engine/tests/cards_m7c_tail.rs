@@ -814,3 +814,103 @@ fn black_widow_counter_or_cast_their_card_with_any_mana_cr609_4b() {
         }
     }
 }
+
+// ---- Prismatic Ending ------------------------------------------------------
+
+/// "Converge - Exile target nonland permanent if its mana value is less than
+/// or equal to the number of colors of mana spent to cast this spell" (CR
+/// 106.1b: a dual land's mana is the colour its controller chooses, so the
+/// count is the most its sources can show).
+#[test]
+fn prismatic_ending_counts_the_colours_spent_converge_cr106_1b() {
+    for (lands, exiled) in [(["Plains", "Island", "Swamp"], true), (["Plains", "Plains", "Island"], false), (["Plains", "Tundra", "Underground Sea"], true)] {
+        let mut g = scen()
+            .battlefield(0, &lands)
+            .battlefield(1, &["Coalition Relic"])
+            .hand(0, &["Prismatic Ending"])
+            .at(Step::Main1, 0)
+            .start();
+        let pe = g.card(0, "Prismatic Ending", Zone::Hand);
+        let relic = bf(&g, 1, "Coalition Relic");
+        g.choose(Choice::Cast(pe));
+        g.drive_until(|g| !at_priority(g));
+        // X = 2 (the mana value of the Relic is 3).
+        if g.kind() == Some(DecisionKind::ChooseMode) {
+            g.choose(Choice::Number(2));
+        }
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(g.tgt(relic));
+        pay(&mut g);
+        settle(&mut g);
+        assert_eq!(g.obj(relic).zone == Zone::Exile, exiled, "{lands:?}");
+    }
+}
+
+// ---- Painter's Servant -----------------------------------------------------
+
+/// "As this creature enters, choose a color (CR 614.12). All cards that
+/// aren't on the battlefield, spells, and permanents are the chosen color in
+/// addition to their other colors" (layer 5, 613.1e).
+#[test]
+fn painters_servant_paints_cards_spells_and_permanents_cr613_1e() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island"])
+        .battlefield(1, &["Mountain"])
+        .hand(0, &["Painter's Servant"])
+        .hand(1, &["Lightning Bolt"])
+        .graveyard(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let ps = g.card(0, "Painter's Servant", Zone::Hand);
+    g.choose(Choice::Cast(ps));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseColor));
+    g.choose(Choice::Number(1)); // blue
+    settle(&mut g);
+    let blue = 1 << 1;
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    let bear = g.card(1, "Test Bear", Zone::Graveyard);
+    let mountain = bf(&g, 1, "Mountain");
+    for c in [bolt, bear, mountain, ps] {
+        assert!(g.colors_of(c) & blue != 0, "{} is blue", g.name(c));
+    }
+    assert!(g.colors_of(bolt) & (1 << 3) != 0, "in addition to red");
+    // Without the Servant: back to normal.
+    let mut g2 = scen().battlefield(1, &["Mountain"]).hand(1, &["Lightning Bolt"]).at(Step::Main1, 0).start();
+    let b2 = g2.card(1, "Lightning Bolt", Zone::Hand);
+    assert_eq!(g2.colors_of(b2), 1 << 3);
+    let _ = &mut g2;
+}
+
+// ---- Sunfall ---------------------------------------------------------------
+
+/// "Exile all creatures. Incubate X, where X is the number of creatures
+/// exiled this way" (CR 701.53a: an Incubator token with X +1/+1 counters
+/// and "{2}: Transform this artifact"; its back face is a 0/0 Phyrexian
+/// artifact creature, 712).
+#[test]
+fn sunfall_exiles_all_creatures_and_incubates_their_number_cr701_53a() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Test Bear"])
+        .battlefield(1, &["Test Bear", "Test Giant"])
+        .hand(0, &["Sunfall"])
+        .at(Step::Main1, 0)
+        .start();
+    let s = g.card(0, "Sunfall", Zone::Hand);
+    g.choose(Choice::Cast(s));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.creatures_of(0).count() + g.creatures_of(1).count(), 0);
+    let inc = *g.battlefield().last().unwrap();
+    assert_eq!(g.name(inc), "Incubator");
+    assert_eq!(g.counters_on(inc, Counter::P1P1), 3);
+    assert!(!g.is_creature(inc));
+    g.choose(act(inc, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.name(inc), "Phyrexian Token", "{}", g.log_lines().join("
+"));
+    assert!(g.is_creature(inc) && g.is_type(inc, engine::db::types::ARTIFACT));
+    assert_eq!((g.power(inc), g.toughness(inc)), (3, 3), "a 0/0 with three counters");
+    assert_eq!(g.colors_of(inc), 0);
+}

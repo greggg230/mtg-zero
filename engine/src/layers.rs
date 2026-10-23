@@ -275,10 +275,18 @@ impl Game {
 
     pub fn colors_of(&self, c: CardIdx) -> ManaMask {
         // Layer 1: a copy's "it's black" (CR 707.9b).
-        let base = match self.exc(c).and_then(|e| e.colors) {
+        let mut base = match self.exc(c).and_then(|e| e.colors) {
             Some(m) => m,
             None => self.def_of(c).colors,
         };
+        // Painter's Servant (layer 5): every card, spell and permanent (not
+        // an emblem) is the chosen colour too. (Its timestamp is the only
+        // one in the cube's colour effects that could come before a
+        // "becomes" colour effect: none of those exists, so its order
+        // against `Mod::Colors` is not modelled.)
+        if !self.marks.is_empty() && self.objs[c.i()].zone != Zone::Command {
+            base |= self.painted();
+        }
         if self.effects.is_empty() || self.objs[c.i()].zone != Zone::Battlefield {
             return base;
         }
@@ -290,6 +298,19 @@ impl Game {
                 Mod::Colors(m) => *m,
                 _ => col,
             })
+    }
+
+    /// The colours Painter's Servants on the battlefield add to everything
+    /// (`Mark::ChosenColor` of a permanent that paints).
+    pub(crate) fn painted(&self) -> ManaMask {
+        self.marks.iter().fold(0, |m, &(r, k)| match k {
+            crate::game::Mark::ChosenColor(i)
+                if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield && self.abilities(r.idx).paints =>
+            {
+                m | (1 << i)
+            }
+            _ => m,
+        })
     }
 
     // ---- layer 6: abilities -----------------------------------------------

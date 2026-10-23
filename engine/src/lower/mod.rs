@@ -88,6 +88,8 @@ pub struct Lowerer<'a> {
     /// An effect makes the card prepared (CR 722.3a): it needs a prepare
     /// spell.
     pub uses_prepare: bool,
+    /// A predicate reads the colours of mana spent to cast the spell.
+    pub converge: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -217,8 +219,10 @@ pub fn lower_card(
         face: Face::Card,
         latent: Vec::new(),
         uses_prepare: false,
+        converge: false,
     };
-    let def = printing::lower_printing(&mut l, p);
+    let mut def = printing::lower_printing(&mut l, p);
+    def.converge = l.converge;
     if l.uses_prepare && def.prepare.is_none() {
         l.unsupported("Effect:SourceBecomesPrepared(without a prepare spell)");
     }

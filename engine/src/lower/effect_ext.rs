@@ -73,10 +73,21 @@ fn apply(b: &mut Builder, on: On, mods: Vec<Mod>, until: Until) {
 /// two Map tokens"), as the IR writes it where a card spells it out.
 const MAP_TOKEN: &str = r#"{"$t": "CardPrinting", "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}", "sacrifice_self": true, "tap_self": true}, "effect": {"$t": "Explore", "target": true}, "sorcery_speed": true}], "card_types": ["Artifact"], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Map", "subtypes": ["Map"], "supertypes": ["Token"], "type_line": "Token Artifact \u2014 Map"}"#;
 
+/// The Incubator token (CR 701.53a incubate): a double-faced token, an
+/// artifact with "{2}: Transform this artifact" whose back face is a 0/0
+/// colorless Phyrexian artifact creature named Phyrexian Token (CR 111.? /
+/// 712: a transforming double-faced token).
+const INCUBATOR_TOKEN: &str = r#"{"$t": "CardPrinting", "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 2}, "mana_str": "{2}"}, "effect": {"$t": "TransformSource"}}], "card_types": ["Artifact"], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Incubator", "subtypes": ["Incubator"], "supertypes": ["Token"], "type_line": "Token Artifact — Incubator", "transform_back_face": {"$t": "CardPrinting", "card_types": ["Artifact", "Creature"], "face_colors": [], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Phyrexian Token", "power": 0, "subtypes": ["Phyrexian"], "supertypes": ["Token"], "toughness": 0, "type_line": "Token Artifact Creature — Phyrexian"}}"#;
+
+/// A token's back face, while lowering: its index among the faces of the
+/// card being lowered, tagged (`CardDb::from_cards` places it).
+pub(crate) const TOKEN_FACE: u16 = 0x8000;
+
 /// A predefined token by name (CR 111.10).
 pub(crate) fn named_token(l: &mut Lowerer, name: &str) -> Option<u16> {
     let json = match name {
         "Map" => MAP_TOKEN,
+        "Incubator" => INCUBATOR_TOKEN,
         other => {
             l.unsupported(format!("token({other})"));
             return None;
@@ -84,7 +95,9 @@ pub(crate) fn named_token(l: &mut Lowerer, name: &str) -> Option<u16> {
     };
     let p: cats::CardPrinting = serde_json::from_str(json).expect("predefined token printing");
     let cats::CardPrinting::CardPrinting(tp) = &p;
-    let def = super::printing::lower_printing(l, tp);
+    let mut def = super::printing::lower_printing(l, tp);
+    // A double-faced token: its back face is among the card's faces.
+    def.back = def.back.map(|k| k | TOKEN_FACE);
     Some(l.token(def))
 }
 

@@ -628,6 +628,9 @@ pub enum Ext {
     /// spending mana as though it were mana of any type (CR 609.4b; Black
     /// Widow). Choice: yes/no (`YES` = the counter).
     ExileUntilNonlandCounterOrCast,
+    /// Exile all creatures; incubate X, X the number exiled this way (CR
+    /// 701.53a: create `token`, an Incubator, with X +1/+1 counters).
+    ExileAllCreaturesIncubate { token: u16 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").

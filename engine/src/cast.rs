@@ -1392,6 +1392,11 @@ impl Game {
         }
         let mut pm = PayMana::new(p, cost);
         pm.improvise = def.improvise;
+        if def.converge {
+            // The payment records the colours spent (ENGINE.md 28).
+            let r = self.obj_ref(card);
+            self.marks.push((r, crate::game::Mark::ConvergePending(0)));
+        }
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
@@ -1643,6 +1648,7 @@ impl Game {
             Filter::Subtype(s) => self.has_subtype(c, *s),
             Filter::Supertype(bits) => def.supertypes & bits != 0,
             Filter::ManaValueAtMost(n) => self.mana_value_of(c) <= *n,
+            Filter::MvAtMostConverge => self.mana_value_of(c) <= self.converge_of(ctx.source),
             Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n,
             Filter::PowerAtMost(n) => self.is_creature(c) && self.power(c) <= *n,
             Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,

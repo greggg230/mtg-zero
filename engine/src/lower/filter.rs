@@ -32,6 +32,12 @@ macro_rules! lower_object_predicate {
             | E::ValuePredicatesHasManaValueAtMost(nodes::ValuePredicatesHasManaValueAtMost { n }) => {
                 Some(Filter::ManaValueAtMost($l.int("HasManaValueAtMost.n", *n, 0, 30) as u8))
             }
+            // Converge: "if its mana value is less than or equal to the
+            // number of colors of mana spent to cast this spell".
+            E::HasManaValueAtMostColorsSpent(nodes::HasManaValueAtMostColorsSpent {}) => {
+                $l.converge = true;
+                Some(Filter::MvAtMostConverge)
+            }
             E::HasPowerAtLeast(nodes::HasPowerAtLeast { n }) => {
                 Some(Filter::PowerAtLeast($l.int("HasPowerAtLeast.n", *n, -99, 99)))
             }

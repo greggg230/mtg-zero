@@ -115,6 +115,26 @@ impl Game {
                 }
             }
             Ext::ExileUntilNonlandCounterOrCast => self.exile_until_nonland_counter_or_cast(f),
+            Ext::ExileAllCreaturesIncubate { token } => {
+                let all: Vec<CardIdx> = self.battlefield.iter().copied().filter(|&c| self.is_creature(c)).collect();
+                self.begin_batch();
+                let mut n = 0u16;
+                for c in all {
+                    self.move_card(c, Zone::Exile, Pos::Top);
+                    // (A token ceases to exist in exile, CR 111.7: it was
+                    // exiled all the same.)
+                    n += 1;
+                }
+                self.end_batch();
+                let def = self.db.token_def(*token);
+                let made = self.create_tokens(def, f.controller, 1, false);
+                for &c in &made {
+                    self.add_counters(c, Counter::P1P1, n);
+                }
+                f.made = made.first().copied();
+                f.made_all = made;
+                Flow::Next
+            }
             other => unreachable!("not a tail instruction: {other:?}"),
         }
     }

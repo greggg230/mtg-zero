@@ -322,7 +322,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
-        l.deny("CardPrinting.paints_all_objects_chosen_color_at_etb", paints_all_objects_chosen_color_at_etb);
         l.deny("CardPrinting.all_permanents_gain_card_type", all_permanents_gain_card_type);
         l.deny("CardPrinting.all_objects_colorless", all_objects_colorless);
         l.deny("CardPrinting.mana_spendable_as_any_color", mana_spendable_as_any_color);
@@ -1345,6 +1344,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         gy_abilities,
         artifact_ability_discount: l.int("CardPrinting.artifact_ability_cost_reduction", *artifact_ability_cost_reduction, 0, 9) as u8,
         skip_turn_untap: *may_skip_turn_to_untap,
+        converge: false,
+        paints: *paints_all_objects_chosen_color_at_etb,
     };
     // The bestowed face (CR 702.103b): an Aura enchantment with enchant
     // creature (an Aura spell targets a creature, 303.4a) whose enchanted

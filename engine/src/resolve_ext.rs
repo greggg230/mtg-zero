@@ -1553,7 +1553,8 @@ impl Game {
             | Ext::LootMayCastFree { .. }
             | Ext::ExileFromHandTaxed { .. }
             | Ext::ExileHandCardOrTargetUntil { .. }
-            | Ext::ExileUntilNonlandCounterOrCast => self.exec_tail(f, op),
+            | Ext::ExileUntilNonlandCounterOrCast
+            | Ext::ExileAllCreaturesIncubate { .. } => self.exec_tail(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

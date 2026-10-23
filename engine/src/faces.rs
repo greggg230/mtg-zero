@@ -517,7 +517,9 @@ impl Game {
                 x.vals.def = other;
                 x.own = other;
             }
-        } else if d.token {
+        } else if d.token && d.front != Some(other) && self.db.def(other).front != Some(self.objs[c.i()].def) {
+            // (A token transforms only if it is double-faced: the Incubator,
+            // whose back face's front is the token, ENGINE.md 28.)
             return false;
         }
         let a = self.abilities(c);

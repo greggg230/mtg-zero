@@ -752,8 +752,18 @@ impl Game {
             return;
         }
         if !pm.pooled {
+            let before = self.players[payer as usize].pool;
             self.players[payer as usize].pool.pay_into(&mut pm.cost);
             pm.pooled = true;
+            if !self.marks.is_empty() {
+                let after = self.players[payer as usize].pool;
+                let spent = (0..5).filter(|&t| before.amt[t] > after.amt[t]).fold(0u8, |m, t| m | (1 << t));
+                for (_, m) in self.marks.iter_mut() {
+                    if let crate::game::Mark::ConvergePending(x) = m {
+                        *x |= spent;
+                    }
+                }
+            }
         }
         if let Some((src, prods)) = pm.now.take() {
             match self.answer.take() {
@@ -874,6 +884,9 @@ impl Game {
     /// mana of several-mana sources stays in the pool.
     fn finish_payment(&mut self, pm: &PayMana) {
         let payer = pm.payer;
+        if self.marks.iter().any(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) {
+            self.record_converge(pm);
+        }
         let mut order: Vec<Src> = pm.chosen.iter().copied().chain(pm.multi.iter().map(|m| m.0)).collect();
         // Sources that keep their permanent first ("activate only if you
         // control three artifacts" still holds; counts are unchanged), life
@@ -903,6 +916,76 @@ impl Game {
             let n = pm.phyrexian_life;
             self.note(|_| format!("P{payer} pays {n} life for Phyrexian mana"));
         }
+    }
+
+    /// Converge (ENGINE.md 28): the colours of mana spent on a spell. The
+    /// pool's mana counts as spent; several-mana sources' spent mana by
+    /// type; each single-mana source makes the colour the player prefers,
+    /// so the count is the most colours an exact payment of the rest by
+    /// those sources can show (the player chooses each mana's type as the
+    /// ability resolves, CR 106.1b).
+    fn record_converge(&mut self, pm: &PayMana) {
+        let Some(k) = self.marks.iter().position(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) else { return };
+        let crate::game::Mark::ConvergePending(mut fixed) = self.marks[k].1 else { unreachable!() };
+        let mut made = [0u8; 6];
+        for (_, v) in &pm.multi {
+            for t in 0..6 {
+                made[t] += v[t];
+            }
+        }
+        for t in 0..5 {
+            if made[t] > pm.extra[t] {
+                fixed |= 1 << t;
+            }
+        }
+        let classes = self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise);
+        let units: Vec<ManaMask> = pm
+            .chosen
+            .iter()
+            .map(|s| match classes.iter().find(|cl| cl.members.contains(s)).map(|cl| &cl.yld) {
+                Some(Yield::One(u)) => u.mask,
+                _ => 0,
+            })
+            .collect();
+        fn best(i: usize, units: &[ManaMask], cost: &ManaCost, got: &mut Vec<ManaMask>, fixed: u8) -> u32 {
+            if i == units.len() {
+                if !crate::mana::payable(cost, &[], got) {
+                    return 0;
+                }
+                return (got.iter().fold(fixed, |m, &x| m | x) & COLORS).count_ones();
+            }
+            let options: SVec<ManaMask, 6> = if units[i] == 0 { [0u8].into_iter().collect() } else { (0..6).filter(|t| units[i] & (1 << t) != 0).map(|t| 1u8 << t).collect() };
+            let mut b = 0;
+            for o in options.iter() {
+                got.push(*o);
+                b = b.max(best(i + 1, units, cost, got, fixed));
+                got.pop();
+            }
+            b
+        }
+        let n = if units.len() <= 7 {
+            best(0, &units, &pm.cost, &mut Vec::new(), fixed)
+        } else {
+            // (Many sources: each colour any of them could make, at most
+            // one per source.)
+            let all = units.iter().fold(fixed, |m, &x| m | x) & COLORS;
+            all.count_ones().min(fixed.count_ones() + units.len() as u32)
+        };
+        self.marks[k].1 = crate::game::Mark::Converge(n as u8);
+    }
+
+    /// The number of colours of mana spent to cast the spell `source`
+    /// (converge; 0 if none was recorded).
+    pub(crate) fn converge_of(&self, source: Option<crate::ids::ObjRef>) -> u8 {
+        let Some(r) = source else { return 0 };
+        self.marks
+            .iter()
+            .find_map(|&(o, m)| match m {
+                crate::game::Mark::Converge(n) if o == r => Some(n),
+                crate::game::Mark::ConvergePending(x) if o == r => Some(x.count_ones() as u8),
+                _ => None,
+            })
+            .unwrap_or(0)
     }
 
     pub(crate) fn add_mana(&mut self, p: PlayerId, mana: &[u8; 6]) {

@@ -373,7 +373,7 @@ impl Game {
             controller: f.controller,
             deathtouch: d.keywords.has(Kw::Deathtouch),
             lifelink: d.keywords.has(Kw::Lifelink),
-            colors: d.colors,
+            colors: d.colors | if self.marks.is_empty() { 0 } else { self.painted() },
             types: d.types,
             obj: Some(f.source),
         }

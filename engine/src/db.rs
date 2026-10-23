@@ -276,6 +276,10 @@ pub enum Filter {
     Supertype(u8),
     /// Mana value at most n (CR 202.3).
     ManaValueAtMost(u8),
+    /// Mana value at most the number of colours of mana spent to cast the
+    /// spell that is the context's source (converge, CR 702.?/Prismatic
+    /// Ending; ENGINE.md 28).
+    MvAtMostConverge,
     /// A creature with power at least / at most n, toughness at most n.
     PowerAtLeast(i32),
     PowerAtMost(i32),
@@ -1176,6 +1180,13 @@ pub struct CardDef {
     /// skip that turn instead. If you do, untap this artifact." (Time
     /// Vault; CR 614.1b, 614.10.)
     pub skip_turn_untap: bool,
+    /// Its spell reads the colours of mana spent to cast it (converge): the
+    /// payment records them (`Mark::Converge`).
+    pub converge: bool,
+    /// "As this enters, choose a color. All cards that aren't on the
+    /// battlefield, spells, and permanents are the chosen color in addition
+    /// to their other colors" (Painter's Servant; layer 5, CR 613.1e).
+    pub paints: bool,
 }
 
 /// A ward cost (CR 702.21a-b): mana, life, or a card to discard.
@@ -1261,8 +1272,22 @@ impl CardDb {
         let mut tokens: Vec<CardDef> = Vec::new();
         // The faces of each supported card (its back face, its Adventure).
         let mut faces: Vec<(DefId, Vec<CardDef>)> = Vec::new();
+        // Double-faced tokens: (token index, the card whose faces hold its
+        // back face, that face's index).
+        let mut token_faces: Vec<(usize, DefId, DefId)> = Vec::new();
+        let face_tag = crate::lower::effect_ext::TOKEN_FACE;
         for card in cards {
-            match lower::lower_card(card, &mut db.subtypes, &mut tokens) {
+            let t0 = tokens.len();
+            let result = lower::lower_card(card, &mut db.subtypes, &mut tokens);
+            for (ti, t) in tokens.iter_mut().enumerate().skip(t0) {
+                if let Some(k) = t.back.filter(|k| k & face_tag != 0) {
+                    match result {
+                        Ok(_) => token_faces.push((ti, db.defs.len() as DefId, k & !face_tag)),
+                        Err(_) => t.back = None,
+                    }
+                }
+            }
+            match result {
                 Ok((def, fs)) => {
                     let id = db.defs.len() as DefId;
                     assert!(
@@ -1300,6 +1325,13 @@ impl CardDb {
                 f.front = Some(id);
                 if back == Some(base + k as DefId) {
                     f.back = Some(id); // a back face transforms into its front
+                }
+                // A double-faced token's back face (its token is its front).
+                if let Some(&(ti, _, _)) = token_faces.iter().find(|&&(_, c, fk)| c == id && fk == k as DefId) {
+                    let t = db.token_base + ti as DefId;
+                    f.front = Some(t);
+                    f.back = Some(t);
+                    db.defs[t as usize].back = Some(base + k as DefId);
                 }
                 db.defs.push(f);
             }
