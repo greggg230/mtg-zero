@@ -43,7 +43,9 @@ impl Default for GameSpec {
 }
 
 /// One card slot (ENGINE.md 2). Per-object state resets on zone changes.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+/// Plain data (`Copy`): `Vec<Obj>` clones as one copy, which is most of a
+/// `Game::clone` (ENGINE.md 17).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Obj {
     pub def: DefId,
     pub owner: PlayerId,
