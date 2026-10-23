@@ -802,6 +802,7 @@ they isolate one keyword or trigger each.
 | `tests/cards_m7b_walkers.rs`, `cards_m7b_walkers2.rs` | M7b: every ability of the 18 planeswalkers (Minsc & Boo on a corrected copy of its IR, while the card stays blocked, 24.8); Oko's Elk losing a static ability |
 | `tests/cards_m7b_walkers3.rs` | M7b hidden information: the decisions of Tamiyo's naming, Jace's look, a search for any number of cards, Chandra's cast from exile and Karn's opponent choice survive determinize; a retrace cast in progress keeps its land card |
 | `tests/cards_m7b_walkers_audit.rs` | the any-target audit (24.9): removal and damage that can hit planeswalkers, "each creature" effects that can't, voting, edicts, Psychic Frog and Questing Beast, Clarion Conqueror, Mox Amber, Subtlety |
+| `tests/cards_m7b_tests_lands.rs`, `cards_m7b_tests_mana.rs`, `cards_m7b_tests_creatures.rs`, `cards_m7b_tests_creatures2.rs`, `cards_m7b_tests_spells.rs`, `cards_m7b_tests_edges.rs` | M7b: a test for each of the 118 supported cards no earlier test named (`python tools/untested_cards.py` lists the supported cards no card test names; 0 left), each against its Oracle text: the land cycles table-driven (fetch lands, surveil lands, fast lands, horizon lands, shock lands, duals, Triomes and tri-lands with cycling, Verges), Tolarian Academy, Abandoned Air Temple, Talismans, Moxen, mana creatures, artifacts, creatures and spells; rules edges: 611.2c (Harvester of Misery, Spectacular Spider-Man, Ravenous Robots), 610.3c (Touch the Spirit Realm), 601.2g-h (Crop Rotation, Natural Order, Goblin Engineer sacrificing the permanent that paid), 605.3a (Basalt Monolith paying its own untap), 502.3, 122.1d (stun), 701.16a, 702.34 (granted flashback ends; 702.34a, Reprieve on a flashed-back spell exiles it), 608.2n (Echo of Eons isn't shuffled into its own library), 614.1c (lands put onto the battlefield by Crop Rotation), 111.7 (a flickered token) |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
@@ -1025,6 +1026,21 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
 * IR gap: Get Lost's rider (`ControllerCreatesTokens { token_name: "Map" }`) names a token
   the IR does not describe (Python looks it up in `TOKEN_PRINTINGS`); the IR should carry the
   printing, as `CreateToken.token_printing` does (Map also needs explore).
+* M7b: `docs/ir_defects.md` lists the IR defects for mtg-bot's parser, each with the Oracle
+  text, what the IR says and should say, the parser function that produces it, a suggested fix
+  and the engine-side status. Confirmed: Strip Mine's mana ability; Colonnade and Tar Pit's
+  colours and creature type (`_try_build_manland`); Get Lost's Map printing; Robber of the
+  Rich's duration; `{C}` folded into generic mana (the IR's `ManaCost` has no colorless pip:
+  Sowing Mycospawn's "Kicker {1}{C}" reads `{2}`); target specs set in `__post_init__` and not
+  exported (Thieving Skydiver; six more classes, re-derived here for Mishra's Bauble, Urza's
+  Bauble, Grindstone, Displacer Kitten). Suspected: an Aura's bonus in `equipment_bonuses`
+  (Animate Dead), Necromancy's "as though it had flash" as the flash keyword, transform back
+  faces carrying the front face's mana cost, sentinels (Fastbond's 1000000, Pest Infestation's
+  `count_max: 0`, Wizard's Rockets' `amount: 0`), target requirements that exist only in Python
+  methods. The 118 cards first tested in M7b showed no IR defect and no engine bug.
+* Lowering: the `*_str` cost twins (`mana_cost_str`, `kicker_cost_str`, `mana_str`, ...) are
+  ignored as display forms; checking them against the structured cost (rule 4a, section 3) would
+  have caught the lost `{C}`.
 * IR naming: `EachOpponentSacrificesCreature` means "a nontoken creature" (Sheoldred's
   Edict; Python agrees); `Scry.bottom_choice` and `SearchLibraryForCard.may_fail` are Python
   behaviour switches the engine ignores in favour of the CR (section 14).
