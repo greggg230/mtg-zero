@@ -10,6 +10,7 @@
 
 pub mod activated;
 pub mod effect;
+pub mod effect_copies;
 pub mod effect_ext;
 pub mod effect_faces;
 pub mod effect_walkers;
@@ -64,10 +65,8 @@ pub struct Lowerer<'a> {
     pub link_exiles: bool,
     /// "<Types> your opponents control enter tapped" from a static ability.
     pub opp_enter_tapped: u16,
-    /// The card's name, and a token copy of the card it makes (its token
-    /// index, the card types added): filled in once the card is lowered.
+    /// The card's name.
     pub card_name: String,
-    pub self_copy: Option<(u16, u16)>,
     pub errs: Vec<String>,
     /// The colours of mana the card being lowered produces as a land
     /// (`produces`), for consistency checks.
@@ -202,7 +201,6 @@ pub fn lower_card(
         link_exiles,
         opp_enter_tapped: 0,
         card_name: p.name.clone(),
-        self_copy: None,
         faces: Vec::new(),
         face: Face::Card,
         latent: Vec::new(),
@@ -210,11 +208,6 @@ pub fn lower_card(
     let def = printing::lower_printing(&mut l, p);
     if let Some(&(_, blocker)) = IR_DEFECTS.iter().find(|(n, _)| *n == card.name) {
         l.unsupported(blocker);
-    }
-    if let Some((idx, extra)) = l.self_copy {
-        // "A token that's a copy of it, except it's an artifact" (CR
-        // 707.9b): the card's own definition, as a token.
-        l.tokens[idx as usize] = CardDef { token: true, types: def.types | extra, ..def.clone() };
     }
     if l.errs.is_empty() {
         Ok((def, l.faces))

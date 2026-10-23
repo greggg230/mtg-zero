@@ -55,7 +55,7 @@ impl Game {
                 // exist there, 704.5d).
                 let d = self.def_of(c);
                 match d.back {
-                    Some(back) if !d.token && !self.db.def(back).is(types::INSTANT | types::SORCERY) => {
+                    Some(back) if !self.is_token(c) && !self.db.def(back).is(types::INSTANT | types::SORCERY) => {
                         self.entering_face = Some(back);
                         let ctl = if *yours { f.controller } else { owner };
                         self.put_onto_battlefield(c, ctl);
@@ -483,7 +483,24 @@ impl Game {
         }
         let d = self.db.def(o.def);
         let Some(other) = d.back else { return false };
-        if d.token || self.db.def(other).is(types::INSTANT | types::SORCERY) {
+        if self.db.def(other).is(types::INSTANT | types::SORCERY) {
+            return false;
+        }
+        if self.is_copy(c) {
+            // CR 707.8a: a token created as a copy of a double-faced
+            // permanent is a double-faced token (its copy effect follows the
+            // face); a card copying one isn't a double-faced card (701.27c).
+            let r = self.obj_ref(c);
+            let created = self.is_copy_obj(c)
+                && self.copies.iter().filter(|x| x.obj == r).all(|x| x.until == crate::layers::Until::Forever && x.own == x.vals.def);
+            if !created {
+                return false;
+            }
+            for x in self.copies.iter_mut().filter(|x| x.obj == r) {
+                x.vals.def = other;
+                x.own = other;
+            }
+        } else if d.token {
             return false;
         }
         let a = self.abilities(c);

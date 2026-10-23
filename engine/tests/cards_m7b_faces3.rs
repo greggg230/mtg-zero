@@ -1,7 +1,7 @@
 //! M7b part 2 (ENGINE.md 25): cards with more than one face, part 3: Sagas
-//! (CR 714): Urza's Saga, and Fable of the Mirror-Breaker on a copy of its IR
-//! without Reflection of Kiki-Jiki's copy ability (token copies of nontoken
-//! permanents are not built; the cube card stays blocked by it).
+//! (CR 714): Urza's Saga, and Fable of the Mirror-Breaker's chapters (its
+//! Reflection of Kiki-Jiki's copy ability: `cards_m7b_copies.rs`, M7b part
+//! 3).
 
 mod common;
 
@@ -181,37 +181,13 @@ fn a_saga_isnt_sacrificed_while_its_last_chapter_waits_cr_704_5s() {
     assert_eq!(g.obj(s).zone, Zone::Graveyard);
 }
 
-// ---- Fable of the Mirror-Breaker (a copy without the copy ability) -------------------
+// ---- Fable of the Mirror-Breaker -------------------------------------------------------
 
-const FABLE: &str = "Test Fable";
-
-/// The cube, the custom cards, and Fable of the Mirror-Breaker's IR as
-/// "Test Fable" without Reflection of Kiki-Jiki's activated ability.
-fn fable_db() -> &'static engine::db::CardDb {
-    static DB: std::sync::OnceLock<&'static engine::db::CardDb> = std::sync::OnceLock::new();
-    DB.get_or_init(|| {
-        let doc: serde_json::Value = serde_json::from_str(engine::db::CUBE_IR).unwrap();
-        let mut v = doc["cards"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|c| c["name"] == "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki")
-            .unwrap()
-            .clone();
-        v["name"] = serde_json::json!(FABLE);
-        v["printing"]["name"] = serde_json::json!(FABLE);
-        v["printing"]["transform_back_face"].as_object_mut().unwrap().remove("activated_abilities");
-        let mut cards = engine::db::load_cube_document().cards;
-        cards.extend(common::custom_cards());
-        cards.push(serde_json::from_value(v).unwrap());
-        engine::db::CardDb::from_cards(&cards).leak()
-    })
-}
+const FABLE: &str = "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki";
 
 #[test]
-fn fable_is_blocked_only_by_reflections_copy_ability() {
-    let err = engine::db::CardDb::cube().expect_id("Fable of the Mirror-Breaker // Reflection of Kiki-Jiki").unwrap_err();
-    assert!(err.ends_with("is not supported: Effect:CreateTokenCopyOfTargetWithKeywordsSacAtEndStep"), "{err}");
+fn fable_is_supported_since_token_copies_m7b_part_3() {
+    assert!(engine::db::CardDb::cube().expect_id(FABLE).is_ok());
 }
 
 #[test]
@@ -220,7 +196,7 @@ fn fable_chapters_and_reflection_cr_714_712_14a() {
     // token attacks, create a Treasure token.' II - You may discard up to two
     // cards. If you do, draw that many cards. III - Exile this Saga, then
     // return it to the battlefield transformed under your control."
-    let mut g = Scenario::new(fable_db())
+    let mut g = Scenario::new(db())
         .spec(|s| s.auto_single = false)
         .library(0, &["Island"; 10])
         .library(1, &["Forest"; 10])

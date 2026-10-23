@@ -86,8 +86,11 @@ fn cr_707_vaultborn_tyrant_dies_and_leaves_an_artifact_token_copy_once() {
     });
     assert_eq!(g.obj(vt).zone, Zone::Graveyard);
     let copy = bf(&g, 0, "Vaultborn Tyrant");
-    assert!(g.def_of(copy).token);
-    assert!(g.def_of(copy).is(engine::db::types::ARTIFACT));
+    // (A token copy: the card's copiable values, CR 707.2, with the
+    // exception "it's an artifact", 707.9b; ENGINE.md 26.)
+    assert!(g.is_token(copy));
+    assert!(g.is_type(copy, engine::db::types::ARTIFACT));
+    assert!(g.is_copy(copy));
     assert_eq!(g.pt(copy), (6, 6));
     assert!(g.has_kw(copy, Kw::Trample));
     // The token dies: "if it's not a token": no further copy.

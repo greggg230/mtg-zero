@@ -57,6 +57,8 @@ const SUPPORTED: &[&str] = &[
     "Carnage Interpreter",
     "Cathar Commando",
     "Cecil, Dark Knight // Cecil, Redeemed Paladin",
+    "Chain Lightning",
+    "Chain of Smog",
     "Chandra, Torch of Defiance",
     "Chaos Defiler",
     "Clarion Conqueror",
@@ -110,6 +112,7 @@ const SUPPORTED: &[&str] = &[
     "Exorcise",
     "Expedition Map",
     "Expressive Iteration",
+    "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
     "Faerie Mastermind",
     "Faithless Looting",
     "Fatal Push",
@@ -128,6 +131,7 @@ const SUPPORTED: &[&str] = &[
     "Force of Will",
     "Forest",
     "Formidable Speaker",
+    "Fractured Identity",
     "Frantic Search",
     "Fury",
     "Gaea's Cradle",
@@ -189,10 +193,12 @@ const SUPPORTED: &[&str] = &[
     "Lion's Eye Diamond",
     "Llanowar Elves",
     "Loran of the Third Path",
+    "Lose Focus",
     "Lotus Cobra",
     "Lotus Petal",
     "Luminarch Aspirant",
     "Lush Portico",
+    "Lutri, the Spellchaser",
     "Lórien Revealed",
     "Magda, Brazen Outlaw",
     "Malevolent Rumble",
@@ -246,6 +252,7 @@ const SUPPORTED: &[&str] = &[
     "Path to Exile",
     "Phelia, Exuberant Shepherd",
     "Phlage, Titan of Fire's Fury",
+    "Phyrexian Metamorph",
     "Plains",
     "Plateau",
     "Polluted Delta",
@@ -275,6 +282,8 @@ const SUPPORTED: &[&str] = &[
     "Retrofitter Foundry",
     "Robber of the Rich",
     "Sacred Foundry",
+    "Sage of the Skies",
+    "Saheeli, Sublime Artificer",
     "Sanguine Evangelist",
     "Savai Triome",
     "Savannah",
@@ -292,6 +301,8 @@ const SUPPORTED: &[&str] = &[
     "Shatterskull Smashing // Shatterskull, the Hammer Pass",
     "Sheoldred's Edict",
     "Sheoldred, the Apocalypse",
+    "Shifting Woodland",
+    "Sicarian Infiltrator",
     "Simian Spirit Guide",
     "Sink into Stupor // Soporific Springs",
     "Skateboard",
@@ -310,6 +321,7 @@ const SUPPORTED: &[&str] = &[
     "Spellseeker",
     "Spider-Woman, Stunning Savior",
     "Spirebluff Canal",
+    "Springheart Nantuko",
     "Staff of the Storyteller",
     "Starting Town",
     "Steam Vents",
@@ -320,6 +332,7 @@ const SUPPORTED: &[&str] = &[
     "Subtlety",
     "Sunbaked Canyon",
     "Super Shredder",
+    "Superior Spider-Man",
     "Suplex",
     "Swamp",
     "Swords to Plowshares",
@@ -348,7 +361,9 @@ const SUPPORTED: &[&str] = &[
     "Thornspire Verge",
     "Thoughtseize",
     "Thraben Inspector",
+    "Three Steps Ahead",
     "Thundering Falls",
+    "Thundertrap Trainer",
     "Tidehollow Sculler",
     "Time Spiral",
     "Time Walk",
@@ -472,8 +487,8 @@ fn unsupported_cards_fail_loudly() {
     let db = CardDb::cube();
     let err = db.expect_id("Balance").unwrap_err();
     assert!(err.contains("Effect:BalanceEffect"), "{err}");
-    let err = db.expect_id("Saheeli, Sublime Artificer").unwrap_err();
-    assert!(err.contains("Effect:TargetBecomesCopyOfAnotherTargetUEOT"), "{err}");
+    let err = db.expect_id("Emeritus of Abundance // Regrowth").unwrap_err();
+    assert!(err.contains("Effect:SourceBecomesPrepared"), "{err}");
     assert!(db.expect_id("No Such Card").is_err());
 }
 

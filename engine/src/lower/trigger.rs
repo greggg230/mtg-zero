@@ -94,8 +94,23 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     if let Some(s) = slots_used(&pred).into_iter().find(|&s| event.slot_index(s).is_none()) {
         l.unsupported(format!("TriggerPredicate.subject({s:?} of {event:?})"));
     }
+    // Predicates read from one event kind's note.
+    let (enters, cast) = (needs(&pred, &|p| matches!(p, TrigPred::EnteredCast | TrigPred::EnteredPaid)), needs(&pred, &|p| matches!(p, TrigPred::SpellPaid | TrigPred::OrCopy)));
+    if enters && event != EventKind::Enters || cast && event != EventKind::IsCast {
+        l.unsupported(format!("TriggerPredicate(how it was cast, on {event:?})"));
+    }
     let uses_event = ability.uses_event();
     Some(TriggerDef { event, pred, ability, uses_event })
+}
+
+/// Does some part of the predicate satisfy `f`?
+fn needs(p: &TrigPred, f: &dyn Fn(&TrigPred) -> bool) -> bool {
+    f(p)
+        || match p {
+            TrigPred::And(a, b) | TrigPred::Or(a, b) => needs(a, f) || needs(b, f),
+            TrigPred::Not(a) => needs(a, f),
+            _ => false,
+        }
 }
 
 /// Every subject slot a predicate names (checked against the event).
@@ -120,7 +135,11 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::Source(_)
         | TrigPred::Chapter(_)
         | TrigPred::Batch
-        | TrigPred::HostAttacksWithAnother => Vec::new(),
+        | TrigPred::HostAttacksWithAnother
+        | TrigPred::EnteredCast
+        | TrigPred::EnteredPaid
+        | TrigPred::SpellPaid
+        | TrigPred::OrCopy => Vec::new(),
     }
 }
 
@@ -163,8 +182,22 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         P::IsSelf(nodes::IsSelf { subject }) => Some(TrigPred::IsSelf(slot(l, subject)?)),
         P::IsThisSpell(nodes::IsThisSpell {}) => Some(TrigPred::IsSelf(Slot::Spell)),
         P::IsFormerHost(nodes::IsFormerHost { subject }) => Some(TrigPred::FormerHost(slot(l, subject)?)),
-        // A spell copy would also count; there are none yet (CR 707.10).
-        P::CastOrCopy(nodes::CastOrCopy {}) => Some(TrigPred::Always),
+        // "Whenever you cast or copy": a copy of a spell counts too (CR
+        // 707.10; `TrigPred::OrCopy`).
+        P::CastOrCopy(nodes::CastOrCopy {}) => Some(TrigPred::OrCopy),
+        // "If you cast it": it entered as a resolving spell its controller
+        // cast (its `Enters` event's note).
+        P::EnteredViaCast(nodes::EnteredViaCast {}) => Some(TrigPred::EnteredCast),
+        // "If you've cast another spell this turn" (while casting this one;
+        // CR 603.4, checked again on resolution).
+        P::CastAnotherSpellThisTurn(nodes::CastAnotherSpellThisTurn {}) => Some(TrigPred::If(Cond::SpellsCastAtLeast(2))),
+        // "If its squad / offspring cost was paid" (CR 702.157a, 702.175a):
+        // how its spell was cast, the `Enters` event's note.
+        P::Source(nodes::Source { inner })
+            if matches!(**inner, cats::ObjectPredicate::SquadCostPaid(_) | cats::ObjectPredicate::OffspringCostPaid(_)) =>
+        {
+            Some(TrigPred::EnteredPaid)
+        }
         P::Subject(nodes::Subject { slot: s, inner }) => {
             let s = slot(l, s);
             let f = lower_pred(l, inner);

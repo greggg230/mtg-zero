@@ -1,6 +1,6 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
 //! f32 vector for a viewer, with no hidden information. Layout v3 (M7b: 26,500
-//! floats), in order:
+//! floats; M7b part 3, copies: 29,092), in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
@@ -8,9 +8,9 @@
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
 //! | bags | 15 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them) |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 100 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up) |
+//! | permanents | 2 x 32 x 140 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
-//! | stack | 8 x 76 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets |
+//! | stack | 8 x 80 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets; a copy of a spell, times an additional cost was paid, bestowed |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 40 x 56 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
 //!
@@ -20,6 +20,10 @@
 //! plus a descriptor (card types, colours, mana value, printed power and
 //! toughness, token, legendary; M7b: planeswalker, printed loyalty, emblem, a
 //! face other than the front is up: then the descriptor is that face's).
+//! M7b part 3 (copies, ENGINE.md 26): a permanent's identity is what it is
+//! without copy effects (the physical card, or the card a token copy copies);
+//! its descriptor shows the copiable values it has (the copied face), and
+//! its status the identity of what it copies.
 //! Layout v1 (M5a, 13,532 floats) used the
 //! card table's index (capacity 256), which renumbers as support grows;
 //! v2 (M5b, 23,324 floats) had a 192-float context block with room for 32
@@ -48,11 +52,11 @@ pub const BAGS: usize = 15;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
 pub const PERMS: usize = 32;
-pub const PERM_W: usize = CODE + 48;
+pub const PERM_W: usize = CODE + 88;
 pub const HANDS: usize = 16;
 pub const HAND_W: usize = CODE + 8;
 pub const STACKS: usize = 8;
-pub const STACK_W: usize = CODE + 24;
+pub const STACK_W: usize = CODE + 28;
 pub const TRIGS: usize = 4;
 pub const TRIG_W: usize = CODE + 4;
 pub const LIST: usize = 40;
@@ -141,14 +145,46 @@ pub mod perm {
     pub const LORE: usize = 45;
     /// Its back face is up (transformed, CR 701.27g; an MDFC's back face).
     pub const BACK_FACE: usize = 46;
+    /// M7b part 3: a copy effect applies to it (CR 707): its descriptor is
+    /// the copied face's; `COPY_OF` (32 floats) is the identity of what it
+    /// copies, as the card code's digits.
+    pub const COPY: usize = 47;
+    pub const COPY_OF: usize = 48;
+    /// Attached to a permanent (an Equipment, a bestowed Aura: CR 301.5,
+    /// 702.103), that permanent's slot ((slot + 1) / 32), and whether the
+    /// viewer's opponent controls it.
+    pub const ATTACHED: usize = 80;
+    pub const ATTACHED_SLOT: usize = 81;
+    pub const ATTACHED_OPP: usize = 82;
+}
+
+/// Offsets inside a stack slot's status (after its card code).
+pub mod stack {
+    /// M7b part 3: a copy of a spell (CR 707.10), the times an additional
+    /// cost was paid / 4 (replicate, squad, offspring), a bestowed Aura
+    /// spell (702.103b).
+    pub const COPY: usize = 24;
+    pub const TIMES: usize = 25;
+    pub const BESTOWED: usize = 26;
 }
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
 fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
+    code_of(out, db, ids, def, def);
+}
+
+/// The identity digits (16, 8, 8) of definition `def`'s identity.
+fn digits(out: &mut [f32], ids: &[u16], def: DefId) {
     let i = ids[def as usize] as usize;
     out[(i >> 6) & 15] = 1.0;
     out[16 + ((i >> 3) & 7)] = 1.0;
     out[24 + (i & 7)] = 1.0;
+}
+
+/// A card code with the identity of `who` and the descriptor of `def` (a
+/// copy: what it is, and the copiable values it has; ENGINE.md 26).
+fn code_of(out: &mut [f32], db: &CardDb, ids: &[u16], who: DefId, def: DefId) {
+    digits(out, ids, who);
     let d = db.def(def);
     for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
         .iter()
@@ -204,6 +240,9 @@ fn task_code(t: &Task) -> usize {
         Task::CastPay { .. } | Task::ActPay { .. } => 17,
         Task::AttackTarget { .. } => 19,
         Task::ChooseFace { .. } => 20,
+        Task::EnterAsCopy { .. } => 21,
+        Task::CopyTargets { .. } => 22,
+        Task::ChooseTimes { .. } => 23,
         _ => 18,
     }
 }
@@ -346,7 +385,10 @@ impl Game {
             for (s, &c) in list.iter().enumerate().take(PERMS) {
                 let o = base + s * PERM_W;
                 let ob = &self.objs[c.i()];
-                code(&mut out[o..o + CODE], self.db, ids, ob.def);
+                // What it is (its identity) and the copiable values it has
+                // (the descriptor; a copy's copied face, CR 707.2).
+                code_of(&mut out[o..o + CODE], self.db, ids, self.own_def(c), ob.def);
+                out[o + 46] = self.is_token(c) as u8 as f32;
                 let st = &mut out[o + CODE..o + PERM_W];
                 st[perm::PRESENT] = 1.0;
                 st[perm::TAPPED] = ob.tapped as u8 as f32;
@@ -377,7 +419,7 @@ impl Game {
                 for (k, kw) in KWS.iter().enumerate() {
                     st[perm::KEYWORDS + k] = self.has_kw(c, *kw) as u8 as f32;
                 }
-                st[perm::TOKEN] = self.def_of(c).token as u8 as f32;
+                st[perm::TOKEN] = self.is_token(c) as u8 as f32;
                 st[perm::NEW] = (ob.control_since == self.turn.number) as u8 as f32;
                 st[perm::STOLEN] = (ob.controller != ob.owner) as u8 as f32;
                 let walker = self.is_type(c, types::PLANESWALKER);
@@ -398,6 +440,15 @@ impl Game {
                 st[perm::ASKED_ATTACKER] = (asked_attacker == Some(c)) as u8 as f32;
                 st[perm::LORE] = self.counters_on(c, crate::db::Counter::Lore) as f32 / 4.0;
                 st[perm::BACK_FACE] = self.db.is_face(ob.def) as u8 as f32;
+                if self.is_copy(c) {
+                    st[perm::COPY] = 1.0;
+                    digits(&mut st[perm::COPY_OF..perm::COPY_OF + 32], ids, ob.def);
+                }
+                if let Some(h) = ob.attached.filter(|&h| self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield) {
+                    st[perm::ATTACHED] = 1.0;
+                    st[perm::ATTACHED_SLOT] = slot_of(h.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+                    st[perm::ATTACHED_OPP] = (self.objs[h.idx.i()].controller != me) as u8 as f32;
+                }
             }
         }
         // The viewer's hand.
@@ -445,6 +496,11 @@ impl Game {
             st[5] = item.modes.len() as f32 / 4.0;
             st[6] = item.cost_option as f32 / 4.0;
             st[7] = item.targets.len() as f32 / 4.0;
+            if let StackKind::Spell { card } = item.kind {
+                st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
+                st[stack::TIMES] = item.times as f32 / 4.0;
+                st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
+            }
             for (k, &(_, t)) in item.targets.iter().take(2).enumerate() {
                 let tb = &mut st[8 + 8 * k..16 + 8 * k];
                 match t {
@@ -500,8 +556,9 @@ impl Game {
             bag_add(out, ids, bag::MY_HAND, self.objs[c.i()].def);
         }
         for &c in &self.battlefield {
+            // (By what it is: a copy by its own identity, ENGINE.md 26.)
             let o = &self.objs[c.i()];
-            bag_add(out, ids, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, o.def);
+            bag_add(out, ids, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, self.own_def(c));
         }
         for p in [me, op_] {
             for &c in &self.players[p as usize].graveyard {
@@ -594,7 +651,7 @@ impl Game {
                 if self.is_type(c, types::ARTIFACT) {
                     artifacts += 1;
                 }
-                if self.def_of(c).token {
+                if self.is_token(c) {
                     tokens += 1;
                 }
             }
@@ -705,7 +762,9 @@ impl Game {
                 | Task::ChooseModes { id }
                 | Task::PayCosts { id, .. }
                 | Task::CastPay { id }
-                | Task::ActPay { id } => stack_item(*id),
+                | Task::ActPay { id }
+                | Task::CopyTargets { id, .. }
+                | Task::ChooseTimes { id } => stack_item(*id),
                 _ => None,
             }
         };
@@ -754,6 +813,13 @@ impl Game {
             }
             Task::DeclareAttackers { next } => x[ctx::NEXT_ATTACKER] = *next as f32 / 32.0,
             Task::AttackTarget { card: c } => card = Some((self.objs[c.i()].def, None, None)),
+            // The card entering as a copy (by what it is), the copy whose
+            // targets may change (its target position).
+            Task::EnterAsCopy { card: c, .. } => card = Some((self.own_def(*c), None, None)),
+            Task::CopyTargets { k, .. } => {
+                card = frame_card(task);
+                x[ctx::REQ] = *k as f32 / 4.0;
+            }
             Task::ChooseFace { card: c, mask, .. } => {
                 card = Some((self.objs[c.i()].def, None, None));
                 for (k, bit) in [FACE_CAST, FACE_PLAY, OTHER_CAST, OTHER_PLAY].into_iter().enumerate() {

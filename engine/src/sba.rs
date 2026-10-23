@@ -18,11 +18,12 @@ impl Game {
                 if done[i] {
                     continue;
                 }
-                let name = &self.def_of(legends[i]).name;
+                // (Its name as a copy may have it, CR 707.9b.)
+                let name = self.name(legends[i]);
                 let group: Vec<CardIdx> = legends
                     .iter()
                     .enumerate()
-                    .filter(|&(j, &c)| j >= i && &self.def_of(c).name == name)
+                    .filter(|&(j, &c)| j >= i && self.name(c) == name)
                     .map(|(j, &c)| {
                         done[j] = true;
                         c
@@ -70,7 +71,7 @@ impl Game {
             return true;
         }
         for (i, &c) in self.battlefield.iter().enumerate() {
-            if self.objs[c.i()].attached.is_some() && self.bad_attachments().contains(&c) {
+            if (self.objs[c.i()].attached.is_some() || self.def_of(c).bestowed) && self.bad_attachments().contains(&c) {
                 return true;
             }
             let ty = self.types_of(c);
@@ -91,10 +92,10 @@ impl Game {
                 }
             }
             if self.is_legendary(c) {
-                let (ctl, name) = (self.objs[c.i()].controller, &self.def_of(c).name);
+                let (ctl, name) = (self.objs[c.i()].controller, self.name(c));
                 if self.battlefield[i + 1..]
                     .iter()
-                    .any(|&d| self.objs[d.i()].controller == ctl && &self.def_of(d).name == name)
+                    .any(|&d| self.objs[d.i()].controller == ctl && self.is_legendary(d) && self.name(d) == name)
                 {
                     return true;
                 }
@@ -125,18 +126,23 @@ impl Game {
     }
 
     /// 704.5n: Equipment attached to an illegal permanent (gone, or not a
-    /// creature).
+    /// creature); 702.103f: a bestowed Aura attached to an illegal object or
+    /// to none.
     fn bad_attachments(&self) -> Vec<CardIdx> {
         self.battlefield
             .iter()
             .copied()
             .filter(|&c| {
-                self.objs[c.i()].attached.is_some_and(|h| {
+                let illegal = |h: crate::ids::ObjRef| {
                     !self.live(h)
                         || self.objs[h.idx.i()].zone != Zone::Battlefield
                         || !self.is_creature(h.idx)
                         || self.protected_from(h.idx, &self.damage_source_of(c))
-                })
+                };
+                match self.objs[c.i()].attached {
+                    Some(h) => illegal(h),
+                    None => self.def_of(c).bestowed,
+                }
             })
             .collect()
     }
@@ -149,8 +155,10 @@ impl Game {
         (0..self.objs.len())
             .map(|i| CardIdx(i as u16))
             .filter(|&c| {
+                // (704.5e: a copy of a spell or of a card is a token here;
+                // one leaving the stack ceases to exist at once, `move_card`.)
                 let z = self.objs[c.i()].zone;
-                self.def_of(c).token && z != Zone::Battlefield && z != Zone::Nowhere
+                z != Zone::Battlefield && z != Zone::Nowhere && z != Zone::Stack && self.is_token(c)
             })
             .collect()
     }
@@ -238,6 +246,14 @@ impl Game {
         let unattach = self.bad_attachments();
         for &c in &unattach {
             self.objs[c.i()].attached = None;
+            // CR 702.103f: an unattached bestowed Aura ceases to be bestowed:
+            // it is its card again (an enchantment creature; an exception to
+            // 704.5m).
+            if self.def_of(c).bestowed {
+                let front = self.def_of(c).card_def(self.objs[c.i()].def);
+                self.set_face(c, front);
+                self.note(|g| format!("{} is no longer bestowed", g.name(c)));
+            }
         }
         let mut legend_out: Vec<CardIdx> = Vec::new();
         for (_, g) in groups {

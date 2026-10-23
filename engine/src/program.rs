@@ -27,6 +27,13 @@ pub enum Who {
     Opponent,
     /// The player of the triggered ability's event ("that player").
     EventPlayer,
+    /// The player chosen for target requirement `i`, or the controller of
+    /// the object chosen for it ("that player or that permanent's
+    /// controller").
+    TargetOrItsController(u8),
+    /// The player other than the controller of the object last remembered
+    /// ("each player other than its controller", 2p).
+    NotLkiController,
 }
 
 /// A number an op uses.
@@ -63,6 +70,12 @@ pub enum Amount {
     Remembered,
     /// Half the cards in the controller's library, rounded up.
     HalfLibraryUp,
+    /// The times the additional cost of the event's permanent was paid as
+    /// its spell was cast (squad, CR 702.157a: the `Enters` event's note).
+    EventTimes,
+    /// The times the additional cost of the event's spell was paid
+    /// (replicate, CR 702.56a).
+    EventSpellTimes,
 }
 
 /// Which objects an `Ext` op acts on.
@@ -338,9 +351,6 @@ pub enum Ext {
     /// one type); the rest go on the bottom in a random order. Choice: a
     /// `LIBRARY` slot or `PASS`.
     RevealTopOnePerType { n: u8 },
-    /// Create a token that's a copy of the first legal target of `tgt` (a
-    /// token: its definition, CR 707.2).
-    CopyTargetToken { tgt: u8 },
     /// An opponent gains control of the source (CR 108.4).
     GiveSourceToOpponent,
     /// Exile the event's second object ("that creature"), if it is still
@@ -484,6 +494,21 @@ pub enum Ext {
     /// discards a card (a decision); if a nonland card was discarded, a
     /// +1/+1 counter on the source if it is still that permanent.
     Connive,
+    // ---- M7b part 3: copies (`copies.rs`, ENGINE.md 26) ----
+    /// `who` creates n tokens that are copies of `of` (CR 707.2, 111.10
+    /// copiable values), with the exceptions `exc` (707.9); they become the
+    /// made objects. Nothing if `of` names no object (111.12).
+    CreateTokenCopy { of: CopyOf, who: Who, n: Amount, exc: crate::copies::Except },
+    /// Each object of `on` becomes a copy of `of` with the exceptions `exc`
+    /// until `until` (CR 707.2, 613.2a; 707.4: it stays the same object).
+    BecomeCopy { on: On, of: CopyOf, exc: crate::copies::Except, until: Until },
+    /// `who` [may] put n copies of the spell `of` onto the stack (CR
+    /// 707.10: not cast; modes, X, targets and costs copied), choosing new
+    /// targets for each if `new_targets` (707.10c). Choice: yes/no if `may`.
+    CopySpell { of: SpellOf, who: Who, n: Amount, may: bool, new_targets: bool },
+    /// Exile the card of the triggered ability's event, if it is still that
+    /// card in a graveyard ("exile that card").
+    ExileEventCard,
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -494,6 +519,37 @@ pub enum About {
     Made,
     /// The number remembered (`Amount::LkiManaValue`).
     Remembered,
+    /// Each object the last `CreateToken` (or token copy) made: one delayed
+    /// ability about each.
+    EachMade,
+}
+
+/// Whose copiable values a copy takes (CR 707.2).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CopyOf {
+    /// The first legal target of requirement `i`: a permanent (its copiable
+    /// values now), or a card in a graveyard (its card's); with `lki`, a
+    /// permanent that left the battlefield during this resolution as it last
+    /// existed there (CR 608.2h, 111.12).
+    Target { i: u8, lki: bool },
+    /// The ability's source, as it last existed on the battlefield if it
+    /// left.
+    Source,
+    /// The permanent the source is attached to (an Aura's enchanted
+    /// creature).
+    SourceHost,
+}
+
+/// Which spell a copy is a copy of (CR 707.10).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum SpellOf {
+    /// The resolving spell itself ("copy this spell" in its own text).
+    This,
+    /// The triggered ability's event spell ("when you cast this spell,
+    /// copy it"; as it last existed on the stack if it left, CR 608.2h).
+    EventSpell,
+    /// The first legal target spell of requirement `i`.
+    Target(u8),
 }
 
 /// What `Ext::Choose` does to the chosen permanents.
@@ -652,7 +708,7 @@ pub enum Op {
 impl Op {
     /// Does the op read its triggered ability's event?
     pub fn uses_event(&self) -> bool {
-        let amt = |a: &Amount| matches!(a, Amount::EventAmount | Amount::EventObjPower);
+        let amt = |a: &Amount| matches!(a, Amount::EventAmount | Amount::EventObjPower | Amount::EventTimes | Amount::EventSpellTimes);
         let who = |w: &Who| matches!(w, Who::EventPlayer);
         match self {
             Op::Ext(Ext::Apply { on, .. })
@@ -673,6 +729,9 @@ impl Op {
             | Op::Ext(Ext::ExileEventObj2) => true,
             Op::Ext(Ext::ReturnDiedWithCounter { .. }) => true,
             Op::Ext(Ext::JumpUnlessEventObj { .. }) | Op::Ext(Ext::GainControlOfEventSpellTargets { .. }) => true,
+            Op::Ext(Ext::CreateTokenCopy { n, who: w, .. }) => who(w) || amt(n),
+            Op::Ext(Ext::CopySpell { of, n, who: w, .. }) => *of == SpellOf::EventSpell || who(w) || amt(n),
+            Op::Ext(Ext::ExileEventCard) => true,
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::Poison { who: w, n }) => who(w) || amt(n),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
@@ -731,7 +790,7 @@ pub struct Builder {
 impl Builder {
     /// Add a target requirement; returns its index.
     pub fn target(&mut self, filter: Filter, min: u8, max: u8) -> u8 {
-        let req = TargetReq { filter, min, max };
+        let req = TargetReq { filter, min, max, distinct: 0 };
         if let Some(k) = self.reuse {
             if self.targets.get(k) == Some(&req) {
                 self.reuse = Some(k + 1);
@@ -741,6 +800,15 @@ impl Builder {
         }
         self.targets.push(req);
         (self.targets.len() - 1) as u8
+    }
+
+    /// Add a target requirement whose targets must differ from those of
+    /// the requirements in `distinct` (a bit mask; "another target", CR
+    /// 115.3); returns its index.
+    pub fn target_distinct(&mut self, filter: Filter, min: u8, max: u8, distinct: u8) -> u8 {
+        let t = self.target(filter, min, max);
+        self.targets[t as usize].distinct = distinct;
+        t
     }
 
     /// Point the jump of the op at `at` to the current end.

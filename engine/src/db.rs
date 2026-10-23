@@ -322,6 +322,9 @@ pub enum Filter {
     /// Has exactly one of these mana costs (CR 202.1; a land has no mana
     /// cost, so not {0}; nor has a card with {X} in its cost a cost without).
     ManaCostIn(Vec<ManaCost>),
+    /// A permanent attached to a permanent matching the inner filter (an
+    /// Aura's enchanted creature, CR 303.4b).
+    AttachedTo(Box<Filter>),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -329,6 +332,9 @@ pub struct TargetReq {
     pub filter: Filter,
     pub min: u8,
     pub max: u8,
+    /// Bit k: the targets of this requirement must differ from those
+    /// chosen for requirement k ("another target", CR 115.3).
+    pub distinct: u8,
 }
 
 /// A spell or ability's effect: its target requirements and program; or,
@@ -374,6 +380,9 @@ pub struct Modes {
     /// Escalate: discard a card for each mode beyond the first (CR
     /// 702.120).
     pub escalate_discard: bool,
+    /// Spree (CR 702.172): the additional cost of each mode, paid for each
+    /// mode chosen (700.2h); empty for other modal spells.
+    pub costs: Vec<ManaCost>,
 }
 
 impl AbilityDef {
@@ -574,6 +583,20 @@ pub enum TrigPred {
     /// "Whenever one or more ...": triggers once for the events of one
     /// simultaneous move (a batch, `Game::begin_batch`), however many match.
     Batch,
+    /// An `Enters` event of a permanent that entered as a resolving spell
+    /// cast by its controller ("if you cast it"; the event's note,
+    /// `Game::enter_note`).
+    EnteredCast,
+    /// An `Enters` event of a permanent whose spell had an additional cost
+    /// paid one or more times (squad, offspring: CR 702.157a, 702.175a).
+    EnteredPaid,
+    /// An `IsCast` event of a spell whose additional cost was paid one or
+    /// more times (replicate, CR 702.56a).
+    SpellPaid,
+    /// "Whenever you cast or copy": an `IsCast` event of a copy of a spell
+    /// matches too (CR 707.10: a copy isn't cast; only these abilities see
+    /// it).
+    OrCopy,
 }
 
 impl TrigPred {
@@ -659,6 +682,9 @@ pub enum Cond {
     /// You control a permanent of one of these colours other than the
     /// ability's source (evaluated with the source: `cond_holds_from`).
     ControlOtherOfColor(crate::mana::ManaMask),
+    /// You have cast at least n spells this turn ("if you've cast another
+    /// spell this turn" while casting one: 2).
+    SpellsCastAtLeast(u8),
     /// All of these hold (a static ability's own conditions included).
     All(Vec<Cond>),
 }
@@ -753,6 +779,37 @@ pub struct AltCost {
     /// `k` (`delayed_base + k`) returns it to its owner's hand at the
     /// beginning of the next end step.
     pub dash: Option<u8>,
+    /// Bestow (CR 702.103): cast bestowed, as the card's bestowed face
+    /// (`CardDef::bestow`), an Aura spell.
+    pub bestow: bool,
+}
+
+/// An additional cost that may be paid a number of times as a spell is cast
+/// (CR 601.2b): replicate (702.56a), squad (702.157a), offspring (702.175a:
+/// once). The number paid is `StackItem::times`.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct TimesCost {
+    pub mana: ManaCost,
+    /// At most this many times (1 for offspring).
+    pub max: u8,
+}
+
+/// "You may have this enter as a copy of ..." (CR 707.5, 614.1c): what it
+/// may copy and the copy's exceptions (707.9).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct EntersAsCopy {
+    /// Permanents on the battlefield matching it (other than itself), or,
+    /// with `from_graveyard`, cards in any graveyard matching it.
+    pub filter: Filter,
+    pub from_graveyard: bool,
+    /// The exceptions (707.9b): card types and subtypes in addition, base
+    /// power and toughness, keywords.
+    pub exc: crate::copies::Except,
+    /// "Except his name is <its own name>".
+    pub keep_name: bool,
+    /// "When you do, exile that card" (603.11, 707.9g): its delayed
+    /// ability k (`delayed_base + k`), about the card copied.
+    pub exile_k: Option<u8>,
 }
 
 /// What an activated ability does.
@@ -1002,6 +1059,17 @@ pub struct CardDef {
     /// "Each nonland card in your graveyard has mayhem. The mayhem cost is
     /// equal to its mana cost." (CR 702.187)
     pub grants_mayhem: bool,
+    // ---- copies (M7b part 3; ENGINE.md 26) ----
+    /// "You may have this enter as a copy of ..." (CR 707.5).
+    pub enters_as_copy: Option<Box<EntersAsCopy>>,
+    /// An additional cost paid any number of times, or once (replicate,
+    /// squad, offspring).
+    pub times_cost: Option<TimesCost>,
+    /// Bestow (CR 702.103): the card's bestowed face, an Aura enchantment
+    /// with enchant creature (702.103b; a face definition, `front` = the
+    /// card). On that face: `bestowed`.
+    pub bestow: Option<DefId>,
+    pub bestowed: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.
@@ -1106,6 +1174,7 @@ impl CardDb {
             let adventure = card.adventure.map(|k| base + k);
             card.back = back;
             card.adventure = adventure;
+            card.bestow = card.bestow.map(|k| base + k);
             card.halves = card.halves.map(|(a, b)| (base + a, base + b));
             for (k, mut f) in fs.into_iter().enumerate() {
                 f.front = Some(id);

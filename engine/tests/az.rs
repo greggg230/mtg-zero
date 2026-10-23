@@ -312,7 +312,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 26_500);
+    assert_eq!(NUM_FEATURES, 29_092);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -332,7 +332,12 @@ fn encoding_slots_name_the_action_slots() {
             let range = if side == 0 { act::MY_PERM } else { act::OPP_PERM };
             for (s, c) in g.g.permanents_of(p).enumerate().take(encode::PERMS) {
                 let o = base + s * encode::PERM_W;
-                assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.obj(c).def));
+                // (A copy: what it is, and what it copies, ENGINE.md 26.)
+                assert_eq!(decode_id(&x[o..o + CODE]), ident(g.g.own_def(c)));
+                if g.g.is_copy(c) {
+                    let co = o + CODE + encode::perm::COPY_OF;
+                    assert_eq!(decode_id(&x[co..co + 32]), ident(g.g.obj(c).def));
+                }
                 assert_eq!(x[o + CODE + encode::perm::TAPPED] == 1.0, g.g.obj(c).tapped);
                 assert_eq!(x[o + CODE + encode::perm::OPTION] == 1.0, l.contains(&(range + s as u16)));
             }

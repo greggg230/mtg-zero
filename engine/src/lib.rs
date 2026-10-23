@@ -9,6 +9,7 @@ mod activate;
 pub mod az;
 mod cast;
 mod combat;
+pub mod copies;
 mod faces;
 pub mod db;
 pub mod decision;

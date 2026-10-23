@@ -257,6 +257,9 @@ pub struct StackItem {
     pub flips: u8,
     /// The zone a spell was cast from (`Nowhere` for an ability).
     pub origin: Zone,
+    /// The times an additional cost that may be paid repeatedly was paid
+    /// (replicate, squad, offspring: `CardDef::times_cost`).
+    pub times: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -477,6 +480,28 @@ pub struct Game {
     /// graveyard ("if that spell would be put into your graveyard, exile it
     /// instead").
     pub(crate) gy_exile: Vec<CardIdx>,
+    // ---- copies (M7b part 3, `copies.rs`; ENGINE.md 26) ----
+    /// Copy effects on permanents (CR 707, layer 1), in timestamp order.
+    pub(crate) copies: Vec<crate::copies::CopyFx>,
+    /// Slots made as copies, not cards (token copies, copies of spells and
+    /// of cards), in increasing order.
+    pub(crate) copy_objs: Vec<CardIdx>,
+    /// Copiable values of permanents that left the battlefield this turn,
+    /// as they last existed there (CR 608.2h).
+    pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals)>,
+    /// Spells that left the stack while a triggered ability about them
+    /// waited: their definition and item (CR 608.2h: "copy it").
+    pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
+    /// The token being created is a copy with these values (consumed as it
+    /// enters).
+    pub(crate) entering_copy: Option<crate::copies::CopyVals>,
+    /// ... its additional cost was paid this many times (consumed by
+    /// `put_onto_battlefield`); the note of its `Enters` event (bit 0: cast,
+    /// the rest: times paid; consumed by `move_card`); its `Enters` event
+    /// waits for an "enter as a copy" choice.
+    pub(crate) entering_times: u8,
+    pub(crate) enter_note: u16,
+    pub(crate) defer_enters: bool,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -612,6 +637,14 @@ impl Game {
             discarded: Vec::new(),
             temp_triggers: Vec::new(),
             gy_exile: Vec::new(),
+            copies: Vec::new(),
+            copy_objs: Vec::new(),
+            lki_copy: Vec::new(),
+            spell_lki: Vec::new(),
+            entering_copy: None,
+            entering_times: 0,
+            enter_note: 0,
+            defer_enters: false,
             batching: false,
             batch_start: 0,
             entering_cast: false,
@@ -712,8 +745,12 @@ impl Game {
     pub fn def_of(&self, idx: CardIdx) -> &'static CardDef {
         self.db.def(self.objs[idx.i()].def)
     }
+    /// Its name (a copy's "except his name is ...", CR 707.9b).
     pub fn name(&self, idx: CardIdx) -> &'static str {
-        &self.def_of(idx).name
+        match self.exc(idx).and_then(|e| e.name) {
+            Some(d) => &self.db.def(d).name,
+            None => &self.def_of(idx).name,
+        }
     }
 
     /// The current object of a slot.
@@ -817,22 +854,32 @@ impl Game {
         // cast, exile it instead."
         let cast = std::mem::take(&mut self.entering_cast);
         let evoked = std::mem::take(&mut self.entering_evoked);
-        if !cast && self.def_of(idx).is(types::CREATURE) && !self.def_of(idx).token {
+        let times = std::mem::take(&mut self.entering_times);
+        if !cast && self.def_of(idx).is(types::CREATURE) && !self.is_token(idx) {
             let replaced = self
                 .battlefield
                 .iter()
                 .any(|&c| self.abilities(c).exiles_uncast_creatures);
             if replaced {
+                self.entering_copy = None;
                 self.note(|g| format!("{} is exiled instead (not cast)", g.name(idx)));
                 return self.move_card(idx, Zone::Exile, Pos::Top);
             }
         }
-        let tapped = self.enters_tapped(idx, controller);
+        // "You may have this enter as a copy of ..." (CR 707.5): the choice
+        // comes first (`Task::EnterAsCopy`), then what it entered as enters.
+        let copy_choice = self.def_of(idx).enters_as_copy.is_some();
+        let tapped = !copy_choice && self.enters_tapped(idx, controller);
         self.entering_evoked = evoked; // read as it moves (its ETB sees it)
         let escaped = std::mem::take(&mut self.entering_escaped);
         let dash = std::mem::take(&mut self.entering_dash);
         let x = std::mem::take(&mut self.entering_x);
         self.entering_escaped = escaped && cast;
+        // Its `Enters` event says whether it was cast and how many times an
+        // additional cost was paid ("if you cast it", squad, offspring).
+        let note = cast as u16 | (times as u16) << 1;
+        self.enter_note = note;
+        self.defer_enters = copy_choice;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
         if let (Some(k), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand
@@ -855,6 +902,18 @@ impl Game {
                 ev: crate::triggers::EvCtx { obj: Some(r), ..Default::default() },
             });
         }
+        if copy_choice {
+            self.agenda.push(Task::EnterAsCopy { card: idx, note });
+            return r;
+        }
+        self.entering(idx, tapped, x);
+        r
+    }
+
+    /// What applies as a permanent enters (CR 614.1c, 614.12): "enters
+    /// tapped", counters, loyalty, a Saga's lore counter, day and night,
+    /// "as this enters" choices.
+    pub(crate) fn entering(&mut self, idx: CardIdx, tapped: bool, x: u8) {
         if tapped {
             self.objs[idx.i()].tapped = true;
         }
@@ -882,23 +941,27 @@ impl Game {
         if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player {
             self.agenda.push(Task::AsEnters { card: idx });
         }
-        r
     }
 
     /// Create `n` tokens (CR 111.2) under `controller`, with the
     /// replacement effects that multiply them ("twice that many of those
     /// tokens are created instead", CR 614.1a); the first is first.
     pub(crate) fn create_tokens(&mut self, def: DefId, controller: PlayerId, n: u32, tapped: bool) -> Vec<CardIdx> {
-        let mut n = n;
-        let factors: Vec<u8> = self
-            .permanents_of(controller)
-            .map(|c| self.abilities(c).token_factor)
-            .filter(|&f| f > 1)
-            .collect();
-        for f in factors {
-            n = n.saturating_mul(f as u32).min(64);
-        }
+        let n = self.token_count(controller, n);
         (0..n).map(|_| self.create_token(def, controller, tapped)).collect()
+    }
+
+    /// How many tokens `controller` creates instead of n ("twice that many
+    /// of those tokens", CR 614.1a; at most 64).
+    pub(crate) fn token_count(&self, controller: PlayerId, n: u32) -> u32 {
+        let mut n = n;
+        for c in self.permanents_of(controller) {
+            let f = self.abilities(c).token_factor;
+            if f > 1 {
+                n = n.saturating_mul(f as u32).min(64);
+            }
+        }
+        n
     }
 
     /// Create one token (CR 111.2): a new object slot, put onto the
@@ -976,6 +1039,16 @@ impl Game {
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
+        // Its copiable values as it last existed on the battlefield (CR
+        // 608.2h: "create a token that's a copy of it").
+        if from == Zone::Battlefield {
+            let v = self.copiable(idx);
+            self.lki_copy.push((old, v));
+        }
+        // CR 707.10a, 704.5e: a copy of a spell (or of a card) leaving the
+        // stack ceases to exist, unless it becomes a permanent (608.3f);
+        // nothing can see it in another zone first.
+        let to = if from == Zone::Stack && to != Zone::Battlefield && self.is_copy_obj(idx) { Zone::Nowhere } else { to };
         // CR 702.34a: a flashback spell leaving the stack is exiled instead;
         // "if that spell would be put into your graveyard, exile it instead".
         let to = if from == Zone::Stack && self.objs[idx.i()].flashback { Zone::Exile } else { to };
@@ -1000,7 +1073,10 @@ impl Game {
             list.remove(i);
         }
         if from == Zone::Stack {
-            self.stack.retain(|s| s.kind != StackKind::Spell { card: idx });
+            if let Some(i) = self.stack.iter().position(|s| s.kind == StackKind::Spell { card: idx }) {
+                let item = self.stack.remove(i);
+                self.note_spell_lki(idx, &item);
+            }
         }
         if from == Zone::Battlefield {
             self.players[old_controller as usize].left_battlefield = true;
@@ -1048,10 +1124,33 @@ impl Game {
             o.flips = 0;
             o.escaped = to == Zone::Battlefield && std::mem::take(&mut self.entering_escaped);
         }
+        // A token created as a copy (CR 707.2, 111.10): a copy effect for as
+        // long as it exists, in place before it is seen entering.
+        if to == Zone::Battlefield {
+            if let Some(v) = self.entering_copy.take() {
+                // (It may have entered with another face up: 702.145b.)
+                let d = self.objs[idx.i()].def;
+                self.next_ts += 1;
+                let fx = crate::copies::CopyFx {
+                    obj: ObjRef { idx, inc: self.objs[idx.i()].inc },
+                    ts: self.next_ts,
+                    until: crate::layers::Until::Forever,
+                    vals: crate::copies::CopyVals { def: d, exc: v.exc },
+                    own: d,
+                };
+                self.copies.push(fx);
+            }
+        }
         self.layers_on_move(idx, old, from, to);
         if from == Zone::Battlefield && self.batching {
             let def = self.objs[idx.i()].def;
             self.leaving.push(crate::triggers::Lki { old, def, controller: old_controller });
+        }
+        // Its copy effects end with it (CR 400.7): it has its own
+        // definition again (the copied one was its last known information,
+        // used above).
+        if !self.copies.is_empty() {
+            self.copies_on_move(idx, old);
         }
         // CR 712.8a, 715.4: outside the battlefield and the stack a card has
         // only its front face's characteristics (the face it had there was
@@ -1092,7 +1191,12 @@ impl Game {
         let new = self.obj_ref(idx);
         self.note(|g| format!("{} {:?} -> {:?}", g.name(idx), from, to));
         if to == Zone::Battlefield {
-            self.event(Event::obj(EventKind::Enters, new));
+            // (The note: cast, times paid; an "enter as a copy" choice holds
+            // the event back, `copies.rs`.)
+            let note = std::mem::take(&mut self.enter_note);
+            if !std::mem::take(&mut self.defer_enters) {
+                self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(new), b: crate::triggers::Subj::None, amount: note });
+            }
         }
         if from == Zone::Battlefield && !self.links.is_empty() {
             self.release_links(old);

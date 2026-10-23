@@ -263,7 +263,7 @@ impl Game {
                         let owner = self.objs[o.idx.i()].owner;
                         self.move_card(o.idx, Zone::Exile, Pos::Top);
                         // CR 111.7: a token that left can't come back.
-                        if !self.def_of(o.idx).token {
+                        if !self.is_token(o.idx) {
                             self.put_onto_battlefield(o.idx, owner);
                         }
                     }
@@ -563,6 +563,15 @@ impl Game {
                 if *about == crate::program::About::Made && f.made.is_none() {
                     return Flow::Next; // nothing to be about
                 }
+                if *about == crate::program::About::EachMade {
+                    // One about each object made ("sacrifice it": each token
+                    // a doubled creation made).
+                    for c in f.made_all.clone() {
+                        let ev = crate::triggers::EvCtx { obj: Some(self.obj_ref(c)), ..Default::default() };
+                        self.add_delayed(f, *k, *when, ev);
+                    }
+                    return Flow::Next;
+                }
                 let ev = match about {
                     crate::program::About::Nothing => Default::default(),
                     crate::program::About::Made => crate::triggers::EvCtx {
@@ -572,6 +581,7 @@ impl Game {
                     crate::program::About::Remembered => {
                         crate::triggers::EvCtx { amount: f.x.max(0) as u16, ..Default::default() }
                     }
+                    crate::program::About::EachMade => unreachable!("handled above"),
                 };
                 self.add_delayed(f, *k, *when, ev);
                 Flow::Next
@@ -920,7 +930,7 @@ impl Game {
                 let Some(r) = f.ev.obj else { return Flow::Next };
                 let o = &self.objs[r.idx.i()];
                 // The card it became in the graveyard (one move later).
-                if o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1) && !self.def_of(r.idx).token {
+                if o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1) && !self.is_token(r.idx) {
                     let owner = o.owner;
                     self.put_onto_battlefield(r.idx, owner);
                     if self.objs[r.idx.i()].zone == Zone::Battlefield {
@@ -1363,17 +1373,6 @@ impl Game {
                 self.put_on_bottom_randomly(p, rest);
                 Flow::Next
             }
-            Ext::CopyTargetToken { tgt } => {
-                if let Some(&c) = self.objs_on(f, &On::Target(*tgt)).first() {
-                    if self.def_of(c).token {
-                        let def = self.objs[c.i()].def;
-                        let made = self.create_tokens(def, f.controller, 1, false);
-                        f.made = made.first().copied();
-                        f.made_all = made;
-                    }
-                }
-                Flow::Next
-            }
             Ext::GiveSourceToOpponent => {
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
                     let q = crate::ids::opp(f.controller);
@@ -1473,8 +1472,11 @@ impl Game {
                 Flow::Next
             }
             Ext::TokensCreated => {
-                if f.made.is_some_and(|c| self.def_of(c).is(crate::db::types::CREATURE)) {
-                    self.event(crate::triggers::Event::player(crate::db::EventKind::CreatureTokensCreated, f.controller));
+                // (For the player who created them: "each player other than
+                // its controller creates" too.)
+                if let Some(c) = f.made.filter(|&c| self.def_of(c).is(crate::db::types::CREATURE)) {
+                    let p = self.objs[c.i()].controller;
+                    self.event(crate::triggers::Event::player(crate::db::EventKind::CreatureTokensCreated, p));
                 }
                 Flow::Next
             }
@@ -1508,6 +1510,9 @@ impl Game {
             | Ext::DiscardUpToThenDraw { .. }
             | Ext::KeepOneOfEachType { .. }
             | Ext::Connive => self.exec_faces(f, op),
+            Ext::CreateTokenCopy { .. } | Ext::BecomeCopy { .. } | Ext::CopySpell { .. } | Ext::ExileEventCard => {
+                self.exec_copies(f, op)
+            }
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

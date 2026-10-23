@@ -147,6 +147,10 @@ pub enum DecisionKind {
     /// itself), 1 = its other face (a modal double-faced card's back face,
     /// an Adventure). Asked only when both can be cast or played.
     ChooseFace,
+    /// A new target for a copy of a spell (CR 707.10c), its targets one
+    /// decision each in order: a legal target for that requirement, or
+    /// `PASS` = keep the one it has (even if illegal). M7b part 3.
+    NewTarget,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

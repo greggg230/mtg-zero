@@ -165,6 +165,18 @@ impl Heuristic {
                 }
             }
             K::PutInHand | K::ChooseDiscard => Some(Self::best_card(g, d)),
+            // Enter as a copy of the most valuable permanent, or of the
+            // costliest card (CR 707.5).
+            K::ChoosePermanent | K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(Task::EnterAsCopy { .. })) => d
+                .options
+                .iter()
+                .filter_map(|o| match o.choice {
+                    Choice::Card(c) if g.obj(c).zone == Zone::Battlefield => Some((Self::value(g, c), o.action)),
+                    Choice::Card(c) => Some((g.def_of(c).mana_value() as i32, o.action)),
+                    _ => None,
+                })
+                .max()
+                .map(|x| x.1),
             K::ChooseMode => d.options.iter().find(|o| o.action != act::PASS).map(|o| o.action),
             // A land face while it has played no land this turn, else the
             // costlier spell face (CR 712.11b, 712.12, 715.3).
@@ -301,7 +313,7 @@ impl Heuristic {
         if def.is(types::LAND) {
             v += 3;
         }
-        if def.token {
+        if g.is_token(c) {
             v -= 2;
         }
         v

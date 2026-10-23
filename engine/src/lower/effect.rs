@@ -13,6 +13,7 @@ use card_ir::{cats, enums, nodes, unions, Count};
 pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     use cats::Effect as E;
     // A modal spell or ability (CR 700.2): every mode is an ability.
+    let mut costs: Vec<ManaCost> = Vec::new();
     let modal = match e {
         E::ModalChooseOne(nodes::ModalChooseOne { modes, or_both }) => {
             Some((modes, 1, if *or_both { 2 } else { 1 }, false, false))
@@ -26,8 +27,17 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
             escalate_discard,
             header,
         }) => {
-            let _ = header; // display text ("Choose two")
-            l.deny("ChooseModes.mode_mana_costs", mode_mana_costs);
+            let _ = header; // display text ("Choose two", "Spree")
+            // Spree (CR 702.172a, 700.2h): each mode's additional cost.
+            for s in mode_mana_costs {
+                match ManaCost::parse(s) {
+                    Some(c) => costs.push(c),
+                    None => l.unsupported(format!("ChooseModes.mode_mana_costs({s})")),
+                }
+            }
+            if !mode_mana_costs.is_empty() && (mode_mana_costs.len() != modes.len() || *repeats || *escalate_discard) {
+                l.unsupported("ChooseModes.mode_mana_costs(not one per mode)");
+            }
             let min = l.int("ChooseModes.min_modes", *min_modes, 0, 8) as u8;
             let max = l.int("ChooseModes.max_modes", *max_modes, 1, 8) as u8;
             Some((modes, min, max, *repeats, *escalate_discard))
@@ -59,7 +69,7 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     AbilityDef {
         targets: Vec::new(),
         program: Vec::new(),
-        modes: Some(Box::new(Modes { list, min, max, repeat, escalate_discard })),
+        modes: Some(Box::new(Modes { list, min, max, repeat, escalate_discard, costs })),
         divide: None,
     }
 }
@@ -256,6 +266,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 /// land card, put it onto the battlefield tapped, then
                 /// shuffle."
                 SearchBasic { optional: bool },
+                /// "Each player other than its controller creates a token
+                /// that's a copy of it" (as it last existed, CR 608.2h).
+                OthersCopy,
             }
             let lki_rider = match rider.as_deref() {
                 None => None,
@@ -272,10 +285,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     let n = l.int("ControllerCreatesTokens.count", *count, 1, 9) as u8;
                     super::effect_ext::named_token(l, token_name).map(|t| Rider::ControllerTokens(t, n))
                 }
-                Some(other) => {
-                    l.unsupported(format!("RemovalRider:{}", other.tag()));
-                    None
-                }
+                Some(cats::RemovalRider::OtherPlayersCreateTokenCopy(nodes::OtherPlayersCreateTokenCopy {})) => Some(Rider::OthersCopy),
             };
             l.deny("RemoveTargetPermanents.count_from_x", count_from_x);
             // No card in the cube regenerates (no regeneration shield
@@ -330,6 +340,13 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     let at = b.op(Op::Ext(crate::program::Ext::JumpUnlessLkiYours { to: 0 }));
                     b.op(Op::Draw { who: Who::You, n: Amount::Fixed(n) });
                     b.patch(at);
+                }
+                Some(Rider::OthersCopy) => {
+                    // (2p: the player other than its controller.)
+                    let of = crate::program::CopyOf::Target { i: tgt, lki: true };
+                    let exc = crate::copies::Except::default();
+                    b.op(Op::Ext(crate::program::Ext::CreateTokenCopy { of, who: Who::NotLkiController, n: Amount::Fixed(1), exc }));
+                    b.op(Op::Ext(crate::program::Ext::TokensCreated));
                 }
                 Some(Rider::SearchBasic { optional }) => {
                     let who = Who::LkiController;
@@ -823,6 +840,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             if !super::effect_ext::lower_effect_ext(l, b, other)
                 && !super::effect_walkers::lower_effect_walkers(l, b, other)
                 && !super::effect_faces::lower_effect_faces(l, b, other)
+                && !super::effect_copies::lower_effect_copies(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

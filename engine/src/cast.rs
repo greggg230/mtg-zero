@@ -160,27 +160,32 @@ impl Game {
             return false;
         }
         let cls = classes;
-        let cost = self.delve_reduced(c, p, self.spell_cost(c, p), 0);
+        let base = self.delve_reduced(c, p, self.spell_cost(c, p), 0);
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
+        // Spree (CR 702.172a): at least one mode's additional cost is paid.
+        let extras = self.spree_extras(c, p);
+        let mut payable = |cost: &crate::mana::ManaCost| -> bool {
+            if !def.additional.is_empty() {
+                // (Excluding the card itself: on the stack while it is paid.)
+                self.options_payable(p, c, cost, cls, Some(c))
+            } else if self.hand_mana_source(c) {
+                // A card cast from hand is on the stack while its cost is
+                // paid: its own mana ability (a Spirit Guide's) cannot help.
+                self.can_pay_with(p, cost, &classes_without(cls, c), &Default::default())
+            } else {
+                let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
+                self.can_pay_plain(p, cost, cls, plain)
+            }
+        };
         if alt_ok {
             // castable for an alternative cost (601.2b); the mana cost
             // may be payable too (asked on casting)
-        } else if !def.additional.is_empty() {
-            // (Excluding the card itself: on the stack while it is paid.)
-            if !self.options_payable(p, c, &cost, cls, Some(c)) {
+        } else if let Some(extras) = &extras {
+            if !extras.iter().any(|x| payable(&base.plus(x))) {
                 return false;
             }
-        } else if self.hand_mana_source(c) {
-            // A card cast from hand is on the stack while its cost is
-            // paid: its own mana ability (a Spirit Guide's) cannot help.
-            if !self.can_pay_with(p, &cost, &classes_without(cls, c), &Default::default()) {
-                return false;
-            }
-        } else {
-            let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
-            if !self.can_pay_plain(p, &cost, cls, plain) {
-                return false;
-            }
+        } else if !payable(&base) {
+            return false;
         }
         if let Some(ab) = &def.spell {
             if !self.targets_available(ab, p, Some(self.obj_ref(c))) {
@@ -370,14 +375,19 @@ impl Game {
             return false;
         }
         let mana = self.delve_reduced(card, p, self.route_mana(card, p, from), self.escape_exiles(card, from));
-        let paid = match from {
+        let paid = |mana: &crate::mana::ManaCost| match from {
             crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
-                self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
+                self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), mana, classes, None)
             }
-            _ if !def.additional.is_empty() => self.options_payable(p, card, &mana, classes, None),
-            _ => self.can_pay_with(p, &mana, classes, &Default::default()),
+            _ if !def.additional.is_empty() => self.options_payable(p, card, mana, classes, None),
+            _ => self.can_pay_with(p, mana, classes, &Default::default()),
         };
-        if !paid {
+        // Spree (CR 702.172a): at least one mode's additional cost is paid.
+        let ok = match self.spree_extras(card, p) {
+            Some(extras) => extras.iter().any(|x| paid(&mana.plus(x))),
+            None => paid(&mana),
+        };
+        if !ok {
             return false;
         }
         // Not from hand, an overload spell can't be overloaded (one
@@ -419,7 +429,7 @@ impl Game {
         let item = &self.stack[pos];
         let k = self.def_of(card).x_pips;
         let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. });
-        let base = self.route_mana(card, p, item.from);
+        let base = self.route_mana(card, p, item.from).plus(&self.extra_costs(item));
         let mut most = 0u8;
         if !free {
             while most < (act::NUMBER_N - 1) as u8 {
@@ -659,6 +669,10 @@ impl Game {
         match &ab.modes {
             None => {
                 let ctx = Ctx { controller, source };
+                if ab.targets.iter().any(|tr| tr.distinct != 0) {
+                    let reqs: Vec<&TargetReq> = ab.targets.iter().collect();
+                    return self.distinct_choosable(&reqs, 0, &mut Vec::new(), &ctx);
+                }
                 ab.targets.iter().all(|tr| tr.min == 0 || self.has_candidates(tr, &ctx, tr.min as usize))
             }
             Some(m) => {
@@ -710,7 +724,17 @@ impl Game {
             self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
-        let avail: Vec<bool> = m.list.iter().map(|x| self.targets_available(x, p, source)).collect();
+        let mut avail: Vec<bool> = m.list.iter().map(|x| self.targets_available(x, p, source)).collect();
+        // Spree (CR 702.172a, 700.2h): a mode whose additional cost can't be
+        // paid with the others chosen can't be chosen.
+        if !m.costs.is_empty() {
+            if let StackKind::Spell { card } = item.kind {
+                let base = self.announced_cost(card, item);
+                for (k, a) in avail.iter_mut().enumerate() {
+                    *a = *a && self.can_pay(p, &base.plus(&m.costs[k]));
+                }
+            }
+        }
         let floor = item.modes.last().map_or(0, |&l| if m.repeat { l } else { l + 1 }) as usize;
         let need = (m.min as usize).saturating_sub(chosen + 1);
         let mut opts = Vec::new();
@@ -726,6 +750,120 @@ impl Game {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
         self.ask(Task::ChooseModes { id }, p, DecisionKind::ChooseMode, opts);
+    }
+
+    /// Can requirements `reqs[k..]` each get their `min` targets (at most
+    /// one each where they must differ, the lowering checks), none being a
+    /// target `chosen` for a requirement it must differ from (CR 115.3)?
+    fn distinct_choosable(&self, reqs: &[&TargetReq], k: usize, chosen: &mut Vec<(u8, Target)>, ctx: &Ctx) -> bool {
+        let Some(tr) = reqs.get(k) else { return true };
+        if tr.min == 0 {
+            return self.distinct_choosable(reqs, k + 1, chosen, ctx);
+        }
+        if tr.distinct == 0 && !reqs[k + 1..].iter().any(|r| r.distinct & (1 << k) != 0) {
+            return self.has_candidates(tr, ctx, tr.min as usize) && self.distinct_choosable(reqs, k + 1, chosen, ctx);
+        }
+        let exclude: Vec<Target> = chosen.iter().filter(|(r, _)| tr.distinct & (1 << r) != 0).map(|&(_, t)| t).collect();
+        for t in self.target_candidates(tr, ctx, &exclude) {
+            chosen.push((k as u8, t));
+            let ok = self.distinct_choosable(reqs, k + 1, chosen, ctx);
+            chosen.pop();
+            if ok {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// With `t` chosen for requirement `req`, can the later requirements
+    /// still be chosen (with the targets `chosen` so far)?
+    fn later_distinct_ok(&self, reqs: &[&TargetReq], req: u8, t: Target, chosen: &[(u8, Target)], ctx: &Ctx) -> bool {
+        let mut c: Vec<(u8, Target)> = chosen.to_vec();
+        c.push((req, t));
+        self.distinct_choosable(reqs, req as usize + 1, &mut c, ctx)
+    }
+
+    /// The mana of the additional costs a spell's announcements added
+    /// (CR 601.2b, f): the times an additional cost is paid (replicate,
+    /// squad, offspring) and spree's mode costs (702.172a).
+    pub(crate) fn extra_costs(&self, item: &StackItem) -> crate::mana::ManaCost {
+        let StackKind::Spell { card } = item.kind else { return Default::default() };
+        let def = self.def_of(card);
+        let mut c = crate::mana::ManaCost::default();
+        if let Some(tc) = &def.times_cost {
+            for _ in 0..item.times {
+                c = c.plus(&tc.mana);
+            }
+        }
+        if let Some(m) = def.spell.as_ref().and_then(|ab| ab.modes.as_ref()) {
+            for &k in &item.modes {
+                if let Some(x) = m.costs.get(k as usize) {
+                    c = c.plus(x);
+                }
+            }
+        }
+        c
+    }
+
+    /// The mana of spell `card`'s cost as announced so far (CR 601.2b): its
+    /// mana cost or alternative cost, with increases, plus the additional
+    /// costs announced.
+    fn announced_cost(&self, card: CardIdx, item: &StackItem) -> crate::mana::ManaCost {
+        let p = item.controller;
+        match item.alt {
+            0 => self.route_mana(card, p, item.from),
+            k => self.alt_mana(card, p, k as usize - 1),
+        }
+        .plus(&self.extra_costs(item))
+    }
+
+    /// A spree spell's mode costs (CR 702.172a) for the modes whose targets
+    /// `p` could choose now; `None` for other spells.
+    fn spree_extras(&self, card: CardIdx, p: PlayerId) -> Option<Vec<crate::mana::ManaCost>> {
+        let m = self.def_of(card).spell.as_ref()?.modes.as_ref()?;
+        if m.costs.is_empty() {
+            return None;
+        }
+        let src = Some(self.obj_ref(card));
+        Some(
+            m.list
+                .iter()
+                .zip(m.costs.iter())
+                .filter(|(ab, _)| self.targets_available(ab, p, src))
+                .map(|(_, c)| *c)
+                .collect(),
+        )
+    }
+
+    /// CR 601.2b: announce how many times an additional cost is paid
+    /// (replicate, squad: any number; offspring: once or not), among the
+    /// numbers that leave the cost payable (`NUMBER` = times; at most 31).
+    pub(crate) fn choose_times(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let StackKind::Spell { card } = self.stack[pos].kind else { return };
+        let p = self.stack[pos].controller;
+        match self.answer.take() {
+            Some(Choice::Number(n)) => {
+                self.stack[pos].times = n;
+                self.note(|_| format!("additional cost paid {n} time(s)"));
+                return;
+            }
+            Some(other) => unreachable!("times answer {other:?}"),
+            None => {}
+        }
+        let Some(tc) = self.def_of(card).times_cost.clone() else { return };
+        let base = self.announced_cost(card, &self.stack[pos]);
+        let mut most = 0u8;
+        let mut c = base;
+        while most < tc.max.min(act::NUMBER_N as u8 - 1) {
+            c = c.plus(&tc.mana);
+            if !self.can_pay(p, &c) {
+                break;
+            }
+            most += 1;
+        }
+        let opts = (0..=most).map(|n| Opt { action: act::NUMBER + n as u16, choice: Choice::Number(n) }).collect();
+        self.ask(Task::ChooseTimes { id }, p, DecisionKind::ChooseMode, opts);
     }
 
     /// At least `n` legal candidates for `tr` (the same order and rules as
@@ -789,6 +927,20 @@ impl Game {
         if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
             return false;
         }
+        if a.bestow && !self.def_of(card).bestowed {
+            // CR 702.103b, d: cast bestowed, it is an Aura spell, and only
+            // those characteristics are evaluated: it needs a creature to
+            // target, and cost increases for noncreature spells apply (on a
+            // copy of the game with the face up: only cards with bestow).
+            // Its timing is the card's (the face keeps its keywords).
+            let Some(face) = self.def_of(card).bestow else { return false };
+            let mut g = self.clone();
+            g.objs[card.i()].def = face;
+            if !g.db.def(face).spell.as_ref().is_some_and(|ab| g.targets_available(ab, p, Some(g.obj_ref(card)))) {
+                return false;
+            }
+            return g.alt_payable(p, card, k, classes);
+        }
         if a.only_if.as_ref().is_some_and(|c| !self.cond_holds(c, p)) {
             return false;
         }
@@ -833,6 +985,14 @@ impl Game {
                 if self.def_of(card).overload {
                     // CR 702.96a: overloaded, "target" becomes "each".
                     self.stack[pos].modes = vec![(k > 0) as u8];
+                }
+                if k > 0 && self.def_of(card).alt_costs[k as usize - 1].bestow {
+                    // CR 702.103b: cast bestowed, it becomes an Aura spell
+                    // with enchant creature, which targets (601.2c).
+                    if let Some(face) = self.def_of(card).bestow {
+                        self.objs[card.i()].def = face;
+                        self.agenda.push(Task::ChooseTargets { id, req: 0 });
+                    }
                 }
             }
             Some(other) => unreachable!("cost answer {other:?}"),
@@ -911,6 +1071,7 @@ impl Game {
             noted: Vec::new(),
             flips: 0,
             origin,
+            times: 0,
         });
         self.agenda.push(Task::CastDone { id });
         if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
@@ -934,6 +1095,10 @@ impl Game {
         }
         if self.def_of(card).x_pips > 0 {
             self.agenda.push(Task::ChooseX { id }); // CR 601.2b
+        }
+        if self.def_of(card).times_cost.is_some() {
+            // CR 601.2b: replicate, squad, offspring (before X).
+            self.agenda.push(Task::ChooseTimes { id });
         }
         if self.def_of(card).overload {
             // Not overloaded unless the alternative cost is chosen.
@@ -1030,6 +1195,10 @@ impl Game {
         let ctx = Ctx { controller: item.controller, source: Some(self.item_source(item)) };
         let already: Vec<Target> =
             item.targets.iter().filter(|(r, _)| *r == req).map(|&(_, t)| t).collect();
+        // "Another target" (CR 115.3): not one chosen for a requirement it
+        // must differ from.
+        let mut exclude = already.clone();
+        exclude.extend(item.targets.iter().filter(|(r, _)| tr.distinct & (1 << r) != 0).map(|&(_, t)| t));
         match self.answer.take() {
             Some(Choice::Pass) => {
                 self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
@@ -1054,7 +1223,13 @@ impl Game {
             self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
             return;
         }
-        let cands = self.target_candidates(tr, &ctx, &already);
+        let mut cands = self.target_candidates(tr, &ctx, &exclude);
+        if reqs.iter().any(|r| r.distinct & (1 << req) != 0) {
+            // Keep a later requirement that must differ from this one
+            // choosable (a cast is offered only if it can be completed).
+            let chosen = item.targets.clone();
+            cands.retain(|&t| self.later_distinct_ok(&reqs, req, t, &chosen, &ctx));
+        }
         let mut opts: Vec<Opt> = cands
             .iter()
             .map(|&t| Opt { action: self.target_action(ctx.controller, t), choice: Choice::Target(t) })
@@ -1077,9 +1252,10 @@ impl Game {
         let StackKind::Spell { card } = item.kind else { return };
         let def = self.def_of(card);
         let p = item.controller;
+        let extra = self.extra_costs(item);
         if item.alt > 0 {
             let k = item.alt as usize - 1;
-            let mut pm = PayMana::new(p, self.alt_mana(card, p, k));
+            let mut pm = PayMana::new(p, self.alt_mana(card, p, k).plus(&extra));
             pm.keep = Self::keep_for(card, &def.alt_costs[k].cost, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
@@ -1087,7 +1263,7 @@ impl Game {
             }
             return;
         }
-        let mut cost = self.route_mana(card, p, item.from).less_generic(item.delved);
+        let mut cost = self.route_mana(card, p, item.from).plus(&extra).less_generic(item.delved);
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             cost = cost.plus(&extra.mana);
         }
@@ -1322,9 +1498,12 @@ impl Game {
             Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,
             Filter::Controller(you) => (self.objs[c.i()].controller == ctx.controller) == *you,
             Filter::Source => ctx.source.is_some_and(|s| s.idx == c && self.live(s)),
-            Filter::Token => def.token,
+            Filter::Token => self.is_token(c),
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,
+            Filter::AttachedTo(inner) => self.objs[c.i()].attached.is_some_and(|h| {
+                self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield && self.card_matches(inner, h.idx, ctx)
+            }),
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
             Filter::Owner(you) => (self.objs[c.i()].owner == ctx.controller) == *you,

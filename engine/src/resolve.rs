@@ -70,6 +70,25 @@ impl Game {
     /// Resolve the top object of the stack (CR 608.1).
     pub(crate) fn resolve_top(&mut self) {
         let item = self.stack.last().expect("resolve with an empty stack").clone();
+        if let StackKind::Spell { card } = item.kind {
+            if self.def_of(card).bestowed {
+                // A bestowed Aura spell (CR 702.103e, 608.3b): with an illegal
+                // target it ceases to be bestowed and resolves as a creature
+                // spell; else it enters attached to its target (608.3c).
+                let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)) };
+                let legal = match (self.item_ability(&item), item.targets.first()) {
+                    (Some(ar), Some(&(req, t))) => self.target_legal(self.db.ability(ar).reqs(&item.modes)[req as usize], t, &ctx),
+                    _ => false,
+                };
+                if !legal {
+                    let front = self.def_of(card).card_def(self.objs[card.i()].def);
+                    self.objs[card.i()].def = front;
+                    self.note(|g| format!("{} is no longer bestowed", g.name(card)));
+                }
+                self.agenda.push(Task::FinishResolve { id: item.id });
+                return;
+            }
+        }
         let Some(ar) = self.item_ability(&item) else {
             // A permanent spell: it becomes a permanent (608.3).
             self.agenda.push(Task::FinishResolve { id: item.id });
@@ -95,7 +114,7 @@ impl Game {
             // being about resolving).
             self.note(|_| "fizzles".to_string());
             if let StackKind::Spell { card } = item.kind {
-                self.stack.pop();
+                // (Leaving the stack removes its item.)
                 self.move_card(card, Zone::Graveyard, Pos::Top);
                 self.turn.priority = self.turn.active;
                 self.turn.passes = 0;
@@ -173,6 +192,7 @@ impl Game {
         if let Some(pos) = self.item_index(id) {
             let item = self.stack.remove(pos);
             if let StackKind::Spell { card } = item.kind {
+                self.note_spell_lki(card, &item);
                 if self.objs[card.i()].zone == Zone::Stack {
                     if self.def_of(card).discard_land_to_enter && !item.discarded_land {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
@@ -183,7 +203,17 @@ impl Game {
                         self.entering_dash = alt.and_then(|a| a.dash);
                         self.entering_escaped = item.from == crate::game::CastFrom::Escape;
                         self.entering_x = item.x;
+                        self.entering_times = item.times;
+                        let bestowed = self.def_of(card).bestowed;
                         self.put_onto_battlefield(card, item.controller);
+                        // CR 608.3c: a bestowed Aura enters attached to the
+                        // creature it targeted (checked as it began
+                        // resolving).
+                        if bestowed && self.objs[card.i()].zone == Zone::Battlefield {
+                            if let Some(&(_, Target::Obj(h))) = item.targets.first() {
+                                self.objs[card.i()].attached = Some(h);
+                            }
+                        }
                     } else if self.def_of(card).buyback && item.cost_option == 1 {
                         // CR 702.27a: bought back.
                         self.move_card(card, Zone::Hand, Pos::Top);
@@ -274,6 +304,11 @@ impl Game {
             Who::NonActive => Some(crate::ids::opp(self.turn.active)),
             Who::Opponent => Some(crate::ids::opp(f.controller)),
             Who::EventPlayer => f.ev.player,
+            Who::TargetOrItsController(i) => self.targets_of(f, i).into_iter().next().map(|t| match t {
+                Target::Player(p) => p,
+                Target::Obj(o) => self.objs[o.idx.i()].controller,
+            }),
+            Who::NotLkiController => f.lki.map(|l| crate::ids::opp(l.1)),
         }
     }
 
@@ -315,6 +350,8 @@ impl Game {
             }
             Amount::Remembered => f.x,
             Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as i32 + 1) / 2,
+            Amount::EventTimes => (f.ev.amount >> 1) as i32,
+            Amount::EventSpellTimes => self.event_spell_times(f) as i32,
         }
     }
 

@@ -95,6 +95,15 @@ fn has_batch(p: &TrigPred) -> bool {
     }
 }
 
+/// Does the predicate say "cast or copy" (`OrCopy`)?
+fn has_or_copy(p: &TrigPred) -> bool {
+    match p {
+        TrigPred::OrCopy => true,
+        TrigPred::And(a, b) | TrigPred::Or(a, b) => has_or_copy(a) || has_or_copy(b),
+        _ => false,
+    }
+}
+
 /// Does the predicate name "this spell" (`IsSelf(Spell)`)?
 fn names_this_spell(p: &TrigPred) -> bool {
     match p {
@@ -161,12 +170,19 @@ impl Game {
             },
             amount: ev.amount,
         };
+        // A copy of a spell isn't cast (CR 707.10): only "whenever you cast
+        // or copy" abilities see its event.
+        let copied = ev.kind == EventKind::IsCast && ev.amount == crate::copies::COPIED;
         for o in obs {
             let def = self.db.def(o.def);
             // (Delayed and temporary abilities, from `delayed_base` on,
             // trigger only as such.)
             for (i, t) in def.triggers.iter().enumerate().take(def.delayed_base as usize) {
-                if t.event == ev.kind && (!o.spell || names_this_spell(&t.pred)) && self.pred_matches(&t.pred, &ev, o) {
+                if t.event == ev.kind
+                    && (!o.spell || names_this_spell(&t.pred))
+                    && (!copied || has_or_copy(&t.pred))
+                    && self.pred_matches(&t.pred, &ev, o)
+                {
                     // "Whenever one or more ...": once per simultaneous batch.
                     if self.batching
                         && has_batch(&t.pred)
@@ -197,7 +213,11 @@ impl Game {
             let tt = self.temp_triggers[k];
             let t = &self.db.def(tt.source_def).triggers[tt.slot as usize];
             let o = Observer { r: tt.source, def: tt.source_def, controller: tt.controller, spell: false };
-            if t.event == ev.kind && self.pred_matches(&t.pred, &ev, o) && !self.done_once.contains(&(tt.source, tt.slot)) {
+            if t.event == ev.kind
+                && (!copied || has_or_copy(&t.pred))
+                && self.pred_matches(&t.pred, &ev, o)
+                && !self.done_once.contains(&(tt.source, tt.slot))
+            {
                 self.waiting.push(PendingTrigger {
                     controller: tt.controller,
                     source: tt.source,
@@ -253,6 +273,14 @@ impl Game {
             }
             TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u16,
             TrigPred::Batch => true,
+            // The `Enters` event's note (`Game::put_onto_battlefield`).
+            TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
+            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && ev.amount >> 1 != 0,
+            TrigPred::SpellPaid => match ev.a {
+                Subj::Obj(r) => self.stack.iter().any(|s| s.kind == StackKind::Spell { card: r.idx } && s.times > 0),
+                _ => false,
+            },
+            TrigPred::OrCopy => true,
             TrigPred::FormerHost(s) => match ev.subject(*s) {
                 // Evaluated as the host leaves (look back): the Equipment
                 // is still attached to it.
@@ -360,6 +388,7 @@ impl Game {
             noted,
             flips: if self.live(t.source) { self.objs[t.source.idx.i()].flips } else { 0 },
             origin: Zone::Nowhere,
+            times: 0,
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {

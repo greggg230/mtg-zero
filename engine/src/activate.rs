@@ -49,6 +49,7 @@ impl Game {
                 self.permanents_of(p).any(|x| self.colors_of(x) & m != 0 && Some(self.obj_ref(x)) != source)
             }
             Cond::All(v) => v.iter().all(|c| self.cond_holds_from(c, p, source)),
+            Cond::SpellsCastAtLeast(n) => pl.spells_cast >= *n,
         }
     }
 
@@ -212,6 +213,7 @@ impl Game {
             noted: Vec::new(),
             flips: self.objs[card.i()].flips,
             origin: Zone::Nowhere,
+            times: 0,
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });

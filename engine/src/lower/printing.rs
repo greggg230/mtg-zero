@@ -377,14 +377,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.reconfigure_cost", reconfigure_cost);
         l.deny("CardPrinting.reconfigure_cost_str", reconfigure_cost_str);
         l.deny("CardPrinting.equipment_bonus_per_own_counter", equipment_bonus_per_own_counter);
-        l.deny("CardPrinting.bestow_cost", bestow_cost);
-        l.deny("CardPrinting.bestow_cost_str", bestow_cost_str);
-        l.deny("CardPrinting.bestow_enchanted_bonus", bestow_enchanted_bonus);
         l.deny("CardPrinting.extra_mana_when_you_tap_creature_for_mana", extra_mana_when_you_tap_creature_for_mana);
-        l.deny("CardPrinting.squad_cost", squad_cost);
-        l.deny("CardPrinting.squad_cost_str", squad_cost_str);
-        l.deny("CardPrinting.offspring_cost", offspring_cost);
-        l.deny("CardPrinting.offspring_cost_str", offspring_cost_str);
         l.deny("CardPrinting.has_improvise", has_improvise);
         l.deny("CardPrinting.void_exile_replacement", void_exile_replacement);
         l.deny("CardPrinting.zone_abilities", zone_abilities);
@@ -398,19 +391,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.chooses_parity_as_enters", chooses_parity_as_enters);
         l.deny("CardPrinting.x_min", x_min);
         l.deny("CardPrinting.blocks_only_with_subtype", blocks_only_with_subtype);
-        l.deny("CardPrinting.enters_as_copy_types", enters_as_copy_types);
-        l.deny_ne("CardPrinting.enters_as_copy_zone", enters_as_copy_zone, &generated::defaults::d_CardPrinting_enters_as_copy_zone());
-        l.deny("CardPrinting.enters_as_copy_add_type", enters_as_copy_add_type);
-        l.deny("CardPrinting.enters_as_copy_keep_name", enters_as_copy_keep_name);
-        l.deny("CardPrinting.enters_as_copy_base_pt", enters_as_copy_base_pt);
-        l.deny("CardPrinting.enters_as_copy_add_subtypes", enters_as_copy_add_subtypes);
-        l.deny("CardPrinting.enters_as_copy_exiles_card", enters_as_copy_exiles_card);
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
-        l.deny("CardPrinting.enters_as_copy_add_keywords", enters_as_copy_add_keywords);
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
         l.deny("CardPrinting.room_halves", room_halves);
-        l.deny("CardPrinting.replicate_cost", replicate_cost);
         l.deny("CardPrinting.teamwork_power", teamwork_power);
         l.deny("CardPrinting.roto_statics", roto_statics);
         l.deny("CardPrinting.enters_choosing_creature_type", enters_choosing_creature_type);
@@ -699,7 +683,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                         l.unsupported("CardPrinting.kicker_cost(modal effect)");
                     }
                     Some(crate::db::AbilityDef {
-                        modes: Some(Box::new(crate::db::Modes { list: vec![plain, kicked], min: 1, max: 1, repeat: false, escalate_discard: false })),
+                        modes: Some(Box::new(crate::db::Modes { list: vec![plain, kicked], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new() })),
                         ..Default::default()
                     })
                 }
@@ -728,7 +712,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                     l.unsupported("AlternativeCost.overload(shape)");
                 }
                 Some(crate::db::AbilityDef {
-                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, each], min: 1, max: 1, repeat: false, escalate_discard: false })),
+                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, each], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new() })),
                     ..Default::default()
                 })
             }
@@ -790,6 +774,84 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         _ => {
             l.unsupported("CardPrinting.escape_cost(without an exile count)");
+            None
+        }
+    };
+    // ---- copies (M7b part 3; ENGINE.md 26) ----
+    // "You may have this enter as a copy of ..." (CR 707.5, 707.9).
+    let enters_as_copy = lower_enters_as_copy(
+        l,
+        EnterCopyFields {
+            types: enters_as_copy_types,
+            zone: enters_as_copy_zone,
+            add_type: enters_as_copy_add_type,
+            keep_name: *enters_as_copy_keep_name,
+            base_pt: enters_as_copy_base_pt,
+            add_subtypes: enters_as_copy_add_subtypes,
+            exiles_card: *enters_as_copy_exiles_card,
+            add_keywords: enters_as_copy_add_keywords,
+        },
+        ty,
+    );
+    // Additional costs paid a number of times (CR 601.2b): squad
+    // (702.157a, creatures), offspring (702.175a, once), replicate
+    // (702.56a, instants and sorceries: its "when you cast this spell, copy
+    // it for each time" trigger is the keyword's own).
+    let mut times_cost: Option<crate::db::TimesCost> = None;
+    let mut set_times = |l: &mut Lowerer, what: &str, mana: ManaCost, max: u8, ok: bool| {
+        if !ok {
+            l.unsupported(format!("CardPrinting.{what}(on this card type)"));
+        }
+        if times_cost.is_some() {
+            l.unsupported(format!("CardPrinting.{what}(with another repeatable cost)"));
+        }
+        times_cost = Some(crate::db::TimesCost { mana, max });
+    };
+    match squad_cost.as_deref() {
+        Some(m) => {
+            let mana = super::effect_copies::checked_cost(l, "CardPrinting.squad_cost", m, squad_cost_str);
+            set_times(l, "squad_cost", mana, crate::decision::act::NUMBER_N as u8 - 1, is_creature);
+        }
+        None => l.deny("CardPrinting.squad_cost_str", squad_cost_str),
+    }
+    match offspring_cost.as_deref() {
+        Some(m) => {
+            let mana = super::effect_copies::checked_cost(l, "CardPrinting.offspring_cost", m, offspring_cost_str);
+            set_times(l, "offspring_cost", mana, 1, ty & types::PERMANENT != 0);
+        }
+        None => l.deny("CardPrinting.offspring_cost_str", offspring_cost_str),
+    }
+    if !replicate_cost.is_empty() {
+        match ManaCost::parse(replicate_cost) {
+            Some(mana) => {
+                set_times(l, "replicate_cost", mana, crate::decision::act::NUMBER_N as u8 - 1, ty & (types::INSTANT | types::SORCERY) != 0);
+                keyword_triggers.push(replicate());
+            }
+            None => l.unsupported(format!("CardPrinting.replicate_cost({replicate_cost})")),
+        }
+    }
+    if times_cost.is_some() && (!additional.is_empty() || x_pips > 0) {
+        l.unsupported("CardPrinting(a repeatable cost with other additional costs or X)");
+    }
+    // Bestow (CR 702.103): an alternative cost; the bestowed face is built
+    // below from the card (702.103b).
+    let bestow = match bestow_cost.as_deref() {
+        Some(m) => {
+            let mana = super::effect_copies::checked_cost(l, "CardPrinting.bestow_cost", m, bestow_cost_str);
+            if !is_creature || face != super::Face::Card {
+                l.unsupported("CardPrinting.bestow_cost(not a creature card)");
+            }
+            match bestow_enchanted_bonus[..] {
+                [p, t] => Some((mana, l.int("CardPrinting.bestow_enchanted_bonus", p, -9, 9), l.int("CardPrinting.bestow_enchanted_bonus", t, -9, 9))),
+                _ => {
+                    l.unsupported("CardPrinting.bestow_enchanted_bonus(not p/t)");
+                    None
+                }
+            }
+        }
+        None => {
+            l.deny("CardPrinting.bestow_cost_str", bestow_cost_str);
+            l.deny("CardPrinting.bestow_enchanted_bonus", bestow_enchanted_bonus);
             None
         }
     };
@@ -961,6 +1023,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     alt_costs.extend(dash);
+    if let Some((mana, _, _)) = &bestow {
+        alt_costs.push(AltCost { mana: *mana, bestow: true, ..AltCost::default() });
+    }
     // "If this spell is the first spell you've cast this game, you may cast
     // it without paying its mana cost" (an alternative cost, CR 118.9).
     match free_cast_condition.as_deref() {
@@ -1136,7 +1201,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.deny("CardPrinting.nightbound(on a modal face)", nightbound);
         }
     }
-    CardDef {
+    let mut def = CardDef {
         name: name.clone(),
         types: ty,
         supertypes: sup,
@@ -1216,6 +1281,133 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         halves,
         gy_spell_discount,
         grants_mayhem: *grants_mayhem_to_graveyard,
+        enters_as_copy,
+        times_cost,
+        bestow: None,
+        bestowed: false,
+    };
+    // The bestowed face (CR 702.103b): an Aura enchantment with enchant
+    // creature (an Aura spell targets a creature, 303.4a) whose enchanted
+    // creature gets the bonus; no creature types, no power and toughness;
+    // its other abilities are the card's.
+    if let Some((_, p, t)) = bestow {
+        let mut f = def.clone();
+        f.types = types::ENCHANTMENT;
+        f.subtypes = vec![l.subtype("Aura")];
+        f.power = None;
+        f.toughness = None;
+        f.pt_cda = None;
+        f.statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::Pt(p, t)] });
+        let req = crate::db::TargetReq { filter: Filter::Type(types::CREATURE), min: 1, max: 1, distinct: 0 };
+        f.spell = Some(crate::db::AbilityDef { targets: vec![req], ..Default::default() });
+        f.bestowed = true;
+        l.faces.push(f);
+        def.bestow = Some((l.faces.len() - 1) as u16);
+    }
+    def
+}
+
+/// The `enters_as_copy_*` fields of a printing.
+struct EnterCopyFields<'a> {
+    types: &'a [String],
+    zone: &'a enums::ZoneName,
+    add_type: &'a str,
+    keep_name: bool,
+    base_pt: &'a Option<(i64, i64)>,
+    add_subtypes: &'a [String],
+    exiles_card: bool,
+    add_keywords: &'a [cats::Keyword],
+}
+
+/// "You may have this enter as a copy of any <types> on the battlefield /
+/// any <types> card in a graveyard, except ..." (CR 707.5, 707.9b) -> its
+/// [`EntersAsCopy`](crate::db::EntersAsCopy); "when you do, exile that card"
+/// is a delayed ability of the card (603.11).
+fn lower_enters_as_copy(l: &mut Lowerer, x: EnterCopyFields, card_types: u16) -> Option<Box<crate::db::EntersAsCopy>> {
+    if x.types.is_empty() {
+        l.deny_ne("CardPrinting.enters_as_copy_zone", x.zone, &generated::defaults::d_CardPrinting_enters_as_copy_zone());
+        l.deny("CardPrinting.enters_as_copy_add_type", &x.add_type.to_string());
+        l.deny("CardPrinting.enters_as_copy_keep_name", &x.keep_name);
+        l.deny("CardPrinting.enters_as_copy_base_pt", x.base_pt);
+        l.deny("CardPrinting.enters_as_copy_add_subtypes", &x.add_subtypes.to_vec());
+        l.deny("CardPrinting.enters_as_copy_exiles_card", &x.exiles_card);
+        if !x.add_keywords.is_empty() {
+            l.unsupported("CardPrinting.enters_as_copy_add_keywords");
+        }
+        return None;
+    }
+    if card_types & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.enters_as_copy_types(not a permanent card)");
+    }
+    let mut bits = 0u16;
+    for t in x.types {
+        match types::from_name(t) {
+            Some(b) => bits |= b,
+            None => l.unsupported(format!("CardPrinting.enters_as_copy_types({t})")),
+        }
+    }
+    let from_graveyard = match x.zone {
+        enums::ZoneName::Battlefield => false,
+        enums::ZoneName::Graveyard => true,
+        other => {
+            l.unsupported(format!("CardPrinting.enters_as_copy_zone({other:?})"));
+            false
+        }
+    };
+    let mut exc = crate::copies::Except::default();
+    if !x.add_type.is_empty() {
+        match types::from_name(x.add_type) {
+            Some(b) => exc.types |= b,
+            None => l.unsupported(format!("CardPrinting.enters_as_copy_add_type({})", x.add_type)),
+        }
+    }
+    if let Some((p, t)) = x.base_pt {
+        exc.pt = Some((l.int("CardPrinting.enters_as_copy_base_pt", *p, 0, 99) as i8, l.int("CardPrinting.enters_as_copy_base_pt", *t, 0, 99) as i8));
+    }
+    for s in x.add_subtypes {
+        let id = l.subtype(s);
+        if !exc.add_subtype(id) {
+            l.unsupported("CardPrinting.enters_as_copy_add_subtypes(too many)");
+        }
+    }
+    for k in x.add_keywords {
+        match lower_keyword_full(l, k) {
+            Some(KwOrProt::Kw(kw)) => exc.kws.insert(kw),
+            Some(_) => l.unsupported("CardPrinting.enters_as_copy_add_keywords(not a plain keyword)"),
+            None => {}
+        }
+    }
+    let exile_k = if x.exiles_card {
+        if !from_graveyard {
+            l.unsupported("CardPrinting.enters_as_copy_exiles_card(not a graveyard card)");
+        }
+        let mut d = crate::program::Builder::default();
+        d.op(crate::program::Op::Ext(crate::program::Ext::ExileEventCard));
+        Some(l.delayed_ability(d.finish()))
+    } else {
+        None
+    };
+    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k }))
+}
+
+/// Replicate's triggered ability (CR 702.56a): "When you cast this spell,
+/// if a replicate cost was paid for it, copy it for each time its replicate
+/// cost was paid. If the spell has any targets, you may choose new targets
+/// for any of the copies."
+fn replicate() -> TriggerDef {
+    let mut b = crate::program::Builder::default();
+    b.op(crate::program::Op::Ext(crate::program::Ext::CopySpell {
+        of: crate::program::SpellOf::EventSpell,
+        who: crate::program::Who::You,
+        n: crate::program::Amount::EventSpellTimes,
+        may: false,
+        new_targets: true,
+    }));
+    TriggerDef {
+        event: EventKind::IsCast,
+        pred: TrigPred::And(Box::new(TrigPred::IsSelf(Slot::Spell)), Box::new(TrigPred::SpellPaid)),
+        ability: b.finish(),
+        uses_event: true,
     }
 }
 

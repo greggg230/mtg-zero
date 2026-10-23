@@ -323,6 +323,9 @@ impl Game {
                 v.extend([h64(&k), n as u64]);
             }
             v.push(o.attached.map_or(u64::MAX, |h| self.battlefield.iter().position(|&x| x == h.idx).unwrap_or(999) as u64));
+            // Copies (public, CR 707): what it is without copy effects, its
+            // copy effects' exceptions, token-ness.
+            v.extend([self.own_def(c) as u64, h64(&self.exc(c)), self.is_token(c) as u64]);
         };
         for &c in &self.battlefield {
             obj(&mut v, c);
@@ -359,7 +362,9 @@ impl Game {
         let live_place = |r: crate::ids::ObjRef| -> u64 { if self.live(r) { place(r.idx) } else { 7777 } };
         for s in &self.stack {
             match s.kind {
-                crate::game::StackKind::Spell { card } => v.extend([1, self.objs[card.i()].def as u64]),
+                crate::game::StackKind::Spell { card } => {
+                    v.extend([1, self.objs[card.i()].def as u64, self.is_copy_obj(card) as u64, s.times as u64])
+                }
                 crate::game::StackKind::Ability { ability, source } => {
                     let slot = match ability.slot {
                         crate::db::AbilitySlot::Spell => 0,
@@ -533,6 +538,10 @@ impl Game {
         self.temp_triggers.hash(&mut h);
         self.gy_exile.hash(&mut h);
         self.batch_start.hash(&mut h);
+        self.copies.hash(&mut h);
+        self.copy_objs.hash(&mut h);
+        self.lki_copy.hash(&mut h);
+        self.spell_lki.hash(&mut h);
         h.finish()
     }
 
@@ -585,7 +594,7 @@ impl Game {
             if n != want {
                 return Err(format!("card {i} ({}) appears {n} times", self.name(CardIdx(i as u16))));
             }
-            if self.objs[i].zone == Zone::Nowhere && !self.def_of(CardIdx(i as u16)).token {
+            if self.objs[i].zone == Zone::Nowhere && !self.is_token(CardIdx(i as u16)) {
                 return Err(format!("card {i} is nowhere"));
             }
             // CR 712.8a, 715.4: only a permanent or a spell has a face up

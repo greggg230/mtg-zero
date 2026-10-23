@@ -1326,30 +1326,18 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         }
         E::CreateTokenCopyOfSource(nodes::CreateTokenCopyOfSource { extra_card_types, eternalize }) => {
             // "Create a token that's a copy of it[, except it's an
-            // artifact]" (the card's own copiable values, CR 707.2).
+            // artifact]" (its copiable values as it last existed, CR 707.2,
+            // 608.2h; the exception, 707.9b).
             l.deny("CreateTokenCopyOfSource.eternalize", eternalize);
-            let mut extra = 0u16;
+            let mut exc = crate::copies::Except::default();
             for t in extra_card_types {
                 match types::from_name(t) {
-                    Some(b) => extra |= b,
+                    Some(b) => exc.types |= b,
                     None => l.unsupported(format!("CreateTokenCopyOfSource.extra_card_types({t})")),
                 }
             }
-            let token = match l.self_copy {
-                Some((idx, x)) if x == extra => idx,
-                Some(_) => {
-                    l.unsupported("CreateTokenCopyOfSource(two kinds)");
-                    return true;
-                }
-                None => {
-                    // A unique placeholder, replaced once the card is lowered.
-                    let placeholder = crate::db::CardDef { name: format!("{} (token copy)", l.card_name), token: true, ..Default::default() };
-                    let idx = l.token(placeholder);
-                    l.self_copy = Some((idx, extra));
-                    idx
-                }
-            };
-            b.op(Op::CreateToken { token, n: 1, tapped: false });
+            let of = crate::program::CopyOf::Source;
+            b.op(Op::Ext(Ext::CreateTokenCopy { of, who: Who::You, n: Amount::Fixed(1), exc }));
             b.op(Op::Ext(Ext::TokensCreated));
         }
         E::RevealUntilCreatureOntoBattlefieldAttacking(nodes::RevealUntilCreatureOntoBattlefieldAttacking {}) => {
@@ -1424,9 +1412,13 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             b.op(Op::Ext(Ext::GraveyardCastPermission { tgt: t }));
         }
         E::CreateTokenCopyOfTargetTokenYouControl(nodes::CreateTokenCopyOfTargetTokenYouControl {}) => {
-            // "Create a token that's a copy of target token you control."
+            // "Create a token that's a copy of target token you control"
+            // (its copiable values, CR 707.2: a copy of a token copy has the
+            // exceptions of the copy effect that made it).
             let t = b.target(and(Filter::Token, Filter::Controller(true)), 1, 1);
-            b.op(Op::Ext(Ext::CopyTargetToken { tgt: t }));
+            let of = crate::program::CopyOf::Target { i: t, lki: false };
+            let exc = crate::copies::Except::default();
+            b.op(Op::Ext(Ext::CreateTokenCopy { of, who: Who::You, n: Amount::Fixed(1), exc }));
             b.op(Op::Ext(Ext::TokensCreated));
         }
         E::OpponentGainsControlOfSource(nodes::OpponentGainsControlOfSource {}) => {

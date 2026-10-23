@@ -67,6 +67,15 @@ pub(crate) enum Task {
     /// Which face of a card to cast or play (CR 712.11b, 712.12, 715.3;
     /// `mask`: `decision::FACE_*` bits).
     ChooseFace { p: PlayerId, card: CardIdx, mask: u8 },
+    /// What a permanent that may enter as a copy copies (CR 707.5), then
+    /// it enters (`note`: its `Enters` event's).
+    EnterAsCopy { card: CardIdx, note: u16 },
+    /// New targets for a copy of a spell, from its target `k` on (CR
+    /// 707.10c).
+    CopyTargets { id: u32, k: u8 },
+    /// Announce how many times an additional cost is paid (CR 601.2b:
+    /// replicate, squad, offspring).
+    ChooseTimes { id: u32 },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -212,6 +221,9 @@ impl Game {
             Task::Escalate { id } => self.escalate(id),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
+            Task::EnterAsCopy { card, note } => self.enter_as_copy(card, note),
+            Task::CopyTargets { id, k } => self.copy_targets(id, k),
+            Task::ChooseTimes { id } => self.choose_times(id),
         }
     }
 
@@ -335,6 +347,8 @@ impl Game {
         self.done_once.clear();
         self.discarded.clear();
         self.lki_counters.clear();
+        self.lki_copy.clear();
+        self.spell_lki.clear();
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
         self.permissions = perms.into_iter().filter(|p| p.turn.is_none_or(|t| t >= n) && self.live(p.card)).collect();

@@ -164,7 +164,7 @@ impl Game {
             Filter::Supertype(bits) => self.def_of(c).supertypes & bits != 0,
             Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::Controller(y) => (self.objs[c.i()].controller == you) == *y,
-            Filter::Token => self.def_of(c).token,
+            Filter::Token => self.is_token(c),
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::And(a, b) => self.scope_matches(a, c, you) && self.scope_matches(b, c, you),
             Filter::Or(v) => v.iter().any(|x| self.scope_matches(x, c, you)),
@@ -201,6 +201,10 @@ impl Game {
     /// Card types (layer 4).
     pub fn types_of(&self, c: CardIdx) -> u16 {
         let mut base = self.def_of(c).types;
+        // Layer 1: a copy's "in addition to its other types" (CR 707.9b).
+        if let Some(e) = self.exc(c) {
+            base |= e.types;
+        }
         if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
                 if let Mod::Types { add, .. } = m {
@@ -226,7 +230,7 @@ impl Game {
     /// Does `c` have subtype `s` (layer 4: an effect that sets creature
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
-        let mut printed = self.def_of(c).subtypes.contains(&s);
+        let mut printed = self.def_of(c).subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(s));
         if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
                 if let Mod::Types { subtypes, .. } = m {
@@ -280,11 +284,16 @@ impl Game {
     /// effects and static abilities.
     pub fn keywords_of(&self, c: CardIdx) -> KwSet {
         let mut k = self.def_of(c).keywords;
+        // Layer 1: a copy's "except it has <keyword>" (CR 707.9a).
+        if let Some(e) = self.exc(c) {
+            k.0 |= e.kws.0;
+        }
         if self.printed_only(c) {
             return k;
         }
-        // "Loses all abilities" (CR 613.1f): printed keywords, keyword
-        // counters and earlier grants are gone; later grants stay.
+        // "Loses all abilities" (CR 613.1f): printed keywords (a copy's
+        // too), keyword counters and earlier grants are gone; later grants
+        // stay.
         let loss = self.loss_ts(c);
         if loss.is_some() {
             k = KwSet::default();
@@ -369,14 +378,20 @@ impl Game {
     /// Power and toughness (layer 7a-7c; CR 613.4).
     pub fn pt(&self, c: CardIdx) -> (i32, i32) {
         let d = self.def_of(c);
-        let printed = (d.power.unwrap_or(0), d.toughness.unwrap_or(0));
+        // Layer 1: a copy's base power and toughness (CR 707.9b); then no
+        // characteristic-defining ability sets them (707.9d).
+        let exc_pt = self.exc(c).and_then(|e| e.pt);
+        let printed = match exc_pt {
+            Some((p, t)) => (p as i32, t as i32),
+            None => (d.power.unwrap_or(0), d.toughness.unwrap_or(0)),
+        };
         if self.objs[c.i()].zone != Zone::Battlefield || self.printed_only(c) {
             return printed;
         }
         // 7a: characteristic-defining abilities.
-        let (mut p, mut t) = match &d.pt_cda {
-            Some(cda) => self.cda_pt(c, cda, printed),
-            None => printed,
+        let (mut p, mut t) = match (&d.pt_cda, exc_pt) {
+            (Some(cda), None) => self.cda_pt(c, cda, printed),
+            _ => printed,
         };
         // 7b in timestamp order, 7c summed.
         let mut sets: Vec<(u32, i32, i32)> = Vec::new();
@@ -589,10 +604,14 @@ impl Game {
         self.effects_changed();
     }
 
-    /// CR 514.2: "until end of turn" effects end in the cleanup step.
+    /// CR 514.2: "until end of turn" effects end in the cleanup step (copy
+    /// effects too, `copies.rs`).
     pub(crate) fn end_turn_effects(&mut self) {
         self.effects.retain(|e| e.until != Until::EndOfTurn);
         self.effects_changed();
+        if !self.copies.is_empty() {
+            self.end_copy_effects(Until::EndOfTurn);
+        }
     }
 
     /// "Until your next turn" effects of `p` end as `p`'s turn begins (CR
