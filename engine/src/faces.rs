@@ -230,14 +230,15 @@ impl Game {
     /// Etali's "each player exiles cards from the top of their library until
     /// they exile a nonland card; you may cast any number of spells from
     /// among the nonland cards exiled this way without paying their mana
-    /// costs": the exiles first (each card revealed as it moves), then one
-    /// yes/no per nonland card in APNAP order (`f.picked`), each cast at
-    /// once (CR 608.2g) while the rest of the effect waits.
+    /// costs": the exiles first (each card revealed as it moves; the nonland
+    /// cards in `f.picked`), then, one at a time in any order, a card to
+    /// cast (`ChooseExiled`, `PASS` = no more), each cast at once (CR
+    /// 608.2g) while the rest of the effect waits.
     fn exile_until_nonland_cast_free(&mut self, f: &mut Frame) -> Flow {
         let p = f.controller;
         match self.answer.take() {
-            Some(Choice::Yes) => {
-                let card = f.picked.remove(0);
+            Some(Choice::Card(card)) => {
+                f.picked.retain(|&c| c != card);
                 let mut back = f.clone();
                 back.i = 1;
                 self.agenda.push(Task::Run(back));
@@ -251,9 +252,11 @@ impl Game {
                 self.begin_cast(p, card);
                 return Flow::Suspend;
             }
-            Some(_) => {
-                f.picked.remove(0);
+            Some(Choice::Pass) => {
+                f.picked.clear();
+                return Flow::Next;
             }
+            Some(other) => unreachable!("exiled-card answer {other:?}"),
             None => {}
         }
         if f.i == 0 {
@@ -270,15 +273,22 @@ impl Game {
                 }
             }
         }
-        while let Some(&card) = f.picked.first() {
-            if self.objs[card.i()].zone == Zone::Exile && self.can_cast_free_now(p, card) {
-                let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
-                self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
-                return Flow::Suspend;
-            }
-            f.picked.remove(0);
+        // (In exile order: `EXILE` + k = the k-th card offered.)
+        let cands: Vec<CardIdx> = self
+            .exile
+            .iter()
+            .copied()
+            .filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c))
+            .take(act::EXILE_N as usize)
+            .collect();
+        if cands.is_empty() {
+            f.picked.clear();
+            return Flow::Next;
         }
-        Flow::Next
+        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        opts.extend(cands.into_iter().enumerate().map(|(k, c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }));
+        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+        Flow::Suspend
     }
 
     /// Could `p` cast `card` (in exile) now without paying its mana cost,

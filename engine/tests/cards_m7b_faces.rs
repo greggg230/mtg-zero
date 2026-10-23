@@ -599,7 +599,7 @@ fn tamiyo_minus_seven_draws_half_the_library_and_gives_no_maximum_hand_size() {
 const ETALI: &str = "Etali, Primal Conqueror // Etali, Primal Sickness";
 
 #[test]
-fn etali_exiles_until_nonland_and_casts_them_free() {
+fn etali_exiles_until_nonland_and_casts_them_free_in_any_order_cr_608_2g() {
     // "Trample. When Etali enters, each player exiles cards from the top of
     // their library until they exile a nonland card. You may cast any
     // number of spells from among the nonland cards exiled this way without
@@ -612,11 +612,29 @@ fn etali_exiles_until_nonland_and_casts_them_free() {
         .hand(0, &[ETALI])
         .start();
     cast(&mut g, 0, ETALI);
+    // Any number, in any order: the Bear first, then the Bolt.
+    let offered = std::cell::RefCell::new(Vec::new());
     resolve_with(&mut g, |g| match g.kind() {
-        Some(DecisionKind::YesNo) => Some(Choice::Yes),
+        Some(DecisionKind::ChooseExiled) => {
+            let opts = &g.pending_decision().unwrap().options;
+            let names: Vec<String> = opts
+                .iter()
+                .filter_map(|o| match o.choice {
+                    Choice::Card(c) => Some(g.name(c).to_string()),
+                    _ => None,
+                })
+                .collect();
+            offered.borrow_mut().push(names.clone());
+            let want = if names.iter().any(|n| n == "Test Bear") { "Test Bear" } else { "Lightning Bolt" };
+            opts.iter().find(|o| matches!(o.choice, Choice::Card(c) if g.name(c) == want)).map(|o| o.choice)
+        }
         Some(DecisionKind::Target) => Some(player(1)),
         _ => None,
     });
+    assert_eq!(
+        *offered.borrow(),
+        vec![vec!["Lightning Bolt".to_string(), "Test Bear".to_string()], vec!["Lightning Bolt".to_string()]]
+    );
     let e = bf(&g, 0, ETALI);
     assert!(g.has_kw(e, Kw::Trample));
     assert_eq!(g.count_in(0, "Island", Zone::Exile), 1);
@@ -629,7 +647,7 @@ fn etali_exiles_until_nonland_and_casts_them_free() {
 }
 
 #[test]
-fn etali_may_decline_each_card() {
+fn etali_may_cast_none() {
     let mut g = Scenario::new(db())
         .spec(|s| s.auto_single = false)
         .library(0, &["Lightning Bolt", "Island"])
@@ -638,10 +656,15 @@ fn etali_may_decline_each_card() {
         .hand(0, &[ETALI])
         .start();
     cast(&mut g, 0, ETALI);
+    let asked = std::cell::Cell::new(0);
     resolve_with(&mut g, |g| match g.kind() {
-        Some(DecisionKind::YesNo) => Some(Choice::Pass),
+        Some(DecisionKind::ChooseExiled) => {
+            asked.set(asked.get() + 1);
+            Some(Choice::Pass)
+        }
         _ => None,
     });
+    assert_eq!(asked.get(), 1, "PASS: no more");
     assert_eq!(g.count_in(0, "Lightning Bolt", Zone::Exile), 1);
     assert_eq!(g.count_in(1, "Test Bear", Zone::Exile), 1);
 }
