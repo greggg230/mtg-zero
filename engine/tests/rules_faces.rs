@@ -173,3 +173,26 @@ fn a_transform_is_public_and_keeps_the_hidden_state_cr_712_6() {
         assert_eq!(w.obj(f).def, g.obj(f).def);
     }
 }
+
+#[test]
+fn a_daybound_permanent_transforms_only_through_day_and_night_cr_702_145b() {
+    let mut g = scen().battlefield(0, &["Test Werewolf", "Forest"]).day(Some(true)).start();
+    let w = bf(&g, 0, "Test Werewolf");
+    g.choose(act(w, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.name(w), "Test Werewolf", "its transform ability does nothing");
+    // Night (P0 casts nothing this turn, P1 nothing in its turn).
+    for _ in 0..200 {
+        if g.day() == Some(false) {
+            break;
+        }
+        let c = match g.kind() {
+            Some(DecisionKind::Priority) | Some(DecisionKind::DeclareAttackers) | Some(DecisionKind::DeclareBlockers) => Choice::Pass,
+            _ => g.pending_decision().unwrap().options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.day(), Some(false));
+    assert_eq!(g.name(w), "Test Nightwolf");
+}

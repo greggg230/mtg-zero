@@ -84,11 +84,12 @@ impl Game {
         out: &mut Vec<Opt>,
     ) {
         for c in self.permanents_of(p) {
-            for (i, ad) in self.abilities(c).activated.iter().enumerate() {
+            let d = self.abilities(c);
+            for (i, ad) in d.activated.iter().enumerate() {
                 if ad.mana().is_some() && !ad.instant_only {
                     continue; // paid with while paying a cost (ENGINE.md 18)
                 }
-                if !self.has_activated(c, i) {
+                if d.latent > 0 && !self.has_activated(c, i) {
                     continue; // a latent ability it hasn't gained
                 }
                 let slot = AbilitySlot::Activated(i as u8);

@@ -161,6 +161,19 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         ),
         creature("Test Not Flipper", "{1}", 1, 1, &[], false, json!({"activated_abilities": [transform_ability()]})),
         creature("Test Cat", "{1}{W}", 2, 1, &[], false, json!({"subtypes": ["Cat"]})),
+        // Daybound with a transform ability (CR 702.145b: it can't
+        // transform except through day and night).
+        creature(
+            "Test Werewolf",
+            "{1}{G}",
+            2,
+            2,
+            &[],
+            false,
+            json!({"daybound": true, "activated_abilities": [transform_ability()],
+                "transform_back_face": back_face("Test Nightwolf", json!({"card_types": ["Creature"], "subtypes": ["Test"],
+                    "power": 3, "toughness": 3, "face_colors": ["G"], "nightbound": true}))}),
+        ),
         spell(
             "Test Phyrexian Shock",
             "Instant",
@@ -263,7 +276,16 @@ pub fn fuzz_pool() -> &'static (Vec<u16>, Vec<u16>) {
     POOL.get_or_init(|| {
         let db = db();
         let (mut lands, mut spells) = (Vec::new(), Vec::new());
+        // `POOL_EXCLUDE=<file>`: names (one per line) left out of the pool,
+        // to play an earlier milestone's games (ENGINE.md 17).
+        let exclude: Vec<String> = std::env::var("POOL_EXCLUDE")
+            .ok()
+            .map(|p| std::fs::read_to_string(p).unwrap().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+            .unwrap_or_default();
         for name in db.supported() {
+            if exclude.iter().any(|x| x == name) {
+                continue;
+            }
             let id = db.id(name).unwrap();
             if db.def(id).is(engine::db::types::LAND) {
                 lands.push(id);

@@ -100,10 +100,11 @@ impl Game {
     /// spell each turn", "your opponents can't cast spells during your
     /// turn")?
     pub(crate) fn may_cast_spells(&self, p: PlayerId) -> bool {
-        let one = self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.abilities(c).one_spell_each_turn);
+        if self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.abilities(c).one_spell_each_turn) {
+            return false;
+        }
         let ap = self.turn.active;
-        let locked = ap != p && self.permanents_of(ap).any(|c| self.abilities(c).opp_no_spells_your_turn);
-        !one && !locked
+        !(ap != p && self.permanents_of(ap).any(|c| self.abilities(c).opp_no_spells_your_turn))
     }
 
     fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
