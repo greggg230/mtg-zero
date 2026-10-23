@@ -43,6 +43,7 @@ permission) and a consumer can go wrong with it.
 | 9 | transform DFCs (Aang, Ajani, Cecil, Concealing Curtains, Etali, Fable, Jace VP, Outland Liberator, Tamiyo IS, Ulvenwald Oddity) | value copied | back face `mana_cost` = the front face's | no mana cost (mana value from the front, CR 712.8e) | `cards/parser/dfc_builder.py::transform_back` | blocked (`transform_back_face`) | suspected |
 | 10 | Fastbond, Pest Infestation, Wizard's Rockets | sentinel values | `1000000`; `count_max: 0` + `count_from_x`; `amount: 0` + `amount_is_x` | explicit "any number" / "X" | `cards/parser/cube_enchantments.py`, `cards/parser/removal_phrases.py`, `effects/generic/artifact_mechanics.py` | blocked | suspected |
 | 11 | many (Agent Bishop, Cryogen Relic, Kolaghan's Command, ...) | targets only in code | effect classes with no `targets` | target requirements as data | effect classes' `requires_target` / `legal_targets` | re-derived per class in the lowering | suspected (systemic) |
+| 12 | Minsc & Boo, Timeless Heroes | colour dropped | Boo's token printing with no `color_indicator` (a colourless Boo) | `color_indicator: [R]` | `cards/parser/effects_ext.py::_CREATE_NAMED_TOKEN`, `_token_printing` | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -180,6 +181,28 @@ that spell."
   `engine/src/lower/printing.rs::lower_printing` ignores the `*_str` fields ("display form").
   Suggested engine-side guard (rule 4a of ENGINE.md 3): parse each `*_cost_str` / `mana_str` and
   record a blocker when it differs from the structured cost.
+
+### E. A token's colour dropped by the token-phrase parser
+
+**12. Minsc & Boo, Timeless Heroes.** Oracle: "When Minsc & Boo enters and at the beginning of
+your upkeep, you may create Boo, a legendary 1/1 red Hamster creature token with trample and
+haste."
+
+* IR: both `CreateToken.token_printing`s (the entering and the upkeep trigger) name Boo, legendary,
+  1/1, Hamster, trample and haste, but have no `color_indicator`: Boo would be colourless.
+* Should be: `color_indicator: ["R"]`.
+* Source: `cards/parser/effects_ext.py`: `_CREATE_NAMED_TOKEN` (line ~343) matches the colour with
+  a non-capturing group `(?:{_COLOR})`, and `_token_printing` (line ~449) passes no colours to
+  `cards/base.py::make_token_creature` (which takes `colors=`). `_CREATE_STAT_TOKEN` (line ~338)
+  drops the colour the same way; a scan of every token printing in the cube IR against its card's
+  Oracle text finds Boo as the only coloured creature token that comes out colourless (the other
+  tokens are built elsewhere, e.g. from `TOKEN_PRINTINGS`).
+* Fix: capture the colour words in both patterns and pass them through `_token_printing` to
+  `make_token_creature(colors=...)`.
+* Engine: blocked by `lower::IR_DEFECTS` (`IR:CreateToken.token_printing.color_indicator(Boo is
+  red)`, ENGINE.md 24.8); the card's tests run on a corrected copy of its IR
+  (`engine/tests/cards_m7b_walkers2.rs::minsc_db`), so it becomes supported once the IR is fixed
+  (and the registry gets a red Boo line).
 
 ## Suspected defects (representational)
 

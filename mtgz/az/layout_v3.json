@@ -1,7 +1,7 @@
 {
   "bags": [
     {
-      "count": 13,
+      "count": 15,
       "name": "bags",
       "offset": 384,
       "width": 1024
@@ -79,7 +79,7 @@
     null,
     null,
     null,
-    null,
+    "Chandra, Torch of Defiance",
     "Chaos Defiler",
     null,
     null,
@@ -89,7 +89,7 @@
     null,
     "Cogwork Librarian",
     "Collective Brutality",
-    null,
+    "Comet, Stellar Pup",
     "Commercial District",
     "Concealed Courtyard",
     null,
@@ -109,7 +109,7 @@
     "Cryogen Relic",
     null,
     "Cut Down",
-    null,
+    "Dack Fayden",
     "Damn",
     "Dark Confidant",
     "Dark Ritual",
@@ -131,7 +131,7 @@
     "Echo of Eons",
     "Elegant Parlor",
     null,
-    null,
+    "Elspeth, Storm Slayer",
     "Elvish Mystic",
     "Elvish Spirit Guide",
     null,
@@ -231,16 +231,16 @@
     "Island",
     "Ivora, Insatiable Heir",
     null,
-    null,
-    null,
+    "Jace, Wielder of Mysteries",
+    "Jace, the Mind Sculptor",
     null,
     null,
     "Jetmir's Garden",
-    null,
+    "Kaito, Bane of Nightmares",
     "Kaldra Compleat",
     null,
     "Karakas",
-    null,
+    "Karn, Scion of Urza",
     null,
     "Ketria Triome",
     "Knight of Autumn",
@@ -308,11 +308,11 @@
     "Mystic Confluence",
     "Mystical Tutor",
     null,
-    null,
+    "Narset, Parter of Veils",
     "Natural Order",
     null,
     "Nettlecyst",
-    null,
+    "Nissa, Who Shakes the World",
     "No More Lies",
     "Noble Hierarch",
     null,
@@ -320,7 +320,7 @@
     "Oath of Druids",
     null,
     null,
-    null,
+    "Oko, Thief of Crowns",
     "Okoye, Mighty and Adored",
     "Oliphaunt",
     "Once Upon a Time",
@@ -456,21 +456,21 @@
     "Talisman of Dominance",
     "Talisman of Indulgence",
     "Talisman of Progress",
-    null,
+    "Tamiyo, Collector of Tales",
     null,
     "Tear Asunder",
-    null,
-    null,
+    "Teferi, Hero of Dominaria",
+    "Teferi, Time Raveler",
     "Temple Garden",
     "Territorial Kavu",
     null,
-    null,
+    "Tezzeret, Cruel Captain",
     "Thalia, Guardian of Thraben",
     "Thassa's Oracle",
     "The Fantasticar",
     null,
     null,
-    null,
+    "The Wandering Emperor",
     null,
     null,
     "Thopter Foundry",
@@ -503,7 +503,7 @@
     "Tropical Island",
     "True-Name Nemesis",
     "Tundra",
-    null,
+    "Ugin, Eye of the Storms",
     null,
     "Undercity Sewers",
     "Underground Mortuary",
@@ -547,7 +547,7 @@
     "Worldly Tutor",
     null,
     "Wrath of God",
-    null,
+    "Wrenn and Six",
     "Xander's Lounge",
     null,
     "Zagoth Triome",
@@ -816,7 +816,7 @@
     "Illusion",
     "Construct",
     "Vaultborn Tyrant",
-    null,
+    "Squirrel",
     null,
     null,
     null,
@@ -1033,7 +1033,7 @@
     null,
     null
   ],
-  "features": 23388,
+  "features": 26500,
   "segments": [
     {
       "count": 1,
@@ -1061,9 +1061,9 @@
         ]
       },
       "name": "tops",
-      "offset": 13696,
+      "offset": 15744,
       "present": 1,
-      "width": 50
+      "width": 54
     },
     {
       "actions": [
@@ -1098,9 +1098,9 @@
         ]
       },
       "name": "my_permanents",
-      "offset": 13996,
-      "present": 48,
-      "width": 88
+      "offset": 16068,
+      "present": 52,
+      "width": 100
     },
     {
       "actions": [
@@ -1119,9 +1119,9 @@
         ]
       },
       "name": "opponent_permanents",
-      "offset": 16812,
-      "present": 48,
-      "width": 88
+      "offset": 19268,
+      "present": 52,
+      "width": 100
     },
     {
       "actions": [
@@ -1144,9 +1144,9 @@
         ]
       },
       "name": "hand",
-      "offset": 19628,
-      "present": 48,
-      "width": 56
+      "offset": 22468,
+      "present": 52,
+      "width": 60
     },
     {
       "actions": [
@@ -1165,9 +1165,9 @@
         ]
       },
       "name": "stack",
-      "offset": 20524,
-      "present": 48,
-      "width": 72
+      "offset": 23428,
+      "present": 52,
+      "width": 76
     },
     {
       "actions": [
@@ -1186,9 +1186,9 @@
         ]
       },
       "name": "triggers",
-      "offset": 21100,
-      "present": 48,
-      "width": 52
+      "offset": 24036,
+      "present": 52,
+      "width": 56
     },
     {
       "actions": [
@@ -1207,9 +1207,9 @@
         ]
       },
       "name": "list",
-      "offset": 21308,
-      "present": 48,
-      "width": 52
+      "offset": 24260,
+      "present": 52,
+      "width": 56
     }
   ],
   "version": 3,
