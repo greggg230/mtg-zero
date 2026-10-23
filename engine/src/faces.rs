@@ -384,6 +384,10 @@ impl Game {
         if zone != Zone::Hand && route.is_none() {
             return false;
         }
+        // (Timing first, from the face alone: it saves the copy below.)
+        if !sorcery_ok && !self.instant_speed(p, self.db.def(face)) {
+            return false;
+        }
         let mut g = self.clone();
         g.objs[c.i()].def = face;
         match route {

@@ -78,8 +78,10 @@ impl Game {
         let mut opts = self.priority_options_all(p);
         // "Each player can't cast more than one spell each turn" (Archon of
         // Emeria); "your opponents can't cast spells during your turn"
-        // (Jennifer Walters): only lands and abilities are left.
-        if !self.may_cast_spells(p) {
+        // (Jennifer Walters): only lands and abilities are left. (Checked
+        // only when a spell could be cast.)
+        let casts = |o: &Opt| matches!(o.choice, Choice::Cast(_) | Choice::CastFace(_) | Choice::Faces(..));
+        if opts.iter().any(casts) && !self.may_cast_spells(p) {
             use crate::decision::{FACE_PLAY, OTHER_PLAY};
             opts.retain_mut(|o| match o.choice {
                 Choice::Cast(_) | Choice::CastFace(_) => false,
@@ -204,11 +206,13 @@ impl Game {
         if sorcery_ok {
             return true;
         }
-        let def = self.def_of(card);
-        let instant_speed = def.is(types::INSTANT)
-            || def.keywords.has(Kw::Flash)
-            || (def.is(types::SORCERY) && self.players[p as usize].flash_sorceries);
-        instant_speed && !self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed)
+        self.instant_speed(p, self.def_of(card)) && !self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed)
+    }
+
+    /// Could `p` cast a spell with definition `def` any time they could cast
+    /// an instant (an instant, flash, a sorcery with Teferi's +1)?
+    pub(crate) fn instant_speed(&self, p: PlayerId, def: &crate::db::CardDef) -> bool {
+        def.is(types::INSTANT) || def.keywords.has(Kw::Flash) || (def.is(types::SORCERY) && self.players[p as usize].flash_sorceries)
     }
 
     /// Does permission `pm` let `p` play its card now?
