@@ -712,7 +712,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             // "Target player reveals their hand. You choose a <filter> card
             // from it. That player discards that card." (Duress,
             // Thoughtseize, Inquisition of Kozilek.)
-            l.deny("TargetPlayerRevealsHandYouChooseDiscard.then_draws", then_draws);
+            // "... If you do, that player discards that card, then draws a
+            // card" (Revealing Eye): the draw follows a discard only.
+            let draws = l.int("TargetPlayerRevealsHandYouChooseDiscard.then_draws", *then_draws, 0, 1);
             if *destination != enums::RevealedCardFate::Discard {
                 l.unsupported(format!("TargetPlayerRevealsHandYouChooseDiscard.destination({destination:?})"));
             }
@@ -720,6 +722,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             let t = b.target(player_filter(*opponent_only), 1, 1);
             b.op(Op::RevealHand { whose: Who::TargetPlayer(t), to: None });
             b.op(Op::ChooseDiscard { chooser: Who::You, whose: Who::TargetPlayer(t), filter, optional: *optional });
+            if draws > 0 {
+                b.op(Op::Draw { who: Who::TargetPlayer(t), n: Amount::Remembered });
+            }
         }
         E::CreateToken(nodes::CreateToken {
             token_printing,
@@ -815,7 +820,10 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             b.op(Op::Discard { who: Who::TargetPlayer(t), n });
         }
         other => {
-            if !super::effect_ext::lower_effect_ext(l, b, other) && !super::effect_walkers::lower_effect_walkers(l, b, other) {
+            if !super::effect_ext::lower_effect_ext(l, b, other)
+                && !super::effect_walkers::lower_effect_walkers(l, b, other)
+                && !super::effect_faces::lower_effect_faces(l, b, other)
+            {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }
         }

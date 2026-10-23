@@ -117,6 +117,7 @@ pub(crate) fn counter_by_name(l: &mut Lowerer, s: &str) -> Counter {
         "+1/+1" => Counter::P1P1,
         "-1/-1" => Counter::M1M1,
         "stun" => Counter::Stun,
+        "lore" => Counter::Lore,
         _ => match Kw::from_counter_name(s) {
             Some(k) => Counter::Kw(k),
             None => Counter::Named(l.subtype(&format!("counter:{s}"))),
@@ -812,10 +813,26 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         }) => {
             // "N damage divided as you choose among any number of target
             // creatures [and/or planeswalkers]" (CR 601.2d: each target at
-            // least 1, so at most N targets).
-            l.deny("DealDamageDividedAmongTargets.double_if_x_at_least", double_if_x_at_least);
-            let n = match amount {
-                card_ir::unions::IntOrFormula::Int(n) => l.int("DealDamageDividedAmongTargets.amount", *n, 1, 20) as u8,
+            // least 1, so at most N targets). "X damage ... among up to two
+            // targets; if X is 6 or more, twice X damage instead"
+            // (Shatterskull Smashing): X is announced first (601.2b), so the
+            // targets are at most the amount (`cast::choose_targets`).
+            let dbl = l.int("DealDamageDividedAmongTargets.double_if_x_at_least", *double_if_x_at_least, 0, 20) as u8;
+            let (amt, n, min) = match amount {
+                card_ir::unions::IntOrFormula::Int(n) => {
+                    let n = l.int("DealDamageDividedAmongTargets.amount", *n, 1, 20) as u8;
+                    if dbl > 0 {
+                        l.unsupported("DealDamageDividedAmongTargets.double_if_x_at_least(without X)");
+                    }
+                    (crate::db::DivAmount::Fixed(n), n, 1)
+                }
+                card_ir::unions::IntOrFormula::Formula(f) if matches!(**f, cats::Formula::ResolvingX(_)) => {
+                    // ("Up to": with X = 0 there is nothing to divide.)
+                    if max_targets.is_none() {
+                        l.unsupported("DealDamageDividedAmongTargets(X among any number)");
+                    }
+                    (crate::db::DivAmount::X { double_at: dbl }, 20, 0)
+                }
                 card_ir::unions::IntOrFormula::Formula(f) => {
                     l.unsupported(format!("Formula:{}", f.tag()));
                     return true;
@@ -829,8 +846,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             if b.divide.is_some() {
                 l.unsupported("DealDamageDividedAmongTargets(twice)");
             }
-            let t = b.target(f, 1, most);
-            b.divide = Some((t, n));
+            let t = b.target(f, min, most);
+            b.divide = Some((t, amt));
             b.op(Op::Ext(Ext::DealDivided { to: t }));
         }
         E::OwnerPutsTargetSpellOnTopOrBottom(nodes::OwnerPutsTargetSpellOnTopOrBottom { card_types, up_to_one }) => {

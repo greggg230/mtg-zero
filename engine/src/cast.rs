@@ -54,14 +54,37 @@ impl Game {
     pub(crate) fn priority_options(&self, p: PlayerId) -> Vec<Opt> {
         let mut opts = self.priority_options_all(p);
         // "Each player can't cast more than one spell each turn" (Archon of
-        // Emeria).
-        if self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.abilities(c).one_spell_each_turn) {
-            opts.retain(|o| !matches!(o.choice, Choice::Cast(_)));
+        // Emeria); "your opponents can't cast spells during your turn"
+        // (Jennifer Walters): only lands and abilities are left.
+        if !self.may_cast_spells(p) {
+            use crate::decision::{FACE_PLAY, OTHER_PLAY};
+            opts.retain_mut(|o| match o.choice {
+                Choice::Cast(_) | Choice::CastFace(_) => false,
+                Choice::Faces(c, m) => match crate::faces::face_choice(c, m & (FACE_PLAY | OTHER_PLAY)) {
+                    Some(ch) => {
+                        o.choice = ch;
+                        true
+                    }
+                    None => false,
+                },
+                _ => true,
+            });
         }
         opts
     }
 
+    /// May `p` cast spells now at all ("each player can't cast more than one
+    /// spell each turn", "your opponents can't cast spells during your
+    /// turn")?
+    pub(crate) fn may_cast_spells(&self, p: PlayerId) -> bool {
+        let one = self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.abilities(c).one_spell_each_turn);
+        let ap = self.turn.active;
+        let locked = ap != p && self.permanents_of(ap).any(|c| self.abilities(c).opp_no_spells_your_turn);
+        !one && !locked
+    }
+
     fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
+        use crate::decision::{FACE_CAST, FACE_PLAY};
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let drops = 1 + self.permanents_of(p).map(|c| self.abilities(c).extra_lands as u32).sum::<u32>();
@@ -71,55 +94,79 @@ impl Game {
         let slots = self.hand_slots(p);
         for &(action, c) in &slots {
             let def = self.def_of(c);
-            if def.is(types::LAND) {
+            let front = if def.is(types::LAND) {
                 if land_ok {
-                    opts.push(Opt { action, choice: Choice::Play(c) });
+                    FACE_PLAY
+                } else {
+                    0
                 }
-                continue;
-            }
-            if !self.cast_timing_ok(p, c, sorcery_ok) {
-                continue;
-            }
-            let cls = &classes[..];
-            let cost = self.delve_reduced(c, p, self.spell_cost(c, p), 0);
-            let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
-            if alt_ok {
-                // castable for an alternative cost (601.2b); the mana cost
-                // may be payable too (asked on casting)
-            } else if !def.additional.is_empty() {
-                // (Excluding the card itself: on the stack while it is paid.)
-                if !self.options_payable(p, c, &cost, cls, Some(c)) {
-                    continue;
-                }
-            } else if self.hand_mana_source(c) {
-                // A card cast from hand is on the stack while its cost is
-                // paid: its own mana ability (a Spirit Guide's) cannot help.
-                if !self.can_pay_with(p, &cost, &classes_without(cls, c), &Default::default()) {
-                    continue;
-                }
+            } else if self.hand_castable(p, c, sorcery_ok, &classes, &mut plain) {
+                FACE_CAST
             } else {
-                let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
-                if !self.can_pay_plain(p, &cost, cls, plain) {
-                    continue;
-                }
+                0
+            };
+            // An MDFC's back face or an Adventure (CR 712.11b, 712.12,
+            // 715.3).
+            let other = self.other_face_options(p, c, sorcery_ok, land_ok, &classes);
+            if let Some(choice) = crate::faces::face_choice(c, front | other) {
+                opts.push(Opt { action, choice });
             }
-            if let Some(ab) = &def.spell {
-                if !self.targets_available(ab, p, Some(self.obj_ref(c))) {
-                    continue;
-                }
-                // Not overloaded: its own target is needed.
-                if def.overload && !alt_ok {
-                    let plain = ab.modes.as_ref().map(|m| &m.list[0]);
-                    if !plain.is_some_and(|x| self.targets_available(x, p, Some(self.obj_ref(c)))) {
-                        continue;
-                    }
-                }
-            }
-            opts.push(Opt { action, choice: Choice::Cast(c) });
         }
         self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts);
         self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
         opts
+    }
+
+    /// Can `p` cast card `c` from their hand now (timing, the cost with its
+    /// options, targets), with the face it has?
+    pub(crate) fn hand_castable(
+        &self,
+        p: PlayerId,
+        c: CardIdx,
+        sorcery_ok: bool,
+        classes: &[crate::pay::Class],
+        plain: &mut Option<crate::pay::Cands>,
+    ) -> bool {
+        let def = self.def_of(c);
+        if !self.cast_timing_ok(p, c, sorcery_ok) {
+            return false;
+        }
+        let cls = classes;
+        let cost = self.delve_reduced(c, p, self.spell_cost(c, p), 0);
+        let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
+        if alt_ok {
+            // castable for an alternative cost (601.2b); the mana cost
+            // may be payable too (asked on casting)
+        } else if !def.additional.is_empty() {
+            // (Excluding the card itself: on the stack while it is paid.)
+            if !self.options_payable(p, c, &cost, cls, Some(c)) {
+                return false;
+            }
+        } else if self.hand_mana_source(c) {
+            // A card cast from hand is on the stack while its cost is
+            // paid: its own mana ability (a Spirit Guide's) cannot help.
+            if !self.can_pay_with(p, &cost, &classes_without(cls, c), &Default::default()) {
+                return false;
+            }
+        } else {
+            let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
+            if !self.can_pay_plain(p, &cost, cls, plain) {
+                return false;
+            }
+        }
+        if let Some(ab) = &def.spell {
+            if !self.targets_available(ab, p, Some(self.obj_ref(c))) {
+                return false;
+            }
+            // Not overloaded: its own target is needed.
+            if def.overload && !alt_ok {
+                let plain = ab.modes.as_ref().map(|m| &m.list[0]);
+                if !plain.is_some_and(|x| self.targets_available(x, p, Some(self.obj_ref(c)))) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// May `p` cast `card` now as far as timing goes (CR 307.1, 702.8):
@@ -162,9 +209,16 @@ impl Game {
     /// The permission that lets `p` play `card` from exile now, if any.
     pub(crate) fn exile_permission(&self, p: PlayerId, card: CardIdx) -> Option<crate::game::PermKind> {
         let r = self.obj_ref(card);
+        // (A general permission first: it may allow the card's Adventure
+        // too, CR 715.3d.)
         self.permissions
             .iter()
             .find(|pm| pm.card == r && self.permission_ok(pm, p) && matches!(pm.kind, crate::game::PermKind::Play { .. }))
+            .or_else(|| {
+                self.permissions
+                    .iter()
+                    .find(|pm| pm.card == r && self.permission_ok(pm, p) && pm.kind == crate::game::PermKind::Adventure)
+            })
             .map(|pm| pm.kind)
     }
 
@@ -185,7 +239,9 @@ impl Game {
                     pm.card == r && pm.kind == crate::game::PermKind::Flashback && self.permission_ok(pm, p)
                 });
                 let permitted = self.permissions.iter().any(|pm| {
-                    pm.card == r && matches!(pm.kind, crate::game::PermKind::Play { .. }) && self.permission_ok(pm, p)
+                    pm.card == r
+                        && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::CastThenExile)
+                        && self.permission_ok(pm, p)
                 });
                 if def.flashback.is_some() || granted {
                     Some(CastFrom::Flashback)
@@ -207,7 +263,9 @@ impl Game {
             }
             Zone::Exile => match self.exile_permission(p, card)? {
                 crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
-                crate::game::PermKind::Flashback => None,
+                // CR 715.3d: cast it (not as an Adventure) for its mana cost.
+                crate::game::PermKind::Adventure => Some(CastFrom::Permission { free: false, any_mana: false }),
+                crate::game::PermKind::Flashback | crate::game::PermKind::CastThenExile => None,
             },
             _ => None,
         }
@@ -504,38 +562,53 @@ impl Game {
     /// slots) and in the graveyard (`GRAVEYARD` slots): lands to play,
     /// spells to cast.
     fn other_zone_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<Opt>) {
+        use crate::decision::{FACE_CAST, FACE_PLAY};
         let mut k = 0u16;
         for &c in &self.exile {
-            let Some(crate::game::PermKind::Play { cast_only, .. }) = self.exile_permission(p, c) else { continue };
+            let cast_only = match self.exile_permission(p, c) {
+                Some(crate::game::PermKind::Play { cast_only, .. }) => cast_only,
+                // CR 715.3d: an adventurer card on an adventure (a creature
+                // card: cast only).
+                Some(crate::game::PermKind::Adventure) => true,
+                _ => continue,
+            };
             if k >= act::EXILE_N {
                 break;
             }
             let action = act::EXILE + k;
             k += 1;
-            if self.def_of(c).is(types::LAND) {
+            let front = if self.def_of(c).is(types::LAND) {
                 if land_ok && !cast_only {
-                    opts.push(Opt { action, choice: Choice::Play(c) });
+                    FACE_PLAY
+                } else {
+                    0
                 }
-                continue;
-            }
-            if let Some(from) = self.cast_route(p, c) {
-                if self.castable_via(p, c, from, classes, sorcery_ok) {
-                    opts.push(Opt { action, choice: Choice::Cast(c) });
-                }
+            } else if self.cast_route(p, c).is_some_and(|from| self.castable_via(p, c, from, classes, sorcery_ok)) {
+                FACE_CAST
+            } else {
+                0
+            };
+            let other = self.other_face_options(p, c, sorcery_ok, land_ok && !cast_only, classes);
+            if let Some(choice) = crate::faces::face_choice(c, front | other) {
+                opts.push(Opt { action, choice });
             }
         }
         let lands_ok = land_ok && self.lands_from_graveyard(p);
         for &c in &self.players[p as usize].graveyard {
-            if self.def_of(c).is(types::LAND) {
+            let front = if self.def_of(c).is(types::LAND) {
                 if lands_ok {
-                    opts.push(Opt { action: self.graveyard_action(p, c), choice: Choice::Play(c) });
+                    FACE_PLAY
+                } else {
+                    0
                 }
-                continue;
-            }
-            if let Some(from) = self.cast_route(p, c) {
-                if self.castable_via(p, c, from, classes, sorcery_ok) {
-                    opts.push(Opt { action: self.graveyard_action(p, c), choice: Choice::Cast(c) });
-                }
+            } else if self.cast_route(p, c).is_some_and(|from| self.castable_via(p, c, from, classes, sorcery_ok)) {
+                FACE_CAST
+            } else {
+                0
+            };
+            let other = self.other_face_options(p, c, sorcery_ok, lands_ok, classes);
+            if let Some(choice) = crate::faces::face_choice(c, front | other) {
+                opts.push(Opt { action: self.graveyard_action(p, c), choice });
             }
         }
     }
@@ -646,6 +719,7 @@ impl Game {
         let item = &self.stack[pos];
         let Some(ar) = self.item_ability(item) else { return };
         let Some((req, amount)) = self.db.ability(ar).divide else { return };
+        let amount = amount.of(item.x);
         let n = item.targets.iter().filter(|(r, _)| *r == req).count();
         if let Some(Choice::Number(k)) = self.answer.take() {
             self.stack[pos].division.push(k);
@@ -661,8 +735,9 @@ impl Game {
             self.stack[pos].division.push(left);
             return;
         }
-        // Leave at least 1 for each target after this one.
-        let most = left - (n - k - 1) as u8;
+        // Leave at least 1 for each target after this one (amounts within
+        // the `NUMBER` range: a larger share goes to a later target).
+        let most = (left - (n - k - 1) as u8).min(act::NUMBER_N as u8 - 1);
         let opts = (1..=most).map(|a| Opt { action: act::NUMBER + a as u16, choice: Choice::Number(a) }).collect();
         let p = item.controller;
         self.ask(Task::Divide { id }, p, DecisionKind::DivideDamage, opts);
@@ -746,9 +821,30 @@ impl Game {
     /// 601.2a: the card moves to the stack; then targets (601.2c), cost
     /// (601.2f-h) and "becomes cast" (601.2i) run as tasks.
     pub(crate) fn begin_cast(&mut self, p: PlayerId, card: CardIdx) {
+        self.begin_cast_face(p, card, None);
+    }
+
+    /// Cast `card` with face `face` up (an MDFC's back face, an Adventure:
+    /// CR 712.11b, 715.3; `None` = its front): the face is chosen before
+    /// the card goes on the stack, and only that face's characteristics
+    /// exist there (712.8f, 715.3b).
+    pub(crate) fn begin_cast_face(&mut self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) {
         let from = self.cast_route(p, card).expect("a castable card");
-        self.note(|g| format!("P{p} casts {} ({from:?})", g.name(card)));
+        // "If that spell would be put into your graveyard, exile it
+        // instead": a permission from a graveyard that says so (unless
+        // flashback, which exiles it anyway, is how it is cast).
+        let r = self.obj_ref(card);
+        let exile_after = self.objs[card.i()].zone == Zone::Graveyard
+            && from != crate::game::CastFrom::Flashback
+            && self.permissions.iter().any(|pm| pm.card == r && pm.kind == crate::game::PermKind::CastThenExile && self.permission_ok(pm, p));
         self.move_card_to_stack(card, p);
+        if exile_after {
+            self.gy_exile.push(card);
+        }
+        if let Some(f) = face {
+            self.objs[card.i()].def = f;
+        }
+        self.note(|g| format!("P{p} casts {} ({from:?})", g.name(card)));
         if from == crate::game::CastFrom::Flashback {
             self.objs[card.i()].flashback = true;
         }
@@ -770,6 +866,7 @@ impl Game {
             division: Vec::new(),
             attack_as: None,
             noted: Vec::new(),
+            flips: 0,
         });
         self.agenda.push(Task::CastDone { id });
         if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
@@ -903,7 +1000,13 @@ impl Game {
             Some(other) => unreachable!("target answer {other:?}"),
             None => {}
         }
-        if already.len() >= tr.max as usize {
+        // Divided damage: each target gets at least 1 (CR 601.2d), so no
+        // more targets than the amount (an X spell's X is announced first).
+        let max = match self.db.ability(ar).divide {
+            Some((r, amount)) if r == req && ar.mode.is_none() => (tr.max).min(amount.of(item.x)),
+            _ => tr.max,
+        };
+        if already.len() >= max as usize {
             self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
             return;
         }
@@ -1070,6 +1173,7 @@ impl Game {
             lifelink: false,
             colors: d.colors,
             types: d.types,
+            obj: None,
         })
     }
 
@@ -1198,6 +1302,10 @@ impl Game {
                     )
             }
             Filter::ManaValueAtLeast(n) => self.mana_value_of(c) >= *n,
+            Filter::ManaCostIn(v) => {
+                // (Back faces have no mana cost, CR 712.8e.)
+                !def.is(types::LAND) && def.x_pips == 0 && def.front_mv.is_none() && v.contains(&def.cost)
+            }
             Filter::HasKeyword(k) => self.has_kw(c, *k),
             Filter::Colorless => self.colors_of(c) == 0,
             // A spell: one or more of its targets (as chosen, still the

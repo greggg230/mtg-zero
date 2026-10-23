@@ -64,6 +64,9 @@ pub(crate) enum Task {
     /// Which player or planeswalker an attacking creature attacks (CR
     /// 508.1b, 508.4).
     AttackTarget { card: CardIdx },
+    /// Which face of a card to cast or play (CR 712.11b, 712.12, 715.3;
+    /// `mask`: `decision::FACE_*` bits).
+    ChooseFace { p: PlayerId, card: CardIdx, mask: u8 },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -208,6 +211,7 @@ impl Game {
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),
             Task::AttackTarget { card } => self.choose_attack_target(card),
+            Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
         }
     }
 
@@ -303,6 +307,10 @@ impl Game {
             self.outcome = Some(Outcome { winner: None, reason: EndReason::TurnLimit });
             return;
         }
+        // CR 731.2: the previous turn's active player's spells decide
+        // whether day becomes night or night becomes day (checked as the
+        // untap step's second part, below).
+        let prev_spells = (self.turn.number > 0).then(|| self.players[self.turn.active as usize].spells_cast);
         self.turn.number += 1;
         self.turn.active = next;
         self.turn.step = Step::Untap;
@@ -320,7 +328,11 @@ impl Game {
         // "Until your next turn" ends as that turn begins (CR 611.2b).
         self.players[next as usize].flash_sorceries = false;
         self.end_until_next_turn(next);
+        if !self.temp_triggers.is_empty() {
+            self.temp_triggers.retain(|t| t.controller != next);
+        }
         self.resolved.clear();
+        self.done_once.clear();
         self.lki_counters.clear();
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
@@ -330,6 +342,9 @@ impl Game {
         pl.turns += 1;
         pl.lands_played = 0;
         self.note(|_| format!("turn {n}: P{next}"));
+        if let (Some(spells), Some(_)) = (prev_spells, self.day) {
+            self.day_night_turn(spells);
+        }
         self.agenda.push(Task::BeginStep);
     }
 
@@ -391,6 +406,12 @@ impl Game {
                     Step::End => Some(EventKind::BeginningOfEndStep),
                     _ => None,
                 };
+                // CR 714.3c: as the precombat main phase begins, its player
+                // puts a lore counter on each Saga they control (a
+                // turn-based action).
+                if self.turn.step == Step::Main1 {
+                    self.lore_turn_action(ap);
+                }
                 if let Some(k) = kind {
                     self.event(Event::player(k, ap));
                 }
@@ -485,16 +506,35 @@ impl Game {
             Some(Choice::Play(c)) => {
                 // Special action (CR 116.2a, 305.1); the player keeps priority.
                 self.turn.passes = 0;
-                self.players[p as usize].lands_played += 1;
-                self.note(|g| format!("P{p} plays {}", g.name(c)));
                 self.agenda.push(Task::Priority);
-                self.put_onto_battlefield(c, p);
+                self.play_land(p, c, None);
             }
             Some(Choice::Cast(c)) => {
                 // CR 117.3c: after casting, the caster receives priority.
                 self.turn.passes = 0;
                 self.agenda.push(Task::Priority);
                 self.begin_cast(p, c);
+            }
+            Some(Choice::CastFace(c)) => {
+                self.turn.passes = 0;
+                self.agenda.push(Task::Priority);
+                let face = self.other_face(c).expect("a card with another face");
+                self.begin_cast_face(p, c, Some(face));
+            }
+            Some(Choice::PlayFace(c)) => {
+                self.turn.passes = 0;
+                self.agenda.push(Task::Priority);
+                self.play_face(p, c);
+            }
+            Some(Choice::Faces(c, mask)) => {
+                // Both faces can be cast or played: which one is the next
+                // decision (CR 712.11b, 712.12, 715.3). The card will be
+                // public either way, so it is revealed now (a refreshed
+                // decision must find the same card, ENGINE.md 10).
+                self.turn.passes = 0;
+                self.agenda.push(Task::Priority);
+                self.reveal(c);
+                self.agenda.push(Task::ChooseFace { p, card: c, mask });
             }
             Some(Choice::Ability(c, slot)) => {
                 // CR 117.3c also after activating (and 605.3a: a mana
@@ -514,7 +554,7 @@ impl Game {
         if let Some(Choice::Card(c)) = self.answer.take() {
             self.discard(c);
         }
-        if self.players[ap as usize].hand.len() > self.spec.max_hand as usize {
+        if self.players[ap as usize].hand.len() > self.spec.max_hand as usize && !self.no_max_hand(ap) {
             let opts = self.hand_options(ap);
             self.ask(Task::CleanupDiscard, ap, DecisionKind::Discard, opts);
         }

@@ -169,6 +169,13 @@ macro_rules! lower_condition {
                 Some(Cond::YourTurnAtMost($l.int("YourTurnOfGameAtMost.n", *n, 0, 99) as u8))
             }
             E::YourLibraryHasNoCards(nodes::YourLibraryHasNoCards {}) => Some(Cond::LibraryEmpty),
+            // "If there are n or more cards in your graveyard".
+            E::CardsInYourGraveyardAtLeast(nodes::CardsInYourGraveyardAtLeast { n }) => {
+                Some(Cond::GraveyardAtLeast($l.int("CardsInYourGraveyardAtLeast.n", *n, 0, 99) as u8))
+            }
+            // "If your life total is less than or equal to half your starting
+            // life total".
+            E::LifeAtMostHalfStartingLife(nodes::LifeAtMostHalfStartingLife {}) => Some(Cond::LifeAtMostHalfStart),
             $($extra)*
             other => {
                 $l.unsupported(format!("Condition:{}", other.tag()));
@@ -236,8 +243,19 @@ fn card_type_bits(t: &str) -> Option<u16> {
 
 pub(crate) fn lower_card_filter_node(l: &mut Lowerer, f: &nodes::CardFilter) -> Option<Filter> {
     let nodes::CardFilter { any_types, excluded_types, max_mv, color, supertype, subtype, mana_costs } = f;
-    l.deny("CardFilter.mana_costs", mana_costs);
     let mut parts: Vec<Filter> = Vec::new();
+    // "With mana cost {0} or {1}" (Urza's Saga): exactly one of these mana
+    // costs.
+    if !mana_costs.is_empty() {
+        let mut v = Vec::new();
+        for m in mana_costs {
+            match crate::mana::ManaCost::parse(m) {
+                Some(c) => v.push(c),
+                None => l.unsupported(format!("CardFilter.mana_costs({m})")),
+            }
+        }
+        parts.push(Filter::ManaCostIn(v));
+    }
     let bits = |l: &mut Lowerer, names: &[String]| {
         let mut b = 0u16;
         for t in names {

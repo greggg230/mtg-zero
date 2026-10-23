@@ -514,11 +514,15 @@ impl Game {
         if n == 0 || !matches!(self.objs[c.i()].zone, Zone::Battlefield | Zone::Exile) {
             return;
         }
+        let before = self.counters_on(c, k);
         match self.counters.iter_mut().find(|x| x.0 == c && x.1 == k) {
             Some(x) => x.2 = x.2.saturating_add(n),
             None => self.counters.push((c, k, n)),
         }
         self.note(|g| format!("{n} {k:?} counter(s) on {}", g.name(c)));
+        if k == Counter::Lore && self.objs[c.i()].zone == Zone::Battlefield {
+            self.chapters_reached(c, before, before.saturating_add(n));
+        }
     }
 
     /// Remove up to n counters of kind `k`; returns how many were removed.

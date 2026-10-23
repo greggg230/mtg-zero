@@ -1498,6 +1498,14 @@ impl Game {
             | Ext::SearchAnyNumber { .. }
             | Ext::NameRevealTopToHand { .. }
             | Ext::FlashSorceries => self.exec_walker(f, op),
+            Ext::TransformSource
+            | Ext::ExileReturnTransformed { .. }
+            | Ext::OnceMay { .. }
+            | Ext::GraveyardCastThenExile { .. }
+            | Ext::TriggerUntilYourNextTurn { .. }
+            | Ext::EachExileUntilNonlandCastFree
+            | Ext::Poison { .. }
+            | Ext::DiscardUpToThenDraw { .. } => self.exec_faces(f, op),
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

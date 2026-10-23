@@ -383,6 +383,9 @@ impl Game {
         let mut to_creatures: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i32)> = Vec::new();
         let mut to_walkers: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i32)> = Vec::new();
         self.combat_damage_now = true;
+        // Combat damage each source dealt in all (one "deals damage" event
+        // per source: the damage is dealt at once, CR 510.2).
+        let mut by_source: Vec<(crate::ids::ObjRef, i32)> = Vec::new();
         for ((&(s, t, n), src), r) in list.iter().zip(sources).zip(refs) {
             if first {
                 self.objs[s.i()].struck_first = true;
@@ -392,6 +395,12 @@ impl Game {
             let to_walker =
                 matches!(t, Target::Obj(o) if self.live(o) && self.is_type(o.idx, crate::db::types::PLANESWALKER));
             let dealt = self.deal_damage(src, t, n as i32);
+            if dealt > 0 {
+                match by_source.iter_mut().find(|x| x.0 == r) {
+                    Some(x) => x.1 += dealt,
+                    None => by_source.push((r, dealt)),
+                }
+            }
             if let (Target::Player(p), true) = (t, dealt > 0) {
                 to_players.push((r, p, dealt));
             }
@@ -403,6 +412,9 @@ impl Game {
             }
         }
         self.combat_damage_now = false;
+        for (r, n) in by_source {
+            self.event(Event { kind: EventKind::DealsDamage, a: Subj::Obj(r), b: Subj::None, amount: n.min(u16::MAX as i32) as u16 });
+        }
         for (r, o, n) in to_creatures {
             self.event(Event {
                 kind: EventKind::DealsCombatDamageToCreature,

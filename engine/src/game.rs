@@ -97,6 +97,10 @@ pub struct Obj {
     pub pw_turn: u16,
     pub pw_used: u8,
     pub pw_extra: u8,
+    /// Times this object transformed (CR 701.27f: an ability of a permanent
+    /// transforms it only if it hasn't transformed since the ability was
+    /// put on the stack); wraps.
+    pub flips: u8,
 }
 
 /// How a spell was cast (CR 601.2a-b, 118.9).
@@ -139,6 +143,12 @@ pub enum PermKind {
     /// It has flashback; the flashback cost is its mana cost (Snapcaster
     /// Mage).
     Flashback,
+    /// An adventurer card on an adventure (CR 715.3d): its owner may cast
+    /// it for as long as it stays exiled, but not as an Adventure.
+    Adventure,
+    /// Cast it from a graveyard (for its mana cost); if that spell would be
+    /// put into a graveyard, it is exiled instead (Jace, Telepath Unbound).
+    CastThenExile,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -188,6 +198,8 @@ pub struct Player {
     /// "Until your next turn, you may cast sorcery spells as though they
     /// had flash."
     pub flash_sorceries: bool,
+    /// Poison counters (CR 122.1f; ten or more lose the game, 704.5c).
+    pub poison: u16,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -237,6 +249,9 @@ pub struct StackItem {
     /// emblem, "gain control of those permanents", still so if that spell
     /// is countered first).
     pub noted: Vec<ObjRef>,
+    /// An ability's source's `Obj::flips` as the ability was put on the
+    /// stack (CR 701.27f).
+    pub flips: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -311,6 +326,16 @@ pub struct Link {
     /// "Until an opponent of this player becomes the monarch" (Palace
     /// Jailer): then it returns to the battlefield.
     pub until_monarch: Option<PlayerId>,
+}
+
+/// A triggered ability a player has for a while (until their next turn):
+/// trigger `slot` of definition `source_def`, created by `source`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct TempTrigger {
+    pub controller: PlayerId,
+    pub source: ObjRef,
+    pub source_def: DefId,
+    pub slot: u8,
 }
 
 /// A delayed triggered ability (CR 603.7): it triggers once, at `when`.
@@ -425,6 +450,22 @@ pub struct Game {
     /// ... the X it was cast with.
     pub(crate) entering_x: u8,
     pub(crate) entering_dash: Option<u8>,
+    /// ... with this face up (a back face: "transformed", CR 712.14a; an
+    /// MDFC's land face played, 712.12) instead of its front (712.14).
+    pub(crate) entering_face: Option<DefId>,
+    /// Day (`Some(true)`) or night (`Some(false)`), once the game has one
+    /// of them (CR 731.1).
+    pub(crate) day: Option<bool>,
+    /// Optional actions done this turn that may be done "only once each
+    /// turn": (source, its triggered ability).
+    pub(crate) done_once: Vec<(ObjRef, u8)>,
+    /// Triggered abilities a player has until their next turn ("until your
+    /// next turn, whenever ..."; `Ext::TriggerUntilYourNextTurn`).
+    pub(crate) temp_triggers: Vec<TempTrigger>,
+    /// Spells on the stack that are exiled instead of being put into a
+    /// graveyard ("if that spell would be put into your graveyard, exile it
+    /// instead").
+    pub(crate) gy_exile: Vec<CardIdx>,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -499,6 +540,7 @@ impl Game {
             energy: 0,
             lost_life: false,
             flash_sorceries: false,
+            poison: 0,
         };
         Game {
             db,
@@ -553,6 +595,11 @@ impl Game {
             entering_escaped: false,
             entering_x: 0,
             entering_dash: None,
+            entering_face: None,
+            day: None,
+            done_once: Vec::new(),
+            temp_triggers: Vec::new(),
+            gy_exile: Vec::new(),
             batching: false,
             entering_cast: false,
             entering_evoked: false,
@@ -592,6 +639,7 @@ impl Game {
             pw_turn: 0,
             pw_used: 0,
             pw_extra: 0,
+            flips: 0,
         });
         idx
     }
@@ -740,6 +788,18 @@ impl Game {
     /// 614.1c, decided before it moves) and queueing "as this enters"
     /// choices (614.12, a task that runs next).
     pub(crate) fn put_onto_battlefield(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
+        // The face it enters with (CR 712.13-14): the one it had on the
+        // stack, its front, or the face an effect names ("return it
+        // transformed", 712.14a; an MDFC's land face, 712.12); a daybound
+        // card enters transformed at night (702.145b). Set before it moves,
+        // so what applies as it enters sees that face (CR 614.12).
+        if let Some(face) = self.entering_face.take() {
+            self.objs[idx.i()].def = face;
+        } else if self.day == Some(false) && self.def_of(idx).daybound {
+            if let Some(b) = self.def_of(idx).back {
+                self.objs[idx.i()].def = b;
+            }
+        }
         // CR 614.1a: "If a nontoken creature would enter and it wasn't
         // cast, exile it instead."
         let cast = std::mem::take(&mut self.entering_cast);
@@ -795,6 +855,16 @@ impl Game {
         // CR 306.5b: a planeswalker enters with its printed loyalty.
         if let (Some(n), true) = (self.def_of(idx).loyalty, self.def_of(idx).is(types::PLANESWALKER)) {
             self.add_counters(idx, crate::db::Counter::Loyalty, n as u16);
+        }
+        // CR 714.3a: a Saga enters with a lore counter on it (its chapter I
+        // ability triggers, 714.2b).
+        if self.def_of(idx).chapters > 0 {
+            self.add_counters(idx, crate::db::Counter::Lore, 1);
+        }
+        // CR 702.145d, g: a daybound (nightbound) permanent makes it day
+        // (night) if it is neither; at night a daybound one transforms.
+        if self.def_of(idx).daybound || self.def_of(idx).nightbound {
+            self.day_night_check();
         }
         if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player {
             self.agenda.push(Task::AsEnters { card: idx });
@@ -893,8 +963,19 @@ impl Game {
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
-        // CR 702.34a: a flashback spell leaving the stack is exiled instead.
+        // CR 702.34a: a flashback spell leaving the stack is exiled instead;
+        // "if that spell would be put into your graveyard, exile it instead".
         let to = if from == Zone::Stack && self.objs[idx.i()].flashback { Zone::Exile } else { to };
+        let to = if from == Zone::Stack && !self.gy_exile.is_empty() && self.gy_exile.contains(&idx) {
+            self.gy_exile.retain(|&c| c != idx);
+            if to == Zone::Graveyard {
+                Zone::Exile
+            } else {
+                to
+            }
+        } else {
+            to
+        };
         // "If it would die this turn, exile it instead" (Suplex).
         let to = if from == Zone::Battlefield && to == Zone::Graveyard && self.flags_of(idx).exile_if_dies {
             Zone::Exile
@@ -951,12 +1032,23 @@ impl Game {
             o.pw_turn = 0;
             o.pw_used = 0;
             o.pw_extra = 0;
+            o.flips = 0;
             o.escaped = to == Zone::Battlefield && std::mem::take(&mut self.entering_escaped);
         }
         self.layers_on_move(idx, old, from, to);
         if from == Zone::Battlefield && self.batching {
             let def = self.objs[idx.i()].def;
             self.leaving.push(crate::triggers::Lki { old, def, controller: old_controller });
+        }
+        // CR 712.8a, 715.4: outside the battlefield and the stack a card has
+        // only its front face's characteristics (the face it had there was
+        // last known information, used above). A spell becoming a permanent
+        // keeps the face it had on the stack (712.13); a card put onto the
+        // battlefield from elsewhere comes with its front face up unless it
+        // enters transformed (712.14, `put_onto_battlefield`).
+        if to != Zone::Battlefield && to != Zone::Stack {
+            let o = &mut self.objs[idx.i()];
+            o.def = self.db.def(o.def).card_def(o.def);
         }
         if let Some(list) = self.zone_list(idx, to) {
             match pos {
@@ -1189,6 +1281,16 @@ impl Game {
             self.gain_life(src.controller, amount);
         }
         self.note(|g| format!("{amount} damage to {}", g.describe_target(t)));
+        // "Whenever this deals damage" (combat damage: one event per source
+        // for the whole step, `combat.rs`).
+        if let (false, Some(o)) = (self.combat_damage_now, src.obj) {
+            self.event(crate::triggers::Event {
+                kind: EventKind::DealsDamage,
+                a: crate::triggers::Subj::Obj(o),
+                b: crate::triggers::Subj::None,
+                amount: amount.min(u16::MAX as i32) as u16,
+            });
+        }
         amount
     }
 
@@ -1242,6 +1344,7 @@ impl Game {
             lifelink: kws.has(Kw::Lifelink),
             colors: self.colors_of(idx),
             types: self.types_of(idx),
+            obj: Some(self.obj_ref(idx)),
         }
     }
 
@@ -1270,4 +1373,7 @@ pub struct DamageSource {
     /// Its colours and card types (protection, CR 702.16).
     pub colors: crate::mana::ManaMask,
     pub types: u16,
+    /// The object dealing the damage, if one ("whenever this deals
+    /// damage").
+    pub obj: Option<ObjRef>,
 }

@@ -134,7 +134,7 @@ impl Game {
                 }
             }
         }
-        if obs.is_empty() {
+        if obs.is_empty() && self.temp_triggers.is_empty() {
             return;
         }
         let ctx = EvCtx {
@@ -153,7 +153,10 @@ impl Game {
             amount: ev.amount,
         };
         for o in obs {
-            for (i, t) in self.db.def(o.def).triggers.iter().enumerate() {
+            let def = self.db.def(o.def);
+            // (Delayed and temporary abilities, from `delayed_base` on,
+            // trigger only as such.)
+            for (i, t) in def.triggers.iter().enumerate().take(def.delayed_base as usize) {
                 if t.event == ev.kind && (!o.spell || names_this_spell(&t.pred)) && self.pred_matches(&t.pred, &ev, o) {
                     self.waiting.push(PendingTrigger {
                         controller: o.controller,
@@ -163,6 +166,22 @@ impl Game {
                         ev: ctx,
                     });
                 }
+            }
+        }
+        // Triggered abilities a player has for a while ("until your next
+        // turn, whenever ...").
+        for k in 0..self.temp_triggers.len() {
+            let tt = self.temp_triggers[k];
+            let t = &self.db.def(tt.source_def).triggers[tt.slot as usize];
+            let o = Observer { r: tt.source, def: tt.source_def, controller: tt.controller, spell: false };
+            if t.event == ev.kind && self.pred_matches(&t.pred, &ev, o) {
+                self.waiting.push(PendingTrigger {
+                    controller: tt.controller,
+                    source: tt.source,
+                    source_def: tt.source_def,
+                    slot: tt.slot,
+                    ev: ctx,
+                });
             }
         }
     }
@@ -209,6 +228,7 @@ impl Game {
                 let host = self.objs[src.r.idx.i()].attached;
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
             }
+            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u16,
             TrigPred::FormerHost(s) => match ev.subject(*s) {
                 // Evaluated as the host leaves (look back): the Equipment
                 // is still attached to it.
@@ -314,6 +334,7 @@ impl Game {
             division: Vec::new(),
             attack_as: None,
             noted,
+            flips: if self.live(t.source) { self.objs[t.source.idx.i()].flips } else { 0 },
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {

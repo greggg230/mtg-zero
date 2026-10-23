@@ -383,11 +383,31 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             bonus_color,
             bonus,
         }) => {
-            l.deny("ReturnTargetCardFromYourGraveyardToHand.bonus_color", bonus_color);
-            l.deny("ReturnTargetCardFromYourGraveyardToHand.bonus", bonus);
             let Some(cf) = super::filter::lower_card_filter(l, card_filter) else { return true };
             let t = b.target(Filter::InGraveyard(Box::new(and(cf, Filter::Owner(true)))), 1, 1);
-            b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: false, yours: true, tapped: false }));
+            let back = Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: false, yours: true, tapped: false });
+            match (bonus_color, bonus) {
+                (None, None) => {
+                    b.op(back);
+                }
+                // "If it's a <colour> card, <bonus>" (Tamiyo, Seasoned
+                // Scholar): its colour in the graveyard (a card's colour
+                // doesn't change on the way to a hand).
+                (Some(c), Some(e)) => match crate::mana::letter_index(c) {
+                    Some(i) if i < 5 => {
+                        let filter = Filter::InGraveyard(Box::new(Filter::Color(1 << i)));
+                        let at = b.op(Op::JumpUnlessTarget { tgt: t, filter, to: 0 });
+                        b.op(back.clone());
+                        lower_effect(l, b, e);
+                        let end = b.op(Op::Jump { to: 0 });
+                        b.patch(at);
+                        b.op(back);
+                        b.patch(end);
+                    }
+                    _ => l.unsupported(format!("ReturnTargetCardFromYourGraveyardToHand.bonus_color({c})")),
+                },
+                _ => l.unsupported("ReturnTargetCardFromYourGraveyardToHand.bonus(without bonus_color)"),
+            }
         }
         E::ReturnTargetGraveyardCardToHand(nodes::ReturnTargetGraveyardCardToHand { card_filter, optional }) => {
             // "Return [up to one] target <...> card from your graveyard to

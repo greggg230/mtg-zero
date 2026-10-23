@@ -53,6 +53,9 @@ pub(crate) struct Frame {
     pub attack_as: Option<Option<ObjRef>>,
     /// The objects the stack item noted (`StackItem::noted`).
     pub noted: Vec<ObjRef>,
+    /// The source's transformations when the ability was put on the stack
+    /// (`StackItem::flips`, CR 701.27f).
+    pub flips: u8,
 }
 
 pub(crate) enum Flow {
@@ -86,12 +89,22 @@ impl Game {
                 legal |= 1 << i;
             }
         }
-        self.agenda.push(Task::FinishResolve { id: item.id });
         if !item.targets.is_empty() && legal == 0 {
-            // CR 608.2b: every target is illegal; it doesn't resolve.
+            // CR 608.2b: every target is illegal; it doesn't resolve (a
+            // spell goes to its owner's graveyard: an Adventure too, 715.3d
+            // being about resolving).
             self.note(|_| "fizzles".to_string());
+            if let StackKind::Spell { card } = item.kind {
+                self.stack.pop();
+                self.move_card(card, Zone::Graveyard, Pos::Top);
+                self.turn.priority = self.turn.active;
+                self.turn.passes = 0;
+            } else {
+                self.agenda.push(Task::FinishResolve { id: item.id });
+            }
             return;
         }
+        self.agenda.push(Task::FinishResolve { id: item.id });
         if !self.intervening_holds(ar, item.controller) {
             self.note(|_| "intervening if: does nothing".to_string());
             return; // CR 603.4
@@ -123,6 +136,7 @@ impl Game {
             made_all: Vec::new(),
             attack_as: item.attack_as,
             noted: item.noted.clone(),
+            flips: item.flips,
         };
         let Some(modes) = &ab.modes else {
             self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
@@ -173,6 +187,18 @@ impl Game {
                     } else if self.def_of(card).buyback && item.cost_option == 1 {
                         // CR 702.27a: bought back.
                         self.move_card(card, Zone::Hand, Pos::Top);
+                    } else if self.is_adventure(self.objs[card.i()].def) && !self.objs[card.i()].flashback {
+                        // CR 715.3d: an Adventure is exiled as it resolves;
+                        // its controller may cast the card (not as an
+                        // Adventure) while it stays exiled.
+                        let r = self.move_card(card, Zone::Exile, Pos::Top);
+                        self.note(|g| format!("{} goes on an adventure", g.name(card)));
+                        self.permissions.push(crate::game::Permission {
+                            card: r,
+                            player: item.controller,
+                            turn: None,
+                            kind: crate::game::PermKind::Adventure,
+                        });
                     } else {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
                     }
@@ -287,6 +313,8 @@ impl Game {
             Amount::OpponentsLostLife => {
                 self.players[crate::ids::opp(f.controller) as usize].lost_life as i32
             }
+            Amount::Remembered => f.x,
+            Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as i32 + 1) / 2,
         }
     }
 
@@ -305,6 +333,7 @@ impl Game {
             lifelink: d.keywords.has(Kw::Lifelink),
             colors: d.colors,
             types: d.types,
+            obj: Some(f.source),
         }
     }
 
@@ -786,6 +815,8 @@ impl Game {
                 Flow::Next
             }
             Op::ChooseDiscard { chooser, whose, ref filter, optional } => {
+                // (`Frame::x`: whether a card was discarded, for "if you do".)
+                f.x = 0;
                 let (Some(p), Some(owner)) = (self.who(f, chooser), self.who(f, whose)) else { return Flow::Next };
                 if self.shielded_from(owner, f.controller) {
                     return Flow::Next;
@@ -794,6 +825,7 @@ impl Game {
                     Some(Choice::Card(c)) => {
                         self.note(|g| format!("P{owner} discards {}", g.name(c)));
                         self.discard(c);
+                        f.x = 1;
                         Flow::Next
                     }
                     Some(Choice::Pass) => Flow::Next,

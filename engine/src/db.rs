@@ -181,6 +181,9 @@ pub enum Mod {
     /// types exactly `subtypes` (CR 205.1a: "becomes a [subtype] creature";
     /// supertypes are kept).
     BecomeTypes { types: u16, subtypes: Vec<u16> },
+    /// Layer 6: it gains latent activated ability k of its card ("this
+    /// Saga gains '<ability>'"; `CardDef::latent`).
+    GainLatent(u8),
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated
@@ -222,6 +225,8 @@ pub enum Counter {
     Named(u16),
     /// A loyalty counter (CR 122.1e, 306.5c): a planeswalker's loyalty.
     Loyalty,
+    /// A lore counter (CR 714.3): a Saga's progress.
+    Lore,
 }
 
 /// A characteristic-defining power / toughness (CR 604.3, layer 7a).
@@ -314,6 +319,9 @@ pub enum Filter {
     TargetsMatching(Box<Filter>),
     /// An object with one or more counters of this kind (in any zone).
     HasCounter(Counter),
+    /// Has exactly one of these mana costs (CR 202.1; a land has no mana
+    /// cost, so not {0}; nor has a card with {X} in its cost a cost without).
+    ManaCostIn(Vec<ManaCost>),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -332,7 +340,26 @@ pub struct AbilityDef {
     pub modes: Option<Box<Modes>>,
     /// "n damage divided as you choose among" the targets of requirement
     /// `.0`: the division is announced with the targets (CR 601.2d).
-    pub divide: Option<(u8, u8)>,
+    pub divide: Option<(u8, DivAmount)>,
+}
+
+/// The amount of divided damage (CR 601.2d).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DivAmount {
+    Fixed(u8),
+    /// The spell's X, twice X if X is at least `double_at` (0: never).
+    X { double_at: u8 },
+}
+
+impl DivAmount {
+    /// The amount for a spell cast with this X.
+    pub fn of(self, x: u8) -> u8 {
+        match self {
+            DivAmount::Fixed(n) => n,
+            DivAmount::X { double_at } if double_at > 0 && x >= double_at => x.saturating_mul(2),
+            DivAmount::X { .. } => x,
+        }
+    }
 }
 
 /// The modes of a modal spell or ability (CR 700.2): choose between `min`
@@ -426,6 +453,17 @@ pub enum EventKind {
     /// Never emitted: the trigger is a delayed triggered ability (CR 603.7)
     /// an effect creates (`Ext::Delay`).
     Delayed,
+    /// A permanent transformed (CR 701.27; "when this transforms into",
+    /// 701.27e: seen with the face it transformed into). Subject: obj.
+    Transforms,
+    /// Lore counters put on a Saga reached chapter `amount` (CR 714.2b: the
+    /// number of lore counters was less than N and became at least N; one
+    /// event per chapter number reached). Subject: obj.
+    Chapter,
+    /// A source dealt damage, combat or not (CR 120; "whenever this deals
+    /// damage"); one event per source and damage event, with the total
+    /// (CR 120.? simultaneous damage). Subject: source.
+    DealsDamage,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -456,6 +494,8 @@ impl EventKind {
             }
             E::Attacks | E::AttacksAlone => (&[Slot::Attacker], &[]),
             E::Blocks => (&[Slot::Blocker], &[]),
+            E::Transforms | E::Chapter => (&[Slot::Obj], &[]),
+            E::DealsDamage => (&[Slot::Source], &[]),
             E::YouAttack
             | E::DrawsCard
             | E::BeginningOfUpkeep
@@ -528,6 +568,9 @@ pub enum TrigPred {
     /// A condition of the trigger event itself, checked when it happens
     /// only ("whenever you cast your second spell each turn").
     State(Cond),
+    /// A chapter ability (CR 714.2b): this Saga's lore counters reached
+    /// chapter n (a `Chapter` event of the source with amount n).
+    Chapter(u8),
 }
 
 impl TrigPred {
@@ -608,6 +651,8 @@ pub enum Cond {
     LibraryEmpty,
     /// It is your turn.
     YourTurn,
+    /// Your life total is at most half your starting life total.
+    LifeAtMostHalfStart,
     /// All of these hold (a static ability's own conditions included).
     All(Vec<Cond>),
 }
@@ -909,6 +954,39 @@ pub struct CardDef {
     /// "<Cards matching> in your graveyard have retrace" (an emblem; CR
     /// 702.81).
     pub grants_retrace: Option<Filter>,
+    // ---- cards with more than one face (M7b part 2; ENGINE.md 25) ----
+    /// A double-faced card (CR 712): on the card's definition, its back
+    /// face; on a back face, the card's definition (its front face).
+    /// Transforming turns one into the other (CR 701.27). Face definitions
+    /// are stored after the tokens.
+    pub back: Option<DefId>,
+    /// A modal double-faced card (CR 712.3): either face may be cast or
+    /// played (712.11b, 712.12); its back face has its own mana cost and
+    /// mana value (712.8f).
+    pub modal: bool,
+    /// An adventurer card's Adventure (CR 715.2): the alternative
+    /// characteristics it may be cast with (an instant or sorcery face).
+    pub adventure: Option<DefId>,
+    /// On a face's definition (a back face, an Adventure): the card's
+    /// definition, which is what the card is outside the battlefield and
+    /// the stack (CR 712.8a, 715.4) and which gives its identity.
+    pub front: Option<DefId>,
+    /// The mana value of a nonmodal back face: its front face's (CR 712.8e,
+    /// 202.3b); it has no mana cost of its own.
+    pub front_mv: Option<u8>,
+    /// Daybound (on a front face) and nightbound (on its back face) (CR
+    /// 702.145).
+    pub daybound: bool,
+    pub nightbound: bool,
+    /// A Saga's final chapter number (CR 714.2d); 0 = not a Saga.
+    pub chapters: u8,
+    /// "Your opponents can't cast spells during your turn."
+    pub opp_no_spells_your_turn: bool,
+    /// The last `latent` activated abilities are latent: a permanent has
+    /// ability k of them only once an effect gave it (`Mod::GainLatent`).
+    pub latent: u8,
+    /// "You have no maximum hand size" (CR 402.2).
+    pub no_max_hand: bool,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.
@@ -928,7 +1006,17 @@ impl CardDef {
         self.types & types::PERMANENT != 0
     }
     pub fn mana_value(&self) -> u8 {
-        self.cost.mana_value()
+        // CR 712.8e: a nonmodal back face's mana value is its front face's.
+        match self.front_mv {
+            Some(mv) => mv,
+            None => self.cost.mana_value(),
+        }
+    }
+    /// The card's definition (its front face) of a face definition, else
+    /// itself.
+    #[inline]
+    pub fn card_def(&self, me: DefId) -> DefId {
+        self.front.unwrap_or(me)
     }
     /// The activated ability in `slot` (`Activated` or `Hand`).
     pub fn activated_def(&self, slot: AbilitySlot) -> &ActivatedDef {
@@ -957,9 +1045,11 @@ impl CardDb {
     pub fn from_cards(cards: &[card_ir::Card]) -> CardDb {
         let mut db = CardDb::default();
         let mut tokens: Vec<CardDef> = Vec::new();
+        // The faces of each supported card (its back face, its Adventure).
+        let mut faces: Vec<(DefId, Vec<CardDef>)> = Vec::new();
         for card in cards {
             match lower::lower_card(card, &mut db.subtypes, &mut tokens) {
-                Ok(def) => {
+                Ok((def, fs)) => {
                     let id = db.defs.len() as DefId;
                     assert!(
                         db.by_name.insert(card.name.clone(), id).is_none(),
@@ -967,6 +1057,9 @@ impl CardDb {
                         card.name
                     );
                     db.defs.push(def);
+                    if !fs.is_empty() {
+                        faces.push((id, fs));
+                    }
                 }
                 Err(blockers) => {
                     db.unsupported.insert(card.name.clone(), blockers);
@@ -976,7 +1069,30 @@ impl CardDb {
         // Tokens the cards create (CR 111), interned during lowering.
         db.token_base = db.defs.len() as DefId;
         db.defs.extend(tokens);
+        // Faces after the tokens: the card's `back` / `adventure` held the
+        // face's index among its faces (`lower_card`); a face knows its card.
+        for (id, fs) in faces {
+            let base = db.defs.len() as DefId;
+            let card = &mut db.defs[id as usize];
+            let back = card.back.map(|k| base + k);
+            let adventure = card.adventure.map(|k| base + k);
+            card.back = back;
+            card.adventure = adventure;
+            for (k, mut f) in fs.into_iter().enumerate() {
+                f.front = Some(id);
+                if back == Some(base + k as DefId) {
+                    f.back = Some(id); // a back face transforms into its front
+                }
+                db.defs.push(f);
+            }
+        }
         db
+    }
+
+    /// Is this a face's definition (a back face, an Adventure: CR 712, 715)
+    /// rather than a card's, a token's or an emblem's?
+    pub fn is_face(&self, id: DefId) -> bool {
+        self.defs[id as usize].front.is_some()
     }
 
     /// The definition of token `t` (an index of `Op::CreateToken`).

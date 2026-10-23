@@ -11,6 +11,7 @@
 pub mod activated;
 pub mod effect;
 pub mod effect_ext;
+pub mod effect_faces;
 pub mod effect_walkers;
 pub mod filter;
 pub mod printing;
@@ -74,6 +75,30 @@ pub struct Lowerer<'a> {
     /// Delayed triggered abilities the card's effects create (CR 603.7),
     /// appended to its triggers.
     pub delayed: Vec<crate::db::TriggerDef>,
+    /// The faces of the card being lowered (its back face, its Adventure:
+    /// CR 712, 715); `CardDef.back` / `adventure` hold their index here
+    /// until `CardDb::from_cards` places them.
+    pub faces: Vec<CardDef>,
+    /// Which face the printing being lowered is.
+    pub face: Face,
+    /// Latent activated abilities the printing's effects grant it ("this
+    /// Saga gains ..."), appended to its activated abilities.
+    pub latent: Vec<crate::db::ActivatedDef>,
+}
+
+/// Which face of a card a printing describes (ENGINE.md 25).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Face {
+    /// The card itself (a single-faced card, a front face, an adventurer).
+    #[default]
+    Card,
+    /// The back face of a nonmodal (transforming) double-faced card (CR
+    /// 712.2): no mana cost, colours from its colour indicator.
+    Back,
+    /// The back face of a modal double-faced card (CR 712.3).
+    ModalBack,
+    /// An Adventure (CR 715.2).
+    Adventure,
 }
 
 impl Lowerer<'_> {
@@ -156,7 +181,7 @@ pub fn lower_card(
     card: &card_ir::Card,
     subtypes: &mut Vec<String>,
     tokens: &mut Vec<CardDef>,
-) -> Result<CardDef, Vec<String>> {
+) -> Result<(CardDef, Vec<CardDef>), Vec<String>> {
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
     // A card that refers to "cards exiled with this" links its exiles.
     let link_exiles = format!("{p:?}").contains("ExiledWithSource");
@@ -170,6 +195,9 @@ pub fn lower_card(
         opp_enter_tapped: 0,
         card_name: p.name.clone(),
         self_copy: None,
+        faces: Vec::new(),
+        face: Face::Card,
+        latent: Vec::new(),
     };
     let def = printing::lower_printing(&mut l, p);
     if let Some(&(_, blocker)) = IR_DEFECTS.iter().find(|(n, _)| *n == card.name) {
@@ -181,7 +209,7 @@ pub fn lower_card(
         l.tokens[idx as usize] = CardDef { token: true, types: def.types | extra, ..def.clone() };
     }
     if l.errs.is_empty() {
-        Ok(def)
+        Ok((def, l.faces))
     } else {
         let mut errs = l.errs;
         errs.sort();

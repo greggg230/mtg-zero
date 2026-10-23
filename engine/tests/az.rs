@@ -382,8 +382,8 @@ fn token_registry_and_stable_identities() {
     let reg = identity::registry();
     let mut keys = Vec::new();
     for i in db.num_cards()..db.len() {
-        // (an emblem, stored with the tokens, has its card's identity)
-        if !db.def(i as engine::ids::DefId).emblem {
+        // (an emblem or a face, stored with the tokens, has its card's identity)
+        if !db.def(i as engine::ids::DefId).emblem && !db.is_face(i as engine::ids::DefId) {
             keys.push(identity::token_key(db, db.def(i as engine::ids::DefId)));
         }
     }
@@ -417,12 +417,19 @@ fn token_registry_and_stable_identities() {
         } else if d.emblem {
             // an emblem (CR 114) has the identity of the card that makes it
             assert_eq!(Some(names[id].as_str()), d.name.strip_suffix(" emblem"));
+        } else if let Some(f) = d.front {
+            // a face (CR 712, 715) has its card's identity
+            assert_eq!(names[id], db.def(f).name);
         } else {
             assert_eq!(names[id], d.name);
         }
     }
-    let not_emblems: Vec<u16> =
-        ids.iter().enumerate().filter(|&(i, _)| !db.def(i as engine::ids::DefId).emblem).map(|(_, &x)| x).collect();
+    let not_emblems: Vec<u16> = ids
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| !db.def(i as engine::ids::DefId).emblem && !db.is_face(i as engine::ids::DefId))
+        .map(|(_, &x)| x)
+        .collect();
     let distinct: std::collections::BTreeSet<u16> = not_emblems.iter().copied().collect();
     assert_eq!(distinct.len(), not_emblems.len());
     // the identity does not depend on what else is supported: a card table of a few cards

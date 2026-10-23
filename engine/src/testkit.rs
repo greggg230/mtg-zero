@@ -101,6 +101,30 @@ impl Scenario {
         self
     }
 
+    /// `p`'s first permanent named `name` (its card's name) has its back
+    /// face up (it transformed earlier, CR 701.27).
+    pub fn transformed(mut self, p: PlayerId, name: &str) -> Self {
+        let c = self.g.find_card(p, name, Zone::Battlefield).unwrap_or_else(|| panic!("no {name} of P{p}"));
+        let back = self.g.def_of(c).back.unwrap_or_else(|| panic!("{name} has no back face"));
+        self.g.set_face(c, back);
+        self
+    }
+
+    /// It is day (`Some(true)`) or night (`Some(false)`) (CR 731).
+    pub fn day(mut self, day: Option<bool>) -> Self {
+        self.g.day = day;
+        self
+    }
+
+    /// Cards in exile, owned by `p`.
+    pub fn exile(mut self, p: PlayerId, names: &[&str]) -> Self {
+        for n in names {
+            let c = self.add(p, n, Zone::Exile);
+            self.g.exile.push(c);
+        }
+        self
+    }
+
     /// An emblem `p` got earlier from the card named `card` (CR 114).
     pub fn emblem(mut self, p: PlayerId, card: &str) -> Self {
         let name = format!("{card} emblem");
@@ -370,6 +394,13 @@ impl Game {
         }
         v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
+        // Day and night (public, CR 731); optional actions done once this
+        // turn (public), by the source's place.
+        v.push(self.day.map_or(9, |d| d as u64));
+        for &(r, k) in &self.done_once {
+            v.extend([live_place(r), k as u64]);
+        }
+        v.push(u64::MAX);
         for pm in &self.permissions {
             v.extend([live_place(pm.card), pm.player as u64, pm.turn.unwrap_or(0) as u64, h64(&pm.kind)]);
         }
@@ -473,6 +504,9 @@ impl Game {
         self.counters.hash(&mut h);
         self.n_static.hash(&mut h);
         self.n_self_types.hash(&mut h);
+        self.day.hash(&mut h);
+        self.entering_face.hash(&mut h);
+        self.done_once.hash(&mut h);
         h.finish()
     }
 
@@ -528,6 +562,20 @@ impl Game {
             if self.objs[i].zone == Zone::Nowhere && !self.def_of(CardIdx(i as u16)).token {
                 return Err(format!("card {i} is nowhere"));
             }
+            // CR 712.8a, 715.4: only a permanent or a spell has a face up
+            // other than its front.
+            if self.db.is_face(self.objs[i].def) && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack) {
+                return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx(i as u16)), self.objs[i].zone));
+            }
+        }
+        if self.entering_face.is_some() {
+            return Err("an entering face left over".into());
+        }
+        // The static-ability fast paths count the faces that are up.
+        let n_static = self.battlefield.iter().filter(|&&c| !self.def_of(c).statics.is_empty()).count()
+            + self.command.iter().filter(|&&c| !self.def_of(c).statics.is_empty()).count();
+        if n_static != self.n_static as usize {
+            return Err(format!("n_static {} but {n_static} permanents and emblems with static abilities", self.n_static));
         }
         if !self.keys.is_empty() {
             return Err("chance keys left in the state".into());

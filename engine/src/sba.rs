@@ -60,7 +60,7 @@ impl Game {
     /// creature dies, no player controls two legendary permanents with the
     /// same name.
     fn sba_possible(&self) -> bool {
-        if self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty) {
+        if self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty || p.poison >= 10) {
             return true;
         }
         if self.tokens > 0 && !self.stray_tokens().is_empty() {
@@ -82,6 +82,10 @@ impl Game {
                 }
             }
             if ty & crate::db::types::PLANESWALKER != 0 && self.counters_on(c, Counter::Loyalty) == 0 {
+                return true;
+            }
+            let ch = self.db.def(self.objs[c.i()].def).chapters as u16;
+            if ch > 0 && self.counters_on(c, Counter::Lore) >= ch && self.finished_sagas().contains(&c) {
                 return true;
             }
             if self.is_legendary(c) {
@@ -155,11 +159,12 @@ impl Game {
         !self.stray_tokens().is_empty()
             || !self.counter_pairs().is_empty()
             || !self.bad_attachments().is_empty()
-            || self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty)
+            || self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty || p.poison >= 10)
             || !z.is_empty()
             || !d.is_empty()
             || !self.legend_groups().is_empty()
             || !self.dead_walkers().is_empty()
+            || !self.finished_sagas().is_empty()
     }
 
     /// One SBA check as part of the priority loop (117.5): choices for the
@@ -200,8 +205,8 @@ impl Game {
     }
 
     fn perform_sbas(&mut self, groups: &[(PlayerId, Vec<CardIdx>)], keep: &[CardIdx]) -> bool {
-        // 704.5a, 704.5b: losing the game.
-        let lost: Vec<bool> = self.players.iter().map(|p| p.life <= 0 || p.drew_from_empty).collect();
+        // 704.5a, 704.5b, 704.5c: losing the game.
+        let lost: Vec<bool> = self.players.iter().map(|p| p.life <= 0 || p.drew_from_empty || p.poison >= 10).collect();
         for p in &mut self.players {
             p.drew_from_empty = false;
         }
@@ -240,7 +245,15 @@ impl Game {
         // 704.5i: a planeswalker with loyalty 0 goes to its owner's
         // graveyard (not destroyed: indestructible doesn't stop it).
         let walkers = self.dead_walkers();
-        for c in zero.into_iter().chain(walkers.iter().copied()).chain(legend_out).chain(destroyed.iter().copied()) {
+        // 704.5s: a Saga past its final chapter is sacrificed.
+        let sagas = self.finished_sagas();
+        for c in zero
+            .into_iter()
+            .chain(walkers.iter().copied())
+            .chain(legend_out)
+            .chain(destroyed.iter().copied())
+            .chain(sagas.iter().copied())
+        {
             if !all.contains(&c) {
                 all.push(c);
             }
@@ -251,6 +264,8 @@ impl Game {
         for &c in &all {
             if destroyed.contains(&c) && !walkers.contains(&c) {
                 self.destroy(c);
+            } else if sagas.contains(&c) && self.objs[c.i()].zone == Zone::Battlefield {
+                self.sacrifice(c);
             } else {
                 self.move_card(c, Zone::Graveyard, Pos::Top);
             }

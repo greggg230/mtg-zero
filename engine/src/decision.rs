@@ -142,6 +142,11 @@ pub enum DecisionKind {
     /// Name a card (`LIBRARY` = a definition in the namer's library sorted
     /// by definition, `Choice::Def`; `PASS` = a name of no card in it).
     NameCard,
+    /// Which face of the card chosen at priority to cast or play (CR
+    /// 712.11b, 712.12, 715.3): `NUMBER` 0 = its front face (the card
+    /// itself), 1 = its other face (a modal double-faced card's back face,
+    /// an Adventure). Asked only when both can be cast or played.
+    ChooseFace,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
@@ -169,7 +174,22 @@ pub enum Choice {
     /// library search): which physical card is never part of the choice
     /// (ENGINE.md 10).
     Def(DefId),
+    /// Priority: cast this card's other face (a modal double-faced card's
+    /// back face, an Adventure; CR 712.11b, 715.3).
+    CastFace(CardIdx),
+    /// Priority: play this card's other face, a land (CR 712.12).
+    PlayFace(CardIdx),
+    /// Priority: this card, whose two faces can both be cast or played: a
+    /// `ChooseFace` decision follows (`FACE_*` bits: what each face does).
+    Faces(CardIdx, u8),
 }
+
+/// `Choice::Faces` bits: the front face is cast / played, the other face
+/// is cast / played.
+pub const FACE_CAST: u8 = 1;
+pub const FACE_PLAY: u8 = 2;
+pub const OTHER_CAST: u8 = 4;
+pub const OTHER_PLAY: u8 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Opt {
@@ -323,6 +343,9 @@ impl Game {
             Choice::Trigger(k) => format!("trigger {k}"),
             Choice::Ability(i, slot) => format!("activate {}#{} {slot:?}", self.name(i), i.0),
             Choice::Def(d) => format!("a {}", self.db.def(d).name),
+            Choice::CastFace(i) => format!("cast the other face of {}#{}", self.name(i), i.0),
+            Choice::PlayFace(i) => format!("play the other face of {}#{}", self.name(i), i.0),
+            Choice::Faces(i, m) => format!("{}#{} (choose a face, {m:#b})", self.name(i), i.0),
         }
     }
 }

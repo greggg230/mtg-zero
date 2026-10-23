@@ -33,6 +33,9 @@ pub(crate) struct Repl {
     /// "If you would draw a card while your library has no cards in it,
     /// you win the game instead."
     pub wins_on_empty_draw: bool,
+    /// "You have no maximum hand size" (a rule of the game for you, CR
+    /// 402.2).
+    pub no_max_hand: bool,
 }
 
 /// A static ability's replacement effect -> `repl`.
@@ -81,7 +84,6 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     }) = s;
     l.deny("StaticAbility.tier_threshold", tier_threshold);
     l.deny("StaticAbility.room_half", room_half);
-    l.deny("StaticAbility.grants_no_max_hand_size", grants_no_max_hand_size);
     l.deny("StaticAbility.grants_creature_spells_uncounterable", grants_creature_spells_uncounterable);
     l.deny("StaticAbility.grants_spells_uncounterable", grants_spells_uncounterable);
     l.deny("StaticAbility.grants_ward_life_cost", grants_ward_life_cost);
@@ -96,6 +98,22 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     l.deny("StaticAbility.skips_your_draw_step", skips_your_draw_step);
 
     let scope = lower_scope(l, scope)?;
+    // "You have no maximum hand size" (CR 402.2): a rule for its controller.
+    if *grants_no_max_hand_size {
+        let other = *power_bonus != 0
+            || *toughness_bonus != 0
+            || !granted_keywords.is_empty()
+            || *must_attack_each_combat
+            || continuous_effect.is_some()
+            || replacement_effect.is_some()
+            || !opponents_enter_tapped_types.is_empty()
+            || *bonus_per_condition_count;
+        if !matches!(scope, Scope::This) || condition.is_some() || other {
+            l.unsupported("StaticAbility.grants_no_max_hand_size(with more)");
+        }
+        repl.no_max_hand = true;
+        return None;
+    }
     // A replacement effect (CR 614.1a) of the card itself: no condition, no
     // modification besides it.
     if let Some(r) = replacement_effect.as_deref() {

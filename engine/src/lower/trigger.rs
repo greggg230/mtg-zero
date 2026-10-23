@@ -19,7 +19,6 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         functions_in_graveyard,
     }) = t;
     l.deny("TriggeredAbility.requires_void", requires_void);
-    l.deny("TriggeredAbility.once_per_turn", once_per_turn);
     l.deny("TriggeredAbility.tier_threshold", tier_threshold);
     l.deny("TriggeredAbility.room_half", room_half);
     l.deny("TriggeredAbility.functions_in_graveyard", functions_in_graveyard);
@@ -44,6 +43,9 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::CardDiscarded) => Some(EventKind::CardDiscarded),
         Some(E::BecomesMonstrous) => Some(EventKind::BecomesMonstrous),
         Some(E::Blocks) => Some(EventKind::Blocks),
+        Some(E::Transforms) => Some(EventKind::Transforms),
+        Some(E::SagaChapter) => Some(EventKind::Chapter),
+        Some(E::DealsDamage) => Some(EventKind::DealsDamage),
         Some(E::DealsCombatDamageToCreature) => Some(EventKind::DealsCombatDamageToCreature),
         Some(E::CreatureTokensCreated) => Some(EventKind::CreatureTokensCreated),
         Some(other) => {
@@ -62,13 +64,24 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
             None
         }
     };
-    let ability = match effect {
+    let mut ability = match effect {
         Some(e) => lower_ability(l, e),
         None => {
             l.unsupported("TriggeredAbility.effect(missing)");
             return None;
         }
     };
+    // "You may [do this]. Do this only once each turn" (The Sensational
+    // She-Hulk): the optional action, not the trigger, is limited. ("This
+    // ability triggers only once each turn" is another rule, not built.)
+    if *once_per_turn {
+        match ability.program.first() {
+            Some(&crate::program::Op::May { who: crate::program::Who::You, skip }) if ability.modes.is_none() => {
+                ability.program[0] = crate::program::Op::Ext(crate::program::Ext::OnceMay { skip });
+            }
+            _ => l.unsupported("TriggeredAbility.once_per_turn(not \"you may ... only once each turn\")"),
+        }
+    }
     let (event, mut pred) = (ev?, pred?);
     // "When this creature dies" (CR 700.4): it was a creature as it left;
     // the IR's `dies` event covers any permanent put into a graveyard from
@@ -103,6 +116,7 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::If(_)
         | TrigPred::State(_)
         | TrigPred::Source(_)
+        | TrigPred::Chapter(_)
         | TrigPred::HostAttacksWithAnother => Vec::new(),
     }
 }
@@ -159,6 +173,14 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         }
         P::Source(nodes::Source { inner }) => Some(TrigPred::Source(lower_pred(l, inner)?)),
         P::HostAttacksWithAnother(nodes::HostAttacksWithAnother {}) => Some(TrigPred::HostAttacksWithAnother),
+        // A chapter ability (CR 714.2b).
+        P::ChapterReached(nodes::ChapterReached { n }) => Some(TrigPred::Chapter(l.int("ChapterReached.n", *n, 1, 20) as u8)),
+        // "When you draw your nth card in a turn": the drawing player (the
+        // draw event's subject, after the draw counts) has drawn n.
+        P::NthCardDrawnThisTurn(nodes::NthCardDrawnThisTurn { n }) => Some(TrigPred::Subject(
+            Slot::Player,
+            Filter::DrewThisTurn(l.int("NthCardDrawnThisTurn.n", *n, 1, 99) as u8),
+        )),
         P::StateBound(nodes::StateBound { inner }) => {
             let (c, intervening) = lower_state_pred(l, inner)?;
             Some(if intervening { TrigPred::If(c) } else { TrigPred::State(c) })

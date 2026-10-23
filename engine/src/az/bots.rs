@@ -166,6 +166,29 @@ impl Heuristic {
             }
             K::PutInHand | K::ChooseDiscard => Some(Self::best_card(g, d)),
             K::ChooseMode => d.options.iter().find(|o| o.action != act::PASS).map(|o| o.action),
+            // A land face while it has played no land this turn, else the
+            // costlier spell face (CR 712.11b, 712.12, 715.3).
+            K::ChooseFace => match g.agenda.last() {
+                Some(&Task::ChooseFace { card, mask, .. }) => {
+                    let front_land = mask & crate::decision::FACE_PLAY != 0;
+                    let other_land = mask & crate::decision::OTHER_PLAY != 0;
+                    let want_land = g.player(p).lands_played == 0;
+                    let mv = |front: bool| {
+                        if front {
+                            g.def_of(card).mana_value()
+                        } else {
+                            g.other_face(card).map_or(0, |f| g.db.def(f).mana_value())
+                        }
+                    };
+                    let front = if front_land || other_land {
+                        front_land == want_land
+                    } else {
+                        mv(true) >= mv(false)
+                    };
+                    Some(act::NUMBER + (!front) as u16)
+                }
+                _ => None,
+            },
             _ => None,
         };
         match pick {
@@ -181,15 +204,40 @@ impl Heuristic {
         let q = opp(p);
         let my_main = g.turn().active == p && g.turn().step.is_main() && g.stack().is_empty();
         if my_main {
-            if let Some(o) = d.options.iter().find(|o| matches!(o.choice, Choice::Play(_))) {
+            // A land card first, else a land face (an MDFC's, CR 712.12).
+            let land = d.options.iter().find(|o| matches!(o.choice, Choice::Play(_))).or_else(|| {
+                d.options.iter().find(|o| match o.choice {
+                    Choice::PlayFace(_) => true,
+                    Choice::Faces(_, m) => m & (crate::decision::FACE_PLAY | crate::decision::OTHER_PLAY) != 0,
+                    _ => false,
+                })
+            });
+            if let Some(o) = land {
                 return Some(o.action);
             }
         }
         let opp_spell_on_top = g.stack().last().is_some_and(|s| s.controller == q && matches!(s.kind, StackKind::Spell { .. }));
         let mut best: Option<(i32, u16)> = None;
+        // The faces each option would cast (an MDFC's back face, an
+        // Adventure: CR 712.11b, 715.3).
+        let mut casts: Vec<(&'static crate::db::CardDef, u16)> = Vec::new();
         for o in &d.options {
-            let Choice::Cast(c) = o.choice else { continue };
-            let def = g.def_of(c);
+            match o.choice {
+                Choice::Cast(c) => casts.push((g.def_of(c), o.action)),
+                Choice::CastFace(c) => casts.extend(g.other_face(c).map(|f| (g.db.def(f), o.action))),
+                Choice::Faces(c, m) => {
+                    if m & crate::decision::FACE_CAST != 0 {
+                        casts.push((g.def_of(c), o.action));
+                    }
+                    if m & crate::decision::OTHER_CAST != 0 {
+                        casts.extend(g.other_face(c).map(|f| (g.db.def(f), o.action)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (def, action) in casts {
+            let o = crate::decision::Opt { action, choice: Choice::Pass };
             let Some(ab) = &def.spell else {
                 // A permanent spell: in the main phase.
                 if my_main {

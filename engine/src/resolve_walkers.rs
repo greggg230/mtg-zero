@@ -509,7 +509,7 @@ impl Game {
         if self.permanents_of(opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
             return false;
         }
-        if self.players[p as usize].spells_cast >= 1 && self.battlefield.iter().any(|&c| self.abilities(c).one_spell_each_turn) {
+        if !self.may_cast_spells(p) {
             return false;
         }
         let classes = self.mana_classes(p, None);

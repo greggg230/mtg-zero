@@ -14,6 +14,8 @@
 //!   table has no line);
 //! * an emblem (CR 114) has the identity of the card that creates it (its definition is named
 //!   "<card> emblem"); the encoding keeps emblems in bags of their own;
+//! * a face (a double-faced card's back face, an Adventure: CR 712, 715) has its card's
+//!   identity (the card code's descriptor shows the face that is up);
 //! * [`UNKNOWN`] for anything else (a card outside the cube list, an unregistered token).
 //!
 //! Capacity [`D`] = 1024 identities: the code's digits are one-hots of 16, 8 and 8 (index =
@@ -107,6 +109,9 @@ fn compute(db: &CardDb) -> Vec<u16> {
                 reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
             } else if d.emblem {
                 d.name.strip_suffix(" emblem").and_then(|n| pos.get(n).copied()).unwrap_or(UNKNOWN)
+            } else if let Some(f) = d.front {
+                // A face (a back face, an Adventure) is its card (ENGINE.md 25).
+                pos.get(db.def(f).name.as_str()).copied().unwrap_or(UNKNOWN)
             } else {
                 pos.get(d.name.as_str()).copied().unwrap_or(UNKNOWN)
             }

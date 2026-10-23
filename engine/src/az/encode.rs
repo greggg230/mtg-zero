@@ -194,6 +194,7 @@ fn task_code(t: &Task) -> usize {
         Task::AsEnters { .. } => 16,
         Task::CastPay { .. } | Task::ActPay { .. } => 17,
         Task::AttackTarget { .. } => 19,
+        Task::ChooseFace { .. } => 20,
         _ => 18,
     }
 }
@@ -713,6 +714,7 @@ impl Game {
             }
             Task::DeclareAttackers { next } => x[ctx::NEXT_ATTACKER] = *next as f32 / 32.0,
             Task::AttackTarget { card: c } => card = Some((self.objs[c.i()].def, None, None)),
+            Task::ChooseFace { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
             Task::DeclareBlockers { i } => x[ctx::BLOCKER_INDEX] = *i as f32 / 16.0,
             Task::MulliganBottom { left, .. } => x[ctx::BOTTOMS_LEFT] = *left as f32 / 7.0,
             Task::ManaNow { src } => card = Some((self.objs[src.card.i()].def, Some(src.slot), None)),
@@ -756,8 +758,9 @@ pub fn layout_json(db: &'static CardDb) -> String {
     let ids = identity::identities(db);
     let mut cards: Vec<Option<String>> = vec![None; D];
     for (def, &i) in ids.iter().enumerate() {
-        // An emblem shares the identity of the card that makes it.
-        if i != identity::UNKNOWN && !db.def(def as DefId).emblem {
+        // An emblem shares the identity of the card that makes it, a face
+        // its card's.
+        if i != identity::UNKNOWN && !db.def(def as DefId).emblem && !db.is_face(def as DefId) {
             cards[i as usize] = Some(db.def(def as DefId).name.clone());
         }
     }

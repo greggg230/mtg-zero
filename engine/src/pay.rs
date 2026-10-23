@@ -232,7 +232,7 @@ impl Game {
             let def = self.objs[c.i()].def;
             for (i, ad) in self.abilities(c).activated.iter().enumerate() {
                 let Some(m) = ad.mana() else { continue };
-                if ad.instant_only || !self.activation_ready(p, c, ad) {
+                if ad.instant_only || !self.activation_ready(p, c, ad) || !self.has_activated(c, i) {
                     continue;
                 }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };

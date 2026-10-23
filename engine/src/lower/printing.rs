@@ -258,6 +258,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             conspiracy_rules,
             replacement_statics,
         } = p;
+        // Which face this printing is (set by the caller for a face); the
+        // printings lowered inside it (tokens, emblems) are cards.
+        let face = std::mem::take(&mut l.face);
         l.deny("CardPrinting.warp_cost", warp_cost);
         l.deny("CardPrinting.warp_cost_str", warp_cost_str);
         l.deny("CardPrinting.warp_additional_life_cost", warp_additional_life_cost);
@@ -269,7 +272,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
         l.deny("CardPrinting.station_threshold", station_threshold);
         l.deny("CardPrinting.stationed_keywords", stationed_keywords);
-        l.deny("CardPrinting.chapter_count", chapter_count);
         l.deny("CardPrinting.ward_cost", ward_cost);
         l.deny("CardPrinting.ward_cost_str", ward_cost_str);
         l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
@@ -348,16 +350,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.splice_onto", splice_onto);
         l.deny("CardPrinting.splice_cost", splice_cost);
         l.deny("CardPrinting.splice_cost_str", splice_cost_str);
-        l.deny("CardPrinting.mdfc_back_face", mdfc_back_face);
-        l.deny("CardPrinting.transform_back_face", transform_back_face);
-        l.deny("CardPrinting.face_colors", face_colors);
-        l.deny("CardPrinting.daybound", daybound);
-        l.deny("CardPrinting.nightbound", nightbound);
+        // Faces (`mdfc_back_face`, `transform_back_face`, `face_colors`,
+        // `daybound`, `nightbound`, `adventure_face`): below.
         l.deny("CardPrinting.class_level", class_level);
         l.deny("CardPrinting.class_levels", class_levels);
         l.deny("CardPrinting.split_faces", split_faces);
         l.deny("CardPrinting.grants_mayhem_to_graveyard", grants_mayhem_to_graveyard);
-        l.deny("CardPrinting.adventure_face", adventure_face);
         l.deny("CardPrinting.prepare_spell", prepare_spell);
         l.deny("CardPrinting.enters_prepared", enters_prepared);
         l.deny("CardPrinting.plot_cost", plot_cost);
@@ -372,7 +370,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_with_counter_per_kick", enters_with_counter_per_kick);
         l.deny("CardPrinting.evoke_cost", evoke_cost);
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
-        l.deny("CardPrinting.opponents_cant_cast_spells_during_your_turn", opponents_cant_cast_spells_during_your_turn);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
         l.deny("CardPrinting.grants_once_per_turn_graveyard_play_mv", grants_once_per_turn_graveyard_play_mv);
@@ -470,6 +467,21 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             _ => l.unsupported(format!("CardPrinting.color_indicator({c})")),
         }
     }
+    // A nonmodal back face's colours are its colour indicator's (CR 204,
+    // 712.8e: it has no mana cost); the IR gives them as `face_colors`.
+    match (face, face_colors) {
+        (super::Face::Back, Some(v)) => {
+            for c in v {
+                match letter_index(c) {
+                    Some(i) if i < 5 => indicator |= 1 << i,
+                    _ => l.unsupported(format!("CardPrinting.face_colors({c})")),
+                }
+            }
+        }
+        (super::Face::Back, None) => l.unsupported("CardPrinting.face_colors(missing on a back face)"),
+        (_, Some(_)) => l.unsupported("CardPrinting.face_colors(not a nonmodal back face)"),
+        (_, None) => {}
+    }
     let subs: Vec<u16> = subtypes.iter().map(|s| l.subtype(s)).collect();
     // {X} in the card's own mana cost (CR 107.3): announced on casting.
     let x_pips = {
@@ -528,6 +540,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     let saved_land_colors = l.land_colors;
     let saved_delayed = std::mem::take(&mut l.delayed);
+    let saved_latent = std::mem::take(&mut l.latent);
     l.land_colors = prod & crate::mana::COLORS;
     if prod != 0 && ty & types::LAND == 0 {
         // `produces` describes lands (CR 305.6 and land rules text).
@@ -593,9 +606,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     } else if life > 0 {
         l.unsupported("CardPrinting.produces_life_cost(no produces ability)");
     }
-    if activated.len() > 4 {
-        l.unsupported("CardPrinting.activated_abilities(more than 4)");
-    }
+    // (Checked again with the latent abilities, below.)
     // Lands pay only through their mana abilities here. The Python engine
     // lets a land without `mana_only_from_produces` pay one generic mana
     // anyway; a land with no mana ability in the IR relies on that (Strip
@@ -802,9 +813,38 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     triggers.extend(keyword_triggers);
     let trig_mask = triggers.iter().fold(0u32, |m, t| m | 1 << t.event as u32);
+    // Sagas (CR 714): the final chapter number is the greatest of its
+    // chapter abilities' (714.2d); the IR also states it (`chapter_count`),
+    // which must agree (ENGINE.md 3, rule 4a).
+    let chapters = {
+        let n = l.int("CardPrinting.chapter_count", *chapter_count, 0, 20) as u8;
+        let mut last = 0u8;
+        for t in &triggers {
+            let ch = chapter_of(&t.pred);
+            if ch.is_some() != (t.event == EventKind::Chapter) {
+                l.unsupported("TriggerPredicate:ChapterReached(on another event)");
+            }
+            last = last.max(ch.unwrap_or(0));
+        }
+        if n != last {
+            l.unsupported("CardPrinting.chapter_count(not its last chapter)");
+        }
+        if n > 0 && !subs.contains(&l.subtype("Saga")) {
+            l.unsupported("CardPrinting.chapter_count(not a Saga)");
+        }
+        n
+    };
     // Delayed triggered abilities come last (`delayed_base`).
     let delayed_base = triggers.len() as u8;
     triggers.extend(std::mem::replace(&mut l.delayed, saved_delayed));
+    // Latent activated abilities its effects grant it come last
+    // (`CardDef::latent`).
+    let latent = std::mem::replace(&mut l.latent, saved_latent);
+    let n_latent = latent.len() as u8;
+    activated.extend(latent);
+    if activated.len() > 4 {
+        l.unsupported("CardPrinting.activated_abilities(more than 4)");
+    }
     if triggers.len() > u8::MAX as usize {
         l.unsupported("CardPrinting.triggered_abilities(too many)");
     }
@@ -975,6 +1015,88 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
 
     l.land_colors = saved_land_colors;
+
+    // The card's other faces (CR 712, 715; ENGINE.md 25): each is lowered
+    // like a printing into a definition of its own (`l.faces`).
+    let (mut back, mut modal, mut adventure) = (None, false, None);
+    let mut back_nightbound = false;
+    if face != super::Face::Card {
+        l.deny("CardPrinting.transform_back_face(on a face)", transform_back_face);
+        l.deny("CardPrinting.mdfc_back_face(on a face)", mdfc_back_face);
+        l.deny("CardPrinting.adventure_face(on a face)", adventure_face);
+    } else {
+        let lower_face = |l: &mut Lowerer, f: &nodes::CardPrinting, face: super::Face| -> (u16, bool) {
+            l.face = face; // (taken by the face's lower_printing)
+            let d = lower_printing(l, f);
+            let night = d.nightbound;
+            l.faces.push(d);
+            ((l.faces.len() - 1) as u16, night)
+        };
+        match (transform_back_face.as_deref(), mdfc_back_face.as_deref()) {
+            (None, None) => {}
+            // A nonmodal double-faced card (CR 712.2). The IR repeats the
+            // front's mana cost on the back face (docs/ir_defects.md 9):
+            // the back face has none (its mana value is the front's, CR
+            // 712.8e).
+            (Some(cats::CardPrinting::CardPrinting(t)), None) => {
+                let mut t = t.clone();
+                let cats::ManaCost::ManaCost(m) = &*t.mana_cost;
+                let empty = nodes::ManaCost { generic: 0, colored: Vec::new(), x_pips: 0, hybrid: Vec::new(), phyrexian: Vec::new() };
+                if t.mana_cost == *mana_cost && t.mana_cost_str.is_empty() || *m == empty {
+                    t.mana_cost = Box::new(cats::ManaCost::ManaCost(empty));
+                } else {
+                    l.unsupported("CardPrinting.transform_back_face.mana_cost(not the front face's)");
+                }
+                let (k, night) = lower_face(l, &t, super::Face::Back);
+                l.faces[k as usize].front_mv = Some(cost.mana_value());
+                back = Some(k);
+                back_nightbound = night;
+            }
+            // A modal double-faced card (CR 712.3), possibly one whose face
+            // can transform: the IR then describes the back face twice,
+            // which must agree (ENGINE.md 3, rule 4a).
+            (t, Some(cats::CardPrinting::CardPrinting(m))) => {
+                if let Some(cats::CardPrinting::CardPrinting(t)) = t {
+                    if t != m {
+                        l.unsupported("CardPrinting.mdfc_back_face(differs from transform_back_face)");
+                    }
+                }
+                let (k, _) = lower_face(l, m, super::Face::ModalBack);
+                back = Some(k);
+                modal = true;
+            }
+        }
+        if let Some(cats::CardPrinting::CardPrinting(a)) = adventure_face.as_deref() {
+            // CR 715.2: an Adventure is an instant or sorcery spell.
+            let (k, _) = lower_face(l, a, super::Face::Adventure);
+            let ad = &l.faces[k as usize];
+            if ad.types & (types::INSTANT | types::SORCERY) == 0 || ad.types & types::PERMANENT != 0 {
+                l.unsupported("CardPrinting.adventure_face(not an instant or sorcery)");
+            }
+            if ty & types::PERMANENT == 0 {
+                l.unsupported("CardPrinting.adventure_face(not on a permanent card)");
+            }
+            if back.is_some() {
+                l.unsupported("CardPrinting.adventure_face(on a double-faced card)");
+            }
+            adventure = Some(k);
+        }
+    }
+    // Daybound and nightbound (CR 702.145) are on the two faces of one
+    // double-faced card.
+    match face {
+        super::Face::Card => {
+            if *daybound != back_nightbound || (*daybound && modal) {
+                l.unsupported("CardPrinting.daybound(without a nightbound back face)");
+            }
+            l.deny("CardPrinting.nightbound(on a front face)", nightbound);
+        }
+        super::Face::Back => l.deny("CardPrinting.daybound(on a back face)", daybound),
+        _ => {
+            l.deny("CardPrinting.daybound(on a modal face)", daybound);
+            l.deny("CardPrinting.nightbound(on a modal face)", nightbound);
+        }
+    }
     CardDef {
         name: name.clone(),
         types: ty,
@@ -1041,6 +1163,26 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         extra_mana_on_tap,
         emblem: false,
         grants_retrace: None,
+        back,
+        modal,
+        adventure,
+        front: None,
+        front_mv: None,
+        daybound: *daybound,
+        nightbound: *nightbound,
+        chapters,
+        opp_no_spells_your_turn: *opponents_cant_cast_spells_during_your_turn,
+        latent: n_latent,
+        no_max_hand: repl.no_max_hand,
+    }
+}
+
+/// The chapter number of a chapter ability's predicate (CR 714.2b).
+fn chapter_of(p: &TrigPred) -> Option<u8> {
+    match p {
+        TrigPred::Chapter(n) => Some(*n),
+        TrigPred::And(a, b) => chapter_of(a).or_else(|| chapter_of(b)),
+        _ => None,
     }
 }
 

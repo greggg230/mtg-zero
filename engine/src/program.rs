@@ -57,6 +57,12 @@ pub enum Amount {
     SourceCounters(Counter),
     /// The number of the controller's opponents who lost life this turn.
     OpponentsLostLife,
+    /// The number an earlier op of the program remembered (`Frame::x`): the
+    /// cards `ChooseDiscard` had discarded ("if you do, ... then draws a
+    /// card").
+    Remembered,
+    /// Half the cards in the controller's library, rounded up.
+    HalfLibraryUp,
 }
 
 /// Which objects an `Ext` op acts on.
@@ -435,6 +441,38 @@ pub enum Ext {
     /// "Until your next turn, you may cast sorcery spells as though they
     /// had flash."
     FlashSorceries,
+    // ---- M7b part 2: cards with more than one face (`faces.rs`) ----
+    /// Transform the source (CR 701.27), if it is still that permanent and
+    /// hasn't transformed since this ability was put on the stack
+    /// (701.27f).
+    TransformSource,
+    /// Exile the source, if it is still that permanent, then return it to
+    /// the battlefield transformed (CR 712.14a) under its owner's control
+    /// (or the controller's, `yours`); a card that isn't double-faced stays
+    /// in exile.
+    ExileReturnTransformed { yours: bool },
+    /// "You may [do this]. Do this only once each turn": like `Op::May`,
+    /// unless this ability of this source was done this turn (then
+    /// continue at `skip`, as if declined).
+    OnceMay { skip: u16 },
+    /// The controller may cast each legal target of `tgt` (a card in their
+    /// graveyard) this turn; if that spell would be put into a graveyard,
+    /// it is exiled instead.
+    GraveyardCastThenExile { tgt: u8 },
+    /// Until the controller's next turn, they have triggered ability `k` of
+    /// the source's card (its trigger `delayed_base + k`, with its own
+    /// event); it may trigger any number of times.
+    TriggerUntilYourNextTurn { k: u8 },
+    /// Each player in APNAP order exiles cards from the top of their
+    /// library until they exile a nonland card (revealed); the controller
+    /// may cast any number of those nonland cards without paying their
+    /// mana costs (CR 608.2g), one decision per card. Choice: yes/no.
+    EachExileUntilNonlandCastFree,
+    /// `who` gets n poison counters (CR 122.1f).
+    Poison { who: Who, n: Amount },
+    /// The controller may discard up to n cards (one decision per card,
+    /// `PASS` = no more), then draws as many as they discarded.
+    DiscardUpToThenDraw { n: u8 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -625,6 +663,7 @@ impl Op {
             Op::Ext(Ext::ReturnDiedWithCounter { .. }) => true,
             Op::Ext(Ext::JumpUnlessEventObj { .. }) | Op::Ext(Ext::GainControlOfEventSpellTargets { .. }) => true,
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
+            Op::Ext(Ext::Poison { who: w, n }) => who(w) || amt(n),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
             | Op::Ext(Ext::TapOrUntap { on })
             | Op::Ext(Ext::CounterOrDoubleOnSecond { on }) => matches!(on, On::EventObj),
@@ -657,6 +696,7 @@ impl Op {
             Op::Ext(Ext::JumpUnlessSourceNoCounters { to, .. }) => Some(to),
             Op::Ext(Ext::ExileTopMayCast { skip }) => Some(skip),
             Op::Ext(Ext::JumpUnlessEventObj { to, .. }) => Some(to),
+            Op::Ext(Ext::OnceMay { skip }) => Some(skip),
             _ => None,
         }
     }
@@ -674,7 +714,7 @@ pub struct Builder {
     pub reuse: Option<usize>,
     pub reuse_failed: bool,
     /// A divided amount among the targets of a requirement (CR 601.2d).
-    pub divide: Option<(u8, u8)>,
+    pub divide: Option<(u8, crate::db::DivAmount)>,
 }
 
 impl Builder {

@@ -38,6 +38,7 @@ impl Game {
             }
             Cond::LibraryEmpty => pl.library.is_empty(),
             Cond::YourTurn => self.turn.active == p,
+            Cond::LifeAtMostHalfStart => pl.life * 2 <= self.spec.starting_life,
             Cond::All(v) => v.iter().all(|c| self.cond_holds(c, p)),
         }
     }
@@ -77,6 +78,9 @@ impl Game {
             for (i, ad) in self.abilities(c).activated.iter().enumerate() {
                 if ad.mana().is_some() && !ad.instant_only {
                     continue; // paid with while paying a cost (ENGINE.md 18)
+                }
+                if !self.has_activated(c, i) {
+                    continue; // a latent ability it hasn't gained
                 }
                 let slot = AbilitySlot::Activated(i as u8);
                 if self.can_activate(p, c, ad, classes, sorcery_ok) {
@@ -196,6 +200,7 @@ impl Game {
             division: Vec::new(),
             attack_as: None,
             noted: Vec::new(),
+            flips: self.objs[card.i()].flips,
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });
