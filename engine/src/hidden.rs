@@ -12,6 +12,7 @@
 use crate::game::Game;
 use crate::ids::{CardIdx, DefId, PlayerId, Zone};
 use crate::rng::Rng;
+use crate::svec::SVec;
 
 /// A card was drawn (private to the drawer). Payload: its definition.
 pub const KEY_DRAW: u64 = 1;
@@ -187,7 +188,7 @@ impl Game {
                     j += 1;
                 }
                 if j - i > 1 {
-                    let mut bits: crate::svec::SVec<u8, 16> = h[i..j].iter().map(|c| self.objs[c.i()].known).collect();
+                    let mut bits: SVec<u8, 16> = h[i..j].iter().map(|c| self.objs[c.i()].known).collect();
                     bits.sort_unstable_by(|a, b| b.cmp(a));
                     for (k, &c) in h[i..j].iter().enumerate() {
                         self.objs[c.i()].known = bits[k];
@@ -224,12 +225,15 @@ impl Game {
     /// Cards whose identity `viewer` does not know, per owner: the other
     /// player's hand and both libraries, minus known cards.
     pub fn unknown_to(&self, viewer: PlayerId, owner: PlayerId) -> Vec<CardIdx> {
+        self.unknown_to_in(viewer, owner).to_vec()
+    }
+
+    /// [`unknown_to`](Self::unknown_to) in inline storage (no allocation for
+    /// up to 64 cards; ENGINE.md 17).
+    fn unknown_to_in(&self, viewer: PlayerId, owner: PlayerId) -> SVec<CardIdx, 64> {
         let pl = &self.players[owner as usize];
         let hand = if owner != viewer { &pl.hand[..] } else { &[][..] };
-        // (Sized once: a filtered chain has no useful size hint.)
-        let mut out = Vec::with_capacity(hand.len() + pl.library.len());
-        out.extend(hand.iter().chain(pl.library.iter()).copied().filter(|&c| !self.knows(viewer, c)));
-        out
+        hand.iter().chain(pl.library.iter()).copied().filter(|&c| !self.knows(viewer, c)).collect()
     }
 
     // ---- knowledge events (ENGINE.md 10) ----------------------------------
@@ -514,7 +518,7 @@ impl Game {
     pub fn determinize(&mut self, viewer: PlayerId, rng: &mut Rng) {
         let payer = self.payment_in_progress();
         for owner in 0..2u8 {
-            let mut slots = self.unknown_to(viewer, owner);
+            let mut slots = self.unknown_to_in(viewer, owner);
             let mut pinned: Vec<CardIdx> = Vec::new();
             if payer == Some(owner) && owner != viewer {
                 // A payment in progress may count on the payer's mana
@@ -531,15 +535,15 @@ impl Game {
                     !pin
                 });
             }
-            let mut defs: Vec<DefId> = slots.iter().map(|c| self.objs[c.i()].def).collect();
+            let mut defs: SVec<DefId, 64> = slots.iter().map(|c| self.objs[c.i()].def).collect();
             if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
                 rng.shuffle(&mut defs);
-                for (c, d) in slots.iter().zip(defs) {
+                for (c, &d) in slots.iter().zip(defs.iter()) {
                     self.objs[c.i()].def = d;
                 }
                 continue;
             }
-            self.resample_with_clouds(viewer, owner, &slots, &pinned, defs, rng);
+            self.resample_with_clouds(viewer, owner, &slots, &pinned, defs.to_vec(), rng);
         }
         self.rng = Rng::new(rng.next_u64());
         self.observer = Some(viewer);

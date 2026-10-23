@@ -38,6 +38,19 @@ impl<T: Copy + Default, const N: usize> SVec<T, N> {
         }
     }
 
+    /// Keep the elements for which `f` holds, in order.
+    pub fn retain(&mut self, mut f: impl FnMut(&T) -> bool) {
+        let mut k = 0;
+        for i in 0..self.len() {
+            let x = self[i];
+            if f(&x) {
+                self[k] = x;
+                k += 1;
+            }
+        }
+        self.truncate(k);
+    }
+
     #[inline]
     pub fn truncate(&mut self, n: usize) {
         if self.spilled {
