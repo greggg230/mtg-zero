@@ -1,6 +1,8 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7b part 1 (planeswalkers: loyalty abilities, attacking planeswalkers, damage to
+Status: M7b part 2 (cards with more than one face: transforming and modal double-faced cards,
+Adventures, Sagas, day and night, a split card; 394 supported cube cards; section 25),
+2026-10-23; M7b part 1 (planeswalkers: loyalty abilities, attacking planeswalkers, damage to
 planeswalkers, emblems and the command zone; 378 supported cube cards; section 24),
 2026-10-22; M7a (threats first: layers and continuous effects, counters, generic triggers,
 protection and combat restrictions, alternative costs, X, kicker, delve, casting from
@@ -515,7 +517,10 @@ attacks: `PLAYER` + 1 = the defending player, `OPP_PERM` = a planeswalker they c
 only when they control one), `ChooseExiled` (`EXILE` + k: a card in exile an effect picks, Karn's
 -1), `NameCard` (`LIBRARY`: a name among the namer's library cards, a definition at its first
 slot, `Choice::Def`; `PASS` = a name of no card there; Tamiyo's +1). A loyalty ability is
-activated like any other (`ACTIVATE` ids). There are 35 decision kinds; the context block holds
+activated like any other (`ACTIVATE` ids). M7b part 2: `ChooseFace` (`NUMBER` 0 = the card's
+front face, 1 = its other face: a modal double-faced card's back face, an Adventure, a split
+card's right half; asked after a `HAND`, `GRAVEYARD` or `EXILE` id whose card can be cast or
+played with either face, section 25.3). There are 36 decision kinds; the context block holds
 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
@@ -587,8 +592,21 @@ sorceries with flash, a discard and sacrifice shield), triggered mana abilities 
 rolls, casting during resolution, searching for any number of cards, naming a card, ninjutsu,
 retrace, "until your next turn".
 
-Supported cube cards: 378 (M7a: 360, M4b-2: 191, M4b-1: 133, M4a: 31); creatures 113 (M4b-2:
-20); planeswalkers 18. New in M7b (18): Chandra, Torch of Defiance; Comet, Stellar Pup; Dack
+Implemented (M7b part 2, section 25): faces as definitions of their own; transforming
+(701.27, 712.18) and exiling and returning transformed; modal double-faced cards (casting or
+playing either face); Adventures; a split card cast as either half; Sagas (lore counters,
+chapter abilities, 704.5s); day and night (daybound, nightbound); "whenever this deals
+damage"; poison counters; "do this only once each turn"; triggered abilities until your next
+turn; activated abilities a permanent gains ("this Saga gains ..."); connive; mayhem; graveyard
+spell discounts; divided X damage; "one or more" batch triggers; no maximum hand size.
+
+Supported cube cards: 394 (M7b part 1: 378, M7a: 360, M4b-2: 191, M4b-1: 133, M4a: 31);
+creatures 125 by their front faces (M7b part 1: 113, M4b-2: 20); planeswalkers 18 (Jace's and
+Tamiyo's back faces not counted). New in M7b part 2 (16): Brazen Borrower // Petty Theft; Cecil, Dark Knight; Concealing
+Curtains; Embereth Shieldbreaker // Battle Display; Etali, Primal Conqueror; Jace, Vryn's
+Prodigy; Jennifer Walters // The Sensational She-Hulk; Life // Death; Norman Osborn // Green
+Goblin; Outland Liberator; Shatterskull Smashing; Sink into Stupor; Tamiyo, Inquisitive
+Student; Ulvenwald Oddity; Urza's Saga; Witch Enchanter. New in M7b part 1 (18): Chandra, Torch of Defiance; Comet, Stellar Pup; Dack
 Fayden; Elspeth, Storm Slayer; Jace, Wielder of Mysteries; Jace, the Mind Sculptor; Kaito, Bane
 of Nightmares; Karn, Scion of Urza; Narset, Parter of Veils; Nissa, Who Shakes the World; Oko,
 Thief of Crowns; Tamiyo, Collector of Tales; Teferi, Hero of Dominaria; Teferi, Time Raveler;
@@ -651,8 +669,10 @@ Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED
 
 Not yet (later milestones; each is a blocker in the support report, never a silent no-op):
 battles, copies (of spells, token copies of nontoken permanents, "enters as a copy"; Saheeli,
-Sublime Artificer), transform and double-faced cards, adventures, ward, targeting abilities
-on the stack, the initiative, sagas, replacement and prevention effects beyond
+Sublime Artificer; Fable of the Mirror-Breaker's Reflection), meld, flip cards, convert,
+"cast transformed", read ahead, prepare (Emeritus of Abundance), fuse, "this ability triggers
+only once each turn", ward, targeting abilities on the stack, the initiative, replacement and
+prevention effects beyond
 the ones above, escalate and spree, multikicker, mana with spend restrictions, mana abilities
 whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic Star),
 granted triggered abilities (Kaldra Compleat), activated abilities in graveyards, naming a
@@ -680,7 +700,7 @@ Deliberate simplifications and limits (each is small and local to change):
   with repeats offers each multiset of modes once.
 * Events are recorded only for the kinds some permanent listens for (`trig_mask`); section
   23.2 lists the kinds.
-* M7a's own simplifications are in section 23.11; M7b's in section 24.7.
+* M7a's own simplifications are in section 23.11; M7b's in sections 24.7 and 25.10.
 * Waiting triggers with the same definition and ability are offered once in the ordering
   decision (their order cannot matter while effects ignore their source's per-object state).
 * Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide offers the
@@ -774,6 +794,25 @@ Deliberate simplifications and limits (each is small and local to change):
   begins and doesn't check the loyalty condition again.
 * M7b: Tezzeret, Cruel Captain's -7 emblem: Python defers it (it has no emblems); here every
   emblem of the 18 planeswalkers exists (CR 114).
+* M7b part 2: "transform this" (701.27f). Python's `TransformSource` transforms the permanent
+  every time it resolves; here an ability of a permanent transforms it only if it hasn't
+  transformed since the ability was put on the stack.
+* M7b part 2: "do this only once each turn" (603.2h, The Sensational She-Hulk). Python's
+  `once_per_turn` gate lets the ability trigger once a turn, whether or not the player then
+  did it; here a declined trigger doesn't count, and once the player has done it the ability
+  doesn't trigger again that turn.
+* M7b part 2: a transforming card's back face has no mana cost here (its mana value is the
+  front face's, 712.8e). Python's back-face printing carries the front's mana cost (the IR
+  copies it, docs/ir_defects.md 9); the mana value is the same in both.
+* M7b part 2: mayhem (702.187b, Green Goblin): Python stamps a card with the turn it was
+  discarded; here it is the graveyard object discarded this turn, so a card that left the
+  graveyard and came back that turn (a new object, 400.7) has no mayhem.
+* M7b part 2: Etali, Primal Conqueror's free casts are one `ChooseExiled` decision per spell,
+  in any order (608.2g); Python asks yes or no per card in APNAP order.
+* M7b part 2 (a fix to this engine, not a Python difference): a spell whose targets are all
+  illegal (608.2b) goes to its owner's graveyard without resolving. M7a's engine finished it
+  as if it had resolved: a buyback spell went back to its owner's hand (702.27a applies only as
+  the spell resolves).
 
 ## 15. Tests
 
@@ -803,6 +842,11 @@ they isolate one keyword or trigger each.
 | `tests/cards_m7b_walkers3.rs` | M7b hidden information: the decisions of Tamiyo's naming, Jace's look, a search for any number of cards, Chandra's cast from exile and Karn's opponent choice survive determinize; a retrace cast in progress keeps its land card |
 | `tests/cards_m7b_walkers_audit.rs` | the any-target audit (24.9): removal and damage that can hit planeswalkers, "each creature" effects that can't, voting, edicts, Psychic Frog and Questing Beast, Clarion Conqueror, Mox Amber, Subtlety |
 | `tests/cards_m7b_tests_lands.rs`, `cards_m7b_tests_mana.rs`, `cards_m7b_tests_creatures.rs`, `cards_m7b_tests_creatures2.rs`, `cards_m7b_tests_spells.rs`, `cards_m7b_tests_edges.rs` | M7b: a test for each of the 118 supported cards no earlier test named (`python tools/untested_cards.py` lists the supported cards no card test names; 0 left), each against its Oracle text: the land cycles table-driven (fetch lands, surveil lands, fast lands, horizon lands, shock lands, duals, Triomes and tri-lands with cycling, Verges), Tolarian Academy, Abandoned Air Temple, Talismans, Moxen, mana creatures, artifacts, creatures and spells; rules edges: 611.2c (Harvester of Misery, Spectacular Spider-Man, Ravenous Robots), 610.3c (Touch the Spirit Realm), 601.2g-h (Crop Rotation, Natural Order, Goblin Engineer sacrificing the permanent that paid), 605.3a (Basalt Monolith paying its own untap), 502.3, 122.1d (stun), 701.16a, 702.34 (granted flashback ends; 702.34a, Reprieve on a flashed-back spell exiles it), 608.2n (Echo of Eons isn't shuffled into its own library), 614.1c (lands put onto the battlefield by Crop Rotation), 111.7 (a flickered token) |
+| `tests/rules_faces.rs` | M7b part 2, on custom double-faced test cards (Test Flipper, Test Walker Flip, Test Not Flipper, Test Werewolf): 712.18 (the same object: counters, damage, effects), 701.27f, 701.27c, 306.5b / 704.5i (transformed into a planeswalker), 712.8a (a back face dies as its front card), a transform is public, 702.145b (daybound) |
+| `tests/cards_m7b_faces.rs` | M7b part 2, the transforming double-faced cards: Ulvenwald Oddity, Concealing Curtains, Cecil, Jace, Vryn's Prodigy (712.14a; every loyalty ability), Tamiyo, Inquisitive Student (every loyalty ability), Etali (608.2g in any order; 704.5c poison), Outland Liberator (731.2, 702.145b), Jennifer Walters |
+| `tests/cards_m7b_faces2.rs` | M7b part 2, MDFCs and Adventures: Shatterskull Smashing (712.12, divided X damage), Sink into Stupor, Witch Enchanter, The Sensational She-Hulk (712.11b, 603.2h), Brazen Borrower (715.3d; countered and fizzled Adventures), Embereth Shieldbreaker; hidden information (a face choice survives determinize, a card on an adventure is public, no face up in a hidden zone) |
+| `tests/cards_m7b_faces3.rs` | M7b part 2, Sagas: Urza's Saga (714.2b, 714.3a, 714.3c, latent abilities), 704.5s (not while the last chapter waits), Fable of the Mirror-Breaker on a copy of its IR without Reflection's copy ability |
+| `tests/cards_m7b_faces4.rs` | M7b part 2: Norman Osborn // Green Goblin (701.50 connive, mayhem, graveyard discount), Life // Death (709.3), Ajani on a renamed copy of its IR (batch triggers, the -4), the encoding of faces in every world of the viewer |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
@@ -828,7 +872,10 @@ game count (default 300). A failing game prints its seed; `FUZZ_FIRST=s FUZZ_GAM
 FUZZ_LOG=1` reruns it with the game log in the panic message. M4b-2: 20,000 games in release,
 no failure (see section 17 for the time). M7a: 20,000 games over the 360 cards, no failure.
 M7b: 20,000 games over the 378 cards, no failure; on the way it found two faults, both fixed
-(24.10).
+(24.10). M7b part 2: 20,000 games over the 394 cards, no failure; two faults found on the way,
+both fixed (25.9). The check also asserts that no face is up in a hidden zone.
+`POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
+earlier milestone's games (section 17).
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
@@ -878,14 +925,14 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 `tests/perf.rs`; random decks of every supported card as in the fuzzer, mulligans on,
 `auto_single` on.
 
-| Measure | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
-|---|---|---|---|---|---|
-| Random play | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
-| Per exposed decision (`apply`, running to the next decision) | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
-| `Game::clone` (mean over mid-game states) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
-| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
-| `legal_actions` (copies cached ids) | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+| Measure | M7b part 2 (394 cards; pinned, below) | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
+|---|---|---|---|---|---|---|
+| Random play | 635 games/s (M7b part 1's code, the same day: 648 on its own pool) | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
+| Per exposed decision (`apply`, running to the next decision) | 6.97 us (226 decisions per game); on M7b part 1's pool 7.01 us against its code's 6.81 us, the same 906,266 decisions | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
+| `Game::clone` (mean over mid-game states) | 1.27 us (6,484 states); 1,040 B (part 1's code the same day: 1.24 us) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
+| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
+| `legal_actions` (copies cached ids) | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
+| Fuzzer, 20,000 games, release | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -899,6 +946,21 @@ static abilities of emblems walked by index instead of a chained iterator, a per
 type-changing statics looked for only while one is on the battlefield (`n_self_types`), the
 SBA test reading a permanent's types once, Teferi's lock looked for only for a card it could
 stop, `Obj` back to 64 bytes.
+
+M7b part 2's column is measured the same way, best of four, interleaved with M7b part 1's
+code (main at dba496d) on the same machine the same day; this machine measured part 1's code at
+6.81-6.94 us per decision that day (6.3 us the day before), so only same-day numbers compare.
+On part 1's card pool (`POOL_EXCLUDE` leaves the 16 new cards and the custom face test cards
+out of the random decks: exactly the same games, 906,266 decisions both) part 2's code takes
+7.01 us per decision against 6.81 us, about +3%. The face checks first cost about +5%; four of
+them were taken off the hot paths: a card's other-face options are computed only for a card
+that has another face (`CardDef::other_face`), the Saga SBA looks only at enchantments, the
+spell locks (Archon of Emeria, Jennifer Walters) are checked only when a spell could be cast,
+and a face's timing is checked before the game is copied to evaluate it. A stubbed build
+without the face checks matched part 1's time, so the rest is those checks (the lore counter
+turn-based action, "deals damage" events, the day and night checks). `Obj` stays 64 bytes;
+`Game` grew from 928 to 1,040 bytes (four vectors: optional actions done this turn, cards
+discarded this turn, temporary triggers, spells exiled instead of going to a graveyard).
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
@@ -1038,6 +1100,15 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
   faces carrying the front face's mana cost, sentinels (Fastbond's 1000000, Pest Infestation's
   `count_max: 0`, Wizard's Rockets' `amount: 0`), target requirements that exist only in Python
   methods. The 118 cards first tested in M7b showed no IR defect and no engine bug.
+* M7b part 2 IR findings (25.11, docs/ir_defects.md 9, 13, 14): Ajani, Nacatl Avenger's 0
+  flattens a reflexive trigger into an `IfCondition` (confirmed; the card is blocked by
+  `lower::IR_DEFECTS` and tested on a copy); transforming back faces repeat the front's mana
+  cost (suspected; the lowering reads it as none); `TriggeredAbility.once_per_turn` stands for
+  both "do this only once each turn" (603.2h, She-Hulk) and "this ability triggers only once
+  each turn" (Enduring Innocence), told apart here by the shape of the effect (suspected).
+  The modal double-faced cards that can also transform (Jennifer Walters, Norman Osborn)
+  describe their back face twice, as `mdfc_back_face` and `transform_back_face`; the two agree
+  (the lowering checks it). Apart from these, the 16 cards' IR matches their Oracle text.
 * Lowering: the `*_str` cost twins (`mana_cost_str`, `kicker_cost_str`, `mana_str`, ...) are
   ignored as display forms; checking them against the structured cost (rule 4a, section 3) would
   have caught the lost `{C}`.
@@ -1603,6 +1674,15 @@ emblems); two globals per player in the spare floats. `mtgz/az/layout_v3.json` a
 registry must be regenerated (`MTGZ_WRITE_LAYOUT=1` and `MTGZ_WRITE_TOKENS=1 cargo test -p
 engine --test az ...`; not run on the M7b branch).
 
+M7b part 2 (faces, section 25.8) adds fields only in spare floats (still 26,500): the card
+code's spare float (a face other than the front is up), permanent status 45-46 (lore counters,
+back face up), hand status 6-7 (which face the slot's `HAND` id casts or plays), task code 20
+and four context floats (`ChooseFace` and its mask; 11 context floats stay spare), four
+globals per player (poison, cards on an adventure, temporary triggered abilities, no maximum
+hand size) and two game globals (day, night). The `cards` list gains the 16 new cards (faces
+share their card's identity and are skipped); no new token kind. `layout_v3.json` must be
+regenerated (not run on the branch).
+
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
 M7a grew the supported cube from 191 to 360 cards, creatures from 20 to 113 (threats, i.e.
@@ -2042,3 +2122,261 @@ them. `cards_m7b_walkers_audit.rs` tests one card of each kind.
   progress whose land card the other player's determinize resampled away (the cost then had
   nothing to discard): `exile_filters_in_progress` now keeps retrace's land card in that hand,
   like the other hand cards a cost in progress may still take.
+
+## 25. Cards with more than one face (M7b part 2)
+
+M7b part 2 grew the supported cube from 378 to 394 cards: transforming double-faced cards,
+modal double-faced cards (MDFCs), Adventures, Sagas, day and night, and a split card. The 16:
+Brazen Borrower // Petty Theft; Cecil, Dark Knight; Concealing Curtains; Embereth Shieldbreaker
+// Battle Display; Etali, Primal Conqueror; Jace, Vryn's Prodigy; Jennifer Walters // The
+Sensational She-Hulk; Life // Death; Norman Osborn // Green Goblin; Outland Liberator;
+Shatterskull Smashing; Sink into Stupor; Tamiyo, Inquisitive Student; Ulvenwald Oddity; Urza's
+Saga; Witch Enchanter. Every card's IR, each face, was read against its Oracle text. Four cards
+with faces stay blocked (25.11).
+
+Rule numbers are those of the Comprehensive Rules effective 2026-09-25: transform is 701.27
+(701.28 is convert), day and night 731. Older documents (and the M7b plan) say 701.28 and 726
+for the same rules; tests and comments cite the current numbers.
+
+### 25.1 A face is a definition
+
+* Each face (a double-faced card's back face, an Adventure, a half of a split card) is lowered
+  like a printing into a `CardDef` of its own: `lower_card` returns the card and its faces,
+  and `CardDb::from_cards` stores the faces after the tokens. A face knows its card
+  (`CardDef.front`); the card names its faces (`back`, `modal` for an MDFC, `adventure`,
+  `halves`); a transforming card's back face has the front as its `back`, so transforming is
+  the same both ways. `CardDb::is_face`, `CardDef::card_def`, `CardDef::other_face`.
+* An object's `def` is the face that is up. Outside the battlefield and the stack a card has
+  only its front face's characteristics (712.8a, 715.4, 709.4): `move_card` turns it back as it
+  goes to any other zone (what left keeps its face as last known information). A spell that
+  becomes a permanent keeps the face it had on the stack (712.13). A card put onto the
+  battlefield from elsewhere comes front face up (712.14) unless the effect says "transformed"
+  (712.14a; `Game.entering_face`), it is daybound and it is night (702.145b), or it is an MDFC's
+  land face being played (712.12).
+* A transforming card's back face has no mana cost; its mana value is the front face's mana
+  value (712.8e; `CardDef.front_mv`). Its colours come from its colour indicator
+  (`face_colors`, required on such a face). An MDFC's back face has a mana cost of its own
+  (712.8f). A split card has its halves combined everywhere but the stack (709.4: the lowering
+  checks that the IR's card-level cost and types are the sum and the union of the halves').
+* A face has its card's identity (`identity.rs`): the token registry and the layout's card
+  list skip faces, and the card code's descriptor shows the face that is up (25.8). Hidden-zone
+  keys and knowledge use the card, not the face.
+* **The back face's mana cost** (docs/ir_defects.md 9). The IR repeats the front face's mana
+  cost on a transforming card's back face (with an empty `mana_cost_str`). The lowering reads
+  exactly that shape, or an empty cost, as "no mana cost" and records the front's mana value
+  in `front_mv`; any other back-face cost is a blocker
+  (`CardPrinting.transform_back_face.mana_cost(not the front face's)`). No card can cast a
+  transforming card's back face, so the mana cost itself is the only difference; the mana
+  value is the same either way.
+
+### 25.2 Transforming (CR 701.27, 712.18)
+
+* `Game::transform` turns the other face up. The permanent stays the same object (712.18):
+  counters, damage, attachments, tapped and combat status, summoning sickness and every effect
+  on it remain. Nothing happens to a token or a single-faced permanent (701.27c), when the
+  other face is an instant or sorcery face (701.27d, 712.10), or to a daybound or nightbound
+  permanent except through day and night (702.145b, e). A permanent that transforms into a
+  planeswalker gets no loyalty counters (306.5b is about entering), so with no other loyalty it
+  is put into the graveyard by 704.5i (a custom test card; no cube card does it).
+* 701.27f: an activated or triggered ability of a permanent transforms it only if it hasn't
+  transformed since the ability was put on the stack. `Obj.flips` counts its transformations;
+  `StackItem.flips` and `Frame.flips` keep the count from when the ability was put on the
+  stack (`Ext::TransformSource`).
+* "Exile it, then return it to the battlefield transformed under its owner's control"
+  (Jace, Vryn's Prodigy; Tamiyo, Inquisitive Student; Ajani: `Ext::ExileReturnTransformed`): a new object with its back face up (712.14a); a
+  planeswalker back face enters with its printed loyalty. A token, or a card that isn't
+  double-faced, stays in exile.
+* "When this creature transforms into Revealing Eye" (701.27e): a `Transforms` event.
+
+### 25.3 Casting and playing a face (CR 709.3, 712.11-12, 715.3)
+
+* At priority, a card whose other face can be cast or played (an MDFC's back face, an
+  Adventure, a split card's right half) gets one option on its `HAND`, `GRAVEYARD` or `EXILE`
+  id: `Cast` / `Play` for its front face, `CastFace` / `PlayFace` for the other face, or, when
+  both faces can be used, `Faces(card, mask)` followed by a `ChooseFace` decision (`NUMBER`
+  0 = the front face, 1 = the other). The mask bits (`FACE_CAST`, `FACE_PLAY`, `OTHER_CAST`,
+  `OTHER_PLAY`) say what each face does; the task keeps them, so a refreshed decision asks the
+  same question. A split card is always cast as one of its halves (709.3: `Cast` = the left
+  half).
+* Only the face to be cast is evaluated (712.11c, 715.3a, 709.3a): its timing, cost,
+  additional costs and targets come from that face (`face_castable` evaluates them on a copy
+  of the game with that face up). How the card may be cast from where it is comes from the card
+  as it is there (its front: Wrenn and Six's retrace for "instant and sorcery cards" doesn't
+  reach an adventurer creature card; a fuzz find, 25.9).
+* Playing an MDFC's land face is a land play like any other: it uses the land drop, enters
+  with that face up (712.12), and its "as this enters" choice (pay 3 life or enter tapped)
+  is the face's.
+* An Adventure that resolves is exiled instead of going to the graveyard (715.3d), with a
+  permission (`PermKind::Adventure`, no time limit) to cast the card from exile, but not as an
+  Adventure. A countered Adventure, or one whose targets are all illegal (608.2b: it doesn't
+  resolve), goes to its owner's graveyard. A flashback Adventure would be exiled by flashback's
+  rule without the permission (no card does it).
+* Two spell locks now check every face: Archon of Emeria's "one spell each turn" and Jennifer
+  Walters' "your opponents can't cast spells during your turn" (`may_cast_spells`); a locked
+  player keeps the land faces.
+
+### 25.4 Sagas (CR 714)
+
+* `CardDef.chapters` is the final chapter number (714.2d); chapter abilities are triggered
+  abilities on a `Chapter` event (714.2b: one event per chapter number the lore counters
+  reach, so two counters at once trigger two chapters, in order).
+* A Saga enters with a lore counter (714.3a, a replacement: its chapter I triggers); as its
+  controller's precombat main phase begins, they put a lore counter on each Saga they control
+  (714.3c, a turn-based action before the "beginning of precombat main phase" triggers).
+* 704.5s: a Saga with at least its final chapter number of lore counters is sacrificed once
+  no chapter ability of it is waiting to be put on the stack or on the stack. It is a
+  sacrifice ("whenever you sacrifice" sees it), and a Saga that lost all its abilities isn't
+  sacrificed.
+* Urza's Saga's chapters I and II make it gain activated abilities ("{T}: Add {C}", "{2},
+  {T}: Create a 0/0 Construct ..."): the lowering stores them as *latent* activated abilities
+  of the card (`CardDef.latent`, the last ones in `activated`), and the chapter abilities
+  create an effect (`Mod::GainLatent(k)`) that switches one on while the Saga stays. Chapter
+  III's "an artifact card with mana cost {0} or {1}" is `Filter::ManaCostIn`.
+
+### 25.5 Day and night (CR 731, 702.145)
+
+* `Game.day`: `None` (the game starts with neither), `Some(true)` day, `Some(false)` night.
+* When a daybound permanent appears and it is neither, it becomes day (702.145d); a nightbound
+  one, with no daybound one, makes it night (702.145g). As it becomes night, daybound
+  permanents transform; as it becomes day, nightbound ones do (702.145c, f; at once, not a
+  state-based action). A daybound card put onto the battlefield at night enters transformed
+  (702.145b).
+* As the untap step's second part (731.2), if it is day and the previous turn's active player
+  cast no spells that turn, it becomes night; if it is night and they cast two or more, it
+  becomes day.
+* Daybound and nightbound permanents transform only through day and night (702.145b, e; the
+  custom Test Werewolf has a transform ability that does nothing).
+
+### 25.6 Other rules and effects added
+
+* **"Whenever this deals damage"** (Cecil): a `DealsDamage` event per damage dealt by an
+  effect, and one per source for all the combat damage it deals in a step (510.2: dealt at
+  once). Cecil's "then if your life total is less than or equal to half your starting life
+  total" is `Cond::LifeAtMostHalfStart`.
+* **Poison** (122.1f, 704.5c): `Player.poison`; ten or more lose the game. Etali, Primal
+  Sickness: "they get that many poison counters" (`Ext::Poison`).
+* **"You may ... Do this only once each turn"** (603.2h, The Sensational She-Hulk):
+  `Ext::OnceMay` asks like `Op::May`; once the player does it, the ability doesn't trigger
+  again that turn (`Game.done_once`). A declined trigger doesn't count.
+* **"Until your next turn, whenever ..."** (Tamiyo, Seasoned Scholar's +2): a temporary
+  triggered ability of its controller (`Game.temp_triggers`, `TempTrigger`), ending as their
+  next turn begins (611.2b). Its definition is among the card's delayed abilities.
+* **Casting a graveyard card this turn, exiled instead of going to a graveyard** (Jace,
+  Telepath Unbound's -3): `PermKind::CastThenExile` and `Game.gy_exile` (the spell, wherever it
+  would go to a graveyard from the stack, goes to exile; a countered spell returned to hand
+  isn't exiled).
+* **Etali's "each player exiles cards from the top of their library until they exile a nonland
+  card; you may cast any number of spells from among the nonland cards exiled this way without
+  paying their mana costs"**: the exiles first (each card revealed), then a `ChooseExiled`
+  decision per spell (`PASS` = no more), so they are cast in any order, each at once while the
+  rest of the effect waits (608.2g, as Chandra's +1, 24.4).
+* **Connive** (701.50, Norman Osborn), **mayhem** (702.187b, Green Goblin's "each nonland card
+  in your graveyard has mayhem"; `CastFrom::Mayhem`, `Game.discarded` holds the graveyard
+  objects discarded this turn) and **"spells you cast from your graveyard cost {2} less"**
+  (`CardDef.gy_spell_discount`; `StackItem.origin` records the zone a spell was cast from).
+* **Divided X damage** (Shatterskull Smashing: "X damage divided as you choose among up to two
+  target creatures and/or planeswalkers; if X is 6 or more, twice X damage instead"):
+  `DivAmount::X { double_at }`; at most as many targets as damage.
+* **"Whenever one or more other Cats you control die"** (Ajani): a batch trigger
+  (`TrigPred::Batch`) triggers once per simultaneous event. **"Each opponent chooses an
+  artifact, a creature, an enchantment and a planeswalker from among the nonland permanents
+  they control, then sacrifices the rest"** (Ajani's -4, `Ext::KeepOneOfEachType`). **"If you
+  control a red permanent other than Ajani"** (`Cond::ControlOtherOfColor`). Ajani is blocked by
+  its IR (25.11); these are tested on a copy.
+* Also: "draw cards equal to half the number of cards in your library, rounded up"
+  (`Amount::HalfLibraryUp`), an emblem "you have no maximum hand size" (402.2;
+  `CardDef.no_max_hand`), "discard up to N cards, then draw that many" (`Ext::DiscardUpToThenDraw`),
+  "that player draws a card" only if a card was discarded (`Amount::Remembered`), "target
+  opponent mills five" from an emblem, "lands you control become 1/1 creatures until end of
+  turn" (Life), a +1/+1 counter on each permanent of a kind, "-1/-0 until your next turn"
+  (Jace's +1), "return target instant or sorcery card; if it's green, add one mana of any
+  colour" (Tamiyo's -3), the third card drawn in a turn (Tamiyo).
+* **A spell whose targets are all illegal** (608.2b) is put into its owner's graveyard without
+  resolving. M7a's engine sent it through the resolution's last step, which put a buyback
+  spell into its owner's hand (702.27a applies as the spell resolves) and would have put an
+  Adventure into exile.
+
+### 25.7 Decisions and the bot
+
+One new kind (36 in all): `ChooseFace` (`NUMBER` 0 = the front face, 1 = the other face),
+asked after a priority id whose card can be cast or played with either face. The priority
+choices `CastFace`, `PlayFace` and `Faces` use the existing `HAND`, `GRAVEYARD` and `EXILE`
+ids. Everything else uses existing kinds: Etali's casts are `ChooseExiled` (`PASS` = no
+more), She-Hulk's "you may" is a `YesNo`, Ajani's -4 keeps are `ChoosePermanent`, connive's
+discard and "discard up to" are `Discard` (`PASS` = stop, for "up to"). The heuristic bot
+(`az/bots.rs`) plays a land face when it has played no land this turn and otherwise casts the
+costlier face; it counts land faces as lands and casts faces by the same rule as cards.
+
+### 25.8 Encoding (layout v3, unchanged width, 26,500 floats)
+
+Every new field uses spare floats of layout v3; no width changed.
+
+* Card code (52): float 51 (the spare one) = a face other than the front is up (a transformed
+  permanent, an MDFC's back face, an Adventure or a split half on the stack). The identity
+  digits are the card's; the descriptor (types, colours, mana value, P/T, loyalty) is the
+  face's.
+* Permanent status (48): `perm::LORE` (45) = lore counters / 4; `perm::BACK_FACE` (46) = a face
+  other than the front is up.
+* Hand slots (60): status floats 6 and 7 = what the slot's `HAND` id does for the viewer
+  deciding now: casts or plays the front face, the other face (both: a face choice follows).
+* Context: task code 20 = `ChooseFace` (its card = the card); `ctx::FACES` (4 floats) = the
+  mask bits (front cast, front played, other face cast, other face played). 11 context floats
+  stay spare.
+* Globals per player: poison / 10, cards on an adventure / 4, temporary triggered abilities /
+  2, no maximum hand size; and day, night (globals 104, 105).
+* No new token kind (the Construct, Clue and Cat Warrior lines already exist). The `cards` list
+  of `layout_v3.json` gains the 16 newly supported cards (faces are skipped), so the file must
+  be regenerated (`MTGZ_WRITE_LAYOUT=1`; not run on this branch).
+
+### 25.9 Hidden information and fuzzing
+
+* A face choice from a hand: the card is revealed when its `Faces` id is chosen (it becomes
+  public a decision later anyway, cast or played), so the refreshed `ChooseFace` decision of a
+  determinized world finds the same card (`choosing_a_face_reveals_the_card_and_survives_
+  determinize`). `CastFace` and `PlayFace` move the card at once.
+* A card on an adventure is in exile face up with a public permission; its twin in the hand
+  stays hidden (`a_card_on_an_adventure_is_public_and_its_hand_twin_is_not_cr_715`).
+* No face is up in a hidden zone: `testkit::check_invariants` checks it after every fuzz
+  action, with the static-ability counters (`n_static`, `n_self_types`) that `set_face` keeps
+  right.
+* Etali's exiles are revealed one by one (`KEY_REVEAL`); a transform is public; Jace's -9
+  emblem mills face up; Tamiyo's -7 draws are private like any draw.
+* The encoding of faces is the same in every world of the viewer
+  (`the_encoding_of_faces_is_the_same_in_every_world_of_the_viewer`).
+* The fuzzer found two faults on the way, both fixed: an adventurer creature card in a
+  graveyard was castable as an Adventure through Wrenn and Six's retrace (the route came from
+  the face, not the card in its zone), and an MDFC played as its land face was keyed and
+  forgotten by its face definition, not its card (the other player's cloud kept the card in
+  that hand).
+
+### 25.10 Simplifications
+
+* `face_castable` evaluates a face on a clone of the game (its timing first, without one): the
+  cast checks read the card's definition throughout. Correct, and only for cards with another
+  face.
+* "Do this only once each turn" is built for the "you may" form only; "this ability triggers
+  only once each turn" (Enduring Innocence) is another rule and a blocker
+  (`TriggeredAbility.once_per_turn(not "you may ... only once each turn")`).
+* Mayhem is tied to the graveyard object discarded this turn: a card that left the graveyard
+  and came back is a new object (400.7) and has no mayhem.
+* Split cards: only Life // Death (no fuse, no split permanent). Meld, flip cards, convert,
+  "cast transformed", read ahead and prepare are not built.
+* Latent activated abilities: at most four activated abilities per permanent in all (the
+  `ACTIVATE` slots), checked by the lowering.
+
+### 25.11 Blocked
+
+* Fable of the Mirror-Breaker // Reflection of Kiki-Jiki: Reflection's "create a token that's a
+  copy of another target nonlegendary creature you control" (token copies of nontoken
+  permanents, part 3). Its chapters and the transform are tested on a copy of its IR without
+  that ability (`cards_m7b_faces3.rs`).
+* Ajani, Nacatl Pariah // Ajani, Nacatl Avenger: its IR flattens the 0's reflexive trigger
+  ("When you do, if you control a red permanent other than Ajani, he deals damage ... to any
+  target", 603.12) into an `IfCondition` of the loyalty ability, whose target would be chosen
+  on activation. Blocked by `lower::IR_DEFECTS`
+  (`IR:IfCondition(a reflexive trigger flattened: Ajani's 0)`, docs/ir_defects.md 13); every
+  ability is tested on a renamed copy of its IR (`cards_m7b_faces4.rs`).
+* Aang, Swift Savior // Aang and La, Ocean's Fury: waterbend (`ActivationCost.waterbend`, a
+  cost that taps artifacts and creatures for mana) and airbend (`Effect:Airbend`).
+* Emeritus of Abundance // Regrowth: prepare (`CardPrinting.enters_prepared`,
+  `CardPrinting.prepare_spell`, `Effect:SourceBecomesPrepared`), a copy of the prepared spell.

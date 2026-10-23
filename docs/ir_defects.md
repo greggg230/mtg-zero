@@ -1,7 +1,8 @@
 # Card-IR defects for mtg-bot's parser (M7b)
 
 Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tests`); IR
-`data/cards/powerlsv.ir.json` (546 cube cards, 360 supported); mtg-bot read at commit
+`data/cards/powerlsv.ir.json` (546 cube cards, 360 supported). Updated 2026-10-23 for M7b part 2
+(cards with more than one face, branch `m7b-faces`, 394 supported): entries 9, 13 and 14; mtg-bot read at commit
 `3073a633` (branch main). The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
@@ -40,10 +41,12 @@ permission) and a consumer can go wrong with it.
 | 6 | Thieving Skydiver (and 6 more effect classes, 7 more cards) | target spec not exported | `GainControlOfTargetThenAttachIfEquipment {}` | its `TargetSpec` (artifact with mana value X or less) | `effects/generic/cube_creatures_ub.py` (`targets` set in `__post_init__`) | blocked / re-derived in the lowering | confirmed |
 | 7 | Animate Dead | misnamed field | Aura bonus "-1/-0" in `equipment_bonuses` | an Aura (or attachment) bonus field | `cards/base.py::make_aura` | blocked | suspected |
 | 8 | Necromancy | permission as keyword | `keywords: [flash]` | "may cast as though it had flash" | `cards/parser/cube_enchantments.py::_reanimation_aura_lines` | blocked elsewhere | suspected |
-| 9 | transform DFCs (Aang, Ajani, Cecil, Concealing Curtains, Etali, Fable, Jace VP, Outland Liberator, Tamiyo IS, Ulvenwald Oddity) | value copied | back face `mana_cost` = the front face's | no mana cost (mana value from the front, CR 712.8e) | `cards/parser/dfc_builder.py::transform_back` | blocked (`transform_back_face`) | suspected |
+| 9 | transform DFCs (Aang, Ajani, Cecil, Concealing Curtains, Etali, Fable, Jace VP, Outland Liberator, Tamiyo IS, Ulvenwald Oddity) | value copied | back face `mana_cost` = the front face's | no mana cost (mana value from the front, CR 712.8e) | `cards/parser/dfc_builder.py::transform_back` | worked around (read as no mana cost) | suspected |
 | 10 | Fastbond, Pest Infestation, Wizard's Rockets | sentinel values | `1000000`; `count_max: 0` + `count_from_x`; `amount: 0` + `amount_is_x` | explicit "any number" / "X" | `cards/parser/cube_enchantments.py`, `cards/parser/removal_phrases.py`, `effects/generic/artifact_mechanics.py` | blocked | suspected |
 | 11 | many (Agent Bishop, Cryogen Relic, Kolaghan's Command, ...) | targets only in code | effect classes with no `targets` | target requirements as data | effect classes' `requires_target` / `legal_targets` | re-derived per class in the lowering | suspected (systemic) |
 | 12 | Minsc & Boo, Timeless Heroes | colour dropped | Boo's token printing with no `color_indicator` (a colourless Boo) | `color_indicator: [R]` | `cards/parser/effects_ext.py::_CREATE_NAMED_TOKEN`, `_token_printing` | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 13 | Ajani, Nacatl Pariah // Ajani, Nacatl Avenger | reflexive trigger flattened | the 0: `Sequence [CreateToken, IfCondition(ControlOtherPermanentOfColor, DealDamageFromEvent → any target)]` | a reflexive triggered ability (CR 603.12) after the token, its target chosen when it triggers | `cards/parser/layout_face_grammar.py` (`_WHEN_YOU_DO`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 14 | The Sensational She-Hulk; Enduring Innocence | one flag, two rules | `TriggeredAbility.once_per_turn: true` for both | "do this only once each turn" (603.2h) apart from "this ability triggers only once each turn" | `TriggeredAbility.once_per_turn` (`turn.py::should_fire_trigger`) | told apart by the effect's shape | suspected |
 
 ## Confirmed defects
 
@@ -204,6 +207,35 @@ haste."
   (`engine/tests/cards_m7b_walkers2.rs::minsc_db`), so it becomes supported once the IR is fixed
   (and the registry gets a red Boo line).
 
+### F. A reflexive trigger flattened into the ability (M7b part 2)
+
+**13. Ajani, Nacatl Pariah // Ajani, Nacatl Avenger.** Oracle (Ajani, Nacatl Avenger): "0: Create
+a 2/1 white Cat Warrior creature token. When you do, if you control a red permanent other than
+Ajani, he deals damage equal to the number of creatures you control to any target."
+
+* IR: the loyalty ability's effect is `Sequence [CreateToken (Cat Warrior), IfCondition {
+  condition: ControlOtherPermanentOfColor, then: DealDamageFromEvent { amount:
+  CountControlledMatching(IsCreature), targets: [any target] } }]`. The "any target" is then a
+  target of the loyalty ability, chosen as it is activated (before the token exists), and the
+  ability can't be activated without a legal target for it; the condition is checked only as
+  the ability resolves.
+* Should be: a reflexive triggered ability (CR 603.12): after the token is created, "when you do"
+  triggers; its intervening "if" (603.4) is checked as it triggers and as it resolves, and its
+  target is chosen when it is put on the stack. With no red permanent the 0 still makes a Cat
+  Warrior and asks for no target.
+* Source: `cards/parser/layout_face_grammar.py` (`_WHEN_YOU_DO`, line ~140): "`<first>`. When
+  you do, `<then>`." returns `Sequence(effects=(first, then))`, with the comment "The reflexive
+  ability's targets are chosen with the enclosing ability (the MayDoThenReflexive precedent;
+  see docs/SEARCH_LIMITATIONS.md)", a Python engine shortcut written into the IR.
+* Fix: export the reflexive form as data, as `ReflexiveWhenYouDo` / `MayDoThenReflexive` already
+  do for "you may ... When you do" (a non-optional variant: `first`, the reflexive effect, its
+  targets), and keep the Python shortcut in the Python engine.
+* Engine: blocked by `lower::IR_DEFECTS` (`IR:IfCondition(a reflexive trigger flattened: Ajani's
+  0)`, ENGINE.md 25.11); every ability of the card is tested on a renamed copy of its IR
+  (`engine/tests/cards_m7b_faces4.rs`, "Test Ajani"), so it becomes supported once the IR is
+  fixed and the lowering reads the reflexive form (the engine has reflexive triggers, ENGINE.md
+  23.2).
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."
@@ -250,7 +282,13 @@ Jace, Vryn's Prodigy; Outland Liberator; Tamiyo, Inquisitive Student; Ulvenwald 
   anything that inspects mana costs.
 * Fix: keep the back face's `mana_cost` empty and export the mana value separately (or let
   consumers take it from the front face).
-* Engine: blocked (`CardPrinting.transform_back_face`).
+* Engine (M7b part 2, ENGINE.md 25.1): worked around. The lowering reads a back-face mana cost
+  equal to the front's with an empty `mana_cost_str` (or an empty cost) as "no mana cost" and
+  takes the mana value from the front face; any other back-face cost is a blocker
+  (`CardPrinting.transform_back_face.mana_cost(not the front face's)`). All ten cards have the
+  copied shape; seven of them are supported (Cecil, Concealing Curtains, Etali, Jace VP,
+  Outland Liberator, Tamiyo IS, Ulvenwald Oddity). Modal double-faced back faces carry their
+  own mana cost and are not affected.
 
 **10. Sentinel values.**
 
@@ -286,6 +324,24 @@ class's targets. The engine re-derives them per class in `engine/src/lower/effec
 Suggested direction: export a `TargetSpec` list for every targeting effect (computed from the same
 methods at export time), so new classes don't need a hand-written lowering of their targets.
 
+**14. `TriggeredAbility.once_per_turn` stands for two rules.** The Sensational She-Hulk: "Whenever
+a creature you control is dealt damage, you may have The Sensational She-Hulk deal that much
+damage to any target. Do this only once each turn." Enduring Innocence: "Whenever one or more
+other creatures you control with power 2 or less enter, draw a card. This ability triggers only
+once each turn."
+
+* IR: `once_per_turn: true` on both triggered abilities.
+* The rules differ: "do this only once each turn" (CR 603.2h) limits the action: the ability
+  triggers again after a turn's trigger the player declined, and stops triggering only once the
+  player has done it. "This ability triggers only once each turn" limits the triggering itself.
+  Python implements the second for both (`turn.py::should_fire_trigger` records the first
+  trigger), so a She-Hulk trigger declined once can't be taken later that turn.
+* Fix: two fields (`once_per_turn_action`, `triggers_once_per_turn`), or an enum.
+* Engine: told apart by the effect's shape. A `once_per_turn` trigger whose effect starts with
+  "you may" (`Op::May { You }`) is lowered as "do this only once each turn" (`Ext::OnceMay`, CR
+  603.2h; She-Hulk is supported); any other is a blocker
+  (`TriggeredAbility.once_per_turn(not "you may ... only once each turn")`, Enduring Innocence).
+
 ## Checked and not defects
 
 * `CardPrinting.kicker_cost(not "if kicked ... else")` (Batroc the Leaper, Sowing Mycospawn,
@@ -294,7 +350,12 @@ methods at export time), so new classes don't need a hand-written lowering of th
   and #6).
 * `CardPrinting.spell_effect(missing)` (Life // Death): a split card; the faces carry the effects
   in `split_faces` (Death's `ReturnCardFromGraveyardToBattlefield` omits `card_filter` because the
-  schema default is a creature card). The engine has no split cards.
+  schema default is a creature card). Supported since M7b part 2: the card-level mana cost and
+  types are the halves' sum and union, as CR 709.4 says.
+* Modal double-faced cards that can also transform (Jennifer Walters // The Sensational She-Hulk,
+  Norman Osborn // Green Goblin): the back face is described twice, as `mdfc_back_face` and
+  `transform_back_face`; the two are equal (the lowering checks it) and each carries the back
+  face's own mana cost, as it should for a modal face (CR 712.8f).
 * `ActivationCost.sacrifice_n_nonland_permanents(out of range 10)` (Bolas's Citadel): 10 is the
   Oracle text; the range is the engine's.
 * Planeswalker `ActivationCost.loyalty` is the signed loyalty *cost* (a "+1" ability is
