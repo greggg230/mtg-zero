@@ -239,11 +239,18 @@ impl Decision {
 
 use crate::game::{Game, StackKind};
 use crate::ids::Zone;
+use crate::svec::SVec;
 
 impl Game {
     /// `p`'s hand in canonical order: by definition, then card index.
     pub fn hand_sorted(&self, p: PlayerId) -> Vec<CardIdx> {
-        let mut h = self.players[p as usize].hand.clone();
+        self.hand_sorted_in(p).to_vec()
+    }
+
+    /// [`hand_sorted`](Self::hand_sorted) in inline storage (no allocation
+    /// for a hand of up to 16 cards; ENGINE.md 17).
+    pub(crate) fn hand_sorted_in(&self, p: PlayerId) -> SVec<CardIdx, 16> {
+        let mut h: SVec<CardIdx, 16> = self.players[p as usize].hand.iter().copied().collect();
         h.sort_by_key(|c| (self.objs[c.i()].def, c.0));
         h
     }
@@ -251,8 +258,13 @@ impl Game {
     /// One (slot, card) per distinct definition in `p`'s hand: cards in a
     /// hidden zone have no other state, so equal definitions are equivalent.
     pub fn hand_slots(&self, p: PlayerId) -> Vec<(u16, CardIdx)> {
-        let h = self.hand_sorted(p);
-        let mut out = Vec::with_capacity(h.len());
+        self.hand_slots_in(p).to_vec()
+    }
+
+    /// [`hand_slots`](Self::hand_slots) in inline storage.
+    pub(crate) fn hand_slots_in(&self, p: PlayerId) -> SVec<(u16, CardIdx), 16> {
+        let h = self.hand_sorted_in(p);
+        let mut out = SVec::new();
         for (i, &c) in h.iter().enumerate() {
             if i > 0 && self.objs[h[i - 1].i()].def == self.objs[c.i()].def {
                 continue;
@@ -265,13 +277,13 @@ impl Game {
 
     /// Options "choose a card in `p`'s hand", one per distinct definition.
     pub(crate) fn hand_options(&self, p: PlayerId) -> Vec<Opt> {
-        self.hand_slots(p).into_iter().map(|(a, c)| Opt { action: a, choice: Choice::Card(c) }).collect()
+        self.hand_slots_in(p).iter().map(|&(a, c)| Opt { action: a, choice: Choice::Card(c) }).collect()
     }
 
     /// [`hand_options`](Self::hand_options) without one card (an ability's
     /// source in hand); a definition keeps its canonical slot.
     pub(crate) fn hand_options_except(&self, p: PlayerId, except: Option<CardIdx>) -> Vec<Opt> {
-        let h = self.hand_sorted(p);
+        let h = self.hand_sorted_in(p);
         let mut out = Vec::new();
         let mut i = 0;
         while i < h.len() {

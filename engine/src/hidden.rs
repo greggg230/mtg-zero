@@ -178,7 +178,7 @@ impl Game {
             if self.players[p as usize].hand.len() < 2 {
                 continue;
             }
-            let h = self.hand_sorted(p);
+            let h = self.hand_sorted_in(p);
             let mut i = 0;
             while i < h.len() {
                 let d = self.objs[h[i].i()].def;
@@ -187,7 +187,7 @@ impl Game {
                     j += 1;
                 }
                 if j - i > 1 {
-                    let mut bits: Vec<u8> = h[i..j].iter().map(|c| self.objs[c.i()].known).collect();
+                    let mut bits: crate::svec::SVec<u8, 16> = h[i..j].iter().map(|c| self.objs[c.i()].known).collect();
                     bits.sort_unstable_by(|a, b| b.cmp(a));
                     for (k, &c) in h[i..j].iter().enumerate() {
                         self.objs[c.i()].known = bits[k];

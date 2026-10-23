@@ -46,17 +46,6 @@ impl<T: Copy + Default, const N: usize> SVec<T, N> {
             self.len = n;
         }
     }
-
-    #[inline]
-    pub fn clear(&mut self) {
-        self.truncate(0);
-    }
-
-    pub fn extend_from_slice(&mut self, xs: &[T]) {
-        for &x in xs {
-            self.push(x);
-        }
-    }
 }
 
 impl<T: Copy + Default, const N: usize> Default for SVec<T, N> {
@@ -112,6 +101,30 @@ impl<'a, T: Copy + Default, const N: usize> IntoIterator for &'a SVec<T, N> {
     }
 }
 
+/// By-value iteration (the elements are `Copy`).
+pub(crate) struct IntoIter<T: Copy + Default, const N: usize> {
+    v: SVec<T, N>,
+    i: usize,
+}
+
+impl<T: Copy + Default, const N: usize> Iterator for IntoIter<T, N> {
+    type Item = T;
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        let x = self.v.get(self.i).copied();
+        self.i += 1;
+        x
+    }
+}
+
+impl<T: Copy + Default, const N: usize> IntoIterator for SVec<T, N> {
+    type Item = T;
+    type IntoIter = IntoIter<T, N>;
+    fn into_iter(self) -> IntoIter<T, N> {
+        IntoIter { v: self, i: 0 }
+    }
+}
+
 impl<T: Copy + Default + std::fmt::Debug, const N: usize> std::fmt::Debug for SVec<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -148,7 +161,7 @@ mod tests {
         let w: SVec<u16, 3> = (0..2).collect();
         assert_eq!(w.len(), 2);
         assert!(w.contains(&1));
-        v.clear();
+        v.truncate(0);
         assert!(v.is_empty());
     }
 }

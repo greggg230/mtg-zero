@@ -116,13 +116,15 @@ impl Game {
 
     fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
         use crate::decision::{FACE_CAST, FACE_PLAY};
-        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        // (Room for the usual options without growing.)
+        let mut opts = Vec::with_capacity(16);
+        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
         let drops = 1 + self.permanents_of(p).map(|c| self.abilities(c).extra_lands as u32).sum::<u32>();
         let land_ok = sorcery_ok && (self.players[p as usize].lands_played as u32) < drops;
         let classes = self.mana_classes(p, None);
         let mut plain = None;
-        let slots = self.hand_slots(p);
+        let slots = self.hand_slots_in(p);
         for &(action, c) in &slots {
             let def = self.def_of(c);
             let front = if def.halves.is_some() {

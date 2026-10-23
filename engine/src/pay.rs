@@ -292,7 +292,7 @@ impl Game {
         // paying like any other; a Spirit Guide exiles itself). One mana
         // each (the lowering checks), after the permanents.
         if self.players[p as usize].hand.iter().any(|&c| self.hand_mana_source(c)) {
-            for c in self.hand_sorted(p) {
+            for c in self.hand_sorted_in(p) {
                 if Some(c) == exclude || !self.hand_mana_source(c) {
                     continue;
                 }
@@ -538,10 +538,10 @@ impl Game {
             }
             AbilitySlot::Hand(_) => {
                 let def = self.objs[card.i()].def;
-                let (a, _) = self
-                    .hand_slots(viewer)
-                    .into_iter()
-                    .find(|&(_, c)| self.objs[c.i()].def == def)
+                let (a, _) = *self
+                    .hand_slots_in(viewer)
+                    .iter()
+                    .find(|&&(_, c)| self.objs[c.i()].def == def)
                     .expect("card in hand");
                 act::HAND_ABILITY + (a - act::HAND)
             }
