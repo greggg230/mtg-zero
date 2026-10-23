@@ -86,6 +86,22 @@ fn measure() {
         t.elapsed().as_secs_f64() * 1e9 / (20 * snapshots.len()) as f64
     );
 
+    // determinize alone, on states cloned beforehand (the clones and their
+    // drops, and so the allocator, out of the timing).
+    let mut rng = Rng::new(5);
+    let mut total = 0.0;
+    for _ in 0..20 {
+        let mut copies: Vec<Game> = snapshots.clone();
+        let t = Instant::now();
+        for d in copies.iter_mut() {
+            let v = d.to_move().unwrap();
+            d.determinize(v, &mut rng);
+        }
+        total += t.elapsed().as_secs_f64();
+        black_box(&copies);
+    }
+    println!("determinize alone: {:.0} ns mean", total * 1e9 / (20 * snapshots.len()) as f64);
+
     // legal_actions (a copy of the cached options).
     let t = Instant::now();
     for _ in 0..reps {
