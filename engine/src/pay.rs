@@ -209,7 +209,14 @@ impl Game {
     /// depend on choices: {T} (untapped; a creature also free of summoning
     /// sickness, CR 302.6 / 602.5a), "only during your turn", "only if".
     pub(crate) fn activation_ready(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef) -> bool {
-        if self.activation_locked(card) {
+        self.activation_ready_locks(p, card, ad, None)
+    }
+
+    /// [`activation_ready`](Self::activation_ready) with the battlefield's
+    /// [`activation_locks`](Self::activation_locks) when the caller has
+    /// them (one walk of the battlefield for many sources).
+    fn activation_ready_locks(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, locks: Option<u16>) -> bool {
+        if self.activation_locked_by(card, locks) {
             return false;
         }
         let o = &self.objs[card.i()];
@@ -231,12 +238,20 @@ impl Game {
     /// "Activated abilities of [types] can't be activated" (CR 602.5) by a
     /// static ability of a permanent on the battlefield (mana abilities
     /// included).
-    pub(crate) fn activation_locked(&self, card: CardIdx) -> bool {
+    fn activation_locked_by(&self, card: CardIdx, locks: Option<u16>) -> bool {
         if self.objs[card.i()].zone != Zone::Battlefield {
             return false;
         }
-        let t = self.types_of(card);
-        self.battlefield.iter().any(|&c| self.abilities(c).locks_activated & t != 0)
+        // (Some permanent's lock covers one of its types iff the union of
+        // the locks does; its types are read only when there is a lock.)
+        let locks = locks.unwrap_or_else(|| self.activation_locks());
+        locks != 0 && self.types_of(card) & locks != 0
+    }
+
+    /// The card types whose activated abilities some permanent's static
+    /// ability says can't be activated (CR 602.5), together.
+    pub(crate) fn activation_locks(&self) -> u16 {
+        self.battlefield.iter().fold(0, |m, &c| m | self.abilities(c).locks_activated)
     }
 
     /// The mana sources `p` can use to pay a cost, by class (ENGINE.md 18):
@@ -245,6 +260,7 @@ impl Game {
     pub(crate) fn mana_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
         let mut out: Vec<Class> = Vec::with_capacity(8);
         let mut n_multi = 0;
+        let locks = Some(self.activation_locks());
         // "Whenever you tap a <land subtype> for mana, add an additional
         // <mana>" (triggered mana abilities, CR 605.1b: they resolve at once,
         // so such a land makes more mana).
@@ -260,7 +276,7 @@ impl Game {
             let d = self.abilities(c);
             for (i, ad) in d.activated.iter().enumerate() {
                 let Some(m) = ad.mana() else { continue };
-                if ad.instant_only || !self.activation_ready(p, c, ad) || (d.latent > 0 && !self.has_activated(c, i)) {
+                if ad.instant_only || !self.activation_ready_locks(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
                     continue;
                 }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
@@ -299,7 +315,7 @@ impl Game {
                 let def = self.objs[c.i()].def;
                 for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {
                     let Some(m) = ad.mana() else { continue };
-                    if ad.instant_only || !self.activation_ready(p, c, ad) {
+                    if ad.instant_only || !self.activation_ready_locks(p, c, ad, locks) {
                         continue;
                     }
                     let src = Src { card: c, slot: AbilitySlot::Hand(i as u8) };

@@ -289,6 +289,13 @@ impl Game {
     /// their graveyard with flashback (printed or granted) or escape; from
     /// exile with a permission.
     pub(crate) fn cast_route(&self, p: PlayerId, card: CardIdx) -> Option<crate::game::CastFrom> {
+        self.cast_route_esc(p, card, &mut None)
+    }
+
+    /// [`cast_route`](Self::cast_route) remembering in `esc` whether `p`
+    /// controls a permanent that grants escape (one walk of `p`'s
+    /// permanents for a whole graveyard).
+    fn cast_route_esc(&self, p: PlayerId, card: CardIdx, esc: &mut Option<bool>) -> Option<crate::game::CastFrom> {
         use crate::game::CastFrom;
         let def = self.def_of(card);
         match self.objs[card.i()].zone {
@@ -314,7 +321,7 @@ impl Game {
                     // (Granted escape with the card's own additional costs is
                     // not offered: one combined cost isn't built; ENGINE.md
                     // 23.11.)
-                    || (!def.is(types::LAND) && def.additional.is_empty() && self.escape_granter(p).is_some())
+                    || (!def.is(types::LAND) && def.additional.is_empty() && *esc.get_or_insert_with(|| self.escape_granter(p).is_some()))
                 {
                     Some(CastFrom::Escape)
                 } else if def.additional.is_empty() && self.retrace_granted(p, card) {
@@ -705,6 +712,7 @@ impl Game {
             }
         }
         let lands_ok = land_ok && self.lands_from_graveyard(p);
+        let mut esc = None;
         // (A token in a graveyard is not a card: nothing casts or plays it.)
         for c in self.graveyard_cards(p) {
             let front = if self.def_of(c).halves.is_some() {
@@ -715,7 +723,7 @@ impl Game {
                 } else {
                     0
                 }
-            } else if self.cast_route(p, c).is_some_and(|from| self.castable_via(p, c, from, classes, sorcery_ok)) {
+            } else if self.cast_route_esc(p, c, &mut esc).is_some_and(|from| self.castable_via(p, c, from, classes, sorcery_ok)) {
                 FACE_CAST
             } else {
                 0
