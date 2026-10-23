@@ -1164,7 +1164,7 @@ three or four rounds; per decision on M7a's pool unless noted):
 | Payment feasibility without heap allocations: a class's sources, the candidate units and a card's ways inline (`svec::SVec`), a card's own sources left out by a filter instead of a copy of the classes | 49.0 -> 22.6 allocations per decision; 6.83 -> 6.16 us |
 | Hand slots, the sorted hand and the hand-knowledge canonicalisation inline; the priority options sized once | 22.6 -> 14.9 allocations; 6.42 -> 6.10 us |
 | SBA check: 704.5d looks only from the first slot made as a token or copy (`Game::first_token`: cards are never tokens), "is any SBA possible" builds no lists, power and toughness walk the statics once | 5.84 -> 5.69 us (pairs -2% to -10%) |
-| The battlefield's activation locks read once per `mana_classes` (their union; a source's types only when there is a lock); the escape granter once per graveyard | 5.63 -> 4.80 us |
+| The battlefield's activation locks read once per `mana_classes` (their union; a source's types only when there is a lock); the escape granter once per graveyard | 5.63 -> 4.80 us (the escape granter alone, measured later against the final code: -1% to -4% per round on the full pool, -2% to +2% on M7a's) |
 | `determinize`: the unknown cards and identities inline | clone + determinize on the full pool 2.04 -> 1.61 us; `determinize` alone unchanged (the gain is fewer allocator round trips next to the clone's) |
 | A cheap necessary test before building payment candidates (enough mana units for the non-Phyrexian pips: the pool plus every source at its largest production); the locks once per activation pass | 5.07 -> 4.91 us (full pool 5.43 -> 5.34) |
 
