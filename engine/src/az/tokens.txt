@@ -28,3 +28,13 @@ Thopter 1/1 U ac Thopter flying
 Elemental 5/3 G c Elemental
 Spirit 1/1 C c Spirit
 Wurm 5/5 G c Wurm trample
+Human 1/1 W c Human
+Monk 1/1 W c Monk
+Rebel 2/2 R c Rebel
+Skeleton 4/1 B c Skeleton menace
+Phyrexian Germ 0/0 B c Germ Phyrexian
+Orc Army 0/0 B c Army Orc
+Pilot 1/1 C c Pilot
+Illusion 0/0 U c Illusion
+Construct 4/4 C ac Construct flying haste
+Vaultborn Tyrant 6/6 G ac Dinosaur trample
