@@ -39,3 +39,4 @@ Illusion 0/0 U c Illusion
 Construct 4/4 C ac Construct flying haste
 Vaultborn Tyrant 6/6 G ac Dinosaur trample
 Squirrel 1/1 G c Squirrel
+Insect 1/1 G c Insect

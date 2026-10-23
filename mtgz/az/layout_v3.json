@@ -77,8 +77,8 @@
     null,
     "Cecil, Dark Knight // Cecil, Redeemed Paladin",
     null,
-    null,
-    null,
+    "Chain Lightning",
+    "Chain of Smog",
     "Chandra, Torch of Defiance",
     "Chaos Defiler",
     null,
@@ -135,7 +135,7 @@
     "Elvish Mystic",
     "Elvish Spirit Guide",
     "Embereth Shieldbreaker // Battle Display",
-    null,
+    "Emeritus of Abundance // Regrowth",
     null,
     null,
     "Emry, Lurker of the Loch",
@@ -151,7 +151,7 @@
     "Exorcise",
     "Expedition Map",
     "Expressive Iteration",
-    null,
+    "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
     "Faerie Mastermind",
     "Faithless Looting",
     null,
@@ -178,7 +178,7 @@
     "Forest",
     "Formidable Speaker",
     null,
-    null,
+    "Fractured Identity",
     "Frantic Search",
     null,
     "Fury",
@@ -261,13 +261,13 @@
     "Llanowar Elves",
     null,
     "Loran of the Third Path",
-    null,
+    "Lose Focus",
     "Lotus Cobra",
     "Lotus Petal",
     "Luminarch Aspirant",
     null,
     "Lush Portico",
-    null,
+    "Lutri, the Spellchaser",
     "Lórien Revealed",
     "Magda, Brazen Outlaw",
     null,
@@ -342,7 +342,7 @@
     null,
     "Phelia, Exuberant Shepherd",
     "Phlage, Titan of Fire's Fury",
-    null,
+    "Phyrexian Metamorph",
     null,
     null,
     "Plains",
@@ -379,8 +379,8 @@
     "Retrofitter Foundry",
     "Robber of the Rich",
     "Sacred Foundry",
-    null,
-    null,
+    "Sage of the Skies",
+    "Saheeli, Sublime Artificer",
     "Sanguine Evangelist",
     "Savai Triome",
     "Savannah",
@@ -403,8 +403,8 @@
     null,
     "Sheoldred's Edict",
     "Sheoldred, the Apocalypse",
-    null,
-    null,
+    "Shifting Woodland",
+    "Sicarian Infiltrator",
     "Simian Spirit Guide",
     "Sink into Stupor // Soporific Springs",
     null,
@@ -425,7 +425,7 @@
     "Spellseeker",
     "Spider-Woman, Stunning Savior",
     "Spirebluff Canal",
-    null,
+    "Springheart Nantuko",
     null,
     "Staff of the Storyteller",
     "Starting Town",
@@ -441,7 +441,7 @@
     null,
     null,
     "Super Shredder",
-    null,
+    "Superior Spider-Man",
     "Suplex",
     null,
     "Swamp",
@@ -478,10 +478,10 @@
     "Thornspire Verge",
     "Thoughtseize",
     "Thraben Inspector",
-    null,
+    "Three Steps Ahead",
     null,
     "Thundering Falls",
-    null,
+    "Thundertrap Trainer",
     "Tidehollow Sculler",
     "Time Spiral",
     null,
@@ -815,9 +815,9 @@
     "Pilot",
     "Illusion",
     "Construct",
-    "Vaultborn Tyrant",
-    "Squirrel",
     null,
+    "Squirrel",
+    "Insect",
     null,
     null,
     null,
@@ -1033,7 +1033,7 @@
     null,
     null
   ],
-  "features": 26500,
+  "features": 29092,
   "segments": [
     {
       "count": 1,
@@ -1100,7 +1100,7 @@
       "name": "my_permanents",
       "offset": 16068,
       "present": 52,
-      "width": 100
+      "width": 140
     },
     {
       "actions": [
@@ -1119,9 +1119,9 @@
         ]
       },
       "name": "opponent_permanents",
-      "offset": 19268,
+      "offset": 20548,
       "present": 52,
-      "width": 100
+      "width": 140
     },
     {
       "actions": [
@@ -1144,7 +1144,7 @@
         ]
       },
       "name": "hand",
-      "offset": 22468,
+      "offset": 25028,
       "present": 52,
       "width": 60
     },
@@ -1165,9 +1165,9 @@
         ]
       },
       "name": "stack",
-      "offset": 23428,
+      "offset": 25988,
       "present": 52,
-      "width": 76
+      "width": 80
     },
     {
       "actions": [
@@ -1186,7 +1186,7 @@
         ]
       },
       "name": "triggers",
-      "offset": 24036,
+      "offset": 26628,
       "present": 52,
       "width": 56
     },
@@ -1207,7 +1207,7 @@
         ]
       },
       "name": "list",
-      "offset": 24260,
+      "offset": 26852,
       "present": 52,
       "width": 56
     }
