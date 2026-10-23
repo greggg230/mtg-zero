@@ -1435,11 +1435,12 @@ Costs, for every kind but loyalty: life only with 8 left (2 for a fetch); a disc
 flooded (6 lands, or 5 and a land in hand); a permanent other than the source sacrificed only
 if it is a token (except for removal worth more, or lethal damage); the source sacrificed, if
 it is a land or a nontoken mana rock (Horizon Canopy, Mind Stone), only when flooded, if it is
-a creature only for removal. Order at priority: a land; then tier 2 (loyalty, fetches, a land
-tutor before the land drop, ninjutsu, lethal damage) by score; counterspells and lethal burn
-spells; the most expensive spell worth casting; then tier 1, the highest score first (removal
-500 + the target's worth, equip 400, crew 380, manland 370, put-in 350, upgrade 300 + its mana,
-tokens 250, recursion 220, draw 200, land tutor 180, cycling 150, mill 100, life 50).
+a creature only for removal. Order at priority: a land; a counterspell against an opponent's
+spell; a lethal burn spell; tier 2 (loyalty, fetches, a land tutor before the land drop,
+ninjutsu, lethal damage) by score; the most expensive spell worth casting; then tier 1, the
+highest score first (removal 500 + the target's worth, equip 400, crew 380, manland 370,
+put-in 350, upgrade 300 + its mana, tokens 250, recursion 220, draw 200, land tutor 180,
+cycling 150, mill 100, life 50).
 
 **Caps.** An ability is activated at most once a turn (a loyalty ability 3 times, for Comet's
 extra activations; one whose cost sacrifices another permanent, removes counters or discards,

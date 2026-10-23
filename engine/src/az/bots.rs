@@ -669,10 +669,11 @@ impl Heuristic {
         }
     }
 
-    /// Priority: a land, fetch lands, loyalty abilities and lethal burn
-    /// abilities; then a counterspell against an opponent's spell, lethal
-    /// burn, (own main phase) the most expensive spell worth casting; then
-    /// the best other activated ability; otherwise pass.
+    /// Priority: a land; a counterspell against an opponent's spell; a
+    /// lethal burn spell; the best tier-2 ability (loyalty, fetch lands, a
+    /// land tutor before the land drop, ninjutsu, lethal damage); (own main
+    /// phase) the most expensive spell worth casting; the best other
+    /// activated ability; otherwise pass.
     fn priority(&mut self, g: &Game, d: &Decision, p: PlayerId) -> Option<u16> {
         let q = opp(p);
         let my_main = g.turn().active == p && g.turn().step.is_main() && g.stack().is_empty();
