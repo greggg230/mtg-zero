@@ -176,6 +176,11 @@ impl Game {
                     {
                         continue;
                     }
+                    // CR 603.2h: "Do this only once each turn": it triggers
+                    // only if its controller hasn't done it this turn.
+                    if !self.done_once.is_empty() && self.done_once.contains(&(o.r, i as u8)) {
+                        continue;
+                    }
                     self.waiting.push(PendingTrigger {
                         controller: o.controller,
                         source: o.r,
@@ -192,7 +197,7 @@ impl Game {
             let tt = self.temp_triggers[k];
             let t = &self.db.def(tt.source_def).triggers[tt.slot as usize];
             let o = Observer { r: tt.source, def: tt.source_def, controller: tt.controller, spell: false };
-            if t.event == ev.kind && self.pred_matches(&t.pred, &ev, o) {
+            if t.event == ev.kind && self.pred_matches(&t.pred, &ev, o) && !self.done_once.contains(&(tt.source, tt.slot)) {
                 self.waiting.push(PendingTrigger {
                     controller: tt.controller,
                     source: tt.source,

@@ -453,7 +453,8 @@ pub enum Ext {
     ExileReturnTransformed { yours: bool },
     /// "You may [do this]. Do this only once each turn": like `Op::May`,
     /// unless this ability of this source was done this turn (then
-    /// continue at `skip`, as if declined).
+    /// continue at `skip`, as if declined; CR 603.2h: once it is done, the
+    /// ability doesn't trigger again that turn, `triggers.rs`).
     OnceMay { skip: u16 },
     /// The controller may cast each legal target of `tgt` (a card in their
     /// graveyard) this turn; if that spell would be put into a graveyard,

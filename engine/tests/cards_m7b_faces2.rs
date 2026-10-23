@@ -341,7 +341,7 @@ fn the_sensational_she_hulk_can_be_cast_from_hand_cr_712_11b() {
 }
 
 #[test]
-fn she_hulk_redirects_damage_only_once_each_turn() {
+fn she_hulk_redirects_damage_only_once_each_turn_cr_603_2h() {
     // "Whenever a creature you control is dealt damage, you may have The
     // Sensational She-Hulk deal that much damage to any target. Do this only
     // once each turn."
@@ -352,8 +352,9 @@ fn she_hulk_redirects_damage_only_once_each_turn() {
         .hand(1, &["Lightning Bolt"; 3])
         .at(Step::Main1, 1)
         .start();
-    let asked = std::cell::Cell::new(0);
-    // Declined the first time, done the second, not offered the third.
+    let (asked, targeted) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
+    // Declined the first time, done the second; the third time it doesn't
+    // trigger (CR 603.2h: no target to choose either).
     for (k, victim) in ["Test Giant", SHE_HULK, "Test Bear"].into_iter().enumerate() {
         let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
         g.choose(Choice::Cast(bolt));
@@ -362,7 +363,10 @@ fn she_hulk_redirects_damage_only_once_each_turn() {
         g.choose(g.tgt(v));
         pay(&mut g);
         resolve_with(&mut g, |g| match g.kind() {
-            Some(DecisionKind::Target) => Some(player(1)),
+            Some(DecisionKind::Target) => {
+                targeted.set(targeted.get() + 1);
+                Some(player(1))
+            }
             Some(DecisionKind::YesNo) => {
                 asked.set(asked.get() + 1);
                 Some(if k == 0 { Choice::Pass } else { Choice::Yes })
@@ -370,7 +374,7 @@ fn she_hulk_redirects_damage_only_once_each_turn() {
             _ => None,
         });
     }
-    assert_eq!(asked.get(), 2);
+    assert_eq!((asked.get(), targeted.get()), (2, 2));
     assert_eq!(g.life(1), 17);
     // A new turn: again.
     quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1);

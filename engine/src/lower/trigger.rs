@@ -72,8 +72,10 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         }
     };
     // "You may [do this]. Do this only once each turn" (The Sensational
-    // She-Hulk): the optional action, not the trigger, is limited. ("This
-    // ability triggers only once each turn" is another rule, not built.)
+    // She-Hulk, CR 603.2h): what is limited is the optional action, done
+    // or not; the ability doesn't trigger once it was done that turn
+    // (`triggers.rs`). ("This ability triggers only once each turn" is
+    // another rule, not built.)
     if *once_per_turn {
         match ability.program.first() {
             Some(&crate::program::Op::May { who: crate::program::Who::You, skip }) if ability.modes.is_none() => {
