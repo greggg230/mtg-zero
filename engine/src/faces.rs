@@ -282,11 +282,19 @@ impl Game {
         if self.db.def(face).is(types::LAND) {
             return if land_ok { OTHER_PLAY } else { 0 };
         }
+        // How the card may be cast from where it is comes from the card as
+        // it is there (its front: "instant and sorcery cards in your
+        // graveyard have retrace" doesn't reach an adventurer creature card,
+        // CR 715.4); whether that face can be cast, from the face alone.
+        let route = if zone == Zone::Hand { None } else { self.cast_route(p, c) };
+        if zone != Zone::Hand && route.is_none() {
+            return 0;
+        }
         let mut g = self.clone();
         g.objs[c.i()].def = face;
-        let ok = match zone {
-            Zone::Hand => g.hand_castable(p, c, sorcery_ok, classes, &mut None),
-            _ => g.cast_route(p, c).is_some_and(|from| g.castable_via(p, c, from, classes, sorcery_ok)),
+        let ok = match route {
+            None => g.hand_castable(p, c, sorcery_ok, classes, &mut None),
+            Some(from) => g.castable_via(p, c, from, classes, sorcery_ok),
         };
         if ok {
             OTHER_CAST

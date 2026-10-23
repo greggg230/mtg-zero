@@ -131,6 +131,35 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
                 "effect": {"$t": "ModalChooseOne", "modes": [
                     {"$t": "GainLife", "amount": 3}, {"$t": "ChooseNoMode"}]}}]}),
         ),
+        // Double-faced test cards (CR 712): "{1}: Transform this creature."
+        // on both faces; a back face that is a planeswalker; and a
+        // single-faced card with the same ability (CR 701.27c).
+        creature(
+            "Test Flipper",
+            "{1}{G}",
+            2,
+            2,
+            &[],
+            false,
+            json!({"activated_abilities": [transform_ability()],
+                "transform_back_face": back_face("Test Flipped", json!({"card_types": ["Creature"], "subtypes": ["Test"],
+                    "power": 3, "toughness": 3, "face_colors": ["G"], "activated_abilities": [transform_ability()]}))}),
+        ),
+        creature(
+            "Test Walker Flip",
+            "{1}{U}",
+            1,
+            1,
+            &[],
+            false,
+            json!({"activated_abilities": [transform_ability()],
+                "transform_back_face": back_face("Test Flipped Walker", json!({"card_types": ["Planeswalker"],
+                    "subtypes": ["Test"], "loyalty": 3, "face_colors": ["U"],
+                    "activated_abilities": [{"$t": "ActivatedAbility", "sorcery_speed": true,
+                        "cost": {"$t": "ActivationCost", "loyalty": -1},
+                        "effect": {"$t": "DrawCards", "amount": 1}}]}))}),
+        ),
+        creature("Test Not Flipper", "{1}", 1, 1, &[], false, json!({"activated_abilities": [transform_ability()]})),
         spell(
             "Test Phyrexian Shock",
             "Instant",
@@ -157,6 +186,30 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         ),
     ];
     cards.into_iter().map(|v| serde_json::from_value(v).expect("custom card IR")).collect()
+}
+
+/// "{1}: Transform this creature."
+fn transform_ability() -> Value {
+    json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": cost("{1}"), "mana_str": "{1}"},
+        "effect": {"$t": "TransformSource"}})
+}
+
+/// A back face printing (no mana cost of its own, CR 712.8e).
+fn back_face(name: &str, extra: Value) -> Value {
+    let mut pr = json!({
+        "$t": "CardPrinting",
+        "name": name,
+        "mana_cost_str": "",
+        "mana_cost": {"$t": "ManaCost"},
+        "type_line": "",
+        "supertypes": [],
+    });
+    if let Value::Object(m) = extra {
+        for (k, v) in m {
+            pr[k] = v;
+        }
+    }
+    pr
 }
 
 fn tap_ping() -> Value {

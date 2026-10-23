@@ -102,11 +102,21 @@ impl Scenario {
     }
 
     /// `p`'s first permanent named `name` (its card's name) has its back
-    /// face up (it transformed earlier, CR 701.27).
+    /// face up (it entered transformed earlier, CR 712.14a: a planeswalker
+    /// face with its printed loyalty).
     pub fn transformed(mut self, p: PlayerId, name: &str) -> Self {
         let c = self.g.find_card(p, name, Zone::Battlefield).unwrap_or_else(|| panic!("no {name} of P{p}"));
         let back = self.g.def_of(c).back.unwrap_or_else(|| panic!("{name} has no back face"));
         self.g.set_face(c, back);
+        if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
+            self.g.add_counters(c, crate::db::Counter::Loyalty, n as u16);
+        }
+        self
+    }
+
+    /// `p` has played `n` lands this turn.
+    pub fn lands_played(mut self, p: PlayerId, n: u8) -> Self {
+        self.g.players[p as usize].lands_played = n;
         self
     }
 

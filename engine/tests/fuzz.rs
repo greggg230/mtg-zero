@@ -116,7 +116,12 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
             }
             d.legal_actions(&mut legal);
             d.apply(legal[rng.below(legal.len() as u32) as usize], &mut keys).unwrap();
-            d.check_invariants().unwrap_or_else(|e| panic!("seed {seed} (determinized for P{viewer}): {e}"));
+            d.check_invariants().unwrap_or_else(|e| {
+                panic!(
+                    "seed {seed} (determinized for P{viewer}): {e}\n{}",
+                    d.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("\n")
+                )
+            });
         }
     }
 }

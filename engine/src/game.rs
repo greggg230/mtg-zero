@@ -1064,7 +1064,9 @@ impl Game {
         // It is keyed even if everyone knew it: which known card a hidden
         // choice (a hand slot) named can differ between sampled worlds.
         if from.is_hidden() {
-            let def = self.objs[idx.i()].def;
+            // (The card's identity: a land played with its back face up, an
+            // MDFC, has that face already, `put_onto_battlefield`.)
+            let def = self.db.def(self.objs[idx.i()].def).card_def(self.objs[idx.i()].def);
             if to.is_hidden() {
                 self.knowledge_moves(idx, owner, from, to);
             } else {
