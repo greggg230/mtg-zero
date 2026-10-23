@@ -260,3 +260,28 @@ fn the_initiative_and_a_room_choice_survive_determinize() {
         }
     }
 }
+
+#[test]
+fn the_initiative_and_the_dungeons_are_in_the_encoding() {
+    // P0 has the initiative and its marker on Arena (room 4) with one
+    // dungeon completed; P1 has none. Globals are viewer first: per player
+    // at 24 + 40 * side, the rooms one-hot at ROOM + 9 * side. Undercity is
+    // not in the emblem bags.
+    use engine::az::encode::{glob, O_BAGS, NUM_FEATURES};
+    let g = scen().initiative(0).dungeon(0, Some(4), 1).start();
+    for viewer in [0u8, 1] {
+        let mut x = vec![0.0; NUM_FEATURES];
+        g.encode_features(viewer, &mut x);
+        let side = (viewer != 0) as usize; // P0's side for this viewer
+        let p0 = 24 + 40 * side;
+        let p1 = 24 + 40 * (1 - side);
+        assert_eq!(x[p0 + glob::INITIATIVE], 1.0);
+        assert_eq!(x[p1 + glob::INITIATIVE], 0.0);
+        assert_eq!((x[p0 + glob::IN_DUNGEON], x[p0 + glob::COMPLETED]), (1.0, 0.5));
+        assert_eq!((x[p1 + glob::IN_DUNGEON], x[p1 + glob::COMPLETED]), (0.0, 0.0));
+        let rooms: Vec<usize> = (0..18).filter(|&k| x[glob::ROOM + k] == 1.0).collect();
+        assert_eq!(rooms, vec![9 * side + 4]);
+        let emblems = 13 * engine::az::encode::D;
+        assert!(x[O_BAGS + emblems..O_BAGS + 15 * engine::az::encode::D].iter().all(|&v| v == 0.0));
+    }
+}

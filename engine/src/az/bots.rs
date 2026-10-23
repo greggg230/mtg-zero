@@ -164,7 +164,7 @@ impl Heuristic {
                     (None, false) => None,
                 }
             }
-            K::PutInHand | K::ChooseDiscard => Some(Self::best_card(g, d)),
+            K::PutInHand | K::ChooseDiscard | K::PutOntoBattlefield => Some(Self::best_card(g, d)),
             // Enter as a copy of the most valuable permanent, or of the
             // costliest card (CR 707.5).
             K::ChoosePermanent | K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(Task::EnterAsCopy { .. })) => d

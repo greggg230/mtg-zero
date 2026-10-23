@@ -16,6 +16,8 @@
 //!   "<card> emblem"); the encoding keeps emblems in bags of their own;
 //! * a face (a double-faced card's back face, an Adventure: CR 712, 715) has its card's
 //!   identity (the card code's descriptor shows the face that is up);
+//! * a rules definition (`CardDef::rules`: the Undercity dungeon, the initiative's abilities;
+//!   ENGINE.md 27.4) is in the token registry under the key `<name> rules`;
 //! * [`UNKNOWN`] for anything else (a card outside the cube list, an unregistered token).
 //!
 //! Capacity [`D`] = 1024 identities: the code's digits are one-hots of 16, 8 and 8 (index =
@@ -56,8 +58,11 @@ const KEY_KWS: [Kw; 15] = [
 ];
 
 /// A token definition's registry key, e.g. `Treasure -/- C a Treasure` or
-/// `Cat 2/2 W c Cat lifelink`.
+/// `Cat 2/2 W c Cat lifelink`; a rules definition's, `Undercity rules`.
 pub fn token_key(db: &CardDb, d: &CardDef) -> String {
+    if d.rules {
+        return format!("{} rules", d.name);
+    }
     let pt = |v: Option<i32>| v.map_or("-".to_string(), |x| x.to_string());
     let colors: String = "WUBRG"
         .chars()
@@ -105,7 +110,7 @@ fn compute(db: &CardDb) -> Vec<u16> {
     (0..db.len())
         .map(|i| {
             let d = db.def(i as DefId);
-            if d.token {
+            if d.token || d.rules {
                 reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
             } else if d.emblem {
                 d.name.strip_suffix(" emblem").and_then(|n| pos.get(n).copied()).unwrap_or(UNKNOWN)

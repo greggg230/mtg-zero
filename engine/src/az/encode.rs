@@ -1,18 +1,20 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
 //! f32 vector for a viewer, with no hidden information. Layout v3 (M7b: 26,500
-//! floats; M7b part 3, copies: 29,092), in order:
+//! floats; M7b part 3, copies: 29,092; part 3b, the stack, ward, the
+//! initiative: 29,860), in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
-//! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash; M7b part 2: poison, cards on an adventure, temporary triggered abilities, no maximum hand size; day and night |
+//! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash; M7b part 2: poison, cards on an adventure, temporary triggered abilities, no maximum hand size; day and night; part 3b: the initiative, the dungeon room, dungeons completed, experience counters |
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
 //! | bags | 15 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them) |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 140 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to) |
+//! | permanents | 2 x 32 x 148 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
-//! | stack | 8 x 80 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets; a copy of a spell, times an additional cost was paid, bestowed |
+//! | stack | 8 x 84 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 40 x 56 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
+//! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //!
 //! A card code (52 floats) is the card's stable identity (`identity.rs`: its
 //! position in the cube's IR card list, tokens from a registry; capacity
@@ -33,7 +35,7 @@
 //! Everything else is public or the viewer's own knowledge, so the vector is
 //! the same in every world `determinize(viewer)` can produce (tested).
 
-use crate::db::{types, AbilitySlot, CardDb, Kw};
+use crate::db::{types, AbilitySlot, CardDb, Kw, WardCost};
 use crate::decision::{act, Choice, FACE_CAST, FACE_PLAY, OTHER_CAST, OTHER_PLAY};
 use crate::flow::Task;
 use crate::game::{Game, StackKind};
@@ -52,15 +54,17 @@ pub const BAGS: usize = 15;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
 pub const PERMS: usize = 32;
-pub const PERM_W: usize = CODE + 88;
+pub const PERM_W: usize = CODE + 96;
 pub const HANDS: usize = 16;
 pub const HAND_W: usize = CODE + 8;
 pub const STACKS: usize = 8;
-pub const STACK_W: usize = CODE + 28;
+pub const STACK_W: usize = CODE + 32;
 pub const TRIGS: usize = 4;
 pub const TRIG_W: usize = CODE + 4;
 pub const LIST: usize = 40;
 pub const LIST_W: usize = CODE + 4;
+pub const GYAS: usize = 4;
+pub const GYA_W: usize = CODE + 4;
 
 pub const O_GLOBALS: usize = 0;
 pub const O_CONTEXT: usize = O_GLOBALS + GLOBALS;
@@ -72,7 +76,8 @@ pub const O_HAND: usize = O_OPP_PERM + PERMS * PERM_W;
 pub const O_STACK: usize = O_HAND + HANDS * HAND_W;
 pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
 pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
-pub const NUM_FEATURES: usize = O_LIST + LIST * LIST_W;
+pub const O_GYA: usize = O_LIST + LIST * LIST_W;
+pub const NUM_FEATURES: usize = O_GYA + GYAS * GYA_W;
 
 /// Bags (each `D` wide, 0.25 per card).
 pub mod bag {
@@ -159,6 +164,20 @@ pub mod perm {
     /// Prepared (CR 722.3a): a copy of its prepare spell in exile may be
     /// cast.
     pub const PREPARED: usize = 83;
+    /// M7b part 3b (ENGINE.md 27): its ward abilities / 2 (its own and
+    /// those a permanent its controller controls gives it, CR 702.21), the
+    /// largest ward mana cost's mana value / 4, the largest ward life cost
+    /// / 4, a ward cost of discarding a card.
+    pub const WARD: usize = 84;
+    pub const WARD_MANA: usize = 85;
+    pub const WARD_LIFE: usize = 86;
+    pub const WARD_DISCARD: usize = 87;
+    /// It lost all abilities (CR 613.1f; Tishana's Tidebinder).
+    pub const LOST_ABILITIES: usize = 88;
+    /// Goaded (CR 701.38: it attacks each combat if able).
+    pub const GOADED: usize = 89;
+    /// It is exiled if it would leave the battlefield (From the Catacombs).
+    pub const EXILE_IF_LEAVES: usize = 90;
 }
 
 /// Offsets inside a stack slot's status (after its card code).
@@ -169,6 +188,32 @@ pub mod stack {
     pub const COPY: usize = 24;
     pub const TIMES: usize = 25;
     pub const BESTOWED: usize = 26;
+    /// M7b part 3b: another stack item targets it (CR 115.7); a spell that
+    /// can't be countered (101.2); an ability's index in its card's list
+    /// ((index + 1) / 8: which triggered or activated ability; a ward
+    /// trigger is one of its card's triggers); an ability of a card in a
+    /// graveyard (ENGINE.md 27.5).
+    pub const TARGETED: usize = 27;
+    pub const UNCOUNTERABLE: usize = 28;
+    pub const SLOT: usize = 29;
+    pub const GRAVEYARD: usize = 30;
+}
+
+/// Offsets inside the per-player globals (`g[24 + 40 * side..]`, viewer
+/// first) added in M7b part 3b, and the room one-hots.
+pub mod glob {
+    /// Has the initiative (CR 725).
+    pub const INITIATIVE: usize = 34;
+    /// Has a dungeon in the command zone (its venture marker is in a room,
+    /// CR 309.4).
+    pub const IN_DUNGEON: usize = 35;
+    /// Dungeons completed / 2 (CR 309.7).
+    pub const COMPLETED: usize = 36;
+    /// Experience counters / 4 (CR 122.1).
+    pub const EXPERIENCE: usize = 37;
+    /// The venture marker's room (`dungeon::ROOMS` index), one-hot:
+    /// `g[ROOM + 9 * side + room]`.
+    pub const ROOM: usize = 106;
 }
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
@@ -392,6 +437,30 @@ impl Game {
                 // (the descriptor; a copy's copied face, CR 707.2).
                 code_of(&mut out[o..o + CODE], self.db, ids, self.own_def(c), ob.def);
                 out[o + 46] = self.is_token(c) as u8 as f32;
+                // A copy's exceptions to the copiable values (CR 707.9b:
+                // eternalize's black 4/4 with no mana cost).
+                if let Some(e) = self.exc(c) {
+                    for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
+                        .iter()
+                        .enumerate()
+                    {
+                        if e.types & t != 0 {
+                            out[o + 32 + k] = 1.0;
+                        }
+                    }
+                    if let Some(m) = e.colors {
+                        for k in 0..5 {
+                            out[o + 38 + k] = (m & (1 << k) != 0) as u8 as f32;
+                        }
+                    }
+                    if e.no_cost {
+                        out[o + 43] = 0.0;
+                    }
+                    if let Some((pw, th)) = e.pt {
+                        out[o + 44] = pw as f32 / 8.0;
+                        out[o + 45] = th as f32 / 8.0;
+                    }
+                }
                 let st = &mut out[o + CODE..o + PERM_W];
                 st[perm::PRESENT] = 1.0;
                 st[perm::TAPPED] = ob.tapped as u8 as f32;
@@ -453,6 +522,20 @@ impl Game {
                     st[perm::ATTACHED_OPP] = (self.objs[h.idx.i()].controller != me) as u8 as f32;
                 }
                 st[perm::PREPARED] = self.is_prepared(c) as u8 as f32;
+                let wards = self.wards_of(c);
+                st[perm::WARD] = wards.len() as f32 / 2.0;
+                for w in wards {
+                    match w {
+                        WardCost::Mana(m) => {
+                            st[perm::WARD_MANA] = st[perm::WARD_MANA].max(m.total() as f32 / 4.0)
+                        }
+                        WardCost::Life(n) => st[perm::WARD_LIFE] = st[perm::WARD_LIFE].max(n as f32 / 4.0),
+                        WardCost::Discard => st[perm::WARD_DISCARD] = 1.0,
+                    }
+                }
+                st[perm::LOST_ABILITIES] = self.lost_abilities(c) as u8 as f32;
+                st[perm::GOADED] = [me, op_].iter().any(|&p| self.goaded_by(c, p)) as u8 as f32;
+                st[perm::EXILE_IF_LEAVES] = self.flags_of(c).exile_if_leaves as u8 as f32;
             }
         }
         // The viewer's hand.
@@ -484,6 +567,7 @@ impl Game {
             }
         }
         // The stack, top first.
+        let stack_targets: Vec<Target> = self.stack.iter().flat_map(|s| s.targets.iter().map(|&(_, t)| t)).collect();
         for (s, item) in self.stack.iter().rev().enumerate().take(STACKS) {
             let o = O_STACK + s * STACK_W;
             let (def, kind) = match item.kind {
@@ -500,10 +584,28 @@ impl Game {
             st[5] = item.modes.len() as f32 / 4.0;
             st[6] = item.cost_option as f32 / 4.0;
             st[7] = item.targets.len() as f32 / 4.0;
-            if let StackKind::Spell { card } = item.kind {
-                st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
-                st[stack::TIMES] = item.times as f32 / 4.0;
-                st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
+            match item.kind {
+                StackKind::Spell { card } => {
+                    st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
+                    st[stack::TIMES] = item.times as f32 / 4.0;
+                    st[stack::BESTOWED] = self.def_of(card).bestowed as u8 as f32;
+                    st[stack::UNCOUNTERABLE] = self.spell_uncounterable(card) as u8 as f32;
+                    st[stack::TARGETED] =
+                        stack_targets.iter().any(|t| matches!(t, Target::Obj(r) if r.idx == card && self.live(*r))) as u8
+                            as f32;
+                }
+                StackKind::Ability { ability, .. } => {
+                    st[stack::TARGETED] = stack_targets.contains(&Target::Stack(item.id)) as u8 as f32;
+                    let i = match ability.slot {
+                        AbilitySlot::Spell => None,
+                        AbilitySlot::Trigger(i) | AbilitySlot::Activated(i) | AbilitySlot::Hand(i) => Some(i),
+                        AbilitySlot::Graveyard(i) => {
+                            st[stack::GRAVEYARD] = 1.0;
+                            Some(i)
+                        }
+                    };
+                    st[stack::SLOT] = i.map_or(0.0, |i| (i as f32 + 1.0) / 8.0);
+                }
             }
             for (k, &(_, t)) in item.targets.iter().take(2).enumerate() {
                 let tb = &mut st[8 + 8 * k..16 + 8 * k];
@@ -557,7 +659,37 @@ impl Game {
                 out[o + CODE + 2] = list.iter().filter(|&&x| x == def).count() as f32 / 4.0;
             }
         }
+        // The cards in the viewer's graveyard with a graveyard ability (the
+        // `GY_ABILITY` ids, graveyard order: `Game::activation_options`).
+        for (k, c) in self.graveyard_cards(me).filter(|&c| !self.def_of(c).gy_abilities.is_empty()).take(GYAS).enumerate() {
+            let o = O_GYA + k * GYA_W;
+            code(&mut out[o..o + CODE], self.db, ids, self.objs[c.i()].def);
+            out[o + CODE] = 1.0;
+            out[o + CODE + 1] = legal(act::GY_ABILITY + k as u16) as u8 as f32;
+        }
         self.encode_context(me, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
+    }
+
+    /// The ward abilities permanent `c` has (CR 702.21): its own and those a
+    /// permanent its controller controls gives it ("other creatures you
+    /// control have ward"), unless it lost them (613.7: a later "loses all
+    /// abilities"; the `TrigPred::Granted` test).
+    fn wards_of(&self, c: CardIdx) -> Vec<WardCost> {
+        let mut v: Vec<WardCost> = self.abilities(c).ward.into_iter().collect();
+        if self.is_creature(c) {
+            let loss = self.loss_ts(c);
+            for q in self.permanents_of(self.objs[c.i()].controller) {
+                if q == c {
+                    continue;
+                }
+                if let Some(w) = self.abilities(q).grants_ward {
+                    if loss.is_none_or(|l| l < self.objs[q.i()].timestamp) {
+                        v.push(w);
+                    }
+                }
+            }
+        }
+        v
     }
 
     /// Per-identity counts.
@@ -692,6 +824,17 @@ impl Game {
                 / 4.0;
             o[32] = self.temp_triggers.iter().filter(|t| t.controller == p).count() as f32 / 2.0;
             o[33] = self.no_max_hand(p) as u8 as f32;
+            // M7b part 3b (ENGINE.md 27.4).
+            let (room, completed) = self.dungeon(p);
+            o[glob::INITIATIVE] = self.has_initiative(p) as u8 as f32;
+            o[glob::IN_DUNGEON] = room.is_some() as u8 as f32;
+            o[glob::COMPLETED] = completed as f32 / 2.0;
+            o[glob::EXPERIENCE] = pl.experience as f32 / 4.0;
+        }
+        for (side, p) in [me, opp(me)].into_iter().enumerate() {
+            if let (Some(r), _) = self.dungeon(p) {
+                g[glob::ROOM + crate::dungeon::ROOMS.len() * side + r as usize] = 1.0;
+            }
         }
         // Day and night (CR 731).
         g[104] = (self.day == Some(true)) as u8 as f32;
@@ -722,7 +865,7 @@ impl Game {
         let Some(d) = &self.pending else { return Vec::new() };
         let cards: Vec<CardIdx> = match d.kind {
             K::SearchLibrary | K::NameCard => self.library_sorted(p),
-            K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand => match self.agenda.last() {
+            K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield => match self.agenda.last() {
                 Some(Task::Run(f)) => {
                     let mut v = f.pile.clone();
                     v.sort_by_key(|c| (self.objs[c.i()].def, c.0));
@@ -908,6 +1051,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
             seg("stack", O_STACK, STACKS, STACK_W, CODE, json!([a(act::STACK, 1)])),
             seg("triggers", O_TRIG, TRIGS, TRIG_W, CODE, json!([a(act::TRIGGER, 1)])),
             seg("list", O_LIST, LIST, LIST_W, CODE, json!([a(act::LIBRARY, 1)])),
+            seg("graveyard_abilities", O_GYA, GYAS, GYA_W, CODE, json!([a(act::GY_ABILITY, 1)])),
         ],
         "bags": [{"name": "bags", "offset": O_BAGS, "count": BAGS, "width": D}],
         "cards": cards,

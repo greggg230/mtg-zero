@@ -464,3 +464,52 @@ fn ertai_destroys_and_the_creatures_controller_draws_even_if_indestructible() {
     assert_eq!(g.obj(ti).zone, Zone::Battlefield, "indestructible");
     assert_eq!(g.player(0).hand.len(), hand0 + 1, "its controller still draws");
 }
+
+#[test]
+fn a_targeted_ability_and_the_lost_abilities_are_in_the_encoding() {
+    // Tidebinder's trigger (top) targets the Ballista's ping (below it): the
+    // ping's slot is targeted, the trigger's first target is stack slot 1;
+    // the ping is the Ballista's activated ability 1. Then the Ballista has
+    // lost all abilities.
+    use engine::az::encode::{self, perm, stack, CODE, NUM_FEATURES, PERM_W, STACK_W};
+    let mut g = scen()
+        .battlefield(0, &[BALLISTA])
+        .counters(0, BALLISTA, Counter::P1P1, 2)
+        .battlefield(1, &["Island", "Island", "Island"])
+        .hand(1, &[TIDEBINDER])
+        .start();
+    let wb = bf(&g, 0, BALLISTA);
+    g.choose(Choice::Ability(wb, AbilitySlot::Activated(1)));
+    finish(&mut g, |g| g.has_option(player(1)).then_some(player(1)));
+    g.pass();
+    let tb = g.card(1, TIDEBINDER, Zone::Hand);
+    g.choose(Choice::Cast(tb));
+    finish(&mut g, |_| None);
+    for _ in 0..50 {
+        if g.stack().len() == 2 && at_priority(&g) && !g.stack()[1].targets.is_empty() {
+            break;
+        }
+        if at_priority(&g) {
+            g.pass();
+        } else {
+            let c = stack_target(&g).unwrap_or_else(|| options(&g)[0]);
+            g.choose(c);
+        }
+    }
+    assert_eq!(g.stack().len(), 2, "the ping and Tidebinder's trigger");
+    for viewer in [0u8, 1] {
+        let mut x = vec![0.0; NUM_FEATURES];
+        g.encode_features(viewer, &mut x);
+        let slot = |s: usize| &x[encode::O_STACK + s * STACK_W + CODE..encode::O_STACK + (s + 1) * STACK_W];
+        assert_eq!(slot(0)[stack::TARGETED], 0.0);
+        assert_eq!((slot(0)[8 + 6], slot(0)[8 + 7]), (1.0, 1.0 / 8.0), "its target: stack slot 1");
+        assert_eq!(slot(1)[stack::TARGETED], 1.0);
+        assert_eq!(slot(1)[stack::SLOT], 2.0 / 8.0, "activated ability 1");
+        assert_eq!(slot(1)[stack::GRAVEYARD], 0.0);
+    }
+    resolve_with(&mut g, stack_target);
+    let mut x = vec![0.0; NUM_FEATURES];
+    g.encode_features(1, &mut x);
+    let o = encode::O_OPP_PERM + g.permanents_of(0).position(|c| c == wb).unwrap() * PERM_W + CODE;
+    assert_eq!(x[o + perm::LOST_ABILITIES], 1.0);
+}

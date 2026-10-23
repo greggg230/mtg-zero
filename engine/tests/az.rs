@@ -312,7 +312,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 29_092);
+    assert_eq!(NUM_FEATURES, 29_860);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -356,6 +356,14 @@ fn encoding_slots_name_the_action_slots() {
                 assert_eq!(decode_id(&x[off..off + CODE]), want);
                 assert_eq!(x[off + CODE + 1], 1.0);
                 lists += 1;
+            }
+            // a graveyard card's ability (ENGINE.md 27.5)
+            if (act::GY_ABILITY..act::GY_ABILITY + encode::GYAS as u16).contains(&o.action) {
+                let k = (o.action - act::GY_ABILITY) as usize;
+                let off = encode::O_GYA + k * encode::GYA_W;
+                let engine::Choice::Ability(c, _) = o.choice else { unreachable!() };
+                assert_eq!(decode_id(&x[off..off + CODE]), ident(g.g.obj(c).def));
+                assert_eq!(x[off + CODE + 1], 1.0);
             }
         }
         // the decision kind
@@ -417,7 +425,7 @@ fn token_registry_and_stable_identities() {
         let d = db.def(i as engine::ids::DefId);
         let id = ids[i] as usize;
         assert!(id != identity::UNKNOWN as usize, "{} has no identity", d.name);
-        if d.token {
+        if d.token || d.rules {
             assert!((identity::CUBE_CAP..identity::D - 1).contains(&id));
         } else if d.emblem {
             // an emblem (CR 114) has the identity of the card that makes it
@@ -445,7 +453,7 @@ fn token_registry_and_stable_identities() {
     let sids = identity::identities(small);
     for i in 0..small.len() {
         let d = small.def(i as engine::ids::DefId);
-        let full = if d.token {
+        let full = if d.token || d.rules {
             (db.num_cards()..db.len()).find(|&j| identity::token_key(db, db.def(j as engine::ids::DefId)) == identity::token_key(small, d))
         } else {
             db.id(&d.name).map(|x| x as usize)

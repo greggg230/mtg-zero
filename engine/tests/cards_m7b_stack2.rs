@@ -343,6 +343,15 @@ fn fanatic_of_rhonas_eternalize_from_the_graveyard_cr_702_129a() {
     let f = g.card(0, FANATIC, Zone::Graveyard);
     let a = Choice::Ability(f, AbilitySlot::Graveyard(0));
     assert_eq!(g.pending_decision().unwrap().action_of(a), Some(act::GY_ABILITY));
+    // Encoded: graveyard-ability slot 0 is the Fanatic, an option of P0's.
+    use engine::az::encode::{self, CODE, GYA_W, NUM_FEATURES};
+    for viewer in [0u8, 1] {
+        let mut x = vec![0.0; NUM_FEATURES];
+        g.encode_features(viewer, &mut x);
+        let s = &x[encode::O_GYA..encode::O_GYA + GYA_W];
+        let want = if viewer == 0 { (1.0, 1.0) } else { (0.0, 0.0) };
+        assert_eq!((s[CODE], s[CODE + 1]), want, "P0's graveyard for P0; P1's (empty) for P1");
+    }
     g.choose(a);
     finish(&mut g, |_| None);
     assert_eq!(g.obj(f).zone, Zone::Exile, "exiled as a cost");
@@ -352,6 +361,11 @@ fn fanatic_of_rhonas_eternalize_from_the_graveyard_cr_702_129a() {
     let t = t[0];
     assert_eq!(g.pt(t), (4, 4));
     assert_eq!(g.colors_of(t), 1 << 2, "black");
+    // Its card code's descriptor: black, mana value 0, a 4/4 (CR 707.9b).
+    let mut x = vec![0.0; NUM_FEATURES];
+    g.encode_features(0, &mut x);
+    let o = encode::O_MY_PERM + g.permanents_of(0).position(|c| c == t).unwrap() * encode::PERM_W;
+    assert_eq!(&x[o + 38..o + 46], &[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5]);
     let zombie = db().subtype_id("Zombie").unwrap();
     assert!(g.has_subtype(t, zombie) && g.has_subtype(t, db().subtype_id("Snake").unwrap()));
 }

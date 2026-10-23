@@ -8,6 +8,7 @@
 mod common;
 
 use common::db;
+use engine::az::encode::perm;
 use engine::db::{AbilitySlot, Counter};
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Zone};
@@ -53,6 +54,17 @@ fn tgt_if(g: &Game, c: CardIdx) -> Option<Choice> {
 
 fn options(g: &Game) -> Vec<Choice> {
     g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect()
+}
+
+/// The status floats of permanent `c` in `viewer`'s encoding.
+fn perm_status(g: &Game, viewer: PlayerId, c: CardIdx) -> Vec<f32> {
+    use engine::az::encode::{self, CODE, NUM_FEATURES, PERM_W};
+    let mut x = vec![0.0; NUM_FEATURES];
+    g.encode_features(viewer, &mut x);
+    let ctl = g.obj(c).controller;
+    let s = g.permanents_of(ctl).position(|x| x == c).unwrap();
+    let o = if ctl == viewer { encode::O_MY_PERM } else { encode::O_OPP_PERM } + s * PERM_W + CODE;
+    x[o..o + PERM_W - CODE].to_vec()
 }
 
 /// P1's turn: P1 has `lands` and `hand`; P0 has `mine`.
@@ -236,6 +248,8 @@ fn a_creature_that_lost_its_abilities_has_no_granted_ward_cr_613_7() {
     resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::YesNo)).then_some(Choice::Yes));
     assert_eq!(g.life(1), 18);
     assert_eq!(g.pt(bear), (3, 3), "an Elk");
+    let st = perm_status(&g, 1, bear);
+    assert_eq!((st[perm::LOST_ABILITIES], st[perm::WARD]), (1.0, 0.0), "encoded: no abilities, no ward");
     let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
     g.choose(Choice::Cast(bolt));
     finish(&mut g, |g| tgt_if(g, bear));
@@ -257,4 +271,24 @@ fn ward_triggers_for_each_instance_cr_702_21a() {
     assert_eq!(asked.get(), 2);
     assert_eq!(g.life(1), 16);
     assert_eq!(g.obj(sq).zone, Zone::Graveyard);
+}
+
+#[test]
+fn ward_and_its_costs_are_in_the_encoding() {
+    // Kappa Cannoneer: ward {4}; Sedgemoor Witch: ward-pay 3 life; Sunset
+    // Saboteur: ward-discard a card; Hexing Squelcher: ward-pay 2 life, and
+    // the other creatures have it too (two wards each). Public: the same
+    // for both viewers.
+    let g = scen(&["Kappa Cannoneer", "Sedgemoor Witch", "Sunset Saboteur", "Hexing Squelcher"], &["Mountain"], &[]);
+    for viewer in [0, 1] {
+        let st = |name: &str| perm_status(&g, viewer, bf(&g, 0, name));
+        let k = st("Kappa Cannoneer");
+        assert_eq!((k[perm::WARD], k[perm::WARD_MANA], k[perm::WARD_LIFE], k[perm::WARD_DISCARD]), (1.0, 1.0, 0.5, 0.0));
+        let w = st("Sedgemoor Witch");
+        assert_eq!((w[perm::WARD], w[perm::WARD_MANA], w[perm::WARD_LIFE], w[perm::WARD_DISCARD]), (1.0, 0.0, 0.75, 0.0));
+        let s = st("Sunset Saboteur");
+        assert_eq!((s[perm::WARD], s[perm::WARD_LIFE], s[perm::WARD_DISCARD]), (1.0, 0.5, 1.0));
+        let h = st("Hexing Squelcher");
+        assert_eq!((h[perm::WARD], h[perm::WARD_LIFE], h[perm::LOST_ABILITIES]), (0.5, 0.5, 0.0));
+    }
 }
