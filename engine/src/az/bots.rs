@@ -607,6 +607,8 @@ impl Heuristic {
                 })
                 .max()
                 .map(|x| x.1),
+            // X (CR 107.3): as much as it can pay.
+            K::ChooseMode if matches!(g.agenda.last(), Some(Task::ChooseX { .. })) => d.options.last().map(|o| o.action),
             K::ChooseMode => d.options.iter().find(|o| o.action != act::PASS).map(|o| o.action),
             // A land face while it has played no land this turn, else the
             // costlier spell face (CR 712.11b, 712.12, 715.3).

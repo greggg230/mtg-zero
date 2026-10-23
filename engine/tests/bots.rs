@@ -501,6 +501,26 @@ fn draws_with_spare_mana_at_the_end_of_the_opponents_turn() {
     assert_eq!(bot_choice(&g), ability(stone, 1), "{:?}", g.options_desc());
 }
 
+#[test]
+fn casts_x_spells_for_as_much_as_it_can_pay() {
+    let mut g = Scenario::new(db())
+        .battlefield(0, &["Island", "Island", "Island", "Island"])
+        .hand(0, &["Walking Ballista"])
+        .library(0, &["Island"; 5])
+        .lands_played(0, 1)
+        .start();
+    let mut h = Heuristic::new(3);
+    let mut legal = Vec::new();
+    let mut keys = Vec::new();
+    while g.turn().step == Step::Main1 {
+        g.legal_actions(&mut legal);
+        let a = h.choose(&g, &legal);
+        g.apply(a, &mut keys).unwrap();
+    }
+    let ballista = bf(&g, 0, "Walking Ballista");
+    assert_eq!(g.counters_on(ballista, Counter::P1P1), 2);
+}
+
 // ---- the inventory ----------------------------------------------------------
 
 fn op_names(ab: &engine::db::AbilityDef) -> String {
