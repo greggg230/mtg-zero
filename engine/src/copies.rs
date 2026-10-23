@@ -121,9 +121,10 @@ pub(crate) const COPIED: u16 = 1;
 
 /// At most this many copies a turn by "may copy this spell" effects. Chain
 /// of Smog's copies cost nothing, so players who always copy would loop
-/// forever; CR 732.4 has a player choose how many times to repeat a loop
-/// of optional actions. 31 (the `NUMBER` range) keeps the drain loop of
-/// Chain of Smog and a magecraft creature lethal (ENGINE.md 26.11).
+/// forever; the CR has a loop of optional actions repeated a chosen number
+/// of times (732.2a) and broken when it comes back to the same game state
+/// (732.3). 31 (the `NUMBER` range) keeps the drain loop of Chain of Smog
+/// and a magecraft creature lethal (ENGINE.md 26.11).
 pub(crate) const MAY_COPY_CAP: u8 = 31;
 
 impl Game {

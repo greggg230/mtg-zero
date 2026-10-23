@@ -140,9 +140,10 @@ impl Game {
                         || !self.is_creature(h.idx)
                         || self.protected_from(h.idx, &self.damage_source_of(c))
                 };
-                // 704.5p: a permanent that is no longer an Equipment (a copy
-                // effect ended) becomes unattached.
-                let attachable = || self.def_of(c).bestowed || equipment.is_some_and(|s| self.has_subtype(c, s));
+                // 704.5p: a creature, or a permanent that is no longer an
+                // Equipment (a copy effect ended), becomes unattached.
+                let attachable =
+                    || !self.is_creature(c) && (self.def_of(c).bestowed || equipment.is_some_and(|s| self.has_subtype(c, s)));
                 match self.objs[c.i()].attached {
                     Some(h) => illegal(h) || !attachable(),
                     None => self.def_of(c).bestowed,

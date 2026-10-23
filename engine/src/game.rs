@@ -511,8 +511,8 @@ pub struct Game {
     pub(crate) prepared: Vec<(ObjRef, CardIdx)>,
     /// Copies made this turn by "may copy this spell" effects (Chain of
     /// Smog, Chain Lightning): at `copies::MAY_COPY_CAP` no more are offered
-    /// (an engine limit on a loop of optional actions, CR 732.4; ENGINE.md
-    /// 26.11).
+    /// (an engine limit on a loop of optional actions, CR 732.2a, 732.3;
+    /// ENGINE.md 26.11).
     pub(crate) may_copies: u8,
     pub(crate) log: Option<Vec<String>>,
 }

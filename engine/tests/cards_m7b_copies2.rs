@@ -314,10 +314,11 @@ fn chain_of_smog_the_target_player_may_copy_it_cr_707_10() {
 }
 
 #[test]
-fn chain_of_smog_copied_forever_stops_at_the_engine_limit_cr_732_4() {
+fn chain_of_smog_copied_forever_stops_at_the_engine_limit_cr_732_3() {
     // P0 targets itself with an empty hand and always copies, keeping the
-    // target: a loop of optional actions (CR 732.4). The engine offers 31
-    // copies a turn, then the loop ends.
+    // target: a loop of optional actions that comes back to the same game
+    // state (CR 732.2a, 732.3). The engine offers 31 copies a turn, then the
+    // loop ends.
     let mut g = scen().battlefield(0, &["Swamp", "Swamp"]).hand(0, &["Chain of Smog"]).start();
     let cs = g.card(0, "Chain of Smog", Zone::Hand);
     g.choose(Choice::Cast(cs));
@@ -517,6 +518,32 @@ fn emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3() 
     assert!(!g.is_prepared(e), "unprepared as the copy was cast");
     assert_eq!(g.obj(copy).zone, Zone::Nowhere, "a copy of a card ceases to exist off the stack (CR 704.5e)");
     assert_eq!(g.lands_of(0).filter(|&c| g.obj(c).tapped).count(), 5);
+}
+
+#[test]
+fn a_metamorph_copying_emeritus_enters_prepared_cr_722_2b() {
+    // The prepare spell is a copiable value (CR 722.2b): Phyrexian Metamorph
+    // entering as a copy of Emeritus enters prepared, with its own Regrowth
+    // copy in exile.
+    let mut g = scen()
+        .battlefield(0, &[EMERITUS])
+        .battlefield(0, &["Island"; 4])
+        .hand(0, &["Phyrexian Metamorph"])
+        .start();
+    let e = bf(&g, 0, EMERITUS);
+    let m = g.card(0, "Phyrexian Metamorph", Zone::Hand);
+    g.choose(Choice::Cast(m));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChoosePermanent) => Some(Choice::Card(e)),
+        Some(DecisionKind::PayPhyrexian) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c == Choice::Number(0)),
+        _ => None,
+    });
+    assert_eq!(g.obj(m).zone, Zone::Battlefield);
+    assert!(g.is_copy(m));
+    assert!(g.is_prepared(m), "enters prepared as a copy of Emeritus");
+    assert!(g.is_type(m, types::ARTIFACT));
+    let copies: Vec<CardIdx> = g.exile_zone().iter().copied().filter(|&c| g.is_copy_obj(c) && g.name(c) == "Regrowth").collect();
+    assert_eq!(copies.len(), 1, "the Metamorph's own Regrowth (the scenario's Emeritus wasn't put onto the battlefield prepared)");
 }
 
 #[test]

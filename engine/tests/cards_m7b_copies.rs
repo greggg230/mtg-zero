@@ -37,10 +37,6 @@ fn resolve_with(g: &mut Game, answer: impl Fn(&Game) -> Option<Choice>) {
     panic!("resolve_with: no progress\n{}", g.log_lines().join("\n"));
 }
 
-fn settle(g: &mut Game) {
-    resolve_with(g, |_| None);
-}
-
 /// Pass, decline attacks and blocks, first option otherwise, until `stop`.
 fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
     for _ in 0..10_000 {
@@ -349,6 +345,33 @@ fn saheeli_copy_of_an_equipment_becomes_unattached_when_it_reverts_cr_704_5p() {
     assert_eq!(g.obj(ring).attached, None, "no longer an Equipment: unattached (CR 704.5p)");
     assert_eq!(g.obj(ring).zone, Zone::Battlefield);
     assert!(!g.has_kw(bear, Kw::Haste));
+}
+
+#[test]
+fn an_equipment_made_a_copy_of_a_creature_becomes_unattached_cr_704_5p() {
+    // Skullclamp, attached to the Bear, becomes a copy of the Bear
+    // (an artifact creature): a creature attached to an object becomes
+    // unattached and stays on the battlefield (CR 704.5p).
+    let mut g = scen().battlefield(0, &[SAHEELI, "Skullclamp", "Test Bear", "Island"]).start();
+    let sa = bf(&g, 0, SAHEELI);
+    let clamp = bf(&g, 0, "Skullclamp");
+    let bear = bf(&g, 0, "Test Bear");
+    let slot = (0..g.def_of(clamp).activated.len() as u8).find(|&i| g.has_option(Choice::Ability(clamp, AbilitySlot::Activated(i)))).expect("equip offered");
+    g.choose(Choice::Ability(clamp, AbilitySlot::Activated(slot)));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(g.tgt(bear)),
+        _ => None,
+    });
+    assert_eq!(g.obj(clamp).attached.map(|h| h.idx), Some(bear));
+    g.choose(Choice::Ability(sa, AbilitySlot::Activated(0)));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) if g.has_option(g.tgt(clamp)) => Some(g.tgt(clamp)),
+        Some(DecisionKind::Target) => Some(g.tgt(bear)),
+        _ => None,
+    });
+    assert!(g.is_creature(clamp) && g.is_type(clamp, types::ARTIFACT));
+    assert_eq!(g.obj(clamp).attached, None);
+    assert_eq!(g.obj(clamp).zone, Zone::Battlefield);
 }
 
 // ---- Shifting Woodland ----------------------------------------------------------------
