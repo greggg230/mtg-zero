@@ -131,7 +131,7 @@ pub enum DecisionKind {
     /// The amount of divided damage for the next target (`NUMBER`, CR
     /// 601.2d).
     DivideDamage,
-    // (At most 32 kinds: the network's context block has 32 slots. "Top or
+    // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
 

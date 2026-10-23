@@ -158,7 +158,7 @@ cards and 4v4 PowerLSV, then best-of-3 with sideboarding.
 * **Deferred results**: a game whose terminal result comes from a separate evaluation step (the
   matches), with samples held until the result arrives.
 * A set/transformer encoder network: done in M5b (zero-core arch `tokens`, `net.TokenNet`, its
-  docs/az.md 10; MTG's object layout `mtgz/az/layout_v2.json`). Maybe also for `team_draft`.
+  docs/az.md 10; MTG's object layout `mtgz/az/layout_v3.json`). Maybe also for `team_draft`.
 * Remote (Mac) workers: zero-core step 2, already planned.
 
 ## 6. Not doing

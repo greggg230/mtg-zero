@@ -3,7 +3,7 @@
     {
       "count": 13,
       "name": "bags",
-      "offset": 320,
+      "offset": 384,
       "width": 1024
     }
   ],
@@ -1033,12 +1033,12 @@
     null,
     null
   ],
-  "features": 23324,
+  "features": 23388,
   "segments": [
     {
       "count": 1,
       "id": {
-        "at": 54,
+        "at": 98,
         "radix": [
           16,
           8,
@@ -1048,7 +1048,7 @@
       "name": "context",
       "offset": 128,
       "present": null,
-      "width": 192
+      "width": 256
     },
     {
       "count": 6,
@@ -1061,7 +1061,7 @@
         ]
       },
       "name": "tops",
-      "offset": 13632,
+      "offset": 13696,
       "present": 1,
       "width": 50
     },
@@ -1098,7 +1098,7 @@
         ]
       },
       "name": "my_permanents",
-      "offset": 13932,
+      "offset": 13996,
       "present": 48,
       "width": 88
     },
@@ -1119,7 +1119,7 @@
         ]
       },
       "name": "opponent_permanents",
-      "offset": 16748,
+      "offset": 16812,
       "present": 48,
       "width": 88
     },
@@ -1144,7 +1144,7 @@
         ]
       },
       "name": "hand",
-      "offset": 19564,
+      "offset": 19628,
       "present": 48,
       "width": 56
     },
@@ -1165,7 +1165,7 @@
         ]
       },
       "name": "stack",
-      "offset": 20460,
+      "offset": 20524,
       "present": 48,
       "width": 72
     },
@@ -1186,7 +1186,7 @@
         ]
       },
       "name": "triggers",
-      "offset": 21036,
+      "offset": 21100,
       "present": 48,
       "width": 52
     },
@@ -1207,11 +1207,11 @@
         ]
       },
       "name": "list",
-      "offset": 21244,
+      "offset": 21308,
       "present": 48,
       "width": 52
     }
   ],
-  "version": 2,
+  "version": 3,
   "vocab": 1024
 }

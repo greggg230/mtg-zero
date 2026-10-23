@@ -502,7 +502,7 @@ creature), `ChooseAltCost` (`NUMBER` 0 = the mana cost, k + 1 = alternative cost
 for the next target); X, a counter kind, an energy amount and tap-or-untap use `ChooseMode`;
 "top or bottom" is a `YesNo`. Priority also offers graveyard cards (`GRAVEYARD`: flashback,
 escape, lands with Crucible of Worlds) and exiled cards with a permission (`EXILE`). There
-are 32 decision kinds, the context block's capacity (section 22).
+are 32 decision kinds; the context block holds 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
@@ -1256,12 +1256,12 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
 
 * The runs of 22.4 used layout v1 (21.2) unchanged; layout v2 (22.2) came after them.
   `encode::layout_json` describes the encoding for the token network, checked in as
-  `mtgz/az/layout_v2.json` (v1: `layout_v1.json` at commit 531070a; `cargo test -p engine
+  `mtgz/az/layout_v3.json` (22.6; v2 at commit 98b9463, v1: `layout_v1.json` at commit 531070a; `cargo test -p engine
   --test az layout_json_is_checked_in`; `MTGZ_WRITE_LAYOUT=1` rewrites it):
 
   | Segment | Slots x floats | Present flag | Identity | Actions scored from the slot's token |
   |---|---|---|---|---|
-  | context | 1 x 384 (v2: 192) | always | the decision's card (v1: one-hot of 256; v2: card code) | |
+  | context | 1 x 384 (v2: 192, v3: 256) | always | the decision's card (v1: one-hot of 256; v2: card code) | |
   | tops | 6 x 50 | known to the viewer | card code | |
   | my permanents | 32 x 88 | present | card code | `MY_PERM` + s, `ACTIVATE` + 4 s + i (i = 0..3) |
   | opponent permanents | 32 x 88 | present | card code | `OPP_PERM` + s |
@@ -1495,6 +1495,19 @@ Readout:
   decisions to try.
 * **Layout v2** (22.2) for every new run; mtg2 / mtg2c checkpoints are layout v1.
 
+### 22.6 Layout v3: room for 64 decision kinds (M7b)
+
+Layout v2's context block (192 floats) had one-hot room for exactly 32 decision kinds, 20 asking
+tasks and 40 effect ops, and M7a used 32, 19 and 38. Layout v3 (23,388 floats) widens the context
+block to 256: 64 decision kinds, 32 task codes, 64 op codes (`encode::ctx::{KINDS, TASKS, OPS}`;
+`encode_context` asserts each code is in range instead of writing into the next field); the rest
+of the block (decider, the card behind the decision, cost, counters, ...) keeps its order after
+them, with 19 spare floats. Every segment after the context moves by 64 floats; the identities,
+the bags and every other width are v2's (the `cards` list of `layout_v3.json` is v2's exactly).
+Checkpoints of layout v2 (no run was made with M7a's cards) do not load into v3. v3 is not frozen
+until the M7b card batch ends: while no run uses it, the batch may widen it further (the version
+stays 3); it is frozen at the first run.
+
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
 M7a grew the supported cube from 191 to 360 cards, creatures from 20 to 113 (threats, i.e.
@@ -1695,5 +1708,5 @@ At the end of M7a: threats 139 supported (113 creatures), 107 blocked (96 creatu
 * "True-Name Nemesis": choosing yourself is offered (a `Target` decision with `PLAYER` ids;
   dominated, but legal).
 * The tap-or-untap choice, a counter kind to remove, an energy amount and X use `ChooseMode`
-  with `NUMBER` ids; DecisionKind stays at 32 kinds (the network's context block), so "top
+  with `NUMBER` ids; DecisionKind stayed at 32 kinds (the context block of layout v2; v3 has 64), so "top
   or bottom" is a `YesNo` (`YES` = top).

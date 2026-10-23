@@ -1,11 +1,11 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2): a fixed-width
-//! f32 vector for a viewer, with no hidden information. Layout v2 (23,324
+//! f32 vector for a viewer, with no hidden information. Layout v3 (23,388
 //! floats), in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
 //! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary |
-//! | context | 192 | the pending decision: kind, decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
+//! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
 //! | bags | 13 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds |
 //! | tops | 2 x 3 x 50 | the top three library positions of each player: present, known to the viewer, the card code |
 //! | permanents | 2 x 32 x 88 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat, keywords, decision flags, options) |
@@ -19,7 +19,9 @@
 //! 1024) as three one-hots (index / 64, index / 8 % 8, index % 8: 16 + 8 + 8)
 //! plus a descriptor (card types, colours, mana value, printed power and
 //! toughness, token, legendary). Layout v1 (M5a, 13,532 floats) used the
-//! card table's index (capacity 256), which renumbers as support grows.
+//! card table's index (capacity 256), which renumbers as support grows;
+//! v2 (M5b, 23,324 floats) had a 192-float context block with room for 32
+//! decision kinds.
 //! "Me" is the viewer. Options of the pending decision are encoded only
 //! when the viewer decides (its own legal actions); the list block too.
 //! Everything else is public or the viewer's own knowledge, so the vector is
@@ -39,7 +41,7 @@ pub const D: usize = identity::D;
 /// Card code: id / 16 one-hot, id % 16 one-hot, descriptor.
 pub const CODE: usize = 48;
 pub const GLOBALS: usize = 128;
-pub const CONTEXT: usize = 192;
+pub const CONTEXT: usize = 256;
 pub const BAGS: usize = 13;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
@@ -222,17 +224,23 @@ fn op_code(op: &Op) -> usize {
 
 /// The context of the pending decision.
 pub(crate) mod ctx {
-    pub const KIND: usize = 0; // 32
-    pub const DECIDER_IS_VIEWER: usize = 32;
-    pub const PENDING: usize = 33;
-    pub const TASK: usize = 34; // 20
-    pub const CARD: usize = 54; // a card code
-    pub const HAS_CARD: usize = 54 + super::CODE;
+    /// Decision kinds (one-hot; `DecisionKind as usize` must stay below `KINDS`).
+    pub const KINDS: usize = 64;
+    /// Asking-task codes (`task_code`).
+    pub const TASKS: usize = 32;
+    /// Effect-op codes (`op_code`).
+    pub const OPS: usize = 64;
+    pub const KIND: usize = 0;
+    pub const DECIDER_IS_VIEWER: usize = KIND + KINDS;
+    pub const PENDING: usize = DECIDER_IS_VIEWER + 1;
+    pub const TASK: usize = PENDING + 1;
+    pub const CARD: usize = TASK + TASKS; // a card code
+    pub const HAS_CARD: usize = CARD + super::CODE;
     pub const SLOT_KIND: usize = HAS_CARD + 1; // 4
     pub const SLOT_INDEX: usize = SLOT_KIND + 4;
     pub const MODE: usize = SLOT_INDEX + 1;
-    pub const OP: usize = MODE + 1; // 40
-    pub const PC: usize = OP + 40;
+    pub const OP: usize = MODE + 1;
+    pub const PC: usize = OP + OPS;
     pub const OP_I: usize = PC + 1;
     pub const COST: usize = OP_I + 1; // 9
     pub const DAMAGE_LEFT: usize = COST + 9;
@@ -580,6 +588,7 @@ impl Game {
 
     fn encode_context(&self, me: PlayerId, ids: &[u16], x: &mut [f32]) {
         let Some(d) = &self.pending else { return };
+        assert!((d.kind as usize) < ctx::KINDS, "decision kind {:?} beyond the context block", d.kind);
         x[ctx::KIND + d.kind as usize] = 1.0;
         x[ctx::DECIDER_IS_VIEWER] = (d.player == me) as u8 as f32;
         x[ctx::PENDING] = 1.0;
@@ -587,7 +596,9 @@ impl Game {
             x[ctx::OPTIONS] = d.options.len() as f32 / 32.0;
         }
         let Some(task) = self.agenda.last() else { return };
-        x[ctx::TASK + task_code(task)] = 1.0;
+        let t = task_code(task);
+        assert!(t < ctx::TASKS);
+        x[ctx::TASK + t] = 1.0;
         // The card behind the decision: the resolving or paid-for ability,
         // the spell being cast, the land entering, the attacker.
         let mut card: Option<(DefId, Option<AbilitySlot>, Option<u8>)> = None;
@@ -615,7 +626,9 @@ impl Game {
                 card = frame_card(task);
                 let prog = &self.db.ability(f.ability).program;
                 if let Some(op) = prog.get(f.pc as usize) {
-                    x[ctx::OP + op_code(op)] = 1.0;
+                    let o = op_code(op);
+                    assert!(o < ctx::OPS);
+                    x[ctx::OP + o] = 1.0;
                 }
                 x[ctx::PC] = f.pc as f32 / 32.0;
                 x[ctx::OP_I] = f.i as f32 / 8.0;
@@ -682,7 +695,7 @@ impl Game {
 /// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
 /// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (13 multisets of
 /// 1024 identities). Every other feature (the 128 globals) is the global token's input.
-/// Checked in as `mtgz/az/layout_v2.json` (a test keeps the two equal). `cards` (the name behind
+/// Checked in as `mtgz/az/layout_v3.json` (a test keeps the two equal). `cards` (the name behind
 /// each identity of `db`, for analysis; null where none) is not read by the network.
 pub fn layout_json(db: &'static CardDb) -> String {
     use serde_json::json;
@@ -700,7 +713,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
         }
     }
     let v = json!({
-        "version": 2,
+        "version": 3,
         "features": NUM_FEATURES,
         "vocab": D,
         "segments": [
