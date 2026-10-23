@@ -1,8 +1,10 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7b part 3 (copies: copy effects, token copies, copies of spells, entering as a copy;
-squad, offspring, replicate, spree, bestow, prepare; 410 supported cube cards; section 26),
-2026-10-23; M7b part 2 (cards with more than one face: transforming and modal double-faced cards,
+Status: M7b part 3b (spells and abilities on the stack as targets, "becomes the target", ward,
+improvise, the initiative and Undercity, abilities activated from graveyards, storm, mobilize,
+the cost-order fixes; 438 supported cube cards; section 27), 2026-10-23; M7b part 3 (copies: copy
+effects, token copies, copies of spells, entering as a copy; squad, offspring, replicate, spree,
+bestow, prepare; 410 supported cube cards; section 26), 2026-10-23; M7b part 2 (cards with more than one face: transforming and modal double-faced cards,
 Adventures, Sagas, day and night, a split card; 394 supported cube cards; section 25),
 2026-10-23; M7b part 1 (planeswalkers: loyalty abilities, attacking planeswalkers, damage to
 planeswalkers, emblems and the command zone; 378 supported cube cards; section 24),
@@ -487,7 +489,7 @@ to the decider:
 | `ACTIVATE` | 532-915 | `MY_PERM` slot * 4 + ability index: activate at priority; a mana source while paying |
 | `HAND_ABILITY` | 916-979 | the ability of the card in the decider's hand slot 0..63 (cycling; a Spirit Guide while paying) |
 | `EXILE` | 980-1011 | at priority: play or cast the k-th card in exile the decider may play (exile order; M7a); `ChooseExiled`: the k-th offered card (M7b) |
-| reserved | 1012-1023 | |
+| `GY_ABILITY` | 1012-1023 | at priority: activate the ability of the k-th card in the decider's graveyard (bottom first) that has a graveyard ability (M7b part 3b, section 27.5) |
 
 `NUM_ACTIONS = 1024`. Canonical orders: hand, library, pile = sorted by (definition, card
 index); permanents = timestamp order, split by controller; stack = top first. **Equivalent
@@ -528,8 +530,11 @@ front face, 1 = its other face: a modal double-faced card's back face, an Advent
 card's right half; asked after a `HAND`, `GRAVEYARD` or `EXILE` id whose card can be cast or
 played with either face, section 25.3). M7b part 3: `NewTarget` (a copy of a spell may get new
 targets, 707.10c: one decision per target in order, `PASS` = keep it, else a target id for the
-same requirement; section 26.4). There are 37 decision kinds; the context block holds 64 since
-layout v3 (section 22.6).
+same requirement; section 26.4). M7b part 3b: `ChooseRoom` (`NUMBER` = the room a venture marker
+moves into, 309.5a) and `PutOntoBattlefield` (`LIBRARY`: a card of a revealed pile to put onto the
+battlefield, Throne of the Dead Three); an ability on the stack is targeted with its `STACK` id;
+ward's costs are a `YesNo` (mana, life) or a `Discard` with `PASS` (section 27). There are 39
+decision kinds; the context block holds 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
@@ -614,9 +619,26 @@ copies (of permanents now or as they last existed, of the source, "sacrifice it 
 beginning of the next end step"), copies of spells with new targets (707.10), "cast or copy"
 triggers, squad, offspring, replicate, spree, bestow, "another target", prepare (722), 704.5p.
 
-Supported cube cards: 410 (M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2: 191, M4b-1: 133,
-M4a: 31); creatures 133 by their front faces (M7b part 2: 125, M7b part 1: 113, M4b-2: 20);
-planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in M7b part 3 (16): Chain
+Implemented (M7b part 3b, section 27): activated and triggered abilities on the stack as targets
+(115.1, 115.4), countering abilities (701.5a), gaining control of a spell and new targets (608.3a,
+115.7), "becomes the target" triggers (603.2e), ward with mana, life or discard costs and granted
+ward (702.21), "spells you control can't be countered", improvise (702.126), the initiative
+(725) and the Undercity dungeon (309, 701.49, 704.5t), goad (701.38), abilities activated from a
+graveyard (eternalize, Otharri's return), experience counters, connive N, storm (702.40),
+mobilize (702.181), activated-ability cost reductions, "for as long as <the source> remains on
+the battlefield"; the total cost of 601.2f with every additional cost and X before reductions,
+reductions on alternative costs (118.9d), graveyard counts of cards only (108.2).
+
+Supported cube cards: 438 (M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
+191, M4b-1: 133, M4a: 31); creatures 155 by their front faces (M7b part 3: 133, M7b part 2: 125,
+M7b part 1: 113, M4b-2: 20); planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in
+M7b part 3b (28): Boseiju, Who Endures; Brain Freeze; Caves of Chaos Adventurer; Ertai
+Resurrected; Fallen Shinobi; Fanatic of Rhonas; Feywild Caretaker; Forensic Gadgeteer; From the
+Catacombs; Hexing Squelcher; Invert Polarity; Kappa Cannoneer; Leovold, Emissary of Trest; Occult
+Epiphany; Otawara, Soaring City; Otharri, Suns' Glory; Passageway Seer; Raffine, Scheming Seer;
+Seasoned Dungeoneer; Seasoned Pyromancer; Sedgemoor Witch; Sunset Saboteur; Surrak, Elusive
+Hunter; The Wondrous Wasp; Tishana's Tidebinder; Undermountain Adventurer; Voice of Victory; White
+Plume Adventurer. New in M7b part 3 (16): Chain
 Lightning; Chain of Smog; Emeritus of Abundance // Regrowth; Fable of the Mirror-Breaker //
 Reflection of Kiki-Jiki; Fractured Identity; Lose Focus; Lutri, the Spellchaser; Phyrexian
 Metamorph; Sage of the Skies; Saheeli, Sublime Artificer; Shifting Woodland; Sicarian
@@ -688,13 +710,14 @@ Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED
 
 Not yet (later milestones; each is a blocker in the support report, never a silent no-op):
 battles, meld, flip cards, convert, "cast transformed", read ahead, fuse, "this ability
-triggers only once each turn", ward, targeting spells and abilities on the stack (Tishana's
-Tidebinder, Ertai Resurrected), "becomes the target" triggers, the initiative, replacement and
-prevention effects beyond the ones above, Auras other than bestowed ones, multikicker, mana with spend restrictions, mana abilities
-whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic Star),
-granted triggered abilities (Kaldra Compleat), activated abilities in graveyards, naming a
-card other than Tamiyo's (Demonic Consultation, "as this enters, choose a card name"),
-"activate only once" / exhaust / boast, the play/draw choice.
+triggers only once each turn", dungeons other than Undercity ("venture into the dungeon"), ward
+that discards at random or that an Aura or Equipment grants, replacement and prevention effects
+beyond the ones above, Auras other than bestowed ones, multikicker, mana with spend restrictions,
+mana abilities whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic
+Star), granted triggered abilities other than an Equipment's (Kaldra Compleat), a random card
+from a graveyard (Tersa Lightshatter), naming a card other than Tamiyo's (Demonic Consultation,
+"as this enters, choose a card name"), "activate only once" / exhaust / boast, the play/draw
+choice.
 
 Deliberate simplifications and limits (each is small and local to change):
 
@@ -717,7 +740,7 @@ Deliberate simplifications and limits (each is small and local to change):
   with repeats offers each multiset of modes once.
 * Events are recorded only for the kinds some permanent listens for (`trig_mask`); section
   23.2 lists the kinds.
-* M7a's own simplifications are in section 23.11; M7b's in sections 24.7, 25.10 and 26.11.
+* M7a's own simplifications are in section 23.11; M7b's in sections 24.7, 25.10, 26.11 and 27.13.
 * Waiting triggers with the same definition and ability are offered once in the ordering
   decision (their order cannot matter while effects ignore their source's per-object state).
 * Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide offers the
@@ -875,6 +898,18 @@ Deliberate simplifications and limits (each is small and local to change):
   times paid; Python's copy has none. ("Another target", 115.3: Python removes every target
   already chosen from every later choice; here only for the requirements that say "another" or
   belong to the same "target" word, so separate "target" words may name the same object.)
+* M7b part 3b: ward (702.21). Python checks ward only for a spell, as it is cast, and pays it
+  automatically when it can (an extra cost: mana by its automatic payment, life, a chosen
+  discard; granted life costs summed into one payment). Here ward is a triggered ability: it
+  triggers for abilities too, each instance separately, the targeting player chooses whether to
+  pay when it resolves, and players may respond to it.
+* M7b part 3b: the initiative (725.2) and Undercity (309.4c). Python ventures and resolves the
+  room at once; here the initiative's abilities and the room abilities are triggered abilities
+  on the stack (their targets chosen as they are put on it), and a dungeon is completed by the
+  state-based action of 704.5t. Python's Catacombs Skeleton is colourless; here black (the
+  Oracle text).
+* M7b part 3b: improvise (702.126). Python taps artifacts automatically to pay; here each
+  artifact tapped is a payment decision.
 
 ## 15. Tests
 
@@ -912,6 +947,12 @@ they isolate one keyword or trigger each.
 | `tests/rules_copies.rs` | M7b part 3, the rules of copies with cube cards: 707.2 (no counters or effects copied), 613.2 (counters after layer 1), 707.4 (no enter trigger), 707.3, 707.8a (a token copy of a transformed permanent), 704.5j (a token copy of a legend), 707.9b (a copy of a copy keeps the exceptions), 608.2h (a token copy of an exiled permanent), 707.10 / 707.12 (a copy of a spell isn't cast; X copied; 707.10a ceases to exist, countered too), 608.3f / 111.13 (a copy of a permanent spell becomes a token, not created); hidden information (a pending copy choice and a copy's new targets survive determinize; the same encoding in every world) |
 | `tests/cards_m7b_copies.rs` | M7b part 3: Phyrexian Metamorph (707.5, 707.9b, a legend of the opponent's, copying nothing: 704.5f), Superior Spider-Man (a graveyard card, his name, 704.5j), Saheeli's -2 (until end of turn, "another target" 115.3, 704.5p: a copy of an Equipment that reverts, an Equipment made a copy of a creature), Shifting Woodland (delirium), Reflection of Kiki-Jiki (haste, sacrificed at the end step), Fractured Identity (608.2h, the other player's copy), Springheart Nantuko (bestow 702.103b, e, f; landfall copy or Insect) |
 | `tests/cards_m7b_copies2.rs` | M7b part 3: Three Steps Ahead (spree 702.172a, 700.2h payable modes), Sicarian Infiltrator (squad 702.157a), Thundertrap Trainer (offspring 702.175a; 601.2f, a reduction reduces the offspring cost), Chain Lightning (707.10c, a creature's controller is asked), Chain of Smog (the 31-copy limit, 732.2a, 732.3; with Witherbloom Apprentice), Lose Focus (replicate 702.56a), Lutri (cast or not, 603.4), Sage of the Skies (707.10f), Emeritus of Abundance (prepare 722.3: enters prepared, attacking with eight lands, leaving takes the copy; a Metamorph copying it enters prepared, 722.2b) |
+| `tests/rules_costs.rs` | M7b part 3b: 601.2f (kicker and X before reductions), 118.9d (a reduction on an alternative cost), 108.2 (a token in a graveyard isn't a card) |
+| `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
+| `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
+| `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
+| `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
+| `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
@@ -940,6 +981,8 @@ M7b: 20,000 games over the 378 cards, no failure; on the way it found two faults
 (24.10). M7b part 2: 20,000 games over the 394 cards, no failure; two faults found on the way,
 both fixed (25.9). The check also asserts that no face is up in a hidden zone. M7b part 3:
 20,000 games over the 410 cards, no failure; three faults found on the way, all fixed (26.10).
+M7b part 3b: 20,000 games over the 438 cards, no failure (102 s); one fault found on the way,
+fixed (27.12).
 `POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
 earlier milestone's games (section 17).
 
@@ -991,14 +1034,14 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 `tests/perf.rs`; random decks of every supported card as in the fuzzer, mulligans on,
 `auto_single` on.
 
-| Measure | M7b part 3 (410 cards; pinned, below) | M7b part 2 (394 cards; pinned, below) | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
-|---|---|---|---|---|---|---|---|
-| Random play | 615 games/s (main's code, the same day: 674 on its own pool) | 635 games/s (M7b part 1's code, the same day: 648 on its own pool) | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
-| Per exposed decision (`apply`, running to the next decision) | 7.14 us (228 decisions per game); on main's pool 6.95 us against its code's 6.57 us, nearly the same games (903,244 decisions against 903,215) | 6.97 us (226 decisions per game); on M7b part 1's pool 7.01 us against its code's 6.81 us, the same 906,266 decisions | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
-| `Game::clone` (mean over mid-game states) | 1.23 us (6,244 states); 1,200 B (main's code the same day: 1.17 us, 1,040 B) | 1.27 us (6,484 states); 1,040 B (part 1's code the same day: 1.24 us) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
-| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.80 us (main's code the same day: 1.82 us) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
-| `legal_actions` (copies cached ids) | 4-5 ns | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 93-110 s (the last three runs), no failure | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+| Measure | M7b part 3b (438 cards; pinned, below) | M7b part 3 (410 cards; pinned, below) | M7b part 2 (394 cards; pinned, below) | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
+|---|---|---|---|---|---|---|---|---|
+| Random play | 545 games/s (main's code, the same day: 592 on its own pool) | 615 games/s (main's code, the same day: 674 on its own pool) | 635 games/s (M7b part 1's code, the same day: 648 on its own pool) | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
+| Per exposed decision (`apply`, running to the next decision) | 8.44 us (218 decisions per game); on main's pool 7.73 us against its code's 7.41 us, nearly the same games (911,364 decisions against 911,361) | 7.14 us (228 decisions per game); on main's pool 6.95 us against its code's 6.57 us, nearly the same games (903,244 decisions against 903,215) | 6.97 us (226 decisions per game); on M7b part 1's pool 7.01 us against its code's 6.81 us, the same 906,266 decisions | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
+| `Game::clone` (mean over mid-game states) | 1.34 us (6,137 states); 1,240 B (main's code the same day: 1.28 us, 1,200 B) | 1.23 us (6,244 states); 1,200 B (main's code the same day: 1.17 us, 1,040 B) | 1.27 us (6,484 states); 1,040 B (part 1's code the same day: 1.24 us) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
+| `clone` + `determinize(to_move)` (one search simulation's setup) | 2.44 us (on main's pool 2.03 us; main's code the same day: 1.95 us) | 1.80 us (main's code the same day: 1.82 us) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
+| `legal_actions` (copies cached ids) | 3-6 ns | 4-5 ns | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
+| Fuzzer, 20,000 games, release | 102 s, no failure | 93-110 s (the last three runs), no failure | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -1040,6 +1083,19 @@ of main; reverting the state-based 704.5p and bestow checks, or the last-known c
 recorded as permanents leave, made no measurable difference; moving the copy search out of line
 (a cold function) didn't either. `Game` grew from 1,040 to 1,200 bytes (copy effects, copy
 slots, last known copiable values and spells, prepared permanents, the entering copy's state).
+
+M7b part 3b's column is measured the same way, interleaved with main's code (cffdc34) and best of
+four. On main's card pool (`POOL_EXCLUDE` leaves the 28 new cards and the two new custom test cards
+out) the branch takes about 4% more per decision (7.73 against 7.41 us best of four; the four
+same-round pairs +1%, +6%, +7%, +4%); the games are nearly the same (3 more decisions in 4,000
+games: the cost-order fixes and the ninjutsu reservation reach a few of main's games). The cost was
+not located build by build as in part 3; the checks the part adds to every priority decision are
+the candidates: the graveyard-ability scan, the stack-ability candidates, `Game::total_mana`'s
+additional costs before reductions, the token test in graveyard counts, and the larger `EvCtx`
+(the targeting item) that frames, stack items and waiting triggers copy. `Game` grew from 1,200
+to 1,240 bytes (the initiative, the dungeons, the rules slot, `choosing_for`). On the full pool
+the games are shorter (218 decisions against 228) and each decision costs more (8.44 us): the new
+cards' decisions (ward payments, rooms, improvise) and their triggers.
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
@@ -1194,6 +1250,12 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
   `needs_target_with_cards_in_hand` is a Python behaviour switch (section 14). The repeatable
   and alternative costs new here (squad, offspring, bestow, Springheart Nantuko's {1}{G}) are
   checked against their `*_str` twins (replicate's cost is a string only).
+* M7b part 3b (27.14): the IR of the 28 cards matches their Oracle text; no new defect. The IR
+  leaves rules to code (Undercity's rooms, the initiative's abilities, mobilize's and storm's
+  abilities), and Fallen Shinobi's `TargetPlayerExilesTopNYouMayPlayThem` has no target (its
+  "that player" is the damaged player). Left with one blocker near this part: Tersa Lightshatter
+  (a random graveyard card), Celestial Colonnade and Creeping Tar Pit (IR), the mana abilities
+  with a mana cost (Chromatic Star, Loot), spend restrictions (Mishra's Workshop), Balance.
 * Lowering: the `*_str` cost twins (`mana_cost_str`, `kicker_cost_str`, `mana_str`, ...) are
   ignored as display forms; checking them against the structured cost (rule 4a, section 3) would
   have caught the lost `{C}`.
@@ -1775,6 +1837,17 @@ slot: a copy of a spell, the times an additional cost was paid, bestowed; one sp
 codes 21-23. A permanent's identity is what it is without copy effects, its descriptor the
 copied face. `layout_v3.json` and the token registry (one new kind, `Insect 1/1 G c Insect`)
 must be regenerated (not run on the branch).
+
+M7b part 3b (section 27.10) widens it to 29,860 floats (still version 3): the permanent status
+from 88 to 96 floats (148 a slot: ward and its costs, lost all abilities, goaded, exiled if it
+would leave), the stack status from 28 to 32 (84 a slot: targeted, can't be countered, the
+ability's index, a graveyard card's ability), a new segment `graveyard_abilities` (4 x 56, at the
+end, scoring the `GY_ABILITY` ids), the initiative, dungeon and experience globals in spare
+floats, the context's ability-slot kind from 4 to 5 floats (the fields after it move by one).
+The descriptor of a copy shows its exceptions. `layout_v3.json` and the token registry (four new
+keys: `Undercity rules`, `The initiative rules`, `Elemental 1/1 R c Elemental`, `Warrior 1/1 R c
+Warrior`) must be regenerated (not run on the branch). The M7b card batch ends here; v3 can be
+frozen at the first run.
 
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
@@ -2607,9 +2680,8 @@ IR (26.12). The code is `copies.rs`, its lowering `lower/effect_copies.rs`.
   offspring, replicate) and increases, less reductions: a reduction larger than the generic part
   of the mana cost reduces them too (`Game::route_mana_plus`; Green Goblin's discount on a
   Thundertrap Trainer cast with offspring). Kicker and the other additional cost options of
-  M4b-1 and M7a are still added after reductions, a known difference left for later: Tear
-  Asunder kicked, cast with mayhem under Green Goblin's {2} discount, costs {1}{G}{B} here, not
-  {G}{B}.
+  M4b-1 and M7a were still added after reductions here; fixed in part 3b (27.6): Tear Asunder
+  kicked, cast with mayhem under Green Goblin's {2} discount, costs {G}{B}.
 * **Bestow** (702.103): an alternative cost (`AltCost.bestow`) and a bestowed face lowered from
   the card (`CardDef.bestow`): an Aura enchantment with enchant creature (no creature types, power
   or toughness), "enchanted creature gets +p/+t" as a static of `Scope::Equipped`, the card's
@@ -2709,7 +2781,8 @@ IR (26.12). The code is `copies.rs`, its lowering `lower/effect_copies.rs`.
   beyond that create fewer tokens.
 * At most 31 copies a turn by "may copy this spell" effects (26.4; a loop of optional actions,
   732.2a, is cut there rather than asked as a number).
-* Kicker's and the other M7a optional additional costs are added after cost reductions (26.6).
+* (Kicker's and the other M7a optional additional costs were added after cost reductions; fixed
+  in part 3b, 27.6.)
 * Chain of Smog's IR flag `needs_target_with_cards_in_hand` (a Python shortcut) is ignored: the
   copy is always offered (section 14).
 
@@ -2723,3 +2796,287 @@ IR (26.12). The code is `copies.rs`, its lowering `lower/effect_copies.rs`.
   the game, before it starts: these games have no sideboard; here Lutri is a flash creature).
   The `*_cost_str` twins of squad, offspring, bestow and Springheart's payment are checked
   against the structured costs (section 3, rule 4a).
+
+## 27. The stack as a target, ward, the initiative, graveyard abilities (M7b part 3b)
+
+M7b part 3b grew the supported cube from 410 to 438 cards, ending the M7b card batch. Twenty
+cards came with four features: spells and abilities on the stack as targets and "becomes the
+target" (Tishana's Tidebinder, Ertai Resurrected, Invert Polarity, Leovold, Emissary of Trest,
+Surrak, Elusive Hunter), ward and improvise (Sedgemoor Witch, Kappa Cannoneer, Raffine, Scheming
+Seer, Hexing Squelcher, Sunset Saboteur), the initiative and the Undercity dungeon (Feywild
+Caretaker, Passageway Seer, White Plume Adventurer, Caves of Chaos Adventurer, Seasoned
+Dungeoneer, Undermountain Adventurer, From the Catacombs) and abilities activated from a
+graveyard (Fanatic of Rhonas, Otharri, Suns' Glory, Seasoned Pyromancer). Eight more needed one
+small feature each afterwards (27.9). Three faults in the cost rules were fixed first, each with a
+failing test (27.6). Every card's IR was read against its Oracle text; none is blocked by its IR
+(27.14). The code is `stack_ext.rs` and `dungeon.rs`, the lowering `lower/effect_stack.rs`.
+
+### 27.1 Spells and abilities on the stack as targets (CR 115.1, 115.4, 115.5)
+
+* A spell is targeted as its card (`Target::Obj`, as before). An activated or triggered ability on
+  the stack is `Target::Stack(id)`, its stack item's id. `Filter::Ability(mask)` (activated,
+  triggered; the IR's `StackObjectKind`) names abilities; "target spell, activated ability, or
+  triggered ability" is an `Or` of a spell filter and it. A target id is the item's `STACK` slot.
+* Candidates are the stack top first; abilities are listed only for a filter that names them
+  (`cast::wants_ability`). An ability is never its own target (115.5): `choose_targets` leaves
+  out its own id, and `Game.choosing_for` holds the id while its modes are chosen, so Ertai's
+  "counter target ... triggered ability" mode isn't offered for itself alone (found by a card
+  test). Mana abilities never use the stack (605.3b) and can't be targeted. An ability of a card
+  in a graveyard is an activated ability; the initiative's and Undercity's abilities are
+  triggered abilities (27.4).
+* A targeted ability that left the stack is an illegal target (608.2b).
+
+### 27.2 Countering abilities, gaining control of a spell, becoming the target
+
+* `Op::Counter` counters a spell or an ability (`Game::counter`, 701.5a): a spell goes to its
+  owner's graveyard unless it can't be countered (`spell_uncounterable`: "this spell can't be
+  countered", Surrak, Hexing Squelcher; or its controller controls a permanent with "spells you
+  control can't be countered", Hexing Squelcher, 101.2); an ability is removed from the stack.
+* Tishana's Tidebinder (`Ext::SourceOfTargetLosesAbilities`): if the countered ability's source
+  is still the same artifact, creature or planeswalker on the battlefield, it loses all abilities
+  (`Mod::LoseAllAbilities`) with the duration `Until::WhileOnBattlefield(Tidebinder)`, removed
+  when Tidebinder leaves (611.2b; nothing if Tidebinder had already left). The Wondrous Wasp's
+  "for as long as" uses the same duration (27.9).
+* Ertai Resurrected's "its controller draws a card" remembers the target's controller before the
+  effect (608.2h: a countered spell's or destroyed creature's controller still draws).
+* Invert Polarity: a coin flip; won, `Ext::GainControlOfSpell` makes the spell (and its card)
+  the flipper's (608.3a: a permanent spell enters under its new controller), who may then choose
+  new targets one by one (`Task::CopyTargets` with `copy` false, 115.7); lost, it is countered.
+* "Becomes the target" (603.2e): `EventKind::BecomesTarget`, one event per player or object as
+  it becomes a target of a spell or ability, with the targeting item as `Subj::Item(id)`; the
+  event's player ("that player", ward's payer) is that item's controller. A player or permanent
+  is the event's `Slot::Target`, a spell its `Slot::TargetSpell` (Surrak's "a creature spell you
+  control"). The events come as targets are chosen (601.2c, 602.2b, 603.3d), once per object for
+  one spell even if two of its targets name it, as a stolen spell's new targets are chosen
+  (115.7), and when a copy of a spell is put on the stack (its targets become targets then,
+  707.10c).
+* Leovold ("you or a permanent you control becomes the target of a spell or ability an opponent
+  controls, you may draw a card") and Surrak (a creature or creature spell you control) are
+  generic triggers on the new event; the opponent test is on the item's controller.
+
+### 27.3 Ward (CR 702.21)
+
+* `CardDef.ward` (`WardCost`: `Mana`, `Life(n)`, `Discard`). The lowering synthesizes the
+  triggered ability (`effect_stack::ward_trigger`): "whenever this permanent becomes the target
+  of a spell or ability an opponent controls, counter that spell or ability unless that player
+  pays <cost>". The cost is offered to the targeting item's controller: mana with `OfferPay`
+  (`YesNo`), life with `Ext::OfferPayOther` (`YesNo`, `YES` only with at least that much life,
+  119.4), a card with `Ext::OfferPayOther` too (one `Discard` decision: a hand card pays, `PASS`
+  declines). Unpaid, `Ext::CounterEventItem` counters the event's item if it is still on the
+  stack (a spell that can't be countered stays, 101.2).
+* Each instance triggers separately: a Hexing Squelcher with its own ward and another
+  Squelcher's has two triggers.
+* Granted ward (Hexing Squelcher: "other creatures you control have 'Ward—Pay 2 life'",
+  `CardDef.grants_ward`): the trigger is the granting card's own, about a target that is
+  another creature its controller controls (`TrigPred::Granted(Slot::Target)`: one that didn't
+  lose all abilities later than the grant's timestamp, 613.7; Oko's Elk has no ward).
+* Improvise (702.126, Kappa Cannoneer): `CardDef.improvise`; while its cost is paid, each
+  untapped artifact the payer controls may be tapped for {1} of generic mana (`PayMana.
+  improvise`; the artifact's `MY_PERM` id with `Choice::Card`, marked by the `IMPROVISE` slot;
+  castability counts them as sources of one generic mana). An artifact with a mana ability can
+  pay either way, not both; improvise artifacts are tapped last as the payment completes.
+
+### 27.4 The initiative and Undercity (CR 725, 309, 701.49)
+
+* `Game.initiative: Option<PlayerId>`. Taking it (`Ext::TakeInitiative`, 725.1) triggers the
+  initiative's first inherent ability; the others trigger at the upkeep of the player who has it
+  and when one or more creatures a player controls deal combat damage to that player (once per
+  attacking player). They have no source (725.2): they are the triggers of a rules definition
+  named "The initiative" (`CardDef.rules`), put on the stack with `Game.rules_src`, a slot in no
+  zone, as their source, controlled by the player they name.
+* A player's dungeon is an object in the command zone whose definition is "Undercity"
+  (`Game.dungeons[p] = Dungeon { obj, room, completed }`). Venturing into Undercity
+  (`Ext::Venture`, 701.49a-c): with no dungeon, Undercity is put into the command zone with the
+  marker on Secret Entrance; else the marker moves to a room an arrow leads to (`ChooseRoom`,
+  `NUMBER` = the room's index in `dungeon::ROOMS`, asked when there are two). Entering a room
+  triggers its ability (309.4c; Undercity's triggers, by room index): Secret Entrance (search for
+  a basic land, to hand), Forge (two +1/+1 counters on target creature), Lost Well (scry 2), Trap!
+  (target player loses 5 life), Arena (goad target creature), Stash (a Treasure), Archives (draw),
+  Catacombs (a 4/1 black Skeleton with menace), Throne of the Dead Three (reveal the top ten, put a
+  creature card onto the battlefield with three +1/+1 counters, hexproof until your next turn,
+  shuffle: `Ext::PileToBattlefield`, `PutOntoBattlefield`).
+* Completing (309.7, 704.5t): a dungeon whose marker is on its bottommost room, with no room
+  ability of it waiting or on the stack, is removed by the state-based actions and its owner has
+  completed it (`completed`, `Cond::CompletedDungeon`: White Plume Adventurer, Caves of Chaos
+  Adventurer, Undermountain Adventurer). The next venture starts a new Undercity.
+* Both rules definitions (and the Treasure and Skeleton tokens) are built by the lowering when a
+  card takes the initiative and stored with the tokens (`lower/effect_stack.rs::initiative_defs`;
+  `dungeon.rs` finds them by name).
+* Goad (701.38, Arena): `Mod::Goad` until the goading player's next turn; the creature attacks
+  each combat if able (`must_attack`) and a player other than the goading player if able: in two
+  players, a creature its own controller goaded attacks the opponent (not a planeswalker); one
+  the opponent goaded attacks as usual.
+* "If you have the initiative" (Feywild Caretaker, Passageway Seer) is `Cond::HasInitiative`, an
+  intervening "if" (603.4).
+
+### 27.5 Abilities activated from a graveyard (CR 602.2, 113.6)
+
+* `CardDef.gy_abilities` (at most one per card, the lowering checks): `lower_activated` with
+  `From::Graveyard`. Priority offers it as `GY_ABILITY + k` (ids 1012-1023, the old reserved
+  range): the k-th card in the player's graveyard, bottom first, that has one (counted whether or
+  not it can be activated now), `Choice::Ability(card, AbilitySlot::Graveyard(0))`.
+* Costs: "exile this card from your graveyard" (`exile_self`, eternalize, Seasoned
+  Pyromancer); "tap an untapped Rebel you control" (`Cost.tap_untapped`, one `ChoosePermanent`
+  per permanent after the mana).
+* Fanatic of Rhonas: eternalize (702.129a) is a token copy of the card as it last existed in the
+  graveyard (`CopyOf::SourceCard`), except a 4/4 black Zombie with no mana cost (`Except.colors`,
+  `Except.no_cost`: mana value 0); its ferocious mana ability is `ManaProd::IfElse`.
+* Otharri: experience counters (`Player.experience`, `Ext::GetExperience`,
+  `Amount::Experience`), Rebels created tapped and attacking per counter (`Ext::CreateTokensN`),
+  and "return this card from your graveyard to the battlefield tapped"
+  (`Ext::SourceFromGraveyard`).
+* Seasoned Pyromancer: "discard two cards, then draw two cards; for each nonland card discarded
+  this way, create a 1/1 red Elemental" (`Ext::DiscardThenDraw`), and from the graveyard two
+  Elementals.
+
+### 27.6 Cost rules fixed (CR 601.2f, 118.9d, 108.2)
+
+Three faults, each found with a failing test first (`tests/rules_costs.rs`):
+
+* **The total cost** (601.2f) is the mana cost or the alternative cost, plus every additional
+  cost announced (kicker, buyback and M7a's other options, spree, squad, offspring, replicate)
+  and X, plus increases, less reductions. Kicker, the other additional-cost options and X were
+  added after the reductions: kicked Tear Asunder cast with mayhem under Green Goblin's {2}
+  discount cost {1}{G}{B} instead of {G}{B}, and a Walking Ballista cast from the graveyard so
+  paid {2} too much. `Game::total_mana` is now the one total.
+* **Reductions apply to an alternative cost** (601.2f, 118.9d): an alternative cost took the
+  increases but no reductions. Green Goblin's discount now reduces a flashback or escape cost
+  from the graveyard, and an affinity-like reduction an alternative cost (the custom "Test
+  Discount Alt"; the lowering's blocker for reductions with alternative costs is gone).
+* **A token in a graveyard isn't a card** (108.2, 111.1): between a token dying and 704.5d it is
+  in a graveyard, and threshold, delirium, the Lhurgoyfs' card types, delve, escape's exiled
+  cards and graveyard choices counted it. They count cards only now (`Game::graveyard_cards`).
+  Supported cards whose results change: Barrowgoyf and Pyrogoyf (their toughness in the same
+  state-based check), Dragon's Rage Channeler, Unholy Heat, Shifting Woodland, Cabal Ritual,
+  Treasure Cruise, Dig Through Time, the escape cards.
+
+### 27.7 Other rules and effects added
+
+* Connive N (701.50, Raffine: X = the attacking creatures, `Amount::Attacking`):
+  `Ext::Connive { on, n }`.
+* From the Catacombs: "with a corpse counter on it" and "if that creature would leave the
+  battlefield, exile it instead" (`Mod::ExileIfLeaves`, a replacement, 614.1a); its escape cost
+  exiles five other cards.
+* Caves of Chaos Adventurer's "if you've completed a dungeon, you may play that card this turn
+  without paying its mana cost; otherwise, you may play that card this turn" (checked as it
+  resolves); Seasoned Dungeoneer's protection from creatures and explore; Undermountain
+  Adventurer's {G}{G} or six {G} (`ManaProd::IfElse`); White Plume Adventurer's untap at each
+  opponent's upkeep.
+* `Op::Ext` gains `SourceOfTargetLosesAbilities`, `GainControlOfSpell`, `CounterEventItem`,
+  `OfferPayOther`, `TakeInitiative`, `Venture`, `PileToBattlefield`, `GetExperience`,
+  `CreateTokensN`, `DiscardThenDraw`, `SourceFromGraveyard`; `Connive` takes a target and an
+  amount. Each is a rules action (section 16, rule 3).
+
+### 27.8 Decisions, identities and the bot
+
+* Two new kinds (39 in all): `ChooseRoom` (`NUMBER` = room) and `PutOntoBattlefield` (Throne of
+  the Dead Three: `LIBRARY` = the card's slot in the revealed cards sorted by definition, one id
+  per definition). Ward's payments use `YesNo` and `Discard` (with `PASS`); graveyard abilities
+  `GY_ABILITY`; improvise `PayMana` with `MY_PERM` ids; an ability target a `STACK` id.
+* Identities (22.2): the rules definitions are in the token registry as `Undercity rules` and
+  `The initiative rules` (`identity::token_key`; `tests/az.rs` treats `d.token || d.rules`
+  alike). New token kinds: `Elemental 1/1 R c Elemental` (Seasoned Pyromancer), `Warrior 1/1 R c
+  Warrior` (mobilize). Treasure, Skeleton, Rebel, Faerie Dragon, Spirit and Clue have lines; an
+  eternalized Fanatic is a token copy of the card (its identity).
+* The heuristic bot puts the most expensive card onto the battlefield (`PutOntoBattlefield`),
+  takes the first room, pays ward when it can (`YES`; for a discard, a card of its choosing), and treats an
+  ability target as its controller's (`Heuristic::target_player`).
+
+### 27.9 More cards needing one feature
+
+After the 20 cards the support report's one-feature list gave eight more:
+
+* The Wondrous Wasp: "tap up to one target creature. It loses all abilities for as long as The
+  Wondrous Wasp remains on the battlefield." `Until::WhileSource`, a lowered duration that an op
+  turns into `WhileOnBattlefield(source)` as it resolves, or into nothing if the source already
+  left (611.2b: "If the 'for as long as' duration never starts, the effect does nothing").
+* Voice of Victory: mobilize 2 (702.181a): two 1/1 red Warriors tapped and attacking, each
+  sacrificed at the beginning of the next end step (a delayed ability about each token).
+* Brain Freeze: storm (702.40a), a cast trigger that copies the spell for each spell cast before
+  it this turn, by any player, with new targets (`Amount::EventAmount`: the `IsCast` event's
+  amount is that number, counted as the spell becomes cast; `copies::COPIED`, the mark of a
+  copy's event, moved to `u16::MAX`). Copies aren't cast and don't count.
+* Occult Epiphany: draw X, discard X, a Spirit for each card type among the discarded cards
+  (`Ext::DiscardThenDraw { types }`, 205.2a).
+* Fallen Shinobi: "that player exiles the top two cards of their library. Until end of turn, you
+  may play those cards without paying their mana costs" (`Ext::ExileTopWithPermission`, the
+  event's player). Its ninjutsu exposed an older fault (27.12).
+* Otawara, Soaring City and Boseiju, Who Endures: "this ability costs {1} less to activate for
+  each legendary creature you control" (`ActivatedDef.discounts`, `Game::act_mana`; generic mana
+  only, 602.2b). Boseiju's "that player may search their library for a land card with a basic
+  land type, put it onto the battlefield" is the destroyed permanent's controller's search
+  (remembered first, 608.2h).
+* Forensic Gadgeteer: "activated abilities of artifacts you control cost {1} less to activate.
+  This effect can't reduce the mana in that cost to less than one mana"
+  (`CardDef.artifact_ability_discount`).
+
+### 27.10 Encoding (layout v3, 29,860 floats)
+
+* Globals: per player (viewer first), in the spare floats 34-37: has the initiative, has a
+  dungeon, dungeons completed / 2, experience counters / 4; game globals 106-123: the venture
+  marker's room as a one-hot, nine per player (`encode::glob`).
+* Permanent status 88 -> 96 floats (`PERM_W` 140 -> 148): ward instances / 2, the largest ward
+  mana cost / 4, the largest ward life cost / 4, a discard ward (84-87; own and granted, as the
+  triggers see them), lost all abilities (88), goaded (89), exiled if it would leave (90); five
+  spare.
+* Stack status 28 -> 32 floats (`STACK_W` 80 -> 84): targeted by another stack item (27), a
+  spell that can't be countered (28), an ability's index ((index + 1) / 8: which of its card's
+  triggered or activated abilities, a ward trigger among them; 29), an ability of a card in a
+  graveyard (30); one spare. A target that is an ability is its stack slot (target floats 6-7,
+  as a spell's).
+* A new segment `graveyard_abilities` (4 slots x 56, at the end): the viewer's graveyard cards
+  with a graveyard ability in `GY_ABILITY` order (card code, present, its id is an option);
+  `layout_json` scores `GY_ABILITY + k` from slot k (ids 4-11 fall back to the generic logits, as
+  the `HAND` ids beyond the 16 slots do).
+* The card code's descriptor of a permanent shows a copy's exceptions (types added, colours, no
+  mana cost, base power and toughness: an eternalized Fanatic is a black 4/4 of mana value 0).
+* Context: `ctx::SLOT_KIND` widened from 4 to 5 floats (a graveyard ability), so the fields after
+  it move by one (`ctx::END` 245 -> 246, ten spare). No new task code; every new instruction is an `Ext` op.
+* Bags: dungeons are not counted among the emblems.
+* `mtgz/az/layout_v3.json` and the token registry must be regenerated (`MTGZ_WRITE_LAYOUT=1`,
+  `MTGZ_WRITE_TOKENS=1`: four new keys, 27.8); `tests/az.rs` expects 29,860 features and checks
+  the graveyard-ability slots (not run on this branch). The rules tests check the new fields
+  (`rules_ward.rs`, `rules_stack.rs`, `rules_initiative.rs`, Fanatic of Rhonas).
+
+### 27.11 Hidden information
+
+* The initiative, dungeons, rooms, experience and every stack target are public; `view_of` and
+  the fingerprint include them (an `Until::WhileOnBattlefield` duration and an ability target
+  are named by place). A pending room choice survives `determinize` for either viewer with the
+  same encoding (`rules_initiative.rs`). Ward's discard is from the payer's own hand; Throne of
+  the Dead Three reveals the ten cards; Fallen Shinobi's exiled cards are revealed.
+
+### 27.12 Fuzzing
+
+20,000 games over the 438 cards: see section 15. The first run found one fault, older than this
+part: a cost that returns a permanent to its owner's hand (ninjutsu's "return an unblocked
+attacker you control") didn't reserve it from the mana payment, so an attacking Eldrazi Spawn
+could be sacrificed for {C} and then the cost had nothing to return (Kaito's ninjutsu had the
+same fault). `Keep.sac` now reserves the permanents a "return" cost needs as it does for a
+sacrifice (`tests/cards_m7b_stack3.rs::ninjutsu_cant_pay_its_mana_with_the_attacker_it_returns_cr_601_2h`).
+
+### 27.13 Simplifications
+
+* Granted ward is the granting permanent's triggered ability (its source is the granting
+  permanent, not the warded creature); nothing in the cube looks at a ward ability's source.
+* "With a counter on it" (From the Catacombs' corpse counter, Throne of the Dead Three's three
+  +1/+1 counters) puts the counters right after the permanent enters, not as it enters (614.1c);
+  no supported card reads counters as a creature enters.
+* White Plume Adventurer's "untap a creature you control" offers only tapped creatures.
+* A "tap an untapped Rebel you control" cost counts, for castability, only Rebels with no mana
+  ability (one could tap for mana first); no Rebel in the cube has one.
+* One graveyard ability per card; `GY_ABILITY` names the first 12 such cards of a graveyard.
+* Undercity is the only dungeon ("venture into the dungeon" isn't supported; no supported card
+  has it).
+* The initiative's abilities are controlled by the player they name and have a sourceless slot
+  as their source (725.2 says they have none).
+
+### 27.14 IR
+
+* The 28 cards' IR matches their Oracle text. Things the IR leaves to code: Undercity's rooms
+  and the initiative's abilities (rules, CR 309.4 and 725.2, built by the lowering from the
+  dungeon card), mobilize's and storm's abilities (keywords, 702.181a and 702.40a), Fallen
+  Shinobi's "that player" (the class is named `TargetPlayer...` but has no target: the damaged
+  player, as Python passes it). `TargetConnives` repeats "attacking" in `attacking_only` and in
+  its target filter (the lowering checks they agree). `CardPrinting.ward_discard_random` has no
+  cube card and is a blocker. docs/ir_defects.md has the details; no new defect.

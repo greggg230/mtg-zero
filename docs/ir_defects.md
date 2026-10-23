@@ -5,7 +5,8 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 (cards with more than one face, branch `m7b-faces`, 394 supported): entries 9, 13 and 14; mtg-bot read at commit
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
-defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -369,8 +370,8 @@ once each turn."
   (`effects/generic/discard.py:30`), not "discard this card".
 * Fastbond's `LandsPlayedThisTurnAtLeast` without `n`: the schema default is 2 ("if it wasn't the
   first land you played this turn").
-* `TriggerPredicate.subject(Land / Defender / TargetSpell)` (City of Traitors, Coveted Jewel,
-  Surrak), `ExileTopCardsWithPlayPermission.duration(UntilYourNextEndStep)` (Inti),
+* `TriggerPredicate.subject(Land / Defender)` (City of Traitors, Coveted Jewel; Surrak's
+  `TargetSpell` is built since M7b part 3b), `ExileTopCardsWithPlayPermission.duration(UntilYourNextEndStep)` (Inti),
   `LinkExiledCardsToSource.inner(...)` (Keen-Eyed Curator), `RemoveAllMatching.action(Exile)`
   (Winds of Abandon), `Keyword.quality(SpellsThatAreOneOrMoreColors)` (Emrakul): the IR matches
   the Oracle text; these are engine features not built yet.
@@ -386,3 +387,18 @@ once each turn."
   `*_str` twins). Chain of Smog's "that player" is the spell's target player, found among its
   targets. Apart from these (and entry 11), the 16 cards' IR matches their Oracle text and
   rulings.
+* M7b part 3b, the 28 cards of the stack, ward, the initiative and graveyard abilities (Tishana's
+  Tidebinder, Ertai Resurrected, Invert Polarity, Leovold, Surrak, Sedgemoor Witch, Kappa
+  Cannoneer, Raffine, Hexing Squelcher, Sunset Saboteur, Feywild Caretaker, Passageway Seer, White
+  Plume Adventurer, Caves of Chaos Adventurer, Seasoned Dungeoneer, Undermountain Adventurer, From
+  the Catacombs, Fanatic of Rhonas, Otharri, Seasoned Pyromancer; The Wondrous Wasp, Voice of
+  Victory, Brain Freeze, Occult Epiphany, Fallen Shinobi, Otawara, Boseiju, Forensic Gadgeteer):
+  the IR matches the Oracle text. Rules the IR leaves to the consumer, as the CR defines them:
+  `TakeInitiative` alone (the initiative's three abilities, CR 725.2, and Undercity's rooms, 309,
+  are built by the engine from the dungeon card; Python's `designations.py` does the same),
+  `Mobilize { n }` (the Warrior token, 702.181a) and `has_storm` (702.40a).
+  `TargetPlayerExilesTopNYouMayPlayThem` (Fallen Shinobi) has no target specification: its "that
+  player" is the player the combat-damage trigger names (Python passes it as the trigger's fixed
+  target), not a chosen target; the name misleads, the data is right. `TargetConnives` states
+  "attacking" twice (`attacking_only` and its target filter); they agree. `ward_discard_random`
+  (Alpharael, not in the cube) is unused here and a blocker.
