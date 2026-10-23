@@ -50,6 +50,8 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::CreatureTokensCreated) => Some(EventKind::CreatureTokensCreated),
         // "Becomes the target of a spell or ability" (ENGINE.md 27.2).
         Some(E::BecomesTarget) => Some(EventKind::BecomesTarget),
+        // "When you play another land" (CR 305.1: playing, not putting).
+        Some(E::PlaysLand) => Some(EventKind::PlaysLand),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -101,8 +103,37 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     if enters && event != EventKind::Enters || cast && event != EventKind::IsCast {
         l.unsupported(format!("TriggerPredicate(how it was cast, on {event:?})"));
     }
+    // "At the beginning of ..., if this is tapped" (Mana Vault): an
+    // intervening "if" about the source (CR 603.4), checked again as the
+    // ability resolves.
+    let step = matches!(
+        event,
+        EventKind::BeginningOfUpkeep
+            | EventKind::BeginningOfDrawStep
+            | EventKind::BeginningOfPrecombatMain
+            | EventKind::BeginningOfCombat
+            | EventKind::BeginningOfEndStep
+    );
+    if step {
+        if let Some(f) = source_condition(&pred) {
+            let mut b = crate::program::Builder { program: std::mem::take(&mut ability.program), ..Default::default() };
+            b.insert(0, crate::program::Op::Ext(crate::program::Ext::JumpUnlessSource { filter: f, to: 0 }));
+            b.patch(0);
+            ability.program = b.program;
+        }
+    }
     let uses_event = ability.uses_event();
     Some(TriggerDef { event, pred, ability, uses_event })
+}
+
+/// A condition on the source at the top level of a predicate (`Source`,
+/// possibly under `And`).
+fn source_condition(p: &TrigPred) -> Option<Filter> {
+    match p {
+        TrigPred::Source(f) => Some(f.clone()),
+        TrigPred::And(a, b) => source_condition(a).or_else(|| source_condition(b)),
+        _ => None,
+    }
 }
 
 /// Does some part of the predicate satisfy `f`?
@@ -160,6 +191,7 @@ fn slot(l: &mut Lowerer, s: &Option<enums::EventSubject>) -> Option<Slot> {
         Some(S::Player) => Slot::Player,
         Some(S::Card) => Slot::Card,
         Some(S::TargetSpell) => Slot::TargetSpell,
+        Some(S::Land) => Slot::Land,
         Some(other) => {
             l.unsupported(format!("TriggerPredicate.subject({other:?})"));
             return None;

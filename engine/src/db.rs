@@ -190,6 +190,10 @@ pub enum Mod {
     /// "If it would leave the battlefield, exile it instead of putting it
     /// anywhere else" (CR 614.1a).
     ExileIfLeaves,
+    /// "It attacks that player this combat if able" (the effect
+    /// controller's opponent, 2 players: never one of their planeswalkers;
+    /// Ursine Monstrosity).
+    MustAttackPlayer,
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated
@@ -494,6 +498,9 @@ pub enum EventKind {
     /// spell (a spell: the event's amount is 1), then controller: the
     /// spell or ability that targets (`Subj::Item`; its controller).
     BecomesTarget,
+    /// A player played a land (CR 305.1; not a land put onto the
+    /// battlefield by an effect). Subjects: the land, the player.
+    PlaysLand,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -539,6 +546,7 @@ impl EventKind {
             E::Delayed => (&[], &[]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
             E::BecomesTarget => (&[Slot::Target, Slot::TargetSpell], &[Slot::Controller]),
+            E::PlaysLand => (&[Slot::Land, Slot::Obj], &[Slot::Controller, Slot::Player]),
         };
         match s {
             Slot::Default if names.1.is_empty() => Some(0),
@@ -567,6 +575,8 @@ pub enum Slot {
     /// A spell that became the target ("a creature spell you control
     /// becomes the target"; `BecomesTarget`).
     TargetSpell,
+    /// The land a player played (`PlaysLand`).
+    Land,
 }
 
 /// When a triggered ability triggers (CR 603.2), over the event's subjects
@@ -746,6 +756,15 @@ pub enum ManaProd {
     /// Fixed amounts `then` if the condition holds for you, else `els`
     /// ("add {G}{G}; if you've completed a dungeon, add six {G} instead").
     IfElse { cond: Cond, then: [u8; 6], els: [u8; 6] },
+    /// One mana of any of the colours of the cards exiled with the source
+    /// (CR 607.2a; Chrome Mox's imprint).
+    Linked,
+    /// One of these fixed productions (Sunken Ruins: {U}{U}, {U}{B} or
+    /// {B}{B}).
+    OneOf(Vec<[u8; 6]>),
+    /// One mana of any type the land sacrificed for its cost could produce
+    /// (Squandered Resources; CR 106.7, as the land last existed).
+    SacrificedLand,
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -754,6 +773,9 @@ pub enum ManaProd {
 pub struct ManaAbility {
     pub prod: ManaProd,
     pub damage_to_you: u8,
+    /// "If there are no <kind> counters on this, sacrifice it" (Gemstone
+    /// Mine), after the mana.
+    pub sac_if_no: Option<Counter>,
 }
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
@@ -873,8 +895,12 @@ pub struct ActivatedDef {
     /// "Activate only as a sorcery" (CR 602.5d).
     pub sorcery: bool,
     /// "Activate only as an instant." For a mana ability: only with
-    /// priority, never while paying a cost (Lion's Eye Diamond).
+    /// priority, never while paying a cost (Lion's Eye Diamond); also a
+    /// mana ability whose cost has a mana part or a choice (Chromatic Star,
+    /// Orcish Lumberjack: ENGINE.md 28).
     pub instant_only: bool,
+    /// Exhaust (CR 702.177): each object activates it only once.
+    pub exhaust: bool,
     /// "Activate only if ..." (CR 602.5b).
     pub only_if: Option<Cond>,
     /// "Activate only during your turn."

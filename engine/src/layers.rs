@@ -360,6 +360,11 @@ impl Game {
         !self.effects.is_empty() && self.effects_on(c).any(|e| e.m == Mod::Goad && e.controller == p)
     }
 
+    /// Must `c` attack a player (not a planeswalker) this combat?
+    pub(crate) fn must_attack_player(&self, c: CardIdx) -> bool {
+        !self.effects.is_empty() && self.effects_on(c).any(|e| e.m == Mod::MustAttackPlayer)
+    }
+
     /// Keywords gained when it attacks the monarch (Okoye).
     pub(crate) fn attack_monarch_kws(&self, c: CardIdx) -> KwSet {
         let mut k = KwSet::default();
@@ -386,7 +391,7 @@ impl Game {
                 Mod::CantBlock => f.cant_block = true,
                 Mod::CantBeBlocked => f.cant_be_blocked = true,
                 // Goaded: it attacks each combat if able (CR 701.38a).
-                Mod::MustAttack | Mod::Goad => f.must_attack = true,
+                Mod::MustAttack | Mod::Goad | Mod::MustAttackPlayer => f.must_attack = true,
                 Mod::ExileIfDies => f.exile_if_dies = true,
                 Mod::ExileIfLeaves => f.exile_if_leaves = true,
                 _ => {}

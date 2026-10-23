@@ -154,7 +154,12 @@ fn check_information_set(g: &Game, viewer: u8, seed: u64, rng: &mut Rng) {
             );
             return;
         }
-        assert_eq!(a.view_of(viewer), b.view_of(viewer), "seed {seed} step {step}: same keys, different views");
+        assert_eq!(a.view_of(viewer), b.view_of(viewer), "seed {seed} step {step}: same keys, different views
+{}
+----
+{}", a.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
+"), b.log_lines().iter().rev().take(25).rev().cloned().collect::<Vec<_>>().join("
+"));
         if a.is_over() {
             return;
         }

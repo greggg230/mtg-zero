@@ -14,6 +14,7 @@ pub mod effect_copies;
 pub mod effect_ext;
 pub mod effect_faces;
 pub mod effect_stack;
+pub mod effect_tail;
 pub mod effect_walkers;
 pub mod filter;
 pub mod printing;
@@ -187,6 +188,11 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // triggered ability (CR 603.12) into an IfCondition of the loyalty
     // ability, whose target would be chosen on activation.
     ("Ajani, Nacatl Pariah // Ajani, Nacatl Avenger", "IR:IfCondition(a reflexive trigger flattened: Ajani's 0)"),
+    // "When this artifact is put into a graveyard from the battlefield, draw
+    // a card": the IR's event is `leaves_battlefield` (it would draw when
+    // the Star is exiled or bounced too); the IR's `dies` event is "put
+    // into a graveyard from the battlefield" (Titania's lands).
+    ("Chromatic Star", "IR:TriggeredAbility.event(leaves_battlefield for \"put into a graveyard\")"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

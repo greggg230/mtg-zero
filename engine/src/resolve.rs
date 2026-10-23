@@ -607,7 +607,7 @@ impl Game {
             }
             Op::AddManaChoice { who, ref prod } => {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
-                let prods = crate::pay::productions(self, p, prod);
+                let prods = crate::pay::productions(self, p, prod, Some(f.source.idx));
                 match self.answer.take() {
                     Some(Choice::Number(k)) => {
                         self.add_mana(p, &prods[k as usize]);
@@ -975,7 +975,7 @@ impl Game {
     /// library sorted by definition (so the options depend only on the
     /// library's contents, which its owner always knows); `PASS` when the
     /// search may fail or nothing matches.
-    fn search_options(&self, p: PlayerId, filter: &crate::db::Filter, may_fail: bool, ctx: &crate::cast::Ctx) -> Vec<Opt> {
+    pub(crate) fn search_options(&self, p: PlayerId, filter: &crate::db::Filter, may_fail: bool, ctx: &crate::cast::Ctx) -> Vec<Opt> {
         let lib = self.library_sorted(p);
         let mut opts = Vec::new();
         for (i, &c) in lib.iter().enumerate() {

@@ -23,6 +23,7 @@ mod pay;
 pub mod program;
 mod resolve;
 mod resolve_ext;
+mod resolve_tail;
 mod resolve_walkers;
 pub mod rng;
 mod sba;

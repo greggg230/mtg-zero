@@ -312,15 +312,22 @@ impl Game {
                 let granted = self.permissions.iter().any(|pm| {
                     pm.card == r && pm.kind == crate::game::PermKind::Flashback && self.permission_ok(pm, p)
                 });
-                let permitted = self.permissions.iter().any(|pm| {
-                    pm.card == r
-                        && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::CastThenExile)
-                        && self.permission_ok(pm, p)
+                // (A "without paying its mana cost" permission: Malcolm's
+                // free cast of the discarded card, ENGINE.md 28.)
+                let permitted = self.permissions.iter().find_map(|pm| {
+                    if pm.card != r || !self.permission_ok(pm, p) {
+                        return None;
+                    }
+                    match pm.kind {
+                        crate::game::PermKind::Play { free, any_mana, .. } => Some((free, any_mana)),
+                        crate::game::PermKind::CastThenExile => Some((false, false)),
+                        _ => None,
+                    }
                 });
                 if def.flashback.is_some() || granted {
                     Some(CastFrom::Flashback)
-                } else if permitted {
-                    Some(CastFrom::Permission { free: false, any_mana: false })
+                } else if let Some((free, any_mana)) = permitted {
+                    Some(CastFrom::Permission { free, any_mana })
                 } else if def.escape.is_some()
                     // (Granted escape with the card's own additional costs is
                     // not offered: one combined cost isn't built; ENGINE.md

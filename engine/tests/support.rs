@@ -28,6 +28,7 @@ const SUPPORTED: &[&str] = &[
     "Auriok Salvagers",
     "Avacyn's Pilgrim",
     "Badlands",
+    "Balance",
     "Baleful Mastery",
     "Baleful Strix",
     "Baloth Prime",
@@ -64,7 +65,10 @@ const SUPPORTED: &[&str] = &[
     "Chain of Smog",
     "Chandra, Torch of Defiance",
     "Chaos Defiler",
+    "Chrome Mox",
+    "City of Traitors",
     "Clarion Conqueror",
+    "Coalition Relic",
     "Cogwork Librarian",
     "Collective Brutality",
     "Comet, Stellar Pup",
@@ -91,6 +95,7 @@ const SUPPORTED: &[&str] = &[
     "Daze",
     "Death-Greeter's Champion",
     "Deep-Cavern Bat",
+    "Demonic Consultation",
     "Demonic Tutor",
     "Dig Through Time",
     "Dismember",
@@ -146,6 +151,7 @@ const SUPPORTED: &[&str] = &[
     "Fury",
     "Gaea's Cradle",
     "Galvanic Discharge",
+    "Gemstone Mine",
     "Generous Ent",
     "Get Lost",
     "Ghost Vacuum",
@@ -203,9 +209,11 @@ const SUPPORTED: &[&str] = &[
     "Life // Death",
     "Lightning Bolt",
     "Lightning Greaves",
+    "Lim-Dûl's Vault",
     "Lingering Souls",
     "Lion's Eye Diamond",
     "Llanowar Elves",
+    "Loot, the Pathfinder",
     "Loran of the Third Path",
     "Lose Focus",
     "Lotus Cobra",
@@ -215,12 +223,14 @@ const SUPPORTED: &[&str] = &[
     "Lutri, the Spellchaser",
     "Lórien Revealed",
     "Magda, Brazen Outlaw",
+    "Malcolm, Alluring Scoundrel",
     "Malevolent Rumble",
     "Mana Confluence",
     "Mana Crypt",
     "Mana Drain",
     "Mana Leak",
     "Mana Tithe",
+    "Mana Vault",
     "Manamorphose",
     "Manifold Key",
     "Marsh Flats",
@@ -259,6 +269,7 @@ const SUPPORTED: &[&str] = &[
     "Oliphaunt",
     "Once Upon a Time",
     "Orcish Bowmasters",
+    "Orcish Lumberjack",
     "Otawara, Soaring City",
     "Otharri, Suns' Glory",
     "Ouroboroid",
@@ -266,6 +277,7 @@ const SUPPORTED: &[&str] = &[
     "Outland Liberator // Frenzied Trapbreaker",
     "Overgrown Tomb",
     "Palace Jailer",
+    "Palantír of Orthanc",
     "Passageway Seer",
     "Path to Exile",
     "Phelia, Exuberant Shepherd",
@@ -344,6 +356,7 @@ const SUPPORTED: &[&str] = &[
     "Spider-Woman, Stunning Savior",
     "Spirebluff Canal",
     "Springheart Nantuko",
+    "Squandered Resources",
     "Staff of the Storyteller",
     "Starting Town",
     "Steam Vents",
@@ -353,6 +366,7 @@ const SUPPORTED: &[&str] = &[
     "Stoneforge Mystic",
     "Subtlety",
     "Sunbaked Canyon",
+    "Sunken Ruins",
     "Sunset Saboteur",
     "Super Shredder",
     "Superior Spider-Man",
@@ -376,6 +390,7 @@ const SUPPORTED: &[&str] = &[
     "Teferi, Time Raveler",
     "Temple Garden",
     "Territorial Kavu",
+    "Tersa Lightshatter",
     "Tezzeret, Cruel Captain",
     "Thalia, Guardian of Thraben",
     "Thassa's Oracle",
@@ -400,6 +415,7 @@ const SUPPORTED: &[&str] = &[
     "Tolarian Academy",
     "Torsten, Founder of Benalia",
     "Touch the Spirit Realm",
+    "Transmute Artifact",
     "Traumatic Critique",
     "Treasure Cruise",
     "Trinket Mage",
@@ -419,6 +435,7 @@ const SUPPORTED: &[&str] = &[
     "Unholy Heat",
     "Upheaval",
     "Uro, Titan of Nature's Wrath",
+    "Ursine Monstrosity",
     "Urza's Bauble",
     "Urza's Saga",
     "Vampiric Tutor",
@@ -514,10 +531,10 @@ fn threat_report() {
 #[test]
 fn unsupported_cards_fail_loudly() {
     let db = CardDb::cube();
-    let err = db.expect_id("Balance").unwrap_err();
-    assert!(err.contains("Effect:BalanceEffect"), "{err}");
-    let err = db.expect_id("Goblin Welder").unwrap_err();
-    assert!(err.contains("Effect:SwapArtifactWithGraveyardArtifact"), "{err}");
+    let err = db.expect_id("Memory Jar").unwrap_err();
+    assert!(err.contains("Effect:EachPlayerExilesHandDrawsNReturnsLater"), "{err}");
+    let err = db.expect_id("Headliner Scarlett").unwrap_err();
+    assert!(err.contains("ExileTopCardsWithPlayPermission.face_down"), "{err}");
     assert!(db.expect_id("No Such Card").is_err());
 }
 

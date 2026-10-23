@@ -449,8 +449,15 @@ impl Game {
     pub(crate) fn play_land(&mut self, p: PlayerId, c: CardIdx, face: Option<DefId>) {
         self.players[p as usize].lands_played += 1;
         self.entering_face = face;
-        self.put_onto_battlefield(c, p);
+        let r = self.put_onto_battlefield(c, p);
         self.note(|g| format!("P{p} plays {}", g.name(c)));
+        // "Whenever a player plays a land" (City of Traitors).
+        self.event(crate::triggers::Event {
+            kind: crate::db::EventKind::PlaysLand,
+            a: crate::triggers::Subj::Obj(r),
+            b: crate::triggers::Subj::Player(p),
+            amount: 0,
+        });
     }
 
     /// Play card `c`'s other face, a land (CR 712.12).

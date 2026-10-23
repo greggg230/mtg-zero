@@ -40,7 +40,6 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     l.deny("ActivatedAbility.room_half", room_half);
     l.deny("ActivatedAbility.tier_threshold", tier_threshold);
     l.deny("ActivatedAbility.activate_only_once", activate_only_once);
-    l.deny("ActivatedAbility.exhaust", exhaust);
     l.deny("ActivatedAbility.boast", boast);
     let mut only_if = Vec::new();
     let mut loyalty_paid = (0i64, false);
@@ -67,28 +66,47 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
             only_if.push(c);
         }
     }
+    let mut instant_only = *activate_only_as_instant;
     let effect = if *is_mana_ability {
         let m = lower_mana_ability(l, effect)?;
         // Mana abilities are activated while paying a cost (ENGINE.md 18):
-        // only costs without choices, and no mana cost of their own (a
-        // nested payment) unless activated only with priority.
-        if !*activate_only_as_instant {
-            if !cost.mana.is_zero() {
-                l.unsupported("ManaAbility.cost.mana");
-            }
-            if cost.sacrifice.is_some() || cost.discard > 0 || cost.discard_hand {
-                l.unsupported("ManaAbility.cost(with a choice)");
-            }
-            if cost.life > 0 && !matches!(m.prod, ManaProd::One(_) | ManaProd::ColorAmong(_)) {
-                l.unsupported("ManaAbility.cost.life(more than one mana)");
-            }
+        // only costs without choices and no mana cost of their own (a
+        // nested payment). One whose cost has a mana part or a choice, or
+        // whose mana depends on the permanent its cost sacrifices, or that
+        // can be activated only once (exhaust), is activated with priority
+        // only, like Lion's Eye Diamond (ENGINE.md 28; CR 605.3a lets a
+        // player activate it then).
+        if !cost.mana.is_zero()
+            || cost.sacrifice.is_some()
+            || *exhaust
+            || matches!(m.prod, ManaProd::SacrificedLand)
+        {
+            instant_only = true;
+        }
+        if matches!(m.prod, ManaProd::SacrificedLand) && cost.sacrifice.is_none() {
+            l.unsupported("ManaAbility:AddOneManaSacrificedLandCouldProduce(no sacrifice)");
+        }
+        if cost.sacrifice.as_ref().is_some_and(|s| s.n != 1) {
+            l.unsupported("ManaAbility.cost.sacrifice(more than one)");
+        }
+        if !*activate_only_as_instant && (cost.discard > 0 || cost.discard_hand) {
+            l.unsupported("ManaAbility.cost(with a choice)");
+        }
+        if !instant_only && cost.life > 0 && !matches!(m.prod, ManaProd::One(_) | ManaProd::ColorAmong(_)) {
+            l.unsupported("ManaAbility.cost.life(more than one mana)");
         }
         if *sorcery_speed {
             l.unsupported("ManaAbility.sorcery_speed");
         }
+        // "Remove a counter from this": paid like {T} (no choice).
+        if cost.remove_counters.is_some_and(|(_, n)| n != 1) {
+            l.unsupported("ManaAbility.cost(more than one counter)");
+        }
+        if m.sac_if_no.is_some() && cost.remove_counters.map(|(k, _)| k) != m.sac_if_no {
+            l.unsupported("ManaAbility:SacrificeSelfIfNoNamedCounters(not the counter its cost removes)");
+        }
         // (The mana-ability payment path pays none of these.)
-        if cost.remove_counters.is_some()
-            || cost.tap_untapped.is_some()
+        if cost.tap_untapped.is_some()
             || cost.crew > 0
             || cost.exile_graveyard > 0
             || cost.bounce.is_some()
@@ -98,7 +116,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         }
         // Payment treats a card's mana abilities as exclusive alternatives,
         // true when each one taps, sacrifices or exiles its source.
-        if !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
+        if !instant_only && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
             l.unsupported("ManaAbility.cost(no tap or sacrifice of the source)");
         }
         if from == From::Hand && !matches!(m.prod, ManaProd::One(_)) {
@@ -108,6 +126,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     } else {
         if *activate_only_as_instant {
             l.unsupported("ActivatedAbility.activate_only_as_instant(non-mana)");
+        }
+        if *exhaust && from != From::Battlefield {
+            l.unsupported("ActivatedAbility.exhaust(not on the battlefield)");
         }
         ActEffect::Stack(lower_ability(l, effect))
     };
@@ -124,7 +145,8 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         cost,
         effect,
         sorcery: *sorcery_speed,
-        instant_only: *activate_only_as_instant,
+        instant_only,
+        exhaust: *exhaust,
         only_if: only_if.into_iter().next(),
         your_turn: *activate_only_during_your_turn,
         loyalty,
@@ -430,6 +452,7 @@ fn lower_produces(l: &mut Lowerer, what: &str, produces: &[(String, i64)]) -> Op
 fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> {
     use cats::Effect as E;
     let mut damage_to_you = 0u8;
+    let mut sac_if_no = None;
     let main = match e {
         E::Sequence(nodes::Sequence { effects }) => {
             let [first, rest @ ..] = &effects[..] else {
@@ -440,6 +463,12 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
                 match x {
                     E::SourceDealsDamageToController(nodes::SourceDealsDamageToController { amount }) => {
                         damage_to_you += l.int("SourceDealsDamageToController.amount", *amount, 0, 20) as u8;
+                    }
+                    // "If there are no mining counters on this land,
+                    // sacrifice it" (Gemstone Mine; part of the mana
+                    // ability, CR 605.3b).
+                    E::SacrificeSelfIfNoNamedCounters(nodes::SacrificeSelfIfNoNamedCounters { kind }) => {
+                        sac_if_no = Some(super::effect_ext::counter_by_name(l, kind));
                     }
                     other => l.unsupported(format!("ManaAbility:{}", other.tag())),
                 }
@@ -519,6 +548,29 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             }
             ManaProd::ColorAmong(f)
         }
+        // "Add one mana of any of the exiled card's colors" (Chrome Mox).
+        E::AddOneManaOfImprintedColors(nodes::AddOneManaOfImprintedColors {}) => ManaProd::Linked,
+        // "Add {U}{U}, {U}{B}, or {B}{B}" (Sunken Ruins).
+        E::AddOneOfManaCombinations(nodes::AddOneOfManaCombinations { options }) => {
+            let mut v = Vec::new();
+            for o in options {
+                match lower_produces(l, "AddOneOfManaCombinations.options", o)? {
+                    ManaProd::Fixed(f) => v.push(f),
+                    ManaProd::One(m) if m.count_ones() == 1 => v.push(std::array::from_fn(|i| (m >> i & 1) as u8)),
+                    _ => {
+                        l.unsupported("AddOneOfManaCombinations.options(a choice inside an option)");
+                        return None;
+                    }
+                }
+            }
+            if v.len() < 2 {
+                l.unsupported("AddOneOfManaCombinations.options(fewer than two)");
+                return None;
+            }
+            ManaProd::OneOf(v)
+        }
+        // "Add one mana of any type the sacrificed land could produce."
+        E::AddOneManaSacrificedLandCouldProduce(nodes::AddOneManaSacrificedLandCouldProduce {}) => ManaProd::SacrificedLand,
         E::DealDamageToControllerAndAddMana(nodes::DealDamageToControllerAndAddMana { damage, produces }) => {
             damage_to_you += l.int("DealDamageToControllerAndAddMana.damage", *damage, 0, 20) as u8;
             lower_produces(l, "DealDamageToControllerAndAddMana.produces", produces)?
@@ -566,7 +618,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             return None;
         }
     };
-    Some(ManaAbility { prod, damage_to_you })
+    Some(ManaAbility { prod, damage_to_you, sac_if_no })
 }
 
 /// The types a production can make (which `produces` colours it covers).
@@ -577,5 +629,8 @@ pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
         ManaProd::PerPermanent { ty, .. } => 1 << ty,
         ManaProd::ColorAmong(_) => COLORS,
         ManaProd::IfElse { then, els, .. } => (0..6).filter(|&i| then[i] + els[i] > 0).fold(0, |m, i| m | (1 << i)),
+        ManaProd::OneOf(v) => v.iter().flat_map(|f| (0..6).filter(move |&i| f[i] > 0)).fold(0, |m, i| m | (1 << i)),
+        ManaProd::Linked => COLORS,
+        ManaProd::SacrificedLand => 0b11_1111,
     }
 }

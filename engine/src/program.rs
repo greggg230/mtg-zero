@@ -563,6 +563,53 @@ pub enum Ext {
     /// The source card, if it is still that card in its owner's graveyard,
     /// returns to the battlefield under its owner's control [tapped].
     SourceFromGraveyard { tapped: bool },
+    // ---- M7c: the single-card tail (`resolve_tail.rs`, ENGINE.md 28) ----
+    /// Remove every counter of a kind from the source (if it is still on
+    /// the battlefield); the controller adds one mana of any colour for
+    /// each (CR 106.4). Choice: a colour per mana (`ChooseColor`), in
+    /// non-decreasing order (each multiset once).
+    RemoveAllCountersAddMana { counter: Counter },
+    /// The player of requirement `tgt` may have the controller draw a card;
+    /// if they don't, the controller mills X cards (X = the source's
+    /// counters of `counter`, as it last existed) and that player loses
+    /// life equal to the total mana value of the cards milled. Choice (that
+    /// player's): yes/no.
+    LetDrawElseMill { tgt: u8, counter: Counter },
+    /// Exile a card at random from the controller's graveyard (a public
+    /// chance key); they may play it this turn.
+    ExileRandomGraveyardPlayable,
+    /// The controller names a card, exiles the top n cards of their library,
+    /// then reveals cards from the top until one with that name: it goes
+    /// into their hand, every other card revealed is exiled. Choice:
+    /// `NameCard` (`PASS`: a name of no card in their library).
+    NameExileRevealUntil { n: u8 },
+    /// Balance: for lands, then cards in hand, then creatures, each player
+    /// who has more than the player with the fewest sacrifices (discards)
+    /// the excess of their choice (APNAP; a permanent per decision in
+    /// increasing slot order, a card per decision discarded at once).
+    Balance,
+    /// Mill n cards; the source attacks the opponent this combat if able
+    /// (2 players: "an opponent chosen at random" is that one); until end
+    /// of turn it gains `kws` and gets +1/+1 for each card type among cards
+    /// in the controller's graveyard (counted as it resolves).
+    MillAttackPump { n: u8, kws: crate::db::KwSet },
+    /// Sacrifice an artifact (a choice; none: nothing more). If they do,
+    /// search for an artifact card: with mana value at most the sacrificed
+    /// one's it is put onto the battlefield; with more, the controller may
+    /// pay the difference to put it onto the battlefield, else it goes to
+    /// the graveyard. Then shuffle. Choices: `Sacrifice`, `SearchLibrary`,
+    /// yes/no then `PayMana`.
+    SacrificeTutorPayDifference,
+    /// Look at the top n cards; any number of times pay `life` life, put
+    /// them on the bottom and look at the next n; then shuffle the rest of
+    /// the library (the looked-at cards stay the pile, put on top by the
+    /// next op). Choice: yes/no per round.
+    LookTopRepeatPayLife { n: u8, life: u8 },
+    /// Draw a card, then discard a card (a choice); if the source has at
+    /// least n counters of `counter` (as it last existed), the controller
+    /// may cast the discarded card without paying its mana cost (CR
+    /// 608.2g). Choices: `Discard`, yes/no.
+    LootMayCastFree { counter: Counter, n: u8 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").

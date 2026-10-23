@@ -515,6 +515,18 @@ impl Game {
         self.castable_via(p, card, from, &classes, true)
     }
 
+    /// Cast `card` now without paying its mana cost (CR 608.2g, 118.9).
+    pub(crate) fn cast_free_now(&mut self, p: PlayerId, card: CardIdx) {
+        let r = self.obj_ref(card);
+        self.permissions.push(crate::game::Permission {
+            card: r,
+            player: p,
+            turn: Some(self.turn.number),
+            kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, attacked_subtype: None },
+        });
+        self.begin_cast(p, card);
+    }
+
     /// Cast `card` from exile now (an effect lets `p` do so as it
     /// resolves): a one-time permission, then the usual casting process.
     pub(crate) fn cast_now(&mut self, p: PlayerId, card: CardIdx) {

@@ -1,0 +1,133 @@
+//! Effects of the single-card tail (M7c, ENGINE.md 28). Same rules as
+//! `effect.rs`: every field named, the rest denied.
+
+use super::effect::lower_effect;
+use super::Lowerer;
+use crate::db::{types, Filter, KwSet};
+use crate::mana::ManaCost;
+use crate::program::{Amount, Builder, Ext, Op, PileDest, Who, PILE_ANY};
+use card_ir::{cats, enums, nodes};
+
+fn and(a: Filter, b: Filter) -> Filter {
+    Filter::And(Box::new(a), Box::new(b))
+}
+
+/// Lower an effect class of the tail; `false` if the class is not one of
+/// these.
+pub(crate) fn lower_effect_tail(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) -> bool {
+    use cats::Effect as E;
+    match e {
+        // "You may pay {4}. If you do, untap this artifact." (Mana Vault;
+        // CR 118.12-style optional cost as it resolves.)
+        E::OptionalManaCostThenEffect(nodes::OptionalManaCostThenEffect { cost_str, inner_effect }) => {
+            let Some(cost) = ManaCost::parse(cost_str) else {
+                l.unsupported(format!("OptionalManaCostThenEffect.cost_str({cost_str})"));
+                return true;
+            };
+            let pay = b.op(Op::OfferPay { who: Who::You, cost, if_paid: 0 });
+            let end = b.op(Op::Jump { to: 0 });
+            b.patch(pay);
+            lower_effect(l, b, inner_effect);
+            b.patch(end);
+        }
+        // "It deals n damage to you."
+        E::SourceDealsDamageToController(nodes::SourceDealsDamageToController { amount }) => {
+            let amount = Amount::Fixed(l.int("SourceDealsDamageToController.amount", *amount, 0, 99));
+            b.op(Op::DamagePlayer { amount, who: Who::You });
+        }
+        // "Put a charge counter on this artifact."
+        E::PutChargeCountersOnSelf(nodes::PutChargeCountersOnSelf { amount, amount_from_x }) => {
+            l.deny("PutChargeCountersOnSelf.amount_from_x", amount_from_x);
+            let n = Amount::Fixed(l.int("PutChargeCountersOnSelf.amount", *amount, 1, 20));
+            let counter = super::effect_ext::counter_by_name(l, "charge");
+            b.op(Op::Ext(Ext::PutCounters { on: crate::program::On::Source, counter, n }));
+        }
+        // "Remove all charge counters from this artifact. Add one mana of
+        // any color for each charge counter removed this way."
+        E::RemoveAllCountersAddManaPerCounter(nodes::RemoveAllCountersAddManaPerCounter { kind }) => {
+            let counter = super::effect_ext::counter_by_name(l, kind);
+            b.op(Op::Ext(Ext::RemoveAllCountersAddMana { counter }));
+        }
+        // Imprint: "you may exile a nonartifact, nonland card from your
+        // hand" (CR 702.? imprint is a linked ability, 607.2a).
+        E::ImprintCardFromHand(nodes::ImprintCardFromHand { excluded_types, card_filter }) => {
+            if card_filter.is_some() {
+                l.unsupported("ImprintCardFromHand.card_filter");
+            }
+            let mut bits = 0u16;
+            for t in excluded_types {
+                match types::from_name(t) {
+                    Some(x) => bits |= x,
+                    None => l.unsupported(format!("ImprintCardFromHand.excluded_types({t})")),
+                }
+            }
+            let filter = if bits == 0 { Filter::Any } else { Filter::Not(Box::new(Filter::Type(bits))) };
+            b.op(Op::Ext(Ext::ExileFromHandLinked { chooser: Who::You, whose: Who::You, filter, optional: true, until: false }));
+        }
+        // "Then target opponent may have you draw a card. If that player
+        // doesn't, you mill X cards, where X is the number of influence
+        // counters on this, and that player loses life equal to the total
+        // mana value of those cards." (Palantir of Orthanc.)
+        E::TargetOpponentMayLetYouDrawElseMill(nodes::TargetOpponentMayLetYouDrawElseMill { kind }) => {
+            let counter = super::effect_ext::counter_by_name(l, kind);
+            let tgt = b.target(and(Filter::Player, Filter::Opponent), 1, 1);
+            b.op(Op::Ext(Ext::LetDrawElseMill { tgt, counter }));
+        }
+        // "Exile a card at random from your graveyard. You may play that
+        // card this turn." (Tersa Lightshatter.)
+        E::ExileRandomGraveyardCardWithPlayPermission(nodes::ExileRandomGraveyardCardWithPlayPermission { duration }) => {
+            if *duration != enums::ExilePlayDuration::ThisTurn {
+                l.unsupported(format!("ExileRandomGraveyardCardWithPlayPermission.duration({duration:?})"));
+            }
+            b.op(Op::Ext(Ext::ExileRandomGraveyardPlayable));
+        }
+        // "Choose a card name. Exile the top six cards of your library, then
+        // reveal cards from the top of your library until you reveal a card
+        // with the chosen name. Put that card into your hand and exile all
+        // other cards revealed this way." (Demonic Consultation.)
+        E::ChooseNameExileThenRevealUntilNamed(nodes::ChooseNameExileThenRevealUntilNamed { exile_first }) => {
+            let n = l.int("ChooseNameExileThenRevealUntilNamed.exile_first", *exile_first, 0, 60) as u8;
+            b.op(Op::Ext(Ext::NameExileRevealUntil { n }));
+        }
+        E::BalanceEffect(nodes::BalanceEffect {}) => {
+            b.op(Op::Ext(Ext::Balance));
+        }
+        // "Mill a card and choose an opponent at random. This creature
+        // attacks that player this combat if able. Until end of turn, this
+        // creature gains indestructible and gets +1/+1 for each card type
+        // among cards in your graveyard." (Ursine Monstrosity.)
+        E::MillChooseOpponentAttackPump(nodes::MillChooseOpponentAttackPump { mill, keywords }) => {
+            let n = l.int("MillChooseOpponentAttackPump.mill", *mill, 0, 20) as u8;
+            let mut kws = KwSet::default();
+            for k in keywords {
+                match super::printing::lower_keyword_full(l, k) {
+                    Some(super::printing::KwOrProt::Kw(kw)) => kws.insert(kw),
+                    Some(_) => l.unsupported("MillChooseOpponentAttackPump.keywords(not a plain keyword)"),
+                    None => {}
+                }
+            }
+            b.op(Op::Ext(Ext::MillAttackPump { n, kws }));
+        }
+        E::SacrificeArtifactTutorArtifactPayDifference(nodes::SacrificeArtifactTutorArtifactPayDifference {}) => {
+            b.op(Op::Ext(Ext::SacrificeTutorPayDifference));
+        }
+        // Lim-Dul's Vault: the loop, then "put the last cards you looked at
+        // this way on top in any order".
+        E::LookAtTopRepeatPayLifeThenStackTop(nodes::LookAtTopRepeatPayLifeThenStackTop { count, life_per_repeat }) => {
+            let n = l.int("LookAtTopRepeatPayLifeThenStackTop.count", *count, 1, 20) as u8;
+            let life = l.int("LookAtTopRepeatPayLifeThenStackTop.life_per_repeat", *life_per_repeat, 0, 20) as u8;
+            b.op(Op::Ext(Ext::LookTopRepeatPayLife { n, life }));
+            b.op(Op::PileTo { who: Who::You, dest: PileDest::Top, filter: Filter::Any, min: 0, max: PILE_ANY, rest: true, reveal: false });
+        }
+        // "Draw a card, then discard a card. If there are four or more
+        // chorus counters on this, you may cast the discarded card without
+        // paying its mana cost." (Malcolm, Alluring Scoundrel.)
+        E::LootThenMayCastDiscardedFreeIfCounters(nodes::LootThenMayCastDiscardedFreeIfCounters { kind, threshold }) => {
+            let counter = super::effect_ext::counter_by_name(l, kind);
+            let n = l.int("LootThenMayCastDiscardedFreeIfCounters.threshold", *threshold, 0, 20) as u8;
+            b.op(Op::Ext(Ext::LootMayCastFree { counter, n }));
+        }
+        _ => return false,
+    }
+    true
+}

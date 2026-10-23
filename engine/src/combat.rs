@@ -65,7 +65,7 @@ impl Game {
                 // CR 701.38a: goaded, it attacks a player other than the
                 // goader if able: goaded by its own controller (2p), it
                 // attacks the defending player, not a planeswalker.
-                if self.goaded_by(card, p) {
+                if self.goaded_by(card, p) || self.must_attack_player(card) {
                     return;
                 }
                 let mut opts = vec![Opt { action: act::PLAYER + 1, choice: Choice::Target(Target::Player(dp)) }];

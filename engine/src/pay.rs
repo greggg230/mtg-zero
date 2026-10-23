@@ -145,10 +145,18 @@ fn one(t: usize, n: u8) -> [u8; 6] {
     v
 }
 
-/// Every production of `prod` for player `p`, in canonical order.
-pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd) -> Vec<[u8; 6]> {
+/// Every production of `prod` of source `src` for player `p`, in canonical
+/// order.
+pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<CardIdx>) -> Vec<[u8; 6]> {
     match prod {
         ManaProd::One(m) => (0..6).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect(),
+        ManaProd::Linked => {
+            let m = src.map_or(0, |c| g.linked_colors(c));
+            (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
+        }
+        ManaProd::OneOf(v) => v.clone(),
+        // (Read from the sacrificed land as the ability is activated.)
+        ManaProd::SacrificedLand => Vec::new(),
         ManaProd::ColorAmong(f) => {
             let m = g.colors_among(p, f);
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
@@ -194,6 +202,17 @@ fn units_of(v: &[u8; 6]) -> impl Iterator<Item = Unit> + '_ {
 }
 
 impl Game {
+    /// The colours of the cards exiled with permanent `c` (CR 607.2a: an
+    /// imprinted card), still in exile.
+    pub(crate) fn linked_colors(&self, c: CardIdx) -> ManaMask {
+        let r = self.obj_ref(c);
+        self.links
+            .iter()
+            .filter(|l| l.source == r && self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile)
+            .fold(0, |m, l| m | self.colors_of(l.card.idx))
+            & COLORS
+    }
+
     /// Colours among permanents `p` controls matching `f` (Mox Amber).
     pub(crate) fn colors_among(&self, p: PlayerId, f: &Filter) -> ManaMask {
         let ctx = crate::cast::Ctx { controller: p, source: None };
@@ -273,10 +292,21 @@ impl Game {
                 if ad.instant_only || !self.activation_ready(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
                     continue;
                 }
+                // "Remove a counter from this" (Gemstone Mine): it needs
+                // one; removing the last one sacrifices it (`sac_if_no`).
+                let mut sac_self = ad.cost.sac_self;
+                if let Some((k, n)) = ad.cost.remove_counters {
+                    let have = self.counters_on(c, k);
+                    if have < n as u16 {
+                        continue;
+                    }
+                    sac_self |= m.sac_if_no == Some(k) && have == n as u16;
+                }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
                 // Same definition and ability: the same yield (it depends on
-                // the controller only).
-                if let Some(cl) = out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == src.slot) {
+                // the controller only; the linked colours on the source).
+                let same = |cl: &&mut Class| cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self;
+                if let Some(cl) = out.iter_mut().find(same).filter(|_| m.prod != ManaProd::Linked) {
                     cl.members.push(src);
                     continue;
                 }
@@ -288,8 +318,8 @@ impl Game {
                         }
                     }
                 }
-                let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra) else { continue };
-                let cl = Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self: ad.cost.sac_self };
+                let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra, Some(c)) else { continue };
+                let cl = Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self };
                 if matches!(cl.yld, Yield::Multi { .. }) {
                     out.insert(n_multi, cl);
                     n_multi += 1;
@@ -317,7 +347,7 @@ impl Game {
                         cl.members.push(src);
                         continue;
                     }
-                    let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life) else { continue };
+                    let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life, Some(c)) else { continue };
                     out.push(Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self: false });
                 }
             }
@@ -363,8 +393,8 @@ impl Game {
     /// A source's yield with `extra` mana its tapping adds (a triggered
     /// mana ability; none for a land whose ability costs life: none in the
     /// cube has both).
-    fn yield_with(&self, p: PlayerId, prod: &ManaProd, life: u8, extra: [u8; 6]) -> Option<Yield> {
-        let base = self.yield_of(p, prod, life)?;
+    fn yield_with(&self, p: PlayerId, prod: &ManaProd, life: u8, extra: [u8; 6], src: Option<CardIdx>) -> Option<Yield> {
+        let base = self.yield_of(p, prod, life, src)?;
         if extra == [0; 6] || life > 0 {
             return Some(base);
         }
@@ -393,21 +423,26 @@ impl Game {
         })
     }
 
-    fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8) -> Option<Yield> {
+    fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8, src: Option<CardIdx>) -> Option<Yield> {
         match prod {
             ManaProd::One(m) => Some(Yield::One(Unit { life, ..Unit::free(*m) })),
+            ManaProd::Linked => {
+                let m = src.map_or(0, |c| self.linked_colors(c));
+                (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
+            }
             ManaProd::ColorAmong(f) => {
                 let m = self.colors_among(p, f) & COLORS;
                 (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
             }
             _ => {
                 debug_assert!(life == 0, "lowering keeps life costs to one-mana abilities");
-                let prods = productions(self, p, prod);
+                let prods = productions(self, p, prod, src);
                 if prods.is_empty() {
                     return None;
                 }
                 let units = match prod {
                     ManaProd::SameType { mask, .. } if mask.count_ones() > 1 => None,
+                    ManaProd::OneOf(_) => None,
                     ManaProd::Combo { mask, n } => Some(vec![Unit::free(*mask); *n as usize]),
                     _ => Some(units_of(&prods[0]).collect()),
                 };
@@ -596,6 +631,9 @@ impl Game {
         if cost.tap {
             self.tap(c);
         }
+        if let Some((k, n)) = cost.remove_counters {
+            self.remove_counters(c, k, n as u16);
+        }
         if cost.life > 0 {
             self.lose_life(p, cost.life as i32);
         }
@@ -617,6 +655,13 @@ impl Game {
         }
         if dmg > 0 {
             self.deal_damage(DamageSource { controller: p, ..dsrc }, Target::Player(p), dmg as i32);
+        }
+        // "If there are no <kind> counters on this, sacrifice it" (the
+        // ability's effect, after its mana).
+        if let Some(k) = ad.mana().and_then(|m| m.sac_if_no) {
+            if self.objs[c.i()].zone == Zone::Battlefield && self.counters_on(c, k) == 0 {
+                self.sacrifice(c);
+            }
         }
     }
 
@@ -841,7 +886,8 @@ impl Game {
             }
             let ad = self.def_of(s.card).activated_def(s.slot);
             let dmg = ad.mana().map_or(0, |m| m.damage_to_you);
-            (false, ad.cost.sac_self, dmg > 0, ad.cost.life == 0)
+            let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
+            (false, ad.cost.sac_self || last, dmg > 0, ad.cost.life == 0)
         });
         for src in order {
             if src.slot == IMPROVISE {

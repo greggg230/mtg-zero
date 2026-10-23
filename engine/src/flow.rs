@@ -51,6 +51,8 @@ pub(crate) enum Task {
     ChooseModes { id: u32 },
     ManaNow { src: Src },
     ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
+    /// The rest of a priority mana ability's cost (ENGINE.md 28).
+    ManaNowCosts { src: Src, sac: Option<CardIdx> },
     // entering the battlefield (CR 614.12)
     AsEnters { card: CardIdx },
     /// Exile graveyard cards for delve (CR 702.66).
@@ -215,6 +217,7 @@ impl Game {
             Task::ChooseModes { id } => self.choose_modes(id),
             Task::ManaNow { src } => self.mana_now(src),
             Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
+            Task::ManaNowCosts { src, sac } => self.mana_now_costs(src, sac),
             Task::AsEnters { card } => self.as_enters(card),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),

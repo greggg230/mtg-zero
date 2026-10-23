@@ -98,6 +98,9 @@ impl Game {
                 if d.latent > 0 && !self.has_activated(c, i) {
                     continue; // a latent ability it hasn't gained
                 }
+                if ad.exhaust && self.exhausted(c, i as u8) {
+                    continue; // CR 702.177a: only once
+                }
                 let slot = AbilitySlot::Activated(i as u8);
                 if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
@@ -205,8 +208,14 @@ impl Game {
             return false;
         }
         if mana_ability {
-            // Free-standing (instant-only) mana abilities have no mana cost.
-            return !productions(self, p, &ad.mana().unwrap().prod).is_empty();
+            // A mana ability activated with priority (ENGINE.md 18, 28): its
+            // whole cost, and some mana to make (what a sacrificed land
+            // could make is read as it is sacrificed; it may be none).
+            if !self.cost_payable(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad)) {
+                return false;
+            }
+            let prod = &ad.mana().unwrap().prod;
+            return matches!(prod, crate::db::ManaProd::SacrificedLand) || !productions(self, p, prod, Some(card)).is_empty();
         }
         if !self.cost_payable(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad)) {
             return false;
@@ -233,6 +242,12 @@ impl Game {
             self.reveal(card); // 602.2a: activated from a hidden zone
         }
         let ad = self.db.def(def).activated_def(slot);
+        if ad.exhaust {
+            if let AbilitySlot::Activated(i) = slot {
+                let r = self.obj_ref(card);
+                self.marks.push((r, crate::game::Mark::Exhausted(i)));
+            }
+        }
         if ad.mana().is_some() {
             self.agenda.push(Task::ManaNow { src: Src { card, slot } });
             return;
@@ -651,17 +666,79 @@ impl Game {
         }
     }
 
-    /// A mana ability activated with priority (only "activate only as an
-    /// instant" ones, Lion's Eye Diamond): pay its costs, then choose the
-    /// mana (CR 605.3b, 106.1b).
+    /// Has `c` activated its exhaust ability `i` (CR 702.177a)?
+    pub(crate) fn exhausted(&self, c: CardIdx, i: u8) -> bool {
+        let r = self.obj_ref(c);
+        self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::Exhausted(i))
+    }
+
+    /// A mana ability activated with priority ("activate only as an
+    /// instant", Lion's Eye Diamond; one whose cost has a mana part or a
+    /// choice, ENGINE.md 28): pay its costs (the mana first, CR 601.2g-h by
+    /// 602.2b), then choose the mana (CR 605.3b, 106.1b).
     pub(crate) fn mana_now(&mut self, src: Src) {
         let p = self.objs[src.card.i()].controller;
         let ad = self.def_of(src.card).activated_def(src.slot);
-        // What it can make is read before the costs are paid (none of the
-        // supported costs changes it).
-        let prods = productions(self, p, &ad.mana().unwrap().prod);
+        let mana = self.act_mana(p, src.card, ad);
+        self.agenda.push(Task::ManaNowCosts { src, sac: None });
+        if !mana.is_zero() {
+            let mut pm = PayMana::new(p, mana);
+            pm.keep = Self::keep_for(src.card, &ad.cost, Self::mana_exclude(src.card, ad));
+            self.agenda.push(Task::PayMana(pm));
+        }
+    }
+
+    /// The rest of a priority mana ability's cost: the permanent to
+    /// sacrifice (a decision), then {T}, life, the source's own costs.
+    pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>) {
+        let p = self.objs[src.card.i()].controller;
+        let ad = self.def_of(src.card).activated_def(src.slot);
+        if let Some(s) = &ad.cost.sacrifice {
+            if sac.is_none() {
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => sac = Some(c),
+                    Some(other) => unreachable!("sacrifice answer {other:?}"),
+                    None => {
+                        let opts: Vec<Opt> = self
+                            .sacrifice_candidates(p, src.card, s)
+                            .into_iter()
+                            .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                            .collect();
+                        self.ask(Task::ManaNowCosts { src, sac }, p, DecisionKind::Sacrifice, opts);
+                        return;
+                    }
+                }
+            }
+        }
+        // What it can make is read before the costs are paid; "any type the
+        // sacrificed land could produce" from that land as it is (CR 106.7).
+        let prod = &ad.mana().unwrap().prod;
+        let prods: Vec<[u8; 6]> = match (prod, sac) {
+            (crate::db::ManaProd::SacrificedLand, Some(land)) => {
+                let m = self.could_produce(land);
+                (0..6).filter(|&t| m & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect()
+            }
+            _ => productions(self, p, prod, Some(src.card)),
+        };
+        if let Some(c) = sac {
+            self.sacrifice(c);
+        }
         self.activate_mana_costs(src);
-        self.agenda.push(Task::ManaNowPick { p, prods });
+        if !prods.is_empty() {
+            self.agenda.push(Task::ManaNowPick { p, prods });
+        }
+    }
+
+    /// The types of mana permanent `c`'s mana abilities could make now
+    /// (CR 106.7).
+    pub(crate) fn could_produce(&self, c: CardIdx) -> crate::mana::ManaMask {
+        let p = self.objs[c.i()].controller;
+        self.abilities(c)
+            .activated
+            .iter()
+            .filter_map(|a| a.mana())
+            .flat_map(|m| productions(self, p, &m.prod, Some(c)))
+            .fold(0, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)))
     }
 
     pub(crate) fn mana_now_pick(&mut self, p: PlayerId, prods: Vec<[u8; 6]>) {

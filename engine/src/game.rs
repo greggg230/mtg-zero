@@ -544,7 +544,20 @@ pub struct Game {
     /// While the modes of a stack item are chosen, its id: it can't target
     /// itself (CR 115.5). 0 otherwise (always between tasks).
     pub(crate) choosing_for: u32,
+    // ---- M7c: the single-card tail (ENGINE.md 28) ----
+    /// Rare per-object facts, one list (a clone copies one empty vector
+    /// in the common case): exhaust abilities activated, colours chosen
+    /// as a permanent entered, ...
+    pub(crate) marks: Vec<(ObjRef, Mark)>,
     pub(crate) log: Option<Vec<String>>,
+}
+
+/// A rare per-object fact (`Game::marks`); stale with its object (CR
+/// 400.7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Mark {
+    /// Its exhaust ability k was activated (CR 702.177a).
+    Exhausted(u8),
 }
 
 impl Game {
@@ -695,6 +708,7 @@ impl Game {
             dungeons: [Dungeon::default(); 2],
             rules_src: None,
             choosing_for: 0,
+            marks: Vec::new(),
             batching: false,
             batch_start: 0,
             entering_cast: false,

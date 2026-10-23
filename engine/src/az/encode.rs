@@ -279,7 +279,7 @@ fn task_code(t: &Task) -> usize {
         Task::Run(_) => 9,
         Task::PutTriggers => 10,
         Task::SbaCheck { .. } => 11,
-        Task::PayCosts { .. } => 12,
+        Task::PayCosts { .. } | Task::ManaNowCosts { .. } => 12,
         Task::CastOption { .. } => 13,
         Task::ChooseModes { .. } => 14,
         Task::ManaNowPick { .. } => 15,

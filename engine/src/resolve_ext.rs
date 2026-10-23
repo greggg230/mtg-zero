@@ -1542,6 +1542,15 @@ impl Game {
             | Ext::CreateTokensN { .. }
             | Ext::DiscardThenDraw { .. }
             | Ext::SourceFromGraveyard { .. } => self.exec_stack(f, op),
+            Ext::RemoveAllCountersAddMana { .. }
+            | Ext::LetDrawElseMill { .. }
+            | Ext::ExileRandomGraveyardPlayable
+            | Ext::NameExileRevealUntil { .. }
+            | Ext::Balance
+            | Ext::MillAttackPump { .. }
+            | Ext::SacrificeTutorPayDifference
+            | Ext::LookTopRepeatPayLife { .. }
+            | Ext::LootMayCastFree { .. } => self.exec_tail(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }
