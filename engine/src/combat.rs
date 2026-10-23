@@ -87,6 +87,19 @@ impl Game {
                 for &c in &attackers {
                     let r = self.obj_ref(c);
                     self.players[ap as usize].attacked_with.push(r);
+                    // "Whenever it attacks the monarch this turn" (applied
+                    // as it attacks).
+                    if self.monarch == Some(opp(ap)) {
+                        let k = self.attack_monarch_kws(c);
+                        if !k.is_empty() {
+                            self.add_effect(
+                                crate::layers::Affected::Obj(r),
+                                crate::db::Mod::Keywords(k),
+                                crate::layers::Until::EndOfTurn,
+                                ap,
+                            );
+                        }
+                    }
                 }
                 // CR 508.1m: abilities that trigger on attacking.
                 for &c in &attackers {

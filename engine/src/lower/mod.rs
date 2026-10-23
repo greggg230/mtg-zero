@@ -62,6 +62,10 @@ pub struct Lowerer<'a> {
     pub link_exiles: bool,
     /// "<Types> your opponents control enter tapped" from a static ability.
     pub opp_enter_tapped: u16,
+    /// The card's name, and a token copy of the card it makes (its token
+    /// index, the card types added): filled in once the card is lowered.
+    pub card_name: String,
+    pub self_copy: Option<(u16, u16)>,
     pub errs: Vec<String>,
     /// The colours of mana the card being lowered produces as a land
     /// (`produces`), for consistency checks.
@@ -146,8 +150,23 @@ pub fn lower_card(
     let cats::CardPrinting::CardPrinting(p) = &card.printing;
     // A card that refers to "cards exiled with this" links its exiles.
     let link_exiles = format!("{p:?}").contains("ExiledWithSource");
-    let mut l = Lowerer { subtypes, tokens, errs: Vec::new(), land_colors: 0, delayed: Vec::new(), link_exiles, opp_enter_tapped: 0 };
+    let mut l = Lowerer {
+        subtypes,
+        tokens,
+        errs: Vec::new(),
+        land_colors: 0,
+        delayed: Vec::new(),
+        link_exiles,
+        opp_enter_tapped: 0,
+        card_name: p.name.clone(),
+        self_copy: None,
+    };
     let def = printing::lower_printing(&mut l, p);
+    if let Some((idx, extra)) = l.self_copy {
+        // "A token that's a copy of it, except it's an artifact" (CR
+        // 707.9b): the card's own definition, as a token.
+        l.tokens[idx as usize] = CardDef { token: true, types: def.types | extra, ..def.clone() };
+    }
     if l.errs.is_empty() {
         Ok(def)
     } else {

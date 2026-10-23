@@ -169,6 +169,9 @@ pub enum Mod {
     MustAttack,
     /// "If it would die this turn, exile it instead" (CR 614).
     ExileIfDies,
+    /// "Whenever it attacks the monarch this turn, it gains these keywords
+    /// until end of turn."
+    IfAttacksMonarch(KwSet),
     /// Layer 7c: +p/+t for each permanent matching the filter (relative to
     /// the static ability's controller; a static ability only).
     PtPer { filter: Filter, p: i32, t: i32 },
@@ -726,7 +729,7 @@ pub struct AbilityRef {
 
 /// A lowered card (ENGINE.md 3). Read only through `Game` accessors during
 /// play, so layers can later modify the values.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct CardDef {
     pub name: String,
     pub types: u16,

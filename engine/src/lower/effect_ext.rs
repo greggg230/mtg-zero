@@ -1296,6 +1296,55 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let Some(t) = lower_targets(l, b, targets, "Exile") else { return true };
             b.op(Op::Exile { tgt: t });
         }
+        E::CreateTokenCopyOfSource(nodes::CreateTokenCopyOfSource { extra_card_types, eternalize }) => {
+            // "Create a token that's a copy of it[, except it's an
+            // artifact]" (the card's own copiable values, CR 707.2).
+            l.deny("CreateTokenCopyOfSource.eternalize", eternalize);
+            let mut extra = 0u16;
+            for t in extra_card_types {
+                match types::from_name(t) {
+                    Some(b) => extra |= b,
+                    None => l.unsupported(format!("CreateTokenCopyOfSource.extra_card_types({t})")),
+                }
+            }
+            let token = match l.self_copy {
+                Some((idx, x)) if x == extra => idx,
+                Some(_) => {
+                    l.unsupported("CreateTokenCopyOfSource(two kinds)");
+                    return true;
+                }
+                None => {
+                    // A unique placeholder, replaced once the card is lowered.
+                    let placeholder = crate::db::CardDef { name: format!("{} (token copy)", l.card_name), token: true, ..Default::default() };
+                    let idx = l.token(placeholder);
+                    l.self_copy = Some((idx, extra));
+                    idx
+                }
+            };
+            b.op(Op::CreateToken { token, n: 1, tapped: false });
+            b.op(Op::Ext(Ext::TokensCreated));
+        }
+        E::RevealUntilCreatureOntoBattlefieldAttacking(nodes::RevealUntilCreatureOntoBattlefieldAttacking {}) => {
+            // "Reveal cards from the top of your library until you reveal a
+            // creature card. Put that card onto the battlefield tapped and
+            // attacking and the rest on the bottom in a random order."
+            b.op(Op::Ext(Ext::RevealUntilCreatureAttacking));
+        }
+        E::CounterThenWhenItAttacksMonarch(nodes::CounterThenWhenItAttacksMonarch { targets, keywords }) => {
+            // "Put a +1/+1 counter on target creature. Whenever that
+            // creature attacks the monarch this turn, it gains <kws> until
+            // end of turn" (applied as it attacks: ENGINE.md 23.11).
+            let Some(t) = lower_targets(l, b, targets, "CounterThenWhenItAttacksMonarch") else { return true };
+            b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::P1P1, n: Amount::Fixed(1) }));
+            let mut set = KwSet::default();
+            for m in keyword_mods(l, keywords) {
+                match m {
+                    Mod::Keywords(k) => set = k,
+                    _ => l.unsupported("CounterThenWhenItAttacksMonarch.keywords(protection)"),
+                }
+            }
+            apply(b, On::Target(t), vec![Mod::IfAttacksMonarch(set)], Until::EndOfTurn);
+        }
         E::BecomeMonarch(nodes::BecomeMonarch {}) => {
             b.op(Op::Ext(Ext::BecomeMonarch));
         }

@@ -243,6 +243,20 @@ impl Game {
         p
     }
 
+    /// Keywords gained when it attacks the monarch (Okoye).
+    pub(crate) fn attack_monarch_kws(&self, c: CardIdx) -> KwSet {
+        let mut k = KwSet::default();
+        if self.printed_only(c) {
+            return k;
+        }
+        for (_, m) in self.mods_on(c) {
+            if let Mod::IfAttacksMonarch(x) = m {
+                k.0 |= x.0;
+            }
+        }
+        k
+    }
+
     /// Rules flags from effects and statics ("can't block", "can't be
     /// blocked").
     pub fn flags_of(&self, c: CardIdx) -> Flags {

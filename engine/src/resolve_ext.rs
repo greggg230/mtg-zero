@@ -1421,6 +1421,37 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::RevealUntilCreatureAttacking => {
+                use crate::game::Step;
+                let p = f.controller;
+                let lib: Vec<CardIdx> = self.players[p as usize].library.iter().rev().copied().collect();
+                let mut rest = Vec::new();
+                let mut found = None;
+                for c in lib {
+                    self.force_library_card(c, crate::hidden::KEY_REVEAL, p);
+                    self.reveal(c);
+                    if self.def_of(c).is(crate::db::types::CREATURE) {
+                        found = Some(c);
+                        break;
+                    }
+                    rest.push(c);
+                }
+                if let Some(c) = found {
+                    self.put_onto_battlefield(c, p);
+                    if self.objs[c.i()].zone == Zone::Battlefield {
+                        self.tap(c);
+                        let in_combat = matches!(
+                            self.turn.step,
+                            Step::DeclareAttackers | Step::DeclareBlockers | Step::FirstStrikeDamage | Step::CombatDamage
+                        );
+                        if in_combat && p == self.turn.active {
+                            self.objs[c.i()].attacking = true;
+                        }
+                    }
+                }
+                self.put_on_bottom_randomly(p, rest);
+                Flow::Next
+            }
             Ext::ExileThisSpell => {
                 let c = f.source.idx;
                 if self.live(f.source) && self.objs[c.i()].zone == Zone::Stack {

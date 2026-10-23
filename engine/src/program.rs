@@ -339,6 +339,10 @@ pub enum Ext {
     ExileUntilMonarch { tgt: u8 },
     /// Exile this spell (Time Spiral).
     ExileThisSpell,
+    /// Reveal cards from the top of the controller's library until a
+    /// creature card; it enters tapped and attacking (508.4), the rest go
+    /// to the bottom in a random order.
+    RevealUntilCreatureAttacking,
     /// Unless the source has no counters of this kind (now, or as it last
     /// existed on the battlefield), continue at `to`.
     JumpUnlessSourceNoCounters { counter: crate::db::Counter, to: u16 },
