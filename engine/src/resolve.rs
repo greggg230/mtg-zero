@@ -51,6 +51,8 @@ pub(crate) struct Frame {
     /// What a creature put onto the battlefield attacking attacks
     /// (ninjutsu, from the stack item).
     pub attack_as: Option<Option<ObjRef>>,
+    /// The objects the stack item noted (`StackItem::noted`).
+    pub noted: Vec<ObjRef>,
 }
 
 pub(crate) enum Flow {
@@ -120,6 +122,7 @@ impl Game {
             spell_x: item.x,
             made_all: Vec::new(),
             attack_as: item.attack_as,
+            noted: item.noted.clone(),
         };
         let Some(modes) = &ab.modes else {
             self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));

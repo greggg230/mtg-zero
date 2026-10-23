@@ -232,6 +232,11 @@ pub struct StackItem {
     /// attacks (ninjutsu, CR 702.49c): `Some(None)` = the defending
     /// player, `Some(Some(pw))` = that planeswalker.
     pub attack_as: Option<Option<ObjRef>>,
+    /// Objects a triggered ability noted as it was put on the stack: the
+    /// permanents the spell that triggered it targets (Dack Fayden's
+    /// emblem, "gain control of those permanents", still so if that spell
+    /// is countered first).
+    pub noted: Vec<ObjRef>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

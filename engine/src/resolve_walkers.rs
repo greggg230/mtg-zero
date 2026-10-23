@@ -5,7 +5,7 @@
 use crate::db::types;
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
-use crate::game::{Game, Pos, StackKind};
+use crate::game::{Game, Pos};
 use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::program::{Ext, On};
 use crate::resolve::{Flow, Frame};
@@ -46,24 +46,18 @@ impl Game {
                 Flow::Next
             }
             Ext::GainControlOfEventSpellTargets { filter } => {
-                let Some(spell) = f.ev.obj else { return Flow::Next };
+                // The permanents the spell targeted as this triggered
+                // (`StackItem::noted`), whether or not that spell is still
+                // on the stack.
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
-                let mut won: Vec<CardIdx> = Vec::new();
-                if self.live(spell) {
-                    if let Some(s) = self.stack.iter().find(|s| s.kind == StackKind::Spell { card: spell.idx }) {
-                        for &(_, t) in &s.targets {
-                            if let Target::Obj(r) = t {
-                                if self.live(r)
-                                    && self.objs[r.idx.i()].zone == Zone::Battlefield
-                                    && self.card_matches(filter, r.idx, &ctx)
-                                    && !won.contains(&r.idx)
-                                {
-                                    won.push(r.idx);
-                                }
-                            }
-                        }
-                    }
-                }
+                let won: Vec<CardIdx> = f
+                    .noted
+                    .iter()
+                    .filter(|&&r| {
+                        self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield && self.card_matches(filter, r.idx, &ctx)
+                    })
+                    .map(|r| r.idx)
+                    .collect();
                 for c in won {
                     self.change_control(c, f.controller);
                 }

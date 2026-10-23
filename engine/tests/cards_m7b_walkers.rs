@@ -330,6 +330,34 @@ fn dack_fayden_emblem_steals_the_permanents_a_spell_targets() {
     assert_eq!(g.obj(bear).zone, Zone::Graveyard);
 }
 
+#[test]
+fn dack_fayden_emblem_steals_even_when_the_spell_is_countered_first() {
+    // "Gain control of those permanents": the permanents the spell targeted
+    // as the ability triggered, whether or not the spell is still there.
+    let mut g = scen()
+        .emblem(0, "Dack Fayden")
+        .battlefield(0, &["Mountain", "Swamp", "Plains", "Mountain"])
+        .hand(0, &["Vindicate"])
+        .battlefield(1, &["Test Bear", "Island", "Island"])
+        .hand(1, &["Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 1, "Test Bear");
+    cast(&mut g, 0, "Vindicate");
+    g.choose(g.tgt(bear));
+    pay(&mut g);
+    assert_eq!(g.stack().len(), 2, "Vindicate and the emblem's trigger");
+    // Player 1 counters Vindicate with the trigger still on the stack.
+    g.pass();
+    // (Its only legal target, so the target is chosen automatically.)
+    cast(&mut g, 1, "Counterspell");
+    pay(&mut g);
+    resolve_with(&mut g, none);
+    assert_eq!(g.count_in(0, "Vindicate", Zone::Graveyard), 1, "countered");
+    assert_eq!(g.obj(bear).controller, 0, "the trigger still gains control");
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+}
+
 // ---- Elspeth, Storm Slayer -------------------------------------------------------
 
 const ELSPETH: &str = "Elspeth, Storm Slayer";

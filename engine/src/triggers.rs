@@ -280,6 +280,22 @@ impl Game {
             self.note(|_| "trigger removed: no legal target".to_string());
             return; // 603.3d
         }
+        // "Gain control of those permanents" (Dack Fayden's emblem): the
+        // permanents the triggering spell targets now.
+        let mut noted = Vec::new();
+        if ab.program.iter().any(|op| matches!(op, crate::program::Op::Ext(crate::program::Ext::GainControlOfEventSpellTargets { .. }))) {
+            if let Some(spell) = t.ev.obj.filter(|&r| self.live(r)) {
+                if let Some(s) = self.stack.iter().find(|s| s.kind == StackKind::Spell { card: spell.idx }) {
+                    for &(_, x) in &s.targets {
+                        if let Target::Obj(r) = x {
+                            if self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield && !noted.contains(&r) {
+                                noted.push(r);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let id = self.new_stack_id();
         self.stack.push(StackItem {
             id,
@@ -297,6 +313,7 @@ impl Game {
             x: 0,
             division: Vec::new(),
             attack_as: None,
+            noted,
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {

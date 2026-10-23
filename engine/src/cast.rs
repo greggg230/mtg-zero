@@ -769,6 +769,7 @@ impl Game {
             x: 0,
             division: Vec::new(),
             attack_as: None,
+            noted: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
         if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {

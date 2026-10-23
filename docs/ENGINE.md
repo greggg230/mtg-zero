@@ -1,6 +1,8 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7a (threats first: layers and continuous effects, counters, generic triggers,
+Status: M7b part 1 (planeswalkers: loyalty abilities, attacking planeswalkers, damage to
+planeswalkers, emblems and the command zone; 378 supported cube cards; section 24),
+2026-10-22; M7a (threats first: layers and continuous effects, counters, generic triggers,
 protection and combat restrictions, alternative costs, X, kicker, delve, casting from
 graveyards and exile, linked exile, delayed and reflexive triggers, the monarch; 360
 supported cube cards; section 23), 2026-10-22; M5b a token network and stable card identities (section 22); M5a
@@ -26,7 +28,7 @@ Game (all mutable state, Clone)  <-- reads ------+
 |---|---|
 | `ids.rs` | `PlayerId`, `CardIdx`, `ObjRef`, `Zone`, `Target` |
 | `db.rs` | `CardDef`, `AbilityDef`, `CardDb` (build from an IR document, look-ups) |
-| `lower/` | IR -> `CardDef`: `printing.rs` (every `CardPrinting` field), `activated.rs` (activated and mana abilities, costs), `effect.rs` (effects -> ops), `filter.rs` (predicates, card filters, conditions), `support.rs` (the per-card report) |
+| `lower/` | IR -> `CardDef`: `printing.rs` (every `CardPrinting` field), `activated.rs` (activated, mana and loyalty abilities, costs), `effect.rs`, `effect_ext.rs`, `effect_walkers.rs` (effects -> ops), `filter.rs` (predicates, card filters, conditions), `statics.rs` (static abilities, replacement effects), `support.rs` (the per-card report) |
 | `program.rs` | `Op` (the effect instruction set), `Amount`, `Who`, the program builder |
 | `mana.rs` | `ManaCost` (generic, coloured, hybrid, Phyrexian), `ManaPool`, colour masks, the matching (`payable`) and budgets |
 | `game.rs` | `Game` (the state), `Obj`, `Player`, `GameSpec`, setup, zone moves |
@@ -36,6 +38,7 @@ Game (all mutable state, Clone)  <-- reads ------+
 | `activate.rs` | activated abilities (CR 602): options, activation, non-mana costs, free-standing mana abilities, conditions, "as enters" choices (section 18) |
 | `pay.rs` | paying mana (601.2g-h, 605): mana sources, feasibility, `PayMana` (section 18) |
 | `resolve.rs` | resolution (CR 608) and the effect VM |
+| `resolve_ext.rs`, `resolve_walkers.rs` | the `Ext` instructions of M7a (section 23.8) and M7b (section 24) |
 | `combat.rs` | CR 506-511 |
 | `sba.rs` | CR 704 |
 | `triggers.rs` | events, trigger matching, putting triggers on the stack (CR 603) |
@@ -62,14 +65,16 @@ order must be deterministic); no threads, callbacks or interior mutability.
 * `Obj` (per slot): `def` (the `CardDef` id), `owner`, `controller`, `zone`, `inc`,
   `timestamp` (CR 613.7, refreshed on entering the battlefield), `tapped`, `damage`,
   `deathtouched` (CR 704.5h), `control_since` (turn number; summoning sickness, CR 302.6),
-  combat flags (`attacking`, `blocking: Option<CardIdx>`, `blocked`, `struck_first`), `known`
+  combat flags (`attacking`, `attacks`: the planeswalker it attacks, if any (M7b),
+  `blocking: Option<CardIdx>`, `blocked`, `struck_first`), `known`
   (bit p = player p knows the card's identity where it is; meaningful in hidden zones, section
   10).
   Per-object state that later features add (counters, attachments, face-down, modifiers)
   goes here too, and must reset in `move_card` when the object changes zones.
 * Zones: per player `library` (index 0 = bottom, last = top), `hand`, `graveyard` (last =
   top); shared `battlefield` (always in timestamp order = the canonical permanent order),
-  `exile`, `stack: Vec<StackItem>` (last = top). `Obj.zone` mirrors membership; the fuzzer
+  `exile`, `command` (emblems, in creation order: CR 114, 408; M7b), `stack: Vec<StackItem>`
+  (last = top). `Obj.zone` mirrors membership; the fuzzer
   checks both agree and that every card is in exactly one zone.
 * **All zone changes go through `move_card(idx, to, position)`**: it removes the card from the
   old list, bumps `inc`, resets per-object state, sets controller = owner outside the
@@ -335,12 +340,15 @@ suspends the frame below that task.
 `Sba` runs when a player would receive priority (704.3) and repeats until nothing happens.
 One pass collects every applicable action and performs them simultaneously: 704.5a (life <= 0),
 704.5b (drew from an empty library since the last check), 704.5f (toughness <= 0), 704.5g
-(lethal damage), 704.5h (deathtouch damage), 704.5j (legend rule: the controller **chooses**
+(lethal damage), 704.5h (deathtouch damage), 704.5i (a planeswalker with loyalty 0 is put into
+its owner's graveyard: not destroyed, so indestructible doesn't stop it; M7b), 704.5j (legend
+rule: the controller **chooses**
 which legendary permanent with the same name to keep, one decision per group, before the
 simultaneous move), 704.5d (a token outside the battlefield ceases to exist: to
 `Zone::Nowhere`, after a "dies" event could see it in the graveyard). Losing ends
 the game at once; if all players lose simultaneously the game is a draw (104.4a). Later SBAs
-(poison, planeswalker loyalty, auras, +1/+1 and -1/-1 counters) are new arms of the same pass.
+are new arms of the same pass (M7a added 704.5n and 704.5q, M7b 704.5i; poison, auras and
+battles are not built).
 
 ## 10. Randomness, chance keys and hidden information
 
@@ -470,7 +478,7 @@ to the decider:
 | `GRAVEYARD` | 404-531 | decider's 0..63, opponent's 64..127 (M4b) |
 | `ACTIVATE` | 532-915 | `MY_PERM` slot * 4 + ability index: activate at priority; a mana source while paying |
 | `HAND_ABILITY` | 916-979 | the ability of the card in the decider's hand slot 0..63 (cycling; a Spirit Guide while paying) |
-| `EXILE` | 980-1011 | at priority: play or cast the k-th card in exile the decider may play (exile order; M7a) |
+| `EXILE` | 980-1011 | at priority: play or cast the k-th card in exile the decider may play (exile order; M7a); `ChooseExiled`: the k-th offered card (M7b) |
 | reserved | 1012-1023 | |
 
 `NUM_ACTIONS = 1024`. Canonical orders: hand, library, pile = sorted by (definition, card
@@ -501,8 +509,14 @@ creature), `ChooseAltCost` (`NUMBER` 0 = the mana cost, k + 1 = alternative cost
 `ExileCost` and `BounceCost` (one card per decision), `DivideDamage` (`NUMBER` = the amount
 for the next target); X, a counter kind, an energy amount and tap-or-untap use `ChooseMode`;
 "top or bottom" is a `YesNo`. Priority also offers graveyard cards (`GRAVEYARD`: flashback,
-escape, lands with Crucible of Worlds) and exiled cards with a permission (`EXILE`). There
-are 32 decision kinds; the context block holds 64 since layout v3 (section 22.6).
+escape, lands with Crucible of Worlds) and exiled cards with a permission (`EXILE`). M7b:
+`AttackTarget` (what the attacker just declared, or just put onto the battlefield attacking,
+attacks: `PLAYER` + 1 = the defending player, `OPP_PERM` = a planeswalker they control; asked
+only when they control one), `ChooseExiled` (`EXILE` + k: a card in exile an effect picks, Karn's
+-1), `NameCard` (`LIBRARY`: a name among the namer's library cards, a definition at its first
+slot, `Choice::Def`; `PASS` = a name of no card there; Tamiyo's +1). A loyalty ability is
+activated like any other (`ACTIVATE` ids). There are 35 decision kinds; the context block holds
+64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
@@ -512,17 +526,21 @@ as above; `NUM_ACTIONS = 1024`.
 
 * Declare attackers (508.1): untapped creatures of the active player that have been under
   their control since the start of their most recent turn (302.6) or have haste, without
-  defender; each attacks the defending player (planeswalker and battle attack targets later).
-  Attackers without vigilance tap (508.1f).
+  defender; each attacks the defending player or, when that player controls planeswalkers, the
+  one its controller chooses (508.1b, `AttackTarget`, section 24.2; battles later). Attackers
+  without vigilance tap (508.1f).
 * Declare blockers (509.1): each untapped creature of the defending player may block one
   attacker it can block: flying needs flying or reach (702.9b); menace needs two or more
   blockers (702.110b; options that would leave an unfixable single blocker are not offered,
   checked by a small search over the remaining blockers).
 * Combat damage (510): the attacking player divides each attacker's damage among its blockers
   as they choose (510.1c, current rules: no damage assignment order); with trample, lethal
-  damage must be assigned to every blocker before the rest may go to the player (702.19c);
+  damage must be assigned to every blocker before the rest may go to the player or
+  planeswalker it attacks (702.19b; 702.19c in the numbering the older test names use);
   deathtouch makes 1 damage lethal (702.2c). A blocked creature whose blockers are gone deals
-  no damage unless it has trample. All combat damage is dealt simultaneously (510.2);
+  no damage unless it has trample. An unblocked creature deals its damage to what it attacks,
+  and none once the planeswalker it attacked has left combat (510.1b, 506.4c; M7b). All combat
+  damage is dealt simultaneously (510.2);
   lifelink gains life at the same time (702.15b). First strike / double strike: 510.4 and
   702.4 / 702.7 (a creature deals damage in the second step only if it has double strike or
   did not deal first-strike damage).
@@ -560,7 +578,21 @@ graveyard targets, coin flips, energy, amass, persist, monstrosity, living weapo
 buyback, overload, escalate, level up, the monarch, token copies of tokens and of the card
 itself.
 
-Supported cube cards: 360 (M4b-2: 191, M4b-1: 133, M4a: 31); creatures 113 (M4b-2: 20).
+Implemented (M7b part 1, section 24): planeswalkers (printed loyalty, loyalty abilities once
+per turn at sorcery speed, damage to planeswalkers, 704.5i), attacking planeswalkers and
+combat damage to them, emblems and the command zone, "loses all abilities", gaining and
+exchanging control, replacement effects of static abilities (token doubling, winning instead
+of drawing from an empty library), rules modifications (a draw limit, a sorcery-speed lock,
+sorceries with flash, a discard and sacrifice shield), triggered mana abilities of lands, die
+rolls, casting during resolution, searching for any number of cards, naming a card, ninjutsu,
+retrace, "until your next turn".
+
+Supported cube cards: 378 (M7a: 360, M4b-2: 191, M4b-1: 133, M4a: 31); creatures 113 (M4b-2:
+20); planeswalkers 18. New in M7b (18): Chandra, Torch of Defiance; Comet, Stellar Pup; Dack
+Fayden; Elspeth, Storm Slayer; Jace, Wielder of Mysteries; Jace, the Mind Sculptor; Kaito, Bane
+of Nightmares; Karn, Scion of Urza; Narset, Parter of Veils; Nissa, Who Shakes the World; Oko,
+Thief of Crowns; Tamiyo, Collector of Tales; Teferi, Hero of Dominaria; Teferi, Time Raveler;
+Tezzeret, Cruel Captain; The Wandering Emperor; Ugin, Eye of the Storms; Wrenn and Six.
 New in M7a (169): Abandoned Air Temple, Adeline, Agent Bishop, Alpha Deathclaw, Aragorn,
 Archon of Cruelty, Archon of Emeria, Arwen, Atraxa, Auriok Salvagers, Baleful Mastery, Baloth Prime, Barrowgoyf, Basalt
 Monolith, Bejeweled Warg, Bloodtithe Harvester, Boomerang Basics, Bristly Bill, Burst
@@ -618,13 +650,14 @@ Caryatid, the six Talismans, Time Warp, Unholy Heat, Vindicate, Voltaic Key, Whe
 Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED`.
 
 Not yet (later milestones; each is a blocker in the support report, never a silent no-op):
-planeswalkers and loyalty (and attacking them), battles, copies (of spells, token copies of
-nontoken permanents, "enters as a copy"), transform and double-faced cards, adventures, ward, targeting abilities
-on the stack, the initiative and the monarch, sagas, replacement and prevention effects beyond
+battles, copies (of spells, token copies of nontoken permanents, "enters as a copy"; Saheeli,
+Sublime Artificer), transform and double-faced cards, adventures, ward, targeting abilities
+on the stack, the initiative, sagas, replacement and prevention effects beyond
 the ones above, escalate and spree, multikicker, mana with spend restrictions, mana abilities
 whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic Star),
 granted triggered abilities (Kaldra Compleat), activated abilities in graveyards, naming a
-card, "activate only once" / exhaust / boast, the play/draw choice.
+card other than Tamiyo's (Demonic Consultation, "as this enters, choose a card name"),
+"activate only once" / exhaust / boast, the play/draw choice.
 
 Deliberate simplifications and limits (each is small and local to change):
 
@@ -647,13 +680,13 @@ Deliberate simplifications and limits (each is small and local to change):
   with repeats offers each multiset of modes once.
 * Events are recorded only for the kinds some permanent listens for (`trig_mask`); section
   23.2 lists the kinds.
-* M7a's own simplifications are in section 23.11.
+* M7a's own simplifications are in section 23.11; M7b's in section 24.7.
 * Waiting triggers with the same definition and ability are offered once in the ordering
   decision (their order cannot matter while effects ignore their source's per-object state).
 * Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide offers the
   first 30 amounts, lethal and all (M7a).
-* Creatures attack only players; the starting player is chosen from the seed; determinize
-  assumes open decklists.
+* Battles can't be attacked (no battle is supported); the starting player is chosen from the
+  seed; determinize assumes open decklists.
 * Targets are not deduplicated (section 11), nor are activations of identical permanents
   (two untapped Mind Stones offer two `ACTIVATE` ids).
 
@@ -727,6 +760,20 @@ Deliberate simplifications and limits (each is small and local to change):
   in two-player games).
 * M7a: Robber of the Rich lasts while the card is exiled (the Oracle text; the IR's default
   "this turn", 23.10), as in Python.
+* M7b: attacking planeswalkers. Python attacks only players ("attacking a planeswalker isn't
+  modeled"); here each attacking creature attacks the player or a planeswalker its
+  controller chooses (508.1b), and combat damage, trample and "deals combat damage to a
+  player" triggers follow what it attacks (510.1b, 702.19b, 510.3a).
+* M7b: neither engine redirects damage from a player to a planeswalker (the redirection rule
+  is gone, CR 306.7). A planeswalker that is also a creature (Kaito during his controller's
+  turn) gets both results of damage, loyalty removed and damage marked (120.3c, 120.3e), as
+  Python's combat damage does.
+* M7b: Kaito's "during your turn, as long as Kaito has one or more loyalty counters on him,
+  he's a 3/4 Ninja creature and has hexproof" is a static ability whose condition is checked
+  all the time (611.3a, layer 4 / 6 / 7b). Python writes until-end-of-turn effects as the turn
+  begins and doesn't check the loyalty condition again.
+* M7b: Tezzeret, Cruel Captain's -7 emblem: Python defers it (it has no emblems); here every
+  emblem of the 18 planeswalkers exists (CR 114).
 
 ## 15. Tests
 
@@ -751,6 +798,10 @@ they isolate one keyword or trigger each.
 | `tests/hidden.rs` | determinize keeps the viewer's view and actions; known cards stay; observer masking of keys; refreshed decisions of the other player; an ability activated from hand reveals its card (602.2a); a payment in progress completes in every determinized world (pinned hand sources, then revealed); a pending shock-land choice survives determinize; a Brainstorm after a hand reveal leaves partial knowledge; a card leaving the hand is not told apart from a known twin |
 | `tests/rules_layers.rs` | M7a: 613 layers (types, colours, keywords, set P/T in timestamp order, pumps, counters), 611.2c, statics and their conditions, 704.5q, protection 702.16, "can't block" groups, equipment 301.5 / 704.5n, exalted, battle cry, prowess |
 | `tests/cards_m7a.rs`, `cards_m7a_costs.rs`, `cards_m7a_zones.rs`, `cards_m7a_zones2.rs`, `cards_m7a_threats.rs`, `cards_m7a_threats2.rs`, `cards_m7a_misc.rs`, `cards_m7a_x.rs`, `cards_m7a_more.rs` | M7a cards and rules: equipment triggers, taxes and locks, replacement of uncast creatures, flicker, coin flips, explore, alternative costs and evoke (118.9, 702.74), divided damage (601.2d), linked exile (610.3), delayed triggers (603.7), reflexive triggers (603.12), random bottom order, tokens attacking (508.4), flashback (702.34), escape (702.138), exile permissions, dash (702.109), backup, amass, persist, monstrosity, living weapon, chosen player (614.12), devotion and winning (104.2b), delve, kicker, energy, X (107.3), crew (702.122), extra land drops |
+| `tests/rules_walkers.rs` | M7b: 306.5b, 606.3 / 606.4, 606.6 / 704.5i, 115.4 / 120.3c, 704.5j for planeswalkers, 508.1b / 510.1b (attacking a planeswalker; no decision without one), 702.19b (trample over a planeswalker), 506.4c (its planeswalker gone), 510.3a (combat damage to a planeswalker isn't to a player), 508.4 (put onto the battlefield attacking), 114 (an emblem), The Wandering Emperor at instant speed (606.3), 120.3 (a planeswalker creature) |
+| `tests/cards_m7b_walkers.rs`, `cards_m7b_walkers2.rs` | M7b: every ability of the 18 planeswalkers (Minsc & Boo on a corrected copy of its IR, while the card stays blocked, 24.8); Oko's Elk losing a static ability |
+| `tests/cards_m7b_walkers3.rs` | M7b hidden information: the decisions of Tamiyo's naming, Jace's look, a search for any number of cards, Chandra's cast from exile and Karn's opponent choice survive determinize; a retrace cast in progress keeps its land card |
+| `tests/cards_m7b_walkers_audit.rs` | the any-target audit (24.9): removal and damage that can hit planeswalkers, "each creature" effects that can't, voting, edicts, Psychic Frog and Questing Beast, Clarion Conqueror, Mox Amber, Subtlety |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
@@ -775,6 +826,8 @@ final state hash, the outcome and the chance-key sequence exactly. `FUZZ_GAMES=n
 game count (default 300). A failing game prints its seed; `FUZZ_FIRST=s FUZZ_GAMES=1
 FUZZ_LOG=1` reruns it with the game log in the panic message. M4b-2: 20,000 games in release,
 no failure (see section 17 for the time). M7a: 20,000 games over the 360 cards, no failure.
+M7b: 20,000 games over the 378 cards, no failure; on the way it found two faults, both fixed
+(24.10).
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
@@ -824,14 +877,27 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 `tests/perf.rs`; random decks of every supported card as in the fuzzer, mulligans on,
 `auto_single` on.
 
-| Measure | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
-|---|---|---|---|---|
-| Random play | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
-| Per exposed decision (`apply`, running to the next decision) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
-| `Game::clone` (mean over mid-game states) | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
-| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
-| `legal_actions` (copies cached ids) | 4 ns | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+| Measure | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
+|---|---|---|---|---|---|
+| Random play | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
+| Per exposed decision (`apply`, running to the next decision) | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
+| `Game::clone` (mean over mid-game states) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
+| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
+| `legal_actions` (copies cached ids) | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
+| Fuzzer, 20,000 games, release | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+
+M7b's column is measured with the process pinned to one logical CPU of a performance core
+(`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
+unpinned runs on this hybrid CPU varied by up to 50% with other work running (the earlier
+columns are unpinned). On M7a's card pool (the planeswalkers left out of the random decks:
+nearly the same games, 881,927 decisions against 885,439) M7b's code takes 5.98 us per
+decision against M7a's 5.41 us, pinned the same day: +10% for the checks the new rules add.
+The rest of the step to 6.3 us is the games with planeswalkers themselves. Those checks were
+measured one at a time and taken off the hot paths where they could be (from +24%): the
+static abilities of emblems walked by index instead of a chained iterator, a permanent's own
+type-changing statics looked for only while one is on the battlefield (`n_self_types`), the
+SBA test reading a permanent's types once, Teferi's lock looked for only for a card it could
+stop, `Obj` back to 64 bytes.
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
@@ -951,6 +1017,11 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
 * M7a IR findings (section 23.10): Celestial Colonnade and Creeping Tar Pit lack the colours
   their animation sets; Robber of the Rich's permission duration; Get Lost's Map token (the
   engine now builds Map from the printing other cards carry).
+* M7b IR finding (24.8): Minsc & Boo, Timeless Heroes's Boo token printing has no colour
+  ("a legendary 1/1 red Hamster creature token"; no `color_indicator`, so Boo would be
+  colourless). The card stays blocked (`IR:CreateToken.token_printing.color_indicator(Boo is
+  red)`, from `lower::IR_DEFECTS`) until mtg-bot fixes the IR; its tests run on a corrected
+  copy.
 * IR gap: Get Lost's rider (`ControllerCreatesTokens { token_name: "Map" }`) names a token
   the IR does not describe (Python looks it up in `TOKEN_PRINTINGS`); the IR should carry the
   printing, as `CreateToken.token_printing` does (Map also needs explore).
@@ -1508,6 +1579,14 @@ Checkpoints of layout v2 (no run was made with M7a's cards) do not load into v3.
 until the M7b card batch ends: while no run uses it, the batch may widen it further (the version
 stays 3); it is frozen at the first run.
 
+M7b part 1 widened it (still version 3) to 26,500 floats for planeswalkers (section 24.6): the
+card code from 48 to 52 floats (planeswalker, printed loyalty / 8, emblem, one spare), so every
+slot that holds a card code grows by 4 (tops 54, hand 60, stack 76, triggers and list 56); the
+permanent status from 40 to 48 floats (88 to 100 a slot); two more bags (15: each player's
+emblems); two globals per player in the spare floats. `mtgz/az/layout_v3.json` and the token
+registry must be regenerated (`MTGZ_WRITE_LAYOUT=1` and `MTGZ_WRITE_TOKENS=1 cargo test -p
+engine --test az ...`; not run on the M7b branch).
+
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
 M7a grew the supported cube from 191 to 360 cards, creatures from 20 to 113 (threats, i.e.
@@ -1710,3 +1789,240 @@ At the end of M7a: threats 139 supported (113 creatures), 107 blocked (96 creatu
 * The tap-or-untap choice, a counter kind to remove, an energy amount and X use `ChooseMode`
   with `NUMBER` ids; DecisionKind stayed at 32 kinds (the context block of layout v2; v3 has 64), so "top
   or bottom" is a `YesNo` (`YES` = top).
+
+## 24. Planeswalkers (M7b part 1)
+
+M7b part 1 grew the supported cube from 360 to 378 cards: 18 of the cube's 20 planeswalkers
+and the rules they need, which also reach cards already supported (damage to "any target",
+"creature or planeswalker" removal, "combat damage to a player"). Saheeli, Sublime Artificer
+needs copy effects (`Effect:TargetBecomesCopyOfAnotherTargetUEOT`); Minsc & Boo, Timeless
+Heroes is blocked by its IR (24.8). Every card's IR was read against its Oracle text.
+
+### 24.1 Loyalty and loyalty abilities (CR 306, 606)
+
+* `CardDef.loyalty` is the printed loyalty (306.5a); a planeswalker enters with that many
+  loyalty counters (`Counter::Loyalty`, 306.5b), and its loyalty is their number (306.5c). The
+  lowering takes `CardPrinting.loyalty` only for a planeswalker; a planeswalker without one,
+  or a loyalty on another card, is a blocker.
+* Every printed activated ability of a planeswalker on the battlefield is a loyalty ability
+  (`ActivatedDef.loyalty = Some(change)`, 606.2). The IR's convention: `ActivationCost.loyalty`
+  is the loyalty removed (+1 is written -1), and a [0] cost is written as no loyalty cost at
+  all; the lowering flips the sign, requires `sorcery_speed` (606.3) and refuses
+  `is_mana_ability` (605.1a: a loyalty ability is never a mana ability; Chandra's "+1: Add
+  {R}{R}" and Ugin's "0: Add {C}{C}{C}" use the stack) and `loyalty_x` (no cube card has X).
+* Activation (606.3): the controller's main phase, an empty stack, and no loyalty ability of
+  that permanent activated this turn (`Obj.pw_turn` / `pw_used`; a permanent that left and
+  came back is a new object). The Wandering Emperor: "as long as she entered this turn, any
+  time you could cast an instant" (`Obj.entered`). Comet: "you may activate Comet's loyalty
+  ability two more times this turn" (`pw_extra`).
+* The cost (606.4) puts on or removes the loyalty counters as the ability is activated; a
+  negative cost needs that many counters (606.6).
+* Damage to a planeswalker removes that many loyalty counters (120.3c, 306.8); a planeswalker
+  that is also a creature (Kaito during his controller's turn) also has the damage marked
+  (120.3e). A planeswalker with loyalty 0 is put into its owner's graveyard (704.5i, 306.9).
+  Damage is never redirected from a player to a planeswalker (306.7: the old rule is gone).
+* The legend rule (704.5j) applies to them like any legendary permanent.
+
+### 24.2 Attacking planeswalkers (CR 506.3, 508.1b, 510.1b)
+
+* `Obj.attacks: Option<ObjRef>`: `None` = the defending player, `Some(r)` = that planeswalker.
+  `Game::attack_dest(c)` is what the creature attacks now: the player; the planeswalker while
+  it is on the battlefield, still a planeswalker and still controlled by the defending player;
+  else nothing, the planeswalker having been removed from combat (506.4c: the creature is still
+  attacking, may be blocked, and deals no combat damage if unblocked).
+* Declaring (508.1b): right after each attacker is chosen, if the defending player controls a
+  planeswalker, an `AttackTarget` decision for that creature; otherwise no decision (games
+  without planeswalkers are unchanged). Creatures that attack each combat if able (508.1d) get
+  theirs first. Creatures put onto the battlefield attacking (508.4: Adeline's tokens, "create
+  ... tapped and attacking", the creature card Raph & Mikey reveal) are asked too; ninjutsu's
+  creature attacks what the returned creature attacked (702.49c).
+* Combat damage (510.1b): an unblocked creature deals its damage to what it attacks; trample's
+  excess goes there too (702.19b); with nothing to attack, everything goes to the blockers and
+  none to the player (702.19f; no cube card has trample over planeswalkers).
+* Triggers: "deals combat damage to a player" fires for players only (510.3a: Ragavan; combat
+  damage to the monarch); "to a player or planeswalker" (Psychic Frog) fires for both
+  (`DealsCombatDamage` events carry the planeswalker as their second subject); "whenever ...
+  attacks" fires whatever it attacks. Okoye's "attacks the monarch" applies only to creatures
+  attacking the player.
+
+### 24.3 Emblems and the command zone (CR 114, 408)
+
+* `Game.command` (`Zone::Command`) holds emblems. An emblem is an object whose definition
+  (`CardDef.emblem`, named "<card> emblem", stored with the tokens) has only abilities (114.3:
+  no types, colours or mana value); it is owned and controlled by the player who got it
+  (114.2) and never leaves. `Ext::CreateEmblem` makes one; the lowering builds the definition
+  from `CreateEmblemWithAbilities` (triggered and static abilities, lowered like a card's).
+* Its abilities function in the command zone (114.4, 113.6p): triggers observe events from
+  there and statics apply from there. The cube's: Chandra's (whenever you cast a spell, 5
+  damage to any target), Dack's (whenever you cast a spell that targets permanents, gain
+  control of them), Kaito's (Ninjas you control get +1/+1), Nissa's (lands you control have
+  indestructible), Teferi, Hero of Dominaria's (whenever you draw a card, exile target
+  permanent an opponent controls), Tezzeret's (at the beginning of combat on your turn, three
+  +1/+1 counters on target artifact you control; a noncreature one becomes a 0/0 Robot
+  artifact creature), Wrenn and Six's (instant and sorcery cards in your graveyard have
+  retrace).
+* Emblems are public: `view_of` and the state fingerprint include them, determinize leaves
+  them alone, the encoding has a bag of them per player (24.6).
+
+### 24.4 Other rules added
+
+* **"Loses all abilities"** (613.1f, Oko's +1): `Mod::LoseAllAbilities`; the object loses its
+  printed abilities and those granted before it (613.7), keeps later grants. Every reader of a
+  permanent's rules flags, triggered, activated, static and mana abilities goes through
+  `Game::abilities(c)`, which returns an empty definition for such a permanent (a fast path,
+  `any_loss`, skips the check when no effect removes abilities). **"Becomes a green Elk
+  creature with base power and toughness 3/3"**: `Mod::BecomeTypes` sets the card types and
+  creature types (205.1a-b: a Food stops being an artifact), with a colour and base P/T.
+* **A permanent's own type-changing static** (Kaito: "during your turn, as long as Kaito has
+  one or more loyalty counters on him, he's a 3/4 Ninja creature and has hexproof"):
+  `Scope::This` with `Cond::All[YourTurn, SourceCountersIn(Loyalty, 1..)]`, read by
+  `types_of` and `has_subtype` without recursion.
+* **Control** (613.1b): gaining control for good (Dack's -2), exchanging control (Oko's -5;
+  701.12a-b: nothing happens unless both are still there and controlled by different players),
+  gaining control of the permanents a spell targets (Dack's emblem: noted as the trigger goes
+  on the stack, so a countered spell doesn't stop it). A permanent that changes control leaves
+  combat (506.4) and is summoning sick (302.6).
+* **Replacement effects of static abilities** (614.1a): Elspeth's "twice that many of those
+  tokens" (`token_factor`, applied by `create_tokens` to every token effect; two Elspeths make
+  four times as many), Jace's "if you would draw a card while your library has no cards in it,
+  you win the game instead" (104.2b).
+* **Rules changes of static abilities**: Narset's "each opponent can't draw more than one card
+  each turn" (a later draw does nothing), Teferi, Time Raveler's "each opponent can cast spells
+  only any time they could cast a sorcery" (`cast_timing_ok`) and his "until your next turn, you
+  may cast sorcery spells as though they had flash" (`Player.flash_sorceries`, ends as that
+  player's next turn begins, 611.2b; `Until::YourNextTurn` for effects, Elspeth's flying),
+  Tamiyo's "spells and abilities your opponents control can't cause you to discard cards or
+  sacrifice permanents" (discard and sacrifice instructions controlled by an opponent skip that
+  player; costs are paid by their own controller and are not affected).
+* **Nissa's "whenever you tap a Forest for mana, add an additional {G}"** (a triggered mana
+  ability, 605.1b, which resolves at once): the Forest's mana ability yields one more {G}.
+* **Die rolls** (706, Comet): `Ext::RollDie` with a public chance key `KEY_DIE` (payload = the
+  result); `force_chance` can choose it.
+* **Casting during resolution** (608.2g; Chandra's +1, Ugin's -11 through a permission): the
+  player casts the exiled card while the effect resolves, ignoring its card type's timing
+  (not Teferi's lock: the stack isn't empty), through the normal casting process (a one-time
+  permission, then `begin_cast`); the rest of the effect waits for the cast.
+* **"Search for any number of cards"** (Nissa's -8, Ugin's -11): one definition per decision
+  in non-decreasing order (each set of cards once), `PASS` = done.
+* **Naming a card** (Tamiyo's +1): `NameCard`, 24.5.
+* **Ninjutsu** (702.49, Kaito): a hand ability whose cost includes returning an unblocked
+  attacking creature you control to its owner's hand (`Filter::Unblocked`, true once blockers
+  are declared, 509.1h); the card enters tapped and attacking.
+* **Retrace** (702.81, Wrenn and Six's emblem): an instant or sorcery card cast from its
+  owner's graveyard by discarding a land card in addition to its other costs
+  (`CastFrom::Retrace`, `GRAVEYARD` ids).
+* **"When you cast this spell"** (113.6, Ugin): while a permanent spell is being cast, only
+  its "this spell" triggered abilities function; "whenever you cast a colorless spell"
+  functions on the battlefield only. (M7a's engine triggered both from the stack; no supported
+  card had both kinds before Ugin.)
+* Also: "put into its owner's library third from the top" (Teferi, Hero of Dominaria), "exile
+  all cards from target player's library, then that player shuffles their hand into their
+  library" (Jace, the Mind Sculptor), a revealed pair of which an opponent chooses one and the
+  other is exiled with a silver counter, and later "a card you own with a silver counter on it
+  from exile" (Karn), "draw a card for each opponent who lost life this turn"
+  (`Player.lost_life`), "deals damage equal to the number of loyalty counters on him to a
+  creature or player" (chosen as it resolves, not targeted: 115.10), "sacrifice a creature;
+  when you do" (a reflexive trigger, Minsc & Boo), "at the beginning of the next end step,
+  untap up to two lands".
+
+### 24.5 Decisions
+
+Three new kinds (35 in all; the context block holds 64):
+
+* `AttackTarget`: what the creature just declared as an attacker (or just put onto the
+  battlefield attacking) attacks: `PLAYER` + 1 = the defending player, `OPP_PERM` = one of
+  their planeswalkers. Only when they control one.
+* `ChooseExiled`: a card in exile an effect picks, `EXILE` + k = the k-th offered card in
+  exile order (Karn's -1).
+* `NameCard`: Tamiyo's "choose a nonland card name". `LIBRARY` = a nonland definition in the
+  namer's library (sorted by definition, `Choice::Def`), `PASS` = any other name. Only cards of
+  that library can be revealed, so every other name has the same result; open decklists make
+  the library's contents (not their order) known to its owner.
+
+Loyalty abilities are `ACTIVATE` ids like other abilities. Comet's "to a creature or player"
+is a `Target` decision (not targeting); an opponent's choice between Karn's revealed cards is a
+`PutInHand` of that opponent; Jace's "you may put that card on the bottom" is a `YesNo`; the
+searches for any number of cards are `SearchLibrary`; "untap up to two lands" is
+`ChoosePermanent`; the heuristic bot (`az/bots.rs`) attacks a planeswalker its attacker's power
+kills, else the player, and counts only creatures attacking it when it blocks.
+
+### 24.6 Encoding (layout v3, 26,500 floats)
+
+* Card code (52): + planeswalker, printed loyalty / 8, emblem (one spare float).
+* Permanent status (48): + loyalty / 8, a loyalty ability may still be activated this turn,
+  attacking a planeswalker and that planeswalker's slot ((slot + 1) / 32), creatures attacking
+  this planeswalker / 4, the attacker the pending `AttackTarget` decision is about.
+* Bags (15): + `MY_EMBLEMS`, `OPP_EMBLEMS` (by the identity of the card that made the emblem:
+  an emblem definition shares its card's identity, `identity.rs`; the token registry and the
+  layout's card list skip emblems).
+* Globals, per player: lost life this turn, may cast sorceries as though they had flash.
+* Context: task code 19 = `AttackTarget` (its card = the attacker); `NameCard`'s list block is
+  the namer's library sorted by definition (as for `SearchLibrary`).
+* One new token kind to register (`tokens.txt`): `Squirrel 1/1 G c Squirrel` (Comet). The
+  other tokens these cards make already have lines: Soldier (Elspeth), Construct 0/0 (Karn;
+  the key has no static abilities), Food (Oko), Samurai (The Wandering Emperor). Boo's line
+  (`Boo 1/1 C c Hamster trample haste`, colourless as the IR has it) will need a red one once
+  the IR is fixed.
+
+### 24.7 Simplifications
+
+* `AttackTarget` is asked right after each attacker is chosen, not after the whole set
+  (508.1a-b): no attack restriction or requirement in the cube depends on what a creature
+  attacks, so the legal sets are the same.
+* Naming a card offers the names of the namer's library cards and one "other name" (above).
+* Nissa's extra mana is part of the Forest's mana ability, not a separate triggered mana
+  ability (payments never float mana, so nothing can be done between the two).
+* A token creation makes at most 64 tokens after doubling.
+* Retrace isn't offered for a card with its own additional costs (as escape granted by
+  Underworld Breach, 23.11); no supported instant or sorcery has both.
+* The heuristic bot activates no abilities at priority (as before M7b: it plays lands and
+  casts spells), so it never uses a loyalty ability; its planeswalkers only draw attacks.
+
+### 24.8 Blocked by the IR
+
+* Minsc & Boo, Timeless Heroes: the IR's Boo token printing has no colour indicator (the
+  Oracle text makes Boo red), so the token would be colourless. `lower::IR_DEFECTS` lists it;
+  the card's tests run on a corrected copy of its IR built in the test
+  (`cards_m7b_walkers2.rs::minsc_db`), which exercises everything else of the card (Boo's
+  creation on entering and each upkeep, the +1, the -2's reflexive damage and the Hamster
+  draw).
+* Not a defect but a convention the lowering relies on: loyalty costs are written as the
+  loyalty removed, and [0] as no cost (24.1).
+
+### 24.9 The any-target audit
+
+Every supported card whose Oracle text says "any target", "planeswalker", "permanent" or "a
+creature or player" (64 cards) was checked against its IR's filters: every filter already
+named planeswalkers where the Oracle text does, so the defects were in the engine, all fixed:
+damage to a planeswalker did nothing (`deal_damage` ignored non-creatures), and "deals combat
+damage to a player or planeswalker" (Psychic Frog) never saw a planeswalker. The cards: damage
+to any target or to creatures and planeswalkers (Burst Lightning, Chandra's emblem, Fury,
+Galvanic Discharge, Goblin Bombardment, Kolaghan's Command, Legion Extruder, Lightning Bolt,
+Mine Collapse, Minsc & Boo, Orcish Bowmasters, Phlage, Pyrite Spellbomb, Pyrogoyf, Screaming
+Nemesis, Sear, Traumatic Critique, Unholy Heat, Walking Ballista, Wrenn and Six); destroy,
+exile, flicker, tuck or bounce a creature or planeswalker or a permanent (Abrupt Decay, Alpha
+Deathclaw, Baleful Mastery, Bitter Triumph, Bone Shards, Boomerang Basics, Chaos Defiler,
+Council's Judgment, Displacer Kitten, Erode, Flickerwisp, Get Lost, Leyline Binding, Phelia,
+Portable Hole, Pyroblast, Skyclave Apparition, Tear Asunder, Teferi, Hero of Dominaria,
+Unexpectedly Absent, Upheaval, Ugin, Vindicate, Woodfall Primus); edicts (Archon of Cruelty,
+Sheoldred's Edict); combat (Adeline, Psychic Frog, Questing Beast); rules that name
+planeswalkers (Clarion Conqueror, Mox Amber, Subtlety, Dack Fayden's emblem, Tamiyo's shield;
+Comet's "a creature or player", no planeswalker, as printed); and cards where "permanent"
+raises no planeswalker question (Atraxa, Baloth Prime, Cryogen Relic, Fatal Push, Formidable
+Speaker, Malevolent Rumble, Skateboard, Super Shredder, Thassa's Oracle). "Each creature"
+effects (Fiery Confluence's mode) spare planeswalkers; "each opponent" damage never reaches
+them. `cards_m7b_walkers_audit.rs` tests one card of each kind.
+
+### 24.10 Hidden information and fuzzing
+
+* The die roll is a public chance key; Karn's and Tamiyo's reveals are public; Jace's look at
+  the top of a library is keyed for the looker and remembered only where its owner knows the
+  card too (23.7); the cards a search for any number of cards takes are private until
+  revealed; Jace, the Mind Sculptor's -12 exiles the library face up, then shuffles the hand
+  in with Timetwister's instruction (what the other player knew of that hand becomes "in that
+  library", section 10); Narset's rest goes to the bottom in a random order (23.7).
+* The fuzzer found two faults on the way, both fixed: a check-only one (`view_of` placed a
+  link or permission whose card had moved on, `testkit::live_place`), and a retrace cast in
+  progress whose land card the other player's determinize resampled away (the cost then had
+  nothing to discard): `exile_filters_in_progress` now keeps retrace's land card in that hand,
+  like the other hand cards a cost in progress may still take.

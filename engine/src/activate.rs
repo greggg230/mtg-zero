@@ -195,6 +195,7 @@ impl Game {
             x: 0,
             division: Vec::new(),
             attack_as: None,
+            noted: Vec::new(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });
