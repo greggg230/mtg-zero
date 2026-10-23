@@ -782,7 +782,10 @@ impl Game {
             self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
+        // (Not the ability itself, already on the stack: CR 115.5.)
+        self.choosing_for = id;
         let mut avail: Vec<bool> = m.list.iter().map(|x| self.targets_available(x, p, source)).collect();
+        self.choosing_for = 0;
         // Spree (CR 702.172a, 700.2h): a mode whose additional cost can't be
         // paid with the others chosen can't be chosen.
         if !m.costs.is_empty() {
@@ -951,7 +954,8 @@ impl Game {
         let abilities = wants_ability(&tr.filter);
         let spells = self.stack.iter().rev().filter_map(move |s| match s.kind {
             StackKind::Spell { card } => Some(self.obj_ref(card)).filter(|&r| Some(r) != ctx.source).map(Target::Obj),
-            StackKind::Ability { .. } => abilities.then_some(Target::Stack(s.id)),
+            // (Not the ability whose modes are being chosen, CR 115.5.)
+            StackKind::Ability { .. } => (abilities && s.id != self.choosing_for).then_some(Target::Stack(s.id)),
         });
         let gy = wants_graveyard(&tr.filter);
         let graves = [ctx.controller, crate::ids::opp(ctx.controller)]

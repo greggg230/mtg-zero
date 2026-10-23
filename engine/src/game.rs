@@ -535,6 +535,9 @@ pub struct Game {
     /// their source (CR 725.2: they have none): a slot in no zone, made the
     /// first time one triggers.
     pub(crate) rules_src: Option<CardIdx>,
+    /// While the modes of a stack item are chosen, its id: it can't target
+    /// itself (CR 115.5). 0 otherwise (always between tasks).
+    pub(crate) choosing_for: u32,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -684,6 +687,7 @@ impl Game {
             initiative: None,
             dungeons: [Dungeon::default(); 2],
             rules_src: None,
+            choosing_for: 0,
             batching: false,
             batch_start: 0,
             entering_cast: false,

@@ -10,7 +10,7 @@ mod common;
 use common::db;
 use engine::db::{AbilitySlot, Counter};
 use engine::testkit::Scenario;
-use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Target, Zone};
+use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Zone};
 
 fn at_priority(g: &Game) -> bool {
     g.kind() == Some(DecisionKind::Priority)
@@ -90,7 +90,8 @@ fn ward_life_counters_unless_its_controller_pays_cr_702_21a() {
     let w = bf(&g, 0, "Sedgemoor Witch");
     bolt_at(&mut g, w, |_| Some(Choice::Pass));
     assert_eq!(g.obj(w).zone, Zone::Battlefield, "countered");
-    assert_eq!(g.card(1, "Lightning Bolt", Zone::Graveyard), g.card(1, "Lightning Bolt", Zone::Graveyard));
+    assert_eq!(g.count_in(1, "Lightning Bolt", Zone::Graveyard), 1);
+    assert_eq!(g.life(1), 20);
     let mut g = scen(&["Sedgemoor Witch"], &["Mountain"], &["Lightning Bolt"]);
     let w = bf(&g, 0, "Sedgemoor Witch");
     bolt_at(&mut g, w, |_| Some(Choice::Yes));
@@ -256,5 +257,4 @@ fn ward_triggers_for_each_instance_cr_702_21a() {
     assert_eq!(asked.get(), 2);
     assert_eq!(g.life(1), 16);
     assert_eq!(g.obj(sq).zone, Zone::Graveyard);
-    let _ = Target::Player(0);
 }
