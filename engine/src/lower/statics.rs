@@ -24,7 +24,38 @@ fn scope_filter_ok(f: &Filter) -> bool {
     }
 }
 
-pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility) -> Option<StaticDef> {
+/// Replacement effects of static abilities (CR 614.1a) the card gets.
+#[derive(Default, Debug)]
+pub(crate) struct Repl {
+    /// "If one or more tokens would be created under your control, n times
+    /// that many of those tokens are created instead."
+    pub token_factor: u8,
+    /// "If you would draw a card while your library has no cards in it,
+    /// you win the game instead."
+    pub wins_on_empty_draw: bool,
+}
+
+/// A static ability's replacement effect -> `repl`.
+fn lower_replacement(l: &mut Lowerer, r: &cats::ReplacementEffect, repl: &mut Repl) {
+    let cats::ReplacementEffect::ReplacementEffect(nodes::ReplacementEffect { event_pattern, transform, scope_filter, affects }) = r;
+    let cats::EventPattern::EventPattern(nodes::EventPattern { event, subject_filters }) = &**event_pattern;
+    l.deny("ReplacementEffect.scope_filter", scope_filter);
+    l.deny("EventPattern.subject_filters", subject_filters);
+    if *affects != enums::AffectedPlayers::You {
+        l.unsupported(format!("ReplacementEffect.affects({affects:?})"));
+    }
+    match (event, &**transform) {
+        (enums::Event::WouldCreateToken, cats::EventTransform::MultiplyCount(nodes::MultiplyCount { factor })) => {
+            repl.token_factor = l.int("MultiplyCount.factor", *factor, 2, 4) as u8;
+        }
+        (enums::Event::WouldDrawFromEmptyLibrary, cats::EventTransform::WinTheGameInstead(nodes::WinTheGameInstead {})) => {
+            repl.wins_on_empty_draw = true;
+        }
+        (e, t) => l.unsupported(format!("ReplacementEffect({e:?}, {})", t.tag())),
+    }
+}
+
+pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut Repl) -> Option<StaticDef> {
     let cats::StaticAbility::StaticAbility(nodes::StaticAbility {
         scope,
         granted_keywords,
@@ -62,11 +93,61 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility) -> Option<S
     );
     l.deny("StaticAbility.granted_becomes_target_effect", granted_becomes_target_effect);
     l.deny("StaticAbility.granted_trigger_limit_per_turn", granted_trigger_limit_per_turn);
-    l.deny("StaticAbility.replacement_effect", replacement_effect);
-    l.deny("StaticAbility.bonus_per_condition_count", bonus_per_condition_count);
     l.deny("StaticAbility.skips_your_draw_step", skips_your_draw_step);
 
     let scope = lower_scope(l, scope)?;
+    // A replacement effect (CR 614.1a) of the card itself: no condition, no
+    // modification besides it.
+    if let Some(r) = replacement_effect.as_deref() {
+        if !matches!(scope, Scope::This) || condition.is_some() {
+            l.unsupported("StaticAbility.replacement_effect(scoped or conditional)");
+        }
+        lower_replacement(l, r, repl);
+        let other = *power_bonus != 0
+            || *toughness_bonus != 0
+            || !granted_keywords.is_empty()
+            || *must_attack_each_combat
+            || continuous_effect.is_some()
+            || !opponents_enter_tapped_types.is_empty()
+            || *bonus_per_condition_count;
+        if other {
+            l.unsupported("StaticAbility.replacement_effect(with modifications)");
+        }
+        return None;
+    }
+    // "This gets +p/+t for each <permanent> you control" (the condition is
+    // the count).
+    if *bonus_per_condition_count {
+        let f = match condition.as_deref() {
+            Some(cats::Condition::PerControlled(nodes::PerControlled { filter })) => lower_pred(l, filter),
+            Some(other) => {
+                l.unsupported(format!("StaticAbility.bonus_per_condition_count({})", other.tag()));
+                None
+            }
+            None => {
+                l.unsupported("StaticAbility.bonus_per_condition_count(no condition)");
+                None
+            }
+        };
+        let f = f?;
+        if !scope_filter_ok(&f) {
+            l.unsupported("StaticAbility.bonus_per_condition_count(not a static scope filter)");
+            return None;
+        }
+        let filter = Filter::And(Box::new(f), Box::new(Filter::Controller(true)));
+        let (p, t) = (
+            l.int("StaticAbility.power_bonus", *power_bonus, -9, 9),
+            l.int("StaticAbility.toughness_bonus", *toughness_bonus, -9, 9),
+        );
+        let other = !granted_keywords.is_empty()
+            || *must_attack_each_combat
+            || continuous_effect.is_some()
+            || !opponents_enter_tapped_types.is_empty();
+        if other || (p == 0 && t == 0) {
+            l.unsupported("StaticAbility.bonus_per_condition_count(with other modifications)");
+        }
+        return Some(StaticDef { scope, cond: None, mods: vec![Mod::PtPer { filter, p, t }] });
+    }
     let cond = match condition.as_deref() {
         Some(c) => Some(lower_condition(l, c)?),
         None => None,

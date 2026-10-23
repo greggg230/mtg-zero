@@ -68,6 +68,23 @@ macro_rules! lower_object_predicate {
             E::HasDrawnNCardsThisTurn(nodes::HasDrawnNCardsThisTurn { n }) => {
                 Some(Filter::DrewThisTurn($l.int("HasDrawnNCardsThisTurn.n", *n, 0, 99) as u8))
             }
+            // A spell with one or more targets matching (its targets as
+            // chosen).
+            E::SpellTargetsMatching(nodes::SpellTargetsMatching { noun_filter }) => {
+                Some(Filter::TargetsMatching(Box::new(lower_pred($l, noun_filter)?)))
+            }
+            E::HasKeyword(nodes::HasKeyword { name }) => match super::printing::lower_keyword_full($l, name) {
+                Some(super::printing::KwOrProt::Kw(k)) => Some(Filter::HasKeyword(k)),
+                _ => {
+                    $l.unsupported("HasKeyword(not a plain keyword)");
+                    None
+                }
+            },
+            E::CubeWalkersHasManaValueAtLeast(nodes::CubeWalkersHasManaValueAtLeast { n }) => {
+                Some(Filter::ManaValueAtLeast($l.int("HasManaValueAtLeast.n", *n, 0, 30) as u8))
+            }
+            E::IsTapped(nodes::IsTapped {}) => Some(Filter::Tapped),
+            E::CubeWalkersIsColorless(nodes::CubeWalkersIsColorless {}) => Some(Filter::Colorless),
             E::HasPrintedCardType(nodes::HasPrintedCardType { card_type }) => match types::from_name(card_type) {
                 // Printed = the card's own types (no type-changing effect
                 // touches spells or graveyard cards here).
@@ -151,6 +168,7 @@ macro_rules! lower_condition {
             E::YourTurnOfGameAtMost(nodes::YourTurnOfGameAtMost { n }) => {
                 Some(Cond::YourTurnAtMost($l.int("YourTurnOfGameAtMost.n", *n, 0, 99) as u8))
             }
+            E::YourLibraryHasNoCards(nodes::YourLibraryHasNoCards {}) => Some(Cond::LibraryEmpty),
             $($extra)*
             other => {
                 $l.unsupported(format!("Condition:{}", other.tag()));

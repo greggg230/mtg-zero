@@ -37,6 +37,8 @@ pub enum Zone {
     Exile,
     /// Tokens that ceased to exist, cards not yet in the game.
     Nowhere,
+    /// The command zone (CR 408): emblems (CR 114).
+    Command,
 }
 
 impl Zone {

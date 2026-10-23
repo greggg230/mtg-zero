@@ -209,7 +209,7 @@ impl Game {
             return false;
         }
         let t = self.types_of(card);
-        self.battlefield.iter().any(|&c| self.def_of(c).locks_activated & t != 0)
+        self.battlefield.iter().any(|&c| self.abilities(c).locks_activated & t != 0)
     }
 
     /// The mana sources `p` can use to pay a cost, by class (ENGINE.md 18):
@@ -218,12 +218,19 @@ impl Game {
     pub(crate) fn mana_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
         let mut out: Vec<Class> = Vec::with_capacity(8);
         let mut n_multi = 0;
+        // "Whenever you tap a <land subtype> for mana, add an additional
+        // <mana>" (triggered mana abilities, CR 605.1b: they resolve at once,
+        // so such a land makes more mana).
+        let bonus: Vec<(u16, u8)> = self
+            .permanents_of(p)
+            .flat_map(|x| self.abilities(x).extra_mana_on_tap.iter().copied())
+            .collect();
         for c in self.permanents_of(p) {
             if Some(c) == exclude {
                 continue;
             }
             let def = self.objs[c.i()].def;
-            for (i, ad) in self.def_of(c).activated.iter().enumerate() {
+            for (i, ad) in self.abilities(c).activated.iter().enumerate() {
                 let Some(m) = ad.mana() else { continue };
                 if ad.instant_only || !self.activation_ready(p, c, ad) {
                     continue;
@@ -235,7 +242,15 @@ impl Game {
                     cl.members.push(src);
                     continue;
                 }
-                let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life) else { continue };
+                let mut extra = [0u8; 6];
+                if !bonus.is_empty() && self.is_type(c, crate::db::types::LAND) {
+                    for &(sub, t) in &bonus {
+                        if self.has_subtype(c, sub) {
+                            extra[t as usize] += 1;
+                        }
+                    }
+                }
+                let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra) else { continue };
                 let cl = Class { def, members: vec![src], yld, dmg: m.damage_to_you, sac_self: ad.cost.sac_self };
                 if matches!(cl.yld, Yield::Multi { .. }) {
                     out.insert(n_multi, cl);
@@ -275,6 +290,39 @@ impl Game {
     /// A card in hand with a mana ability (a Spirit Guide).
     pub(crate) fn hand_mana_source(&self, c: CardIdx) -> bool {
         self.objs[c.i()].zone == Zone::Hand && self.def_of(c).hand_abilities.iter().any(|a| a.mana().is_some())
+    }
+
+    /// A source's yield with `extra` mana its tapping adds (a triggered
+    /// mana ability; none for a land whose ability costs life: none in the
+    /// cube has both).
+    fn yield_with(&self, p: PlayerId, prod: &ManaProd, life: u8, extra: [u8; 6]) -> Option<Yield> {
+        let base = self.yield_of(p, prod, life)?;
+        if extra == [0; 6] || life > 0 {
+            return Some(base);
+        }
+        let more: Vec<Unit> = units_of(&extra).collect();
+        let add = |v: &[u8; 6]| {
+            let mut w = *v;
+            for t in 0..6 {
+                w[t] += extra[t];
+            }
+            w
+        };
+        Some(match base {
+            Yield::One(u) => {
+                let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| add(&one(t, 1))).collect();
+                let mut units = vec![Unit::free(u.mask)];
+                units.extend(more);
+                Yield::Multi { prods, units: Some(units) }
+            }
+            Yield::Multi { prods, units } => Yield::Multi {
+                prods: prods.iter().map(add).collect(),
+                units: units.map(|mut us| {
+                    us.extend(more);
+                    us
+                }),
+            },
+        })
     }
 
     fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8) -> Option<Yield> {

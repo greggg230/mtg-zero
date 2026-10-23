@@ -16,7 +16,10 @@ pub(crate) enum From {
     Hand,
 }
 
-pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from: From) -> Option<ActivatedDef> {
+/// An activated ability. `walker`: the card is a planeswalker, whose
+/// printed abilities on the battlefield are its loyalty abilities (CR
+/// 606.2; the IR writes a [0] cost as no loyalty cost at all).
+pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from: From, walker: bool) -> Option<ActivatedDef> {
     let cats::ActivatedAbility::ActivatedAbility(nodes::ActivatedAbility {
         cost,
         effect,
@@ -39,7 +42,25 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     l.deny("ActivatedAbility.exhaust", exhaust);
     l.deny("ActivatedAbility.boast", boast);
     let mut only_if = Vec::new();
-    let cost = lower_cost(l, cost, from, &mut only_if);
+    let mut loyalty_paid = (0i64, false);
+    let cost = lower_cost(l, cost, from, &mut only_if, &mut loyalty_paid);
+    let loyalty = if walker && from == From::Battlefield {
+        // CR 606.3: loyalty abilities are activated at sorcery speed (the
+        // IR marks them so); 605.1a: never mana abilities.
+        if !*sorcery_speed {
+            l.unsupported("ActivatedAbility(planeswalker ability without sorcery_speed)");
+        }
+        if *is_mana_ability {
+            l.unsupported("ActivatedAbility.is_mana_ability(loyalty ability)");
+        }
+        l.deny("ActivationCost.loyalty_x", &loyalty_paid.1);
+        // The IR's cost is the loyalty removed (+1 is written -1).
+        Some(-(l.int("ActivationCost.loyalty", loyalty_paid.0, -20, 20)) as i8)
+    } else {
+        l.deny("ActivationCost.loyalty", &loyalty_paid.0);
+        l.deny("ActivationCost.loyalty_x", &loyalty_paid.1);
+        None
+    };
     if let Some(c) = activate_only_if {
         if let Some(c) = lower_condition(l, c) {
             only_if.push(c);
@@ -98,12 +119,13 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         instant_only: *activate_only_as_instant,
         only_if: only_if.into_iter().next(),
         your_turn: *activate_only_during_your_turn,
+        loyalty,
     })
 }
 
 /// `ActivationCost` -> [`Cost`]; "activate only if" gates hidden in the
 /// cost struct go to `only_if`.
-fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &mut Vec<Cond>) -> Cost {
+fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &mut Vec<Cond>, loyalty_out: &mut (i64, bool)) -> Cost {
     let cats::ActivationCost::ActivationCost(nodes::ActivationCost {
         mana,
         mana_str,
@@ -153,15 +175,13 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     l.deny("ActivationCost.tap_permanent_you_control", tap_permanent_you_control);
     l.deny("ActivationCost.tap_permanent_type", tap_permanent_type);
     l.deny("ActivationCost.exile_artifact_from_graveyard", exile_artifact_from_graveyard);
-    l.deny("ActivationCost.return_unblocked_attacker", return_unblocked_attacker);
     l.deny("ActivationCost.remove_plus_one_counter_from_your_creature", remove_plus_one_counter_from_your_creature);
     l.deny("ActivationCost.sacrifice_food", sacrifice_food);
     l.deny("ActivationCost.exile_granting_equipment", exile_granting_equipment);
     l.deny("ActivationCost.mana_reduced_by_source_power", mana_reduced_by_source_power);
     l.deny("ActivationCost.tap_x_untapped_artifacts_you_control", tap_x_untapped_artifacts_you_control);
     l.deny("ActivationCost.saddle", saddle);
-    l.deny("ActivationCost.loyalty", loyalty);
-    l.deny("ActivationCost.loyalty_x", loyalty_x);
+    *loyalty_out = (*loyalty, *loyalty_x);
     l.deny("ActivationCost.exert_self", exert_self);
     l.deny("ActivationCost.waterbend", waterbend);
 
@@ -178,12 +198,19 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         discard_hand: *discard_hand,
         sacrifice: None,
         discard: *discard_a_card as u8,
+        discard_filter: None,
         exile_from_hand: None,
         bounce: None,
         exile_graveyard: l.int("ActivationCost.exile_cards_from_graveyard", *exile_cards_from_graveyard, 0, 20) as u8,
         remove_counters: None,
         crew: l.int("ActivationCost.crew", *crew, 0, 20) as u8,
     };
+    // Ninjutsu (CR 702.49a): "return an unblocked attacking creature you
+    // control to its owner's hand".
+    if *return_unblocked_attacker {
+        let filter = Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Unblocked));
+        cost.bounce = Some(SacCost { filter, n: 1, another: true });
+    }
     // "Remove a <name> counter from this."
     if !remove_named_counter_from_self.is_empty() {
         let name = remove_named_counter_from_self;

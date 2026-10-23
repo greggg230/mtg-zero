@@ -80,6 +80,9 @@ impl Game {
                     return true;
                 }
             }
+            if self.is_type(c, crate::db::types::PLANESWALKER) && self.counters_on(c, Counter::Loyalty) == 0 {
+                return true;
+            }
             if self.is_legendary(c) {
                 let (ctl, name) = (self.objs[c.i()].controller, &self.def_of(c).name);
                 if self.battlefield[i + 1..]
@@ -91,6 +94,15 @@ impl Game {
             }
         }
         false
+    }
+
+    /// 704.5i: planeswalkers with loyalty 0 (CR 306.9).
+    fn dead_walkers(&self) -> Vec<CardIdx> {
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&c| self.is_type(c, crate::db::types::PLANESWALKER) && self.counters_on(c, Counter::Loyalty) == 0)
+            .collect()
     }
 
     /// 704.5q: permanents with both +1/+1 and -1/-1 counters.
@@ -146,6 +158,7 @@ impl Game {
             || !z.is_empty()
             || !d.is_empty()
             || !self.legend_groups().is_empty()
+            || !self.dead_walkers().is_empty()
     }
 
     /// One SBA check as part of the priority loop (117.5): choices for the
@@ -223,7 +236,10 @@ impl Game {
             legend_out.extend(g.iter().copied().filter(|c| !keep.contains(c)));
         }
         let mut all: Vec<CardIdx> = Vec::new();
-        for c in zero.into_iter().chain(legend_out).chain(destroyed.iter().copied()) {
+        // 704.5i: a planeswalker with loyalty 0 goes to its owner's
+        // graveyard (not destroyed: indestructible doesn't stop it).
+        let walkers = self.dead_walkers();
+        for c in zero.into_iter().chain(walkers.iter().copied()).chain(legend_out).chain(destroyed.iter().copied()) {
             if !all.contains(&c) {
                 all.push(c);
             }
@@ -232,7 +248,7 @@ impl Game {
         all.sort_by_key(|c| self.objs[c.i()].timestamp);
         self.begin_batch();
         for &c in &all {
-            if destroyed.contains(&c) {
+            if destroyed.contains(&c) && !walkers.contains(&c) {
                 self.destroy(c);
             } else {
                 self.move_card(c, Zone::Graveyard, Pos::Top);

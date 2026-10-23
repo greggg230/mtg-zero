@@ -52,6 +52,11 @@ pub enum Amount {
     /// now if it is still on the battlefield, else as it last existed there
     /// (CR 608.2h).
     EventObjPower,
+    /// The number of counters of a kind on the source (as it last existed
+    /// on the battlefield if it left, CR 608.2h).
+    SourceCounters(Counter),
+    /// The number of the controller's opponents who lost life this turn.
+    OpponentsLostLife,
 }
 
 /// Which objects an `Ext` op acts on.
@@ -71,6 +76,9 @@ pub enum On {
     /// Each permanent matching the filter at resolution ("creatures you
     /// control"; "you" is the controller, "another" excludes the source).
     Each(Filter),
+    /// Every token the last `CreateToken` made that is still that
+    /// permanent ("they gain haste").
+    MadeAll,
 }
 
 /// Effect instructions added after the network layout v1 fixed the list of
@@ -353,6 +361,80 @@ pub enum Ext {
     /// controller (after an effect that may have created some: emitted if
     /// it did, `made` set).
     TokensCreated,
+    // ---- M7b: planeswalkers and their effects (`resolve_walkers.rs`) ----
+    /// The controller gets emblem `emblem` (a token-table definition, CR
+    /// 114.2).
+    CreateEmblem { emblem: u16 },
+    /// Remove n counters of a kind from each object of `on` (as many as
+    /// it has).
+    RemoveCounters { on: On, counter: Counter, n: Amount },
+    /// The controller gains control of each legal target of `tgt` (CR
+    /// 613.1b, no duration).
+    GainControl { tgt: u8 },
+    /// Exchange control of the first legal targets of `a` and `b` (CR
+    /// 701.12a-b: if either is gone, nothing happens).
+    ExchangeControl { a: u8, b: u8 },
+    /// The controller gains control of the permanents matching `filter`
+    /// that the event's spell targets (as it is on the stack).
+    GainControlOfEventSpellTargets { filter: Filter },
+    /// The controller rolls a `sides`-sided die (CR 706; a public chance
+    /// key): the first `(lo, hi, pc)` entry whose range holds the result
+    /// continues at `pc`; none: the next op.
+    RollDie { sides: u8, table: Vec<(u8, u8, u16)> },
+    /// The source's controller may activate its loyalty abilities `n` more
+    /// times this turn (CR 606.3 exception).
+    ExtraLoyaltyActivations { n: u8 },
+    /// The controller chooses a card matching `filter` in their graveyard
+    /// (not targeted) and puts it into their hand; nothing if none. Choice:
+    /// a `GRAVEYARD` slot.
+    ChooseFromGraveyardToHand { filter: Filter },
+    /// The source deals `amount` damage to a creature or player the
+    /// controller chooses as it resolves (not targeted). Choice: `PLAYER` or
+    /// a permanent's slot (a `Target` decision).
+    DamageChosen { amount: Amount },
+    /// Exile the top card of the controller's library (revealed); they may
+    /// cast it now (CR 608.2g: during resolution, ignoring the timing
+    /// permissions of its card type). If they do, continue at `skip`.
+    /// Choice: yes/no.
+    ExileTopMayCast { skip: u16 },
+    /// Exile every card of `who`'s library (face up).
+    ExileLibrary { who: Who },
+    /// The controller looks at the top card of `who`'s library and may put
+    /// it on the bottom. Choice: yes/no.
+    LookAtTopMayBottom { who: Who },
+    /// Ninjutsu's effect (CR 702.49a): the source card, if still in its
+    /// owner's hand, is put onto the battlefield tapped and attacking what
+    /// the returned creature attacked (702.49c).
+    NinjutsuEnter,
+    /// Reveal the top n cards of the controller's library; an opponent
+    /// chooses one of them, which goes into the controller's hand; the rest
+    /// are exiled with a counter of this kind on them. Choice (the
+    /// opponent's): a `LIBRARY` slot of the revealed cards.
+    RevealTopOpponentChooses { n: u8, counter: Counter },
+    /// The controller puts a card they own in exile with a counter of this
+    /// kind into their hand. Choice: `EXILE` + k.
+    ExiledWithCounterToHand { counter: Counter },
+    /// The controller sacrifices a permanent matching `filter` (their
+    /// choice; nothing if none). When they do (CR 603.12), delayed ability
+    /// `k` of the source's card triggers, about the sacrificed object and
+    /// its power as it last existed (`EventAmount`).
+    SacrificeThenReflexive { filter: Filter, k: u8 },
+    /// Unless the event's object (in any zone, by its characteristics there)
+    /// matches `filter`, continue at `to`.
+    JumpUnlessEventObj { filter: Filter, to: u16 },
+    /// Search the controller's library for any number of cards matching
+    /// `filter` (one decision per card, `PASS` = done), then put them onto
+    /// the battlefield (tapped with `tapped`), or exile them with a
+    /// permission to cast them this turn without paying their mana costs
+    /// (`exile_free`); then shuffle (CR 701.19). Choice: a definition.
+    SearchAnyNumber { filter: Filter, tapped: bool, exile_free: bool },
+    /// The controller names a card (a nonland one with `nonland`), then
+    /// reveals the top n cards of their library; the ones with that name go
+    /// into their hand, the rest into their graveyard. Choice: `NameCard`.
+    NameRevealTopToHand { n: u8, nonland: bool },
+    /// "Until your next turn, you may cast sorcery spells as though they
+    /// had flash."
+    FlashSorceries,
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -541,6 +623,7 @@ impl Op {
             | Op::Ext(Ext::MayMillThenTakeCreature)
             | Op::Ext(Ext::ExileEventObj2) => true,
             Op::Ext(Ext::ReturnDiedWithCounter { .. }) => true,
+            Op::Ext(Ext::JumpUnlessEventObj { .. }) | Op::Ext(Ext::GainControlOfEventSpellTargets { .. }) => true,
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
             | Op::Ext(Ext::TapOrUntap { on })
@@ -572,6 +655,8 @@ impl Op {
             Op::Ext(Ext::MayPayEnergyThen { skip, .. }) => Some(skip),
             Op::Ext(Ext::SacrificeSourceThen { skip }) => Some(skip),
             Op::Ext(Ext::JumpUnlessSourceNoCounters { to, .. }) => Some(to),
+            Op::Ext(Ext::ExileTopMayCast { skip }) => Some(skip),
+            Op::Ext(Ext::JumpUnlessEventObj { to, .. }) => Some(to),
             _ => None,
         }
     }

@@ -28,6 +28,8 @@ pub const KEY_LOOK: u64 = 3;
 pub const KEY_AUTO: u64 = 4;
 /// A coin flip (CR 705): payload 1 = its player won, 0 = lost. Public.
 pub const KEY_COIN: u64 = 5;
+/// A die roll (CR 706): payload = the result. Public.
+pub const KEY_DIE: u64 = 6;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
 

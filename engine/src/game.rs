@@ -85,6 +85,17 @@ pub struct Obj {
     pub chosen_player: Option<PlayerId>,
     /// It is monstrous (CR 701.37b).
     pub monstrous: bool,
+    /// What it attacks while `attacking` (CR 506.3, 508.1b): `None` = the
+    /// defending player, `Some(pw)` = that planeswalker (attacking nothing
+    /// once it is removed from combat, 506.4c).
+    pub attacks: Option<ObjRef>,
+    /// The turn it entered the battlefield (0 = never).
+    pub entered: u32,
+    /// Loyalty abilities activated this turn (CR 606.3): in turn `pw_turn`,
+    /// `pw_used` of them, `pw_extra` more allowed than one (Comet).
+    pub pw_turn: u32,
+    pub pw_used: u8,
+    pub pw_extra: u8,
 }
 
 /// How a spell was cast (CR 601.2a-b, 118.9).
@@ -101,6 +112,9 @@ pub enum CastFrom {
     /// With a permission (from exile): for its mana cost, without paying
     /// it (`free`), or with mana spent as though of any colour.
     Permission { free: bool, any_mana: bool },
+    /// From its owner's graveyard with retrace (CR 702.81a): its mana cost
+    /// and a land card discarded.
+    Retrace,
 }
 
 /// A permission to play a card from a zone other than a hand (CR 601.2a,
@@ -168,6 +182,11 @@ pub struct Player {
     pub spells_game: u16,
     /// Energy counters (CR 122.1).
     pub energy: u16,
+    /// Lost life this turn (CR 119.3; damage and payments included).
+    pub lost_life: bool,
+    /// "Until your next turn, you may cast sorcery spells as though they
+    /// had flash."
+    pub flash_sorceries: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -208,6 +227,10 @@ pub struct StackItem {
     /// Divided damage: the amount for each target of the divided
     /// requirement, in the order chosen (CR 601.2d).
     pub division: Vec<u8>,
+    /// What a creature this ability puts onto the battlefield attacking
+    /// attacks (ninjutsu, CR 702.49c): `Some(None)` = the defending
+    /// player, `Some(Some(pw))` = that planeswalker.
+    pub attack_as: Option<Option<ObjRef>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -318,6 +341,8 @@ pub struct Game {
     /// Timestamp order.
     pub(crate) battlefield: Vec<CardIdx>,
     pub(crate) exile: Vec<CardIdx>,
+    /// Emblems (CR 114), in creation order.
+    pub(crate) command: Vec<CardIdx>,
     /// Last = top.
     pub(crate) stack: Vec<StackItem>,
     pub(crate) turn: Turn,
@@ -460,6 +485,8 @@ impl Game {
             draw_step_draws: 0,
             spells_game: 0,
             energy: 0,
+            lost_life: false,
+            flash_sorceries: false,
         };
         Game {
             db,
@@ -469,6 +496,7 @@ impl Game {
             players: [player.clone(), player],
             battlefield: Vec::new(),
             exile: Vec::new(),
+            command: Vec::new(),
             stack: Vec::new(),
             turn: Turn {
                 number: 0,
@@ -545,6 +573,11 @@ impl Game {
             escaped: false,
             chosen_player: None,
             monstrous: false,
+            attacks: None,
+            entered: 0,
+            pw_turn: 0,
+            pw_used: 0,
+            pw_extra: 0,
         });
         idx
     }
@@ -583,6 +616,10 @@ impl Game {
     }
     pub fn exile_zone(&self) -> &[CardIdx] {
         &self.exile
+    }
+    /// Emblems in the command zone (CR 114).
+    pub fn command_zone(&self) -> &[CardIdx] {
+        &self.command
     }
     pub fn stack(&self) -> &[StackItem] {
         &self.stack
@@ -667,6 +704,7 @@ impl Game {
             Zone::Graveyard => Some(&mut self.players[owner].graveyard),
             Zone::Battlefield => Some(&mut self.battlefield),
             Zone::Exile => Some(&mut self.exile),
+            Zone::Command => Some(&mut self.command),
             Zone::Stack | Zone::Nowhere => None,
         }
     }
@@ -740,15 +778,36 @@ impl Game {
         if self.def_of(idx).enters_x_counters && x > 0 {
             self.add_counters(idx, crate::db::Counter::P1P1, x as u16);
         }
+        // CR 306.5b: a planeswalker enters with its printed loyalty.
+        if let (Some(n), true) = (self.def_of(idx).loyalty, self.def_of(idx).is(types::PLANESWALKER)) {
+            self.add_counters(idx, crate::db::Counter::Loyalty, n as u16);
+        }
         if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player {
             self.agenda.push(Task::AsEnters { card: idx });
         }
         r
     }
 
-    /// Create a token (CR 111.2): a new object slot, put onto the
+    /// Create `n` tokens (CR 111.2) under `controller`, with the
+    /// replacement effects that multiply them ("twice that many of those
+    /// tokens are created instead", CR 614.1a); the first is first.
+    pub(crate) fn create_tokens(&mut self, def: DefId, controller: PlayerId, n: u32, tapped: bool) -> Vec<CardIdx> {
+        let mut n = n;
+        let factors: Vec<u8> = self
+            .permanents_of(controller)
+            .map(|c| self.abilities(c).token_factor)
+            .filter(|&f| f > 1)
+            .collect();
+        for f in factors {
+            n = n.saturating_mul(f as u32).min(64);
+        }
+        (0..n).map(|_| self.create_token(def, controller, tapped)).collect()
+    }
+
+    /// Create one token (CR 111.2): a new object slot, put onto the
     /// battlefield under `controller` (its owner, CR 111.2), entering like
-    /// any permanent (triggers, "enters tapped").
+    /// any permanent (triggers, "enters tapped"). No replacement effects:
+    /// effects create tokens through [`create_tokens`](Self::create_tokens).
     pub(crate) fn create_token(&mut self, def: DefId, controller: PlayerId, tapped: bool) -> CardIdx {
         let idx = self.add_card(def, controller, Zone::Nowhere);
         self.tokens += 1;
@@ -764,7 +823,46 @@ impl Game {
     pub(crate) fn lose_life(&mut self, p: PlayerId, n: i32) {
         if n > 0 {
             self.players[p as usize].life -= n;
+            self.players[p as usize].lost_life = true;
         }
+    }
+
+    /// `p` gains control of permanent `c` (CR 613.1b; an effect without a
+    /// duration). It is removed from combat (506.4).
+    pub(crate) fn change_control(&mut self, c: CardIdx, p: PlayerId) {
+        if self.objs[c.i()].zone != Zone::Battlefield || self.objs[c.i()].controller == p {
+            return;
+        }
+        let turn = self.turn.number;
+        let o = &mut self.objs[c.i()];
+        o.controller = p;
+        o.control_since = turn;
+        o.attacking = false;
+        o.blocked = false;
+        o.blocking = None;
+        o.attacks = None;
+        self.note(|g| format!("P{p} gains control of {}", g.name(c)));
+    }
+
+    /// `p` gets an emblem (CR 114.2): an object in the command zone, owned
+    /// and controlled by `p`, whose abilities function there (114.4).
+    pub(crate) fn create_emblem(&mut self, def: DefId, p: PlayerId) -> CardIdx {
+        let idx = self.add_card(def, p, Zone::Command);
+        self.command.push(idx);
+        if !self.db.def(def).statics.is_empty() {
+            self.n_static += 1;
+        }
+        self.note(|g| format!("P{p} gets an emblem ({})", g.name(idx)));
+        idx
+    }
+
+    /// The definition whose abilities a permanent has: its own, or none
+    /// once it lost all abilities (CR 613.1f; Oko's Elk).
+    pub(crate) fn abilities(&self, c: CardIdx) -> &'static CardDef {
+        if self.lost_abilities(c) {
+            return blank_def();
+        }
+        self.db.def(self.objs[c.i()].def)
     }
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
@@ -833,6 +931,11 @@ impl Game {
             o.flashback = false;
             o.chosen_player = None;
             o.monstrous = false;
+            o.attacks = None;
+            o.entered = if to == Zone::Battlefield { turn } else { 0 };
+            o.pw_turn = 0;
+            o.pw_used = 0;
+            o.pw_extra = 0;
             o.escaped = to == Zone::Battlefield && std::mem::take(&mut self.entering_escaped);
         }
         self.layers_on_move(idx, old, from, to);
@@ -903,6 +1006,25 @@ impl Game {
 
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.
     pub(crate) fn draw(&mut self, p: PlayerId) {
+        // "Each opponent can't draw more than one card each turn" (Narset).
+        if self.players[p as usize].drawn >= 1
+            && self.turn.number > 0
+            && self.permanents_of(opp(p)).any(|c| self.abilities(c).opp_draw_limit)
+        {
+            self.note(|_| format!("P{p} can't draw another card this turn"));
+            return;
+        }
+        // "If you would draw a card while your library has no cards in it,
+        // you win the game instead" (CR 614.1a, 104.2b).
+        if self.players[p as usize].library.is_empty()
+            && self.outcome.is_none()
+            && self.permanents_of(p).any(|c| self.abilities(c).wins_on_empty_draw)
+        {
+            self.note(|_| format!("P{p} would draw from an empty library: wins the game"));
+            self.players[opp(p) as usize].lost = true;
+            self.outcome = Some(Outcome { winner: Some(p), reason: EndReason::Effect });
+            return;
+        }
         if self.turn.step == Step::Draw && self.turn.active == p {
             let pl = &mut self.players[p as usize];
             pl.draw_step_draws = pl.draw_step_draws.saturating_add(1);
@@ -1008,28 +1130,40 @@ impl Game {
         }
         match t {
             Target::Player(p) => {
+                // CR 120.3a: the player loses that much life.
                 self.players[p as usize].life -= amount;
+                self.players[p as usize].lost_life = true;
             }
             Target::Obj(r) => {
                 if !self.live(r) || self.objs[r.idx.i()].zone != Zone::Battlefield {
                     return 0;
                 }
-                if !self.is_creature(r.idx) {
-                    return 0; // planeswalkers and battles: later
+                let creature = self.is_creature(r.idx);
+                let walker = self.is_type(r.idx, types::PLANESWALKER);
+                if !creature && !walker {
+                    return 0; // (battles: none in the cube)
                 }
                 if self.protected_from(r.idx, &src) && !(self.combat_damage_now && self.combat_unpreventable(src.controller)) {
                     self.note(|g| format!("damage to {} prevented (protection)", g.describe_target(t)));
                     return 0;
                 }
-                let heals = self.def_of(r.idx).heals_on_damage;
-                let o = &mut self.objs[r.idx.i()];
                 let amt = amount.min(u16::MAX as i32) as u16;
-                o.damage = if heals { amt } else { o.damage.saturating_add(amt) };
-                if heals {
-                    o.deathtouched = false;
+                if walker {
+                    // CR 120.3c: that many loyalty counters are removed.
+                    self.remove_counters(r.idx, crate::db::Counter::Loyalty, amt);
                 }
-                if src.deathtouch {
-                    o.deathtouched = true;
+                if creature {
+                    // CR 120.3e: damage is marked (both, for a planeswalker
+                    // creature).
+                    let heals = self.abilities(r.idx).heals_on_damage;
+                    let o = &mut self.objs[r.idx.i()];
+                    o.damage = if heals { amt } else { o.damage.saturating_add(amt) };
+                    if heals {
+                        o.deathtouched = false;
+                    }
+                    if src.deathtouch {
+                        o.deathtouched = true;
+                    }
                 }
                 let mut ev = Event::obj(EventKind::DealtDamage, r);
                 ev.amount = amount.min(u16::MAX as i32) as u16;
@@ -1102,6 +1236,13 @@ impl Game {
             Target::Obj(r) => format!("{}#{}", self.name(r.idx), r.idx.0),
         }
     }
+}
+
+/// A definition with no abilities (what a permanent that lost all its
+/// abilities has, CR 613.1f).
+pub(crate) fn blank_def() -> &'static CardDef {
+    static BLANK: std::sync::OnceLock<CardDef> = std::sync::OnceLock::new();
+    BLANK.get_or_init(CardDef::default)
 }
 
 /// The characteristics of a damage source that change damage results.

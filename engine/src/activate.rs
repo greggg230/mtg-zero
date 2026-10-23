@@ -36,7 +36,29 @@ impl Game {
             Cond::SpellsCastThisTurn { n, noncreature } => {
                 (if *noncreature { pl.noncreature_cast } else { pl.spells_cast }) == *n
             }
+            Cond::LibraryEmpty => pl.library.is_empty(),
+            Cond::YourTurn => self.turn.active == p,
+            Cond::All(v) => v.iter().all(|c| self.cond_holds(c, p)),
         }
+    }
+
+    /// CR 606.3: no loyalty ability of this permanent was activated this
+    /// turn (or fewer than the extra activations an effect allows).
+    pub(crate) fn loyalty_ready(&self, card: CardIdx) -> bool {
+        let o = &self.objs[card.i()];
+        o.pw_turn != self.turn.number || o.pw_used < 1 + o.pw_extra
+    }
+
+    /// A loyalty ability of `card` is being activated (CR 606.3).
+    fn note_loyalty_activation(&mut self, card: CardIdx) {
+        let turn = self.turn.number;
+        let o = &mut self.objs[card.i()];
+        if o.pw_turn != turn {
+            o.pw_turn = turn;
+            o.pw_used = 0;
+            o.pw_extra = 0;
+        }
+        o.pw_used = o.pw_used.saturating_add(1);
     }
 
     /// The activated abilities `p` may activate with priority now (CR
@@ -52,7 +74,7 @@ impl Game {
         out: &mut Vec<Opt>,
     ) {
         for c in self.permanents_of(p) {
-            for (i, ad) in self.def_of(c).activated.iter().enumerate() {
+            for (i, ad) in self.abilities(c).activated.iter().enumerate() {
                 if ad.mana().is_some() && !ad.instant_only {
                     continue; // paid with while paying a cost (ENGINE.md 18)
                 }
@@ -95,8 +117,26 @@ impl Game {
         if mana_ability && !ad.instant_only {
             return false; // activated while paying (ENGINE.md 18)
         }
-        if ad.sorcery && !sorcery_ok {
-            return false; // CR 602.5d
+        match ad.loyalty {
+            // CR 606.3: once each turn, at sorcery speed ("as long as this
+            // entered this turn, any time you could cast an instant": The
+            // Wandering Emperor); 606.6: a negative cost needs that much
+            // loyalty.
+            Some(d) => {
+                let instant_ok =
+                    self.abilities(card).loyalty_instant_if_entered && self.objs[card.i()].entered == self.turn.number;
+                if !(sorcery_ok || instant_ok) || !self.loyalty_ready(card) {
+                    return false;
+                }
+                if d < 0 && self.counters_on(card, crate::db::Counter::Loyalty) < (-(d as i32)) as u16 {
+                    return false;
+                }
+            }
+            None => {
+                if ad.sorcery && !sorcery_ok {
+                    return false; // CR 602.5d
+                }
+            }
         }
         if !self.activation_ready(p, card, ad) {
             return false;
@@ -134,6 +174,9 @@ impl Game {
             self.agenda.push(Task::ManaNow { src: Src { card, slot } });
             return;
         }
+        if ad.loyalty.is_some() {
+            self.note_loyalty_activation(card);
+        }
         let id = self.new_stack_id();
         let ability = AbilityRef { def, slot, mode: None };
         self.stack.push(StackItem {
@@ -151,6 +194,7 @@ impl Game {
             discarded_land: false,
             x: 0,
             division: Vec::new(),
+            attack_as: None,
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });
@@ -217,6 +261,13 @@ impl Game {
         let in_hand = self.objs[card.i()].zone == Zone::Hand;
         if cost.discard as usize > pl.hand.len() - in_hand as usize {
             return false;
+        }
+        if let Some(f) = &cost.discard_filter {
+            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+            let n = pl.hand.iter().filter(|&&c| c != card && self.card_matches(f, c, &ctx)).count();
+            if (cost.discard as usize) > n {
+                return false;
+            }
         }
         if let Some(f) = &cost.exile_from_hand {
             if self.exile_candidates(p, card, f).is_empty() {
@@ -291,7 +342,9 @@ impl Game {
             exclude,
             life: cost.life,
             sac: cost.sacrifice.clone().map(|s| (s, card)),
-            discard: (cost.discard > 0).then_some((cost.discard, card)),
+            // (A land-card discard never competes with a mana source in
+            // hand: those are not lands.)
+            discard: (cost.discard > 0 && cost.discard_filter.is_none()).then_some((cost.discard, card)),
             exile: cost.exile_from_hand.clone().map(|f| (f, card)),
         }
     }
@@ -356,7 +409,11 @@ impl Game {
             return;
         }
         if picked.len() < n_disc {
-            let opts = self.hand_options_except(p, Some(card));
+            let mut opts = self.hand_options_except(p, Some(card));
+            if let Some(f) = &cost.discard_filter {
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+                opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
+            }
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::DiscardCost, opts);
             return;
         }
@@ -429,9 +486,16 @@ impl Game {
         if let Some((k, n)) = cost.remove_counters {
             self.remove_counters(card, k, n as u16);
         }
-        // Permanents returned as a cost leave together.
+        // Permanents returned as a cost leave together. An attacking
+        // creature returned for ninjutsu leaves what it attacked to the
+        // creature put onto the battlefield (CR 702.49c).
         let mut bounced: Vec<CardIdx> = picked[n_exile..n_bounce].to_vec();
         bounced.sort_by_key(|c| self.objs[c.i()].timestamp);
+        if let (Some(&c), Some(pos)) = (bounced.first(), self.item_index(id)) {
+            if self.objs[c.i()].attacking {
+                self.stack[pos].attack_as = Some(self.objs[c.i()].attacks);
+            }
+        }
         for c in bounced {
             self.note(|g| format!("P{p} returns {}", g.name(c)));
             self.move_card(c, Zone::Hand, Pos::Top);
@@ -466,6 +530,17 @@ impl Game {
         }
         if cost.exile_self {
             self.move_card(card, Zone::Exile, Pos::Top);
+        }
+        // CR 606.4: a loyalty ability's cost puts on or removes loyalty
+        // counters.
+        if let Some((_, src, ad)) = self.act_item(id) {
+            match ad.loyalty {
+                Some(d) if d > 0 => self.add_counters(src, crate::db::Counter::Loyalty, d as u16),
+                Some(d) if d < 0 => {
+                    self.remove_counters(src, crate::db::Counter::Loyalty, (-(d as i32)) as u16);
+                }
+                _ => {}
+            }
         }
     }
 

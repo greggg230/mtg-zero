@@ -91,6 +91,25 @@ impl Heuristic {
             }
             K::Target => self.target(g, d, p),
             K::DeclareAttackers => Some(self.attack(g, d, p)),
+            // A planeswalker its damage kills, else the player.
+            K::AttackTarget => {
+                let power = match g.agenda.last() {
+                    Some(Task::AttackTarget { card }) => g.power(*card),
+                    _ => 0,
+                };
+                d.options
+                    .iter()
+                    .filter_map(|o| match o.choice {
+                        Choice::Target(Target::Obj(r)) => {
+                            let loyalty = g.counters_on(r.idx, crate::db::Counter::Loyalty) as i32;
+                            (loyalty <= power).then_some((loyalty, o.action))
+                        }
+                        _ => None,
+                    })
+                    .max()
+                    .map(|x| x.1)
+                    .or(Some(act::PLAYER + 1))
+            }
             K::DeclareBlockers => Some(self.block(g, d, p)),
             K::AssignDamage => Self::assign(g, d),
             K::YesNo => {
@@ -320,7 +339,7 @@ impl Heuristic {
         let incoming: i32 = g
             .attackers()
             .iter()
-            .filter(|&&a| g.blockers_of(a).is_empty())
+            .filter(|&&a| g.blockers_of(a).is_empty() && g.attack_dest(a) == Some(Target::Player(p)))
             .map(|&a| g.power(a).max(0) * if g.has_kw(a, Kw::DoubleStrike) { 2 } else { 1 })
             .sum();
         let lethal = incoming >= g.life(p);

@@ -11,6 +11,7 @@
 pub mod activated;
 pub mod effect;
 pub mod effect_ext;
+pub mod effect_walkers;
 pub mod filter;
 pub mod printing;
 pub mod statics;

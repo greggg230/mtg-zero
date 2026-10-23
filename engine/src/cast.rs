@@ -77,8 +77,7 @@ impl Game {
                 }
                 continue;
             }
-            let instant_speed = def.is(types::INSTANT) || def.keywords.has(Kw::Flash);
-            if !(instant_speed || sorcery_ok) {
+            if !self.cast_timing_ok(p, c, sorcery_ok) {
                 continue;
             }
             let cls = &classes[..];
@@ -121,6 +120,24 @@ impl Game {
         self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts);
         self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
         opts
+    }
+
+    /// May `p` cast `card` now as far as timing goes (CR 307.1, 702.8):
+    /// instants and flash any time they have priority, the rest at sorcery
+    /// speed; "you may cast sorcery spells as though they had flash" (Teferi,
+    /// Time Raveler's +1); "each opponent can cast spells only any time they
+    /// could cast a sorcery" (his static ability) wins over both.
+    pub(crate) fn cast_timing_ok(&self, p: PlayerId, card: CardIdx, sorcery_ok: bool) -> bool {
+        if sorcery_ok {
+            return true;
+        }
+        if self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
+            return false;
+        }
+        let def = self.def_of(card);
+        def.is(types::INSTANT)
+            || def.keywords.has(Kw::Flash)
+            || (def.is(types::SORCERY) && self.players[p as usize].flash_sorceries)
     }
 
     /// Does permission `pm` let `p` play its card now?
@@ -183,6 +200,9 @@ impl Game {
                     || (!def.is(types::LAND) && def.additional.is_empty() && self.escape_granter(p).is_some())
                 {
                     Some(CastFrom::Escape)
+                } else if def.additional.is_empty() && self.retrace_granted(p, card) {
+                    // (Likewise not with the card's own additional costs.)
+                    Some(CastFrom::Retrace)
                 } else {
                     None
                 }
@@ -221,7 +241,18 @@ impl Game {
                 c
             }
             CastFrom::Permission { .. } => self.spell_cost(card, p),
+            CastFrom::Retrace => self.spell_cost(card, p),
         }
+    }
+
+    /// An emblem of `p` gives `card` (in `p`'s graveyard) retrace (Wrenn and
+    /// Six: "instant and sorcery cards in your graveyard have retrace").
+    pub(crate) fn retrace_granted(&self, p: PlayerId, card: CardIdx) -> bool {
+        let ctx = Ctx { controller: p, source: None };
+        self.command.iter().any(|&e| {
+            self.objs[e.i()].controller == p
+                && self.def_of(e).grants_retrace.as_ref().is_some_and(|f| self.card_matches(f, card, &ctx))
+        })
     }
 
     /// The non-mana part of the cost for a cast `from` (escape's exiled
@@ -229,6 +260,7 @@ impl Game {
     pub(crate) fn route_extra(&self, card: CardIdx, from: crate::game::CastFrom, option: u8) -> Option<&'static crate::db::Cost> {
         let def = self.def_of(card);
         match from {
+            crate::game::CastFrom::Retrace => Some(retrace_cost()),
             crate::game::CastFrom::Escape => match &def.escape {
                 Some(e) => Some(&e.1),
                 None => {
@@ -241,15 +273,15 @@ impl Game {
     }
 
     /// Can `p` cast `card` (not in hand) the way `from` says now?
-    fn castable_via(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, classes: &[crate::pay::Class], sorcery_ok: bool) -> bool {
+    pub(crate) fn castable_via(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, classes: &[crate::pay::Class], sorcery_ok: bool) -> bool {
         let def = self.def_of(card);
-        if !(def.is(types::INSTANT) || def.keywords.has(Kw::Flash) || sorcery_ok) {
+        if !self.cast_timing_ok(p, card, sorcery_ok) {
             return false;
         }
         let mana = self.delve_reduced(card, p, self.route_mana(card, p, from), self.escape_exiles(card, from));
         let paid = match from {
-            crate::game::CastFrom::Escape => {
-                self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape cost"), &mana, classes, None)
+            crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
+                self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
             }
             _ if !def.additional.is_empty() => self.options_payable(p, card, &mana, classes, None),
             _ => self.can_pay_with(p, &mana, classes, &Default::default()),
@@ -738,6 +770,7 @@ impl Game {
             discarded_land: false,
             x: 0,
             division: Vec::new(),
+            attack_as: None,
         });
         self.agenda.push(Task::CastDone { id });
         if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
@@ -1150,11 +1183,51 @@ impl Game {
             Filter::Owner(you) => (self.objs[c.i()].owner == ctx.controller) == *you,
             Filter::FirstDrawInDrawStep | Filter::OathTarget => false,
             Filter::NoCounters(k) => self.counters_on(c, *k) == 0,
+            Filter::HasCounter(k) => self.counters_on(c, *k) > 0,
+            // CR 509.1h: an attacking creature becomes blocked or unblocked
+            // once blockers are declared.
+            Filter::Unblocked => {
+                let o = &self.objs[c.i()];
+                o.attacking
+                    && !o.blocked
+                    && matches!(
+                        self.turn.step,
+                        crate::game::Step::DeclareBlockers
+                            | crate::game::Step::FirstStrikeDamage
+                            | crate::game::Step::CombatDamage
+                            | crate::game::Step::EndCombat
+                    )
+            }
+            Filter::ManaValueAtLeast(n) => self.mana_value_of(c) >= *n,
+            Filter::HasKeyword(k) => self.has_kw(c, *k),
+            Filter::Colorless => self.colors_of(c) == 0,
+            // A spell: one or more of its targets (as chosen, still the
+            // same objects) matches.
+            Filter::TargetsMatching(inner) => self
+                .stack
+                .iter()
+                .find(|s| s.kind == StackKind::Spell { card: c })
+                .is_some_and(|s| {
+                    s.targets.iter().any(|&(_, t)| match t {
+                        Target::Obj(r) => {
+                            self.live(r)
+                                && self.objs[r.idx.i()].zone == Zone::Battlefield
+                                && self.card_matches(inner, r.idx, ctx)
+                        }
+                        Target::Player(_) => false,
+                    })
+                }),
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
             Filter::Not(x) => !self.card_matches(x, c, ctx),
         }
     }
+}
+
+/// Retrace's additional cost (CR 702.81a): discard a land card.
+pub(crate) fn retrace_cost() -> &'static crate::db::Cost {
+    static COST: std::sync::OnceLock<crate::db::Cost> = std::sync::OnceLock::new();
+    COST.get_or_init(|| crate::db::Cost { discard: 1, discard_filter: Some(Filter::Type(types::LAND)), ..Default::default() })
 }
 
 /// Can a filter match a card in a graveyard (`InGraveyard`)?

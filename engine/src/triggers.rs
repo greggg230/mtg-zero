@@ -91,9 +91,11 @@ impl Game {
     pub(crate) fn event(&mut self, ev: Event) {
         let bit = 1u32 << ev.kind as u32;
         let mut obs: Vec<Observer> = Vec::new();
-        for &c in &self.battlefield {
+        // Permanents (not one that lost all its abilities, CR 613.1f), then
+        // emblems (their abilities function in the command zone, 114.4).
+        for &c in self.battlefield.iter().chain(self.command.iter()) {
             let o = &self.objs[c.i()];
-            if self.db.def(o.def).trig_mask & bit != 0 {
+            if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) {
                 obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller });
             }
         }
@@ -274,6 +276,7 @@ impl Game {
             discarded_land: false,
             x: 0,
             division: Vec::new(),
+            attack_as: None,
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {

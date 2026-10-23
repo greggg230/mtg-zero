@@ -61,6 +61,9 @@ pub(crate) enum Task {
     ChooseX { id: u32 },
     /// Discard for escalate (CR 702.120a).
     Escalate { id: u32 },
+    /// Which player or planeswalker an attacking creature attacks (CR
+    /// 508.1b, 508.4).
+    AttackTarget { card: CardIdx },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -204,6 +207,7 @@ impl Game {
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),
+            Task::AttackTarget { card } => self.choose_attack_target(card),
         }
     }
 
@@ -311,7 +315,11 @@ impl Game {
             pl.spells_cast = 0;
             pl.noncreature_cast = 0;
             pl.gained_life = false;
+            pl.lost_life = false;
         }
+        // "Until your next turn" ends as that turn begins (CR 611.2b).
+        self.players[next as usize].flash_sorceries = false;
+        self.end_until_next_turn(next);
         self.resolved.clear();
         self.lki_counters.clear();
         // Permissions end with their turn, or when the card moves.

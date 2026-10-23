@@ -39,6 +39,7 @@ impl Game {
                 Some(c) if self.objs[c.i()].zone == Zone::Battlefield => vec![c],
                 _ => Vec::new(),
             },
+            On::MadeAll => f.made_all.iter().copied().filter(|&c| self.objs[c.i()].zone == Zone::Battlefield).collect(),
             On::Each(filter) => {
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                 self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect()
@@ -686,9 +687,7 @@ impl Game {
             Ext::CreateTokensFor { who, token, n } => {
                 if let Some(p) = self.who(f, *who) {
                     let def = self.db.token_def(*token);
-                    for _ in 0..*n {
-                        self.create_token(def, p, false);
-                    }
+                    self.create_tokens(def, p, *n as u32, false);
                 }
                 Flow::Next
             }
@@ -699,15 +698,21 @@ impl Game {
                     self.turn.step,
                     Step::DeclareAttackers | Step::DeclareBlockers | Step::FirstStrikeDamage | Step::CombatDamage
                 );
-                for k in 0..*n {
-                    let c = self.create_token(def, f.controller, *tapped);
+                let made = self.create_tokens(def, f.controller, *n as u32, *tapped);
+                for &c in &made {
                     if in_combat && f.controller == self.turn.active && self.objs[c.i()].zone == Zone::Battlefield {
                         self.objs[c.i()].attacking = true;
                     }
-                    if k == 0 {
-                        f.made = Some(c);
+                }
+                // CR 508.4: their controller chooses what each attacks (asked
+                // before the rest of the effect, first token first).
+                for &c in made.iter().rev() {
+                    if self.objs[c.i()].attacking {
+                        self.agenda.push(Task::AttackTarget { card: c });
                     }
                 }
+                f.made = made.first().copied();
+                f.made_all = made;
                 Flow::Next
             }
             Ext::GraveyardToBottomRandom { who } => {
@@ -883,18 +888,25 @@ impl Game {
                 let target = match self.answer.take() {
                     Some(Choice::Card(c)) => c,
                     Some(other) => unreachable!("army answer {other:?}"),
-                    None => match armies[..] {
-                        [] => {
+                    None => {
+                        let mut armies = armies;
+                        if armies.is_empty() {
+                            // (Two of them with a token doubler: one is chosen.)
                             let def = self.db.token_def(*token);
-                            self.create_token(def, p, false)
+                            self.create_tokens(def, p, 1, false);
+                            armies = self.permanents_of(p).filter(|&c| self.has_subtype(c, *army)).collect();
                         }
-                        [one] => one,
-                        _ => {
-                            let opts = armies.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
-                            self.ask(Task::Run(f.clone()), p, DecisionKind::ChoosePermanent, opts);
-                            return Flow::Suspend;
+                        match armies[..] {
+                            [] => return Flow::Next,
+                            [one] => one,
+                            _ => {
+                                let opts =
+                                    armies.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
+                                self.ask(Task::Run(f.clone()), p, DecisionKind::ChoosePermanent, opts);
+                                return Flow::Suspend;
+                            }
                         }
-                    },
+                    }
                 };
                 self.add_counters(target, crate::db::Counter::P1P1, *n as u16);
                 if !self.has_subtype(target, *subtype) {
@@ -924,10 +936,11 @@ impl Game {
                 for card in cards {
                     let owner = self.objs[card.idx.i()].owner;
                     let x = self.def_of(card.idx).mana_value() as i32;
-                    let t = self.create_token(def, owner, false);
-                    if self.objs[t.i()].zone == Zone::Battlefield {
-                        let r = self.obj_ref(t);
-                        self.add_effect(Affected::Obj(r), Mod::SetPt(x, x), crate::layers::Until::Forever, owner);
+                    for t in self.create_tokens(def, owner, 1, false) {
+                        if self.objs[t.i()].zone == Zone::Battlefield {
+                            let r = self.obj_ref(t);
+                            self.add_effect(Affected::Obj(r), Mod::SetPt(x, x), crate::layers::Until::Forever, owner);
+                        }
                     }
                 }
                 Flow::Next
@@ -945,7 +958,8 @@ impl Game {
             }
             Ext::CreateTokenAttachSource { token } => {
                 let def = self.db.token_def(*token);
-                let t = self.create_token(def, f.controller, false);
+                // (With a token doubler, it is attached to the first one.)
+                let t = self.create_tokens(def, f.controller, 1, false)[0];
                 if let Some(&eq) = self.objs_on(f, &On::Source).first() {
                     if self.objs[t.i()].zone == Zone::Battlefield {
                         let host = self.obj_ref(t);
@@ -1353,8 +1367,9 @@ impl Game {
                 if let Some(&c) = self.objs_on(f, &On::Target(*tgt)).first() {
                     if self.def_of(c).token {
                         let def = self.objs[c.i()].def;
-                        let t = self.create_token(def, f.controller, false);
-                        f.made = Some(t);
+                        let made = self.create_tokens(def, f.controller, 1, false);
+                        f.made = made.first().copied();
+                        f.made_all = made;
                     }
                 }
                 Flow::Next
@@ -1362,11 +1377,7 @@ impl Game {
             Ext::GiveSourceToOpponent => {
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
                     let q = crate::ids::opp(f.controller);
-                    let turn = self.turn.number;
-                    let o = &mut self.objs[c.i()];
-                    o.controller = q;
-                    o.control_since = turn;
-                    self.note(|g| format!("P{q} gains control of {}", g.name(c)));
+                    self.change_control(c, q);
                 }
                 Flow::Next
             }
@@ -1444,8 +1455,10 @@ impl Game {
                             self.turn.step,
                             Step::DeclareAttackers | Step::DeclareBlockers | Step::FirstStrikeDamage | Step::CombatDamage
                         );
-                        if in_combat && p == self.turn.active {
+                        if in_combat && p == self.turn.active && self.is_creature(c) {
                             self.objs[c.i()].attacking = true;
+                            // CR 508.4: its controller chooses what it attacks.
+                            self.agenda.push(Task::AttackTarget { card: c });
                         }
                     }
                 }
@@ -1465,6 +1478,26 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::CreateEmblem { .. }
+            | Ext::RemoveCounters { .. }
+            | Ext::GainControl { .. }
+            | Ext::ExchangeControl { .. }
+            | Ext::GainControlOfEventSpellTargets { .. }
+            | Ext::RollDie { .. }
+            | Ext::ExtraLoyaltyActivations { .. }
+            | Ext::ChooseFromGraveyardToHand { .. }
+            | Ext::DamageChosen { .. }
+            | Ext::ExileTopMayCast { .. }
+            | Ext::ExileLibrary { .. }
+            | Ext::LookAtTopMayBottom { .. }
+            | Ext::NinjutsuEnter
+            | Ext::RevealTopOpponentChooses { .. }
+            | Ext::ExiledWithCounterToHand { .. }
+            | Ext::SacrificeThenReflexive { .. }
+            | Ext::JumpUnlessEventObj { .. }
+            | Ext::SearchAnyNumber { .. }
+            | Ext::NameRevealTopToHand { .. }
+            | Ext::FlashSorceries => self.exec_walker(f, op),
             Ext::RevealTopToHand { who } => {
                 f.x = 0;
                 if let Some(p) = self.who(f, *who) {

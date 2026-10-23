@@ -46,6 +46,11 @@ pub(crate) struct Frame {
     pub division: Vec<u8>,
     /// The spell's X (CR 107.3).
     pub spell_x: u8,
+    /// Every token the last `CreateToken` made ("they gain haste").
+    pub made_all: Vec<CardIdx>,
+    /// What a creature put onto the battlefield attacking attacks
+    /// (ninjutsu, from the stack item).
+    pub attack_as: Option<Option<ObjRef>>,
 }
 
 pub(crate) enum Flow {
@@ -113,6 +118,8 @@ impl Game {
             alt: item.alt > 0,
             division: item.division.clone(),
             spell_x: item.x,
+            made_all: Vec::new(),
+            attack_as: item.attack_as,
         };
         let Some(modes) = &ab.modes else {
             self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
@@ -267,6 +274,16 @@ impl Game {
                 },
                 None => 0,
             },
+            Amount::SourceCounters(k) => {
+                if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
+                    self.counters_on(f.source.idx, k) as i32
+                } else {
+                    self.lki_counters.iter().filter(|x| x.0 == f.source && x.1 == k).map(|x| x.2 as i32).sum()
+                }
+            }
+            Amount::OpponentsLostLife => {
+                self.players[crate::ids::opp(f.controller) as usize].lost_life as i32
+            }
         }
     }
 
@@ -400,7 +417,9 @@ impl Game {
                 Flow::Suspend
             }
             Op::DiscardRandom { who, n } => {
-                if let Some(p) = self.who(f, who) {
+                // (Tamiyo, Collector of Tales: an opponent's effect can't
+                // make this player discard.)
+                if let Some(p) = self.who(f, who).filter(|&p| !self.shielded_from(p, f.controller)) {
                     for _ in 0..self.amount(f, n) {
                         let hand = &self.players[p as usize].hand;
                         if hand.is_empty() {
@@ -462,6 +481,9 @@ impl Game {
             }
             Op::Discard { who, n } => {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
+                if self.shielded_from(p, f.controller) {
+                    return Flow::Next;
+                }
                 if let Some(ch) = self.answer.take() {
                     let Choice::Card(c) = ch else { unreachable!("discard answer {ch:?}") };
                     self.discard(c);
@@ -475,7 +497,7 @@ impl Game {
                 Flow::Suspend
             }
             Op::DiscardHand { who } => {
-                if let Some(p) = self.who(f, who) {
+                if let Some(p) = self.who(f, who).filter(|&p| !self.shielded_from(p, f.controller)) {
                     for c in self.hand_sorted(p) {
                         self.discard(c);
                     }
@@ -657,16 +679,16 @@ impl Game {
             }
             Op::CreateToken { token, n, tapped } => {
                 let def = self.db.token_def(token);
-                for k in 0..n {
-                    let t = self.create_token(def, f.controller, tapped);
-                    if k == 0 {
-                        f.made = Some(t);
-                    }
-                }
+                let made = self.create_tokens(def, f.controller, n as u32, tapped);
+                f.made = made.first().copied();
+                f.made_all = made;
                 Flow::Next
             }
             Op::Sacrifice { who, ref filter } => {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
+                if self.shielded_from(p, f.controller) {
+                    return Flow::Next;
+                }
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
@@ -762,6 +784,9 @@ impl Game {
             }
             Op::ChooseDiscard { chooser, whose, ref filter, optional } => {
                 let (Some(p), Some(owner)) = (self.who(f, chooser), self.who(f, whose)) else { return Flow::Next };
+                if self.shielded_from(owner, f.controller) {
+                    return Flow::Next;
+                }
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         self.note(|g| format!("P{owner} discards {}", g.name(c)));

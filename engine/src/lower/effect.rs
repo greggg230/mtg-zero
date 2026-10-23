@@ -74,7 +74,7 @@ pub(crate) fn lower_targets(l: &mut Lowerer, b: &mut Builder, specs: &[cats::Tar
     Some(b.target(f, min, max))
 }
 
-fn lower_target_spec(l: &mut Lowerer, s: &cats::TargetSpec) -> Option<(Filter, u8, u8)> {
+pub(crate) fn lower_target_spec(l: &mut Lowerer, s: &cats::TargetSpec) -> Option<(Filter, u8, u8)> {
     let cats::TargetSpec::TargetSpec(nodes::TargetSpec { filter, count_min, count_max, distinct_from }) = s;
     l.deny("TargetSpec.distinct_from", distinct_from);
     let min = l.int("TargetSpec.count_min", *count_min, 0, 8) as u8;
@@ -815,7 +815,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             b.op(Op::Discard { who: Who::TargetPlayer(t), n });
         }
         other => {
-            if !super::effect_ext::lower_effect_ext(l, b, other) {
+            if !super::effect_ext::lower_effect_ext(l, b, other) && !super::effect_walkers::lower_effect_walkers(l, b, other) {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }
         }

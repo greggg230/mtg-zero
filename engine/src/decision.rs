@@ -131,6 +131,17 @@ pub enum DecisionKind {
     /// The amount of divided damage for the next target (`NUMBER`, CR
     /// 601.2d).
     DivideDamage,
+    /// What the attacker just declared (or put onto the battlefield
+    /// attacking) attacks: `PLAYER` + 1 = the defending player, `OPP_PERM`
+    /// = a planeswalker they control (CR 508.1b, 508.4). Asked only when
+    /// the defending player controls a planeswalker.
+    AttackTarget,
+    /// A card in exile chosen by an effect (`EXILE` + k = the k-th offered
+    /// card in exile order; Karn's "a card you own with a silver counter").
+    ChooseExiled,
+    /// Name a card (`LIBRARY` = a definition in the namer's library sorted
+    /// by definition, `Choice::Def`; `PASS` = a name of no card in it).
+    NameCard,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

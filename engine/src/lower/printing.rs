@@ -266,7 +266,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
         let _ = kicker_cost_str; // display form of `kicker_cost`
-        l.deny("CardPrinting.loyalty", loyalty);
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
         l.deny("CardPrinting.station_threshold", station_threshold);
         l.deny("CardPrinting.stationed_keywords", stationed_keywords);
@@ -324,9 +323,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny_ne("CardPrinting.aura_enchant_type", aura_enchant_type, &generated::defaults::d_CardPrinting_aura_enchant_type());
         l.deny("CardPrinting.aura_yours_only", aura_yours_only);
         l.deny("CardPrinting.restricts_noncreature_spells_to_one_per_turn", restricts_noncreature_spells_to_one_per_turn);
-        l.deny("CardPrinting.opponents_cant_draw_more_than_one_card_each_turn", opponents_cant_draw_more_than_one_card_each_turn);
-        l.deny("CardPrinting.opponents_cast_spells_only_at_sorcery_speed", opponents_cast_spells_only_at_sorcery_speed);
-        l.deny("CardPrinting.loyalty_abilities_at_instant_speed_if_entered_this_turn", loyalty_abilities_at_instant_speed_if_entered_this_turn);
         l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
@@ -381,9 +377,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
         l.deny("CardPrinting.grants_once_per_turn_graveyard_play_mv", grants_once_per_turn_graveyard_play_mv);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
-        l.deny("CardPrinting.opponents_cant_make_you_discard_or_sacrifice", opponents_cant_make_you_discard_or_sacrifice);
-        l.deny("CardPrinting.extra_mana_when_you_tap_land_subtype", extra_mana_when_you_tap_land_subtype);
-        l.deny("CardPrinting.creature_during_your_turn", creature_during_your_turn);
         l.deny("CardPrinting.chooses_card_name_as_enters", chooses_card_name_as_enters);
         l.deny("CardPrinting.named_spell_cost_increase", named_spell_cost_increase);
         l.deny("CardPrinting.named_ability_cost_increase", named_ability_cost_increase);
@@ -545,9 +538,35 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // ability, except for colours an explicit mana ability whose whole
     // cost is {T} already makes (Wasteland's {C}, the Verges): there it
     // is a summary (ENGINE.md 18).
+    // Planeswalkers (CR 306): printed loyalty (306.5a); their printed
+    // activated abilities are loyalty abilities (606.2).
+    let walker = ty & types::PLANESWALKER != 0;
+    let printed_loyalty = match (walker, loyalty) {
+        (true, Some(n)) => Some(l.int("CardPrinting.loyalty", *n, 0, 30) as u8),
+        (true, None) => {
+            l.unsupported("CardPrinting.loyalty(missing for a planeswalker)");
+            None
+        }
+        (false, Some(_)) => {
+            l.unsupported("CardPrinting.loyalty(not a planeswalker)");
+            None
+        }
+        (false, None) => None,
+    };
+    let walker_flag = |l: &mut Lowerer, what: &str, v: bool| {
+        if v && !walker {
+            l.unsupported(format!("{what}(not a planeswalker)"));
+        }
+        v
+    };
+    let loyalty_instant_if_entered = walker_flag(
+        l,
+        "CardPrinting.loyalty_abilities_at_instant_speed_if_entered_this_turn",
+        *loyalty_abilities_at_instant_speed_if_entered_this_turn,
+    );
     let mut activated: Vec<ActivatedDef> = Vec::new();
     for a in activated_abilities {
-        if let Some(ad) = lower_activated(l, a, From::Battlefield) {
+        if let Some(ad) = lower_activated(l, a, From::Battlefield, walker) {
             activated.push(ad);
         }
     }
@@ -568,6 +587,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 instant_only: false,
                 only_if: None,
                 your_turn: false,
+                loyalty: None,
             },
         );
     } else if life > 0 {
@@ -585,7 +605,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     let mut hand_abilities = Vec::new();
     for a in hand_activated_abilities {
-        if let Some(ad) = lower_activated(l, a, From::Hand) {
+        if let Some(ad) = lower_activated(l, a, From::Hand, false) {
             hand_abilities.push(ad);
         }
     }
@@ -791,9 +811,41 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
 
     // Static abilities (CR 604) and equipment bonuses (301.5).
     let mut statics = Vec::new();
+    let mut repl = super::statics::Repl::default();
     for s in static_abilities {
-        if let Some(st) = super::statics::lower_static(l, s) {
+        if let Some(st) = super::statics::lower_static(l, s, &mut repl) {
             statics.push(st);
+        }
+    }
+    // "During your turn, as long as this has one or more loyalty counters
+    // on it, it's a p/t <subtypes> creature [and has <keywords>]" (a
+    // static ability; Kaito).
+    if let Some((p, t, subs, kws)) = creature_during_your_turn {
+        if !walker {
+            l.unsupported("CardPrinting.creature_during_your_turn(not a planeswalker)");
+        }
+        let subtypes = subs.iter().map(|s| l.subtype(s)).collect();
+        let mut mods = vec![
+            Mod::Types { add: types::CREATURE, subtypes, replace: false },
+            Mod::SetPt(l.int("creature_during_your_turn.p", *p, 0, 99), l.int("creature_during_your_turn.t", *t, 0, 99)),
+        ];
+        mods.extend(super::effect_ext::keyword_mods(l, kws));
+        let cond = crate::db::Cond::All(vec![
+            crate::db::Cond::YourTurn,
+            crate::db::Cond::SourceCountersIn(crate::db::Counter::Loyalty, 1, None),
+        ]);
+        statics.push(StaticDef { scope: Scope::This, cond: Some(cond), mods });
+    }
+    // "Whenever you tap a <land subtype> for mana, add an additional
+    // <mana>" (a triggered mana ability, CR 605.1b).
+    let mut extra_mana_on_tap = Vec::new();
+    for pair in extra_mana_when_you_tap_land_subtype {
+        match &pair[..] {
+            [sub, mana] => match letter_index(mana) {
+                Some(i) => extra_mana_on_tap.push((l.subtype(sub), i as u8)),
+                None => l.unsupported(format!("CardPrinting.extra_mana_when_you_tap_land_subtype({mana})")),
+            },
+            _ => l.unsupported("CardPrinting.extra_mana_when_you_tap_land_subtype(shape)"),
         }
     }
     if let Some((tys, p, t)) = equipment_bonus_per_controlled {
@@ -979,6 +1031,16 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             exile_graveyard: l.int("CardPrinting.grants_graveyard_escape_exile_count", *grants_graveyard_escape_exile_count, 1, 20) as u8,
             ..Cost::default()
         }),
+        loyalty: printed_loyalty,
+        loyalty_instant_if_entered,
+        opp_draw_limit: *opponents_cant_draw_more_than_one_card_each_turn,
+        opp_sorcery_speed: *opponents_cast_spells_only_at_sorcery_speed,
+        no_forced_discard_sac: *opponents_cant_make_you_discard_or_sacrifice,
+        token_factor: repl.token_factor,
+        wins_on_empty_draw: repl.wins_on_empty_draw,
+        extra_mana_on_tap,
+        emblem: false,
+        grants_retrace: None,
     }
 }
 

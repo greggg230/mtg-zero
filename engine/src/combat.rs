@@ -5,12 +5,71 @@ use crate::triggers::{Event, Subj};
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::Game;
-use crate::ids::{opp, CardIdx, Target};
+use crate::ids::{opp, CardIdx, PlayerId, Target};
 
 impl Game {
     /// Attacking creatures in canonical order (the active player's slots).
     pub fn attackers(&self) -> Vec<CardIdx> {
         self.permanents_of(self.turn.active).filter(|&c| self.objs[c.i()].attacking).collect()
+    }
+
+    /// What attacking creature `c` is attacking now (CR 506.3, 508.1b): the
+    /// defending player, a planeswalker that player controls, or nothing
+    /// once that planeswalker was removed from combat (506.4: it left the
+    /// battlefield, changed controller or stopped being a planeswalker;
+    /// 506.4c).
+    pub fn attack_dest(&self, c: CardIdx) -> Option<Target> {
+        let o = &self.objs[c.i()];
+        if !o.attacking {
+            return None;
+        }
+        let dp = opp(o.controller);
+        match o.attacks {
+            None => Some(Target::Player(dp)),
+            Some(r) => (self.live(r)
+                && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield
+                && self.objs[r.idx.i()].controller == dp
+                && self.is_type(r.idx, crate::db::types::PLANESWALKER))
+            .then_some(Target::Obj(r)),
+        }
+    }
+
+    /// Planeswalkers `p` controls (the ones `p`'s opponent may attack).
+    pub(crate) fn walkers_of(&self, p: PlayerId) -> Vec<CardIdx> {
+        self.permanents_of(p).filter(|&c| self.is_type(c, crate::db::types::PLANESWALKER)).collect()
+    }
+
+    /// CR 508.1b / 508.4: which player or planeswalker attacking creature
+    /// `card` attacks, chosen by its controller when the defending player
+    /// controls a planeswalker (`PLAYER` + 1 = the defending player,
+    /// `OPP_PERM` = one of their planeswalkers); otherwise the player.
+    pub(crate) fn choose_attack_target(&mut self, card: CardIdx) {
+        let o = &self.objs[card.i()];
+        if o.zone != crate::ids::Zone::Battlefield || !o.attacking {
+            return;
+        }
+        let p = o.controller;
+        let dp = opp(p);
+        match self.answer.take() {
+            Some(Choice::Target(Target::Obj(r))) => {
+                self.objs[card.i()].attacks = Some(r);
+                self.note(|g| format!("{} attacks {}", g.name(card), g.name(r.idx)));
+            }
+            Some(Choice::Target(Target::Player(_))) => self.objs[card.i()].attacks = None,
+            Some(other) => unreachable!("attack target answer {other:?}"),
+            None => {
+                let walkers = self.walkers_of(dp);
+                if walkers.is_empty() {
+                    return;
+                }
+                let mut opts = vec![Opt { action: act::PLAYER + 1, choice: Choice::Target(Target::Player(dp)) }];
+                for w in walkers {
+                    let r = self.obj_ref(w);
+                    opts.push(Opt { action: self.perm_action(p, w), choice: Choice::Target(Target::Obj(r)) });
+                }
+                self.ask(Task::AttackTarget { card }, p, DecisionKind::AttackTarget, opts);
+            }
+        }
     }
 
     /// Creatures blocking `att`, in canonical order.
@@ -74,6 +133,8 @@ impl Game {
                 let slot = self.perm_action(ap, c) - act::MY_PERM;
                 self.note(|g| format!("attacks with {}", g.name(c)));
                 self.agenda.push(Task::DeclareAttackers { next: slot as u8 + 1 });
+                // CR 508.1b: what it attacks, when there is a choice.
+                self.agenda.push(Task::AttackTarget { card: c });
                 return;
             }
             Some(Choice::Pass) => {
@@ -88,8 +149,8 @@ impl Game {
                     let r = self.obj_ref(c);
                     self.players[ap as usize].attacked_with.push(r);
                     // "Whenever it attacks the monarch this turn" (applied
-                    // as it attacks).
-                    if self.monarch == Some(opp(ap)) {
+                    // as it attacks; not when it attacks a planeswalker).
+                    if self.monarch == Some(opp(ap)) && self.objs[c.i()].attacks.is_none() {
                         let k = self.attack_monarch_kws(c);
                         if !k.is_empty() {
                             self.add_effect(
@@ -121,11 +182,22 @@ impl Game {
         if next == 0 {
             // CR 508.1d: creatures that attack each combat if able are
             // declared first (no attack here has a cost, so they can).
+            let mut forced = Vec::new();
             for c in self.permanents_of(ap).collect::<Vec<_>>() {
                 if !self.objs[c.i()].attacking && self.can_attack(c) && self.flags_of(c).must_attack {
                     self.objs[c.i()].attacking = true;
                     self.note(|g| format!("{} must attack", g.name(c)));
+                    forced.push(c);
                 }
+            }
+            if !forced.is_empty() {
+                // Their attack targets first (508.1b), in slot order.
+                // (Run again: they are attacking now, so nothing repeats.)
+                self.agenda.push(Task::DeclareAttackers { next: 0 });
+                for &c in forced.iter().rev() {
+                    self.agenda.push(Task::AttackTarget { card: c });
+                }
+                return;
             }
         }
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
@@ -259,7 +331,6 @@ impl Game {
     /// (decisions where the attacking player divides damage), then the
     /// blockers', then all damage at once.
     pub(crate) fn combat_damage(&mut self, first: bool, att: u8) {
-        let dp = opp(self.turn.active);
         let attackers = self.attackers();
         for (k, &a) in attackers.iter().enumerate().skip(att as usize) {
             if !self.deals_damage_now(a, first) {
@@ -270,13 +341,18 @@ impl Game {
                 continue; // CR 510.1a
             }
             let blockers = self.blockers_of(a);
-            let trample = self.has_kw(a, Kw::Trample);
+            // CR 510.1b: to what it attacks (nothing once a planeswalker it
+            // attacked left combat, 506.4c; 702.19f: never to the player).
+            let dest = self.attack_dest(a);
+            let trample = self.has_kw(a, Kw::Trample) && dest.is_some();
             if !self.objs[a.i()].blocked {
-                self.combat_dmg.push((a, Target::Player(dp), power.min(u16::MAX as i32) as u16));
+                if let Some(t) = dest {
+                    self.combat_dmg.push((a, t, power.min(u16::MAX as i32) as u16));
+                }
             } else if blockers.is_empty() {
-                // CR 509.1h / 702.19e: blocked, blockers gone: only trample.
-                if trample {
-                    self.combat_dmg.push((a, Target::Player(dp), power.min(u16::MAX as i32) as u16));
+                // CR 509.1h / 702.19d: blocked, blockers gone: only trample.
+                if let (true, Some(t)) = (trample, dest) {
+                    self.combat_dmg.push((a, t, power.min(u16::MAX as i32) as u16));
                 }
             } else if blockers.len() == 1 && !trample {
                 let b = self.obj_ref(blockers[0]);
@@ -305,17 +381,25 @@ impl Game {
         let refs: Vec<_> = list.iter().map(|&(s, _, _)| self.obj_ref(s)).collect();
         let mut to_players: Vec<(crate::ids::ObjRef, crate::ids::PlayerId, i32)> = Vec::new();
         let mut to_creatures: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i32)> = Vec::new();
+        let mut to_walkers: Vec<(crate::ids::ObjRef, crate::ids::ObjRef, i32)> = Vec::new();
         self.combat_damage_now = true;
         for ((&(s, t, n), src), r) in list.iter().zip(sources).zip(refs) {
             if first {
                 self.objs[s.i()].struck_first = true;
             }
+            // (A creature or planeswalker recipient, as the damage is dealt.)
+            let to_creature = matches!(t, Target::Obj(o) if self.live(o) && self.is_creature(o.idx));
+            let to_walker =
+                matches!(t, Target::Obj(o) if self.live(o) && self.is_type(o.idx, crate::db::types::PLANESWALKER));
             let dealt = self.deal_damage(src, t, n as i32);
             if let (Target::Player(p), true) = (t, dealt > 0) {
                 to_players.push((r, p, dealt));
             }
-            if let (Target::Obj(o), true) = (t, dealt > 0) {
+            if let (Target::Obj(o), true, true) = (t, dealt > 0, to_creature) {
                 to_creatures.push((r, o, dealt));
+            }
+            if let (Target::Obj(o), true, true) = (t, dealt > 0, to_walker) {
+                to_walkers.push((r, o, dealt));
             }
         }
         self.combat_damage_now = false;
@@ -337,12 +421,21 @@ impl Game {
                 }
             }
         }
-        // CR 510.3a: "deals combat damage to a player" triggers.
+        // CR 510.3a: "deals combat damage to a player [or planeswalker]"
+        // triggers (their predicates say which recipients count).
         for (r, p, n) in to_players {
             self.event(Event {
                 kind: EventKind::DealsCombatDamage,
                 a: Subj::Obj(r),
                 b: Subj::Player(p),
+                amount: n.min(u16::MAX as i32) as u16,
+            });
+        }
+        for (r, o, n) in to_walkers {
+            self.event(Event {
+                kind: EventKind::DealsCombatDamage,
+                a: Subj::Obj(r),
+                b: Subj::Obj(o),
                 amount: n.min(u16::MAX as i32) as u16,
             });
         }
@@ -370,8 +463,10 @@ impl Game {
     /// was assigned lethal damage (702.19c).
     pub(crate) fn assign_damage(&mut self, att: CardIdx, j: u8, left: u16) {
         let blockers = self.blockers_of(att);
-        let trample = self.has_kw(att, Kw::Trample);
-        let dp = opp(self.turn.active);
+        // CR 702.19b: the rest to the player or planeswalker it attacks
+        // (with nothing to attack, everything to the blockers, 702.19f).
+        let dest = self.attack_dest(att);
+        let trample = self.has_kw(att, Kw::Trample) && dest.is_some();
         if let Some(Choice::Number(k)) = self.answer.take() {
             // With 32 or more to divide, 30 = lethal and 31 = all the rest.
             let n = match (left >= act::NUMBER_N, k) {
@@ -389,7 +484,9 @@ impl Game {
         if j as usize >= blockers.len() {
             if left > 0 {
                 debug_assert!(trample);
-                self.combat_dmg.push((att, Target::Player(dp), left));
+                if let Some(t) = dest {
+                    self.combat_dmg.push((att, t, left));
+                }
             }
             return;
         }
@@ -436,6 +533,7 @@ impl Game {
             o.blocked = false;
             o.blocking = None;
             o.struck_first = false;
+            o.attacks = None;
         }
     }
 }

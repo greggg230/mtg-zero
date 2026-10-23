@@ -24,6 +24,9 @@ pub enum Until {
     EndOfTurn,
     /// No duration: until the object leaves the battlefield.
     Forever,
+    /// "Until your next turn": until the effect's controller's next turn
+    /// begins (CR 611.2b; ends as that turn's untap step starts).
+    YourNextTurn,
 }
 
 /// What a continuous effect from a resolved spell or ability applies to.
@@ -73,15 +76,17 @@ impl Game {
     }
 
     /// The static abilities in play that apply to `c`, with their source,
-    /// in timestamp order (the battlefield's order).
+    /// in timestamp order (the battlefield's order, then emblems: CR
+    /// 114.4, their abilities function in the command zone).
     fn statics_on(&self, c: CardIdx) -> impl Iterator<Item = (CardIdx, &'static StaticDef)> + '_ {
         let on_bf = self.objs[c.i()].zone == Zone::Battlefield;
         let active = on_bf && self.n_static > 0;
         self.battlefield
             .iter()
+            .chain(self.command.iter())
             .copied()
             .filter(move |_| active)
-            .flat_map(move |s| self.db.def(self.objs[s.i()].def).statics.iter().map(move |st| (s, st)))
+            .flat_map(move |s| self.abilities(s).statics.iter().map(move |st| (s, st)))
             .filter(move |&(s, st)| self.static_applies(s, st, c))
     }
 
@@ -92,15 +97,51 @@ impl Game {
             Scope::Equipped => self.objs[s.i()].attached.is_some_and(|h| h.idx == c && self.live(h)),
             Scope::Matching { filter, other } => !(*other && s == c) && self.scope_matches(filter, c, ctl),
         };
-        covers
-            && st.cond.as_ref().is_none_or(|k| match k {
-                // A level range reads the static's own source (CR 711).
-                Cond::SourceCountersIn(kind, lo, hi) => {
-                    let n = self.counters_on(s, *kind);
-                    n >= *lo as u16 && hi.is_none_or(|h| n <= h as u16)
-                }
-                _ => self.cond_holds(k, ctl),
-            })
+        covers && st.cond.as_ref().is_none_or(|k| self.static_cond(s, k, ctl))
+    }
+
+    /// A static ability's condition; a level range or a counter count
+    /// reads the static's own source (CR 711; Kaito's "as long as he has
+    /// one or more loyalty counters").
+    fn static_cond(&self, s: CardIdx, k: &Cond, ctl: PlayerId) -> bool {
+        match k {
+            Cond::SourceCountersIn(kind, lo, hi) => {
+                let n = self.counters_on(s, *kind);
+                n >= *lo as u16 && hi.is_none_or(|h| n <= h as u16)
+            }
+            Cond::All(v) => v.iter().all(|x| self.static_cond(s, x, ctl)),
+            _ => self.cond_holds(k, ctl),
+        }
+    }
+
+    /// The type-changing mods of `c`'s own "this permanent" static
+    /// abilities whose condition holds ("during your turn, he's a 3/4
+    /// Ninja creature"): layer 4 without scopes, so nothing recurses.
+    fn own_type_mods(&self, c: CardIdx) -> impl Iterator<Item = &'static Mod> + '_ {
+        let active = self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield;
+        let d: &'static crate::db::CardDef = if active { self.abilities(c) } else { crate::game::blank_def() };
+        let ctl = self.objs[c.i()].controller;
+        d.statics
+            .iter()
+            .filter(move |st| st.scope == Scope::This && st.cond.as_ref().is_none_or(|k| self.static_cond(c, k, ctl)))
+            .flat_map(|st| st.mods.iter())
+            .filter(|m| matches!(m, Mod::Types { .. }))
+    }
+
+    /// It lost all abilities (CR 613.1f: "loses all abilities").
+    pub(crate) fn lost_abilities(&self, c: CardIdx) -> bool {
+        !self.effects.is_empty() && self.loss_ts(c).is_some()
+    }
+
+    /// The timestamp of the latest "loses all abilities" effect on `c`:
+    /// abilities from effects and statics with later timestamps survive it
+    /// (CR 613.7).
+    fn loss_ts(&self, c: CardIdx) -> Option<u32> {
+        if self.objs[c.i()].zone != Zone::Battlefield {
+            return None;
+        }
+        let r = self.obj_ref(c);
+        self.effects.iter().filter(|e| e.on == Affected::Obj(r) && e.m == Mod::LoseAllAbilities).map(|e| e.ts).max()
     }
 
     /// A static ability's affected-object filter (types, subtypes, colours,
@@ -149,7 +190,14 @@ impl Game {
 
     /// Card types (layer 4).
     pub fn types_of(&self, c: CardIdx) -> u16 {
-        let base = self.def_of(c).types;
+        let mut base = self.def_of(c).types;
+        if self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield {
+            for m in self.own_type_mods(c) {
+                if let Mod::Types { add, .. } = m {
+                    base |= add;
+                }
+            }
+        }
         if self.effects.is_empty() || self.objs[c.i()].zone != Zone::Battlefield {
             return base;
         }
@@ -159,6 +207,8 @@ impl Game {
             .filter(|e| e.on == Affected::Obj(r))
             .fold(base, |t, e| match &e.m {
                 Mod::Types { add, .. } => t | add,
+                // CR 205.1a: the card types become exactly these.
+                Mod::BecomeTypes { types, .. } => *types,
                 _ => t,
             })
     }
@@ -166,19 +216,32 @@ impl Game {
     /// Does `c` have subtype `s` (layer 4: an effect that sets creature
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
-        let printed = self.def_of(c).subtypes.contains(&s);
+        let mut printed = self.def_of(c).subtypes.contains(&s);
+        if self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield {
+            for m in self.own_type_mods(c) {
+                if let Mod::Types { subtypes, .. } = m {
+                    printed |= subtypes.contains(&s);
+                }
+            }
+        }
         if self.effects.is_empty() || self.objs[c.i()].zone != Zone::Battlefield {
             return printed;
         }
         let r = self.obj_ref(c);
         let mut has = printed;
         for e in self.effects.iter().filter(|e| e.on == Affected::Obj(r)) {
-            if let Mod::Types { subtypes, replace, .. } = &e.m {
-                if *replace {
-                    has = subtypes.contains(&s);
-                } else if subtypes.contains(&s) {
-                    has = true;
+            match &e.m {
+                Mod::Types { subtypes, replace, .. } => {
+                    if *replace {
+                        has = subtypes.contains(&s);
+                    } else if subtypes.contains(&s) {
+                        has = true;
+                    }
                 }
+                // CR 205.1a: a creature with only these creature types (its
+                // other card types, and their subtypes, are gone).
+                Mod::BecomeTypes { subtypes, .. } => has = subtypes.contains(&s),
+                _ => {}
             }
         }
         has
@@ -210,16 +273,25 @@ impl Game {
         if self.printed_only(c) {
             return k;
         }
-        for &(x, cn, n) in &self.counters {
-            if x == c && n > 0 {
-                if let Counter::Kw(kw) = cn {
-                    k.insert(kw);
+        // "Loses all abilities" (CR 613.1f): printed keywords, keyword
+        // counters and earlier grants are gone; later grants stay.
+        let loss = if self.effects.is_empty() { None } else { self.loss_ts(c) };
+        if loss.is_some() {
+            k = KwSet::default();
+        } else {
+            for &(x, cn, n) in &self.counters {
+                if x == c && n > 0 {
+                    if let Counter::Kw(kw) = cn {
+                        k.insert(kw);
+                    }
                 }
             }
         }
-        for (_, m) in self.mods_on(c) {
+        for (ts, m) in self.mods_on(c) {
             if let Mod::Keywords(add) = m {
-                k.0 |= add.0;
+                if loss.is_none_or(|l| ts > l) {
+                    k.0 |= add.0;
+                }
             }
         }
         k
@@ -235,9 +307,15 @@ impl Game {
         if self.printed_only(c) {
             return p;
         }
-        for (_, m) in self.mods_on(c) {
+        let loss = if self.effects.is_empty() { None } else { self.loss_ts(c) };
+        if loss.is_some() {
+            p = Prot::default();
+        }
+        for (ts, m) in self.mods_on(c) {
             if let Mod::Protection(x) = m {
-                p.union(x);
+                if loss.is_none_or(|l| ts > l) {
+                    p.union(x);
+                }
             }
         }
         p
@@ -420,9 +498,10 @@ impl Game {
         v
     }
 
-    /// Put n counters of kind `k` on a permanent (CR 122.6).
+    /// Put n counters of kind `k` on a permanent (CR 122.6), or on a card
+    /// in exile ("exile it with a silver counter on it", 122.1).
     pub(crate) fn add_counters(&mut self, c: CardIdx, k: Counter, n: u16) {
-        if n == 0 || self.objs[c.i()].zone != Zone::Battlefield {
+        if n == 0 || !matches!(self.objs[c.i()].zone, Zone::Battlefield | Zone::Exile) {
             return;
         }
         match self.counters.iter_mut().find(|x| x.0 == c && x.1 == k) {
@@ -489,5 +568,11 @@ impl Game {
     /// CR 514.2: "until end of turn" effects end in the cleanup step.
     pub(crate) fn end_turn_effects(&mut self) {
         self.effects.retain(|e| e.until != Until::EndOfTurn);
+    }
+
+    /// "Until your next turn" effects of `p` end as `p`'s turn begins (CR
+    /// 611.2b).
+    pub(crate) fn end_until_next_turn(&mut self, p: PlayerId) {
+        self.effects.retain(|e| !(e.until == Until::YourNextTurn && e.controller == p));
     }
 }

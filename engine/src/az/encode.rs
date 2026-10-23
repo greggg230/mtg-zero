@@ -1,24 +1,25 @@
-//! The network input of the `mtg` game (ENGINE.md 21.2, 22.2): a fixed-width
-//! f32 vector for a viewer, with no hidden information. Layout v3 (23,388
+//! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
+//! f32 vector for a viewer, with no hidden information. Layout v3 (M7b: 26,500
 //! floats), in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
-//! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary |
+//! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash |
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
-//! | bags | 13 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds |
-//! | tops | 2 x 3 x 50 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 88 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat, keywords, decision flags, options) |
-//! | hand | 16 x 56 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options, known to the opponent |
-//! | stack | 8 x 72 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets |
-//! | triggers | 4 x 52 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
-//! | list | 40 x 52 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
+//! | bags | 15 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them) |
+//! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
+//! | permanents | 2 x 32 x 100 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options) |
+//! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options, known to the opponent |
+//! | stack | 8 x 76 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets |
+//! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
+//! | list | 40 x 56 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
 //!
-//! A card code (48 floats) is the card's stable identity (`identity.rs`: its
+//! A card code (52 floats) is the card's stable identity (`identity.rs`: its
 //! position in the cube's IR card list, tokens from a registry; capacity
 //! 1024) as three one-hots (index / 64, index / 8 % 8, index % 8: 16 + 8 + 8)
 //! plus a descriptor (card types, colours, mana value, printed power and
-//! toughness, token, legendary). Layout v1 (M5a, 13,532 floats) used the
+//! toughness, token, legendary; M7b: planeswalker, printed loyalty, emblem).
+//! Layout v1 (M5a, 13,532 floats) used the
 //! card table's index (capacity 256), which renumbers as support grows;
 //! v2 (M5b, 23,324 floats) had a 192-float context block with room for 32
 //! decision kinds.
@@ -38,15 +39,15 @@ use super::identity;
 
 /// Identity width: the capacity of the stable card identities (`identity.rs`).
 pub const D: usize = identity::D;
-/// Card code: id / 16 one-hot, id % 16 one-hot, descriptor.
-pub const CODE: usize = 48;
+/// Card code: the identity's three one-hot digits, then the descriptor.
+pub const CODE: usize = 52;
 pub const GLOBALS: usize = 128;
 pub const CONTEXT: usize = 256;
-pub const BAGS: usize = 13;
+pub const BAGS: usize = 15;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
 pub const PERMS: usize = 32;
-pub const PERM_W: usize = CODE + 40;
+pub const PERM_W: usize = CODE + 48;
 pub const HANDS: usize = 16;
 pub const HAND_W: usize = CODE + 8;
 pub const STACKS: usize = 8;
@@ -88,6 +89,9 @@ pub mod bag {
     /// The opponent's library cards known exactly, plus the identities the
     /// viewer's clouds place in it.
     pub const OPP_LIBRARY_KNOWN: usize = 12;
+    /// Emblems (CR 114), by the identity of the card that made them.
+    pub const MY_EMBLEMS: usize = 13;
+    pub const OPP_EMBLEMS: usize = 14;
 }
 
 /// Offsets inside a permanent's status (after its card code).
@@ -119,6 +123,19 @@ pub mod perm {
     pub const TOKEN: usize = 36;
     pub const NEW: usize = 37;
     pub const STOLEN: usize = 38;
+    /// Loyalty counters / 8 (CR 306.5c).
+    pub const LOYALTY: usize = 39;
+    /// A planeswalker whose loyalty ability may still be activated this
+    /// turn (CR 606.3).
+    pub const LOYALTY_READY: usize = 40;
+    /// An attacking creature attacking a planeswalker (not the player), and
+    /// that planeswalker's slot (slot + 1) / 32 (CR 506.3, 508.1b).
+    pub const ATTACKS_WALKER: usize = 41;
+    pub const ATTACKS_SLOT: usize = 42;
+    /// Creatures attacking this planeswalker / 4.
+    pub const ATTACKED_BY: usize = 43;
+    /// The attacker the pending `AttackTarget` decision is about.
+    pub const ASKED_ATTACKER: usize = 44;
 }
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
@@ -146,6 +163,9 @@ fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
     out[45] = d.toughness.unwrap_or(0) as f32 / 8.0;
     out[46] = d.token as u8 as f32;
     out[47] = (d.supertypes & crate::db::supertypes::LEGENDARY != 0) as u8 as f32;
+    out[48] = d.is(types::PLANESWALKER) as u8 as f32;
+    out[49] = d.loyalty.unwrap_or(0) as f32 / 8.0;
+    out[50] = d.emblem as u8 as f32;
 }
 
 fn bag_add(out: &mut [f32], ids: &[u16], b: usize, def: DefId) {
@@ -173,6 +193,7 @@ fn task_code(t: &Task) -> usize {
         Task::ManaNowPick { .. } => 15,
         Task::AsEnters { .. } => 16,
         Task::CastPay { .. } | Task::ActPay { .. } => 17,
+        Task::AttackTarget { .. } => 19,
         _ => 18,
     }
 }
@@ -295,6 +316,10 @@ impl Game {
             })
             .collect();
         let (asked_blocker, dmg_att, dmg_blk) = self.combat_context();
+        let asked_attacker = match (self.pending.is_some(), self.agenda.last()) {
+            (true, Some(Task::AttackTarget { card })) => Some(*card),
+            _ => None,
+        };
         let mine: Vec<CardIdx> = self.permanents_of(me).collect();
         let theirs: Vec<CardIdx> = self.permanents_of(op_).collect();
         let slot_of = |c: CardIdx| -> Option<usize> {
@@ -342,6 +367,22 @@ impl Game {
                 st[perm::TOKEN] = self.def_of(c).token as u8 as f32;
                 st[perm::NEW] = (ob.control_since == self.turn.number) as u8 as f32;
                 st[perm::STOLEN] = (ob.controller != ob.owner) as u8 as f32;
+                let walker = self.is_type(c, types::PLANESWALKER);
+                st[perm::LOYALTY] = self.counters_on(c, crate::db::Counter::Loyalty) as f32 / 8.0;
+                st[perm::LOYALTY_READY] = (walker && self.loyalty_ready(c)) as u8 as f32;
+                if let Some(Target::Obj(r)) = self.attack_dest(c) {
+                    st[perm::ATTACKS_WALKER] = 1.0;
+                    st[perm::ATTACKS_SLOT] = slot_of(r.idx).map_or(0.0, |x| (x + 1) as f32 / 32.0);
+                }
+                if walker {
+                    let by = self
+                        .battlefield
+                        .iter()
+                        .filter(|&&x| self.attack_dest(x) == Some(Target::Obj(self.obj_ref(c))))
+                        .count();
+                    st[perm::ATTACKED_BY] = by as f32 / 4.0;
+                }
+                st[perm::ASKED_ATTACKER] = (asked_attacker == Some(c)) as u8 as f32;
             }
         }
         // The viewer's hand.
@@ -443,6 +484,10 @@ impl Game {
             let o = &self.objs[c.i()];
             bag_add(out, ids, if o.owner == me { bag::MY_EXILE } else { bag::OPP_EXILE }, o.def);
         }
+        for &c in &self.command {
+            let o = &self.objs[c.i()];
+            bag_add(out, ids, if o.controller == me { bag::MY_EMBLEMS } else { bag::OPP_EMBLEMS }, o.def);
+        }
         for &c in &self.players[me as usize].library {
             bag_add(out, ids, bag::MY_LIBRARY, self.objs[c.i()].def);
             if self.knows(me, c) {
@@ -535,6 +580,8 @@ impl Game {
             o[25] = artifacts as f32 / 10.0;
             o[26] = tokens as f32 / 10.0;
             o[27] = self.extra_turns.iter().filter(|&&x| x == p).count() as f32;
+            o[28] = pl.lost_life as u8 as f32;
+            o[29] = pl.flash_sorceries as u8 as f32;
         }
     }
 
@@ -561,7 +608,7 @@ impl Game {
         use crate::decision::DecisionKind as K;
         let Some(d) = &self.pending else { return Vec::new() };
         let cards: Vec<CardIdx> = match d.kind {
-            K::SearchLibrary => self.library_sorted(p),
+            K::SearchLibrary | K::NameCard => self.library_sorted(p),
             K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand => match self.agenda.last() {
                 Some(Task::Run(f)) => {
                     let mut v = f.pile.clone();
@@ -665,6 +712,7 @@ impl Game {
                 x[ctx::PICKED] = picked.len() as f32 / 4.0;
             }
             Task::DeclareAttackers { next } => x[ctx::NEXT_ATTACKER] = *next as f32 / 32.0,
+            Task::AttackTarget { card: c } => card = Some((self.objs[c.i()].def, None, None)),
             Task::DeclareBlockers { i } => x[ctx::BLOCKER_INDEX] = *i as f32 / 16.0,
             Task::MulliganBottom { left, .. } => x[ctx::BOTTOMS_LEFT] = *left as f32 / 7.0,
             Task::ManaNow { src } => card = Some((self.objs[src.card.i()].def, Some(src.slot), None)),

@@ -175,6 +175,12 @@ pub enum Mod {
     /// Layer 7c: +p/+t for each permanent matching the filter (relative to
     /// the static ability's controller; a static ability only).
     PtPer { filter: Filter, p: i32, t: i32 },
+    /// Layer 6: it loses all abilities (CR 613.1f).
+    LoseAllAbilities,
+    /// Layer 4: its card types become exactly `types` and its creature
+    /// types exactly `subtypes` (CR 205.1a: "becomes a [subtype] creature";
+    /// supertypes are kept).
+    BecomeTypes { types: u16, subtypes: Vec<u16> },
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated
@@ -214,6 +220,8 @@ pub enum Counter {
     Stun,
     /// Any other named counter (interned name: level, story, ...).
     Named(u16),
+    /// A loyalty counter (CR 122.1e, 306.5c): a planeswalker's loyalty.
+    Loyalty,
 }
 
 /// A characteristic-defining power / toughness (CR 604.3, layer 7a).
@@ -292,6 +300,20 @@ pub enum Filter {
     /// A player who is the active player's opponent and controls more
     /// creatures than the active player (Oath of Druids).
     OathTarget,
+    /// An unblocked attacking creature (CR 509.1h; ninjutsu, 702.49a):
+    /// attacking, blockers declared, not blocked.
+    Unblocked,
+    /// Mana value at least n (CR 202.3).
+    ManaValueAtLeast(u8),
+    /// Has this keyword.
+    HasKeyword(Kw),
+    /// Colorless (CR 105.2c).
+    Colorless,
+    /// A spell with a target matching the inner filter (one or more of its
+    /// targets, as chosen).
+    TargetsMatching(Box<Filter>),
+    /// An object with one or more counters of this kind (in any zone).
+    HasCounter(Counter),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -365,8 +387,9 @@ pub enum EventKind {
     Attacks,
     /// The active player declared one or more attackers. Subject: player.
     YouAttack,
-    /// A creature dealt combat damage to a player (510.3a). Subjects:
-    /// source, target (the player); with the amount.
+    /// A creature dealt combat damage to a player or a planeswalker
+    /// (510.3a). Subjects: source, target (the player or planeswalker);
+    /// with the amount.
     DealsCombatDamage,
     /// A spell was cast (601.2i). Subjects: spell, controller.
     IsCast,
@@ -581,6 +604,12 @@ pub enum Cond {
     /// You have cast exactly n spells this turn (noncreature ones only if
     /// `noncreature`).
     SpellsCastThisTurn { n: u8, noncreature: bool },
+    /// Your library has no cards in it.
+    LibraryEmpty,
+    /// It is your turn.
+    YourTurn,
+    /// All of these hold (a static ability's own conditions included).
+    All(Vec<Cond>),
 }
 
 /// What a mana ability makes (CR 106.1, 605.1a).
@@ -637,8 +666,10 @@ pub struct Cost {
     pub discard_self: bool,
     pub discard_hand: bool,
     pub sacrifice: Option<SacCost>,
-    /// Discard n cards of your choice.
+    /// Discard n cards of your choice (matching `discard_filter`, if any:
+    /// retrace's "a land card").
     pub discard: u8,
+    pub discard_filter: Option<Filter>,
     /// Exile a card matching the filter from your hand (not this card).
     pub exile_from_hand: Option<Filter>,
     /// Return n permanents you control matching the filter to their
@@ -696,6 +727,9 @@ pub struct ActivatedDef {
     pub only_if: Option<Cond>,
     /// "Activate only during your turn."
     pub your_turn: bool,
+    /// A loyalty ability (CR 606.2): the change in loyalty its cost makes
+    /// (+1 = put a loyalty counter, -3 = remove three; 606.4).
+    pub loyalty: Option<i8>,
 }
 
 impl ActivatedDef {
@@ -845,6 +879,36 @@ pub struct CardDef {
     /// "nonbasic lands your opponents control enter tapped".
     pub opp_enter_tapped: u16,
     pub opp_nonbasic_enter_tapped: bool,
+    /// Printed loyalty (CR 306.5a): a planeswalker enters with that many
+    /// loyalty counters (306.5b).
+    pub loyalty: Option<u8>,
+    /// "As long as this entered this turn, you may activate its loyalty
+    /// abilities any time you could cast an instant."
+    pub loyalty_instant_if_entered: bool,
+    /// "Each opponent can't draw more than one card each turn."
+    pub opp_draw_limit: bool,
+    /// "Each opponent can cast spells only any time they could cast a
+    /// sorcery."
+    pub opp_sorcery_speed: bool,
+    /// "Spells and abilities your opponents control can't cause you to
+    /// discard cards or sacrifice permanents."
+    pub no_forced_discard_sac: bool,
+    /// "If one or more tokens would be created under your control, n times
+    /// that many of those tokens are created instead" (CR 614.1a; 0 =
+    /// none).
+    pub token_factor: u8,
+    /// "If you would draw a card while your library has no cards in it, you
+    /// win the game instead" (CR 614.1a).
+    pub wins_on_empty_draw: bool,
+    /// "Whenever you tap a <land subtype> for mana, add an additional
+    /// <mana>" (a triggered mana ability, CR 605.1b): (subtype, mana type).
+    pub extra_mana_on_tap: Vec<(u16, u8)>,
+    /// An emblem's definition (CR 114): no characteristics but abilities;
+    /// it lives in the command zone.
+    pub emblem: bool,
+    /// "<Cards matching> in your graveyard have retrace" (an emblem; CR
+    /// 702.81).
+    pub grants_retrace: Option<Filter>,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.
@@ -918,6 +982,11 @@ impl CardDb {
     /// The definition of token `t` (an index of `Op::CreateToken`).
     pub fn token_def(&self, t: u16) -> DefId {
         self.token_base + t
+    }
+
+    /// A token (or emblem) definition by name.
+    pub fn token_by_name(&self, name: &str) -> Option<DefId> {
+        (self.token_base as usize..self.defs.len()).find(|&i| self.defs[i].name == name).map(|i| i as DefId)
     }
 
     /// Number of card definitions (`0..num_cards()`); token definitions

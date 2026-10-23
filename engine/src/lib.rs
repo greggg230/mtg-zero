@@ -21,6 +21,7 @@ mod pay;
 pub mod program;
 mod resolve;
 mod resolve_ext;
+mod resolve_walkers;
 pub mod rng;
 mod sba;
 pub mod testkit;

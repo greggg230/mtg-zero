@@ -90,7 +90,28 @@ impl Scenario {
             if !self.g.def_of(c).statics.is_empty() {
                 self.g.n_static += 1;
             }
+            // A planeswalker entered with its printed loyalty (CR 306.5b).
+            if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
+                self.g.add_counters(c, crate::db::Counter::Loyalty, n as u16);
+            }
         }
+        self
+    }
+
+    /// An emblem `p` got earlier from the card named `card` (CR 114).
+    pub fn emblem(mut self, p: PlayerId, card: &str) -> Self {
+        let name = format!("{card} emblem");
+        let def = self.g.db.token_by_name(&name).unwrap_or_else(|| panic!("no emblem of {card}"));
+        self.g.create_emblem(def, p);
+        self
+    }
+
+    /// Counters of a kind on `p`'s first permanent named `name`.
+    pub fn counters(mut self, p: PlayerId, name: &str, k: crate::db::Counter, n: u16) -> Self {
+        let c = self.g.find_card(p, name, Zone::Battlefield).unwrap_or_else(|| panic!("no {name} of P{p}"));
+        let have = self.g.counters_on(c, k);
+        self.g.remove_counters(c, k, have);
+        self.g.add_counters(c, k, n);
         self
     }
 
@@ -256,6 +277,10 @@ impl Game {
             v.extend([o.def as u64, o.owner as u64, o.controller as u64, o.tapped as u64, o.damage as u64]);
             v.extend([o.attacking as u64, o.blocked as u64, o.blocking.is_some() as u64, o.escaped as u64]);
             v.extend([o.chosen_player.map_or(9, |p| p as u64), o.monstrous as u64]);
+            // What it attacks (a planeswalker by its place), loyalty
+            // activations this turn, when it entered (public).
+            v.push(o.attacks.map_or(u64::MAX, |r| self.battlefield.iter().position(|&x| x == r.idx).unwrap_or(999) as u64));
+            v.extend([o.pw_turn as u64, o.pw_used as u64, o.pw_extra as u64, o.entered as u64]);
             // Counters and attachments (public, CR 122, 301.5).
             for (k, n) in self.counters_of(c) {
                 v.extend([h64(&k), n as u64]);
@@ -268,6 +293,11 @@ impl Game {
         v.push(u64::MAX);
         for &c in &self.exile {
             obj(&mut v, c);
+        }
+        v.push(u64::MAX);
+        // Emblems (public, CR 114).
+        for &c in &self.command {
+            v.extend([self.objs[c.i()].def as u64, self.objs[c.i()].controller as u64]);
         }
         v.push(u64::MAX);
         // Objects are named by their public place (CardIdx identities are
@@ -358,6 +388,7 @@ impl Game {
             let pl = &self.players[p as usize];
             v.extend([pl.life as i64 as u64, pl.hand.len() as u64, pl.library.len() as u64, pl.lands_played as u64]);
             v.push(pl.cant_gain_life as u64);
+            v.extend([pl.lost_life as u64, pl.flash_sorceries as u64]);
             v.extend(pl.pool.amt.iter().map(|&n| n as u64));
             v.extend(pl.graveyard.iter().map(|&c| self.objs[c.i()].def as u64));
             v.push(u64::MAX);
@@ -410,6 +441,7 @@ impl Game {
         self.players.hash(&mut h);
         self.battlefield.hash(&mut h);
         self.exile.hash(&mut h);
+        self.command.hash(&mut h);
         self.stack.hash(&mut h);
         self.turn.hash(&mut h);
         self.agenda.hash(&mut h);
@@ -470,6 +502,9 @@ impl Game {
         }
         for &c in &self.exile {
             mark(c, Zone::Exile, None)?;
+        }
+        for &c in &self.command {
+            mark(c, Zone::Command, None)?;
         }
         for s in &self.stack {
             if let crate::game::StackKind::Spell { card } = s.kind {

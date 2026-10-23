@@ -12,6 +12,8 @@
 //!   are appended, never inserted (`MTGZ_WRITE_TOKENS=1 cargo test -p engine --test az
 //!   token_registry` appends the missing ones; the test fails while a token of the cube's card
 //!   table has no line);
+//! * an emblem (CR 114) has the identity of the card that creates it (its definition is named
+//!   "<card> emblem"); the encoding keeps emblems in bags of their own;
 //! * [`UNKNOWN`] for anything else (a card outside the cube list, an unregistered token).
 //!
 //! Capacity [`D`] = 1024 identities: the code's digits are one-hots of 16, 8 and 8 (index =
@@ -103,6 +105,8 @@ fn compute(db: &CardDb) -> Vec<u16> {
             let d = db.def(i as DefId);
             if d.token {
                 reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
+            } else if d.emblem {
+                d.name.strip_suffix(" emblem").and_then(|n| pos.get(n).copied()).unwrap_or(UNKNOWN)
             } else {
                 pos.get(d.name.as_str()).copied().unwrap_or(UNKNOWN)
             }
