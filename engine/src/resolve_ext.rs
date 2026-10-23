@@ -370,6 +370,7 @@ impl Game {
                 Flow::Suspend
             }
             Ext::FromGraveyard { tgt, to_battlefield, yours, tapped } => {
+                f.made = None;
                 for t in self.targets_of(f, *tgt) {
                     let Target::Obj(o) = t else { continue };
                     if self.objs[o.idx.i()].zone != Zone::Graveyard {
@@ -381,6 +382,10 @@ impl Game {
                         self.put_onto_battlefield(o.idx, ctl);
                         if *tapped {
                             self.tap(o.idx);
+                        }
+                        // (It becomes the made object: "with a counter on it".)
+                        if self.objs[o.idx.i()].zone == Zone::Battlefield {
+                            f.made = Some(o.idx);
                         }
                     } else {
                         self.move_card(o.idx, Zone::Hand, Pos::Top);
@@ -444,6 +449,7 @@ impl Game {
                     let live = match t {
                         Target::Obj(o) => self.live(o),
                         Target::Player(_) => true,
+                        Target::Stack(_) => false,
                     };
                     // CR 608.2b: an illegal target is not dealt its share.
                     if f.legal & (1 << i) != 0 && live {
@@ -1509,7 +1515,18 @@ impl Game {
             | Ext::Poison { .. }
             | Ext::DiscardUpToThenDraw { .. }
             | Ext::KeepOneOfEachType { .. }
-            | Ext::Connive => self.exec_faces(f, op),
+            | Ext::Connive { .. } => self.exec_faces(f, op),
+            Ext::SourceOfTargetLosesAbilities { .. }
+            | Ext::GainControlOfSpell { .. }
+            | Ext::CounterEventItem
+            | Ext::OfferPayOther { .. }
+            | Ext::TakeInitiative { .. }
+            | Ext::Venture { .. }
+            | Ext::PileToBattlefield { .. }
+            | Ext::GetExperience { .. }
+            | Ext::CreateTokensN { .. }
+            | Ext::DiscardThenDraw { .. }
+            | Ext::SourceFromGraveyard { .. } => self.exec_stack(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

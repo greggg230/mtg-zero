@@ -51,6 +51,8 @@ impl Game {
             }
             Cond::All(v) => v.iter().all(|c| self.cond_holds_from(c, p, source)),
             Cond::SpellsCastAtLeast(n) => pl.spells_cast >= *n,
+            Cond::HasInitiative => self.initiative == Some(p),
+            Cond::CompletedDungeon => self.dungeons[p as usize].completed > 0,
         }
     }
 
@@ -107,6 +109,22 @@ impl Game {
                     // One hand ability per card (lowering): the card's slot.
                     out.push(Opt { action: act::HAND_ABILITY + (a - act::HAND), choice: Choice::Ability(c, slot) });
                 }
+            }
+        }
+        // Abilities of cards in the player's graveyard (CR 602.2; ENGINE.md
+        // 27.5): `GY_ABILITY` + k for the k-th card there that has one (one
+        // each, the lowering checks).
+        let mut k = 0u16;
+        for c in self.graveyard_cards(p) {
+            let d = self.def_of(c);
+            let Some(ad) = d.gy_abilities.first() else { continue };
+            if k >= act::GY_ABILITY_N {
+                break;
+            }
+            let action = act::GY_ABILITY + k;
+            k += 1;
+            if self.can_activate(p, c, ad, classes, sorcery_ok) {
+                out.push(Opt { action, choice: Choice::Ability(c, AbilitySlot::Graveyard(0)) });
             }
         }
     }
@@ -307,6 +325,13 @@ impl Game {
         if cost.crew > 0 && self.crew_power(p, card) < cost.crew as i32 {
             return false;
         }
+        // (Not counting permanents that could be tapped for mana first: the
+        // mana is paid before, 601.2g-h.)
+        if let Some(t) = &cost.tap_untapped {
+            if self.tap_candidates(p, card, t).filter(|&c| !self.has_mana_ability(c)).count() < t.n as usize {
+                return false;
+            }
+        }
         if cost.exile_graveyard > 0 && cost.exile_graveyard as usize > self.graveyard_cards(p).filter(|&c| c != card).count() {
             return false;
         }
@@ -322,6 +347,19 @@ impl Game {
             None => classes,
         };
         self.can_pay_with(p, mana, classes, &Self::keep_for(card, cost, exclude))
+    }
+
+    /// Untapped permanents `p` controls that a "tap n untapped <filter> you
+    /// control" cost of `card` may tap (not `card` itself).
+    pub(crate) fn tap_candidates<'a>(&'a self, p: PlayerId, card: CardIdx, t: &'a crate::db::SacCost) -> impl Iterator<Item = CardIdx> + 'a {
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+        self.permanents_of(p)
+            .filter(move |&c| c != card && !self.objs[c.i()].tapped && self.card_matches(&t.filter, c, &ctx))
+    }
+
+    /// Does permanent `c` have a mana ability?
+    pub(crate) fn has_mana_ability(&self, c: CardIdx) -> bool {
+        self.abilities(c).activated.iter().any(|a| a.mana().is_some())
     }
 
     /// Creatures that can crew `vehicle` for `p`: untapped creatures they
@@ -389,6 +427,7 @@ impl Game {
         let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
         let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
         let n_gy = n_bounce + cost.exile_graveyard as usize;
+        let n_tap = n_gy + cost.tap_untapped.as_ref().map_or(0, |t| t.n) as usize;
         let mut crew_done = false;
         if let Some(ch) = self.answer.take() {
             let c = match ch {
@@ -469,12 +508,29 @@ impl Game {
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChooseGraveyardCard, opts);
             return;
         }
+        if picked.len() < n_tap {
+            // "Tap n untapped <permanents> you control": one decision each
+            // (a set: increasing slot order).
+            let t = cost.tap_untapped.as_ref().unwrap();
+            let floor = picked[n_gy..].last().map(|&c| self.perm_action(p, c));
+            let cands: Vec<Opt> = self
+                .tap_candidates(p, card, t)
+                .filter(|c| !picked.contains(c))
+                .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                .filter(|o| floor.is_none_or(|f| o.action > f))
+                .collect();
+            // (Leaving enough later candidates for the taps still owed.)
+            let still = n_tap - picked.len();
+            let opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();
+            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
+            return;
+        }
         if cost.crew > 0 && !crew_done {
             // Crew (CR 702.122a): untapped creatures other than the source,
             // one decision each in increasing slot order; PASS once their
             // total power is enough. A pick must leave the total reachable.
             let need = cost.crew as i32;
-            let tapped_in: Vec<CardIdx> = picked[n_gy..].to_vec();
+            let tapped_in: Vec<CardIdx> = picked[n_tap..].to_vec();
             let have: i32 = tapped_in.iter().map(|&c| self.crew_power_of(c)).sum();
             let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
             let cands: Vec<CardIdx> = self
@@ -497,6 +553,7 @@ impl Game {
                 return;
             }
         }
+        // (The taps of a "tap untapped permanents" cost, then crew's.)
         for &c in &picked[n_gy..] {
             self.tap(c);
         }

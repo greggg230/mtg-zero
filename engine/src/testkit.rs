@@ -152,6 +152,27 @@ impl Scenario {
         self
     }
 
+    /// `p` has the initiative (CR 725).
+    pub fn initiative(mut self, p: PlayerId) -> Self {
+        self.g.initiative = Some(p);
+        self
+    }
+
+    /// `p` has Undercity in the command zone with the venture marker on
+    /// room `room` (`dungeon::ROOMS`), and has completed `completed`
+    /// dungeons (CR 309).
+    pub fn dungeon(mut self, p: PlayerId, room: Option<u8>, completed: u8) -> Self {
+        if let Some(r) = room {
+            let def = self.g.db.token_by_name(crate::dungeon::UNDERCITY).expect("Undercity");
+            let c = self.g.add_card(def, p, Zone::Command);
+            self.g.command.push(c);
+            self.g.dungeons[p as usize].obj = Some(c);
+            self.g.dungeons[p as usize].room = r;
+        }
+        self.g.dungeons[p as usize].completed = completed;
+        self
+    }
+
     pub fn graveyard(mut self, p: PlayerId, names: &[&str]) -> Self {
         for n in names {
             let c = self.add(p, n, Zone::Graveyard);
@@ -389,6 +410,7 @@ impl Game {
                         crate::db::AbilitySlot::Trigger(i) => 100 + i as u64,
                         crate::db::AbilitySlot::Activated(i) => 200 + i as u64,
                         crate::db::AbilitySlot::Hand(i) => 300 + i as u64,
+                        crate::db::AbilitySlot::Graveyard(i) => 400 + i as u64,
                     };
                     v.extend([2, ability.def as u64, slot, place(source.idx)])
                 }
@@ -399,6 +421,8 @@ impl Game {
                 v.push(match tg {
                     Target::Player(p) => p as u64,
                     Target::Obj(o) => 100 + place(o.idx),
+                    // An ability by its stack position (public).
+                    Target::Stack(id) => 9000 + self.stack.iter().position(|x| x.id == id).map_or(99, |i| i as u64),
                 });
             }
             v.extend(s.modes.iter().map(|&m| m as u64));
@@ -411,7 +435,15 @@ impl Game {
         // Continuous effects (public), with the objects they affect by
         // place.
         for e in &self.effects {
-            v.extend([e.ts as u64, e.controller as u64, e.until as u64]);
+            // (A duration "while <it> remains on the battlefield" names it
+            // by its place.)
+            let until = match e.until {
+                crate::layers::Until::EndOfTurn => 0,
+                crate::layers::Until::Forever => 1,
+                crate::layers::Until::YourNextTurn => 2,
+                crate::layers::Until::WhileOnBattlefield(r) => 3000 + live_place(r),
+            };
+            v.extend([e.ts as u64, e.controller as u64, until]);
             match &e.on {
                 crate::layers::Affected::Obj(r) => v.push(500 + place(r.idx)),
                 crate::layers::Affected::Group(_) => v.push(1),
@@ -427,6 +459,11 @@ impl Game {
         }
         v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
+        // The initiative and the dungeons (public, CR 725, 309).
+        v.push(self.initiative.map_or(9, |p| p as u64));
+        for d in &self.dungeons {
+            v.extend([d.obj.is_some() as u64, d.room as u64, d.completed as u64]);
+        }
         // Day and night (public, CR 731); optional actions done once this
         // turn (public), by the source's place.
         v.push(self.day.map_or(9, |d| d as u64));
@@ -475,7 +512,7 @@ impl Game {
             let pl = &self.players[p as usize];
             v.extend([pl.life as i64 as u64, pl.hand.len() as u64, pl.library.len() as u64, pl.lands_played as u64]);
             v.push(pl.cant_gain_life as u64);
-            v.extend([pl.lost_life as u64, pl.flash_sorceries as u64, pl.poison as u64]);
+            v.extend([pl.lost_life as u64, pl.flash_sorceries as u64, pl.poison as u64, pl.experience as u64]);
             v.extend(pl.pool.amt.iter().map(|&n| n as u64));
             v.extend(pl.graveyard.iter().map(|&c| self.objs[c.i()].def as u64));
             v.push(u64::MAX);
@@ -567,6 +604,9 @@ impl Game {
         self.lki_copy.hash(&mut h);
         self.spell_lki.hash(&mut h);
         self.may_copies.hash(&mut h);
+        self.initiative.hash(&mut h);
+        self.dungeons.hash(&mut h);
+        self.rules_src.hash(&mut h);
         h.finish()
     }
 
@@ -619,7 +659,9 @@ impl Game {
             if n != want {
                 return Err(format!("card {i} ({}) appears {n} times", self.name(CardIdx(i as u16))));
             }
-            if self.objs[i].zone == Zone::Nowhere && !self.is_token(CardIdx(i as u16)) {
+            // (A completed dungeon and the source of the initiative's
+            // abilities are rules objects in no zone, ENGINE.md 27.4.)
+            if self.objs[i].zone == Zone::Nowhere && !self.is_token(CardIdx(i as u16)) && !self.def_of(CardIdx(i as u16)).rules {
                 return Err(format!("card {i} is nowhere"));
             }
             // CR 712.8a, 715.4: only a permanent or a spell has a face up

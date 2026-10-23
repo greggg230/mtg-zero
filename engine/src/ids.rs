@@ -49,12 +49,15 @@ impl Zone {
     }
 }
 
-/// A chosen target: a player or an object (a permanent, a spell on the stack,
-/// later a card in a graveyard).
+/// A chosen target: a player, an object (a permanent, a spell on the stack, a
+/// card in a graveyard), or an activated or triggered ability on the stack
+/// (CR 115.1, 113.1a: by its stack item's id; an ability is an object on the
+/// stack, but not a card's).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Target {
     Player(PlayerId),
     Obj(ObjRef),
+    Stack(u32),
 }
 
 /// The other player (2p).

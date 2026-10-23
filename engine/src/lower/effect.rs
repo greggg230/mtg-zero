@@ -841,6 +841,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::effect_walkers::lower_effect_walkers(l, b, other)
                 && !super::effect_faces::lower_effect_faces(l, b, other)
                 && !super::effect_copies::lower_effect_copies(l, b, other)
+                && !super::effect_stack::lower_effect_stack(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

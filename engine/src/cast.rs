@@ -159,7 +159,15 @@ impl Game {
         if !self.cast_timing_ok(p, c, sorcery_ok) {
             return false;
         }
-        let cls = classes;
+        // Improvise (CR 702.126): the untapped artifacts help pay (not with
+        // the shared plain candidates, which have none).
+        let with_artifacts;
+        let cls = if def.improvise {
+            with_artifacts = [classes, &self.improvise_classes(p, None)[..]].concat();
+            &with_artifacts[..]
+        } else {
+            classes
+        };
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let extras = self.spree_extras(c, p);
@@ -171,7 +179,7 @@ impl Game {
                 return self.options_payable(p, c, crate::game::CastFrom::Hand, extra, 0, cls, Some(c));
             }
             let cost = self.delve_reduced(c, p, self.route_mana_plus(c, p, crate::game::CastFrom::Hand, extra), 0);
-            if self.hand_mana_source(c) {
+            if self.hand_mana_source(c) || def.improvise {
                 // A card cast from hand is on the stack while its cost is
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
                 self.can_pay_with(p, &cost, &classes_without(cls, c), &Default::default())
@@ -399,6 +407,14 @@ impl Game {
         if !self.cast_timing_ok(p, card, sorcery_ok) {
             return false;
         }
+        // Improvise (CR 702.126).
+        let with_artifacts;
+        let classes = if def.improvise {
+            with_artifacts = [classes, &self.improvise_classes(p, None)[..]].concat();
+            &with_artifacts[..]
+        } else {
+            classes
+        };
         let keep = self.escape_exiles(card, from);
         // `extra`: the mana of additional costs announced (CR 601.2f).
         let paid = |extra: &crate::mana::ManaCost| {
@@ -475,6 +491,10 @@ impl Game {
 
     /// Mana value (CR 202.3), with X on the stack (202.3e).
     pub(crate) fn mana_value_of(&self, c: CardIdx) -> u8 {
+        // A copy "with no mana cost" (eternalize) has mana value 0.
+        if self.exc(c).is_some_and(|e| e.no_cost) {
+            return 0;
+        }
         let mv = self.def_of(c).mana_value();
         if self.objs[c.i()].zone != Zone::Stack {
             return mv;
@@ -926,9 +946,12 @@ impl Game {
         let ok = |t: Target| self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx);
         let players = [ctx.controller, crate::ids::opp(ctx.controller)].into_iter().map(Target::Player);
         let perms = self.battlefield.iter().map(|&c| Target::Obj(self.obj_ref(c)));
-        let spells = self.stack.iter().rev().filter_map(|s| match s.kind {
+        // Spells and abilities on the stack, top first (an ability only for
+        // a filter that names abilities: a cheap test first).
+        let abilities = wants_ability(&tr.filter);
+        let spells = self.stack.iter().rev().filter_map(move |s| match s.kind {
             StackKind::Spell { card } => Some(self.obj_ref(card)).filter(|&r| Some(r) != ctx.source).map(Target::Obj),
-            StackKind::Ability { .. } => None,
+            StackKind::Ability { .. } => abilities.then_some(Target::Stack(s.id)),
         });
         let gy = wants_graveyard(&tr.filter);
         let graves = [ctx.controller, crate::ids::opp(ctx.controller)]
@@ -1253,9 +1276,10 @@ impl Game {
         let already: Vec<Target> =
             item.targets.iter().filter(|(r, _)| *r == req).map(|&(_, t)| t).collect();
         // "Another target" (CR 115.3): not one chosen for a requirement it
-        // must differ from.
+        // must differ from; never the ability itself (115.5).
         let mut exclude = already.clone();
         exclude.extend(item.targets.iter().filter(|(r, _)| tr.distinct & (1 << r) != 0).map(|&(_, t)| t));
+        exclude.push(Target::Stack(id));
         match self.answer.take() {
             Some(Choice::Pass) => {
                 self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
@@ -1263,7 +1287,11 @@ impl Game {
             }
             Some(Choice::Target(t)) => {
                 self.note(|g| format!("target {}", g.describe_target(t)));
+                let fresh = !self.stack[pos].targets.iter().any(|&(_, x)| x == t);
                 self.stack[pos].targets.push((req, t));
+                if fresh {
+                    self.became_target(id, t);
+                }
                 self.agenda.push(Task::ChooseTargets { id, req });
                 return;
             }
@@ -1315,6 +1343,7 @@ impl Game {
         if item.alt > 0 {
             let k = item.alt as usize - 1;
             let mut pm = PayMana::new(p, cost);
+            pm.improvise = def.improvise;
             pm.keep = Self::keep_for(card, &def.alt_costs[k].cost, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
@@ -1323,6 +1352,7 @@ impl Game {
             return;
         }
         let mut pm = PayMana::new(p, cost);
+        pm.improvise = def.improvise;
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
@@ -1383,12 +1413,18 @@ impl Game {
         for &c in &self.battlefield {
             consider(Target::Obj(self.obj_ref(c)), &mut out);
         }
+        let abilities = wants_ability(&tr.filter);
         for s in self.stack.iter().rev() {
-            if let StackKind::Spell { card } = s.kind {
-                let r = self.obj_ref(card);
-                if Some(r) != ctx.source {
-                    consider(Target::Obj(r), &mut out);
+            match s.kind {
+                StackKind::Spell { card } => {
+                    let r = self.obj_ref(card);
+                    if Some(r) != ctx.source {
+                        consider(Target::Obj(r), &mut out);
+                    }
                 }
+                // (Not the ability itself, CR 115.5: `choose_targets`.)
+                StackKind::Ability { .. } if abilities => consider(Target::Stack(s.id), &mut out),
+                StackKind::Ability { .. } => {}
             }
         }
         if wants_graveyard(&tr.filter) {
@@ -1408,7 +1444,7 @@ impl Game {
     /// by spells with that quality, nor abilities from sources with it).
     pub(crate) fn targetable(&self, t: Target, ctx: &Ctx) -> bool {
         match t {
-            Target::Player(_) => true,
+            Target::Player(_) | Target::Stack(_) => true,
             Target::Obj(r) => {
                 if self.objs[r.idx.i()].zone != Zone::Battlefield {
                     return true;
@@ -1458,12 +1494,20 @@ impl Game {
 
     /// Is `t` (still) a legal choice for `tr` (CR 608.2b)?
     pub(crate) fn target_legal(&self, tr: &TargetReq, t: Target, ctx: &Ctx) -> bool {
-        if let Target::Obj(r) = t {
-            if !self.live(r) {
-                return false;
-            }
+        match t {
+            Target::Obj(r) if !self.live(r) => return false,
+            // An ability that left the stack (resolved or countered) is
+            // gone.
+            Target::Stack(id) if self.item_index(id).is_none() => return false,
+            _ => {}
         }
         self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx)
+    }
+
+    /// The stack item of an ability target (`Target::Stack`), if still on
+    /// the stack.
+    pub(crate) fn stack_item(&self, id: u32) -> Option<&StackItem> {
+        self.stack.iter().find(|s| s.id == id)
     }
 
     /// Top-level filter. Players and permanents are one universe (a bare
@@ -1501,6 +1545,10 @@ impl Game {
                     _ => false,
                 }
             }
+            Target::Stack(id) => match self.stack_item(id) {
+                Some(s) => ability_ok(f, s),
+                None => false,
+            },
         }
     }
 
@@ -1586,8 +1634,13 @@ impl Game {
             }
             Filter::ManaValueAtLeast(n) => self.mana_value_of(c) >= *n,
             Filter::ManaCostIn(v) => {
-                // (Back faces have no mana cost, CR 712.8e.)
-                !def.is(types::LAND) && def.x_pips == 0 && def.front_mv.is_none() && v.contains(&def.cost)
+                // (Back faces have no mana cost, CR 712.8e; nor has an
+                // eternalized copy.)
+                !def.is(types::LAND)
+                    && def.x_pips == 0
+                    && def.front_mv.is_none()
+                    && !self.exc(c).is_some_and(|e| e.no_cost)
+                    && v.contains(&def.cost)
             }
             Filter::HasKeyword(k) => self.has_kw(c, *k),
             Filter::Colorless => self.colors_of(c) == 0,
@@ -1604,9 +1657,11 @@ impl Game {
                                 && self.objs[r.idx.i()].zone == Zone::Battlefield
                                 && self.card_matches(inner, r.idx, ctx)
                         }
-                        Target::Player(_) => false,
+                        Target::Player(_) | Target::Stack(_) => false,
                     })
                 }),
+            // (Abilities on the stack match only at top level, `filter_ok`.)
+            Filter::Ability(_) => false,
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
             Filter::Not(x) => !self.card_matches(x, c, ctx),
@@ -1626,6 +1681,34 @@ fn wants_graveyard(f: &Filter) -> bool {
         Filter::InGraveyard(_) => true,
         Filter::And(a, b) => wants_graveyard(a) || wants_graveyard(b),
         Filter::Or(v) => v.iter().any(wants_graveyard),
+        _ => false,
+    }
+}
+
+/// Can a filter match an ability on the stack (`Ability`)?
+fn wants_ability(f: &Filter) -> bool {
+    match f {
+        Filter::Ability(_) => true,
+        Filter::And(a, b) => wants_ability(a) || wants_ability(b),
+        Filter::Or(v) => v.iter().any(wants_ability),
+        _ => false,
+    }
+}
+
+/// Does an ability on the stack match the filter ("target activated or
+/// triggered ability")? An activated ability is one of a permanent or of a
+/// card in hand (CR 602); a triggered ability any other (603; delayed,
+/// reflexive and sourceless ones included).
+fn ability_ok(f: &Filter, s: &StackItem) -> bool {
+    let StackKind::Ability { ability, .. } = s.kind else { return false };
+    let kind = match ability.slot {
+        AbilitySlot::Activated(_) | AbilitySlot::Hand(_) | AbilitySlot::Graveyard(_) => crate::db::ABILITY_ACTIVATED,
+        AbilitySlot::Trigger(_) | AbilitySlot::Spell => crate::db::ABILITY_TRIGGERED,
+    };
+    match f {
+        Filter::Ability(k) => k & kind != 0,
+        Filter::And(a, b) => ability_ok(a, s) && ability_ok(b, s),
+        Filter::Or(v) => v.iter().any(|x| ability_ok(x, s)),
         _ => false,
     }
 }

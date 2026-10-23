@@ -48,6 +48,8 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::DealsDamage) => Some(EventKind::DealsDamage),
         Some(E::DealsCombatDamageToCreature) => Some(EventKind::DealsCombatDamageToCreature),
         Some(E::CreatureTokensCreated) => Some(EventKind::CreatureTokensCreated),
+        // "Becomes the target of a spell or ability" (ENGINE.md 27.2).
+        Some(E::BecomesTarget) => Some(EventKind::BecomesTarget),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -126,6 +128,7 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::Subject(s, _)
         | TrigPred::Controlled(s, _)
         | TrigPred::FormerHost(s)
+        | TrigPred::Granted(s)
         | TrigPred::IsHost(s) => {
             vec![*s]
         }
@@ -156,6 +159,7 @@ fn slot(l: &mut Lowerer, s: &Option<enums::EventSubject>) -> Option<Slot> {
         Some(S::Controller) => Slot::Controller,
         Some(S::Player) => Slot::Player,
         Some(S::Card) => Slot::Card,
+        Some(S::TargetSpell) => Slot::TargetSpell,
         Some(other) => {
             l.unsupported(format!("TriggerPredicate.subject({other:?})"));
             return None;
@@ -260,6 +264,10 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
             let n = l.int("NoncreatureSpellsCastThisTurn.n", *n, 1, 99) as u8;
             (Cond::SpellsCastThisTurn { n, noncreature: true }, false)
         }
+        // "If you have the initiative" (CR 725); "if you've completed a
+        // dungeon" (309.7).
+        S::HasInitiative(nodes::HasInitiative {}) => (Cond::HasInitiative, true),
+        S::CompletedADungeon(nodes::CompletedADungeon {}) => (Cond::CompletedDungeon, true),
         other => {
             l.unsupported(format!("StatePredicate:{}", other.tag()));
             return None;

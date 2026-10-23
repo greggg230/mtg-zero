@@ -76,6 +76,10 @@ pub enum Amount {
     /// The times the additional cost of the event's spell was paid
     /// (replicate, CR 702.56a).
     EventSpellTimes,
+    /// The number of attacking creatures (CR 506.4).
+    Attacking,
+    /// The controller's experience counters (CR 122.1).
+    Experience,
 }
 
 /// Which objects an `Ext` op acts on.
@@ -490,10 +494,12 @@ pub enum Ext {
     /// the other [nonland] permanents they control at once. Choice: a
     /// permanent.
     KeepOneOfEachType { types: Vec<u16>, nonland: bool },
-    /// The source connives (CR 701.50a): its controller draws a card, then
-    /// discards a card (a decision); if a nonland card was discarded, a
-    /// +1/+1 counter on the source if it is still that permanent.
-    Connive,
+    /// The first object of `on` connives n (CR 701.50a): its controller
+    /// draws n cards, then discards n cards (a decision each); for each
+    /// nonland card discarded, a +1/+1 counter on it if it is still that
+    /// permanent. With no object (it left), the ability's controller does
+    /// it (701.50c-like, last known information).
+    Connive { on: On, n: Amount },
     // ---- M7b part 3: copies (`copies.rs`, ENGINE.md 26) ----
     /// `who` creates n tokens that are copies of `of` (CR 707.2, 111.10
     /// copiable values), with the exceptions `exc` (707.9); they become the
@@ -511,6 +517,51 @@ pub enum Ext {
     ExileEventCard,
     /// Each object of `on` becomes prepared (CR 722.3a).
     BecomePrepared { on: On },
+    // ---- M7b part 3b: the stack, ward, the initiative, graveyard
+    // abilities (`stack_ext.rs`, `dungeon.rs`; ENGINE.md 27) ----
+    /// The source of each legal target ability of requirement `tgt`, if it
+    /// is an artifact, creature or planeswalker on the battlefield (the
+    /// same object), loses all abilities for as long as this ability's
+    /// source remains on the battlefield (CR 611.2b; "if an ability of an
+    /// artifact, creature, or planeswalker is countered this way, that
+    /// permanent loses all abilities": right before the counter).
+    SourceOfTargetLosesAbilities { tgt: u8 },
+    /// The controller gains control of each legal target spell of `tgt`
+    /// (a permanent spell then enters under their control, CR 608.3a) and
+    /// may choose new targets for it (115.7).
+    GainControlOfSpell { tgt: u8 },
+    /// Counter the spell or ability of the triggered ability's event, if
+    /// it is still on the stack ("counter that spell or ability": ward, CR
+    /// 702.21a).
+    CounterEventItem,
+    /// `who` may pay `life` life (CR 119.4: only with that much life) or
+    /// discard a card of their choice (`discard`); if they do, continue at
+    /// `if_paid` ("unless that player pays", 118.12). Choice: yes/no, or a
+    /// hand card / `PASS`.
+    OfferPayOther { who: Who, life: u8, discard: bool, if_paid: u16 },
+    /// `who` takes the initiative (CR 725.2: the initiative's "whenever a
+    /// player takes the initiative, that player ventures into Undercity"
+    /// triggers).
+    TakeInitiative { who: Who },
+    /// `who` ventures into Undercity (CR 701.49, 309.5). Choice: which room
+    /// next (`ChooseRoom`).
+    Venture { who: Who },
+    /// The controller puts a card matching `filter` from among the pile
+    /// onto the battlefield (their choice; nothing if none); it becomes the
+    /// made object. Choice: a `LIBRARY` slot of the pile.
+    PileToBattlefield { filter: Filter },
+    /// The controller gets n experience counters (CR 122.1).
+    GetExperience { n: u8 },
+    /// The controller creates n tokens (an amount) [tapped] [and attacking,
+    /// CR 508.4].
+    CreateTokensN { token: u16, n: Amount, tapped: bool, attacking: bool },
+    /// The controller discards `discard` cards (a decision each), then
+    /// draws `draw`; the nonland cards discarded are remembered
+    /// (`Amount::Remembered`).
+    DiscardThenDraw { discard: u8, draw: u8 },
+    /// The source card, if it is still that card in its owner's graveyard,
+    /// returns to the battlefield under its owner's control [tapped].
+    SourceFromGraveyard { tapped: bool },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -540,6 +591,10 @@ pub enum CopyOf {
     /// The permanent the source is attached to (an Aura's enchanted
     /// creature).
     SourceHost,
+    /// The ability's source card as it last existed in a graveyard (its
+    /// printed values: eternalize, "exile this card from your graveyard:
+    /// create a token that's a copy of it").
+    SourceCard,
 }
 
 /// Which spell a copy is a copy of (CR 707.10).
@@ -734,6 +789,8 @@ impl Op {
             Op::Ext(Ext::CreateTokenCopy { n, who: w, .. }) => who(w) || amt(n),
             Op::Ext(Ext::CopySpell { of, n, who: w, .. }) => *of == SpellOf::EventSpell || who(w) || amt(n),
             Op::Ext(Ext::ExileEventCard) => true,
+            Op::Ext(Ext::CounterEventItem) => true,
+            Op::Ext(Ext::OfferPayOther { who: w, .. }) => who(w),
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::Poison { who: w, n }) => who(w) || amt(n),
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
@@ -769,6 +826,7 @@ impl Op {
             Op::Ext(Ext::ExileTopMayCast { skip }) => Some(skip),
             Op::Ext(Ext::JumpUnlessEventObj { to, .. }) => Some(to),
             Op::Ext(Ext::OnceMay { skip }) => Some(skip),
+            Op::Ext(Ext::OfferPayOther { if_paid, .. }) => Some(if_paid),
             _ => None,
         }
     }
@@ -811,6 +869,19 @@ impl Builder {
         let t = self.target(filter, min, max);
         self.targets[t as usize].distinct = distinct;
         t
+    }
+
+    /// Insert `op` at position `at` (before what is there): jumps past `at`
+    /// move with the ops they jump to.
+    pub fn insert(&mut self, at: usize, op: Op) {
+        for o in self.program.iter_mut() {
+            if let Some(t) = o.jump_target() {
+                if *t as usize > at {
+                    *t += 1;
+                }
+            }
+        }
+        self.program.insert(at, op);
     }
 
     /// Point the jump of the op at `at` to the current end.

@@ -198,6 +198,9 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
             json!({"$t": "DrawCards", "amount": 1}),
             json!({"additional_cost_sacrifice_filter": {"$t": "CardFilter", "any_types": ["Artifact"]}}),
         ),
+        // "You take the initiative." (An instant: the initiative at instant
+        // speed, CR 701.49c.)
+        spell("Test Initiative", "Instant", cost("{U}"), json!({"$t": "TakeInitiative"}), none.clone()),
         // "This spell costs {1} less to cast for each artifact you control.
         // You may pay {2}{U} rather than pay this spell's mana cost. Draw a
         // card." (A reduction applies to an alternative cost, CR 601.2f.)

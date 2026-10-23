@@ -667,11 +667,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             up_to_one,
         }) => {
             // "Put/return target <filter> card from a graveyard / your
-            // graveyard onto the battlefield [under your control]."
+            // graveyard onto the battlefield [under your control] [with a
+            // <kind> counter on it]. [If that creature would leave the
+            // battlefield, exile it instead of putting it anywhere else.]"
             l.deny("ReturnCardFromGraveyardToBattlefield.haste", haste);
             l.deny("ReturnCardFromGraveyardToBattlefield.exile_at_next_end_step", exile_at_next_end_step);
-            l.deny("ReturnCardFromGraveyardToBattlefield.with_counter", with_counter);
-            l.deny("ReturnCardFromGraveyardToBattlefield.exile_if_it_would_leave", exile_if_it_would_leave);
             let Some(cf) = super::filter::lower_card_filter(l, card_filter) else { return true };
             let (inner, yours) = match source {
                 enums::ReanimateSource::TargetAnyGraveyard => (cf, true),
@@ -683,6 +683,15 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             };
             let t = b.target(Filter::InGraveyard(Box::new(inner)), if *up_to_one { 0 } else { 1 }, 1);
             b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: true, yours, tapped: false }));
+            if let Some(name) = with_counter {
+                // (Put on it as it enters; ENGINE.md 27.8.)
+                let counter = counter_by_name(l, name);
+                b.op(Op::Ext(Ext::PutCounters { on: On::Made, counter, n: Amount::Fixed(1) }));
+            }
+            if *exile_if_it_would_leave {
+                // A replacement effect on that permanent (CR 614.1a).
+                apply(b, On::Made, vec![Mod::ExileIfLeaves], Until::Forever);
+            }
             if *lose_life_equal_mv {
                 b.op(Op::LoseLife { who: Who::You, n: Amount::LkiManaValue });
             }
@@ -1183,9 +1192,21 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         }) => {
             // "Exile the top n cards of <whose> library. You may play / cast
             // them this turn [without paying their mana costs]" (CR 601.2a,
-            // 305.1: playing a land still uses the land drop).
+            // 305.1: playing a land still uses the land drop). "If <state>,
+            // you may play that card this turn without paying its mana cost.
+            // Otherwise, you may play that card this turn" (`free_if`,
+            // checked as it resolves).
             l.deny("ExileTopCardsWithPlayPermission.face_down", face_down);
-            l.deny("ExileTopCardsWithPlayPermission.free_if", free_if);
+            let free_if = match free_if.as_deref() {
+                None => None,
+                Some(s) => match super::trigger::lower_state_pred(l, s) {
+                    Some((c, _)) => Some(c),
+                    None => return true,
+                },
+            };
+            if free_if.is_some() && *free {
+                l.unsupported("ExileTopCardsWithPlayPermission.free_if(with free)");
+            }
             let n = l.int("ExileTopCardsWithPlayPermission.count", *count, 1, 10) as u8;
             let who = match whose {
                 enums::ImpulseLibraryOwner::You => Who::You,
@@ -1205,7 +1226,20 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
             };
             let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
-            b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind, this_turn }));
+            match free_if {
+                None => {
+                    b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind, this_turn }));
+                }
+                Some(cond) => {
+                    let j = b.op(Op::JumpUnless { cond, to: 0 });
+                    let free_kind = crate::game::PermKind::Play { free: true, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+                    b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind: free_kind, this_turn }));
+                    let end = b.op(Op::Jump { to: 0 });
+                    b.patch(j);
+                    b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind, this_turn }));
+                    b.patch(end);
+                }
+            }
         }
         E::GrantFlashbackToTargetCardUEOT(nodes::GrantFlashbackToTargetCardUEOT { card_filter }) => {
             // "Target instant or sorcery card in your graveyard gains
@@ -1327,8 +1361,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::CreateTokenCopyOfSource(nodes::CreateTokenCopyOfSource { extra_card_types, eternalize }) => {
             // "Create a token that's a copy of it[, except it's an
             // artifact]" (its copiable values as it last existed, CR 707.2,
-            // 608.2h; the exception, 707.9b).
-            l.deny("CreateTokenCopyOfSource.eternalize", eternalize);
+            // 608.2h; the exception, 707.9b). Eternalize (702.129a, a
+            // graveyard ability that exiles the card as a cost): "a copy of
+            // this card, except it's black, it's 4/4, it has no mana cost,
+            // and it's a Zombie in addition to its other types".
             let mut exc = crate::copies::Except::default();
             for t in extra_card_types {
                 match types::from_name(t) {
@@ -1336,7 +1372,16 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     None => l.unsupported(format!("CreateTokenCopyOfSource.extra_card_types({t})")),
                 }
             }
-            let of = crate::program::CopyOf::Source;
+            let of = if *eternalize {
+                exc.colors = Some(1 << 2); // black
+                exc.pt = Some((4, 4));
+                exc.no_cost = true;
+                let zombie = l.subtype("Zombie");
+                exc.add_subtype(zombie);
+                crate::program::CopyOf::SourceCard
+            } else {
+                crate::program::CopyOf::Source
+            };
             b.op(Op::Ext(Ext::CreateTokenCopy { of, who: Who::You, n: Amount::Fixed(1), exc }));
             b.op(Op::Ext(Ext::TokensCreated));
         }

@@ -202,6 +202,10 @@ pub(crate) fn lower_condition_or_state(l: &mut Lowerer, c: &cats::ConditionOrSta
         E::CardsInGraveyardAtLeast(nodes::CardsInGraveyardAtLeast { n }) => {
             Some(Cond::GraveyardAtLeast(l.int("CardsInGraveyardAtLeast.n", *n, 0, 99) as u8))
         }
+        // "If you've completed a dungeon" (CR 309.7); "if you have the
+        // initiative" (725).
+        E::CompletedADungeon(nodes::CompletedADungeon {}) => Some(Cond::CompletedDungeon),
+        E::HasInitiative(nodes::HasInitiative {}) => Some(Cond::HasInitiative),
     })
 }
 

@@ -207,6 +207,18 @@ pub struct Player {
     pub flash_sorceries: bool,
     /// Poison counters (CR 122.1f; ten or more lose the game, 704.5c).
     pub poison: u16,
+    /// Experience counters (CR 122.1).
+    pub experience: u16,
+}
+
+/// A player's dungeon (CR 309): the dungeon card in the command zone with the
+/// venture marker on a room (Undercity's rooms 0..8, `dungeon.rs`), and the
+/// dungeons the player completed (309.7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct Dungeon {
+    pub obj: Option<CardIdx>,
+    pub room: u8,
+    pub completed: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -514,6 +526,15 @@ pub struct Game {
     /// (an engine limit on a loop of optional actions, CR 732.2a, 732.3;
     /// ENGINE.md 26.11).
     pub(crate) may_copies: u8,
+    // ---- M7b part 3b: the initiative and dungeons (ENGINE.md 27.4) ----
+    /// The player who has the initiative (CR 725).
+    pub(crate) initiative: Option<PlayerId>,
+    /// Each player's dungeon (CR 309).
+    pub(crate) dungeons: [Dungeon; 2],
+    /// The object the initiative's inherent triggered abilities name as
+    /// their source (CR 725.2: they have none): a slot in no zone, made the
+    /// first time one triggers.
+    pub(crate) rules_src: Option<CardIdx>,
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -589,6 +610,7 @@ impl Game {
             lost_life: false,
             flash_sorceries: false,
             poison: 0,
+            experience: 0,
         };
         Game {
             db,
@@ -659,6 +681,9 @@ impl Game {
             defer_enters: false,
             prepared: Vec::new(),
             may_copies: 0,
+            initiative: None,
+            dungeons: [Dungeon::default(); 2],
+            rules_src: None,
             batching: false,
             batch_start: 0,
             entering_cast: false,
@@ -1094,9 +1119,16 @@ impl Game {
         } else {
             to
         };
-        // "If it would die this turn, exile it instead" (Suplex).
-        let to = if from == Zone::Battlefield && to == Zone::Graveyard && self.flags_of(idx).exile_if_dies {
-            Zone::Exile
+        // "If it would die this turn, exile it instead" (Suplex); "if it
+        // would leave the battlefield, exile it instead of putting it
+        // anywhere else" (From the Catacombs; CR 614.1a).
+        let to = if from == Zone::Battlefield && to != Zone::Exile {
+            let fl = self.flags_of(idx);
+            if (to == Zone::Graveyard && fl.exile_if_dies) || fl.exile_if_leaves {
+                Zone::Exile
+            } else {
+                to
+            }
         } else {
             to
         };
@@ -1390,6 +1422,8 @@ impl Game {
             return 0;
         }
         match t {
+            // (An ability can't be dealt damage.)
+            Target::Stack(_) => return 0,
             Target::Player(p) => {
                 // CR 120.3a: the player loses that much life.
                 self.players[p as usize].life -= amount;
@@ -1506,6 +1540,13 @@ impl Game {
         match t {
             Target::Player(p) => format!("P{p}"),
             Target::Obj(r) => format!("{}#{}", self.name(r.idx), r.idx.0),
+            Target::Stack(id) => match self.stack.iter().find(|s| s.id == id) {
+                Some(s) => match s.kind {
+                    StackKind::Ability { ability, .. } => format!("ability of {} (stack #{id})", self.db.def(ability.def).name),
+                    StackKind::Spell { card } => format!("{} (stack #{id})", self.name(card)),
+                },
+                None => format!("stack #{id} (gone)"),
+            },
         }
     }
 }

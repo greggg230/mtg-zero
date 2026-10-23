@@ -309,8 +309,8 @@ pub(crate) mod ctx {
     pub const TASK: usize = PENDING + 1;
     pub const CARD: usize = TASK + TASKS; // a card code
     pub const HAS_CARD: usize = CARD + super::CODE;
-    pub const SLOT_KIND: usize = HAS_CARD + 1; // 4
-    pub const SLOT_INDEX: usize = SLOT_KIND + 4;
+    pub const SLOT_KIND: usize = HAS_CARD + 1; // 5
+    pub const SLOT_INDEX: usize = SLOT_KIND + 5;
     pub const MODE: usize = SLOT_INDEX + 1;
     pub const OP: usize = MODE + 1;
     pub const PC: usize = OP + OPS;
@@ -528,6 +528,13 @@ impl Game {
                         _ => {}
                     },
                     Target::Obj(_) => {}
+                    // An ability on the stack: its stack slot.
+                    Target::Stack(id) => {
+                        if let Some(pos) = self.stack.iter().rev().position(|x| x.id == id) {
+                            tb[6] = 1.0;
+                            tb[7] = pos as f32 / 8.0;
+                        }
+                    }
                 }
             }
         }
@@ -574,6 +581,10 @@ impl Game {
             bag_add(out, ids, if o.owner == me { bag::MY_EXILE } else { bag::OPP_EXILE }, o.def);
         }
         for &c in &self.command {
+            // (Dungeons are in the globals, ENGINE.md 27.7.)
+            if self.is_dungeon(c) {
+                continue;
+            }
             let o = &self.objs[c.i()];
             bag_add(out, ids, if o.controller == me { bag::MY_EMBLEMS } else { bag::OPP_EMBLEMS }, o.def);
         }
@@ -844,6 +855,7 @@ impl Game {
                     AbilitySlot::Trigger(i) => (1, i),
                     AbilitySlot::Activated(i) => (2, i),
                     AbilitySlot::Hand(i) => (3, i),
+                    AbilitySlot::Graveyard(i) => (4, i),
                 };
                 x[ctx::SLOT_KIND + k] = 1.0;
                 x[ctx::SLOT_INDEX] = i as f32 / 4.0;

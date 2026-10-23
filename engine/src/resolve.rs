@@ -281,6 +281,7 @@ impl Game {
                     && match t {
                         Target::Obj(o) => self.live(o),
                         Target::Player(_) => true,
+                        Target::Stack(id) => self.item_index(id).is_some(),
                     }
             })
             .map(|(_, &(_, t))| t)
@@ -293,10 +294,11 @@ impl Game {
             Who::You => Some(f.controller),
             Who::TargetPlayer(i) => self.targets_of(f, i).into_iter().find_map(|t| match t {
                 Target::Player(p) => Some(p),
-                Target::Obj(_) => None,
+                Target::Obj(_) | Target::Stack(_) => None,
             }),
             Who::ControllerOfTarget(i) => self.targets_of(f, i).into_iter().find_map(|t| match t {
                 Target::Obj(o) => Some(self.objs[o.idx.i()].controller),
+                Target::Stack(id) => self.stack_item(id).map(|s| s.controller),
                 Target::Player(_) => None,
             }),
             Who::LkiController => f.lki.map(|l| l.1),
@@ -304,9 +306,10 @@ impl Game {
             Who::NonActive => Some(crate::ids::opp(self.turn.active)),
             Who::Opponent => Some(crate::ids::opp(f.controller)),
             Who::EventPlayer => f.ev.player,
-            Who::TargetOrItsController(i) => self.targets_of(f, i).into_iter().next().map(|t| match t {
-                Target::Player(p) => p,
-                Target::Obj(o) => self.objs[o.idx.i()].controller,
+            Who::TargetOrItsController(i) => self.targets_of(f, i).into_iter().next().and_then(|t| match t {
+                Target::Player(p) => Some(p),
+                Target::Obj(o) => Some(self.objs[o.idx.i()].controller),
+                Target::Stack(id) => self.stack_item(id).map(|s| s.controller),
             }),
             Who::NotLkiController => f.lki.map(|l| crate::ids::opp(l.1)),
         }
@@ -352,6 +355,8 @@ impl Game {
             Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as i32 + 1) / 2,
             Amount::EventTimes => (f.ev.amount >> 1) as i32,
             Amount::EventSpellTimes => self.event_spell_times(f) as i32,
+            Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
+            Amount::Experience => self.players[f.controller as usize].experience as i32,
         }
     }
 
@@ -430,18 +435,7 @@ impl Game {
             }
             Op::Counter { tgt, dest } => {
                 for t in self.targets_of(f, tgt) {
-                    if let Target::Obj(o) = t {
-                        // CR 101.2: "can't be countered" wins.
-                        if self.objs[o.idx.i()].zone == Zone::Stack && !self.def_of(o.idx).uncounterable {
-                            self.note(|g| format!("counters {}", g.name(o.idx)));
-                            match dest {
-                                SpellDest::Graveyard => self.move_card(o.idx, Zone::Graveyard, Pos::Top),
-                                SpellDest::LibraryTop => self.move_card(o.idx, Zone::Library, Pos::Top),
-                                SpellDest::Exile => self.move_card(o.idx, Zone::Exile, Pos::Top),
-                                SpellDest::Hand => self.move_card(o.idx, Zone::Hand, Pos::Top),
-                            };
-                        }
-                    }
+                    self.counter(t, dest);
                 }
                 Flow::Next
             }
@@ -583,6 +577,9 @@ impl Game {
             Op::Remember { tgt } => {
                 f.lki = self.targets_of(f, tgt).into_iter().find_map(|t| match t {
                     Target::Obj(o) => Some((self.power(o.idx), self.objs[o.idx.i()].controller)),
+                    // An ability: its controller ("its controller draws a
+                    // card", after it is countered).
+                    Target::Stack(id) => self.stack_item(id).map(|s| (0, s.controller)),
                     Target::Player(_) => None,
                 });
                 Flow::Next
@@ -1035,6 +1032,50 @@ impl Game {
                 self.shuffle_library(p);
             }
         }
+    }
+
+    /// Counter a spell or an ability on the stack (CR 701.5a: it is removed
+    /// from the stack and doesn't resolve): a spell goes to `dest` (its
+    /// owner's graveyard unless the effect says otherwise), an ability
+    /// ceases to exist. A spell that can't be countered stays (101.2).
+    /// Returns whether it was countered.
+    pub(crate) fn counter(&mut self, t: Target, dest: SpellDest) -> bool {
+        match t {
+            Target::Obj(o) if self.live(o) && self.objs[o.idx.i()].zone == Zone::Stack => {
+                if self.spell_uncounterable(o.idx) {
+                    self.note(|g| format!("{} can't be countered", g.name(o.idx)));
+                    return false;
+                }
+                self.note(|g| format!("counters {}", g.name(o.idx)));
+                match dest {
+                    SpellDest::Graveyard => self.move_card(o.idx, Zone::Graveyard, Pos::Top),
+                    SpellDest::LibraryTop => self.move_card(o.idx, Zone::Library, Pos::Top),
+                    SpellDest::Exile => self.move_card(o.idx, Zone::Exile, Pos::Top),
+                    SpellDest::Hand => self.move_card(o.idx, Zone::Hand, Pos::Top),
+                };
+                true
+            }
+            Target::Stack(id) => match self.item_index(id) {
+                Some(pos) if matches!(self.stack[pos].kind, StackKind::Ability { .. }) => {
+                    self.note(|g| format!("counters {}", g.describe_target(t)));
+                    self.stack.remove(pos);
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Can't spell `card` be countered: "this spell can't be countered"
+    /// (CR 101.2), or its controller controls a permanent saying "spells you
+    /// control can't be countered"?
+    pub(crate) fn spell_uncounterable(&self, card: CardIdx) -> bool {
+        if self.def_of(card).uncounterable {
+            return true;
+        }
+        let p = self.objs[card.i()].controller;
+        self.permanents_of(p).any(|c| self.abilities(c).spells_uncounterable)
     }
 
     /// Destroy a permanent (CR 701.7): to its owner's graveyard

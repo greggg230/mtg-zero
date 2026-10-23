@@ -64,6 +64,10 @@ impl Game {
         if self.players.iter().any(|p| p.life <= 0 || p.drew_from_empty || p.poison >= 10) {
             return true;
         }
+        // 704.5t: a dungeon whose venture marker is on its bottommost room.
+        if self.dungeons.iter().any(|d| d.obj.is_some() && d.room == crate::dungeon::BOTTOM) && !self.finished_dungeons().is_empty() {
+            return true;
+        }
         if self.tokens > 0 && !self.stray_tokens().is_empty() {
             return true;
         }
@@ -184,6 +188,7 @@ impl Game {
             || !self.legend_groups().is_empty()
             || !self.dead_walkers().is_empty()
             || !self.finished_sagas().is_empty()
+            || !self.finished_dungeons().is_empty()
     }
 
     /// One SBA check as part of the priority loop (117.5): choices for the
@@ -245,6 +250,9 @@ impl Game {
             return true;
         }
         let (zero, destroyed) = self.dying_creatures();
+        // 704.5t: completed dungeons leave the game (at the same time).
+        let dungeons = self.finished_dungeons();
+        self.remove_finished_dungeons(&dungeons);
         // 704.5q and 704.5n happen at the same time as the rest.
         let pairs = self.counter_pairs();
         for &c in &pairs {
@@ -312,6 +320,6 @@ impl Game {
         for &c in &self.battlefield {
             self.objs[c.i()].deathtouched = false;
         }
-        !all.is_empty() || !stray.is_empty() || !pairs.is_empty() || !unattach.is_empty()
+        !all.is_empty() || !stray.is_empty() || !pairs.is_empty() || !unattach.is_empty() || !dungeons.is_empty()
     }
 }

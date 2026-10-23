@@ -183,7 +183,7 @@ pub(crate) fn lower_effect_faces(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         }
         // "<This creature> connives" (CR 701.50a).
         E::SourceConnives(nodes::SourceConnives {}) => {
-            b.op(Op::Ext(Ext::Connive));
+            b.op(Op::Ext(Ext::Connive { on: crate::program::On::Source, n: crate::program::Amount::Fixed(1) }));
         }
         // "All <lands> you control become p/t creatures until end of turn.
         // They're still lands." (Life)

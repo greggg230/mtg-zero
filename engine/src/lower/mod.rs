@@ -13,6 +13,7 @@ pub mod effect;
 pub mod effect_copies;
 pub mod effect_ext;
 pub mod effect_faces;
+pub mod effect_stack;
 pub mod effect_walkers;
 pub mod filter;
 pub mod printing;

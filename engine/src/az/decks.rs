@@ -44,6 +44,7 @@ pub fn land_colors(db: &CardDb, d: &CardDef) -> u8 {
                     ManaProd::SameType { mask, .. } | ManaProd::Combo { mask, .. } => *mask,
                     ManaProd::PerPermanent { ty, .. } => 1 << *ty,
                     ManaProd::ColorAmong(_) => COLORS,
+                    ManaProd::IfElse { then, els, .. } => (0..6).filter(|&i| then[i] + els[i] > 0).fold(0, |m, i| m | 1 << i),
                 }
             }
             ActEffect::Stack(ab) => {

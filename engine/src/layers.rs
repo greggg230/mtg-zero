@@ -27,6 +27,9 @@ pub enum Until {
     /// "Until your next turn": until the effect's controller's next turn
     /// begins (CR 611.2b; ends as that turn's untap step starts).
     YourNextTurn,
+    /// "For as long as <this object> remains on the battlefield" (CR
+    /// 611.2b): ends when that object leaves (Tishana's Tidebinder).
+    WhileOnBattlefield(ObjRef),
 }
 
 /// What a continuous effect from a resolved spell or ability applies to.
@@ -61,6 +64,8 @@ pub struct Flags {
     pub cant_be_blocked: bool,
     pub must_attack: bool,
     pub exile_if_dies: bool,
+    /// "If it would leave the battlefield, exile it instead."
+    pub exile_if_leaves: bool,
 }
 
 impl Game {
@@ -146,7 +151,7 @@ impl Game {
     /// The timestamp of the latest "loses all abilities" effect on `c`:
     /// abilities from effects and statics with later timestamps survive it
     /// (CR 613.7).
-    fn loss_ts(&self, c: CardIdx) -> Option<u32> {
+    pub(crate) fn loss_ts(&self, c: CardIdx) -> Option<u32> {
         if !self.any_loss || self.objs[c.i()].zone != Zone::Battlefield {
             return None;
         }
@@ -264,7 +269,11 @@ impl Game {
     // ---- layer 5: colours -------------------------------------------------
 
     pub fn colors_of(&self, c: CardIdx) -> ManaMask {
-        let base = self.def_of(c).colors;
+        // Layer 1: a copy's "it's black" (CR 707.9b).
+        let base = match self.exc(c).and_then(|e| e.colors) {
+            Some(m) => m,
+            None => self.def_of(c).colors,
+        };
         if self.effects.is_empty() || self.objs[c.i()].zone != Zone::Battlefield {
             return base;
         }
@@ -340,6 +349,12 @@ impl Game {
         p
     }
 
+    /// Is `c` goaded by player `p` (CR 701.38: an effect with `Mod::Goad`
+    /// that `p` controls)?
+    pub(crate) fn goaded_by(&self, c: CardIdx, p: PlayerId) -> bool {
+        !self.effects.is_empty() && self.effects_on(c).any(|e| e.m == Mod::Goad && e.controller == p)
+    }
+
     /// Keywords gained when it attacks the monarch (Okoye).
     pub(crate) fn attack_monarch_kws(&self, c: CardIdx) -> KwSet {
         let mut k = KwSet::default();
@@ -365,8 +380,10 @@ impl Game {
             match m {
                 Mod::CantBlock => f.cant_block = true,
                 Mod::CantBeBlocked => f.cant_be_blocked = true,
-                Mod::MustAttack => f.must_attack = true,
+                // Goaded: it attacks each combat if able (CR 701.38a).
+                Mod::MustAttack | Mod::Goad => f.must_attack = true,
                 Mod::ExileIfDies => f.exile_if_dies = true,
+                Mod::ExileIfLeaves => f.exile_if_leaves = true,
                 _ => {}
             }
         }
@@ -484,6 +501,7 @@ impl Game {
     pub fn devotion(&self, p: PlayerId, color: u8) -> u32 {
         let k = color as usize;
         self.permanents_of(p)
+            .filter(|&c| !self.exc(c).is_some_and(|e| e.no_cost))
             .map(|c| {
                 let m = &self.def_of(c).cost;
                 let hy: u8 = crate::mana::PAIRS
@@ -569,7 +587,10 @@ impl Game {
             self.counters.retain(|x| x.0 != c);
         }
         if !self.effects.is_empty() {
-            self.effects.retain(|e| e.on != Affected::Obj(old));
+            // (Effects "for as long as" it remains on the battlefield end
+            // as it leaves, CR 611.2b.)
+            let left = from == Zone::Battlefield;
+            self.effects.retain(|e| e.on != Affected::Obj(old) && !(left && e.until == Until::WhileOnBattlefield(old)));
             self.effects_changed();
         }
         let d = self.def_of(c);

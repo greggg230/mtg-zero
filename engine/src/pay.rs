@@ -14,8 +14,13 @@ use crate::game::{DamageSource, Game, Pos};
 use crate::ids::{CardIdx, DefId, PlayerId, Target, Zone};
 use crate::mana::{payable_within, Budget, ManaCost, ManaMask, ManaPool, Unit, COLORS};
 
+/// The `Src` slot of an artifact tapped for improvise (CR 702.126a: not a
+/// mana ability; it pays for {1} of the generic mana).
+pub(crate) const IMPROVISE: AbilitySlot = AbilitySlot::Spell;
+
 /// A mana ability that can help pay a cost: of a permanent, or of a card in
-/// hand (the Spirit Guides, CR 605.3a; ENGINE.md 18).
+/// hand (the Spirit Guides, CR 605.3a; ENGINE.md 18); or an artifact tapped
+/// for improvise (`IMPROVISE`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Src {
     pub card: CardIdx,
@@ -90,6 +95,9 @@ pub(crate) struct PayMana {
     /// A several-mana source whose production is being chosen, with the
     /// feasible productions.
     pub now: Option<(Src, Vec<[u8; 6]>)>,
+    /// The spell has improvise (CR 702.126): untapped artifacts may pay for
+    /// {1} each.
+    pub improvise: bool,
 }
 
 impl PayMana {
@@ -105,6 +113,7 @@ impl PayMana {
             keep: Keep::default(),
             phyrexian_life: 0,
             now: None,
+            improvise: false,
         }
     }
 
@@ -128,6 +137,7 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd) -> Vec<[u8; 6]
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
         }
         ManaProd::Fixed(v) => vec![*v],
+        ManaProd::IfElse { cond, then, els } => vec![if g.cond_holds(cond, p) { *then } else { *els }],
         ManaProd::SameType { mask, n } => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, *n)).collect(),
         ManaProd::Combo { mask, n } => {
             let ts: Vec<usize> = (0..6).filter(|&t| mask & (1 << t) != 0).collect();
@@ -286,6 +296,36 @@ impl Game {
             }
         }
         out
+    }
+
+    /// Improvise (CR 702.126a): `p`'s untapped artifacts as sources that pay
+    /// for {1} of generic mana each (a unit of no mana type: only generic
+    /// pips take it), one class per definition. An artifact with a mana
+    /// ability has both as alternatives (both tap it).
+    pub(crate) fn improvise_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
+        let mut out: Vec<Class> = Vec::new();
+        for c in self.permanents_of(p) {
+            if Some(c) == exclude || self.objs[c.i()].tapped || !self.is_type(c, crate::db::types::ARTIFACT) {
+                continue;
+            }
+            let def = self.objs[c.i()].def;
+            let src = Src { card: c, slot: IMPROVISE };
+            match out.iter_mut().find(|cl| cl.def == def) {
+                Some(cl) => cl.members.push(src),
+                None => out.push(Class { def, members: vec![src], yld: Yield::One(Unit::free(0)), dmg: 0, sac_self: false }),
+            }
+        }
+        out
+    }
+
+    /// The sources of a payment: mana abilities, and with improvise the
+    /// untapped artifacts.
+    pub(crate) fn pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: bool) -> Vec<Class> {
+        let mut classes = self.mana_classes(p, exclude);
+        if improvise {
+            classes.extend(self.improvise_classes(p, exclude));
+        }
+        classes
     }
 
     /// A card in hand with a mana ability (a Spirit Guide).
@@ -571,7 +611,7 @@ impl Game {
                 }
                 Some(other) => unreachable!("Phyrexian answer {other:?}"),
                 None => {
-                    let classes = self.mana_classes(payer, pm.keep.exclude);
+                    let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise);
                     let life = self.players[payer as usize].life;
                     let opts: Vec<Opt> = (0..=pm.cost.phyrexian[col])
                         .filter(|&k| {
@@ -614,9 +654,14 @@ impl Game {
             self.finish_payment(&pm);
             return;
         }
-        let classes = self.mana_classes(payer, pm.keep.exclude);
+        let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise);
         if let Some(ch) = self.answer.take() {
-            let Choice::Ability(card, slot) = ch else { unreachable!("pay answer {ch:?}") };
+            let (card, slot) = match ch {
+                Choice::Ability(card, slot) => (card, slot),
+                // An artifact tapped for improvise.
+                Choice::Card(card) => (card, IMPROVISE),
+                other => unreachable!("pay answer {other:?}"),
+            };
             let src = Src { card, slot };
             let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
             pm.min_class = ci as u8;
@@ -676,9 +721,11 @@ impl Game {
                 }
             };
             if ok {
-                opts.push(Opt {
-                    action: self.ability_action(payer, rep.card, rep.slot),
-                    choice: Choice::Ability(rep.card, rep.slot),
+                opts.push(if rep.slot == IMPROVISE {
+                    // Improvise: the artifact's own slot (`MY_PERM`).
+                    Opt { action: self.perm_action(payer, rep.card), choice: Choice::Card(rep.card) }
+                } else {
+                    Opt { action: self.ability_action(payer, rep.card, rep.slot), choice: Choice::Ability(rep.card, rep.slot) }
                 });
             }
         }
@@ -712,13 +759,23 @@ impl Game {
         // Sources that keep their permanent first ("activate only if you
         // control three artifacts" still holds; counts are unchanged), life
         // payments before damage, sacrifices last.
+        // (Artifacts tapped for improvise after the mana abilities, CR
+        // 702.126a.)
         order.sort_by_key(|s| {
+            if s.slot == IMPROVISE {
+                return (true, false, false, false);
+            }
             let ad = self.def_of(s.card).activated_def(s.slot);
             let dmg = ad.mana().map_or(0, |m| m.damage_to_you);
-            (ad.cost.sac_self, dmg > 0, ad.cost.life == 0)
+            (false, ad.cost.sac_self, dmg > 0, ad.cost.life == 0)
         });
         for src in order {
-            self.activate_mana_costs(src);
+            if src.slot == IMPROVISE {
+                self.note(|g| format!("P{payer} taps {} for improvise", g.name(src.card)));
+                self.tap(src.card);
+            } else {
+                self.activate_mana_costs(src);
+            }
         }
         self.add_mana(payer, &pm.extra);
         if pm.phyrexian_life > 0 {

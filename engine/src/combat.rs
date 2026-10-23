@@ -62,6 +62,12 @@ impl Game {
                 if walkers.is_empty() {
                     return;
                 }
+                // CR 701.38a: goaded, it attacks a player other than the
+                // goader if able: goaded by its own controller (2p), it
+                // attacks the defending player, not a planeswalker.
+                if self.goaded_by(card, p) {
+                    return;
+                }
                 let mut opts = vec![Opt { action: act::PLAYER + 1, choice: Choice::Target(Target::Player(dp)) }];
                 for w in walkers {
                     let r = self.obj_ref(w);
@@ -431,6 +437,23 @@ impl Game {
                 if c != p {
                     self.set_monarch(c);
                 }
+            }
+        }
+        // CR 725.2: "whenever one or more creatures a player controls deal
+        // combat damage to the player who has the initiative, the controller
+        // of those creatures takes the initiative" (controlled by the player
+        // who has it; once per damage step and attacking player).
+        if let Some(h) = self.initiative {
+            let mut takers: Vec<crate::ids::PlayerId> = Vec::new();
+            for &(r, p, _) in &to_players {
+                let c = self.objs[r.idx.i()].controller;
+                if p == h && c != h && !takers.contains(&c) {
+                    takers.push(c);
+                }
+            }
+            for c in takers {
+                let ev = crate::triggers::EvCtx { player: Some(c), ..Default::default() };
+                self.initiative_trigger(h, crate::dungeon::DAMAGED, ev);
             }
         }
         // CR 510.3a: "deals combat damage to a player [or planeswalker]"

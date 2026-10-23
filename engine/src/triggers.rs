@@ -13,6 +13,9 @@ pub(crate) enum Subj {
     None,
     Obj(ObjRef),
     Player(PlayerId),
+    /// A spell or ability on the stack, by its item id (the one that
+    /// targets, `BecomesTarget`); its controller is its player.
+    Item(u32),
 }
 
 /// Something that happened (603.2), with its subjects (`EventKind`
@@ -33,6 +36,11 @@ impl Event {
         Event { kind, a: Subj::Player(p), b: Subj::None, amount: 0 }
     }
     fn subject(&self, s: Slot) -> Subj {
+        // "Becomes the target": the target is a player or a permanent
+        // (`Target`), or a spell (`TargetSpell`, amount 1).
+        if self.kind == EventKind::BecomesTarget && (s == Slot::Target) != (self.amount == 0) && s != Slot::Controller {
+            return Subj::None;
+        }
         match self.kind.slot_index(s) {
             Some(0) => self.a,
             Some(_) => self.b,
@@ -60,6 +68,9 @@ pub struct EvCtx {
     /// The second object subject ("that creature" dealt damage).
     pub obj2: Option<ObjRef>,
     pub amount: u16,
+    /// The spell or ability of the event, by stack item id (0 = none):
+    /// the one that targets ("counter that spell or ability", ward).
+    pub item: u32,
 }
 
 /// A triggered ability waiting to be put on the stack (603.3).
@@ -155,11 +166,20 @@ impl Game {
         if obs.is_empty() && self.temp_triggers.is_empty() {
             return;
         }
+        // ("That player" of an event with a spell or ability is its
+        // controller: "unless that player pays", ward.)
+        let item = [ev.a, ev.b].iter().find_map(|s| match s {
+            Subj::Item(id) => Some(*id),
+            _ => None,
+        });
         let ctx = EvCtx {
-            player: [ev.a, ev.b].iter().find_map(|s| match s {
-                Subj::Player(p) => Some(*p),
-                _ => None,
-            }),
+            player: match item.and_then(|id| self.stack_item(id)) {
+                Some(s) => Some(s.controller),
+                None => [ev.a, ev.b].iter().find_map(|s| match s {
+                    Subj::Player(p) => Some(*p),
+                    _ => None,
+                }),
+            },
             obj: [ev.a, ev.b].iter().find_map(|s| match s {
                 Subj::Obj(r) => Some(*r),
                 _ => None,
@@ -169,6 +189,7 @@ impl Game {
                 _ => None,
             },
             amount: ev.amount,
+            item: item.unwrap_or(0),
         };
         // A copy of a spell isn't cast (CR 707.10): only "whenever you cast
         // or copy" abilities see its event.
@@ -240,20 +261,24 @@ impl Game {
                 // "At the beginning of your upkeep": the source's own
                 // event (the IR's IsSelf on a player event).
                 Subj::Player(_) => *s == Slot::Default,
-                Subj::None => false,
+                Subj::None | Subj::Item(_) => false,
             },
             TrigPred::Subject(s, f) => {
                 let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
                 match ev.subject(*s) {
                     Subj::Obj(r) => self.live(r) && self.subject_matches(f, r.idx, &ctx),
                     Subj::Player(q) => self.filter_ok(f, Target::Player(q), &ctx),
-                    Subj::None => false,
+                    Subj::None | Subj::Item(_) => false,
                 }
             }
             TrigPred::Controlled(s, you) => {
                 let who = match ev.subject(*s) {
                     Subj::Obj(r) => self.objs[r.idx.i()].controller,
                     Subj::Player(q) => q,
+                    Subj::Item(id) => match self.stack_item(id) {
+                        Some(item) => item.controller,
+                        None => return false,
+                    },
                     Subj::None => return false,
                 };
                 (who == src.controller) == *you
@@ -281,6 +306,13 @@ impl Game {
                 _ => false,
             },
             TrigPred::OrCopy => true,
+            TrigPred::Granted(s) => match ev.subject(*s) {
+                Subj::Obj(r) => {
+                    let ts = self.objs[src.r.idx.i()].timestamp;
+                    self.live(r) && self.loss_ts(r.idx).is_none_or(|l| l < ts)
+                }
+                _ => false,
+            },
             TrigPred::FormerHost(s) => match ev.subject(*s) {
                 // Evaluated as the host leaves (look back): the Equipment
                 // is still attached to it.
@@ -431,6 +463,38 @@ impl Game {
         let AbilitySlot::Trigger(i) = ability.slot else { return true };
         let t = &self.db.def(ability.def).triggers[i as usize];
         t.pred.intervening().into_iter().all(|c| self.cond_holds(c, controller))
+    }
+
+    /// `t` became the target of the spell or ability of stack item `id`
+    /// (its targets were chosen or changed): a "becomes the target" event
+    /// for a player, a permanent or a spell (ward, CR 702.21a; Leovold).
+    /// Graveyard cards and abilities have no such trigger in the cube.
+    pub(crate) fn became_target(&mut self, id: u32, t: Target) {
+        let (a, amount) = match t {
+            Target::Player(q) => (Subj::Player(q), 0),
+            Target::Obj(r) if self.live(r) => match self.objs[r.idx.i()].zone {
+                Zone::Battlefield => (Subj::Obj(r), 0),
+                Zone::Stack => (Subj::Obj(r), 1),
+                _ => return,
+            },
+            _ => return,
+        };
+        self.event(Event { kind: EventKind::BecomesTarget, a, b: Subj::Item(id), amount });
+    }
+
+    /// Every distinct target of stack item `id` becomes its target (a copy
+    /// of a spell put onto the stack with its targets, CR 707.10c).
+    pub(crate) fn all_became_targets(&mut self, id: u32) {
+        let Some(item) = self.stack_item(id) else { return };
+        let mut ts: Vec<Target> = Vec::new();
+        for &(_, t) in &item.targets {
+            if !ts.contains(&t) {
+                ts.push(t);
+            }
+        }
+        for t in ts {
+            self.became_target(id, t);
+        }
     }
 
     /// Start a simultaneous move of several objects off the battlefield

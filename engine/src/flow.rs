@@ -70,9 +70,10 @@ pub(crate) enum Task {
     /// What a permanent that may enter as a copy copies (CR 707.5), then
     /// it enters (`note`: its `Enters` event's).
     EnterAsCopy { card: CardIdx, note: u16 },
-    /// New targets for a copy of a spell, from its target `k` on (CR
-    /// 707.10c).
-    CopyTargets { id: u32, k: u8 },
+    /// New targets for a copy of a spell (`copy`, CR 707.10c) or a spell
+    /// whose controller may choose new targets (115.7), from its target `k`
+    /// on.
+    CopyTargets { id: u32, k: u8, copy: bool },
     /// Announce how many times an additional cost is paid (CR 601.2b:
     /// replicate, squad, offspring).
     ChooseTimes { id: u32 },
@@ -222,7 +223,7 @@ impl Game {
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::EnterAsCopy { card, note } => self.enter_as_copy(card, note),
-            Task::CopyTargets { id, k } => self.copy_targets(id, k),
+            Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
             Task::ChooseTimes { id } => self.choose_times(id),
         }
     }
@@ -430,6 +431,12 @@ impl Game {
                 }
                 if let Some(k) = kind {
                     self.event(Event::player(k, ap));
+                }
+                // CR 725.2: "at the beginning of the upkeep of the player who
+                // has the initiative, that player ventures into Undercity".
+                if self.turn.step == Step::Upkeep && self.initiative == Some(ap) {
+                    let ev = crate::triggers::EvCtx { player: Some(ap), ..Default::default() };
+                    self.initiative_trigger(ap, crate::dungeon::UPKEEP, ev);
                 }
                 // CR 724.2: at the beginning of the monarch's end step, they
                 // draw a card (here as the step begins, not on the stack).

@@ -36,6 +36,10 @@ pub(crate) struct Repl {
     /// "You have no maximum hand size" (a rule of the game for you, CR
     /// 402.2).
     pub no_max_hand: bool,
+    /// "Spells you control can't be countered."
+    pub spells_uncounterable: bool,
+    /// "Other creatures you control have ward—<cost>" (CR 702.21).
+    pub grants_ward: Option<crate::db::WardCost>,
 }
 
 /// A static ability's replacement effect -> `repl`.
@@ -85,8 +89,6 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     l.deny("StaticAbility.tier_threshold", tier_threshold);
     l.deny("StaticAbility.room_half", room_half);
     l.deny("StaticAbility.grants_creature_spells_uncounterable", grants_creature_spells_uncounterable);
-    l.deny("StaticAbility.grants_spells_uncounterable", grants_spells_uncounterable);
-    l.deny("StaticAbility.grants_ward_life_cost", grants_ward_life_cost);
     l.deny("StaticAbility.activation_cost_reduction", activation_cost_reduction);
     l.deny_ne(
         "StaticAbility.graveyard_permanent_cast_mv_max",
@@ -98,6 +100,40 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     l.deny("StaticAbility.skips_your_draw_step", skips_your_draw_step);
 
     let scope = lower_scope(l, scope)?;
+    let mods_besides = |cond: bool| {
+        *power_bonus != 0
+            || *toughness_bonus != 0
+            || !granted_keywords.is_empty()
+            || *must_attack_each_combat
+            || continuous_effect.is_some()
+            || replacement_effect.is_some()
+            || !opponents_enter_tapped_types.is_empty()
+            || *bonus_per_condition_count
+            || *grants_no_max_hand_size
+            || (cond && condition.is_some())
+    };
+    // "Spells you control can't be countered" (a rule for its controller's
+    // spells, CR 101.2).
+    if *grants_spells_uncounterable {
+        if !matches!(scope, Scope::This) || mods_besides(true) || *grants_ward_life_cost != 0 {
+            l.unsupported("StaticAbility.grants_spells_uncounterable(with more)");
+        }
+        repl.spells_uncounterable = true;
+        return None;
+    }
+    // "Other creatures you control have ward—pay n life" (CR 702.21): the
+    // granted triggered ability is this card's (ENGINE.md 27.3).
+    if *grants_ward_life_cost != 0 {
+        let other_creatures = Scope::Matching {
+            filter: Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Controller(true))),
+            other: true,
+        };
+        if scope != other_creatures || mods_besides(true) || repl.grants_ward.is_some() {
+            l.unsupported("StaticAbility.grants_ward_life_cost(not \"other creatures you control\" alone)");
+        }
+        repl.grants_ward = Some(crate::db::WardCost::Life(l.int("StaticAbility.grants_ward_life_cost", *grants_ward_life_cost, 1, 20) as u8));
+        return None;
+    }
     // "You have no maximum hand size" (CR 402.2): a rule for its controller.
     if *grants_no_max_hand_size {
         let other = *power_bonus != 0

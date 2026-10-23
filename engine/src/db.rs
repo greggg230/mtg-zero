@@ -184,6 +184,12 @@ pub enum Mod {
     /// Layer 6: it gains latent activated ability k of its card ("this
     /// Saga gains '<ability>'"; `CardDef::latent`).
     GainLatent(u8),
+    /// Goaded (CR 701.38) by the effect's controller: it attacks each combat
+    /// if able, and a player other than the goader if able.
+    Goad,
+    /// "If it would leave the battlefield, exile it instead of putting it
+    /// anywhere else" (CR 614.1a).
+    ExileIfLeaves,
 }
 
 /// Which objects a static ability affects (CR 611.3a: re-evaluated
@@ -325,7 +331,15 @@ pub enum Filter {
     /// A permanent attached to a permanent matching the inner filter (an
     /// Aura's enchanted creature, CR 303.4b).
     AttachedTo(Box<Filter>),
+    /// An ability on the stack of these kinds (`ABILITY_*` bits: activated,
+    /// triggered; CR 113.1, 115.1: "target activated or triggered
+    /// ability"). Mana abilities never use the stack (605.3b).
+    Ability(u8),
 }
+
+/// `Filter::Ability` kinds.
+pub const ABILITY_ACTIVATED: u8 = 1;
+pub const ABILITY_TRIGGERED: u8 = 2;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TargetReq {
@@ -473,6 +487,13 @@ pub enum EventKind {
     /// damage"); one event per source and damage event, with the total
     /// (CR 120.? simultaneous damage). Subject: source.
     DealsDamage,
+    /// A player, a permanent or a spell became the target of a spell or
+    /// ability ("becomes the target", CR 603.2e, 702.21a ward) as its
+    /// targets were chosen (601.2c, 602.2b, 603.3d) or changed (115.7,
+    /// 707.10c). Subjects: target (a player or a permanent) or target
+    /// spell (a spell: the event's amount is 1), then controller: the
+    /// spell or ability that targets (`Subj::Item`; its controller).
+    BecomesTarget,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -517,6 +538,7 @@ impl EventKind {
             E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
+            E::BecomesTarget => (&[Slot::Target, Slot::TargetSpell], &[Slot::Controller]),
         };
         match s {
             Slot::Default if names.1.is_empty() => Some(0),
@@ -542,6 +564,9 @@ pub enum Slot {
     Controller,
     Player,
     Card,
+    /// A spell that became the target ("a creature spell you control
+    /// becomes the target"; `BecomesTarget`).
+    TargetSpell,
 }
 
 /// When a triggered ability triggers (CR 603.2), over the event's subjects
@@ -597,6 +622,11 @@ pub enum TrigPred {
     /// matches too (CR 707.10: a copy isn't cast; only these abilities see
     /// it).
     OrCopy,
+    /// The subject (a permanent) has the abilities the source's static
+    /// abilities grant it: it hasn't lost all its abilities in an effect
+    /// later than the source's timestamp (CR 613.7; a granted ward, whose
+    /// triggered ability is the granter's here, ENGINE.md 27.3).
+    Granted(Slot),
 }
 
 impl TrigPred {
@@ -634,6 +664,9 @@ pub enum AbilitySlot {
     Activated(u8),
     /// `CardDef.hand_abilities[i]` (activated from hand: cycling).
     Hand(u8),
+    /// `CardDef.gy_abilities[i]` (activated from its owner's graveyard,
+    /// ENGINE.md 27.5).
+    Graveyard(u8),
 }
 
 /// A condition, evaluated for a player (the ability's controller): "if",
@@ -685,6 +718,10 @@ pub enum Cond {
     /// You have cast at least n spells this turn ("if you've cast another
     /// spell this turn" while casting one: 2).
     SpellsCastAtLeast(u8),
+    /// You have the initiative (CR 725).
+    HasInitiative,
+    /// You have completed a dungeon (CR 309.7).
+    CompletedDungeon,
     /// All of these hold (a static ability's own conditions included).
     All(Vec<Cond>),
 }
@@ -706,6 +743,9 @@ pub enum ManaProd {
     /// One mana of any colour among permanents you control matching the
     /// filter (Mox Amber).
     ColorAmong(Filter),
+    /// Fixed amounts `then` if the condition holds for you, else `els`
+    /// ("add {G}{G}; if you've completed a dungeon, add six {G} instead").
+    IfElse { cond: Cond, then: [u8; 6], els: [u8; 6] },
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -759,6 +799,10 @@ pub struct Cost {
     /// Crew n (CR 702.122): tap untapped creatures you control (not the
     /// source) with total power n or more.
     pub crew: u8,
+    /// Tap n untapped permanents you control matching the filter ("tap an
+    /// untapped Rebel you control"; not {T}: summoning sickness doesn't
+    /// matter, CR 302.6).
+    pub tap_untapped: Option<SacCost>,
 }
 
 /// An alternative cost (CR 118.9): paid instead of the mana cost.
@@ -1075,6 +1119,33 @@ pub struct CardDef {
     pub prepare: Option<DefId>,
     /// "This creature enters prepared" (CR 722.3a).
     pub enters_prepared: bool,
+    // ---- M7b part 3b: the stack, ward, the initiative, graveyard
+    // abilities (ENGINE.md 27) ----
+    /// "Spells you control can't be countered."
+    pub spells_uncounterable: bool,
+    /// Ward (CR 702.21) and its cost; the ward triggered ability itself is
+    /// among `triggers` (synthesized by the lowering).
+    pub ward: Option<WardCost>,
+    /// "Other creatures you control have ward—<cost>" (its triggered
+    /// abilities are this card's: ENGINE.md 27.3).
+    pub grants_ward: Option<WardCost>,
+    /// Improvise (CR 702.126): untapped artifacts its controller taps while
+    /// paying pay for {1} each.
+    pub improvise: bool,
+    /// A definition of the rules, not of a card or token: a dungeon (CR
+    /// 309), the initiative's inherent abilities (725.2).
+    pub rules: bool,
+    /// Abilities activated from its owner's graveyard (CR 602.2, 113.6:
+    /// "exile this card from your graveyard", eternalize). At most one.
+    pub gy_abilities: Vec<ActivatedDef>,
+}
+
+/// A ward cost (CR 702.21a-b): mana, life, or a card to discard.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum WardCost {
+    Mana(ManaCost),
+    Life(u8),
+    Discard,
 }
 
 /// A cost reduction of a spell (CR 601.2f), in generic mana.
@@ -1124,6 +1195,7 @@ impl CardDef {
         match slot {
             AbilitySlot::Activated(i) => &self.activated[i as usize],
             AbilitySlot::Hand(i) => &self.hand_abilities[i as usize],
+            AbilitySlot::Graveyard(i) => &self.gy_abilities[i as usize],
             other => panic!("{other:?} is not an activated ability"),
         }
     }
@@ -1258,7 +1330,7 @@ impl CardDb {
         let ab = match r.slot {
             AbilitySlot::Spell => d.spell.as_ref().expect("spell ability"),
             AbilitySlot::Trigger(i) => &d.triggers[i as usize].ability,
-            AbilitySlot::Activated(_) | AbilitySlot::Hand(_) => match &d.activated_def(r.slot).effect {
+            AbilitySlot::Activated(_) | AbilitySlot::Hand(_) | AbilitySlot::Graveyard(_) => match &d.activated_def(r.slot).effect {
                 ActEffect::Stack(ab) => ab,
                 ActEffect::Mana(_) => panic!("a mana ability has no stack program"),
             },

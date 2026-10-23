@@ -45,6 +45,11 @@ pub struct Except {
     pub pt: Option<(i8, i8)>,
     /// Its name is this definition's ("his name is Superior Spider-Man").
     pub name: Option<DefId>,
+    /// Its colours are exactly these (eternalize's "it's black", CR
+    /// 702.129a).
+    pub colors: Option<crate::mana::ManaMask>,
+    /// It has no mana cost (eternalize; its mana value is 0, 202.3a).
+    pub no_cost: bool,
 }
 
 impl Except {
@@ -88,6 +93,10 @@ impl Except {
         if self.name.is_some() {
             e.name = self.name;
         }
+        if self.colors.is_some() {
+            e.colors = self.colors;
+        }
+        e.no_cost |= self.no_cost;
         e
     }
 }
@@ -361,7 +370,7 @@ impl Game {
                 } else {
                     self.targets_of(f, i).into_iter().find_map(|t| match t {
                         Target::Obj(r) => Some(r),
-                        Target::Player(_) => None,
+                        Target::Player(_) | Target::Stack(_) => None,
                     })?
                 };
                 if self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard {
@@ -377,6 +386,12 @@ impl Game {
                 }
                 let h = self.objs[f.source.idx.i()].attached?;
                 (self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield).then(|| self.copiable(h.idx))
+            }
+            // The card as it last existed in its graveyard: its printed
+            // values (its front face, CR 712.8a).
+            CopyOf::SourceCard => {
+                let d = self.db.def(f.source_def).card_def(f.source_def);
+                Some(CopyVals { def: d, exc: Except::default() })
             }
         }
     }
@@ -431,7 +446,10 @@ impl Game {
                 back.i = f.i + 1;
                 self.agenda.push(Task::Run(back));
                 if *new_targets && !item.targets.is_empty() {
-                    self.agenda.push(Task::CopyTargets { id, k: 0 });
+                    self.agenda.push(Task::CopyTargets { id, k: 0, copy: true });
+                } else {
+                    // The copy's targets become its targets (CR 707.10c).
+                    self.all_became_targets(id);
                 }
                 Flow::Suspend
             }
@@ -494,21 +512,31 @@ impl Game {
 
     /// CR 707.10c: the controller of copy `id` may choose new targets: for
     /// its target `k` (in order), keep it (`PASS`, even if illegal) or
-    /// choose another legal target for that requirement (`NewTarget`).
-    pub(crate) fn copy_targets(&mut self, id: u32, k: u8) {
+    /// choose another legal target for that requirement (`NewTarget`). The
+    /// copy is put onto the stack with the targets so decided: each becomes
+    /// its target then. For a spell that is not a copy (`copy` false: "you
+    /// may choose new targets for it", 115.7), each new target becomes its
+    /// target as it is chosen.
+    pub(crate) fn copy_targets(&mut self, id: u32, k: u8, copy: bool) {
         let Some(pos) = self.item_index(id) else { return };
         if k as usize >= self.stack[pos].targets.len() {
+            if copy {
+                self.all_became_targets(id);
+            }
             return;
         }
         match self.answer.take() {
             Some(Choice::Target(t)) => {
                 self.note(|g| format!("new target {}", g.describe_target(t)));
                 self.stack[pos].targets[k as usize].1 = t;
-                self.agenda.push(Task::CopyTargets { id, k: k + 1 });
+                if !copy && !self.stack[pos].targets.iter().enumerate().any(|(j, &(_, x))| j != k as usize && x == t) {
+                    self.became_target(id, t);
+                }
+                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
                 return;
             }
             Some(Choice::Pass) => {
-                self.agenda.push(Task::CopyTargets { id, k: k + 1 });
+                self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
                 return;
             }
             Some(other) => unreachable!("new target answer {other:?}"),
@@ -540,10 +568,10 @@ impl Game {
         }
         if opts.len() == 1 {
             // Nothing else to choose: the copy keeps it.
-            self.agenda.push(Task::CopyTargets { id, k: k + 1 });
+            self.agenda.push(Task::CopyTargets { id, k: k + 1, copy });
             return;
         }
-        self.ask(Task::CopyTargets { id, k }, p, DecisionKind::NewTarget, opts);
+        self.ask(Task::CopyTargets { id, k, copy }, p, DecisionKind::NewTarget, opts);
     }
 
     /// "You may have this enter as a copy of ..." (CR 707.5, 614.1c) for

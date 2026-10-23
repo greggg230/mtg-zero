@@ -26,6 +26,8 @@ mod resolve_ext;
 mod resolve_walkers;
 pub mod rng;
 mod sba;
+mod stack_ext;
+pub mod dungeon;
 pub mod testkit;
 pub mod layers;
 mod triggers;

@@ -14,6 +14,8 @@ use card_ir::{cats, enums, nodes};
 pub(crate) enum From {
     Battlefield,
     Hand,
+    /// Its owner's graveyard (ENGINE.md 27.5).
+    Graveyard,
 }
 
 /// An activated ability. `walker`: the card is a planeswalker, whose
@@ -87,6 +89,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         }
         // (The mana-ability payment path pays none of these.)
         if cost.remove_counters.is_some()
+            || cost.tap_untapped.is_some()
             || cost.crew > 0
             || cost.exile_graveyard > 0
             || cost.bounce.is_some()
@@ -204,6 +207,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         exile_graveyard: l.int("ActivationCost.exile_cards_from_graveyard", *exile_cards_from_graveyard, 0, 20) as u8,
         remove_counters: None,
         crew: l.int("ActivationCost.crew", *crew, 0, 20) as u8,
+        tap_untapped: None,
     };
     // Ninjutsu (CR 702.49a): "return an unblocked attacking creature you
     // control to its owner's hand".
@@ -236,6 +240,12 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         From::Hand => {
             l.deny("ActivationCost.tap_self(in hand)", tap_self);
             l.deny("ActivationCost.sacrifice_self(in hand)", sacrifice_self);
+        }
+        From::Graveyard => {
+            l.deny("ActivationCost.tap_self(in a graveyard)", tap_self);
+            l.deny("ActivationCost.sacrifice_self(in a graveyard)", sacrifice_self);
+            l.deny("ActivationCost.discard_self(in a graveyard)", discard_self);
+            l.deny("ActivationCost.exile_self(in a graveyard: ExileSelfFromGraveyardCost)", exile_self);
         }
     }
 
@@ -301,6 +311,25 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
                     sacs.push(SacCost { filter: f, n, another: *another });
                 }
             }
+            // "Exile this card from your graveyard" (an ability of a card in
+            // a graveyard).
+            cats::CostAtom::ExileSelfFromGraveyardCost(nodes::ExileSelfFromGraveyardCost {}) => {
+                if from != From::Graveyard {
+                    l.unsupported("CostAtom:ExileSelfFromGraveyardCost(not in a graveyard)");
+                }
+                cost.exile_self = true;
+            }
+            // "Tap n untapped <permanents> you control" (not {T}).
+            cats::CostAtom::TapUntappedPermanentsCost(nodes::TapUntappedPermanentsCost { permanent_filter, count, label }) => {
+                let _ = label; // display text
+                let n = l.int("TapUntappedPermanentsCost.count", *count, 1, 9) as u8;
+                if let Some(f) = lower_pred(l, permanent_filter) {
+                    if cost.tap_untapped.is_some() {
+                        l.unsupported("CostAtom:TapUntappedPermanentsCost(twice)");
+                    }
+                    cost.tap_untapped = Some(SacCost { filter: f, n, another: true });
+                }
+            }
             // "Remove n +1/+1 counters from this" (Walking Ballista).
             cats::CostAtom::RemoveCountersFromSelfCost(nodes::RemoveCountersFromSelfCost { count }) => {
                 if cost.remove_counters.is_some() {
@@ -309,7 +338,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
                 let n = l.int("RemoveCountersFromSelfCost.count", *count, 1, 20) as u8;
                 cost.remove_counters = Some((crate::db::Counter::P1P1, n));
             }
-            other => l.unsupported(format!("CostAtom:{}", other.tag())),
         }
     }
     if sacs.len() > 1 {
@@ -485,6 +513,44 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             damage_to_you += l.int("DealDamageToControllerAndAddMana.damage", *damage, 0, 20) as u8;
             lower_produces(l, "DealDamageToControllerAndAddMana.produces", produces)?
         }
+        // "Add <mana>. If <condition>, add <other mana> instead" (the
+        // condition as the ability resolves, at once: CR 605.3b).
+        E::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(else_effect) }) => {
+            let cond = super::filter::lower_condition_or_state(l, condition)?;
+            let fixed = |l: &mut Lowerer, e: &cats::Effect| -> Option<[u8; 6]> {
+                match e {
+                    E::AddManaToPool(nodes::AddManaToPool {
+                        produces,
+                        spend_restriction,
+                        grants_haste_to_creature_spell,
+                        makes_spell_uncounterable,
+                    }) => {
+                        l.deny("AddManaToPool.spend_restriction", spend_restriction);
+                        l.deny("AddManaToPool.grants_haste_to_creature_spell", grants_haste_to_creature_spell);
+                        l.deny("AddManaToPool.makes_spell_uncounterable", makes_spell_uncounterable);
+                        match lower_produces(l, "AddManaToPool.produces", produces)? {
+                            ManaProd::Fixed(v) => Some(v),
+                            ManaProd::One(m) if m.count_ones() == 1 => {
+                                let mut v = [0u8; 6];
+                                v[m.trailing_zeros() as usize] = 1;
+                                Some(v)
+                            }
+                            _ => {
+                                l.unsupported("ManaAbility:IfConditionElse(a choice of mana)");
+                                None
+                            }
+                        }
+                    }
+                    other => {
+                        l.unsupported(format!("ManaAbility:IfConditionElse({})", other.tag()));
+                        None
+                    }
+                }
+            };
+            let then = fixed(l, then_effect)?;
+            let els = fixed(l, else_effect)?;
+            ManaProd::IfElse { cond, then, els }
+        }
         other => {
             l.unsupported(format!("ManaAbility:{}", other.tag()));
             return None;
@@ -500,5 +566,6 @@ pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
         ManaProd::Fixed(v) => (0..6).filter(|&i| v[i] > 0).fold(0, |m, i| m | (1 << i)),
         ManaProd::PerPermanent { ty, .. } => 1 << ty,
         ManaProd::ColorAmong(_) => COLORS,
+        ManaProd::IfElse { then, els, .. } => (0..6).filter(|&i| then[i] + els[i] > 0).fold(0, |m, i| m | (1 << i)),
     }
 }

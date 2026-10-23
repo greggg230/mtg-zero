@@ -272,8 +272,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
         l.deny("CardPrinting.station_threshold", station_threshold);
         l.deny("CardPrinting.stationed_keywords", stationed_keywords);
-        l.deny("CardPrinting.ward_cost", ward_cost);
-        l.deny("CardPrinting.ward_cost_str", ward_cost_str);
         l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
         l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
@@ -295,8 +293,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
         l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
         l.deny("CardPrinting.ward_discard_random", ward_discard_random);
-        l.deny("CardPrinting.ward_discard_chosen", ward_discard_chosen);
-        l.deny("CardPrinting.ward_life_cost", ward_life_cost);
         l.deny("CardPrinting.may_skip_turn_to_untap", may_skip_turn_to_untap);
         l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
         l.deny("CardPrinting.sunburst", sunburst);
@@ -357,7 +353,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.plot_cost_str", plot_cost_str);
         let _ = escape_cost_str; // display form of `escape_cost`
         l.deny("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing", sacrifice_at_cleanup_if_cast_without_sorcery_timing);
-        l.deny("CardPrinting.graveyard_activated_abilities", graveyard_activated_abilities);
         let _ = dash_cost_str; // display form of `dash_cost`
         l.deny("CardPrinting.watched_in_graveyard", watched_in_graveyard);
         l.deny("CardPrinting.watches_library_graveyard_exile", watches_library_graveyard_exile);
@@ -376,7 +371,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.reconfigure_cost_str", reconfigure_cost_str);
         l.deny("CardPrinting.equipment_bonus_per_own_counter", equipment_bonus_per_own_counter);
         l.deny("CardPrinting.extra_mana_when_you_tap_creature_for_mana", extra_mana_when_you_tap_creature_for_mana);
-        l.deny("CardPrinting.has_improvise", has_improvise);
         l.deny("CardPrinting.void_exile_replacement", void_exile_replacement);
         l.deny("CardPrinting.zone_abilities", zone_abilities);
         l.deny("CardPrinting.emerge_cost", emerge_cost);
@@ -853,6 +847,61 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             None
         }
     };
+    // Ward (CR 702.21a): a triggered ability of the permanent, "whenever this
+    // permanent becomes the target of a spell or ability an opponent
+    // controls, counter that spell or ability unless that player pays
+    // <cost>". The IR states one cost: mana, life or a chosen discard.
+    let mut wards: Vec<crate::db::WardCost> = Vec::new();
+    match ward_cost.as_deref() {
+        Some(m) => wards.push(crate::db::WardCost::Mana(super::effect_copies::checked_cost(l, "CardPrinting.ward_cost", m, ward_cost_str))),
+        None => l.deny("CardPrinting.ward_cost_str", ward_cost_str),
+    }
+    if *ward_life_cost != 0 {
+        wards.push(crate::db::WardCost::Life(l.int("CardPrinting.ward_life_cost", *ward_life_cost, 1, 20) as u8));
+    }
+    if *ward_discard_chosen {
+        wards.push(crate::db::WardCost::Discard);
+    }
+    if wards.len() > 1 {
+        l.unsupported("CardPrinting.ward(more than one cost)");
+    }
+    let ward = wards.first().copied();
+    if ward.is_some() && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.ward(not a permanent card)");
+    }
+    if let Some(w) = ward {
+        keyword_triggers.push(super::effect_stack::ward_trigger(w, false));
+    }
+    // Abilities activated from the graveyard (CR 602.2: "exile this card
+    // from your graveyard", eternalize; ENGINE.md 27.5).
+    let mut gy_abilities: Vec<ActivatedDef> = Vec::new();
+    for a in graveyard_activated_abilities {
+        if let Some(ad) = lower_activated(l, a, From::Graveyard, false) {
+            if ad.mana().is_some() {
+                l.unsupported("CardPrinting.graveyard_activated_abilities(a mana ability)");
+            }
+            gy_abilities.push(ad);
+        }
+    }
+    if gy_abilities.len() > 1 {
+        l.unsupported("CardPrinting.graveyard_activated_abilities(more than one)");
+    }
+    // Improvise (CR 702.126): on a spell.
+    if *has_improvise && ty & types::LAND != 0 {
+        l.unsupported("CardPrinting.has_improvise(a land)");
+    }
+    // Static abilities (CR 604), before the triggered abilities: a granted
+    // ward's trigger is this card's (ENGINE.md 27.3).
+    let mut statics = Vec::new();
+    let mut repl = super::statics::Repl::default();
+    for s in static_abilities {
+        if let Some(st) = super::statics::lower_static(l, s, &mut repl) {
+            statics.push(st);
+        }
+    }
+    if let Some(w) = repl.grants_ward {
+        keyword_triggers.push(super::effect_stack::ward_trigger(w, true));
+    }
     let mut triggers = Vec::new();
     // Triggered abilities an Equipment grants (Kaldra Compleat).
     for t in equipment_granted_triggers {
@@ -907,14 +956,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.triggered_abilities(too many)");
     }
 
-    // Static abilities (CR 604) and equipment bonuses (301.5).
-    let mut statics = Vec::new();
-    let mut repl = super::statics::Repl::default();
-    for s in static_abilities {
-        if let Some(st) = super::statics::lower_static(l, s, &mut repl) {
-            statics.push(st);
-        }
-    }
+    // Static abilities (CR 604; lowered above) and equipment bonuses
+    // (301.5).
     // "During your turn, as long as this has one or more loyalty counters
     // on it, it's a p/t <subtypes> creature [and has <keywords>]" (a
     // static ability; Kaito).
@@ -1303,6 +1346,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         bestowed: false,
         prepare,
         enters_prepared: *enters_prepared,
+        spells_uncounterable: repl.spells_uncounterable,
+        ward,
+        grants_ward: repl.grants_ward,
+        improvise: *has_improvise,
+        rules: false,
+        gy_abilities,
     };
     // The bestowed face (CR 702.103b): an Aura enchantment with enchant
     // creature (an Aura spell targets a creature, 303.4a) whose enchanted

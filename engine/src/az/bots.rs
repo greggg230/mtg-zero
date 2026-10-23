@@ -296,11 +296,18 @@ impl Heuristic {
         let ctx = crate::cast::Ctx { controller: p, source: None };
         ab.targets.iter().all(|tr| {
             tr.min == 0
-                || g.target_candidates(tr, &ctx, &[]).iter().any(|&t| match t {
-                    Target::Player(x) => x == q,
-                    Target::Obj(r) => g.obj(r.idx).controller == q,
-                })
+                || g.target_candidates(tr, &ctx, &[]).iter().any(|&t| Self::target_player(g, t) == Some(q))
         })
+    }
+
+    /// The player a target is or belongs to: a player, an object's
+    /// controller, an ability's controller.
+    fn target_player(g: &Game, t: Target) -> Option<PlayerId> {
+        match t {
+            Target::Player(x) => Some(x),
+            Target::Obj(r) => Some(g.obj(r.idx).controller),
+            Target::Stack(id) => g.stack().iter().find(|s| s.id == id).map(|s| s.controller),
+        }
     }
 
     /// A permanent's worth (sacrifices; targets).
@@ -336,10 +343,7 @@ impl Heuristic {
         let mut best: Option<(i32, u16)> = None;
         for o in &d.options {
             let Choice::Target(t) = o.choice else { continue };
-            let theirs = match t {
-                Target::Player(x) => x == q,
-                Target::Obj(r) => g.obj(r.idx).controller == q,
-            };
+            let theirs = Self::target_player(g, t) == Some(q);
             let score = match t {
                 Target::Player(_) if theirs && dmg >= g.life(q) && dmg > 0 => 1000,
                 Target::Player(_) => 5,
@@ -349,7 +353,7 @@ impl Heuristic {
                     let creature = g.is_creature(c);
                     Self::value(g, c) + if kills && creature { 20 } else if kills { 5 } else { -30 }
                 }
-                Target::Obj(_) => 15,
+                Target::Obj(_) | Target::Stack(_) => 15,
             };
             let score = if theirs == bad { score + 100 } else { -score };
             best = best.max(Some((score, o.action)));

@@ -47,8 +47,12 @@ pub mod act {
     /// order; M7a), k = 0..31.
     pub const EXILE: u16 = 980;
     pub const EXILE_N: u16 = 32;
-    /// First reserved id.
-    pub const RESERVED: u16 = 1012;
+    /// Activate the graveyard ability of the k-th card in the decider's
+    /// graveyard that has one (graveyard order, bottom first; whether or
+    /// not it can be activated now), k = 0..11 (M7b part 3b; ENGINE.md
+    /// 27.5).
+    pub const GY_ABILITY: u16 = 1012;
+    pub const GY_ABILITY_N: u16 = 12;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -151,6 +155,14 @@ pub enum DecisionKind {
     /// decision each in order: a legal target for that requirement, or
     /// `PASS` = keep the one it has (even if illegal). M7b part 3.
     NewTarget,
+    /// The room the venture marker moves into (CR 309.5, 701.49b): `NUMBER`
+    /// = the room's index in its dungeon (Undercity: `dungeon::ROOMS`),
+    /// among the rooms the current one leads to. M7b part 3b.
+    ChooseRoom,
+    /// A card of a looked-at or revealed pile to put onto the battlefield
+    /// (`LIBRARY` = its slot in the pile sorted by definition; Undercity's
+    /// Throne of the Dead Three). M7b part 3b.
+    PutOntoBattlefield,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
@@ -322,6 +334,8 @@ impl Game {
                 Zone::Graveyard => self.graveyard_action(viewer, r.idx),
                 z => panic!("no target slot for an object in {z:?}"),
             },
+            // An ability on the stack: its `STACK` slot (ENGINE.md 27.1).
+            Target::Stack(id) => self.stack_action(id),
         }
     }
 

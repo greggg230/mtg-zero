@@ -187,30 +187,40 @@ impl Game {
                 self.end_batch();
                 Flow::Next
             }
-            Ext::Connive => {
-                // CR 701.50a-b: the source's controller (as it last existed)
-                // draws, then discards; a nonland card discarded puts a
-                // +1/+1 counter on it if it is still that permanent.
-                let p = f.controller;
+            Ext::Connive { on, n } => {
+                // CR 701.50a-b: the conniving permanent's controller (the
+                // ability's controller if it left: last known information)
+                // draws n cards, then discards n; each nonland card
+                // discarded puts a +1/+1 counter on it if it is still that
+                // permanent. `f.i`: 0 = to draw, then 1 + discards made;
+                // `f.x`: nonland cards discarded.
+                let n = self.amount(f, *n).clamp(0, 255) as u8;
+                if f.i == 0 {
+                    f.x = 0;
+                }
+                let it = self.objs_on(f, on).first().copied();
+                let p = it.map_or(f.controller, |c| self.objs[c.i()].controller);
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
-                        let nonland = !self.def_of(c).is(types::LAND);
-                        self.discard(c);
-                        if nonland {
-                            if let Some(&s) = self.objs_on(f, &On::Source).first() {
-                                self.add_counters(s, crate::db::Counter::P1P1, 1);
-                            }
+                        if !self.def_of(c).is(types::LAND) {
+                            f.x += 1;
                         }
-                        return Flow::Next;
+                        self.discard(c);
+                        f.i += 1;
                     }
                     Some(other) => unreachable!("connive answer {other:?}"),
                     None => {}
                 }
                 if f.i == 0 {
                     f.i = 1;
-                    self.draw(p);
+                    for _ in 0..n {
+                        self.draw(p);
+                    }
                 }
-                if self.players[p as usize].hand.is_empty() {
+                if f.i > n || self.players[p as usize].hand.is_empty() {
+                    if let (Some(c), true) = (it, f.x > 0) {
+                        self.add_counters(c, crate::db::Counter::P1P1, f.x as u16);
+                    }
                     return Flow::Next;
                 }
                 let opts = self.hand_options(p);
