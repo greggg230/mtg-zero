@@ -403,7 +403,7 @@ impl Game {
                     let p = order[f.i as usize];
                     let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                     let mut opts: Vec<Opt> = Vec::new();
-                    for &c in &self.players[p as usize].graveyard {
+                    for c in self.graveyard_cards(p) {
                         if self.card_matches(filter, c, &ctx) {
                             opts.push(Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) });
                         }
@@ -652,11 +652,11 @@ impl Game {
             Ext::TopOfGraveyardToBattlefield { filter } => {
                 f.made = None;
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
-                let top = self.players[f.controller as usize]
-                    .graveyard
-                    .iter()
+                let top = self
+                    .graveyard_cards(f.controller)
+                    .collect::<Vec<_>>()
+                    .into_iter()
                     .rev()
-                    .copied()
                     .find(|&c| self.card_matches(filter, c, &ctx));
                 if let Some(c) = top {
                     let owner = self.objs[c.i()].owner;

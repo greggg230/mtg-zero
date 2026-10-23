@@ -807,6 +807,15 @@ impl Game {
         self.permanents_of(p).filter(move |&c| self.is_creature(c))
     }
 
+    /// The cards in `p`'s graveyard, bottom first: a token there (until
+    /// 704.5d) is not a card (CR 108.2, 111.1), so it is never counted
+    /// (threshold, delirium, the Lhurgoyfs), chosen or exiled as one.
+    pub fn graveyard_cards(&self, p: PlayerId) -> impl Iterator<Item = CardIdx> + '_ {
+        let gy = &self.players[p as usize].graveyard;
+        let any_token = self.tokens > 0;
+        gy.iter().copied().filter(move |&c| !any_token || !self.is_token(c))
+    }
+
     // ---- logging -----------------------------------------------------------
 
     #[inline]

@@ -449,10 +449,11 @@ impl Game {
     fn cda_pt(&self, c: CardIdx, cda: &PtCda, printed: (i32, i32)) -> (i32, i32) {
         match cda {
             PtCda::GraveyardTypes { plus } => {
-                // CR 205.2a card types (kindred included).
+                // CR 205.2a card types (kindred included) among cards (not
+                // a token briefly in a graveyard, CR 108.2).
                 let mut t = 0u16;
-                for p in &self.players {
-                    for &g in &p.graveyard {
+                for p in 0..2 {
+                    for g in self.graveyard_cards(p) {
                         t |= self.def_of(g).types;
                     }
                 }

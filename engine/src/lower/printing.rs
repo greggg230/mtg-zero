@@ -1053,9 +1053,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             other => l.unsupported(format!("CostReduction.condition({})", other.tag())),
         }
     }
-    if !discounts.is_empty() && !alt_costs.is_empty() {
-        l.unsupported("CardPrinting.cost_reductions(with alternative costs)");
-    }
+    // (A reduction applies to an alternative cost too, CR 601.2f, 118.9d:
+    // `Game::alt_mana`.)
     let mut spell_tax = Vec::new();
     for (f, n) in spell_cost_increases {
         if let Some(f) = lower_card_filter(l, f) {

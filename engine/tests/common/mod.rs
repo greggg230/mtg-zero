@@ -198,6 +198,18 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
             json!({"$t": "DrawCards", "amount": 1}),
             json!({"additional_cost_sacrifice_filter": {"$t": "CardFilter", "any_types": ["Artifact"]}}),
         ),
+        // "This spell costs {1} less to cast for each artifact you control.
+        // You may pay {2}{U} rather than pay this spell's mana cost. Draw a
+        // card." (A reduction applies to an alternative cost, CR 601.2f.)
+        spell(
+            "Test Discount Alt",
+            "Instant",
+            cost("{3}{U}"),
+            json!({"$t": "DrawCards", "amount": 1}),
+            json!({"cost_reductions": [{"$t": "CostReduction", "amount": 1,
+                    "condition": {"$t": "PerControlled", "filter": {"$t": "IsArtifact"}}}],
+                "alternative_costs": [{"$t": "AlternativeCost", "mana": "{2}{U}"}]}),
+        ),
     ];
     cards.into_iter().map(|v| serde_json::from_value(v).expect("custom card IR")).collect()
 }

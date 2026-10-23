@@ -23,10 +23,11 @@ impl Game {
             Cond::ControlAtLeast(f, n) => self.count_controlled(p, f) >= *n as u32,
             Cond::ControlAtMost(f, n) => self.count_controlled(p, f) <= *n as u32,
             Cond::HandExactly(n) => pl.hand.len() == *n as usize,
-            Cond::GraveyardAtLeast(n) => pl.graveyard.len() >= *n as usize,
+            // (Cards: a token in a graveyard isn't one, CR 108.2.)
+            Cond::GraveyardAtLeast(n) => self.graveyard_cards(p).count() >= *n as usize,
             Cond::Delirium(n) => {
                 // CR 205.2a card types (kindred included) among the cards.
-                let t = pl.graveyard.iter().fold(0u16, |m, &c| m | self.types_of(c));
+                let t = self.graveyard_cards(p).fold(0u16, |m, c| m | self.types_of(c));
                 t.count_ones() >= *n as u32
             }
             Cond::Revolt => pl.left_battlefield,
@@ -306,8 +307,7 @@ impl Game {
         if cost.crew > 0 && self.crew_power(p, card) < cost.crew as i32 {
             return false;
         }
-        let in_gy = self.objs[card.i()].zone == Zone::Graveyard;
-        if cost.exile_graveyard as usize > pl.graveyard.len() - in_gy as usize {
+        if cost.exile_graveyard > 0 && cost.exile_graveyard as usize > self.graveyard_cards(p).filter(|&c| c != card).count() {
             return false;
         }
         if mana.is_zero() {
@@ -456,13 +456,14 @@ impl Game {
         if picked.len() < n_gy {
             // Graveyard cards to exile, a set: picked in increasing
             // position, leaving enough later ones.
-            let gy = &self.players[p as usize].graveyard;
+            // (Cards only: not the source, not a token, CR 108.2.)
+            let gy: Vec<CardIdx> = self.graveyard_cards(p).filter(|&c| c != card).collect();
             let after = picked[n_bounce..].last().map(|c| gy.iter().position(|x| x == c).unwrap() + 1).unwrap_or(0);
             let still = n_gy - picked.len();
             let opts: Vec<Opt> = gy
                 .iter()
                 .enumerate()
-                .filter(|&(i, &c)| i >= after && gy.len() - i >= still && c != card)
+                .filter(|&(i, _)| i >= after && gy.len() - i >= still)
                 .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
                 .collect();
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChooseGraveyardCard, opts);

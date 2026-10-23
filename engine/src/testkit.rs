@@ -226,6 +226,24 @@ impl Game {
         Choice::Target(Target::Obj(self.obj_ref(c)))
     }
 
+    /// A token of the token definition `name`, owned by `p`, put straight
+    /// into `p`'s graveyard, as between a token dying and the next
+    /// state-based check (CR 704.5d). For rules tests of "cards in a
+    /// graveyard" (a token isn't a card, 108.2).
+    pub fn put_token_in_graveyard(&mut self, p: PlayerId, name: &str) -> CardIdx {
+        let def = self.db.token_by_name(name).unwrap_or_else(|| panic!("no token named {name}"));
+        let c = self.add_card(def, p, Zone::Graveyard);
+        self.objs[c.i()].known = 0b11;
+        self.tokens += 1;
+        self.players[p as usize].graveyard.push(c);
+        c
+    }
+
+    /// Does condition `c` hold for `p` now (rules tests)?
+    pub fn holds(&self, c: &crate::db::Cond, p: PlayerId) -> bool {
+        self.cond_holds(c, p)
+    }
+
     pub fn kind(&self) -> Option<DecisionKind> {
         self.pending.as_ref().map(|d| d.kind)
     }

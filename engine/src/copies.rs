@@ -588,7 +588,7 @@ impl Game {
                 let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
                 if eac.from_graveyard {
                     for q in [p, opp(p)] {
-                        for &x in &self.players[q as usize].graveyard {
+                        for x in self.graveyard_cards(q) {
                             if self.card_matches(&eac.filter, x, &ctx) {
                                 opts.push(Opt { action: self.graveyard_action(p, x), choice: Choice::Card(x) });
                             }

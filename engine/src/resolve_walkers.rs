@@ -103,10 +103,8 @@ impl Game {
                     Some(other) => unreachable!("graveyard choice {other:?}"),
                     None => {
                         let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
-                        let opts: Vec<Opt> = self.players[p as usize]
-                            .graveyard
-                            .iter()
-                            .copied()
+                        let opts: Vec<Opt> = self
+                            .graveyard_cards(p)
                             .filter(|&c| self.card_matches(filter, c, &ctx))
                             .map(|c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
                             .collect();

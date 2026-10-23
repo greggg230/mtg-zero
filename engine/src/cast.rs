@@ -160,31 +160,34 @@ impl Game {
             return false;
         }
         let cls = classes;
-        let base = self.delve_reduced(c, p, self.spell_cost(c, p), 0);
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let extras = self.spree_extras(c, p);
-        let mut payable = |cost: &crate::mana::ManaCost| -> bool {
+        // `extra`: the mana of additional costs announced (CR 601.2f: added
+        // before reductions).
+        let mut payable = |extra: &crate::mana::ManaCost| -> bool {
             if !def.additional.is_empty() {
                 // (Excluding the card itself: on the stack while it is paid.)
-                self.options_payable(p, c, cost, cls, Some(c))
-            } else if self.hand_mana_source(c) {
+                return self.options_payable(p, c, crate::game::CastFrom::Hand, extra, 0, cls, Some(c));
+            }
+            let cost = self.delve_reduced(c, p, self.route_mana_plus(c, p, crate::game::CastFrom::Hand, extra), 0);
+            if self.hand_mana_source(c) {
                 // A card cast from hand is on the stack while its cost is
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
-                self.can_pay_with(p, cost, &classes_without(cls, c), &Default::default())
+                self.can_pay_with(p, &cost, &classes_without(cls, c), &Default::default())
             } else {
                 let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
-                self.can_pay_plain(p, cost, cls, plain)
+                self.can_pay_plain(p, &cost, cls, plain)
             }
         };
         if alt_ok {
             // castable for an alternative cost (601.2b); the mana cost
             // may be payable too (asked on casting)
         } else if let Some(extras) = &extras {
-            if !extras.iter().any(|x| payable(&self.delve_reduced(c, p, self.cost_with(c, p, def.cost.plus(x)), 0))) {
+            if !extras.iter().any(|x| payable(x)) {
                 return false;
             }
-        } else if !payable(&base) {
+        } else if !payable(&Default::default()) {
             return false;
         }
         if let Some(ab) = &def.spell {
@@ -396,20 +399,22 @@ impl Game {
         if !self.cast_timing_ok(p, card, sorcery_ok) {
             return false;
         }
-        let mana = self.delve_reduced(card, p, self.route_mana(card, p, from), self.escape_exiles(card, from));
-        let paid = |mana: &crate::mana::ManaCost| match from {
-            crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
-                self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), mana, classes, None)
+        let keep = self.escape_exiles(card, from);
+        // `extra`: the mana of additional costs announced (CR 601.2f).
+        let paid = |extra: &crate::mana::ManaCost| {
+            let mana = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, extra), keep);
+            match from {
+                crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
+                    self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
+                }
+                _ if !def.additional.is_empty() => self.options_payable(p, card, from, extra, keep, classes, None),
+                _ => self.can_pay_with(p, &mana, classes, &Default::default()),
             }
-            _ if !def.additional.is_empty() => self.options_payable(p, card, mana, classes, None),
-            _ => self.can_pay_with(p, mana, classes, &Default::default()),
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let ok = match self.spree_extras(card, p) {
-            Some(extras) => extras
-                .iter()
-                .any(|x| paid(&self.delve_reduced(card, p, self.route_mana_plus(card, p, from, x), self.escape_exiles(card, from)))),
-            None => paid(&mana),
+            Some(extras) => extras.iter().any(|x| paid(x)),
+            None => paid(&Default::default()),
         };
         if !ok {
             return false;
@@ -451,15 +456,14 @@ impl Game {
             None => {}
         }
         let item = &self.stack[pos];
-        let k = self.def_of(card).x_pips;
         let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. });
-        let base = self.route_mana_plus(card, p, item.from, &self.extra_costs(item));
         let mut most = 0u8;
         if !free {
+            // CR 601.2f: X is part of the mana cost, before reductions.
+            let mut tmp = item.clone();
             while most < (act::NUMBER_N - 1) as u8 {
-                let mut c = base;
-                c.generic = c.generic.saturating_add((most + 1).saturating_mul(k));
-                if !self.can_pay(p, &c) {
+                tmp.x = most + 1;
+                if !self.can_pay(p, &self.total_mana(card, &tmp)) {
                     break;
                 }
                 most += 1;
@@ -479,14 +483,19 @@ impl Game {
         mv.saturating_add(x.saturating_mul(self.def_of(c).x_pips))
     }
 
-    /// Can `p` pay one of the spell's additional-cost options (CR 601.2b)
-    /// with `cost` plus the option's own mana; for kicker, only an option
-    /// whose effect has its targets.
+    /// Can `p` pay one of the spell's additional-cost options (CR 601.2b),
+    /// cast the way `from` says with the additional mana `extra` announced:
+    /// the option's mana is part of the total cost before reductions
+    /// (601.2f; `keep`: graveyard cards escape exiles, left out of delve).
+    /// For kicker, only an option whose effect has its targets.
+    #[allow(clippy::too_many_arguments)]
     fn options_payable(
         &self,
         p: PlayerId,
         card: CardIdx,
-        cost: &crate::mana::ManaCost,
+        from: crate::game::CastFrom,
+        extra: &crate::mana::ManaCost,
+        keep: u8,
         classes: &[crate::pay::Class],
         exclude: Option<CardIdx>,
     ) -> bool {
@@ -499,7 +508,10 @@ impl Game {
                     .as_ref()
                     .and_then(|ab| ab.modes.as_ref())
                     .is_some_and(|m| self.targets_available(&m.list[k], p, src)))
-                && self.cost_payable(p, card, o, &cost.plus(&o.mana), classes, exclude)
+                && {
+                    let cost = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep);
+                    self.cost_payable(p, card, o, &cost, classes, exclude)
+                }
         })
     }
 
@@ -510,8 +522,7 @@ impl Game {
         if !self.def_of(card).delve {
             return cost;
         }
-        let gy = &self.players[p as usize].graveyard;
-        let n = gy.iter().filter(|&&c| c != card).count().saturating_sub(keep as usize).min(255) as u8;
+        let n = self.graveyard_cards(p).filter(|&c| c != card).count().saturating_sub(keep as usize).min(255) as u8;
         cost.less_generic(n)
     }
 
@@ -545,10 +556,7 @@ impl Game {
             None => {}
         }
         let item = &self.stack[pos];
-        let mut cost = self.route_mana_plus(card, p, item.from, &self.extra_costs(item)).less_generic(item.delved);
-        if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
-            cost = cost.plus(&extra.mana);
-        }
+        let cost = self.total_mana(card, item).less_generic(item.delved);
         if cost.generic == 0 {
             return;
         }
@@ -559,11 +567,14 @@ impl Game {
         let keep = self.escape_exiles(card, item.from) as usize;
         let gy = &self.players[p as usize].graveyard;
         // Picks go up the graveyard (each set once), leaving enough cards
-        // above for the picks still needed.
+        // above for the picks still needed. (Cards only: a token there isn't
+        // one, CR 108.2.)
+        let card_at = |i: usize| !self.is_token(gy[i]);
+        let n_cards = (0..gy.len()).filter(|&i| card_at(i)).count();
         let mut opts: Vec<Opt> = gy
             .iter()
             .enumerate()
-            .filter(|&(i, _)| i >= floor && gy.len() - i >= need && gy.len() > keep)
+            .filter(|&(i, _)| card_at(i) && i >= floor && (i..gy.len()).filter(|&j| card_at(j)).count() >= need && n_cards > keep)
             .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
             .collect();
         if need == 0 || opts.is_empty() {
@@ -667,7 +678,8 @@ impl Game {
             }
         }
         let lands_ok = land_ok && self.lands_from_graveyard(p);
-        for &c in &self.players[p as usize].graveyard {
+        // (A token in a graveyard is not a card: nothing casts or plays it.)
+        for c in self.graveyard_cards(p) {
             let front = if self.def_of(c).halves.is_some() {
                 self.split_left_options(p, c, sorcery_ok, classes)
             } else if self.def_of(c).is(types::LAND) {
@@ -838,8 +850,26 @@ impl Game {
         let extra = self.extra_costs(item).plus(more);
         match item.alt {
             0 => self.route_mana_plus(card, p, item.from, &extra),
-            k => self.alt_mana(card, p, k as usize - 1).plus(&extra),
+            k => self.cost_with(card, p, self.def_of(card).alt_costs[k as usize - 1].mana.plus(&extra)),
         }
+    }
+
+    /// The total mana cost of spell `card` as cast so far (CR 601.2f): its
+    /// mana cost (with X) or the alternative cost it is cast for, plus the
+    /// mana of every additional cost announced (the option chosen: kicker,
+    /// buyback; spree modes; times paid) and the increases, less the
+    /// reductions (which may reduce the additional costs too). Delve and
+    /// improvise pay from it later (702.66b, 702.126b).
+    pub(crate) fn total_mana(&self, card: CardIdx, item: &StackItem) -> crate::mana::ManaCost {
+        let def = self.def_of(card);
+        let mut more = crate::mana::ManaCost::default();
+        if item.alt == 0 {
+            if let Some(c) = self.route_extra(card, item.from, item.cost_option) {
+                more = more.plus(&c.mana);
+            }
+        }
+        more.generic = more.generic.saturating_add(item.x.saturating_mul(def.x_pips));
+        self.announced_cost(card, item, &more)
     }
 
     /// A spree spell's mode costs (CR 702.172a) for the modes whose targets
@@ -973,13 +1003,10 @@ impl Game {
         self.cost_payable(p, card, &a.cost, &mana, &classes_without(classes, card), Some(card))
     }
 
-    /// The mana of alternative cost `k` with cost increases (CR 601.2f:
-    /// they apply to alternative costs too).
+    /// The mana of alternative cost `k` with the cost increases and
+    /// reductions (CR 601.2f, 118.9d: both apply to an alternative cost).
     pub(crate) fn alt_mana(&self, card: CardIdx, p: PlayerId, k: usize) -> crate::mana::ManaCost {
-        let tax = self.spell_cost(card, p).generic.saturating_sub(self.def_of(card).cost.generic);
-        let mut m = self.def_of(card).alt_costs[k].mana;
-        m.generic = m.generic.saturating_add(tax);
-        m
+        self.cost_with(card, p, self.def_of(card).alt_costs[k].mana)
     }
 
     /// Can `p` cast `card` for its mana cost (with its additional cost, if
@@ -989,7 +1016,7 @@ impl Game {
         let cost = self.spell_cost(card, p);
         let cost = self.delve_reduced(card, p, cost, 0);
         if !def.additional.is_empty() {
-            self.options_payable(p, card, &cost, classes, Some(card))
+            self.options_payable(p, card, crate::game::CastFrom::Hand, &Default::default(), 0, classes, Some(card))
         } else {
             self.can_pay_with(p, &cost, &classes_without(classes, card), &Default::default())
         }
@@ -1163,14 +1190,20 @@ impl Game {
             None => {
                 let def = self.def_of(card);
                 let classes = self.mana_classes(p, None);
-                let cost = self.delve_reduced(card, p, self.route_mana(card, p, item.from), self.escape_exiles(card, item.from));
+                let keep = self.escape_exiles(card, item.from);
                 let src = Some(self.obj_ref(card));
                 let kicker_ok = |k: usize| {
                     !def.kicker
                         || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| self.targets_available(&m.list[k], p, src))
                 };
+                // CR 601.2f: the option's mana is added before reductions.
+                let mut base = item.clone();
                 let opts: Vec<Opt> = (0..def.additional.len())
-                    .filter(|&k| kicker_ok(k) && self.cost_payable(p, card, &def.additional[k], &cost.plus(&def.additional[k].mana), &classes, None))
+                    .filter(|&k| {
+                        base.cost_option = k as u8;
+                        let cost = self.delve_reduced(card, p, self.total_mana(card, &base), keep);
+                        kicker_ok(k) && self.cost_payable(p, card, &def.additional[k], &cost, &classes, None)
+                    })
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();
                 self.ask(Task::CastOption { id }, p, DecisionKind::ChooseCost, opts);
@@ -1276,10 +1309,12 @@ impl Game {
         let StackKind::Spell { card } = item.kind else { return };
         let def = self.def_of(card);
         let p = item.controller;
-        let extra = self.extra_costs(item);
+        // CR 601.2f: the total cost, then delve's exiled cards pay for some
+        // of its generic mana (702.66b).
+        let cost = self.total_mana(card, item).less_generic(item.delved);
         if item.alt > 0 {
             let k = item.alt as usize - 1;
-            let mut pm = PayMana::new(p, self.alt_mana(card, p, k).plus(&extra));
+            let mut pm = PayMana::new(p, cost);
             pm.keep = Self::keep_for(card, &def.alt_costs[k].cost, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
@@ -1287,11 +1322,6 @@ impl Game {
             }
             return;
         }
-        let mut cost = self.route_mana_plus(card, p, item.from, &extra).less_generic(item.delved);
-        if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
-            cost = cost.plus(&extra.mana);
-        }
-        cost.generic = cost.generic.saturating_add(item.x.saturating_mul(def.x_pips));
         let mut pm = PayMana::new(p, cost);
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
@@ -1490,10 +1520,11 @@ impl Game {
         }
     }
 
-    /// A card in a graveyard matches only through `InGraveyard(f)`.
+    /// A card in a graveyard matches only through `InGraveyard(f)` (a token
+    /// there is not a card, CR 108.2).
     fn graveyard_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
         match f {
-            Filter::InGraveyard(inner) => self.card_matches(inner, c, ctx),
+            Filter::InGraveyard(inner) => !self.is_token(c) && self.card_matches(inner, c, ctx),
             Filter::And(a, b) => self.graveyard_ok(a, c, ctx) && self.graveyard_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.graveyard_ok(x, c, ctx)),
             _ => false,
