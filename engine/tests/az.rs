@@ -312,7 +312,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 23_388);
+    assert_eq!(NUM_FEATURES, 26_500);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -382,7 +382,10 @@ fn token_registry_and_stable_identities() {
     let reg = identity::registry();
     let mut keys = Vec::new();
     for i in db.num_cards()..db.len() {
-        keys.push(identity::token_key(db, db.def(i as engine::ids::DefId)));
+        // (an emblem, stored with the tokens, has its card's identity)
+        if !db.def(i as engine::ids::DefId).emblem {
+            keys.push(identity::token_key(db, db.def(i as engine::ids::DefId)));
+        }
     }
     let missing: Vec<&String> = keys.iter().filter(|k| !reg.contains(&k.as_str())).collect();
     if !missing.is_empty() && std::env::var("MTGZ_WRITE_TOKENS").is_ok_and(|v| v == "1") {
@@ -411,12 +414,17 @@ fn token_registry_and_stable_identities() {
         assert!(id != identity::UNKNOWN as usize, "{} has no identity", d.name);
         if d.token {
             assert!((identity::CUBE_CAP..identity::D - 1).contains(&id));
+        } else if d.emblem {
+            // an emblem (CR 114) has the identity of the card that makes it
+            assert_eq!(Some(names[id].as_str()), d.name.strip_suffix(" emblem"));
         } else {
             assert_eq!(names[id], d.name);
         }
     }
-    let distinct: std::collections::BTreeSet<u16> = ids.iter().copied().collect();
-    assert_eq!(distinct.len(), ids.len());
+    let not_emblems: Vec<u16> =
+        ids.iter().enumerate().filter(|&(i, _)| !db.def(i as engine::ids::DefId).emblem).map(|(_, &x)| x).collect();
+    let distinct: std::collections::BTreeSet<u16> = not_emblems.iter().copied().collect();
+    assert_eq!(distinct.len(), not_emblems.len());
     // the identity does not depend on what else is supported: a card table of a few cards
     // gives them the same identities as the full one
     let doc = engine::db::load_cube_document();

@@ -741,7 +741,7 @@ impl Game {
 /// The object layout of this encoding for zero-core's token network (arch `tokens`, zero-core
 /// `python/zero/net.py` `TokenNet`; ENGINE.md 22): JSON with the identity capacity as the
 /// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
-/// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (13 multisets of
+/// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (15 multisets of
 /// 1024 identities). Every other feature (the 128 globals) is the global token's input.
 /// Checked in as `mtgz/az/layout_v3.json` (a test keeps the two equal). `cards` (the name behind
 /// each identity of `db`, for analysis; null where none) is not read by the network.
@@ -756,7 +756,8 @@ pub fn layout_json(db: &'static CardDb) -> String {
     let ids = identity::identities(db);
     let mut cards: Vec<Option<String>> = vec![None; D];
     for (def, &i) in ids.iter().enumerate() {
-        if i != identity::UNKNOWN {
+        // An emblem shares the identity of the card that makes it.
+        if i != identity::UNKNOWN && !db.def(def as DefId).emblem {
             cards[i as usize] = Some(db.def(def as DefId).name.clone());
         }
     }
