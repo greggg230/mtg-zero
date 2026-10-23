@@ -390,3 +390,91 @@ fn cr_602_2b_goblin_engineer_may_sacrifice_the_mox_that_paid_its_red() {
     assert_eq!(g.obj(mox).zone, Zone::Graveyard);
     assert_eq!(g.obj(stone).zone, Zone::Battlefield);
 }
+
+// ---- 702.34a: a flashback spell leaving the stack is exiled ---------------------------------
+
+#[test]
+fn cr_702_34a_reprieve_on_a_flashed_back_echo_of_eons_exiles_it() {
+    // Reprieve would return the spell to its owner's hand; a spell cast
+    // with flashback is exiled instead whenever it would leave the stack.
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island"])
+        .graveyard(0, &["Echo of Eons"])
+        .battlefield(1, &["Plains", "Plains"])
+        .hand(1, &["Reprieve"])
+        .at(Step::Main1, 0)
+        .start();
+    let echo = g.card(0, "Echo of Eons", Zone::Graveyard);
+    g.choose(Choice::Cast(echo));
+    pay(&mut g);
+    g.drive_until(at_priority);
+    g.pass();
+    assert_eq!(g.to_move(), Some(1));
+    let r = g.card(1, "Reprieve", Zone::Hand);
+    g.choose(Choice::Cast(r));
+    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::PayMana));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(echo).zone, Zone::Exile, "exiled, not returned to hand");
+    assert_eq!(g.player(0).hand.len(), 0, "Echo never resolved");
+}
+
+#[test]
+fn echo_of_eons_cast_from_hand_ends_in_the_graveyard_after_the_shuffle() {
+    // It is on the stack while it resolves (608.2n: then put into its
+    // owner's graveyard), so it isn't shuffled into the library.
+    let mut g = scen()
+        .battlefield(0, &["Island"; 6])
+        .hand(0, &["Echo of Eons", "Lightning Bolt"])
+        .graveyard(0, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let echo = g.card(0, "Echo of Eons", Zone::Hand);
+    g.choose(Choice::Cast(echo));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(echo).zone, Zone::Graveyard);
+    assert_eq!(g.player(0).graveyard.len(), 1, "only Echo itself");
+    assert_eq!(g.player(0).hand.len(), 7);
+    assert_eq!(g.player(0).library.len(), 10 + 2 - 7, "Bolt and the Bear shuffled in");
+}
+
+// ---- 614.1c however the land enters ----------------------------------------------------------
+
+#[test]
+fn cr_614_1c_crop_rotation_puts_a_triome_or_fast_land_in_as_it_would_enter() {
+    for (land, others, tapped) in [
+        ("Raugrin Triome", 1, true),
+        ("Spirebluff Canal", 2, false),
+        ("Spirebluff Canal", 3, true),
+        ("Thundering Falls", 1, true),
+    ] {
+        let mut lands = vec!["Forest"];
+        lands.extend(std::iter::repeat_n("Island", others));
+        let mut g = Scenario::new(db())
+            .spec(|s| s.auto_single = false)
+            .battlefield(0, &lands)
+            .hand(0, &["Crop Rotation"])
+            .library(0, &[land, "Island", "Island"])
+            .library(1, &["Forest"; 5])
+            .at(Step::Main1, 0)
+            .start();
+        let cr = g.card(0, "Crop Rotation", Zone::Hand);
+        g.choose(Choice::Cast(cr));
+        g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::Sacrifice) | Some(DecisionKind::PayMana)));
+        pay(&mut g);
+        if g.kind() == Some(DecisionKind::Sacrifice) {
+            // Sacrifice an Island (the Forest paid {G} or not; keep the
+            // count of other lands as set).
+            let island = g.battlefield().iter().copied().find(|&c| g.name(c) == "Island").unwrap();
+            g.choose(Choice::Card(island));
+        }
+        g.drive_until(|g| !at_priority(g) || g.stack().is_empty());
+        g.choose(Choice::Def(def(land)));
+        let c = bf(&g, 0, land);
+        // The other lands it sees: `others` (the Forest plus Islands, one
+        // Island sacrificed).
+        assert_eq!(g.obj(c).tapped, tapped, "{land} with {others} other lands");
+        settle(&mut g);
+    }
+}
