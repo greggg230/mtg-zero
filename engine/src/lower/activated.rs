@@ -354,6 +354,10 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     if cost.sacrifice.is_some() && cost.discard > 0 {
         l.unsupported("ActivationCost.sacrifice(with a discard)");
     }
+    // (A permanent to return is reserved like one to sacrifice.)
+    if cost.bounce.is_some() && (cost.sacrifice.is_some() || cost.discard > 0 || cost.exile_from_hand.is_some()) {
+        l.unsupported("ActivationCost.return_unblocked_attacker(with another reserved part)");
+    }
 
     // "Activate only if ..." gates stored on the cost.
     if *requires_own_creature_power_at_least > 0 {

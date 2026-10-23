@@ -418,13 +418,21 @@ impl Game {
     /// What the parts of `cost` paid after its mana need from that payment.
     pub(crate) fn keep_for(card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Keep {
         debug_assert!(
-            [cost.sacrifice.is_some(), cost.discard > 0, cost.exile_from_hand.is_some()].iter().filter(|&&x| x).count() <= 1,
+            [cost.sacrifice.is_some() || cost.bounce.is_some(), cost.discard > 0, cost.exile_from_hand.is_some()]
+                .iter()
+                .filter(|&&x| x)
+                .count()
+                <= 1,
             "one reservation per cost (lowering)"
         );
+        debug_assert!(!(cost.sacrifice.is_some() && cost.bounce.is_some()), "one reservation per cost (lowering)");
         Keep {
             exclude,
             life: cost.life,
-            sac: cost.sacrifice.clone().map(|s| (s, card)),
+            // (A permanent to return to its owner's hand, ninjutsu's
+            // unblocked attacker, is reserved like one to sacrifice: a mana
+            // ability that sacrifices it can't pay the mana first.)
+            sac: cost.sacrifice.clone().or_else(|| cost.bounce.clone()).map(|s| (s, card)),
             // (A land-card discard never competes with a mana source in
             // hand: those are not lands.)
             discard: (cost.discard > 0 && cost.discard_filter.is_none()).then_some((cost.discard, card)),

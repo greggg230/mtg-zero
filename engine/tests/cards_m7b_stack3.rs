@@ -349,6 +349,48 @@ fn fallen_shinobi_permission_ends_with_the_turn() {
     assert!(!g.has_option(Choice::Cast(giant)));
 }
 
+/// P0 makes an Eldrazi Spawn ("Sacrifice this token: Add {C}") with
+/// Malevolent Rumble, attacks with it alone next turn and stops in the
+/// declare blockers step with Fallen Shinobi in hand and `lands` untapped.
+fn spawn_attacks_alone(lands: &[&str]) -> (Game, CardIdx) {
+    let mut g = scen().battlefield(0, lands).hand(0, &["Malevolent Rumble", "Fallen Shinobi"]).start();
+    let mr = g.card(0, "Malevolent Rumble", Zone::Hand);
+    g.choose(Choice::Cast(mr));
+    finish(&mut g, |_| None);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::PutInHand)).then_some(Choice::Pass));
+    let spawn = tokens_named(&g, "Eldrazi Spawn")[0];
+    let t = g.turn().number;
+    run_until(&mut g, |g| g.turn().active == 0 && g.turn().number > t && g.kind() == Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Card(spawn));
+    g.choose(Choice::Pass);
+    run_until(&mut g, |g| g.turn().step == Step::DeclareBlockers && at_priority(g) && g.pending_decision().unwrap().player == 0);
+    (g, spawn)
+}
+
+#[test]
+fn ninjutsu_cant_pay_its_mana_with_the_attacker_it_returns_cr_601_2h() {
+    // Ninjutsu {2}{U}{B}: "Return an unblocked attacker you control to
+    // hand: Put this card onto the battlefield from your hand tapped and
+    // attacking." The mana is paid first (601.2g-h): the Spawn can't be
+    // sacrificed for {C} and then returned. Three lands and the Spawn: not
+    // offered (the fuzzer found the payment taking it); four lands: it is,
+    // and the Spawn is never a mana source.
+    let (g, _) = spawn_attacks_alone(&["Forest", "Swamp", "Island"]);
+    let fs = g.card(0, "Fallen Shinobi", Zone::Hand);
+    assert!(!g.has_option(Choice::Ability(fs, AbilitySlot::Hand(0))), "{:?}", g.options_desc());
+    let (mut g, spawn) = spawn_attacks_alone(&["Forest", "Swamp", "Island", "Island"]);
+    let fs = g.card(0, "Fallen Shinobi", Zone::Hand);
+    g.choose(Choice::Ability(fs, AbilitySlot::Hand(0)));
+    finish(&mut g, |g| {
+        assert!(!g.has_option(Choice::Ability(spawn, AbilitySlot::Activated(0))), "the Spawn pays no mana");
+        None
+    });
+    resolve_with(&mut g, |_| None);
+    let fs = bf(&g, 0, "Fallen Shinobi");
+    assert!(g.obj(fs).tapped && g.obj(fs).attacking);
+    assert!(tokens_named(&g, "Eldrazi Spawn").is_empty(), "returned to hand: gone");
+}
+
 // ---- Otawara, Soaring City and Boseiju, Who Endures -------------------------------------------
 
 const OTAWARA: &str = "Otawara, Soaring City";
