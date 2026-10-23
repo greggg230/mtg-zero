@@ -751,6 +751,7 @@ they isolate one keyword or trigger each.
 | `tests/hidden.rs` | determinize keeps the viewer's view and actions; known cards stay; observer masking of keys; refreshed decisions of the other player; an ability activated from hand reveals its card (602.2a); a payment in progress completes in every determinized world (pinned hand sources, then revealed); a pending shock-land choice survives determinize; a Brainstorm after a hand reveal leaves partial knowledge; a card leaving the hand is not told apart from a known twin |
 | `tests/rules_layers.rs` | M7a: 613 layers (types, colours, keywords, set P/T in timestamp order, pumps, counters), 611.2c, statics and their conditions, 704.5q, protection 702.16, "can't block" groups, equipment 301.5 / 704.5n, exalted, battle cry, prowess |
 | `tests/cards_m7a.rs`, `cards_m7a_costs.rs`, `cards_m7a_zones.rs`, `cards_m7a_zones2.rs`, `cards_m7a_threats.rs`, `cards_m7a_threats2.rs`, `cards_m7a_misc.rs`, `cards_m7a_x.rs`, `cards_m7a_more.rs` | M7a cards and rules: equipment triggers, taxes and locks, replacement of uncast creatures, flicker, coin flips, explore, alternative costs and evoke (118.9, 702.74), divided damage (601.2d), linked exile (610.3), delayed triggers (603.7), reflexive triggers (603.12), random bottom order, tokens attacking (508.4), flashback (702.34), escape (702.138), exile permissions, dash (702.109), backup, amass, persist, monstrosity, living weapon, chosen player (614.12), devotion and winning (104.2b), delve, kicker, energy, X (107.3), crew (702.122), extra land drops |
+| `tests/cards_m7b_tests_lands.rs`, `cards_m7b_tests_mana.rs`, `cards_m7b_tests_creatures.rs`, `cards_m7b_tests_creatures2.rs`, `cards_m7b_tests_spells.rs`, `cards_m7b_tests_edges.rs` | M7b: a test for each of the 118 supported cards no earlier test named (`python tools/untested_cards.py` lists the supported cards no card test names; 0 left), each against its Oracle text: the land cycles table-driven (fetch lands, surveil lands, fast lands, horizon lands, shock lands, duals, Triomes and tri-lands with cycling, Verges), Tolarian Academy, Abandoned Air Temple, Talismans, Moxen, mana creatures, artifacts, creatures and spells; rules edges: 611.2c (Harvester of Misery, Spectacular Spider-Man, Ravenous Robots), 610.3c (Touch the Spirit Realm), 601.2g-h (Crop Rotation, Natural Order, Goblin Engineer sacrificing the permanent that paid), 605.3a (Basalt Monolith paying its own untap), 502.3, 122.1d (stun), 701.16a, 702.34 (granted flashback ends), 111.7 (a flickered token) |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
@@ -954,6 +955,21 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
 * IR gap: Get Lost's rider (`ControllerCreatesTokens { token_name: "Map" }`) names a token
   the IR does not describe (Python looks it up in `TOKEN_PRINTINGS`); the IR should carry the
   printing, as `CreateToken.token_printing` does (Map also needs explore).
+* M7b: `docs/ir_defects.md` lists the IR defects for mtg-bot's parser, each with the Oracle
+  text, what the IR says and should say, the parser function that produces it, a suggested fix
+  and the engine-side status. Confirmed: Strip Mine's mana ability; Colonnade and Tar Pit's
+  colours and creature type (`_try_build_manland`); Get Lost's Map printing; Robber of the
+  Rich's duration; `{C}` folded into generic mana (the IR's `ManaCost` has no colorless pip:
+  Sowing Mycospawn's "Kicker {1}{C}" reads `{2}`); target specs set in `__post_init__` and not
+  exported (Thieving Skydiver; six more classes, re-derived here for Mishra's Bauble, Urza's
+  Bauble, Grindstone, Displacer Kitten). Suspected: an Aura's bonus in `equipment_bonuses`
+  (Animate Dead), Necromancy's "as though it had flash" as the flash keyword, transform back
+  faces carrying the front face's mana cost, sentinels (Fastbond's 1000000, Pest Infestation's
+  `count_max: 0`, Wizard's Rockets' `amount: 0`), target requirements that exist only in Python
+  methods. The 118 cards first tested in M7b showed no IR defect and no engine bug.
+* Lowering: the `*_str` cost twins (`mana_cost_str`, `kicker_cost_str`, `mana_str`, ...) are
+  ignored as display forms; checking them against the structured cost (rule 4a, section 3) would
+  have caught the lost `{C}`.
 * IR naming: `EachOpponentSacrificesCreature` means "a nontoken creature" (Sheoldred's
   Edict; Python agrees); `Scry.bottom_choice` and `SearchLibraryForCard.may_fail` are Python
   behaviour switches the engine ignores in favour of the CR (section 14).
