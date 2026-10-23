@@ -50,6 +50,7 @@ Game (all mutable state, Clone)  <-- reads ------+
 | `triggers.rs` | events, trigger matching, putting triggers on the stack (CR 603) |
 | `hidden.rs` | knowledge (exact bits and partial "clouds"), chance keys, `determinize` (section 10) |
 | `rng.rs` | xoshiro256++ / splitmix64 (the same generators as zero-core) |
+| `svec.rs` | `SVec`, a small vector of plain values with inline storage (the short lists built for every decision; section 17) |
 | `testkit.rs` | scenario builder and helpers for tests (public; not used by the engine) |
 | `az/` | the zero-core game `mtg` (section 21): `mod.rs` (`MtgAz`, the spec, the `SearchGame` impl), `encode.rs`, `decks.rs`, `bots.rs` |
 
@@ -957,6 +958,7 @@ they isolate one keyword or trigger each.
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
+| `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
 **Fuzzer.** Uniform random actions in complete games between random 40-card decks (17 lands,
 23 other cards drawn with repetition from **every** supported card and the custom test cards,
@@ -984,7 +986,25 @@ both fixed (25.9). The check also asserts that no face is up in a hidden zone. M
 M7b part 3b: 20,000 games over the 438 cards, no failure (102 s); one fault found on the way,
 fixed (27.12).
 `POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
-earlier milestone's games (section 17).
+earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
+`n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).
+
+**Behaviour digests** (`tests/digest.rs`, M7c). For a change that must not change behaviour (a
+performance change): 2,000 games of uniform random play (seeds 0..2000, random decks of every
+supported card as in the fuzzer) and 500 games of `az::bots::Heuristic` against random play
+(seeds 0..500, the bot in seat `seed % 2`), each hashed (FNV-1a) by what a player of the engine
+sees, never by its representation: per decision the pending decision's kind and player, the legal
+action ids, the action taken and the chance keys `apply` emitted; every 10th decision the
+decider's encoding (`encode_features`, bit for bit); every 20th decision a determinized clone for
+the decider (its decision and legal actions, both players' hand and library identities in order,
+five random actions played in it with their legal actions and keys); the outcome, the turn and
+the number of decisions. `cargo test --release -p engine --test digest -- --ignored --nocapture`
+(about 10 s) compares every game with `tests/data/digests.txt`, recorded on main at 79ddaf9
+(combined digest f9b5d7c9db1b2931), and names the games that differ. `DIGEST_WRITE=1` records
+the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
+supported card: the pool deals the random decks), then the digests of the next performance change
+are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every
+M7c commit kept all 2,500 digests; the check caught one wrong fast path on the way (section 17).
 
 ## 16. Porting a card (the recipe for M4b onwards)
 
@@ -1034,14 +1054,14 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 `tests/perf.rs`; random decks of every supported card as in the fuzzer, mulligans on,
 `auto_single` on.
 
-| Measure | M7b part 3b (438 cards; pinned, below) | M7b part 3 (410 cards; pinned, below) | M7b part 2 (394 cards; pinned, below) | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
-|---|---|---|---|---|---|---|---|---|
-| Random play | 545 games/s (main's code, the same day: 592 on its own pool) | 615 games/s (main's code, the same day: 674 on its own pool) | 635 games/s (M7b part 1's code, the same day: 648 on its own pool) | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
-| Per exposed decision (`apply`, running to the next decision) | 8.44 us (218 decisions per game); on main's pool 7.73 us against its code's 7.41 us, nearly the same games (911,364 decisions against 911,361) | 7.14 us (228 decisions per game); on main's pool 6.95 us against its code's 6.57 us, nearly the same games (903,244 decisions against 903,215) | 6.97 us (226 decisions per game); on M7b part 1's pool 7.01 us against its code's 6.81 us, the same 906,266 decisions | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
-| `Game::clone` (mean over mid-game states) | 1.34 us (6,137 states); 1,240 B (main's code the same day: 1.28 us, 1,200 B) | 1.23 us (6,244 states); 1,200 B (main's code the same day: 1.17 us, 1,040 B) | 1.27 us (6,484 states); 1,040 B (part 1's code the same day: 1.24 us) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
-| `clone` + `determinize(to_move)` (one search simulation's setup) | 2.44 us (on main's pool 2.03 us; main's code the same day: 1.95 us) | 1.80 us (main's code the same day: 1.82 us) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
-| `legal_actions` (copies cached ids) | 3-6 ns | 4-5 ns | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
-| Fuzzer, 20,000 games, release | 102 s, no failure | 93-110 s (the last three runs), no failure | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+| Measure | M7c (438 cards; pinned, below) | M7b part 3b (438 cards; pinned, below) | M7b part 3 (410 cards; pinned, below) | M7b part 2 (394 cards; pinned, below) | M7b (378 cards; pinned, below) | M7a (360 cards) | M4b-2 (191 cards) | M4b-1 (133 cards) | M4a (31 cards) |
+|---|---|---|---|---|---|---|---|---|---|
+| Random play | 941 games/s best of six, 870 median (main's code the same day: 502, 474) | 545 games/s (main's code, the same day: 592 on its own pool) | 615 games/s (main's code, the same day: 674 on its own pool) | 635 games/s (M7b part 1's code, the same day: 648 on its own pool) | 702 games/s (M7a's code pinned the same way, the same day: 835) | 867 games/s (4,000 games, setup included) | 694 games/s | 750 games/s | 1,357 games/s |
+| Per exposed decision (`apply`, running to the next decision) | 4.88 us best of six, 5.29 median (218 decisions per game; main's code the same day: 9.16, 9.70); on M7a's pool 4.61 us against M7a's code 5.67 us and main's 7.06 us (medians 4.95, 5.87, 7.30) | 8.44 us (218 decisions per game); on main's pool 7.73 us against its code's 7.41 us, nearly the same games (911,364 decisions against 911,361) | 7.14 us (228 decisions per game); on main's pool 6.95 us against its code's 6.57 us, nearly the same games (903,244 decisions against 903,215) | 6.97 us (226 decisions per game); on M7b part 1's pool 7.01 us against its code's 6.81 us, the same 906,266 decisions | 6.3 us (227 decisions per game) | 5.2 us (221 decisions, 28 turns per game on average: more threats end games sooner) | 6.2 us (231 decisions, 36 turns per game on average) | 6.5 us (206, 36) | 4.4 us (169, 36) |
+| `Game::clone` (mean over mid-game states) | 1.34 us (main's code the same day: 1.43 us); on M7a's pool 1.11 us (M7a's code 1.13 us, main's 1.20 us); 1,240 B | 1.34 us (6,137 states); 1,240 B (main's code the same day: 1.28 us, 1,200 B) | 1.23 us (6,244 states); 1,200 B (main's code the same day: 1.17 us, 1,040 B) | 1.27 us (6,484 states); 1,040 B (part 1's code the same day: 1.24 us) | 1.19 us (6,509 states); 928 B | 1.0 us (6,121 states); `size_of::<Game>()` = 904 B | 1.36 us (6,616 states); 600 B | 1.3 us; 576 B | 1.04 us; 560 B |
+| `clone` + `determinize(to_move)` (one search simulation's setup) | 1.72 us (main's code the same day: 2.55 us); on M7a's pool 1.46 us (M7a's code 1.81 us, main's 1.83 us); `determinize` alone 0.86 us (main's 1.23 us, M7a's 1.10 us on its pool) | 2.44 us (on main's pool 2.03 us; main's code the same day: 1.95 us) | 1.80 us (main's code the same day: 1.82 us) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
+| `legal_actions` (copies cached ids) | 3-4 ns | 3-6 ns | 4-5 ns | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
+| Fuzzer, 20,000 games, release | 67 s, no failure | 102 s, no failure | 93-110 s (the last three runs), no failure | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -1099,10 +1119,66 @@ cards' decisions (ward payments, rooms, improvise) and their triggers.
 
 A decision costs more because every priority decision computes the mana sources and, for
 each card in hand and each ability, whether its cost can be paid (a matching with budgets),
-and payments are decisions now. Most of the remaining time is small allocations under the
-Windows system allocator (mana classes, candidate lists, SBA groups); the matching itself is
-allocation-free. Caching the sources between decisions, or a faster allocator, would cut
-it if it ever matters (the network evaluation per simulation will cost far more).
+and payments are decisions now. Most of the remaining time was small allocations under the
+Windows system allocator (mana classes, candidate lists, SBA groups); M7c removed most of them
+(below).
+
+M7c's column (branch `m7c-perf`) recovers the per-decision speed M7b lost, with behaviour
+unchanged (the digests of section 15 identical after every commit). **Method**: as above, the
+process pinned to logical CPU 2 (a performance core), M7a's code (98b9463), main's (79ddaf9) and
+the branch built side by side and run interleaved, six rounds, best and median reported. M7a's
+pool is main's less the 85 names (cards and custom test cards) M7a lacks (`POOL_EXCLUDE`; what remains
+is exactly M7a's pool in the same order, so the games are nearly the same: 882,060 decisions
+against M7a's 885,439). The bench script waits while a `rustc` or `cargo` runs: another agent's
+builds on the machine moved single runs by up to 50%. **Before**, the same day: main's code took
+7.06 us per decision on M7a's pool against M7a's 5.67 (+23% to +28% in the six same-round
+pairs; the M7b parts' own measurements summed to about +20%), and 9.16 us on the full pool.
+**After**: 4.61 us on M7a's pool, 12-19% less than M7a's code in every round; 4.88 us on the
+full pool, 45-47% less than main's code in every round. `Game::clone` and clone + determinize
+are below M7a's code on its pool; `size_of::<Game>()` stays 1,240 bytes.
+
+**Where the time went.** A sampling profile (a test-only tool, not committed: a thread
+suspends the playing thread every 100 us, unwinds its stack with `RtlVirtualUnwind` and
+symbolizes the frames with dbghelp, inline frames included, to function and line) and an
+allocation-site count. On M7a's pool main spent 49% of a decision building priority options
+(mana sources 13%, activated abilities 10%, castability from hand 9%, other zones 6%, hand slots
+3%), 16% in the SBA check and 13% in payment decisions. Heap allocation and freeing took about a
+quarter of the time: 49 allocations per decision (M7a's code: 48.6, so the count had not
+regressed, but each round trip costs tens of nanoseconds under the Windows heap, and some runs
+hit a slow case where one allocation site took 27% of the time: part of the run-to-run noise of
+this section). The M7b additions that cost most: the "can't be activated" locks read by
+walking the battlefield once per mana source (the walk itself older, but each step now through
+the face- and copy-aware `types_of` and `abilities`), the 704.5d check walking every slot
+through the copy-aware `is_token`, the escape granter looked for once per graveyard card, the
+attachment and counter-pair lists built inside the "is any SBA possible" test, and power and
+toughness walking the static abilities twice. A clone copied `Vec<Obj>` field by field (37% of
+a clone).
+
+**The fixes**, one commit each, each measured interleaved with the commit before it (best of
+three or four rounds; per decision on M7a's pool unless noted):
+
+| Fix | Effect |
+|---|---|
+| `Obj` is `Copy` (`Vec<Obj>` clones as one copy) | clone 1.32 -> 1.19 us |
+| `determinize`: the unknown cards' list sized once | clone + determinize 1.78 -> 1.57 us (full pool 2.42 -> 1.96) |
+| Payment feasibility without heap allocations: a class's sources, the candidate units and a card's ways inline (`svec::SVec`), a card's own sources left out by a filter instead of a copy of the classes | 49.0 -> 22.6 allocations per decision; 6.83 -> 6.16 us |
+| Hand slots, the sorted hand and the hand-knowledge canonicalisation inline; the priority options sized once | 22.6 -> 14.9 allocations; 6.42 -> 6.10 us |
+| SBA check: 704.5d looks only from the first slot made as a token or copy (`Game::first_token`: cards are never tokens), "is any SBA possible" builds no lists, power and toughness walk the statics once | 5.84 -> 5.69 us (pairs -2% to -10%) |
+| The battlefield's activation locks read once per `mana_classes` (their union; a source's types only when there is a lock); the escape granter once per graveyard | 5.63 -> 4.80 us |
+| `determinize`: the unknown cards and identities inline | clone + determinize on the full pool 2.04 -> 1.61 us; `determinize` alone unchanged (the gain is fewer allocator round trips next to the clone's) |
+| A cheap necessary test before building payment candidates (enough mana units for the non-Phyrexian pips: the pool plus every source at its largest production); the locks once per activation pass | 5.07 -> 4.91 us (full pool 5.43 -> 5.34) |
+
+Tried and dropped: the static abilities' sources found once per SBA check (within noise);
+moving rarely used `Game` fields behind one box (25 empty vectors clone and drop in 24 ns, 2% of
+a clone: not worth the churn). **What is left** (full pool): priority options 46% (mana sources
+12%, activated abilities 10%, castability from hand 9%, other zones 6%), the SBA check 14%
+(power and toughness 5%), payment decisions 12%; 14.8 allocations per decision (the options, the
+mana classes, several-mana yields) and 12.9 per clone (one per non-empty vector); 9% of the time
+is memory moves and copies, the largest part (3%) the 232-byte `Task` (a `Frame` and a `PayMana`
+inline) moved on every agenda push and pop: boxing those two would trade moves for allocations.
+A faster allocator
+(mimalloc) would likely cut the rest of the allocation cost, but it belongs to the binary, not
+the engine.
 
 ## 18. Costs, activated abilities and mana abilities (CR 118, 602, 605)
 
