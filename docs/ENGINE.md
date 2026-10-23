@@ -954,6 +954,7 @@ they isolate one keyword or trigger each.
 | `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
 | `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
+| `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below) and replay determinism |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
@@ -1387,20 +1388,113 @@ both (`{"max_turns": 60, "eval_decks": 16, "eval_seed": 1}`).
 
 * `random` (zero-core's `RandomBot`): uniform over the legal ids.
 * `heuristic` (`az/bots.rs`; the Elo anchor of the runs, 1000): plays a land; casts the most
-  expensive spell it can afford in its main phases, skipping harmful targeted spells without
-  an opposing target and a sweeper that would hit more of its own creatures; counters an
-  opponent's spell when it can; burns the opponent out when the damage is lethal; attacks
-  with each creature that no untapped opposing creature can kill and survive (all of them
-  when the opponent has no untapped creature); blocks when the blocker survives or trades
-  for a creature of at least its mana value, chump-blocks when the unblocked damage would be
-  lethal; assigns lethal damage in order; aims harmful effects at the opponent's most
-  valuable permanent it removes (or the player) and helpful ones at its own; keeps hands of
-  2-5 lands (one mulligan at most); gives up lands when flooded, else its most expensive
-  card; pays with the first source offered; never activates abilities. It reads only public
-  information and its own cards. A yardstick, not a goal.
+  expensive spell it can afford in its main phases, skipping a targeted spell without a target
+  on the right side for each required target (an opposing one where the effect harms, its own
+  where it helps) and a sweeper that would hit more of its own creatures; announces the largest
+  X it can pay; counters an opponent's spell when it can; burns the opponent out when the
+  damage is lethal; activates abilities (below: loyalty abilities, fetch lands, equip, crew,
+  removal, upgrades, card draw and other sinks); attacks with each creature that no untapped
+  opposing creature can kill and survive (all of them when the opponent has no untapped
+  creature); blocks when the blocker survives or trades for a creature of at least its mana
+  value, chump-blocks when the unblocked damage would be lethal; assigns lethal damage in
+  order; aims each target by what the effect does to it (the first op of the program that uses
+  the requirement, `aim_in`; else whether any effect of the ability harms): harmful effects at
+  the opponent's most valuable permanent they remove (or the player), helpful ones at its own
+  most valuable permanent (an Equipment at a creature that can attack now; from a graveyard,
+  the costliest card); keeps hands of 2-5 lands (one mulligan at most); gives up lands when
+  flooded, else its most expensive card; sacrifices, or returns as a cost, its least valuable
+  permanent; pays with the first source offered, except the source of the ability being paid
+  for (a manland tapped for its own mana could not attack). It reads only public information
+  and its own cards. A yardstick, not a goal.
 
-Measured (`cargo run --release -p engine --example az_probe -- <a> <b> <games> <spec>`, 1000
-games each, seats alternating, `max_turns` 60):
+**Activated abilities (M7c).** At priority the bot reads each offered ability's kind from its
+definition, the effect's ops and the cost, never from the card's name (`classify`), and
+decides by the kind, the step and the board. "Worth" is `value` (mana value x 2; a creature
+adds 2 + power x 2 + toughness; a land 3; a token 2 less: a 2/2 for two is worth 12).
+
+| Kind (from the ops) | When | If |
+|---|---|---|
+| Loyalty ability | its main phases, before spells | the ultimate (the most negative ability, -5 or less) whenever it can be paid; else a minus or zero that removes an opposing permanent worth 7 or more, if the planeswalker keeps 1 loyalty or the target is worth 15; else a plus aimed at an opposing permanent worth 8; else the biggest plus (one that only adds mana last), else a zero, else a minus that does something (draw, tokens, recursion, an upgrade) and leaves 1 loyalty |
+| Fetch (search for a land onto the battlefield) | its main phases and the opponent's end step, before spells | 2 life left after paying |
+| Land tutor (landcycling, Expedition Map) | its main phase before its land drop (before spells), or the opponent's end step | no land in hand, fewer than 6 lands |
+| Ninjutsu | its declare-blockers step | an unblocked attacker of lower mana value |
+| Lethal damage | its main phases and declare-blockers step, the opponent's end step | one activation, or all its cost allows (the counters on the source, the permanents it can sacrifice), deals the opponent's life; the rest of the turn its damage goes to the player |
+| Removal (destroy, exile, damage, bounce, steal, -X/-X, "loses all abilities") | its main phases or the opponent's end step, after spells | an opposing target worth 7 that the effect removes (`effect_value`: lethal damage, not indestructible; a bounce counts half); a creature sacrificed, or the last counter removed from one, only for a target worth more |
+| Equip | its main phases | the Equipment is not attached to a creature it controls |
+| Crew | its first main phase | the Vehicle can attack and no blocker would eat it, and creatures that would not attack (summoning sick, no power, or eaten by a blocker) have the power |
+| Manland ("becomes a creature until end of turn") | its first main phase | untapped and not summoning sick |
+| Upgrade (+1/+1 and level counters, monstrosity, transform, "becomes" with no end, explore) | its main phases; at instant speed also the opponent's end step | it changes something (not a second monstrosity, not "becomes 4/4" on a 4/4, not "if it's a Spirit" on a non-Spirit); no counters removed |
+| Put a card from hand onto the battlefield | its main phases or the opponent's end step; sacrificed at end of turn (Sneak Attack): its first main phase | a card in hand it applies to (Sneak Attack: one costing more than its lands) |
+| Tokens; recursion from the graveyard | the opponent's end step or its second main phase (sorcery speed: its main phases); tokens sacrificed at end of turn: its first main phase | |
+| Card draw (more draws for it than for the opponent, look and keep, exile and play, tutors) | the opponent's end step (sorcery speed, or "play them this turn": its main phases) | |
+| Cycling | the opponent's end step or its second main phase | stuck: a land card with 5 lands in play and 2 in hand; a spell costing more than its lands + 2 |
+| Mill a player; gain life | the opponent's end step | life: 10 or less |
+| Never | | untapping (Basalt Monolith, Voltaic Key), protection, library rearranging (Sensei's Divining Top), symmetric draws (Faerie Mastermind, Loran), mana abilities at priority (Lion's Eye Diamond), "becomes a copy", graveyard hate, temporary pumps, counterspells, giving the source away (Wishclaw Talisman) |
+
+Costs, for every kind but loyalty: life only with 8 left (2 for a fetch); a discard only when
+flooded (6 lands, or 5 and a land in hand); a permanent other than the source sacrificed only
+if it is a token (except for removal worth more, or lethal damage); the source sacrificed, if
+it is a land or a nontoken mana rock (Horizon Canopy, Mind Stone), only when flooded, if it is
+a creature only for removal. Order at priority: a land; then tier 2 (loyalty, fetches, a land
+tutor before the land drop, ninjutsu, lethal damage) by score; counterspells and lethal burn
+spells; the most expensive spell worth casting; then tier 1, the highest score first (removal
+500 + the target's worth, equip 400, crew 380, manland 370, put-in 350, upgrade 300 + its mana,
+tokens 250, recursion 220, draw 200, land tutor 180, cycling 150, mill 100, life 50).
+
+**Caps.** An ability is activated at most once a turn (a loyalty ability 3 times, for Comet's
+extra activations; one whose cost sacrifices another permanent, removes counters or discards,
+20 times), and a player at most 40 times a turn (`cap`, `TURN_CAP`; the counts reset each turn,
+and when the game's decision count drops: a new game). Untap abilities are never used and no
+mana is made at priority but a loyalty ability's (once a turn), so mana-costed activations are
+bounded too: every game ends (`tests/bots.rs`, 8,000 games with every decision asked).
+
+Decision kinds whose handling changed in M7c: `Priority` (activations), `Target` (per-requirement
+aim; graveyard cards by mana value; an Equipment's creature), `ChooseMode` under X (the largest;
+other modes, the times a repeatable cost is paid, still the first), `PayMana` (not the paid
+ability's source), `ChoosePermanent` while paying a cost (crew, "tap an untapped Rebel": `PASS`
+once allowed, else a summoning-sick creature, else the smallest), `BounceCost` (the least
+valuable; was the first offered). `az::bots::HeuristicV1` (module `v1`) is the policy before
+M7c, unchanged, kept to measure against.
+
+Measured in M7c (`cargo test --release -p engine --test bots -- --ignored --nocapture
+--test-threads=1`; `BOTS_GAMES=2000` deck pairs from the game seeds, each pair played with both
+seatings, scores +- 1 standard error over pairs; the 438-card pool, `max_turns` 60):
+
+| Match | Score of the first | Games | Draws |
+|---|---:|---:|---:|
+| heuristic vs `HeuristicV1` | 62.9% +- 0.6 | 4,000 | 0 |
+| ... a deck has a planeswalker | 63.4% +- 0.6 | 3,288 | 0 |
+| ... no planeswalker | 60.4% +- 1.3 | 712 | 0 |
+| ... 8-11 nonland cards with activated abilities in the two decks | 61.1% +- 1.5 | 588 | 0 |
+| ... 12 or more | 63.3% +- 0.6 | 3,378 | 0 |
+| heuristic vs random | 95.8% +- 0.3 | 4,000 | 0 |
+| `HeuristicV1` vs random | 91.3% +- 0.4 | 4,000 | 1 |
+
+62.9% is about +92 Elo: the anchor of the runs (1000) is a stronger player from M7c on, so scores
+against the heuristic before M7c (sections 21.6, 22.4) and after are not comparable.
+
+Every deck pair has nonland cards with activated abilities (7 or fewer in 34 games). Where the
+gain comes from (the same 4,000 games against `HeuristicV1`, abilities switched off by kind in
+a local experiment): no activations at all (the targeting, X and cost changes only) 53.1% +-
+0.3; loyalty abilities only 55.0% +- 0.4; fetch lands only 56.0% +- 0.5; all but loyalty
+abilities 60.9% +- 0.5; all but fetch lands 59.1% +- 0.5.
+
+Speed (3,000 games each, one thread, decisions with two or more options): `HeuristicV1` vs
+itself 1,166 games/s (15.4 turns, 252 decisions per game, about 0.1 us per bot decision);
+the heuristic vs itself 1,178 games/s (14.4 turns, 186 decisions, about 0.3 us); heuristic vs random 1,380
+games/s, `HeuristicV1` vs random 1,189. The bots take 2-7% of the time; the games are shorter, so
+evaluation games are not slower.
+
+As a yardstick it still has blind spots: it activates nothing in response or during combat
+(no protection from Mother of Runes, no pump or removal on an attacker, no sacrifice of a
+creature about to die), holds no mana for instants (its sinks use the opponent's end step),
+crews and animates manlands only before its own combat (never to block), uses a sacrifice
+outlet only on tokens or for lethal damage, takes an ultimate as soon as it can be paid (even
+one that leaves the planeswalker at 0), and its attacks and blocks are unchanged (aggressive,
+one blocker per attacker).
+
+Measured in M5a (`cargo run --release -p engine --example az_probe -- <a> <b> <games> <spec>`,
+1000 games each, seats alternating, `max_turns` 60; the 191-card pool, before M7c):
 
 | Match | Score of the first | Draws | Turns / game | Decisions / game | Games / s (1 thread) |
 |---|---:|---:|---:|---:|---:|
@@ -1528,7 +1622,7 @@ and the next queued key still lands on its own event; the encoding's hand, perma
 slots hold the cards behind the `HAND`, `MY_PERM` / `OPP_PERM` and `LIBRARY` ids and their
 option flags match the legal actions; decks are legal, seeded and cover the colour pairs; the
 evaluation set is fixed; the spec parser; the heuristic beats random (> 80% over 120 games)
-and always answers a legal id. `tests/` (pytest): the engine module registers `toy` and `mtg`,
+and always answers a legal id (the bot's own tests: `tests/bots.rs`, section 15). `tests/` (pytest): the engine module registers `toy` and `mtg`,
 the game through the bindings (determinize keeps the features), the bots in the Rust driver,
 self-play records valid samples, the presets, the evaluation spec and the driver patch, the
 commands through the shims (zero-core's loop at toy scale: resume, STOP, PAUSE, supervisor,
@@ -2214,7 +2308,9 @@ is a `Target` decision (not targeting); an opponent's choice between Karn's reve
 `PutInHand` of that opponent; Jace's "you may put that card on the bottom" is a `YesNo`; the
 searches for any number of cards are `SearchLibrary`; "untap up to two lands" is
 `ChoosePermanent`; the heuristic bot (`az/bots.rs`) attacks a planeswalker its attacker's power
-kills, else the player, and counts only creatures attacking it when it blocks.
+kills, else the player, counts only creatures attacking it when it blocks, and since M7c uses
+its own planeswalkers' loyalty abilities every turn they are available (the ultimate when it
+can be paid, a minus that removes a worthwhile opposing permanent, else a plus; 21.4).
 
 ### 24.6 Encoding (layout v3, 26,500 floats)
 
@@ -2245,8 +2341,9 @@ kills, else the player, and counts only creatures attacking it when it blocks.
 * A token creation makes at most 64 tokens after doubling.
 * Retrace isn't offered for a card with its own additional costs (as escape granted by
   Underworld Breach, 23.11); no supported instant or sorcery has both.
-* The heuristic bot activates no abilities at priority (as before M7b: it plays lands and
-  casts spells), so it never uses a loyalty ability; its planeswalkers only draw attacks.
+* Until M7c the heuristic bot activated no abilities at priority (it played lands and cast
+  spells), so it never used a loyalty ability and its planeswalkers only drew attacks; since
+  M7c it uses them (21.4).
 
 ### 24.8 Blocked by the IR
 

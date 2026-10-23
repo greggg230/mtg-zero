@@ -59,8 +59,7 @@ impl Bot {
 
 struct Played {
     result: [f32; 2],
-    turns: u32,
-    decisions: u32,
+    /// A draw (the turn cap, or both players lost at once).
     capped: bool,
 }
 
@@ -73,13 +72,12 @@ fn play(spec: &MtgSpec, seed: u64, kinds: [&str; 2], every: bool, seen: &mut BTr
     let mut bots = [Bot::new(kinds[0], seed * 2 + 1), Bot::new(kinds[1], seed * 2 + 2)];
     let mut legal = Vec::new();
     let mut keys = Vec::new();
-    let (mut steps, mut decisions) = (0u32, 0u32);
+    let mut steps = 0u32;
     while let Some(p) = g.to_move() {
         g.legal_actions(&mut legal);
         let a = if legal.len() == 1 && !every {
             legal[0]
         } else {
-            decisions += 1;
             let a = bots[p as usize].choose(&g.g, &legal);
             assert!(legal.contains(&a), "seed {seed}: {} answered {a} to {:?} ({legal:?})", kinds[p as usize], g.g.pending_decision().map(|d| d.kind));
             if p == 0 {
@@ -93,7 +91,7 @@ fn play(spec: &MtgSpec, seed: u64, kinds: [&str; 2], every: bool, seen: &mut BTr
         steps += 1;
         assert!(steps < 200_000, "seed {seed} ({kinds:?}): the game does not end");
     }
-    Played { result: [g.result()[0], g.result()[1]], turns: g.rounds(), decisions, capped: !g.g.is_over() || g.g.outcome().is_some_and(|o| o.winner.is_none()) }
+    Played { result: [g.result()[0], g.result()[1]], capped: g.g.outcome().is_some_and(|o| o.winner.is_none()) }
 }
 
 fn spec() -> MtgSpec {
@@ -145,6 +143,32 @@ fn always_legal_and_every_game_ends() {
         }
     }
     assert!(seen.contains_key("Priority") && seen.contains_key("Target"), "{seen:?}");
+}
+
+/// The registered zero-core bot `heuristic` is this one: legal, and it beats
+/// random (as `tests/az.rs` checks, on other seeds).
+#[test]
+fn registered_bot_beats_random() {
+    let sp = spec();
+    let (mut score, n) = (0.0, 60u64);
+    let mut legal = Vec::new();
+    for s in 0..n {
+        let mut g = MtgAz::new_game(&sp, 2, 9000 + s).unwrap();
+        let hseat = (s % 2) as usize;
+        let mut bots = [
+            zero_search::game::make_bot::<MtgAz>(&sp, "heuristic", s).unwrap(),
+            zero_search::game::make_bot::<MtgAz>(&sp, "random", s).unwrap(),
+        ];
+        let mut keys = Vec::new();
+        while let Some(p) = g.to_move() {
+            g.legal_actions(&mut legal);
+            let a = bots[(p as usize != hseat) as usize].choose(&g, &legal);
+            assert!(legal.contains(&a));
+            g.step(a, &mut keys).unwrap();
+        }
+        score += g.result()[hseat];
+    }
+    assert!(score / n as f32 > 0.85, "heuristic vs random {}", score / n as f32);
 }
 
 /// A few thousand games, the bots asked at every decision: no illegal id, no
@@ -235,29 +259,48 @@ fn strength_against_the_old_policy_and_random() {
 }
 
 /// Games per second of bot-against-bot play (one thread), with the turns and
-/// the decisions of two or more options per game.
+/// the decisions of two or more options per game, and the bots' share of the
+/// time (`--test-threads=1` for clean numbers).
 #[test]
 #[ignore]
 fn speed_of_bot_games() {
     let sp = spec();
     let n = games(1000);
-    let mut seen = BTreeMap::new();
-    for kinds in [["old", "old"], ["new", "new"], ["new", "old"]] {
+    for kinds in [["old", "old"], ["new", "new"], ["new", "old"], ["old", "random"], ["new", "random"]] {
         let t0 = std::time::Instant::now();
-        let (mut turns, mut decisions) = (0u64, 0u64);
+        let (mut turns, mut decisions, mut in_bots) = (0u64, 0u64, 0f64);
+        let mut legal = Vec::new();
+        let mut keys = Vec::new();
         for s in 0..n {
-            let r = play(&sp, 2_000_000 + s, kinds, false, &mut seen);
-            turns += r.turns as u64;
-            decisions += r.decisions as u64;
+            let seed = 2_000_000 + s;
+            let mut g = MtgAz::new_game(&sp, 2, seed).unwrap();
+            let mut bots = [Bot::new(kinds[0], seed * 2 + 1), Bot::new(kinds[1], seed * 2 + 2)];
+            while let Some(p) = g.to_move() {
+                g.legal_actions(&mut legal);
+                let a = if legal.len() == 1 {
+                    legal[0]
+                } else {
+                    decisions += 1;
+                    let t = std::time::Instant::now();
+                    let a = bots[p as usize].choose(&g.g, &legal);
+                    in_bots += t.elapsed().as_secs_f64();
+                    a
+                };
+                keys.clear();
+                g.step(a, &mut keys).unwrap();
+            }
+            turns += g.rounds() as u64;
         }
         let dt = t0.elapsed().as_secs_f64();
         println!(
-            "{} vs {}: {:.0} games/s, {:.1} turns/game, {:.1} decisions/game ({n} games, {:.1} s)",
+            "{} vs {}: {:.0} games/s, {:.1} turns/game, {:.1} decisions/game, {:.2} us per bot decision, bots {:.0}% of the time ({n} games, {:.1} s)",
             kinds[0],
             kinds[1],
             n as f64 / dt,
             turns as f64 / n as f64,
             decisions as f64 / n as f64,
+            1e6 * in_bots / decisions as f64,
+            100.0 * in_bots / dt,
             dt
         );
     }
