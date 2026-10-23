@@ -571,6 +571,8 @@ pub enum Mark {
     Converge(u8),
     /// The colour (index W U B R G) chosen as it entered (CR 614.12).
     ChosenColor(u8),
+    /// This spell can't be countered (mana spent on it said so).
+    Uncounterable,
 }
 
 impl Game {

@@ -914,3 +914,68 @@ fn sunfall_exiles_all_creatures_and_incubates_their_number_cr701_53a() {
     assert_eq!((g.power(inc), g.toughness(inc)), (3, 3), "a 0/0 with three counters");
     assert_eq!(g.colors_of(inc), 0);
 }
+
+// ---- Mishra's Workshop, Delighted Halfling ---------------------------------
+
+/// "{T}: Add {C}{C}{C}. Spend this mana only to cast artifact spells" (CR
+/// 106.6): what is left stays in the pool, still only for artifact spells.
+#[test]
+fn mishras_workshop_mana_only_for_artifact_spells_cr106_6() {
+    let mut g = scen()
+        .battlefield(0, &["Mishra's Workshop"])
+        .hand(0, &["Voltaic Key", "Grim Monolith", "Coalition Relic", "Test Zero"])
+        .at(Step::Main1, 0)
+        .start();
+    let key = g.card(0, "Voltaic Key", Zone::Hand);
+    let mono = g.card(0, "Grim Monolith", Zone::Hand);
+    let relic = g.card(0, "Coalition Relic", Zone::Hand);
+    let z = g.card(0, "Test Zero", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(relic)) && g.has_option(Choice::Cast(key)), "artifacts");
+    assert!(!g.has_option(Choice::Cast(z)), "not a creature spell that isn't an artifact");
+    assert!(!g.can_pay(0, &cost("{1}")), "nor anything else");
+    g.choose(Choice::Cast(key));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(key).zone, Zone::Battlefield);
+    assert_eq!((g.player(0).pool.amt[5], g.player(0).pool.art), (2, 2), "two artifact-only {{C}} left");
+    assert!(g.has_option(Choice::Cast(mono)), "{{2}} from the pool");
+    assert!(!g.has_option(Choice::Cast(z)) && !g.has_option(Choice::Cast(relic)));
+    g.choose(Choice::Cast(mono));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(mono).zone, Zone::Battlefield);
+    assert_eq!(g.player(0).pool.amt[5], 0);
+}
+
+/// "{T}: Add one mana of any color. Spend this mana only to cast a legendary
+/// spell, and that spell can't be countered" (CR 106.6, 101.2).
+#[test]
+fn delighted_halfling_mana_for_legends_that_cant_be_countered_cr101_2() {
+    let mut g = scen()
+        .battlefield(0, &["Delighted Halfling", "Forest"])
+        .battlefield(1, &["Island", "Island"])
+        .hand(0, &["Test Legend", "Swords to Plowshares"])
+        .hand(1, &["Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    let h = bf(&g, 0, "Delighted Halfling");
+    let leg = g.card(0, "Test Legend", Zone::Hand);
+    let stp = g.card(0, "Swords to Plowshares", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(leg)), "{{W}} from the Halfling");
+    assert!(!g.has_option(Choice::Cast(stp)), "not a legendary spell");
+    g.choose(Choice::Cast(leg));
+    while g.kind() == Some(DecisionKind::PayMana) || g.kind() == Some(DecisionKind::ChooseMana) {
+        let c = if g.has_option(act(h, 1)) { act(h, 1) } else { opts(&g)[0] };
+        g.choose(c);
+    }
+    g.drive_until(|g| !at_priority(g) || g.pending_decision().unwrap().player == 1);
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let target = opts(&g)[0];
+    g.choose(target);
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(leg).zone, Zone::Battlefield, "it can't be countered");
+    assert_eq!(g.obj(cs).zone, Zone::Graveyard);
+}

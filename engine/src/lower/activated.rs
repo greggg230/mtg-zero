@@ -453,6 +453,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
     use cats::Effect as E;
     let mut damage_to_you = 0u8;
     let mut sac_if_no = None;
+    let (mut only, mut uncounterable) = (0u8, false);
     let main = match e {
         E::Sequence(nodes::Sequence { effects }) => {
             let [first, rest @ ..] = &effects[..] else {
@@ -484,10 +485,31 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             grants_haste_to_creature_spell,
             makes_spell_uncounterable,
         }) => {
-            l.deny("AddManaToPool.spend_restriction", spend_restriction);
             l.deny("AddManaToPool.grants_haste_to_creature_spell", grants_haste_to_creature_spell);
-            l.deny("AddManaToPool.makes_spell_uncounterable", makes_spell_uncounterable);
-            lower_produces(l, "AddManaToPool.produces", produces)?
+            let prod = lower_produces(l, "AddManaToPool.produces", produces)?;
+            // "Spend this mana only to cast artifact spells" (CR 106.6): what
+            // the pool can hold is colorless artifact-only mana (several
+            // mana, the rest stays), or one mana spent at once.
+            only = match spend_restriction {
+                None => 0,
+                Some(enums::SpendRestriction::ArtifactSpell) => crate::db::SPEND_ARTIFACT,
+                Some(enums::SpendRestriction::LegendarySpell) => crate::db::SPEND_LEGENDARY,
+                Some(other) => {
+                    l.unsupported(format!("AddManaToPool.spend_restriction({other:?})"));
+                    0
+                }
+            };
+            match (&prod, only) {
+                (_, 0) => {}
+                (ManaProd::One(_), _) => {}
+                (ManaProd::Fixed(v), crate::db::SPEND_ARTIFACT) if v[..5].iter().all(|&n| n == 0) => {}
+                _ => l.unsupported("AddManaToPool.spend_restriction(several mana the pool can't hold)"),
+            }
+            uncounterable = *makes_spell_uncounterable;
+            if uncounterable && !matches!(prod, ManaProd::One(_)) {
+                l.unsupported("AddManaToPool.makes_spell_uncounterable(several mana)");
+            }
+            prod
         }
         E::AddNManaOfChosenColor(nodes::AddNManaOfChosenColor { amount, options }) => {
             let n = l.int("AddNManaOfChosenColor.amount", *amount, 1, 20) as u8;
@@ -618,7 +640,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             return None;
         }
     };
-    Some(ManaAbility { prod, damage_to_you, sac_if_no })
+    Some(ManaAbility { prod, damage_to_you, sac_if_no, only, uncounterable })
 }
 
 /// The types a production can make (which `produces` colours it covers).

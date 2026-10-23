@@ -69,6 +69,9 @@ pub(crate) struct Class {
     pub dmg: u8,
     /// The ability sacrifices its source.
     pub sac_self: bool,
+    /// Its mana's spending restriction (`ManaAbility::only`): usable only
+    /// when the payment allows it (`Keep::allow`).
+    pub only: u8,
 }
 
 /// What later parts of a cost need from the payment of its mana (601.2h:
@@ -87,6 +90,12 @@ pub(crate) struct Keep {
     /// A later "exile a card matching the filter from your hand": mana
     /// sources in hand must leave one such card.
     pub exile: Option<(crate::db::Filter, CardIdx)>,
+    /// The spending restrictions this payment satisfies (`SPEND_*` bits:
+    /// casting an artifact / legendary spell; ENGINE.md 28).
+    pub allow: u8,
+    /// The spell being cast, if this pays for one ("that spell can't be
+    /// countered").
+    pub spell: Option<CardIdx>,
 }
 
 /// Paying a mana cost (ENGINE.md 6, 18). Stages: Phyrexian pips (how many
@@ -101,6 +110,8 @@ pub(crate) struct PayMana {
     pub multi: Vec<(Src, [u8; 6])>,
     /// Their mana not yet spent (it stays in the pool at the end).
     pub extra: [u8; 6],
+    /// The part of `extra[C]` that is artifact-only.
+    pub extra_art: u8,
     /// Single-mana sources picked.
     pub chosen: Vec<Src>,
     pub min_class: u8,
@@ -124,6 +135,7 @@ impl PayMana {
             cost,
             multi: Vec::new(),
             extra: [0; 6],
+            extra_art: 0,
             chosen: Vec::new(),
             min_class: 0,
             pooled: false,
@@ -319,7 +331,7 @@ impl Game {
                     }
                 }
                 let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra, Some(c)) else { continue };
-                let cl = Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self };
+                let cl = Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self, only: m.only };
                 if matches!(cl.yld, Yield::Multi { .. }) {
                     out.insert(n_multi, cl);
                     n_multi += 1;
@@ -348,7 +360,7 @@ impl Game {
                         continue;
                     }
                     let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life, Some(c)) else { continue };
-                    out.push(Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self: false });
+                    out.push(Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self: false, only: m.only });
                 }
             }
         }
@@ -369,7 +381,7 @@ impl Game {
             let src = Src { card: c, slot: IMPROVISE };
             match out.iter_mut().find(|cl| cl.def == def) {
                 Some(cl) => cl.members.push(src),
-                None => out.push(Class { def, members: one_member(src), yld: Yield::One(Unit::free(0)), dmg: 0, sac_self: false }),
+                None => out.push(Class { def, members: one_member(src), yld: Yield::One(Unit::free(0)), dmg: 0, sac_self: false, only: 0 }),
             }
         }
         out
@@ -496,7 +508,7 @@ impl Game {
     }
 
     fn cands(&self, p: PlayerId, keep: &Keep, classes: &[Class], use_src: &dyn Fn(&Src) -> bool, dmg: bool) -> Cands {
-        cands(classes, use_src, dmg, &|cl, s| self.reserved(p, keep, cl, s))
+        cands(classes, use_src, dmg, &|cl, s| self.reserved(p, keep, cl, s), keep.allow)
     }
 
     /// Can `p` pay `cost` (Phyrexian pips included) from their pool and the
@@ -559,7 +571,7 @@ impl Game {
             None => {
                 let mut c = *cost;
                 let mut pool = self.players[p as usize].pool;
-                pool.pay_into(&mut c);
+                pool.pay_into_for(&mut c, keep.allow & crate::db::SPEND_ARTIFACT != 0);
                 let (budget, dmg) = self.budget(p, keep, later);
                 c.is_zero() || cands_payable(&c, &[], &self.cands(p, keep, classes, &|s| Some(s.card) != without, dmg), budget)
             }
@@ -588,6 +600,13 @@ impl Game {
         pool.pay_into(&mut c);
         let life = self.players[p as usize].life.max(0);
         c.is_zero() || cands_payable(&c, &[], plain, Budget { life, sac: i32::MAX })
+    }
+
+    /// [`can_pay`](Self::can_pay) for a payment that satisfies the spending
+    /// restrictions `allow` (casting an artifact or legendary spell).
+    pub(crate) fn can_pay_for(&self, p: PlayerId, cost: &ManaCost, allow: u8) -> bool {
+        let classes = self.mana_classes(p, None);
+        self.can_pay_with(p, cost, &classes, &Keep { allow, ..Default::default() })
     }
 
     /// Can `p` pay `cost` with everything available?
@@ -679,9 +698,9 @@ impl Game {
             .copied()
             .filter(|prod| {
                 let mut cost = pm.cost;
-                let mut pool = ManaPool { amt: pm.extra };
+                let mut pool = ManaPool { amt: pm.extra, art: 0 };
                 pool.add(prod);
-                pool.pay_into(&mut cost);
+                pool.pay_into_for(&mut cost, true);
                 cost.total() < pm.cost.total() && (cost.is_zero() || cands_payable(&cost, &[], &rest, budget))
             })
             .collect()
@@ -753,7 +772,7 @@ impl Game {
         }
         if !pm.pooled {
             let before = self.players[payer as usize].pool;
-            self.players[payer as usize].pool.pay_into(&mut pm.cost);
+            self.players[payer as usize].pool.pay_into_for(&mut pm.cost, pm.keep.allow & crate::db::SPEND_ARTIFACT != 0);
             pm.pooled = true;
             if !self.marks.is_empty() {
                 let after = self.players[payer as usize].pool;
@@ -767,7 +786,7 @@ impl Game {
         }
         if let Some((src, prods)) = pm.now.take() {
             match self.answer.take() {
-                Some(Choice::Number(k)) => Self::pick_multi(&mut pm, src, prods[k as usize]),
+                Some(Choice::Number(k)) => self.pick_multi(&mut pm, src, prods[k as usize]),
                 Some(other) => unreachable!("production answer {other:?}"),
                 None => {
                     let opts = (0..prods.len())
@@ -804,7 +823,7 @@ impl Game {
                 Yield::One(_) => pm.chosen.push(src),
                 Yield::Multi { prods, .. } => {
                     if prods.len() == 1 {
-                        Self::pick_multi(&mut pm, src, prods[0]);
+                        self.pick_multi(&mut pm, src, prods[0]);
                     } else {
                         pm.now = Some((src, self.feasible_prods(&pm, &classes, ci, src)));
                     }
@@ -823,6 +842,9 @@ impl Game {
         let chosen_masks: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| unit_of(s).mask).collect();
         let mut opts = Vec::new();
         for (ci, cl) in classes.iter().enumerate().skip(pm.min_class as usize) {
+            if cl.only & !pm.keep.allow != 0 {
+                continue; // its mana can't be spent on this (CR 106.6)
+            }
             // A card already picked for one of its abilities is spent.
             let Some(&rep) = cl.members.iter().find(|s| !pm.used(s.card)) else { continue };
             let ok = match &cl.yld {
@@ -870,11 +892,18 @@ impl Game {
 
     /// A several-mana source picked with production `prod`: its mana pays
     /// what it can of the rest now (it is activated at the end).
-    fn pick_multi(pm: &mut PayMana, src: Src, prod: [u8; 6]) {
-        let mut pool = ManaPool { amt: pm.extra };
+    fn pick_multi(&self, pm: &mut PayMana, src: Src, prod: [u8; 6]) {
+        // (Artifact-only mana is spent first; what is left stays
+        // artifact-only in the pool.)
+        let only = self.def_of(src.card).activated_def(src.slot).mana().map_or(0, |m| m.only);
+        let mut pool = ManaPool { amt: pm.extra, art: pm.extra_art };
         pool.add(&prod);
-        pool.pay_into(&mut pm.cost);
+        if only & crate::db::SPEND_ARTIFACT != 0 {
+            pool.art += prod[crate::mana::C];
+        }
+        pool.pay_into_for(&mut pm.cost, true);
         pm.extra = pool.amt;
+        pm.extra_art = pool.art;
         pm.multi.push((src, prod));
     }
 
@@ -886,6 +915,19 @@ impl Game {
         let payer = pm.payer;
         if self.marks.iter().any(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) {
             self.record_converge(pm);
+        }
+        // "That spell can't be countered" (Delighted Halfling): its mana
+        // was spent on the spell (read before the sources are activated).
+        if let Some(card) = pm.keep.spell {
+            let uncounterable = pm
+                .chosen
+                .iter()
+                .chain(pm.multi.iter().map(|m| &m.0))
+                .any(|s| s.slot != IMPROVISE && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
+            if uncounterable {
+                let r = self.obj_ref(card);
+                self.marks.push((r, crate::game::Mark::Uncounterable));
+            }
         }
         let mut order: Vec<Src> = pm.chosen.iter().copied().chain(pm.multi.iter().map(|m| m.0)).collect();
         // Sources that keep their permanent first ("activate only if you
@@ -911,6 +953,7 @@ impl Game {
             }
         }
         self.add_mana(payer, &pm.extra);
+        self.players[payer as usize].pool.art += pm.extra_art;
         if pm.phyrexian_life > 0 {
             self.lose_life(payer, pm.phyrexian_life as i32);
             let n = pm.phyrexian_life;
@@ -1029,7 +1072,16 @@ fn cands(
     use_src: &dyn Fn(&Src) -> bool,
     dmg: bool,
     reserved: &dyn Fn(&Class, &Src) -> bool,
+    allow: u8,
 ) -> Cands {
+    // (Sources whose mana this payment may not spend are left out.)
+    let filtered: Vec<Class>;
+    let classes = if classes.iter().any(|cl| cl.only & !allow != 0) {
+        filtered = classes.iter().filter(|cl| cl.only & !allow == 0).cloned().collect();
+        &filtered[..]
+    } else {
+        classes
+    };
     // How many usable abilities each card has: a card with one simple way
     // goes straight to the fixed units.
     let mut count: SVec<(CardIdx, u8), 32> = SVec::new();

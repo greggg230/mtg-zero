@@ -780,7 +780,18 @@ pub struct ManaAbility {
     /// "If there are no <kind> counters on this, sacrifice it" (Gemstone
     /// Mine), after the mana.
     pub sac_if_no: Option<Counter>,
+    /// "Spend this mana only to cast artifact spells" / "... a legendary
+    /// spell" (`SPEND_*` bits; 0 = no restriction, CR 106.6).
+    pub only: u8,
+    /// "... and that spell can't be countered" (Delighted Halfling).
+    pub uncounterable: bool,
 }
+
+/// `ManaAbility::only`: the mana may be spent only to cast an artifact
+/// spell.
+pub const SPEND_ARTIFACT: u8 = 1;
+/// ... only to cast a legendary spell.
+pub const SPEND_LEGENDARY: u8 = 2;
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
 /// the ability's source).

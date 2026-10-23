@@ -1074,6 +1074,12 @@ impl Game {
         if self.def_of(card).uncounterable {
             return true;
         }
+        if !self.marks.is_empty() {
+            let r = self.obj_ref(card);
+            if self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::Uncounterable) {
+                return true;
+            }
+        }
         let p = self.objs[card.i()].controller;
         self.permanents_of(p).any(|c| self.abilities(c).spells_uncounterable)
     }

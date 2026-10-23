@@ -564,7 +564,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             0,
             ActivatedDef {
                 cost: Cost { tap: true, life, ..Cost::default() },
-                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::One(intrinsic), damage_to_you: 0, sac_if_no: None }),
+                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::One(intrinsic), damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false }),
                 sorcery: false,
                 instant_only: false,
                 exhaust: false,

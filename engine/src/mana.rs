@@ -167,6 +167,9 @@ impl std::fmt::Display for ManaCost {
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub struct ManaPool {
     pub amt: [u8; 6],
+    /// The part of `amt[C]` that may be spent only to cast artifact spells
+    /// (Mishra's Workshop's mana left over, CR 106.6; ENGINE.md 28).
+    pub art: u8,
 }
 
 impl ManaPool {
@@ -176,6 +179,34 @@ impl ManaPool {
 
     pub fn clear(&mut self) {
         self.amt = [0; 6];
+        self.art = 0;
+    }
+
+    /// [`pay_into`](Self::pay_into) for a cost that artifact-only mana may
+    /// pay (`art_ok`: casting an artifact spell), spending it first;
+    /// otherwise that mana stays.
+    pub fn pay_into_for(&mut self, cost: &mut ManaCost, art_ok: bool) {
+        if self.art == 0 {
+            return self.pay_any(cost);
+        }
+        if art_ok {
+            let c0 = self.amt[C];
+            self.pay_any(cost);
+            self.art = self.art.saturating_sub(c0 - self.amt[C]);
+        } else {
+            let held = self.art;
+            self.amt[C] -= held;
+            self.art = 0;
+            self.pay_any(cost);
+            self.amt[C] += held;
+            self.art = held;
+        }
+    }
+
+    /// Spend pool mana that has no spending restriction (see
+    /// [`pay_into_for`](Self::pay_into_for)).
+    pub fn pay_into(&mut self, cost: &mut ManaCost) {
+        self.pay_into_for(cost, false)
     }
 
     pub fn add(&mut self, mana: &[u8; 6]) {
@@ -189,8 +220,8 @@ impl ManaPool {
     /// pips from the more plentiful of their two colours, then generic
     /// (colourless first, then the most plentiful colour). Using the pool
     /// first is never worse: it empties at the end of the step anyway
-    /// (ENGINE.md 5).
-    pub fn pay_into(&mut self, cost: &mut ManaCost) {
+    /// (ENGINE.md 5). Any of the pool's mana.
+    fn pay_any(&mut self, cost: &mut ManaCost) {
         for c in 0..6 {
             let t = self.amt[c].min(cost.pips[c]);
             self.amt[c] -= t;
@@ -438,7 +469,7 @@ mod tests {
         assert!(payable(&h, &[], &[MR, MW]));
         assert!(!payable(&h, &[], &[MR, MU]));
         assert!(payable(&h, &[MR], &[MR]));
-        let mut pool = ManaPool { amt: [1, 0, 0, 1, 0, 0] };
+        let mut pool = ManaPool { amt: [1, 0, 0, 1, 0, 0], art: 0 };
         let mut c = h;
         pool.pay_into(&mut c);
         assert!(c.is_zero());
@@ -459,7 +490,7 @@ mod tests {
 
     #[test]
     fn pool_pays_first() {
-        let mut pool = ManaPool { amt: [0, 1, 2, 0, 0, 0] };
+        let mut pool = ManaPool { amt: [0, 1, 2, 0, 0, 0], art: 0 };
         let mut cost = ManaCost::parse("{1}{U}").unwrap();
         pool.pay_into(&mut cost);
         assert!(cost.is_zero());

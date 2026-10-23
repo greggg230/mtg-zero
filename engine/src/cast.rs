@@ -114,6 +114,19 @@ impl Game {
         !(ap != p && self.permanents_of(ap).any(|c| self.abilities(c).opp_no_spells_your_turn))
     }
 
+    /// The spending restrictions casting `card` satisfies (`SPEND_*`: an
+    /// artifact spell, a legendary spell; CR 106.6).
+    pub(crate) fn spend_allow(&self, card: CardIdx) -> u8 {
+        let mut a = 0;
+        if self.is_type(card, types::ARTIFACT) {
+            a |= crate::db::SPEND_ARTIFACT;
+        }
+        if self.def_of(card).supertypes & crate::db::supertypes::LEGENDARY != 0 {
+            a |= crate::db::SPEND_LEGENDARY;
+        }
+        a
+    }
+
     fn priority_options_all(&self, p: PlayerId) -> Vec<Opt> {
         use crate::decision::{FACE_CAST, FACE_PLAY};
         // (Room for the usual options without growing.)
@@ -186,6 +199,13 @@ impl Game {
                 return self.options_payable(p, c, crate::game::CastFrom::Hand, extra, 0, cls, Some(c));
             }
             let cost = self.delve_reduced(c, p, self.route_mana_plus(c, p, crate::game::CastFrom::Hand, extra), 0);
+            // Mana that can only be spent on some spells (Mishra's
+            // Workshop, Delighted Halfling): with what this spell allows.
+            let allow = self.spend_allow(c);
+            if allow != 0 && (cls.iter().any(|cl| cl.only & allow != 0) || self.players[p as usize].pool.art > 0) {
+                let keep = crate::pay::Keep { allow, ..Default::default() };
+                return self.can_pay_without(p, &cost, cls, &keep, Some(c));
+            }
             if self.hand_mana_source(c) || def.improvise {
                 // A card cast from hand is on the stack while its cost is
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
@@ -456,7 +476,7 @@ impl Game {
                     self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
                 }
                 _ if !def.additional.is_empty() => self.options_payable(p, card, from, extra, keep, classes, None),
-                _ => self.can_pay_with(p, &mana, classes, &Default::default()),
+                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow(card), ..Default::default() }),
             }
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
@@ -511,7 +531,7 @@ impl Game {
             let mut tmp = item.clone();
             while most < (act::NUMBER_N - 1) as u8 {
                 tmp.x = most + 1;
-                if !self.can_pay(p, &self.total_mana(card, &tmp)) {
+                if !self.can_pay_for(p, &self.total_mana(card, &tmp), self.spend_allow(card)) {
                     break;
                 }
                 most += 1;
@@ -614,7 +634,8 @@ impl Game {
         }
         // The fewest more cards that leave a payable cost (castability
         // made sure some number does).
-        let need = (0..=cost.generic).find(|&d| self.can_pay(p, &cost.less_generic(d))).unwrap_or(cost.generic) as usize;
+        let allow = self.spend_allow(card);
+        let need = (0..=cost.generic).find(|&d| self.can_pay_for(p, &cost.less_generic(d), allow)).unwrap_or(cost.generic) as usize;
         let floor = item.delve_floor as usize;
         let keep = self.escape_exiles(card, item.from) as usize;
         let gy = &self.players[p as usize].graveyard;
@@ -826,7 +847,7 @@ impl Game {
         if !m.costs.is_empty() {
             if let StackKind::Spell { card } = item.kind {
                 for (k, a) in avail.iter_mut().enumerate() {
-                    *a = *a && self.can_pay(p, &self.announced_cost(card, item, &m.costs[k]));
+                    *a = *a && self.can_pay_for(p, &self.announced_cost(card, item, &m.costs[k]), self.spend_allow(card));
                 }
             }
         }
@@ -969,7 +990,7 @@ impl Game {
         let mut more = crate::mana::ManaCost::default();
         while most < tc.max.min(act::NUMBER_N as u8 - 1) {
             more = more.plus(&tc.mana);
-            if !self.can_pay(p, &self.announced_cost(card, &self.stack[pos], &more)) {
+            if !self.can_pay_for(p, &self.announced_cost(card, &self.stack[pos], &more), self.spend_allow(card)) {
                 break;
             }
             most += 1;
@@ -1080,7 +1101,7 @@ impl Game {
         if !def.additional.is_empty() {
             self.options_payable(p, card, crate::game::CastFrom::Hand, &Default::default(), 0, classes, Some(card))
         } else {
-            self.can_pay_without(p, &cost, classes, &Default::default(), Some(card))
+            self.can_pay_without(p, &cost, classes, &crate::pay::Keep { allow: self.spend_allow(card), ..Default::default() }, Some(card))
         }
     }
 
@@ -1384,6 +1405,8 @@ impl Game {
             let mut pm = PayMana::new(p, cost);
             pm.improvise = def.improvise;
             pm.keep = Self::keep_for(card, &def.alt_costs[k].cost, None);
+            pm.keep.allow = self.spend_allow(card);
+            pm.keep.spell = Some(card);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
                 self.agenda.push(Task::PayMana(pm));
@@ -1401,6 +1424,8 @@ impl Game {
             pm.keep = Self::keep_for(card, extra, None);
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         }
+        pm.keep.allow = self.spend_allow(card);
+        pm.keep.spell = Some(card);
         let escalated = item.modes.len().saturating_sub(1) as u8;
         if escalated > 0 && def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
             pm.keep.discard = Some((escalated, card));

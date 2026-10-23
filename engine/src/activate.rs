@@ -447,6 +447,8 @@ impl Game {
             // hand: those are not lands.)
             discard: (cost.discard > 0 && cost.discard_filter.is_none()).then_some((cost.discard, card)),
             exile: cost.exile_from_hand.clone().map(|f| (f, card)),
+            allow: 0,
+            spell: None,
         }
     }
 
