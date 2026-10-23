@@ -187,7 +187,7 @@ impl Game {
             if self.hand_mana_source(c) || def.improvise {
                 // A card cast from hand is on the stack while its cost is
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
-                self.can_pay_with(p, &cost, &classes_without(cls, c), &Default::default())
+                self.can_pay_without(p, &cost, cls, &Default::default(), Some(c))
             } else {
                 let plain = plain.get_or_insert_with(|| self.plain_cands(p, cls));
                 self.can_pay_plain(p, &cost, cls, plain)
@@ -1032,7 +1032,7 @@ impl Game {
         }
         let mana = self.alt_mana(card, p, k);
         // (A card cast from hand is on the stack while its cost is paid.)
-        self.cost_payable(p, card, &a.cost, &mana, &classes_without(classes, card), Some(card))
+        self.cost_payable(p, card, &a.cost, &mana, classes, Some(card))
     }
 
     /// The mana of alternative cost `k` with the cost increases and
@@ -1050,7 +1050,7 @@ impl Game {
         if !def.additional.is_empty() {
             self.options_payable(p, card, crate::game::CastFrom::Hand, &Default::default(), 0, classes, Some(card))
         } else {
-            self.can_pay_with(p, &cost, &classes_without(classes, card), &Default::default())
+            self.can_pay_without(p, &cost, classes, &Default::default(), Some(card))
         }
     }
 
@@ -1723,15 +1723,4 @@ fn ability_ok(f: &Filter, s: &StackItem) -> bool {
         Filter::Or(v) => v.iter().any(|x| ability_ok(x, s)),
         _ => false,
     }
-}
-
-/// `classes` without the sources of one card.
-pub(crate) fn classes_without(classes: &[crate::pay::Class], card: CardIdx) -> Vec<crate::pay::Class> {
-    classes
-        .iter()
-        .filter_map(|cl| {
-            let members: Vec<_> = cl.members.iter().copied().filter(|s| s.card != card).collect();
-            (!members.is_empty()).then(|| crate::pay::Class { members, ..cl.clone() })
-        })
-        .collect()
 }

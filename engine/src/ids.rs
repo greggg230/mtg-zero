@@ -8,7 +8,7 @@ pub type DefId = u16;
 
 /// Index of a card slot in `Game.objs`. One slot per physical card for the
 /// whole match; tokens and copies will append slots. Never reused.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub struct CardIdx(pub u16);
 
 impl CardIdx {

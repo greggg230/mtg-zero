@@ -364,15 +364,7 @@ impl Game {
         if mana.is_zero() {
             return true;
         }
-        let cls: Vec<Class>;
-        let classes = match exclude {
-            Some(x) => {
-                cls = crate::cast::classes_without(classes, x);
-                &cls[..]
-            }
-            None => classes,
-        };
-        self.can_pay_with(p, mana, classes, &Self::keep_for(card, cost, exclude))
+        self.can_pay_without(p, mana, classes, &Self::keep_for(card, cost, exclude), exclude)
     }
 
     /// Untapped permanents `p` controls that a "tap n untapped <filter> you

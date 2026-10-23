@@ -13,6 +13,7 @@ use crate::flow::Task;
 use crate::game::{DamageSource, Game, Pos};
 use crate::ids::{CardIdx, DefId, PlayerId, Target, Zone};
 use crate::mana::{payable_within, Budget, ManaCost, ManaMask, ManaPool, Unit, COLORS};
+use crate::svec::SVec;
 
 /// The `Src` slot of an artifact tapped for improvise (CR 702.126a: not a
 /// mana ability; it pays for {1} of the generic mana).
@@ -25,6 +26,22 @@ pub(crate) const IMPROVISE: AbilitySlot = AbilitySlot::Spell;
 pub(crate) struct Src {
     pub card: CardIdx,
     pub slot: AbilitySlot,
+}
+
+impl Default for Src {
+    /// (A filler for inline storage, never a real source.)
+    fn default() -> Src {
+        Src { card: CardIdx(0), slot: AbilitySlot::Spell }
+    }
+}
+
+/// The members of a class, inline up to eight (ENGINE.md 17).
+pub(crate) type Members = SVec<Src, 8>;
+
+fn one_member(src: Src) -> Members {
+    let mut m = Members::new();
+    m.push(src);
+    m
 }
 
 /// What a source contributes to a payment.
@@ -46,7 +63,7 @@ pub(crate) enum Yield {
 #[derive(Clone, Debug)]
 pub(crate) struct Class {
     pub def: DefId,
-    pub members: Vec<Src>,
+    pub members: Members,
     pub yld: Yield,
     /// Damage the ability's source deals to its controller (Talismans).
     pub dmg: u8,
@@ -262,7 +279,7 @@ impl Game {
                     }
                 }
                 let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra) else { continue };
-                let cl = Class { def, members: vec![src], yld, dmg: m.damage_to_you, sac_self: ad.cost.sac_self };
+                let cl = Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self: ad.cost.sac_self };
                 if matches!(cl.yld, Yield::Multi { .. }) {
                     out.insert(n_multi, cl);
                     n_multi += 1;
@@ -291,7 +308,7 @@ impl Game {
                         continue;
                     }
                     let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life) else { continue };
-                    out.push(Class { def, members: vec![src], yld, dmg: m.damage_to_you, sac_self: false });
+                    out.push(Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self: false });
                 }
             }
         }
@@ -312,7 +329,7 @@ impl Game {
             let src = Src { card: c, slot: IMPROVISE };
             match out.iter_mut().find(|cl| cl.def == def) {
                 Some(cl) => cl.members.push(src),
-                None => out.push(Class { def, members: vec![src], yld: Yield::One(Unit::free(0)), dmg: 0, sac_self: false }),
+                None => out.push(Class { def, members: one_member(src), yld: Yield::One(Unit::free(0)), dmg: 0, sac_self: false }),
             }
         }
         out
@@ -440,12 +457,34 @@ impl Game {
     /// Can `p` pay `cost` (Phyrexian pips included) from their pool and the
     /// sources in `classes`, leaving what `keep` needs?
     pub(crate) fn can_pay_with(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], keep: &Keep) -> bool {
-        self.phyrexian_feasible(p, cost, classes, keep, keep.life)
+        self.phyrexian_feasible(p, cost, classes, keep, keep.life, None)
+    }
+
+    /// [`can_pay_with`](Self::can_pay_with) without the sources of card
+    /// `without` (a card cast from hand is on the stack while its cost is
+    /// paid; a source the cost taps or moves).
+    pub(crate) fn can_pay_without(
+        &self,
+        p: PlayerId,
+        cost: &ManaCost,
+        classes: &[Class],
+        keep: &Keep,
+        without: Option<CardIdx>,
+    ) -> bool {
+        self.phyrexian_feasible(p, cost, classes, keep, keep.life, without)
     }
 
     /// Some split of the Phyrexian pips into life and mana leaves the rest
-    /// payable from the pool and `classes`.
-    fn phyrexian_feasible(&self, p: PlayerId, cost: &ManaCost, classes: &[Class], keep: &Keep, later: u8) -> bool {
+    /// payable from the pool and `classes` (but card `without`'s sources).
+    fn phyrexian_feasible(
+        &self,
+        p: PlayerId,
+        cost: &ManaCost,
+        classes: &[Class],
+        keep: &Keep,
+        later: u8,
+        without: Option<CardIdx>,
+    ) -> bool {
         let life_total = self.players[p as usize].life;
         match (0..5).find(|&c| cost.phyrexian[c] > 0) {
             None => {
@@ -453,12 +492,12 @@ impl Game {
                 let mut pool = self.players[p as usize].pool;
                 pool.pay_into(&mut c);
                 let (budget, dmg) = self.budget(p, keep, later);
-                c.is_zero() || cands_payable(&c, &[], &self.cands(p, keep, classes, &|_| true, dmg), budget)
+                c.is_zero() || cands_payable(&c, &[], &self.cands(p, keep, classes, &|s| Some(s.card) != without, dmg), budget)
             }
             Some(col) => (0..=cost.phyrexian[col]).any(|k| {
                 let later = later as i32 + 2 * k as i32;
                 later <= life_total
-                    && self.phyrexian_feasible(p, &split_phyrexian(cost, col, k), classes, keep, later as u8)
+                    && self.phyrexian_feasible(p, &split_phyrexian(cost, col, k), classes, keep, later as u8, without)
             }),
         }
     }
@@ -623,6 +662,7 @@ impl Game {
                                     &classes,
                                     &pm.keep,
                                     later as u8,
+                                    None,
                                 )
                         })
                         .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) })
@@ -691,7 +731,7 @@ impl Game {
                 _ => unreachable!("chosen sources make one mana"),
             }
         };
-        let chosen_masks: Vec<ManaMask> = pm.chosen.iter().map(|s| unit_of(s).mask).collect();
+        let chosen_masks: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| unit_of(s).mask).collect();
         let mut opts = Vec::new();
         for (ci, cl) in classes.iter().enumerate().skip(pm.min_class as usize) {
             // A card already picked for one of its abilities is spent.
@@ -807,13 +847,16 @@ fn split_phyrexian(cost: &ManaCost, col: usize, k: u8) -> ManaCost {
 /// budget its activation takes, charged once, all its mana or none). With
 /// `dmg`, the damage an ability deals its controller weighs like life.
 pub(crate) struct Cands {
-    fixed: Vec<Unit>,
+    fixed: Units,
     alts: Vec<Vec<Way>>,
 }
 
+/// Candidate units, inline up to 32 (ENGINE.md 17).
+type Units = SVec<Unit, 32>;
+
 #[derive(Clone)]
 struct Way {
-    units: Vec<Unit>,
+    units: SVec<Unit, 4>,
     life: i32,
     sac: i32,
 }
@@ -826,7 +869,7 @@ fn cands(
 ) -> Cands {
     // How many usable abilities each card has: a card with one simple way
     // goes straight to the fixed units.
-    let mut count: Vec<(CardIdx, u8)> = Vec::with_capacity(16);
+    let mut count: SVec<(CardIdx, u8), 32> = SVec::new();
     for cl in classes {
         for s in cl.members.iter().filter(|s| use_src(s)) {
             match count.iter_mut().find(|(c, _)| *c == s.card) {
@@ -836,7 +879,7 @@ fn cands(
         }
     }
     let alone = |c: CardIdx| count.iter().any(|&(x, n)| x == c && n == 1);
-    let mut out = Cands { fixed: Vec::with_capacity(count.len() + 4), alts: Vec::new() };
+    let mut out = Cands { fixed: Units::new(), alts: Vec::new() };
     let mut per_card: Vec<(CardIdx, Vec<Way>)> = Vec::new();
     for cl in classes {
         let extra = if dmg { cl.dmg as i32 } else { 0 };
@@ -853,9 +896,13 @@ fn cands(
                 }
                 _ => {}
             }
-            let multi = |units: Vec<Unit>| Way { units, life: extra, sac };
+            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac };
             let ways: Vec<Way> = match &cl.yld {
-                Yield::One(u) => vec![Way { units: vec![Unit::free(u.mask)], life: u.life as i32 + extra, sac }],
+                Yield::One(u) => {
+                    let mut units = SVec::new();
+                    units.push(Unit::free(u.mask));
+                    vec![Way { units, life: u.life as i32 + extra, sac }]
+                }
                 Yield::Multi { units: Some(us), .. } => {
                     vec![multi(us.iter().map(|u| Unit::free(u.mask)).collect())]
                 }
@@ -884,11 +931,11 @@ fn cands(
 /// [`payable_within`] over candidates, trying each way (or none) of the
 /// cards that have several or whose activation takes budget.
 fn cands_payable(cost: &ManaCost, chosen: &[ManaMask], c: &Cands, budget: Budget) -> bool {
-    fn go(cost: &ManaCost, chosen: &[ManaMask], units: &mut Vec<Unit>, alts: &[Vec<Way>], b: Budget) -> bool {
+    fn go(cost: &ManaCost, chosen: &[ManaMask], units: &mut Units, alts: &[Vec<Way>], b: Budget) -> bool {
         let Some((first, rest)) = alts.split_first() else {
             return payable_within(cost, chosen, units, b);
         };
-        let use_way = |w: &Way, units: &mut Vec<Unit>| {
+        let use_way = |w: &Way, units: &mut Units| {
             let left = Budget { life: b.life - w.life, sac: b.sac - w.sac };
             if left.life < 0 || left.sac < 0 {
                 return false;

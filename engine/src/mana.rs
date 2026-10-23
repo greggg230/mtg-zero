@@ -320,7 +320,7 @@ fn distribute(
 /// budget: life (CR 119.4), or a permanent a later part of the cost may
 /// need to sacrifice (a Lotus Petal when Tinker must sacrifice an
 /// artifact).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Unit {
     pub mask: ManaMask,
     pub life: u8,
