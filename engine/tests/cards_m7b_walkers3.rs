@@ -167,3 +167,35 @@ fn karn_reveals_are_public_and_the_opponents_choice_survives_determinize() {
     assert_eq!(g.to_move(), Some(1));
     check_determinize(&g, 6);
 }
+
+#[test]
+fn a_retrace_cast_in_progress_keeps_its_land_card_under_determinize() {
+    // The cast counted on a land card in hand (CR 702.81a): while the
+    // payment is in progress, the other player's determinize keeps it (a
+    // pinned card, ENGINE.md 10).
+    let mut g = manual()
+        .library(0, &["Island"; 5])
+        .library(1, &["Forest"; 5])
+        .emblem(0, "Wrenn and Six")
+        .battlefield(0, &["Mountain", "Mountain"])
+        .graveyard(0, &["Lightning Bolt"])
+        .hand(0, &["Island", "Test Bear", "Consider"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+    g.choose(Choice::Cast(bolt));
+    g.choose(Choice::Target(Target::Player(1)));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana));
+    for seed in 0..20 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(seed));
+        while !at_priority(&d) {
+            let c = d.pending_decision().unwrap().options[0].choice;
+            d.choose(c);
+        }
+        // The land card discarded, the Bolt on the stack.
+        assert_eq!(d.count_in(0, "Island", Zone::Graveyard), 1, "seed {seed}");
+        assert_eq!(d.stack().len(), 1);
+        d.check_invariants().unwrap();
+    }
+}

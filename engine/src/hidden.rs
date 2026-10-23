@@ -634,9 +634,9 @@ impl Game {
         })
     }
 
-    /// The filters of "exile a card from your hand" costs a spell being
-    /// cast may still pay (any of its alternative costs), with their
-    /// context.
+    /// The filters of the hand cards a cost of a spell being cast may still
+    /// take: "exile a card from your hand" (any of its alternative costs),
+    /// retrace's land card; with their context.
     pub(crate) fn exile_filters_in_progress(&self) -> Vec<(crate::db::Filter, crate::cast::Ctx)> {
         use crate::flow::Task;
         let mut out = Vec::new();
@@ -648,6 +648,13 @@ impl Game {
             let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)) };
             for a in &self.def_of(card).alt_costs {
                 if let Some(f) = &a.cost.exile_from_hand {
+                    out.push((f.clone(), ctx));
+                }
+            }
+            // Retrace's land card to discard (CR 702.81a): the cast counted
+            // on one being in hand.
+            if item.from == crate::game::CastFrom::Retrace {
+                if let Some(f) = &crate::cast::retrace_cost().discard_filter {
                     out.push((f.clone(), ctx));
                 }
             }
