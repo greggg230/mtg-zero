@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -53,6 +53,7 @@ permission) and a consumer can go wrong with it.
 | 15 | Chromatic Star | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (the IR's "put into a graveyard from the battlefield", as Titania's) | `cards/parser/triggers.py` (the "this artifact is put into a graveyard from the battlefield" entry, ~line 744) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 16 | Forth Eorlingas! | "one or more" as once per turn | the this-turn trigger "whenever one or more creatures you control deal combat damage to one or more players" with `once_per_turn: true` | a trigger per combat damage step ("one or more": `OneOrMoreBatch`), no once-per-turn limit | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to one or more players" entry, ~line 1050) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 17 | Green Sun's Zenith | instruction as a replacement | "Shuffle Green Sun's Zenith into its owner's library" as a self static `ReplacementEffect(would_go_to_graveyard, Replace(library))` (from anywhere) | the last instruction of the spell's effect (only as it resolves) | `cards/parser/spell_builder.py` (`_SELF_SHUFFLE_GSZ_RE`, `_detect_shuffle_self_statics`, ~line 430) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -144,10 +145,11 @@ mana value X or less. If that artifact is an Equipment, attach it to this creatu
   `__post_init__` assignment), or make the exporter emit a non-empty `targets` attribute whether or
   not it is a declared field. The Skydiver's filter also needs an exportable predicate for "mana
   value at most the source's X".
-* Engine: Thieving Skydiver is blocked (`Effect:GainControlOfTargetThenAttachIfEquipment`, plus its
-  kicker); the supported ones (Mishra's Bauble, Urza's Bauble, Grindstone, Displacer Kitten) work
-  because the lowering re-derives each target from the class name (`engine/src/lower/
-  effect_ext.rs::lower_effect_ext`, the arms of those classes).
+* Engine: the lowering re-derives each target from the class name and the Oracle text
+  (`engine/src/lower/effect_ext.rs::lower_effect_ext`, `effect_tail3.rs`): Mishra's Bauble,
+  Urza's Bauble, Grindstone, Displacer Kitten, and since M7c tail part 3 Thieving Skydiver
+  ("target artifact with mana value X or less", X its kicker's: `Filter::MvAtMostSourceX`) and Wan
+  Shi Tong ("target nonland permanent").
 
 ### C. A default left in place of the Oracle text
 
@@ -184,12 +186,12 @@ that spell."
   only Sowing Mycospawn has a `{C}` cost (Mana Drain's `{C}` is mana it adds).
 * Fix: add `colorless: int = 0` to `ManaCost`, count `{C}` there in `parse_mana_cost`, export it
   (the IR's `ManaCost` gains the field), and pay it with colorless mana only.
-* Engine: not detected. The card is blocked for other reasons (`CardPrinting.kicker_cost(not "if
-  kicked ... else")`, `Keyword:Devoid`, `TriggerPredicate:ThisSpellWasKicked`); once those are done
-  the kicker would lower as `{2}`. The engine's `ManaCost` has a `{C}` pip, but
-  `engine/src/lower/printing.rs::lower_printing` ignores the `*_str` fields ("display form").
-  Suggested engine-side guard (rule 4a of ENGINE.md 3): parse each `*_cost_str` / `mana_str` and
-  record a blocker when it differs from the structured cost.
+* Engine (M7c tail part 3): worked around. A permanent's kicker is read from `kicker_cost_str`
+  when it agrees with the structured cost but for the {C} pips counted as generic there
+  (`engine/src/lower/printing.rs::kicker_mana`, rule 4a of ENGINE.md 3), so Sowing Mycospawn's
+  kicker is {1}{C} and needs colorless mana
+  (`tests/cards_m7c_tail3.rs::sowing_mycospawn_kicker_needs_colorless_mana_cr107_4c`); any other
+  difference is a blocker.
 
 ### E. A token's colour dropped by the token-phrase parser
 
@@ -307,6 +309,23 @@ library."
   Replace)` (not built). Its search is built (`Filter::MvAtMostX`) and tested on a custom card
   without the last sentence (`Test Green Sun`, `tests/cards_m7c_tail2.rs`).
 
+### I. The same widened event (M7c tail part 3)
+
+**18. Wizard's Rockets.** Oracle: "This artifact enters tapped. {X}, {T}, Sacrifice this artifact:
+Add X mana in any combination of colors. When this artifact is put into a graveyard from the
+battlefield, draw a card."
+
+* IR: the triggered ability's `event` is `leaves_battlefield` with `IsSelf`, as Chromatic Star's
+  (entry 15): it would also draw when the Rockets are exiled, bounced or put into a library.
+* Should be: `event: dies`.
+* Source: the phrase table entry of entry 15 (`cards/parser/triggers.py`, "this artifact is put
+  into a graveyard from the battlefield").
+* Fix: entry 15's.
+* Engine: blocked, `IR:TriggeredAbility.event(leaves_battlefield for "put into a graveyard")`
+  (`lower::IR_DEFECTS`); `tests/cards_m7c_tail3.rs::wizards_rockets_is_blocked_by_its_ir_event`.
+  Its mana ability's `amount: 0` with `amount_is_x` (entry 10) and the {X} in a mana ability's
+  cost are not lowered either.
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."
@@ -320,9 +339,11 @@ library."
 * Fix: rename the field to something attachment-neutral (`attached_bonuses`) or export Auras'
   bonus under its own field (as `bestow_enchanted_bonus` already is). Every Aura built with
   `make_aura(power_bonus=...)` is affected.
-* Engine: blocked, `CardPrinting.equipment_bonuses(not an Equipment)` (`engine/src/lower/
-  printing.rs::lower_printing`), with the Aura features (`aura_enchant_type`, the reanimation
-  effects).
+* Engine (M7c tail part 3): read as the Aura's bonus to what it enchants (the same `attached`)
+  on an Aura with "enchant creature card in a graveyard", the only Aura shape lowered; Animate
+  Dead is supported (`tests/cards_m7c_tail3.rs::animate_dead_reanimates_and_its_leaving_
+  sacrifices_the_creature_cr303_4a`). On any other card that isn't an Equipment it stays a
+  blocker.
 
 **8. Necromancy.** Oracle: "You may cast this spell as though it had flash. If you cast it any time
 a sorcery couldn't have been cast, the controller of the permanent it becomes sacrifices it at the
@@ -336,8 +357,9 @@ beginning of the next cleanup step."
   returns `{"flash": True, ...}` for the literal line; `cards/parser/cube_enchantments.py:277-279`
   (`_reanimation_aura_lines`) turns it into `acc.keywords.add("flash")`.
 * Fix: a printing flag such as `cast_as_though_flash: bool`, not a keyword.
-* Engine: blocked by other features (Aura reanimation, the cleanup sacrifice); lowered as is, it
-  would have flash.
+* Engine (M7c tail part 3): lowered as is (the flash keyword), Necromancy supported: no card in the
+  cube asks whether a card has flash, so the keyword and the permission behave alike here; the
+  difference is noted (ENGINE.md 30.7).
 
 **9. Transforming double-faced cards: the back face's mana cost.** Scryfall back faces have no mana
 cost; the IR's `transform_back_face.mana_cost` is the front face's (with `mana_cost_str: ""`):
@@ -373,7 +395,10 @@ Jace, Vryn's Prodigy; Outland Liberator; Tamiyo, Inquisitive Student; Ulvenwald 
   a placeholder "fixed at cast time"). A `TargetSpec` with `count_max: 0` reads as "no targets".
   Fix: a `count_max_from_x` flag on the `TargetSpec` and no numeric 0. Engine: blocked,
   `TargetSpec.count_max(out of range 0)`, `RemoveTargetPermanents.count(differs from targets)`,
-  `RemoveTargetPermanents.count_from_x`, `Effect:CreateTokensScaledByX`.
+  `RemoveTargetPermanents.count_from_x`, `Effect:CreateTokensScaledByX`. Since M7c tail part 3:
+  read in exactly that shape (`count_from_x` with the four zero counts, on a spell with X) as "up
+  to X targets"; Pest Infestation supported. Fastbond's 1,000,000 is read as any number of land
+  plays (that exact value); Fastbond supported.
 * Wizard's Rockets ("{X}, {T}, Sacrifice this artifact: Add X mana in any combination of
   colors."): `AddManaInAnyCombination { amount_is_x: true }` with the default `amount: 0`
   (`effects/generic/artifact_mechanics.py:109-111`; built at `cards/parser/artifact_effects.py:137`).
@@ -443,7 +468,20 @@ once each turn."
   `TargetSpell` is built since M7b part 3b), `ExileTopCardsWithPlayPermission.duration(UntilYourNextEndStep)` (Inti),
   `LinkExiledCardsToSource.inner(...)` (Keen-Eyed Curator), `RemoveAllMatching.action(Exile)`
   (Winds of Abandon), `Keyword.quality(SpellsThatAreOneOrMoreColors)` (Emrakul): the IR matches
-  the Oracle text; these are engine features not built yet.
+  the Oracle text; these are engine features not built yet (Inti's, Winds of Abandon's and
+  Emrakul's are built since M7c tail part 3).
+* M7c tail part 3, the 33 cards (ENGINE.md 30): the IR matches the Oracle text, apart from entries
+  5-8, 10 and 18. Representational notes: `ConditionalIfCastFromHand` (The One Ring) is "if you
+  cast it" (its docstring; the class name says "from hand"); "put into a graveyard from anywhere"
+  is the `dies` event with a `PutIntoGraveyardFromAnywhere` marker predicate plus
+  `watched_in_graveyard` (Worldspine Wurm, Emrakul; Blightsteel's replacement), read together and
+  checked to agree; Emrakul's annihilator is stated twice (keyword and trigger), they agree;
+  Batroc's "up to X targets" is the class's, its `TargetSpec` giving the filter with the default
+  counts; `discards_card` (Inti) and `card_discarded` (Currency Converter) are the same event;
+  `HideawayLookExileOneFaceDown`, `PlayExiledCardFreeIfAnyLibraryAtMost` and
+  `EachPlayerExilesHandDrawsNReturnsLater` carry their numbers as schema defaults (4, 20, 7), the
+  Oracle text's. Abhorrent Oculus's `ManifestDread` and the other cards still blocked (ENGINE.md
+  30.8) are engine features.
 * Fast lands' `enters_tapped_unless: ControlsAtMost(IsLand, 2)` says "lands", not "other lands";
   it is evaluated before the land enters, so the two agree (ENGINE.md 19).
 * Hybrid pips are stored in alphabetical order (`{W/B}` as `["B", "W"]`); same meaning.

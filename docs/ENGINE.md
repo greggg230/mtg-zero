@@ -447,6 +447,15 @@ at once (704.5e, section 26.4).
   player finds the same decision instead of running on.
   Assumption for now: both decklists are known (open decklists); team drafts will need
   partial pool knowledge (M6).
+* **Cards exiled face down** (M7c tail part 3, section 30.2): `Zone::FaceDown` is hidden like a
+  library. A card moved there keeps its knowledge bits and is known to its owner, who saw it go
+  (a look keyed `KEY_LOOK`, private; a hand exiled face down; a hideaway pile); a cloud whose
+  domain held it keeps it by its slot; `determinize` deals the face-down cards a viewer doesn't
+  know again with the owner's other hidden cards, never for their owner. The view and the
+  encoding show a face-down card's identity only to a viewer who knows it, and a player's
+  face-down cards as a pile without order (the order a hand was exiled in is not observable).
+  Questions about a face-down card (Shelldock Isle's "you may play it") are asked whenever the
+  card is there, so whether they are asked says nothing about it.
 * **Checks** (`tests/fuzz.rs`, every ~40 actions): `determinize(to_move)` keeps the viewer's
   legal actions and its whole observable view (`Game::view_of`: public zones and objects
   named by public place, sizes, life, mana, the turn, its own hand, the cards it knows
@@ -540,7 +549,9 @@ targets, 707.10c: one decision per target in order, `PASS` = keep it, else a tar
 same requirement; section 26.4). M7b part 3b: `ChooseRoom` (`NUMBER` = the room a venture marker
 moves into, 309.5a) and `PutOntoBattlefield` (`LIBRARY`: a card of a revealed pile to put onto the
 battlefield, Throne of the Dead Three); an ability on the stack is targeted with its `STACK` id;
-ward's costs are a `YesNo` (mana, life) or a `Discard` with `PASS` (section 27). There are 39
+ward's costs are a `YesNo` (mana, life) or a `Discard` with `PASS` (section 27). M7c tail part 3
+(section 30.6) adds no kind: splicing is a `ChooseHandCard` per spliced card (`PASS` = no more),
+hideaway's face-down pick a `PutInHand`, "odd or even" a `ChooseMode`. There are 39
 decision kinds; the context block holds 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
@@ -670,8 +681,29 @@ Curator; Laelia, the Blade Reforged; Lurrus of the Dream-Den; Metamorphosis Fana
 Passage; Ocelot Pride; Pinnacle Emissary; Portal to Phyrexia; Six; The Mind Stone; Thor, God of
 Thunder; We Say Thee Nay!; Yawgmoth's Will; Zirda, the Dawnwaker.
 
-Supported cube cards: 491 (M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
-191, M4b-1: 133, M4a: 31); creatures 184 by their front faces (M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
+Implemented (M7c tail part 3, section 30): X of a spell for "destroy all with mana value X or
+less" and "-X/-X", overload's exile with a search per creature, "up to X targets" and "twice X"
+tokens, "exile it instead if it would die this turn" on a fought creature, any number of land
+plays, reflexive "you may ... when you do" triggers, a target opponent's tokens, a player's
+protection from everything (702.16j), "if you cast it", sunburst, "put into a graveyard from
+anywhere" (a trigger from the graveyard and a replacement to the library), infect, annihilator,
+protection from coloured spells, draw replacements (Hullbreacher, Quantum Riddler), kicker on
+permanents (once, multikicker, kicker {X} with a least X, devoid, "if it was kicked" on enter and
+cast triggers), splice onto Arcane (702.47), fading, saddle, triggered abilities that function in a
+graveyard, "enters from anywhere other than a graveyard or exile", modes chosen once per object,
+a parity chosen as it enters, adapt, finality counters, "cards put into a library", attackers
+unblocked, Spirits that block only Spirits, cards exiled face down (a hidden exile zone, 30.2),
+reanimating Auras and an Aura spell's target (30.4), "sacrifice it at the next cleanup step". New
+in M7c tail part 3 (33): "Name Sticker" Goblin; Animate Dead; Batroc the Leaper; Blightsteel
+Colossus; Caustic Bronco; Coveted Jewel; Emperor of Bones; Emrakul, the Aeons Torn; Fastbond;
+Generous Plunderer; Gollum, Riddle Master; Goryo's Vengeance; Headliner Scarlett; Hullbreacher;
+Inti, Seneschal of the Sun; Mawloc; Memory Jar; Necromancy; Parallax Wave; Pentad Prism; Pest
+Infestation; Quantum Riddler; Shelldock Isle; Sowing Mycospawn; Sword of the Meek; The One Ring;
+Thieving Skydiver; Through the Breach; Toxic Deluge; Vicious Rivalry; Wan Shi Tong, All-Knowing;
+Winds of Abandon; Worldspine Wurm.
+
+Supported cube cards: 524 (M7c tail part 2: 491, M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
+191, M4b-1: 133, M4a: 31); creatures 201 by their front faces (M7c tail part 2: 184, M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
 M7b part 1: 113, M4b-2: 20); planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in
 M7b part 3b (28): Boseiju, Who Endures; Brain Freeze; Caves of Chaos Adventurer; Ertai
 Resurrected; Fallen Shinobi; Fanatic of Rhonas; Feywild Caretaker; Forensic Gadgeteer; From the
@@ -749,16 +781,18 @@ Reprieve, Sear, Simian Spirit Guide, Sol Ring, Stern Scolding, Swords to Plowsha
 Caryatid, the six Talismans, Time Warp, Unholy Heat, Vindicate, Voltaic Key, Wheel of
 Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED`.
 
-Not yet (later milestones; each is a blocker in the support report, never a silent no-op):
-battles, meld, flip cards, convert, "cast transformed", read ahead, fuse, "this ability
-triggers only once each turn", dungeons other than Undercity ("venture into the dungeon"), ward
-that discards at random or that an Aura or Equipment grants, replacement and prevention effects
-beyond the ones above, Auras other than bestowed ones, multikicker, mana with spend restrictions,
-mana abilities whose cost has a choice or a mana part (Orcish Lumberjack, Sunken Ruins, Chromatic
-Star), granted triggered abilities other than an Equipment's (Kaldra Compleat), a random card
-from a graveyard (Tersa Lightshatter), naming a card other than Tamiyo's (Demonic Consultation,
-"as this enters, choose a card name"), "activate only once" / exhaust / boast, the play/draw
-choice.
+Not yet (later milestones; each is a blocker in the support report, never a silent no-op; the
+cube cards still blocked are listed in 28.9, 29.8 and 30.8): face-down permanents (manifest,
+manifest dread, morph, disguise: CR 708), battles, meld, flip cards, convert, "cast
+transformed", read ahead, fuse, Class levels (716), reconfigure (702.151), emerge, plot, exert,
+opening-hand actions (103.6), dungeons other than Undercity ("venture into the dungeon"), ward that
+discards at random or that an Aura or Equipment grants, replacement and prevention effects beyond
+the ones above (void counters, Dauthi Voidwalker), shadow, Auras other than bestowed and
+reanimating ones (enchant creature, land, artifact), granted triggered abilities other than an
+Equipment's with a limit per turn (Nadu), a card name chosen as a permanent enters (Anointed
+Peacekeeper), a top card its owner may look at any time and plays from the library (Bolas's
+Citadel), mana abilities whose cost taps another permanent (Urza), mana that gives haste to what
+it is spent on, a random card from a hand, the play/draw choice.
 
 Deliberate simplifications and limits (each is small and local to change):
 
@@ -944,6 +978,15 @@ Deliberate simplifications and limits (each is small and local to change):
   opponent; Time Vault's skip as a replacement, 614.10; Mana Vault's draw-step "if" checked again
   on resolution, 603.4; Goblin Welder's pair checked at resolution, 608.2b); the Python engine's
   handling of these cards was not compared. Its simplifications are listed in 28.8.
+* M7c tail part 3 (section 30): the 33 cards follow their Oracle text and the CR. Where the
+  Python engine's model is known to differ: it gates "if you cast it" on a cast from hand (the
+  class's name; here "if you cast it", from anywhere, as its docstring and the Oracle text say),
+  it has no hidden exile (here face-down cards are hidden, known to their owner, 406.3), it
+  splices nothing it doesn't announce (here 702.47: an announcement with its own cost and
+  targets), and its kicker is a printing switch (here a repeatable additional cost read by "if it
+  was kicked"). The fixes of 30.5 (an effect's cast permission before flashback, a search for
+  several cards by definitions, mana classes by their additional mana) are engine-side. The other
+  cards' Python handling was not compared; the simplifications are listed in 30.7.
 * M7c tail part 2 (section 29): the 24 cards follow their Oracle text and the CR. Where the Python
   engine's model is known to differ: it has one combat per turn (Fear of Missing Out's additional
   combat phase is 500.8 here), it reads `once_per_turn` as "triggers only once each turn" for
@@ -1003,6 +1046,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_costs.rs` | M7b part 3b: 601.2f (kicker and X before reductions), 118.9d (a reduction on an alternative cost), 108.2 (a token in a graveyard isn't a card) |
 | `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
 | `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
+| `tests/cards_m7c_tail3.rs` | M7c tail part 3: the 33 cards against their Oracle text (48 tests, the CR cited in each name: 107.3, 702.96, 701.14, 305.2, 601.2c, 603.12, 702.16j, 603.4, 702.44a, 603.6a, 702.86a, 702.16b, 702.90, 614.1a, 702.33c, 702.33d, 107.4c, 603.7, 702.47, 706, 702.32a, 607.2a, 702.171, 301.5, 700.2, 701.46a, 509.1b, 509.1h, 406.3, 702.75a, 303.4a, 608.3a, 514.3a); face-down cards hidden from the other player in every world it samples, never for their owner; Wizard's Rockets's IR defect |
 | `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (37 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), the search of Green Sun's Zenith on a custom card, the two IR defects |
 | `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (30 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4), Chromatic Star's IR defect |
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
@@ -1041,7 +1085,10 @@ both fixed (25.9). The check also asserts that no face is up in a hidden zone. M
 M7b part 3b: 20,000 games over the 438 cards, no failure (102 s); one fault found on the way,
 fixed (27.12). M7c tail part 1: 20,000 games over the 467 cards, no failure (70 s); four faults
 found on the way, all fixed (28.7). M7c tail part 2: 20,000 games over the 491 cards, no failure
-(72 s); four faults found on the way, all fixed (29.5).
+(72 s); four faults found on the way, all fixed (29.5). M7c tail part 3: 20,000 games over the 524
+cards, no failure (69-70 s); the faults found on the way are 30.5's and the face-down view's (30.2).
+The fuzzer's view, known-card and information-set checks cover the face-down cards (`view_of`
+lists them per owner, by identity only where the viewer knows them).
 `POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
 earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
 `n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).
@@ -1148,6 +1195,20 @@ retrace grant for every graveyard card at every priority, ascend at every SBA ch
 `size_of::<Game>()` 1,344 B (+80: the entering effects, the activation counts, the miracle
 question, the seen bits, the players' turn effects); clone + determinize 1.55-1.74 us (main
 1.40-1.59). Fuzzer 20,000 games: 72 s.
+
+**M7c tail part 3** (524 cards, branch `m7c-tail3`): pinned the same way, interleaved with main's
+code (4613d0f) in four rounds, with a training run using the GPU and about eight threads on the
+machine. On main's pool (`POOL_EXCLUDE` leaves the 33 new cards out) 5.09-5.42 us per decision
+against main's 5.25-5.36, pairs -5.0% to +2.7% (874-930 games/s against 882-901); 845,436
+decisions against 845,409: a few games differ, by the fixes of 30.5 (a search for several cards
+by definitions, the token cap, an effect's cast permission before flashback, mana classes by
+their additional mana). The new rules are looked at only in games with such a card
+(`SEEN_DRAW_REPL`, `SEEN_GY_TRIGGER`, `SEEN_RARE_EVENTS`; the face-down list, empty, costs a
+clone one empty vector). `Game::clone` 1.18-1.25 us (main 1.16-1.25), `size_of::<Game>()` 1,368
+B (+24: the face-down list); clone + determinize 1.55-1.82 us (main 1.51-1.69), `determinize`
+alone 0.86-0.88 us (main 0.84-0.89). On the full pool: 5.59-5.67 us per decision (832,306
+decisions), 848-860 games/s; `Game::clone` 1.30-1.32 us; clone + determinize 1.72-1.90 us.
+Fuzzer 20,000 games: 69-70 s.
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -3666,3 +3727,222 @@ and the doubled cascade are noted under "Checked and not defects".
   encoding all treat exile as public); a zone for it, with its clouds and play permissions, is the
   work they need together.
 * Rain of Filth (28.9) and the cards with three or more blockers (part 3).
+
+## 30. The single-card tail, part 3 (M7c)
+
+Branch `m7c-tail3`, from main at 4613d0f (491 cards): the cards that needed three or more
+features, and the face-down cards. 33 came through, 524 supported; 12 of the cards in scope stay
+blocked (30.8). Code: `lower/effect_tail3.rs` (lowering), `resolve_tail3.rs` (the new `Ext`
+instructions, splice, the face-down plays, the reanimating Auras), the face-down zone in
+`ids.rs` / `game.rs` / `hidden.rs`, changes in `cast.rs`, `pay.rs`, `triggers.rs`, `combat.rs`,
+`sba.rs`, `printing.rs`, `statics.rs`, `trigger.rs`; tests `tests/cards_m7c_tail3.rs` (48 tests,
+the CR cited in each name). The work went shared features first (X life, reflexive triggers,
+"from anywhere", draw replacements, kicker on permanents, splice), then the face-down zone, then
+the reanimating Auras.
+
+### 30.1 The cards
+
+| Card | What it needed | Decisions |
+|---|---|---|
+| Vicious Rivalry | "destroy all ... with mana value X or less" (`Filter::MvAtMostX` on `DestroyAll`; X the life paid, 29.1's `x_life`) | X |
+| Toxic Deluge | "all creatures get -X/-X" (`Ext::ApplyPtX`, X locked in, 608.2h) | X |
+| Winds of Abandon | overload's "exile each": `Ext::ExileAll` with "for each creature exiled this way, its controller searches for a basic land" (up to that many, tapped, then a shuffle; APNAP) | `ChooseAltCost`, `SearchLibrary` |
+| Mawloc | ravenous (29.1) and "if that creature would die this turn, exile it instead" (`Mod::ExileIfDies` on the fought target, whether or not the fight happened) | X, `Target` |
+| Fastbond | "any number of lands" (the IR's sentinel 1,000,000 read as `ANY_LANDS`, ir_defects 10); "if it wasn't the first land you played this turn" (`Cond::LandsPlayedAtLeast`, an intervening "if") | - |
+| Pest Infestation | "up to X targets" (`X_UP_TO`: the IR's `count_from_x` with its zero counts, read only in that exact shape on a spell with X, ir_defects 10); "twice X tokens" (`Amount::XTimes`) | X, `Target` |
+| Generous Plunderer | "you may <do>. When you do, <reflexive>" (`MayDoThenReflexive`, 603.12); "target opponent creates a tapped Treasure" (`Ext::TokensFor`); damage to the defending player by the artifacts they control (`Amount::CountTypesOpp`) | `YesNo`, `Target` |
+| Inti, Seneschal of the Sun | the same reflexive form with "you may discard a card"; "whenever you discard one or more cards" (the IR's `discards_card` as `CardDiscarded`, batched); "until your next end step" (`PERM_UNTIL_END_STEP`) | `Discard`, `Target` |
+| The One Ring | "if you cast it" (the IR's `ConditionalIfCastFromHand`, read as its docstring's "if you cast it": `TrigPred::EnteredCast`); a player's protection from everything until their next turn (702.16j: `Player::prot_until`; not targetable, damage prevented); burden counters | - |
+| Pentad Prism | sunburst (702.44a: the converge record, `CardDef::sunburst`, charge counters or +1/+1 on a creature); a mana ability that removes a counter and doesn't tap: activated with priority (28.1's route: it could be activated again within one payment) | `ChooseMana` |
+| Worldspine Wurm, Emrakul, the Aeons Torn | "when this is put into a graveyard from anywhere" (`EventKind::ToGraveyard`: the card's own ability from the graveyard, its owner controls it, 603.6a); shuffling the source or the owner's graveyard in; Emrakul's annihilator (keyword and trigger checked to agree), protection from coloured spells (`Prot::colored_spells`, `DamageSource::spell`), the cast trigger's extra turn | `Sacrifice` (annihilator) |
+| Blightsteel Colossus | infect (702.90b-c: poison counters, -1/-1 counters; `Kw::Infect`); "if it would be put into a graveyard from anywhere, reveal it and shuffle it into its owner's library instead" (`CardDef::gy_to_library`, applied in `move_card`; from a library it stays there) | - |
+| Hullbreacher | "if an opponent would draw a card except the first one they draw in each of their draw steps, instead you create a Treasure" (`CardDef::opp_draw_token`) | - |
+| Quantum Riddler | "as long as you have one or fewer cards in hand, if you would draw one or more cards, you draw that many plus one" (`CardDef::draw_plus`, per draw instruction: `Game::draw_cards`); warp (29.1) | - |
+| Batroc the Leaper | multikicker (702.33c: the repeatable cost, `TimesCost`); counters per kick; "up to X targets, X the times kicked" (`KICKS_UP_TO`, read from the enter note) | `ChooseMode`, `Target` |
+| Sowing Mycospawn | kicker on a permanent (once), "if it was kicked" on two cast triggers (`TrigPred::SpellPaid`), devoid (702.114a); its kicker's {C} read from `kicker_cost_str` when the structured cost agrees otherwise (ir_defects 5) | `ChooseMode`, `SearchLibrary`, `Target` |
+| Thieving Skydiver | kicker {X} with "X can't be 0" (`TimesCost::x`, `CardDef::x_min`: X announced after the kick, 601.2b); "target artifact with mana value X or less" (`Filter::MvAtMostSourceX`, `Mark::KickerX`; the IR has no target, ir_defects 6: the Oracle text's); gain control, attach if an Equipment | `ChooseMode` x2, `Target` |
+| Goryo's Vengeance, Through the Breach | splice onto Arcane (702.47, 30.3); Goryo's haste and end-step exile | `ChooseHandCard`, `Target` |
+| "Name Sticker" Goblin | "enters from anywhere other than a graveyard or exile" (enter note bit 15); "creatures named ..." (`Filter::Named`); the die roll's gate checked on resolution | - |
+| Parallax Wave | fading (702.32a); exile linked to the source; "each player returns ... all cards they own exiled with it" | `Target` |
+| Caustic Bronco | saddle (702.171a: crew's cost, other creatures, as a sorcery; `Mark::Saddled` until end of turn); "if this creature isn't saddled" on resolution | `ChoosePermanent` |
+| Sword of the Meek | a triggered ability that functions in the graveyard (`TrigPred::InGraveyard`, `CardDef::gy_triggers`, `SEEN_GY_TRIGGER`; its owner controls it); "a 1/1 creature" (`Filter::PtIs`) | `YesNo` |
+| Gollum, Riddle Master | odd or even chosen as it enters (`Mark::Parity`); "a spell with mana value of the chosen quality"; "choose one that hasn't been chosen" (`Modes::once_each`, `Mark::ModesUsed`; with none left the trigger is removed, 700.2b) | `ChooseMode` |
+| Emperor of Bones | adapt (701.46a); "whenever one or more +1/+1 counters are put on this" (`EventKind::CountersAdded`); a finality counter (122.1i: exiled instead of put into a graveyard, `CardDb::finality`); a linked creature card reanimated with haste and an end-step sacrifice | `Target`, `ChooseExiled` |
+| Wan Shi Tong, All-Knowing | "its owner puts it second from the top or on the bottom" (the owner's `YesNo`); "whenever one or more cards are put into a library from anywhere" (`EventKind::CardsPutIntoLibrary`, once among the waiting triggers); Spirits that block and are blocked only by Spirits (`CardDef::blocks_only_subtype`) | `Target`, `YesNo` |
+| Coveted Jewel | "whenever one or more creatures an opponent controls attack you and aren't blocked" (`EventKind::AttackersUnblocked`, `Slot::Defender`); that player draws three, gains control of it, untaps it | - |
+| Headliner Scarlett, Memory Jar, Shelldock Isle | cards exiled face down (30.2) | `PutInHand` (hideaway), `YesNo` (Shelldock) |
+| Animate Dead, Necromancy | reanimating Auras (30.4) | `Target` |
+
+### 30.2 Face-down exile
+
+`Zone::FaceDown` is the exile zone for cards exiled face down (CR 406.3): a hidden zone like a
+library (`Zone::is_hidden`), one list (`Game::face_down`, both players', in exile order). The
+knowledge rules of section 10 carry over: a card moved there keeps its `known` bits (hidden to
+hidden), and its owner, who saw it go, knows it (Scarlett's look is keyed `KEY_LOOK`, private;
+Memory Jar's cards come from the hand; hideaway's from a looked-at pile). A cloud whose domain
+held the card keeps it by its slot (`knowledge_moves`), so "that card is among these" survives
+the move and the return to the hand. `determinize` deals the face-down cards a viewer doesn't
+know again with the owner's other hidden cards (`unknown_to_in`), never for their owner. The
+view (`view_of`) shows each owner's face-down pile as a count and the identities the viewer
+knows, without order (the fuzzer found that the order of a hand exiled face down told which
+known card was where). The encoding puts a face-down card in `MY_EXILE` / `OPP_EXILE` by
+identity only for a viewer who knows it, and the opponent's unknown ones in `OPP_HIDDEN` (the
+multiset of identities the viewer doesn't know, the same in every world it samples); the exile
+count of the globals includes them. Nothing in `az/encode.rs`'s layout changed.
+
+Playing a face-down card: a permission (Scarlett's "this turn") lets its owner play it with the
+`EXILE` slots, after the face-up cards; the play reveals it (hidden to public). Shelldock Isle's
+card is linked to it (607.2a), hideaway's pile picks it with a `PutInHand` decision (a card
+taken; no new decision kind), and its ability asks the `YesNo` whenever the card is there and a
+library has twenty or fewer cards ("yes" only if it can be played now: a land on its
+controller's turn with a land play left; a spell castable without paying its mana cost), so the
+question says nothing about the hidden card. Memory Jar links each player's exiled hand to the
+Jar; the delayed ability discards both hands and returns the linked cards.
+
+Face-down permanents (Abhorrent Oculus's manifest dread, CR 708) are not built: a hidden identity
+on the battlefield would need `determinize` over permanents, 2/2 colourless nameless
+characteristics in every layer accessor and the encoding, and turning face up; they would cost
+more than this whole part (30.8).
+
+### 30.3 Splice onto Arcane (CR 702.47)
+
+Casting a spell with a subtype that some card of its caster's deck splices onto asks
+`Task::Splice` (task code 23, as `ChooseTimes`) after the other announcements and before the
+targets: one `ChooseHandCard` decision per spliced card (a hand slot, `PASS` = no more), asked
+whenever the deck has such a card (open decklists: the question says nothing about the hand). A
+card is offered while a copy of it isn't spliced yet, its splice cost can be paid with the rest
+(`extra_costs` adds it, 601.2f) and its targets exist. The spliced card is revealed and stays in
+the hand; `StackItem::spliced` records its definition. Its targets follow the spell's own
+(`resolve_tail3::item_reqs`, used by target choice, resolution and copies), and as the spell
+resolves its program runs after the spell's, with the spell as its source and the spliced card's
+definition as the frame's (its delayed abilities are its own: Goryo's end-step exile).
+
+### 30.4 Reanimating Auras
+
+Animate Dead is an Aura spell whose target is a creature card in a graveyard (303.4a: the IR's
+`aura_enchant_type`, `CardDef::aura_spell`); with an illegal target it doesn't resolve (608.3a),
+else it enters attached to that card (608.3c, as a bestowed Aura). Its enter trigger returns the
+card it enchants under its controller's control and attaches to it (`Ext::ReanimateAttach`,
+`Mark::Reanimated`); Necromancy's targets a creature card in a graveyard as it triggers and first
+becomes an Aura (layer 4). Both check "if it's on the battlefield" as they resolve. A reanimating
+Aura that is an Aura is legal attached to the creature card it entered on (in a graveyard) or to
+the creature it put onto the battlefield; anything else, or nothing, puts it into its owner's
+graveyard (704.5m, `sba.rs::bad_reanimating_aura`). Leaving, it makes that creature's controller
+sacrifice it. Animate Dead's -1/-0 is the IR's `equipment_bonuses` on an Aura (ir_defects 7: the
+same `attached` applies it). Necromancy's flash is the IR's keyword (ir_defects 8: no card in the
+cube asks whether a card has flash); cast when a sorcery couldn't have been (not its controller's
+main phase with an empty stack, `Mark::NotSorceryTiming`), it is sacrificed at the beginning of
+the next cleanup step (`DelayedWhen::NextCleanup`, fired as the cleanup step begins: 514.3a gives
+priority and another cleanup).
+
+### 30.5 Rules added and fixed on the way
+
+* `Lowerer::spell_x`: the printing's spell has an X (mana cost or "pay X life"); "X" effects
+  check it.
+* The enter note's X is bits 9-14 (6 bits: X is at most 31 here); bit 15 says the permanent came
+  from a graveyard or exile.
+* Kicker on a permanent is a repeatable additional cost (`TimesCost`, once; multikicker any
+  number of times; kicker {X} with `x`), so the enter note's "times" and the spell's are "if it
+  was kicked" (`EnteredPaid`, `SpellPaid`).
+* `trig_mask` is a `u64` (33 event kinds); `Game::seen` a `u16` (`SEEN_DRAW_REPL`,
+  `SEEN_GY_TRIGGER`, `SEEN_RARE_EVENTS`: the draw replacements, graveyard triggers and the three
+  new events are looked at only in games with such a card).
+* Fixes the fuzzer found in older code, exposed by the new pool's decks: a permission an effect
+  gives a graveyard card ("you may cast it now", Bilbo, Malcolm) is its route before its
+  flashback (`cast_route`; the effect offered it for its mana cost); more waiting triggers than
+  `TRIGGER` slots (a board of tokens dying) put the first of each interchangeable group first;
+  tokens are capped so every card a player owns can still enter (a board of tokens, then a
+  spell, overran the 96 permanent slots); a search for several cards (Nissa's, Ugin's) picks
+  definitions, taking the cards at its end (`Frame::picked_defs`: the searcher's own worlds may
+  deal the library again in between); mana classes of one definition stay apart when their
+  additional mana differs (an animated Urza's Saga with Badgermole Cub is a creature, its twin
+  isn't); a card surveiled into a graveyard that Blightsteel shuffles in instead is not known at
+  its new place.
+
+### 30.6 Decisions, tasks, encoding, the bot
+
+No new decision kind (39 still). New task: `Splice` (task code 23). New contexts for existing
+kinds: hideaway's pile pick (`PutInHand`), the splice choice (`ChooseHandCard`), the parity
+(`ChooseMode`), kicker's times and X (`ChooseMode`), the owner's "second from the top" and
+Shelldock's play (`YesNo`). Every new `Ext` op is op code 37. Layout v3 is unchanged; not encoded
+(no spare floats used): a player's protection from everything, splices, saddled, the modes
+Gollum chose and its parity, a kicker's X, a reanimating Aura's creature, the new named counters
+(burden, fade, charge, finality: the layout encodes loyalty and lore counters, +1/+1 and -1/-1
+through power and toughness), `Kw::Infect` (not in the layout's keyword list: a card's printed
+keywords come with its identity). New token kinds to register: Pest (1/1 black and
+green, "when this dies, you gain 1 life"), Wurm (5/5 green, trample), Spirit (1/1 colourless,
+blocks and is blocked only by Spirits); the Treasure is registered already.
+
+The heuristic bot stays legal for every decision (the long test: 4,000 games, all 39 kinds). "Pay
+X life" is chosen by what the spell does: the toughest opposing creature for -X/-X (Toxic Deluge),
+the costliest opposing artifact or creature for "mana value X or less" (Vicious Rivalry), the
+toughness together for divided damage (Fire Covenant), at most half its life.
+
+### 30.7 Simplifications (differences from the CR)
+
+* Blightsteel Colossus's replacement applies before the other replacements of a graveyard
+  destination (Yawgmoth's Will's exile, "exile it instead"): its controller would choose that
+  order (616.1).
+* "Whenever one or more cards are put into a library" triggers at most once among the triggers
+  waiting to be put on the stack (as Laelia's, 29.6), and "whenever you discard one or more
+  cards" once per batch of discards (one instruction's).
+* Saddle counts a creature's crew bonus ("crews Vehicles as though ...", which doesn't apply to
+  saddle).
+* Pentad Prism's mana is made with priority only (28.8).
+* Shelldock Isle plays a land only on its controller's turn with a land play left.
+* "Until your next end step" ends as that end step begins, and "you may play that card" is
+  checked by the controller's turn count, extra turns included.
+* Splice offers each spliced card once per copy in hand, never the spell itself; splicing a card
+  with a "distinct targets" requirement is not modelled (none in the cube).
+* A reanimating Aura's attachment legality doesn't model "enchant creature put onto the
+  battlefield with this Aura" beyond the one creature it reanimated.
+* Necromancy's flash is the flash keyword (ir_defects 8).
+
+### 30.8 Still blocked
+
+* **Abhorrent Oculus**: face-down permanents (manifest dread, CR 708, 701.62), 30.2; its "exile
+  six cards from your graveyard" additional cost is not lowered either.
+* **Urza, Lord High Artificer** (`ActivationCost.tap_permanent_type`): a mana ability whose cost
+  taps another permanent (section 18's payment taps sources, not costs of sources), and
+  "shuffle, exile the top card, play it free".
+* **Bolas's Citadel** (`grants_look_at_top_of_library`, `grants_play_from_top_paying_life`,
+  ten nonland permanents sacrificed): a top card known to its owner at all times and plays from
+  the library paying life.
+* **Dauthi Voidwalker** (shadow, `void_exile_replacement`): opponents' cards exiled with void
+  counters instead of going to a graveyard, and a free play of one of them.
+* **Lion Sash** (reconfigure, 702.151; an Equipment bonus per own counter).
+* **Does Machines** (Class levels, 716).
+* **Nadu, Winged Wisdom** (a granted "becomes the target" trigger limited to twice a turn per
+  creature).
+* **Anointed Peacekeeper** (a card name chosen as it enters, taxes by name).
+* **Gemstone Caverns** (an opening-hand action, 103.6).
+* **Pillage the Bog** (plot, 702.170: a special action from hand).
+* **Arena of Glory** (exert as a cost; mana that gives haste to the creature spell it is spent
+  on).
+* **Crabomination** (emerge, 702.119; a random card from a graveyard and from a hand exiled, one
+  cast free).
+* **Wizard's Rockets**: an IR defect (30.9).
+* Not in scope: Ajani, Celestial Colonnade, Creeping Tar Pit, Minsc & Boo, Strip Mine, Chromatic
+  Star, Forth Eorlingas!, Green Sun's Zenith (IR defects), Rain of Filth (28.9).
+
+### 30.9 IR
+
+One new defect (docs/ir_defects.md 18): Wizard's Rockets's "when this artifact is put into a
+graveyard from the battlefield" is `leaves_battlefield` in the IR, as Chromatic Star's (15);
+blocked (`lower::IR_DEFECTS`). Handled faithfully with consistency checks: Fastbond's and Pest
+Infestation's sentinels (10), Sowing Mycospawn's {C} (5, from the string), Thieving Skydiver's
+and Wan Shi Tong's missing targets (6, the Oracle text's), Animate Dead's Aura bonus (7),
+Necromancy's flash (8). The other cards' IR matches their Oracle text; notes under "Checked and
+not defects".
+
+### 30.10 Measurements and fuzzing
+
+Fuzzing (20,000 games over the 524 cards): no failure (69-70 s); the faults it found on the way are
+30.5's and the face-down view's (30.2). Speed (pinned to logical CPU 2, `tests/perf.rs`,
+interleaved with main's code 4613d0f in four rounds, a training run using the GPU and about eight
+threads): on main's pool (`POOL_EXCLUDE` leaves the 33 new cards out) 5.09-5.42 us per decision
+against main's 5.25-5.36 (874-930 games/s against 882-901; pairs -5.0% to +2.7%), 845,436 decisions
+against 845,409 (a few games differ by 30.5's fixes); `Game::clone` 1.18-1.25 us against 1.16-1.25,
+`size_of::<Game>()` 1,368 B (+24: the face-down list); clone + determinize 1.55-1.82 us against
+1.51-1.69. On the full pool: 5.59-5.67 us per decision (832,306 decisions), 848-860 games/s;
+`Game::clone` 1.30-1.32 us; clone + determinize 1.72-1.90 us.
