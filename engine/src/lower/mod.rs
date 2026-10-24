@@ -91,6 +91,14 @@ pub struct Lowerer<'a> {
     pub uses_prepare: bool,
     /// A predicate reads the colours of mana spent to cast the spell.
     pub converge: bool,
+    /// The activated ability being lowered sacrifices one permanent as a
+    /// cost ("the sacrificed permanent's mana value").
+    pub sac_cost: bool,
+    /// The printing says it watches its controller's library and graveyard
+    /// for exiled cards (Laelia).
+    pub watches_exile: bool,
+    /// An effect of the card is cascade (CR 702.85a).
+    pub cascade: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -203,6 +211,11 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // Oracle text triggers once per combat damage step (first strike,
     // extra combats).
     ("Forth Eorlingas!", "IR:TriggeredAbility.once_per_turn(\"one or more\" written as once each turn)"),
+    // "Shuffle Green Sun's Zenith into its owner's library" (the last
+    // instruction of its effect): the IR writes it as Nexus of Fate's
+    // replacement "if it would be put into a graveyard from anywhere"
+    // (countered, discarded or milled, it would go to the library too).
+    ("Green Sun's Zenith", "IR:StaticAbility.replacement_effect(\"shuffle it into its library\" as a replacement from anywhere)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.
@@ -228,6 +241,9 @@ pub fn lower_card(
         latent: Vec::new(),
         uses_prepare: false,
         converge: false,
+        sac_cost: false,
+        watches_exile: false,
+        cascade: false,
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;

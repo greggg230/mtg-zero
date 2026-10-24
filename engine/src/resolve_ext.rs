@@ -1563,7 +1563,10 @@ impl Game {
             | Ext::Harness
             | Ext::ExilePlayUntilNextTurn { .. }
             | Ext::ExileEventCardLinked { .. }
-            | Ext::LinkedToGraveyardThenToken { .. } => self.exec_tail2(f, op),
+            | Ext::LinkedToGraveyardThenToken { .. }
+            | Ext::PlayFromGraveyardThisTurn
+            | Ext::GraveyardToExileThisTurn
+            | Ext::Cascade => self.exec_tail2(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

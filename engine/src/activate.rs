@@ -269,6 +269,10 @@ impl Game {
                 self.marks.push((r, crate::game::Mark::Exhausted(i)));
             }
         }
+        if ad.boast {
+            let r = self.obj_ref(card);
+            self.marks.push((r, crate::game::Mark::Boasted(self.turn.number as u16)));
+        }
         if ad.mana().is_some() {
             self.agenda.push(Task::ManaNow { src: Src { card, slot } });
             return;
@@ -651,6 +655,13 @@ impl Game {
         }
         let mut sacs: Vec<CardIdx> = picked.iter().copied().take(n_sac).collect();
         sacs.sort_by_key(|c| self.objs[c.i()].timestamp);
+        // "The sacrificed permanent's mana value" (as it last existed, CR
+        // 608.2h): an activated ability's item keeps it (`Amount::CostMvPlus`).
+        if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
+            if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
+                self.stack[pos].ev.amount = self.mana_value_of(c) as u16;
+            }
+        }
         self.begin_batch();
         for c in sacs {
             self.note(|g| format!("P{p} sacrifices {}", g.name(c)));

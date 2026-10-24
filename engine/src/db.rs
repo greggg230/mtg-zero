@@ -346,6 +346,9 @@ pub enum Filter {
     /// It has been harnessed (`Mark::Harnessed`; "once harnessed, its
     /// infinity ability is active").
     Harnessed,
+    /// Mana value at most the X of the resolving spell that is the context's
+    /// source (CR 107.3).
+    MvAtMostX,
 }
 
 /// `Filter::Ability` kinds.
@@ -512,6 +515,9 @@ pub enum EventKind {
     /// A player played a land (CR 305.1; not a land put onto the
     /// battlefield by an effect). Subjects: the land, the player.
     PlaysLand,
+    /// A card was put into exile from its owner's library or graveyard.
+    /// Subject: the owner.
+    ExiledFromLibGy,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -551,7 +557,8 @@ impl EventKind {
             | E::BeginningOfPrecombatMain
             | E::BeginningOfCombat
             | E::BeginningOfEndStep
-            | E::CreatureTokensCreated => (&[Slot::Player], &[]),
+            | E::CreatureTokensCreated
+            | E::ExiledFromLibGy => (&[Slot::Player], &[]),
             E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
             E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
@@ -943,6 +950,9 @@ pub struct ActivatedDef {
     /// "This ability costs {n} less to activate for each ..." (CR 602.2b,
     /// 601.2f; Otawara's channel).
     pub discounts: Vec<Discount>,
+    /// Boast (CR 702.142a): "activate only if this creature attacked this
+    /// turn and only once each turn" (`Mark::Boasted`).
+    pub boast: bool,
 }
 
 impl ActivatedDef {

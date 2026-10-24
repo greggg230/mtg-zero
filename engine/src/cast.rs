@@ -353,6 +353,9 @@ impl Game {
                     Some(CastFrom::Flashback)
                 } else if let Some((free, any_mana)) = permitted {
                     Some(CastFrom::Permission { free, any_mana })
+                } else if self.gy_play_now(p) {
+                    // Yawgmoth's Will: for its mana cost (CR 601.2a).
+                    Some(CastFrom::Permission { free: false, any_mana: false })
                 } else if def.escape.is_some()
                     // (Granted escape with the card's own additional costs is
                     // not offered: one combined cost isn't built; ENGINE.md
@@ -765,7 +768,14 @@ impl Game {
     }
 
     pub(crate) fn lands_from_graveyard(&self, p: PlayerId) -> bool {
-        self.permanents_of(p).any(|c| self.abilities(c).lands_from_graveyard)
+        self.gy_play_now(p) || self.permanents_of(p).any(|c| self.abilities(c).lands_from_graveyard)
+    }
+
+    /// "Until end of turn, you may play lands and cast spells from your
+    /// graveyard" holds for `p` (Yawgmoth's Will).
+    #[inline]
+    pub(crate) fn gy_play_now(&self, p: PlayerId) -> bool {
+        self.players[p as usize].gy_play_turn == self.turn.number && self.turn.number > 0
     }
 
     /// Priority options for cards in exile with a permission (`EXILE`
@@ -1782,6 +1792,10 @@ impl Game {
             }),
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
+            Filter::MvAtMostX => {
+                let x = ctx.source.and_then(|s| self.stack.iter().find(|i| i.kind == StackKind::Spell { card: s.idx })).map_or(0, |i| i.x);
+                self.mana_value_of(c) <= x
+            }
             Filter::Harnessed => {
                 let r = self.obj_ref(c);
                 self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::Harnessed)

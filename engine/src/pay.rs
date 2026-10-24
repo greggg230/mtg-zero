@@ -268,6 +268,16 @@ impl Game {
         if ad.your_turn && self.turn.active != p {
             return false;
         }
+        // Boast (CR 702.142a): it attacked this turn; once each turn.
+        if ad.boast {
+            let r = self.obj_ref(card);
+            let turn = self.turn.number as u16;
+            if !self.players.iter().any(|pl| pl.attacked_with.contains(&r))
+                || self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::Boasted(turn))
+            {
+                return false;
+            }
+        }
         if let Some(c) = &ad.only_if {
             if !self.cond_holds(c, p) {
                 return false;

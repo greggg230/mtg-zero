@@ -23,6 +23,27 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     l.deny("TriggeredAbility.room_half", room_half);
     l.deny("TriggeredAbility.functions_in_graveyard", functions_in_graveyard);
     use enums::Event as E;
+    // "Whenever one or more cards are put into exile from your library
+    // and/or your graveyard" (Laelia): the IR's marker predicate, with the
+    // `dies` event as a placeholder (the Python engine sweeps for it).
+    if let (Some(E::Dies), Some(cats::TriggerPredicate::CardsExiledFromLibraryOrGraveyard(nodes::CardsExiledFromLibraryOrGraveyard {}))) =
+        (event, predicate.as_deref())
+    {
+        if !l.watches_exile {
+            l.unsupported("TriggerPredicate:CardsExiledFromLibraryOrGraveyard(no watches_library_graveyard_exile)");
+        }
+        let Some(e) = effect else {
+            l.unsupported("TriggeredAbility.effect(missing)");
+            return None;
+        };
+        let ability = lower_ability(l, e);
+        let pred = TrigPred::And(Box::new(TrigPred::Controlled(Slot::Player, true)), Box::new(TrigPred::Batch));
+        if *once_per_turn {
+            l.unsupported("TriggeredAbility.once_per_turn(cards exiled)");
+        }
+        let uses_event = ability.uses_event();
+        return Some(TriggerDef { event: EventKind::ExiledFromLibGy, pred, ability, uses_event });
+    }
     let ev = match event {
         Some(E::Enters) => Some(EventKind::Enters),
         Some(E::Dies) => Some(EventKind::Dies),

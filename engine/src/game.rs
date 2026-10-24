@@ -220,6 +220,12 @@ pub struct Player {
     pub poison: u16,
     /// Experience counters (CR 122.1).
     pub experience: u16,
+    /// "Until end of turn, you may play lands and cast spells from your
+    /// graveyard" this turn (the turn number; Yawgmoth's Will).
+    pub gy_play_turn: u32,
+    /// "If a card would be put into your graveyard from anywhere this turn,
+    /// exile that card instead" this turn (the turn number).
+    pub gy_exile_turn: u32,
 }
 
 /// A player's dungeon (CR 309): the dungeon card in the command zone with the
@@ -591,6 +597,8 @@ pub enum Mark {
     UsedTurn(u16),
     /// It has been harnessed (The Mind Stone).
     Harnessed,
+    /// Its boast ability was activated in turn n (CR 702.142a).
+    Boasted(u16),
 }
 
 impl Game {
@@ -666,6 +674,8 @@ impl Game {
             flash_sorceries: false,
             poison: 0,
             experience: 0,
+            gy_play_turn: 0,
+            gy_exile_turn: 0,
         };
         Game {
             db,
@@ -1153,6 +1163,32 @@ impl Game {
         let from = self.objs[idx.i()].zone;
         let old = self.obj_ref(idx);
         let old_controller = self.objs[idx.i()].controller;
+        // Replacements of where it goes (CR 614.1a), decided before the
+        // events: "if it would die this turn, exile it instead" (Suplex),
+        // "if it would leave the battlefield, exile it instead of putting it
+        // anywhere else" (From the Catacombs); "if a card would be put into
+        // your graveyard from anywhere this turn, exile that card instead"
+        // (Yawgmoth's Will; a card, not a token).
+        let to = if from == Zone::Battlefield && to != Zone::Exile {
+            let fl = self.flags_of(idx);
+            if (to == Zone::Graveyard && fl.exile_if_dies) || fl.exile_if_leaves {
+                Zone::Exile
+            } else {
+                to
+            }
+        } else {
+            to
+        };
+        let to = if to == Zone::Graveyard
+            && self.players[self.objs[idx.i()].owner as usize].gy_exile_turn == self.turn.number
+            && self.turn.number > 0
+            && !self.is_token(idx)
+            && !(from == Zone::Stack && self.is_copy_obj(idx))
+        {
+            Zone::Exile
+        } else {
+            to
+        };
         // Leave-the-battlefield abilities look back in time (CR 603.10a):
         // the events are recorded before the object moves.
         if from == Zone::Battlefield {
@@ -1178,19 +1214,6 @@ impl Game {
         let to = if from == Zone::Stack && !self.gy_exile.is_empty() && self.gy_exile.contains(&idx) {
             self.gy_exile.retain(|&c| c != idx);
             if to == Zone::Graveyard {
-                Zone::Exile
-            } else {
-                to
-            }
-        } else {
-            to
-        };
-        // "If it would die this turn, exile it instead" (Suplex); "if it
-        // would leave the battlefield, exile it instead of putting it
-        // anywhere else" (From the Catacombs; CR 614.1a).
-        let to = if from == Zone::Battlefield && to != Zone::Exile {
-            let fl = self.flags_of(idx);
-            if (to == Zone::Graveyard && fl.exile_if_dies) || fl.exile_if_leaves {
                 Zone::Exile
             } else {
                 to
@@ -1336,6 +1359,11 @@ impl Game {
         }
         if from == Zone::Battlefield && !self.links.is_empty() {
             self.release_links(old);
+        }
+        // "Whenever one or more cards are put into exile from your library
+        // and/or your graveyard" (Laelia).
+        if to == Zone::Exile && matches!(from, Zone::Library | Zone::Graveyard) {
+            self.event(Event::player(EventKind::ExiledFromLibGy, owner));
         }
         if from == Zone::Battlefield && !self.marks.is_empty() {
             // Triggered abilities an effect gave it (CR 603.10a: they look

@@ -427,3 +427,194 @@ fn currency_converter_exiles_discards_then_cashes_them_in_for_tokens_cr607_2a() 
     assert_eq!(g.count_in(0, "Rogue", Zone::Battlefield), 1, "{}", log(&g));
     assert_eq!(g.count_in(0, "Treasure", Zone::Battlefield), 0);
 }
+
+// ---- Broadside Bombardiers -------------------------------------------------
+
+/// "Boast - Sacrifice another creature or artifact: This creature deals
+/// damage equal to 2 plus the sacrificed permanent's mana value to any
+/// target. (Activate only if this creature attacked this turn and only once
+/// each turn.)" (CR 702.142a; the mana value as it last existed, 608.2h.)
+#[test]
+fn broadside_bombardiers_boasts_once_after_attacking_cr702_142a() {
+    let mut g = scen()
+        .battlefield(0, &["Broadside Bombardiers", "Test Giant", "Sol Ring"])
+        .at(Step::Main1, 0)
+        .start();
+    let b = bf(&g, 0, "Broadside Bombardiers");
+    assert!(!g.has_option(act(b, 0)), "it hasn't attacked this turn");
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Card(b));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    assert!(g.has_option(act(b, 0)));
+    g.choose(act(b, 0));
+    g.choose(Choice::Target(Target::Player(1)));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    let giant = bf(&g, 0, "Test Giant");
+    g.choose(Choice::Card(giant));
+    settle(&mut g);
+    assert_eq!(g.life(1), 20 - 7, "2 plus mana value 5: {}", log(&g));
+    assert!(!g.has_option(act(b, 0)), "only once each turn");
+}
+
+// ---- Yawgmoth's Will -------------------------------------------------------
+
+/// "Until end of turn, you may play lands and cast spells from your
+/// graveyard. If a card would be put into your graveyard from anywhere this
+/// turn, exile that card instead." (CR 601.2a, 305.1, 614.1a.)
+#[test]
+fn yawgmoths_will_plays_the_graveyard_and_exiles_what_would_go_there_cr614_1a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Mountain"])
+        .hand(0, &["Yawgmoth's Will"])
+        .graveyard(0, &["Lightning Bolt", "Mountain"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+    let land = g.card(0, "Mountain", Zone::Graveyard);
+    assert!(!g.has_option(Choice::Cast(bolt)));
+    let w = cast(&mut g, "Yawgmoth's Will");
+    settle(&mut g);
+    assert_eq!(g.obj(w).zone, Zone::Exile, "the replacement applies as the Will leaves the stack");
+    assert!(g.has_option(Choice::Play(land)), "lands from the graveyard");
+    g.choose(Choice::Play(land));
+    g.drive_until(at_priority);
+    g.choose(Choice::Cast(bolt));
+    g.choose(Choice::Target(Target::Player(1)));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.life(1), 17);
+    assert_eq!(g.obj(bolt).zone, Zone::Exile, "exiled instead of put into the graveyard");
+    // The next own turn: over.
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    let gy: Vec<CardIdx> = g.graveyard_cards(0).collect();
+    assert!(gy.iter().all(|&c| !g.has_option(Choice::Cast(c))));
+}
+
+/// A token isn't a card: it still dies (CR 111.7, 614.1a); a card is exiled.
+#[test]
+fn yawgmoths_will_exiles_dying_cards_but_not_tokens() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Mountain", "Mountain", "Test Bear"])
+        .hand(0, &["Yawgmoth's Will", "Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, "Yawgmoth's Will");
+    settle(&mut g);
+    let bear = bf(&g, 0, "Test Bear");
+    let b = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(g.tgt(bear));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Exile, "{}", log(&g));
+}
+
+// ---- Green Sun's Zenith ----------------------------------------------------
+
+/// "Search your library for a green creature card with mana value X or
+/// less, put it onto the battlefield, then shuffle" (the test card: Green
+/// Sun's Zenith's IR misstates its last sentence and keeps it blocked).
+#[test]
+fn green_suns_zenith_search_finds_a_green_creature_of_mana_value_x_or_less_cr107_3() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest"])
+        .hand(0, &["Test Green Sun"])
+        .library(0, &["Test Giant", "Test Bear", "Test Flyer", "Test Reacher"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Test Green Sun", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(2));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::SearchLibrary));
+    let d = |n: &str| db().expect_id(n).unwrap();
+    assert!(g.has_option(Choice::Def(d("Test Bear"))) && g.has_option(Choice::Def(d("Test Reacher"))));
+    assert!(!g.has_option(Choice::Def(d("Test Giant"))), "mana value 5");
+    assert!(!g.has_option(Choice::Def(d("Test Flyer"))), "blue");
+    g.choose(Choice::Def(d("Test Bear")));
+    settle(&mut g);
+    assert!(g.find_card(0, "Test Bear", Zone::Battlefield).is_some());
+}
+
+#[test]
+fn green_suns_zenith_is_blocked_by_its_ir_replacement() {
+    let err = engine::db::CardDb::cube().expect_id("Green Sun's Zenith").unwrap_err();
+    assert!(err.contains("IR:StaticAbility.replacement_effect"), "{err}");
+}
+
+#[test]
+fn forth_eorlingas_is_blocked_by_its_ir_once_per_turn() {
+    let err = engine::db::CardDb::cube().expect_id("Forth Eorlingas!").unwrap_err();
+    assert!(err.contains("IR:TriggeredAbility.once_per_turn"), "{err}");
+}
+
+// ---- Bloodbraid Challenger -------------------------------------------------
+
+/// Cascade (CR 702.85a): exile until a nonland card with lesser mana value,
+/// cast it without paying its mana cost, the rest on the bottom in a random
+/// order.
+#[test]
+fn bloodbraid_challenger_cascades_into_a_free_spell_cr702_85a() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Forest", "Forest"])
+        .hand(0, &["Bloodbraid Challenger"])
+        .library(0, &["Forest", "Test Giant", "Lightning Bolt", "Plains"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, "Bloodbraid Challenger");
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    let bolt = g.card(0, "Lightning Bolt", Zone::Exile);
+    assert_eq!(g.exile_zone().len(), 3, "Forest, Giant (mana value 5, not less), Bolt");
+    g.choose(Choice::Yes);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(Choice::Target(Target::Player(1)));
+    settle(&mut g);
+    assert_eq!(g.life(1), 17, "{}", log(&g));
+    assert_eq!(g.obj(bolt).zone, Zone::Graveyard);
+    assert!(g.exile_zone().is_empty(), "the rest on the bottom");
+    let lib = &g.player(0).library;
+    let bottom: Vec<&str> = lib[..2].iter().map(|&c| g.name(c)).collect();
+    assert!(bottom.contains(&"Forest") && bottom.contains(&"Test Giant"), "{bottom:?}");
+    assert_eq!(g.name(*lib.last().unwrap()), "Plains");
+    assert!(g.find_card(0, "Bloodbraid Challenger", Zone::Battlefield).is_some());
+}
+
+// ---- Laelia, the Blade Reforged --------------------------------------------
+
+/// "Whenever Laelia attacks, exile the top card of your library. You may
+/// play that card this turn. Whenever one or more cards are put into exile
+/// from your library and/or your graveyard, put a +1/+1 counter on Laelia."
+#[test]
+fn laelia_grows_when_cards_leave_your_library_or_graveyard_for_exile() {
+    let mut g = scen().battlefield(0, &["Laelia, the Blade Reforged"]).at(Step::DeclareAttackers, 0).start();
+    let l = bf(&g, 0, "Laelia, the Blade Reforged");
+    g.choose(Choice::Card(l));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.counters_on(l, engine::db::Counter::P1P1), 1, "{}", log(&g));
+    assert_eq!(g.exile_zone().len(), 1);
+    // An opponent's graveyard: no counter; one's own: a counter.
+    let mut g = scen()
+        .battlefield(0, &["Laelia, the Blade Reforged", "Keen-Eyed Curator", "Forest", "Forest"])
+        .graveyard(0, &["Lightning Bolt"])
+        .graveyard(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let l = bf(&g, 0, "Laelia, the Blade Reforged");
+    let k = bf(&g, 0, "Keen-Eyed Curator");
+    let bear = g.card(1, "Test Bear", Zone::Graveyard);
+    g.choose(act(k, 0));
+    g.choose(g.tgt(bear));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.counters_on(l, engine::db::Counter::P1P1), 0);
+    let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+    g.choose(act(k, 0));
+    g.choose(g.tgt(bolt));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.counters_on(l, engine::db::Counter::P1P1), 1);
+}

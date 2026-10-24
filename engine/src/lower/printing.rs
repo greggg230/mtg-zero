@@ -352,7 +352,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing", sacrifice_at_cleanup_if_cast_without_sorcery_timing);
         let _ = dash_cost_str; // display form of `dash_cost`
         l.deny("CardPrinting.watched_in_graveyard", watched_in_graveyard);
-        l.deny("CardPrinting.watches_library_graveyard_exile", watches_library_graveyard_exile);
         l.deny("CardPrinting.multikicker", multikicker);
         l.deny("CardPrinting.enters_with_counter_per_kick", enters_with_counter_per_kick);
         l.deny("CardPrinting.evoke_cost", evoke_cost);
@@ -480,6 +479,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut kws = KwSet::default();
     let mut protection = Prot::default();
     let mut keyword_triggers: Vec<TriggerDef> = Vec::new();
+    let mut cascade_kw = false;
     for k in keywords {
         match lower_keyword_full(l, k) {
             Some(KwOrProt::Kw(kw)) => kws.insert(kw),
@@ -488,6 +488,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::BattleCry) => keyword_triggers.push(battle_cry()),
             Some(KwOrProt::Prowess) => keyword_triggers.push(prowess()),
             Some(KwOrProt::Persist) => keyword_triggers.push(persist()),
+            Some(KwOrProt::Cascade) => cascade_kw = true,
             None => {}
         }
     }
@@ -570,6 +571,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 your_turn: false,
                 loyalty: None,
                 discounts: Vec::new(),
+                boast: false,
             },
         );
     } else if life > 0 {
@@ -917,10 +919,30 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             triggers.push(td);
         }
     }
+    // "Whenever one or more cards are put into exile from your library and/or
+    // your graveyard": the flag and the trigger's predicate say it together.
+    l.watches_exile = *watches_library_graveyard_exile;
+    let watched = triggered_abilities.iter().any(|t| {
+        let cats::TriggeredAbility::TriggeredAbility(n) = t;
+        matches!(n.predicate.as_deref(), Some(cats::TriggerPredicate::CardsExiledFromLibraryOrGraveyard(_)))
+    });
+    if watched != *watches_library_graveyard_exile {
+        l.unsupported("CardPrinting.watches_library_graveyard_exile(without its trigger)");
+    }
     for t in triggered_abilities {
         if let Some(td) = super::trigger::lower_trigger(l, t, ty) {
             triggers.push(td);
         }
+    }
+    l.watches_exile = false;
+    // Cascade: the keyword and its "when you cast this spell" trigger.
+    let cascade_trigger = triggers.iter().any(|t| {
+        t.event == EventKind::IsCast
+            && t.pred == TrigPred::IsSelf(Slot::Spell)
+            && t.ability.program.contains(&crate::program::Op::Ext(crate::program::Ext::Cascade))
+    });
+    if cascade_kw != cascade_trigger || l.cascade != cascade_kw {
+        l.unsupported("Keyword:Cascade(keyword and trigger disagree)");
     }
     triggers.extend(keyword_triggers);
     let trig_mask = triggers.iter().fold(0u32, |m, t| m | 1 << t.event as u32);
@@ -1682,6 +1704,8 @@ pub(crate) enum KwOrProt {
     BattleCry,
     Prowess,
     Persist,
+    /// Cascade (CR 702.85a): its triggered ability is in the IR too.
+    Cascade,
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
@@ -1729,6 +1753,11 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
                 K::Persist => KwOrProt::Persist,
                 _ => KwOrProt::Prowess,
             });
+        }
+        K::Cascade => {
+            l.deny("Keyword.n", n);
+            l.deny("Keyword.quality", quality);
+            return Some(KwOrProt::Cascade);
         }
         _ => {}
     }

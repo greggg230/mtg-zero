@@ -136,6 +136,47 @@ pub(crate) fn lower_effect_tail2(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             b.op(Op::Ext(Ext::LinkedToGraveyardThenToken { land, nonland }));
             b.op(Op::Ext(Ext::TokensCreated));
         }
+        // "This creature deals damage equal to 2 plus the sacrificed
+        // permanent's mana value to any target" (Broadside Bombardiers).
+        E::DealDamageByFormula(nodes::DealDamageByFormula { amount, targets }) => {
+            let amount = match amount.as_deref() {
+                Some(cats::Formula::MVOfCostPaidObjectPlus(nodes::MVOfCostPaidObjectPlus { constant })) => {
+                    if !l.sac_cost {
+                        l.unsupported("Formula:MVOfCostPaidObjectPlus(no sacrifice cost)");
+                    }
+                    Amount::CostMvPlus(l.int("MVOfCostPaidObjectPlus.constant", *constant, 0, 20) as u8)
+                }
+                Some(other) => {
+                    l.unsupported(format!("Formula:{}", other.tag()));
+                    return true;
+                }
+                None => {
+                    l.unsupported("DealDamageByFormula.amount(missing)");
+                    return true;
+                }
+            };
+            let Some(to) = super::effect::lower_targets(l, b, targets, "DealDamageByFormula") else { return true };
+            b.op(Op::DealDamage { amount, to });
+        }
+        // Yawgmoth's Will.
+        E::MayPlayFromGraveyardThisTurn(nodes::MayPlayFromGraveyardThisTurn {}) => {
+            b.op(Op::Ext(Ext::PlayFromGraveyardThisTurn));
+        }
+        E::ExileInsteadOfGraveyardThisTurn(nodes::ExileInsteadOfGraveyardThisTurn {}) => {
+            b.op(Op::Ext(Ext::GraveyardToExileThisTurn));
+        }
+        // "Search your library for a green creature card with mana value X
+        // or less, put it onto the battlefield, then shuffle."
+        E::SearchLibraryForGreenCreatureWithMVAtMostX(nodes::SearchLibraryForGreenCreatureWithMVAtMostX {}) => {
+            let filter = and(and(Filter::Type(types::CREATURE), Filter::Color(1 << 4)), Filter::MvAtMostX);
+            b.op(Op::Search { who: Who::You, filter, dest: crate::program::SearchDest::Battlefield { tapped: false }, reveal: false, may_fail: true });
+        }
+        // Cascade (CR 702.85a): "when you cast this spell" (the keyword and
+        // its trigger, both in the IR: checked together in printing.rs).
+        E::Cascade(nodes::Cascade {}) => {
+            l.cascade = true;
+            b.op(Op::Ext(Ext::Cascade));
+        }
         _ => return false,
     }
     true

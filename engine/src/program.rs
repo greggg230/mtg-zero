@@ -84,6 +84,10 @@ pub enum Amount {
     /// spell's mana value"): on the stack now (with its X, CR 202.3e), or as
     /// it last existed there (608.2h).
     EventSpellMv,
+    /// n plus the mana value of the permanent sacrificed to pay the
+    /// activated ability's cost ("2 plus the sacrificed permanent's mana
+    /// value"; as it last existed, CR 608.2h).
+    CostMvPlus(u8),
 }
 
 /// Which objects an `Ext` op acts on.
@@ -674,6 +678,18 @@ pub enum Ext {
     /// into its owner's graveyard; then creates token `land` if it is a
     /// land card, else token `nonland`. Choice: `ChooseExiled`.
     LinkedToGraveyardThenToken { land: u16, nonland: u16 },
+    /// "Until end of turn, you may play lands and cast spells from your
+    /// graveyard" (the controller).
+    PlayFromGraveyardThisTurn,
+    /// "If a card would be put into your graveyard from anywhere this turn,
+    /// exile that card instead" (the controller; CR 614.1a).
+    GraveyardToExileThisTurn,
+    /// Cascade (CR 702.85a), of the event's spell: exile cards from the top
+    /// of the controller's library until a nonland card with lesser mana
+    /// value; they may cast it without paying its mana cost if its mana
+    /// value is less; the rest go on the bottom in a random order. Choice:
+    /// yes/no.
+    Cascade,
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -892,6 +908,7 @@ impl Op {
             Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
             Op::Ext(Ext::ReturnEventCardAs { .. }) | Op::Ext(Ext::ExileEventCardLinked { .. }) => true,
             Op::Ext(Ext::SacrificeN { who: w, .. }) => who(w),
+            Op::Ext(Ext::Cascade) => true,
             Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
             Op::Ext(Ext::Reflexive { .. })

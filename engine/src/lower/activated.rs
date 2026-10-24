@@ -40,7 +40,6 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     l.deny("ActivatedAbility.room_half", room_half);
     l.deny("ActivatedAbility.tier_threshold", tier_threshold);
     l.deny("ActivatedAbility.activate_only_once", activate_only_once);
-    l.deny("ActivatedAbility.boast", boast);
     let mut only_if = Vec::new();
     let mut loyalty_paid = (0i64, false);
     let cost = lower_cost(l, cost, from, &mut only_if, &mut loyalty_paid);
@@ -130,10 +129,16 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         if *exhaust && from != From::Battlefield {
             l.unsupported("ActivatedAbility.exhaust(not on the battlefield)");
         }
-        ActEffect::Stack(lower_ability(l, effect))
+        l.sac_cost = cost.sacrifice.as_ref().is_some_and(|s| s.n == 1);
+        let ab = lower_ability(l, effect);
+        l.sac_cost = false;
+        ActEffect::Stack(ab)
     };
     if only_if.len() > 1 {
         l.unsupported("ActivatedAbility.only_if(more than one condition)");
+    }
+    if *boast && (from != From::Battlefield || walker || matches!(effect, ActEffect::Mana(_))) {
+        l.unsupported("ActivatedAbility.boast(not a creature's ability)");
     }
     // "This ability costs {1} less to activate for each legendary creature
     // you control" (CR 602.2b, 601.2f); a mana ability pays no mana here.
@@ -151,6 +156,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         your_turn: *activate_only_during_your_turn,
         loyalty,
         discounts,
+        boast: *boast && from == From::Battlefield && !walker,
     })
 }
 

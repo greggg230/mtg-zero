@@ -223,6 +223,16 @@ impl Game {
                     {
                         continue;
                     }
+                    // "One or more cards are put into exile from your library
+                    // and/or your graveyard": once among the triggers waiting
+                    // to be put on the stack (one instruction's or one cost's
+                    // exiles; ENGINE.md 29).
+                    if ev.kind == crate::db::EventKind::ExiledFromLibGy
+                        && has_batch(&t.pred)
+                        && self.waiting.iter().any(|w| w.source == o.r && w.slot == i as u8)
+                    {
+                        continue;
+                    }
                     // CR 603.2h: "Do this only once each turn": it triggers
                     // only if its controller hasn't done it this turn.
                     if !self.done_once.is_empty() && self.done_once.contains(&(o.r, i as u8)) {

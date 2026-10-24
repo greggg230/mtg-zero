@@ -136,8 +136,77 @@ impl Game {
                 f.made_all = made;
                 Flow::Next
             }
+            Ext::PlayFromGraveyardThisTurn => {
+                let n = self.turn.number;
+                self.players[f.controller as usize].gy_play_turn = n;
+                Flow::Next
+            }
+            Ext::GraveyardToExileThisTurn => {
+                let n = self.turn.number;
+                self.players[f.controller as usize].gy_exile_turn = n;
+                Flow::Next
+            }
+            Ext::Cascade => self.cascade(f),
             other => unreachable!("not a tail-2 op: {other:?}"),
         }
+    }
+
+    /// Cascade (CR 702.85a). `f.i`: 0 = exile and offer the cast; 1 = the
+    /// cast was answered; 2 = after the cast, put `f.picked` on the bottom.
+    /// `f.picked`: the cards exiled, the hit card last.
+    fn cascade(&mut self, f: &mut Frame) -> Flow {
+        let p = f.controller;
+        if f.i == 0 {
+            // "This spell's mana value" (as it last existed, 608.2h).
+            let mv = self.amount(f, crate::program::Amount::EventSpellMv) as u8;
+            f.picked.clear();
+            let mut hit = None;
+            while let Some(&top) = self.players[p as usize].library.last() {
+                self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
+                self.move_card(top, Zone::Exile, Pos::Top);
+                f.picked.push(top);
+                if !self.def_of(top).is(types::LAND) && self.def_of(top).mana_value() < mv {
+                    hit = Some(top);
+                    break;
+                }
+            }
+            f.i = 1;
+            match hit {
+                Some(c) if self.can_cast_free_now(p, c) => {
+                    self.note(|g| format!("P{p} cascades into {}", g.name(c)));
+                    self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, yes_no());
+                    return Flow::Suspend;
+                }
+                _ => {
+                    let rest = std::mem::take(&mut f.picked);
+                    self.put_on_bottom_randomly(p, rest);
+                    return Flow::Next;
+                }
+            }
+        }
+        if f.i == 1 {
+            let hit = *f.picked.last().expect("a hit card");
+            match self.answer.take() {
+                Some(Choice::Yes) if self.objs[hit.i()].zone == Zone::Exile => {
+                    // The rest go to the bottom after the cast (CR
+                    // 702.85a: "then").
+                    let mut back = f.clone();
+                    back.i = 2;
+                    back.picked.pop();
+                    self.agenda.push(Task::Run(back));
+                    self.cast_free_now(p, hit);
+                    return Flow::Suspend;
+                }
+                _ => {
+                    let rest = std::mem::take(&mut f.picked);
+                    self.put_on_bottom_randomly(p, rest);
+                    return Flow::Next;
+                }
+            }
+        }
+        let rest: Vec<CardIdx> = std::mem::take(&mut f.picked).into_iter().filter(|c| self.objs[c.i()].zone == Zone::Exile).collect();
+        self.put_on_bottom_randomly(p, rest);
+        Flow::Next
     }
 
     /// The cards exiled with `source` still there (CR 607.2a), in link
