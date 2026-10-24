@@ -1067,6 +1067,10 @@ fn serra_paragon_plays_one_card_from_the_graveyard_each_turn_cr601_2a() {
     // Not on the opponent's turn.
     let g = scen().battlefield(0, &["Serra Paragon"]).graveyard(0, &["Island"]).at(Step::Main1, 1).start();
     assert!(!g.has_option(Choice::Play(g.card(0, "Island", Zone::Graveyard))));
+    // No Paragon: nothing, not even a card of mana value 0.
+    let g = scen().graveyard(0, &["Mox Jet", "Island"]).at(Step::Main1, 0).start();
+    assert!(!g.has_option(Choice::Cast(g.card(0, "Mox Jet", Zone::Graveyard))));
+    assert!(!g.has_option(Choice::Play(g.card(0, "Island", Zone::Graveyard))));
 }
 
 // ---- Goblin Welder ---------------------------------------------------------

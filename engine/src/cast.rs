@@ -317,13 +317,14 @@ impl Game {
     /// their graveyard with flashback (printed or granted) or escape; from
     /// exile with a permission.
     pub(crate) fn cast_route(&self, p: PlayerId, card: CardIdx) -> Option<crate::game::CastFrom> {
-        self.cast_route_esc(p, card, &mut None)
+        self.cast_route_esc(p, card, &mut None, &mut None)
     }
 
     /// [`cast_route`](Self::cast_route) remembering in `esc` whether `p`
     /// controls a permanent that grants escape (one walk of `p`'s
     /// permanents for a whole graveyard).
-    fn cast_route_esc(&self, p: PlayerId, card: CardIdx, esc: &mut Option<bool>) -> Option<crate::game::CastFrom> {
+    /// (`para` likewise remembers the mana value Serra Paragons allow.)
+    fn cast_route_esc(&self, p: PlayerId, card: CardIdx, esc: &mut Option<bool>, para: &mut Option<u8>) -> Option<crate::game::CastFrom> {
         use crate::game::CastFrom;
         let def = self.def_of(card);
         match self.objs[card.i()].zone {
@@ -368,7 +369,7 @@ impl Game {
                     && def.is_permanent_card()
                     && def.other_face().is_none()
                     && def.halves.is_none()
-                    && self.paragon(p, def.mana_value()).is_some()
+                    && { let m = *para.get_or_insert_with(|| self.paragon_mv(p)); m > 0 && def.mana_value() <= m }
                 {
                     // (A route the card has of its own comes first: one
                     // route per card; a card with another face isn't cast
@@ -734,6 +735,24 @@ impl Game {
         })
     }
 
+    /// The most mana value an unused Serra Paragon of `p` allows this turn
+    /// (0: none; a land needs only one).
+    pub(crate) fn paragon_mv(&self, p: PlayerId) -> u8 {
+        if self.turn.active != p {
+            return 0;
+        }
+        let turn = self.turn.number as u16;
+        self.permanents_of(p)
+            .filter(|&c| self.abilities(c).gy_play_mv > 0)
+            .filter(|&c| {
+                let r = self.obj_ref(c);
+                !self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::UsedTurn(turn))
+            })
+            .map(|c| self.abilities(c).gy_play_mv)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Use Serra Paragon `c`'s permission this turn; the trigger the
     /// permanent will gain.
     pub(crate) fn use_paragon(&mut self, c: CardIdx) -> (crate::ids::DefId, u8) {
@@ -789,8 +808,9 @@ impl Game {
                 opts.push(Opt { action, choice });
             }
         }
-        let lands_ok = land_ok && (self.lands_from_graveyard(p) || self.paragon(p, 0).is_some());
         let mut esc = None;
+        let mut para = None;
+        let lands_ok = land_ok && (self.lands_from_graveyard(p) || *para.get_or_insert_with(|| self.paragon_mv(p)) > 0);
         // (A token in a graveyard is not a card: nothing casts or plays it.)
         for c in self.graveyard_cards(p) {
             let front = if self.def_of(c).halves.is_some() {
@@ -801,7 +821,7 @@ impl Game {
                 } else {
                     0
                 }
-            } else if self.cast_route_esc(p, c, &mut esc).is_some_and(|from| self.castable_via(p, c, from, classes, sorcery_ok)) {
+            } else if self.cast_route_esc(p, c, &mut esc, &mut para).is_some_and(|from| self.castable_via(p, c, from, classes, sorcery_ok)) {
                 FACE_CAST
             } else {
                 0

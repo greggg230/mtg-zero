@@ -304,12 +304,19 @@ impl Game {
         // "Whenever you tap a <land subtype> for mana, add an additional
         // <mana>" (triggered mana abilities, CR 605.1b: they resolve at once,
         // so such a land makes more mana).
-        let bonus: Vec<(u16, u8)> = self
-            .permanents_of(p)
-            .flat_map(|x| self.abilities(x).extra_mana_on_tap.iter().copied())
-            .collect();
-        // "Whenever you tap a creature for mana, add an additional {G}."
-        let creature_bonus = self.creature_mana_bonus(p);
+        // (And "whenever you tap a creature for mana, add an additional
+        // {G}": one walk for both.)
+        let mut bonus: Vec<(u16, u8)> = Vec::new();
+        let mut creature_bonus = [0u8; 6];
+        for x in self.permanents_of(p) {
+            let a = self.abilities(x);
+            bonus.extend(a.extra_mana_on_tap.iter().copied());
+            if a.extra_mana_creature != [0; 6] {
+                for t in 0..6 {
+                    creature_bonus[t] += a.extra_mana_creature[t];
+                }
+            }
+        }
         for c in self.permanents_of(p) {
             if Some(c) == exclude {
                 continue;
