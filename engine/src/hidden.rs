@@ -233,7 +233,9 @@ impl Game {
     fn unknown_to_in(&self, viewer: PlayerId, owner: PlayerId) -> SVec<CardIdx, 64> {
         let pl = &self.players[owner as usize];
         let hand = if owner != viewer { &pl.hand[..] } else { &[][..] };
-        hand.iter().chain(pl.library.iter()).copied().filter(|&c| !self.knows(viewer, c)).collect()
+        // (Cards exiled face down: hidden too, ENGINE.md 30.)
+        let face_down = self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == owner);
+        hand.iter().chain(pl.library.iter()).copied().chain(face_down).filter(|&c| !self.knows(viewer, c)).collect()
     }
 
     // ---- knowledge events (ENGINE.md 10) ----------------------------------
@@ -350,6 +352,8 @@ impl Game {
             match to {
                 Zone::Hand => k.hand = true,
                 Zone::Library if !k.library => k.slots.push(c),
+                // (Exiled face down: it stays in the domain, by its slot.)
+                Zone::FaceDown => k.slots.push(c),
                 _ => {}
             }
             changed = true;

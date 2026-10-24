@@ -768,6 +768,20 @@ pub enum Ext {
     OwnerPutsSecondOrBottom { tgt: u8 },
     /// The event's player gains control of the source and untaps it.
     EventPlayerTakesSourceUntapped,
+    /// Exile the top card of the controller's library face down; they look
+    /// at it and may play it this turn (CR 406.3).
+    ExileTopFaceDownPlayable,
+    /// Each player exiles all cards from their hand face down, linked to the
+    /// source (CR 607.2a).
+    HandsFaceDownLinked,
+    /// The face-down cards linked to the source return to their owners'
+    /// hands.
+    LinkedFaceDownToHand,
+    /// If a library has at most n cards, the controller may play the
+    /// face-down card linked to the source without paying its mana cost (a
+    /// land only if they could play a land now). Choice: yes/no (asked
+    /// whenever the card is there and a library is that small).
+    PlayLinkedFaceDownFree { library_at_most: u8 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -844,6 +858,8 @@ pub enum SearchDest {
 /// Where cards of a looked-at pile go (scry, surveil, "look at the top N").
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PileDest {
+    /// Exiled face down, linked to the source (hideaway, CR 702.75a).
+    FaceDown,
     /// On top of the library, in the order chosen (the last on top).
     Top,
     /// On the bottom, in the order chosen (the last at the very bottom).

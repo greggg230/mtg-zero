@@ -118,7 +118,7 @@ impl Game {
                         return Flow::Next;
                     }
                     f.i = 1;
-                    f.picked.clear();
+                    f.picked_defs.clear();
                     f.floor = 0;
                 }
                 while f.i <= 2 {
@@ -130,14 +130,9 @@ impl Game {
                     }
                     let done = match self.answer.take() {
                         Some(Choice::Def(d)) => {
-                            let c = self
-                                .library_sorted(q)
-                                .into_iter()
-                                .find(|&c| self.objs[c.i()].def == d && !f.picked.contains(&c))
-                                .expect("a card of the chosen definition");
-                            f.picked.push(c);
+                            f.picked_defs.push(d);
                             f.floor = d;
-                            f.picked.len() as i32 >= n
+                            f.picked_defs.len() as i32 >= n
                         }
                         Some(Choice::Pass) => true,
                         Some(other) => unreachable!("search answer {other:?}"),
@@ -155,7 +150,7 @@ impl Game {
                                 }
                                 let def = self.db.def(d);
                                 let basic = def.is(types::LAND) && def.supertypes & supertypes::BASIC != 0;
-                                let left = lib.iter().any(|&x| self.objs[x.i()].def == d && !f.picked.contains(&x));
+                                let left = lib.iter().filter(|&&x| self.objs[x.i()].def == d).count() > f.picked_defs.iter().filter(|&&x| x == d).count();
                                 if d >= f.floor && left && basic {
                                     assert!((i as u16) < act::LIBRARY_N, "library slot {i} out of range");
                                     opts.push(Opt { action: act::LIBRARY + i as u16, choice: Choice::Def(d) });
@@ -169,6 +164,7 @@ impl Game {
                     if done {
                         // Done for this player: the cards enter tapped, then
                         // the library is shuffled.
+                        f.picked = self.cards_of_defs(q, &std::mem::take(&mut f.picked_defs));
                         self.finish_search_any(f, q, true, false);
                         f.floor = 0;
                         f.i += 1;
@@ -331,6 +327,93 @@ impl Game {
                     self.untap(c);
                 }
                 Flow::Next
+            }
+            Ext::ExileTopFaceDownPlayable => {
+                let p = f.controller;
+                let Some(&top) = self.players[p as usize].library.last() else { return Flow::Next };
+                // A private look (CR 406.3): keyed for the owner only.
+                self.force_library_card(top, crate::hidden::KEY_LOOK, p);
+                let card = self.move_card(top, Zone::FaceDown, Pos::Top);
+                self.learn(p, top);
+                let d = self.objs[top.i()].def;
+                self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+                self.note(|_| format!("P{p} exiles the top card of their library face down"));
+                self.permissions.push(crate::game::Permission {
+                    card,
+                    player: p,
+                    turn: Some(self.turn.number),
+                    kind: crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, attacked_subtype: None },
+                });
+                Flow::Next
+            }
+            Ext::HandsFaceDownLinked => {
+                for q in [self.turn.active, opp(self.turn.active)] {
+                    let hand = self.players[q as usize].hand.clone();
+                    for c in hand {
+                        let card = self.move_card(c, Zone::FaceDown, Pos::Top);
+                        self.links.push(crate::game::Link { source: f.source, card, until: false, back: Zone::Hand, until_monarch: None });
+                    }
+                    self.note(|_| format!("P{q} exiles their hand face down"));
+                }
+                Flow::Next
+            }
+            Ext::LinkedFaceDownToHand => {
+                let cards: Vec<_> = self
+                    .links
+                    .iter()
+                    .filter(|l| l.source == f.source && self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::FaceDown)
+                    .map(|l| l.card.idx)
+                    .collect();
+                self.links.retain(|l| l.source != f.source);
+                for c in cards {
+                    self.move_card(c, Zone::Hand, Pos::Top);
+                }
+                Flow::Next
+            }
+            Ext::PlayLinkedFaceDownFree { library_at_most } => {
+                let p = f.controller;
+                let card = self
+                    .links
+                    .iter()
+                    .find(|l| l.source == f.source && self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::FaceDown)
+                    .map(|l| l.card.idx);
+                let Some(c) = card else { return Flow::Next };
+                if !self.players.iter().any(|pl| pl.library.len() <= *library_at_most as usize) {
+                    return Flow::Next;
+                }
+                let land = self.def_of(c).is(types::LAND);
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        if land {
+                            self.play_land(p, c, None);
+                        } else {
+                            self.cast_free_now(p, c);
+                            // The rest of the effect waits for the cast (CR
+                            // 608.2g): nothing follows here.
+                            return Flow::Next;
+                        }
+                        Flow::Next
+                    }
+                    Some(_) => Flow::Next,
+                    None => {
+                        // Asked whenever the card is there (its identity is
+                        // hidden from the other player): "yes" only if it can
+                        // be played now (a land: a land play is left on the
+                        // controller's turn).
+                        let ok = if land {
+                            let drops = 1 + self.permanents_of(p).map(|x| self.abilities(x).extra_lands as u32).sum::<u32>();
+                            self.turn.active == p && (self.players[p as usize].lands_played as u32) < drops
+                        } else {
+                            self.can_cast_free_now(p, c)
+                        };
+                        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                        if ok {
+                            opts.push(Opt { action: act::YES, choice: Choice::Yes });
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
+                        Flow::Suspend
+                    }
+                }
             }
             _ => unreachable!("not a tail-3 op: {op:?}"),
         }

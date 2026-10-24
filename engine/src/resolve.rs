@@ -38,6 +38,10 @@ pub(crate) struct Frame {
     pub x: i32,
     /// Permanents chosen so far by the current `Ext::Choose`.
     pub picked: Vec<CardIdx>,
+    /// Definitions a search for several cards picked so far (by identity:
+    /// the searcher's own worlds may deal the library's cards again before
+    /// the search ends; the cards are taken at its end).
+    pub picked_defs: Vec<DefId>,
     /// The token the last `CreateToken` made.
     pub made: Option<CardIdx>,
     /// The spell was cast for an alternative cost (CR 118.9).
@@ -148,6 +152,7 @@ impl Game {
             ev: item.ev,
             x: 0,
             picked: Vec::new(),
+            picked_defs: Vec::new(),
             made: None,
             alt: item.alt > 0,
             division: item.division.clone(),
@@ -752,6 +757,12 @@ impl Game {
                             f.floor = self.objs[c.i()].def;
                         }
                         self.put_from_pile(p, c, dest, reveal);
+                        if dest == PileDest::FaceDown {
+                            // Linked to the source (CR 607.2a: "the exiled
+                            // card").
+                            let card = self.obj_ref(c);
+                            self.links.push(crate::game::Link { source: f.source, card, until: false, back: Zone::Library, until_monarch: None });
+                        }
                     }
                     Some(Choice::Pass) => return Flow::Next,
                     Some(other) => unreachable!("pile answer {other:?}"),
@@ -808,7 +819,8 @@ impl Game {
                     PileDest::Top => DecisionKind::PutOnTop,
                     PileDest::Bottom => DecisionKind::PutOnBottom,
                     PileDest::Graveyard => DecisionKind::PutInGraveyard,
-                    PileDest::Hand => DecisionKind::PutInHand,
+                    // (Hideaway's "exile one face down": a card taken.)
+                    PileDest::Hand | PileDest::FaceDown => DecisionKind::PutInHand,
                 };
                 self.ask(Task::Run(f.clone()), p, kind, opts);
                 Flow::Suspend
@@ -1040,6 +1052,7 @@ impl Game {
             PileDest::Bottom => self.move_card(c, Zone::Library, Pos::Bottom),
             PileDest::Graveyard => self.move_card(c, Zone::Graveyard, Pos::Top),
             PileDest::Hand => self.move_card(c, Zone::Hand, Pos::Top),
+            PileDest::FaceDown => self.move_card(c, Zone::FaceDown, Pos::Top),
         };
         // (Not a card a replacement shuffled into the library instead:
         // Blightsteel Colossus.)

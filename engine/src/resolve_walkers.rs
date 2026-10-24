@@ -383,15 +383,11 @@ impl Game {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Def(d)) => {
-                        let c = self
-                            .library_sorted(p)
-                            .into_iter()
-                            .find(|&c| self.objs[c.i()].def == d && !f.picked.contains(&c))
-                            .expect("a card of the chosen definition");
-                        f.picked.push(c);
+                        f.picked_defs.push(d);
                         f.floor = d;
                     }
                     Some(Choice::Pass) => {
+                        f.picked = self.cards_of_defs(p, &std::mem::take(&mut f.picked_defs));
                         self.finish_search_any(f, p, *tapped, *exile_free);
                         return Flow::Next;
                     }
@@ -408,7 +404,7 @@ impl Game {
                     if i > 0 && self.objs[lib[i - 1].i()].def == d {
                         continue;
                     }
-                    let left = lib.iter().any(|&x| self.objs[x.i()].def == d && !f.picked.contains(&x));
+                    let left = lib.iter().filter(|&&x| self.objs[x.i()].def == d).count() > f.picked_defs.iter().filter(|&&x| x == d).count();
                     if d >= f.floor && left && self.card_matches(filter, c, &ctx) {
                         assert!((i as u16) < act::LIBRARY_N, "library slot {i} out of range");
                         opts.push(Opt { action: act::LIBRARY + i as u16, choice: Choice::Def(d) });
@@ -465,6 +461,19 @@ impl Game {
             }
             other => unreachable!("not a walker instruction: {other:?}"),
         }
+    }
+
+    /// The library cards of `p` for picked definitions: for each, the first
+    /// card of that definition (canonical order) not taken yet.
+    pub(crate) fn cards_of_defs(&self, p: PlayerId, defs: &[DefId]) -> Vec<CardIdx> {
+        let lib = self.library_sorted(p);
+        let mut out: Vec<CardIdx> = Vec::with_capacity(defs.len());
+        for &d in defs {
+            if let Some(&c) = lib.iter().find(|&&c| self.objs[c.i()].def == d && !out.contains(&c)) {
+                out.push(c);
+            }
+        }
+        out
     }
 
     /// The end of `Ext::SearchAnyNumber`: the found cards go where the

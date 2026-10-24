@@ -224,6 +224,37 @@ pub(crate) fn lower_effect_tail3(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             b.op(Op::Draw { who: Who::EventPlayer, n: Amount::Fixed(n) });
             b.op(Op::Ext(Ext::EventPlayerTakesSourceUntapped));
         }
+        // Hideaway n (CR 702.75a): "look at the top n cards of your library,
+        // exile one face down, then put the rest on the bottom in a random
+        // order" (its controller may look at it: they did).
+        E::HideawayLookExileOneFaceDown(nodes::HideawayLookExileOneFaceDown { n }) => {
+            let n = l.int("HideawayLookExileOneFaceDown.n", *n, 1, 10) as u8;
+            b.op(Op::LookTop { who: Who::You, n, reveal: false });
+            b.op(Op::PileTo { who: Who::You, dest: crate::program::PileDest::FaceDown, filter: Filter::Any, min: 1, max: 1, rest: false, reveal: false });
+            b.op(Op::Ext(Ext::PileRestBottomRandom));
+        }
+        // "You may play the exiled card without paying its mana cost if a
+        // library has twenty or fewer cards in it" (Shelldock Isle).
+        E::PlayExiledCardFreeIfAnyLibraryAtMost(nodes::PlayExiledCardFreeIfAnyLibraryAtMost { library_at_most }) => {
+            let n = l.int("PlayExiledCardFreeIfAnyLibraryAtMost.library_at_most", *library_at_most, 0, 99) as u8;
+            b.op(Op::Ext(Ext::PlayLinkedFaceDownFree { library_at_most: n }));
+        }
+        // "Each player exiles all cards from their hand face down and draws
+        // seven cards. At the beginning of the next end step, each player
+        // discards their hand and returns to their hand each card they exiled
+        // this way" (Memory Jar).
+        E::EachPlayerExilesHandDrawsNReturnsLater(nodes::EachPlayerExilesHandDrawsNReturnsLater { amount }) => {
+            let n = l.int("EachPlayerExilesHandDrawsNReturnsLater.amount", *amount, 0, 20);
+            b.op(Op::Ext(Ext::HandsFaceDownLinked));
+            b.op(Op::Draw { who: Who::Active, n: Amount::Fixed(n) });
+            b.op(Op::Draw { who: Who::NonActive, n: Amount::Fixed(n) });
+            let mut d = Builder::default();
+            d.op(Op::DiscardHand { who: Who::Active });
+            d.op(Op::DiscardHand { who: Who::NonActive });
+            d.op(Op::Ext(Ext::LinkedFaceDownToHand));
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::Delay { k, when: crate::db::DelayedWhen::NextEndStep, about: crate::program::About::Nothing }));
+        }
         _ => return false,
     }
     true

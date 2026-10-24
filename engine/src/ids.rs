@@ -39,13 +39,17 @@ pub enum Zone {
     Nowhere,
     /// The command zone (CR 408): emblems (CR 114).
     Command,
+    /// Exiled face down (CR 406.3): the exile zone, but the card's identity
+    /// is hidden like a library card's (known to the players whose `known`
+    /// bit is set: its owner, who saw it go there; ENGINE.md 10, 30).
+    FaceDown,
 }
 
 impl Zone {
     /// Hidden zones (CR 400.2): a card's identity there is known only to
     /// the players whose `known` bit is set.
     pub fn is_hidden(self) -> bool {
-        matches!(self, Zone::Library | Zone::Hand)
+        matches!(self, Zone::Library | Zone::Hand | Zone::FaceDown)
     }
 }
 

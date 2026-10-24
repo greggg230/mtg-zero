@@ -431,6 +431,9 @@ pub struct Game {
     /// Timestamp order.
     pub(crate) battlefield: Vec<CardIdx>,
     pub(crate) exile: Vec<CardIdx>,
+    /// Cards exiled face down (`Zone::FaceDown`), both players', in the
+    /// order they were exiled.
+    pub(crate) face_down: Vec<CardIdx>,
     /// Emblems (CR 114), in creation order.
     pub(crate) command: Vec<CardIdx>,
     /// Last = top.
@@ -751,6 +754,7 @@ impl Game {
             players: [player.clone(), player],
             battlefield: Vec::new(),
             exile: Vec::new(),
+            face_down: Vec::new(),
             command: Vec::new(),
             stack: Vec::new(),
             turn: Turn {
@@ -1020,6 +1024,7 @@ impl Game {
             Zone::Graveyard => Some(&mut self.players[owner].graveyard),
             Zone::Battlefield => Some(&mut self.battlefield),
             Zone::Exile => Some(&mut self.exile),
+            Zone::FaceDown => Some(&mut self.face_down),
             Zone::Command => Some(&mut self.command),
             Zone::Stack | Zone::Nowhere => None,
         }
@@ -1186,7 +1191,8 @@ impl Game {
     /// How many tokens `controller` creates instead of n ("twice that many
     /// of those tokens", CR 614.1a; at most 64), and no more than leave them
     /// 96 permanents (an engine limit: the `MY_PERM` / `OPP_PERM` action
-    /// slots; ENGINE.md 26.11).
+    /// slots; ENGINE.md 26.11) with room for every card they own to enter
+    /// too (ENGINE.md 30: a board of tokens, then a spell).
     pub(crate) fn token_count(&self, controller: PlayerId, n: u32) -> u32 {
         let mut n = n;
         let mut have = 0u32;
@@ -1197,7 +1203,19 @@ impl Game {
                 n = n.saturating_mul(f as u32).min(64);
             }
         }
-        n.min((crate::decision::act::PERM_N as u32).saturating_sub(have))
+        // (Cards it owns elsewhere, or that another player controls.)
+        let reserve = self
+            .objs
+            .iter()
+            .enumerate()
+            .filter(|&(i, o)| {
+                o.owner == controller
+                    && (i as u16) < self.first_token
+                    && !(o.zone == Zone::Battlefield && o.controller == controller)
+                    && o.zone != Zone::Nowhere
+            })
+            .count() as u32;
+        n.min((crate::decision::act::PERM_N as u32).saturating_sub(have + reserve))
     }
 
     /// Create one token (CR 111.2): a new object slot, put onto the
@@ -1485,7 +1503,7 @@ impl Game {
         }
         // "Whenever one or more cards are put into exile from your library
         // and/or your graveyard" (Laelia).
-        if to == Zone::Exile && matches!(from, Zone::Library | Zone::Graveyard) && self.seen & SEEN_EXILE_WATCH != 0 {
+        if matches!(to, Zone::Exile | Zone::FaceDown) && matches!(from, Zone::Library | Zone::Graveyard) && self.seen & SEEN_EXILE_WATCH != 0 {
             self.event(Event::player(EventKind::ExiledFromLibGy, owner));
         }
         if from == Zone::Battlefield && !self.marks.is_empty() {

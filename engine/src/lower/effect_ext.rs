@@ -1272,7 +1272,24 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // you may play that card this turn without paying its mana cost.
             // Otherwise, you may play that card this turn" (`free_if`,
             // checked as it resolves).
-            l.deny("ExileTopCardsWithPlayPermission.face_down", face_down);
+            // "Exile the top card of your library face down. You may look at
+            // and play that card this turn" (Headliner Scarlett).
+            if *face_down {
+                let plain = *count == 1
+                    && !*free
+                    && *duration == enums::ExilePlayDuration::ThisTurn
+                    && *whose == enums::ImpulseLibraryOwner::You
+                    && !*cast_only
+                    && free_if.is_none()
+                    && requires_attacked_with_subtype.is_empty()
+                    && !*any_color_mana;
+                if !plain {
+                    l.unsupported("ExileTopCardsWithPlayPermission.face_down(with more)");
+                    return true;
+                }
+                b.op(Op::Ext(Ext::ExileTopFaceDownPlayable));
+                return true;
+            }
             let free_if = match free_if.as_deref() {
                 None => None,
                 Some(s) => match super::trigger::lower_state_pred(l, s) {

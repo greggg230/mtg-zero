@@ -411,7 +411,7 @@ impl Game {
                     None
                 }
             }
-            Zone::Exile => match self.exile_permission(p, card)? {
+            Zone::Exile | Zone::FaceDown => match self.exile_permission(p, card)? {
                 crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
                 // CR 715.3d: cast it (not as an Adventure) for its mana cost.
                 crate::game::PermKind::Adventure => Some(CastFrom::Permission { free: false, any_mana: false }),
@@ -880,7 +880,9 @@ impl Game {
     fn other_zone_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<Opt>) {
         use crate::decision::{FACE_CAST, FACE_PLAY};
         let mut k = 0u16;
-        for &c in &self.exile {
+        // (Cards exiled face down that a permission lets `p` play follow the
+        // face-up ones: Headliner Scarlett.)
+        for &c in self.exile.iter().chain(self.face_down.iter()) {
             let cast_only = match self.exile_permission(p, c) {
                 Some(crate::game::PermKind::Play { cast_only, .. }) => cast_only,
                 // (Its owner may play it: a land too.)

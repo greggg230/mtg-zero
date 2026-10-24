@@ -374,6 +374,13 @@ impl Game {
             obj(&mut v, c);
         }
         v.push(u64::MAX);
+        // Cards exiled face down (ENGINE.md 30): their owners, and the
+        // identities the viewer knows.
+        for &c in &self.face_down {
+            let o = &self.objs[c.i()];
+            v.extend([o.owner as u64, if self.knows(viewer, c) { o.def as u64 } else { u64::MAX - 3 }]);
+        }
+        v.push(u64::MAX);
         // Emblems (public, CR 114).
         for &c in &self.command {
             v.extend([self.objs[c.i()].def as u64, self.objs[c.i()].controller as u64]);
@@ -645,6 +652,9 @@ impl Game {
         }
         for &c in &self.battlefield {
             mark(c, Zone::Battlefield, None)?;
+        }
+        for &c in &self.face_down {
+            mark(c, Zone::FaceDown, None)?;
         }
         for &c in &self.exile {
             mark(c, Zone::Exile, None)?;

@@ -711,6 +711,15 @@ impl Game {
             let o = &self.objs[c.i()];
             bag_add(out, ids, if o.owner == me { bag::MY_EXILE } else { bag::OPP_EXILE }, o.def);
         }
+        // Cards exiled face down (ENGINE.md 30): by identity where the viewer
+        // knows it (its owner saw it go there); the others are in the
+        // opponent's hidden pool below.
+        for &c in &self.face_down {
+            let o = &self.objs[c.i()];
+            if self.knows(me, c) {
+                bag_add(out, ids, if o.owner == me { bag::MY_EXILE } else { bag::OPP_EXILE }, o.def);
+            }
+        }
         for &c in &self.command {
             // (Dungeons are in the globals, ENGINE.md 27.7.)
             if self.is_dungeon(c) {
@@ -726,7 +735,8 @@ impl Game {
             }
         }
         let opl = &self.players[op_ as usize];
-        for &c in opl.hand.iter().chain(opl.library.iter()) {
+        let opp_face_down = self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(me, c));
+        for c in opl.hand.iter().copied().chain(opl.library.iter().copied()).chain(opp_face_down) {
             let d = self.objs[c.i()].def;
             if !self.knows(me, c) {
                 bag_add(out, ids, bag::OPP_HIDDEN, d);
@@ -764,7 +774,7 @@ impl Game {
             o[1] = pl.hand.len() as f32 / 10.0;
             o[2] = pl.library.len() as f32 / 40.0;
             o[3] = pl.graveyard.len() as f32 / 20.0;
-            o[4] = self.exile.iter().filter(|&&c| self.objs[c.i()].owner == p).count() as f32 / 10.0;
+            o[4] = self.exile.iter().chain(self.face_down.iter()).filter(|&&c| self.objs[c.i()].owner == p).count() as f32 / 10.0;
             o[5] = pl.lands_played as f32;
             for k in 0..6 {
                 o[6 + k] = pl.pool.amt[k] as f32 / 4.0;

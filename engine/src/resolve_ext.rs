@@ -1587,7 +1587,11 @@ impl Game {
             | Ext::AttachMadeToEventObj
             | Ext::LinkedCreatureToBattlefield { .. }
             | Ext::OwnerPutsSecondOrBottom { .. }
-            | Ext::EventPlayerTakesSourceUntapped => self.exec_tail3(f, op),
+            | Ext::EventPlayerTakesSourceUntapped
+            | Ext::ExileTopFaceDownPlayable
+            | Ext::HandsFaceDownLinked
+            | Ext::LinkedFaceDownToHand
+            | Ext::PlayLinkedFaceDownFree { .. } => self.exec_tail3(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

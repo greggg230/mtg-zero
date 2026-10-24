@@ -1175,3 +1175,109 @@ fn coveted_jewel_changes_hands_when_attackers_are_unblocked_cr509_1h() {
     assert!(!g.obj(jewel).tapped);
     assert_eq!(g.hand_sorted(1).len(), hand + 3);
 }
+
+// ---- Face-down exile: Headliner Scarlett, Memory Jar, Shelldock Isle ----------------------
+
+/// A card exiled face down is hidden (CR 406.3): its owner, who saw it, knows
+/// it; the other player doesn't, and `determinize` for them may give it
+/// another identity, never for the owner.
+fn face_down_is_hidden(g: &Game, c: CardIdx, owner: PlayerId) {
+    assert_eq!(g.obj(c).zone, Zone::FaceDown);
+    assert!(g.knows(owner, c), "its owner knows it");
+    assert!(!g.knows(1 - owner, c), "the other player doesn't");
+    let mut same = g.clone();
+    same.determinize(owner, &mut engine::rng::Rng::new(7));
+    assert_eq!(same.obj(c).def, g.obj(c).def, "never resampled for its owner");
+    assert_eq!(same.view_of(owner), g.view_of(owner));
+    let mut changed = false;
+    for s in 0..40 {
+        let mut d = g.clone();
+        d.determinize(1 - owner, &mut engine::rng::Rng::new(s));
+        assert_eq!(d.view_of(1 - owner), g.view_of(1 - owner), "the other player's view is kept");
+        changed |= d.obj(c).def != g.obj(c).def;
+    }
+    assert!(changed, "resampled for the other player");
+}
+
+/// "At the beginning of your upkeep, exile the top card of your library face
+/// down. You may look at and play that card this turn" (CR 406.3).
+#[test]
+fn headliner_scarlett_exiles_face_down_and_may_play_it_this_turn_cr406_3() {
+    let mut g = scen()
+        .battlefield(0, &["Headliner Scarlett"])
+        .library(0, &["Island", "Forest", "Lightning Bolt", "Mountain", "Test Bear", "Swamp", "Plains"])
+        .at(Step::Main2, 1)
+        .start();
+    quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
+    let fd: Vec<CardIdx> = g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| CardIdx(i as u16)).collect();
+    assert_eq!(fd.len(), 1, "{}", log(&g));
+    let c = fd[0];
+    face_down_is_hidden(&g, c, 0);
+    let can = g.has_option(Choice::Play(c)) || g.has_option(Choice::Cast(c));
+    let land_or_castable = g.def_of(c).is_permanent_card() || true;
+    assert!(can || !land_or_castable, "may play it this turn\n{}", log(&g));
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    assert!(!g.has_option(Choice::Play(c)) && !g.has_option(Choice::Cast(c)), "not on a later turn");
+}
+
+/// Memory Jar: "Each player exiles all cards from their hand face down and
+/// draws seven cards. At the beginning of the next end step, each player
+/// discards their hand and returns to their hand each card they exiled this
+/// way."
+#[test]
+fn memory_jar_hands_face_down_then_back_at_the_end_step_cr406_3() {
+    let mut g = scen()
+        .battlefield(0, &["Memory Jar"])
+        .hand(0, &["Lightning Bolt", "Test Bear"])
+        .hand(1, &["Counterspell", "Test Giant", "Forest"])
+        .library(0, &["Island"; 20])
+        .library(1, &["Forest"; 20])
+        .at(Step::Main1, 0)
+        .start();
+    let jar = bf(&g, 0, "Memory Jar");
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    let giant = g.card(1, "Test Giant", Zone::Hand);
+    g.choose(act(jar, 0));
+    settle(&mut g);
+    assert_eq!(g.hand_sorted(0).len(), 7);
+    assert_eq!(g.hand_sorted(1).len(), 7);
+    face_down_is_hidden(&g, bolt, 0);
+    face_down_is_hidden(&g, giant, 1);
+    quiet_until(&mut g, |g| g.turn().active == 1);
+    assert_eq!(g.obj(bolt).zone, Zone::Hand, "{}", log(&g));
+    assert_eq!(g.hand_sorted(0).len(), 2, "the seven discarded, the two back");
+    assert_eq!(g.hand_sorted(1).len(), 3, "the three back");
+    assert_eq!(g.graveyard_cards(0).count(), 7 + 1, "the Jar and the seven");
+}
+
+/// Hideaway 4 (CR 702.75a): "look at the top four cards of your library,
+/// exile one face down, then put the rest on the bottom in a random order";
+/// "{U}, {T}: You may play the exiled card without paying its mana cost if a
+/// library has twenty or fewer cards in it."
+#[test]
+fn shelldock_isle_hideaway_then_cast_free_cr702_75a() {
+    let mut g = scen()
+        .battlefield(0, &["Island"])
+        .hand(0, &["Shelldock Isle"])
+        .library(0, &["Island", "Island", "Griselbrand", "Test Bear", "Forest", "Swamp"])
+        .at(Step::Main1, 0)
+        .start();
+    let isle = g.card(0, "Shelldock Isle", Zone::Hand);
+    g.choose(Choice::Play(isle));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::PutInHand));
+    let gris = g.card(0, "Griselbrand", Zone::Library);
+    assert!(g.has_option(Choice::Card(gris)), "{:?}", g.options_desc());
+    g.choose(Choice::Card(gris));
+    settle(&mut g);
+    face_down_is_hidden(&g, gris, 0);
+    assert!(g.obj(bf(&g, 0, "Shelldock Isle")).tapped, "enters tapped");
+    // Next turn: activate it (six cards in the library: twenty or fewer).
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    let isle = bf(&g, 0, "Shelldock Isle");
+    g.choose(act(isle, 1));
+    pay(&mut g);
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::YesNo) { Some(Choice::Yes) } else { None });
+    assert_eq!(g.count_in(0, "Griselbrand", Zone::Battlefield), 1, "cast without paying its mana cost\n{}", log(&g));
+}
