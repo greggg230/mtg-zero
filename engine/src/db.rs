@@ -360,6 +360,12 @@ pub enum Filter {
     /// Mana value at most the X its source paid as it was cast (kicker {X};
     /// `Mark::KickerX` of the source permanent).
     MvAtMostSourceX,
+    /// Its name is this ("creatures named ...").
+    Named(String),
+    /// Its power and toughness are exactly these (CR 208).
+    PtIs(i32, i32),
+    /// Saddled this turn (CR 702.171b).
+    Saddled,
 }
 
 /// `Filter::Ability` kinds.
@@ -680,6 +686,12 @@ pub enum TrigPred {
     /// "This ability triggers only once each turn" (always true; once it
     /// has triggered, it doesn't trigger again that turn, `triggers.rs`).
     Once,
+    /// "Enters from anywhere other than a graveyard or exile" (the Enters
+    /// event's note, bit 15).
+    EnteredNotFromGyExile,
+    /// The ability functions in its card's graveyard, and only there
+    /// ("return this card from your graveyard", CR 113.6m-like).
+    InGraveyard,
 }
 
 impl TrigPred {
@@ -1015,6 +1027,7 @@ impl CardDef {
             | (if self.grants_retrace.is_some() && !self.emblem { crate::game::SEEN_RETRACE } else { 0 })
             | (if self.trig_mask & (1 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
             | (if self.opp_draw_token.is_some() || self.draw_plus.is_some() { crate::game::SEEN_DRAW_REPL } else { 0 })
+            | (if self.gy_triggers { crate::game::SEEN_GY_TRIGGER } else { 0 })
     }
 }
 
@@ -1302,6 +1315,9 @@ pub struct CardDef {
     pub enters_times_counters: bool,
     /// The least X its kicker {X} may have ("X can't be 0").
     pub x_min: u8,
+    /// Some triggered ability of it functions in its owner's graveyard
+    /// (`TrigPred::InGraveyard`).
+    pub gy_triggers: bool,
     /// Splice onto <subtype> <cost> (CR 702.47): the subtype, the cost.
     pub splice: Option<(u16, ManaCost)>,
     /// "As this enters, choose a color. All cards that aren't on the

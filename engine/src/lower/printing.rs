@@ -291,7 +291,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
         l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
         l.deny("CardPrinting.ward_discard_random", ward_discard_random);
-        l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
         // Sunburst (CR 702.44a): counters by the colours of mana spent to
         // cast it (the payment records them, as for converge).
         let sunburst_counter = sunburst.then(|| {
@@ -1088,6 +1087,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // "Put into a graveyard from anywhere" (a trigger, or a replacement):
     // the printing says it watches the card there (`watched_in_graveyard`).
     let gy_watch = triggers.iter().any(|t| t.event == EventKind::ToGraveyard) || repl.gy_to_library;
+    // Triggered abilities that function in the graveyard: the flag and the
+    // triggers say it together.
+    let gy_triggers = triggers.iter().any(|t| crate::triggers::in_graveyard(&t.pred));
+    if gy_triggers != *has_graveyard_triggers {
+        l.unsupported("CardPrinting.has_graveyard_triggers(without its trigger)");
+    }
     if gy_watch != *watched_in_graveyard {
         l.unsupported("CardPrinting.watched_in_graveyard(without a \"from anywhere\" ability)");
     }
@@ -1568,6 +1573,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         sunburst: sunburst_counter,
         enters_times_counters: *enters_with_counter_per_kick,
         x_min: x_least,
+        gy_triggers,
         splice,
         miracle,
     };

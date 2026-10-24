@@ -1932,6 +1932,13 @@ impl Game {
             }),
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
+            Filter::Named(n) => self.db.def(self.objs[c.i()].def).name == *n,
+            Filter::PtIs(p, t) => self.is_creature(c) && self.power(c) == *p && self.toughness(c) == *t,
+            Filter::Saddled => {
+                let r = self.obj_ref(c);
+                let t = self.turn.number as u16;
+                self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::Saddled(t))
+            }
             Filter::MvAtMostSourceX => {
                 let x = ctx.source.and_then(|s| {
                     self.marks.iter().find_map(|&(o, m)| match m {

@@ -74,6 +74,10 @@ macro_rules! lower_object_predicate {
             // Stone).
             E::IsHarnessed(nodes::IsHarnessed {}) => Some(Filter::Harnessed),
             E::DrawIsFirstInOwnDrawStep(nodes::DrawIsFirstInOwnDrawStep {}) => Some(Filter::FirstDrawInDrawStep),
+            // "A 1/1 creature" (Sword of the Meek).
+            E::HasPowerToughness(nodes::HasPowerToughness { power, toughness }) => {
+                Some(Filter::PtIs($l.int("HasPowerToughness.power", *power, -99, 99), $l.int("HasPowerToughness.toughness", *toughness, -99, 99)))
+            }
             E::HasDrawnNCardsThisTurn(nodes::HasDrawnNCardsThisTurn { n }) => {
                 Some(Filter::DrewThisTurn($l.int("HasDrawnNCardsThisTurn.n", *n, 0, 99) as u8))
             }

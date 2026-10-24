@@ -91,6 +91,8 @@ struct Observer {
     r: ObjRef,
     def: DefId,
     controller: PlayerId,
+    /// A card in a graveyard: only its abilities that function there.
+    gy: bool,
     /// A spell being cast: only its "when you cast this spell" abilities
     /// function (CR 113.6: a permanent card's other abilities work on the
     /// battlefield).
@@ -98,6 +100,16 @@ struct Observer {
 }
 
 /// Does the predicate say "one or more" (`Batch`)?
+/// The ability functions in the graveyard (`TrigPred::InGraveyard` at the
+/// top of the predicate).
+pub(crate) fn in_graveyard(p: &TrigPred) -> bool {
+    match p {
+        TrigPred::InGraveyard => true,
+        TrigPred::And(a, b) => in_graveyard(a) || in_graveyard(b),
+        _ => false,
+    }
+}
+
 fn has_batch(p: &TrigPred) -> bool {
     match p {
         TrigPred::Batch => true,
@@ -149,19 +161,32 @@ impl Game {
         for &c in &self.battlefield {
             let o = &self.objs[c.i()];
             if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) {
-                obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false });
+                obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false, gy: false });
             }
         }
         for &c in &self.command {
             let o = &self.objs[c.i()];
             if self.db.def(o.def).trig_mask & bit != 0 {
-                obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false });
+                obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false, gy: false });
+            }
+        }
+        // Cards in graveyards with abilities that function there (Sword of
+        // the Meek; their owner controls them).
+        if self.seen & crate::game::SEEN_GY_TRIGGER != 0 {
+            for p in 0..2 {
+                for &c in &self.players[p].graveyard {
+                    let o = &self.objs[c.i()];
+                    let d = self.db.def(o.def);
+                    if d.gy_triggers && d.trig_mask & bit != 0 {
+                        obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.owner, spell: false, gy: true });
+                    }
+                }
             }
         }
         if matches!(ev.kind, EventKind::Dies | EventKind::LeavesBattlefield | EventKind::IsSacrificed) {
             for l in &self.leaving {
                 if self.db.def(l.def).trig_mask & bit != 0 {
-                    obs.push(Observer { r: l.old, def: l.def, controller: l.controller, spell: false });
+                    obs.push(Observer { r: l.old, def: l.def, controller: l.controller, spell: false, gy: false });
                 }
             }
         }
@@ -170,14 +195,14 @@ impl Game {
         if ev.kind == EventKind::ToGraveyard {
             if let Subj::Obj(r) = ev.a {
                 let o = &self.objs[r.idx.i()];
-                obs.push(Observer { r, def: o.def, controller: o.owner, spell: false });
+                obs.push(Observer { r, def: o.def, controller: o.owner, spell: false, gy: false });
             }
         }
         if ev.kind == EventKind::IsCast {
             if let Subj::Obj(r) = ev.a {
                 let o = &self.objs[r.idx.i()];
                 if self.db.def(o.def).trig_mask & bit != 0 {
-                    obs.push(Observer { r, def: o.def, controller: o.controller, spell: true });
+                    obs.push(Observer { r, def: o.def, controller: o.controller, spell: true, gy: false });
                 }
             }
         }
@@ -218,6 +243,7 @@ impl Game {
             // trigger only as such.)
             for (i, t) in def.triggers.iter().enumerate().take(def.delayed_base as usize) {
                 if t.event == ev.kind
+                    && (!def.gy_triggers || o.gy == in_graveyard(&t.pred))
                     && (!o.spell || names_this_spell(&t.pred))
                     && (!copied || has_or_copy(&t.pred))
                     && self.pred_matches(&t.pred, &ev, o)
@@ -266,7 +292,7 @@ impl Game {
         for k in 0..self.temp_triggers.len() {
             let tt = self.temp_triggers[k];
             let t = &self.db.def(tt.source_def).triggers[tt.slot as usize];
-            let o = Observer { r: tt.source, def: tt.source_def, controller: tt.controller, spell: false };
+            let o = Observer { r: tt.source, def: tt.source_def, controller: tt.controller, spell: false, gy: false };
             if t.event == ev.kind
                 && (!copied || has_or_copy(&t.pred))
                 && self.pred_matches(&t.pred, &ev, o)
@@ -334,7 +360,9 @@ impl Game {
             // The `Enters` event's note (`Game::put_onto_battlefield`).
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
             TrigPred::EnteredPaid => ev.kind == EventKind::Enters && (ev.amount >> 1) & 0xFF != 0,
-            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && ev.amount >> 9 >= *n as u16,
+            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && (ev.amount >> 9) & 0x3F >= *n as u16,
+            TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
+            TrigPred::InGraveyard => true,
             TrigPred::SpellPaid => match ev.a {
                 Subj::Obj(r) => self.stack.iter().any(|s| s.kind == StackKind::Spell { card: r.idx } && s.times > 0),
                 _ => false,

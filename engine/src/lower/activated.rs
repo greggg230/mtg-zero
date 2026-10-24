@@ -228,7 +228,9 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     l.deny("ActivationCost.exile_granting_equipment", exile_granting_equipment);
     l.deny("ActivationCost.mana_reduced_by_source_power", mana_reduced_by_source_power);
     l.deny("ActivationCost.tap_x_untapped_artifacts_you_control", tap_x_untapped_artifacts_you_control);
-    l.deny("ActivationCost.saddle", saddle);
+    // Saddle n (CR 702.171a): crew's cost (other untapped creatures with
+    // total power n or more), as a sorcery (the IR's `sorcery_speed`).
+    let saddle_n = l.int("ActivationCost.saddle", *saddle, 0, 20) as u8;
     *loyalty_out = (*loyalty, *loyalty_x);
     l.deny("ActivationCost.exert_self", exert_self);
 
@@ -260,7 +262,14 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         bounce: None,
         exile_graveyard: l.int("ActivationCost.exile_cards_from_graveyard", *exile_cards_from_graveyard, 0, 20) as u8,
         remove_counters: None,
-        crew: l.int("ActivationCost.crew", *crew, 0, 20) as u8,
+        crew: if saddle_n > 0 {
+            if *crew != 0 {
+                l.unsupported("ActivationCost.saddle(with crew)");
+            }
+            saddle_n
+        } else {
+            l.int("ActivationCost.crew", *crew, 0, 20) as u8
+        },
         tap_untapped: None,
         // "Waterbend {n}" (Avatar: tap artifacts and creatures to help pay).
         waterbend: *waterbend,

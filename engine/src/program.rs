@@ -746,6 +746,17 @@ pub enum Ext {
     /// If the first legal target of `tgt` is an Equipment, attach it to the
     /// source creature (CR 701.3, 301.5c).
     AttachTargetToSource { tgt: u8 },
+    /// Remove a counter of this kind from the source; if it can't, sacrifice
+    /// it (fading, CR 702.32a).
+    RemoveCounterOrSacrifice { counter: crate::db::Counter },
+    /// The cards exiled with the source (CR 607.2a) return to the battlefield
+    /// under their owners' control (at once).
+    LinkedToBattlefieldOwners,
+    /// The source becomes saddled until end of turn (CR 702.171b).
+    BecomeSaddled,
+    /// Attach the made object (an Equipment) to the event's object, if it is
+    /// still a creature on the battlefield (CR 701.3, 301.5c).
+    AttachMadeToEventObj,
 }
 
 /// What a delayed trigger is about ("that card", "that much").

@@ -154,6 +154,32 @@ pub(crate) fn lower_effect_tail3(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             b.op(Op::Ext(Ext::GainControl { tgt: t }));
             b.op(Op::Ext(Ext::AttachTargetToSource { tgt: t }));
         }
+        // Fading (CR 702.32a): "remove a fade counter from it. If you can't,
+        // sacrifice it."
+        E::RemoveNamedCounterFromSelfOrSacrifice(nodes::RemoveNamedCounterFromSelfOrSacrifice { kind }) => {
+            let counter = super::effect_ext::counter_by_name(l, kind);
+            b.op(Op::Ext(Ext::RemoveCounterOrSacrifice { counter }));
+        }
+        // "Exile target creature" (linked to this, CR 607.2a: Parallax Wave).
+        E::ExileLinkedToSource(nodes::ExileLinkedToSource { targets }) => {
+            let Some(t) = super::effect::lower_targets(l, b, targets, "ExileLinkedToSource") else { return true };
+            b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: false }));
+        }
+        // "Each player returns to the battlefield all cards they own exiled
+        // with it" (its leave trigger: the cards linked to it, CR 607.2a).
+        E::EachPlayerReturnsCardsExiledWithSource(nodes::EachPlayerReturnsCardsExiledWithSource {}) => {
+            b.op(Op::Ext(Ext::LinkedToBattlefieldOwners));
+        }
+        // Saddle's effect: "this Mount becomes saddled until end of turn".
+        E::BecomeSaddled(nodes::BecomeSaddled {}) => {
+            b.op(Op::Ext(Ext::BecomeSaddled));
+        }
+        // "Return this card from your graveyard to the battlefield, then
+        // attach it to that creature" (Sword of the Meek).
+        E::ReturnThisCardFromGraveyardThenAttachToThatCreature(nodes::ReturnThisCardFromGraveyardThenAttachToThatCreature {}) => {
+            b.op(Op::Ext(Ext::SourceFromGraveyard { tapped: false }));
+            b.op(Op::Ext(Ext::AttachMadeToEventObj));
+        }
         _ => return false,
     }
     true

@@ -21,7 +21,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     l.deny("TriggeredAbility.requires_void", requires_void);
     l.deny("TriggeredAbility.tier_threshold", tier_threshold);
     l.deny("TriggeredAbility.room_half", room_half);
-    l.deny("TriggeredAbility.functions_in_graveyard", functions_in_graveyard);
+
     use enums::Event as E;
     // "Whenever one or more cards are put into exile from your library
     // and/or your graveyard" (Laelia): the IR's marker predicate, with the
@@ -185,6 +185,11 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
             ability.program = b.program;
         }
     }
+    // "Return this card from your graveyard ..." (Sword of the Meek): the
+    // ability functions in the graveyard only.
+    if *functions_in_graveyard {
+        pred = TrigPred::And(Box::new(TrigPred::InGraveyard), Box::new(pred));
+    }
     let uses_event = ability.uses_event();
     Some(TriggerDef { event, pred, ability, uses_event })
 }
@@ -250,7 +255,9 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::OrCopy
         | TrigPred::EnteredXAtLeast(_)
         | TrigPred::FirstAttack
-        | TrigPred::Once => Vec::new(),
+        | TrigPred::Once
+        | TrigPred::EnteredNotFromGyExile
+        | TrigPred::InGraveyard => Vec::new(),
     }
 }
 
@@ -339,6 +346,23 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
             Slot::Player,
             Filter::DrewThisTurn(l.int("NthCardDrawnThisTurn.n", *n, 1, 99) as u8),
         )),
+        // "Enters from anywhere other than a graveyard or exile" ("Name
+        // Sticker" Goblin).
+        P::EnteredNotFromZones(nodes::EnteredNotFromZones { zones }) => {
+            let mut z = zones.clone();
+            z.sort_by_key(|x| format!("{x:?}"));
+            if z != [enums::ZoneName::Exile, enums::ZoneName::Graveyard] {
+                l.unsupported(format!("EnteredNotFromZones.zones({zones:?})"));
+                return None;
+            }
+            Some(TrigPred::EnteredNotFromGyExile)
+        }
+        // "If you control n or fewer creatures named <this card's name>".
+        P::ControlsAtMostNamed(nodes::ControlsAtMostNamed { name, at_most }) => {
+            let n = l.int("ControlsAtMostNamed.at_most", *at_most, 0, 99) as u8;
+            let f = Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Named(name.clone())));
+            Some(TrigPred::If(Cond::ControlAtMost(f, n)))
+        }
         // "If it was kicked" (CR 702.33d): how it was cast; `EnteredPaid`
         // for an enter trigger, `SpellPaid` for a cast trigger (fixed up
         // by the caller from the event).

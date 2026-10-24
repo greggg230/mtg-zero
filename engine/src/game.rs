@@ -620,6 +620,8 @@ pub(crate) const SEEN_MIRACLE_P0: u16 = 16;
 pub(crate) const SEEN_EXILE_WATCH: u16 = 64;
 /// A replacement of draws (Hullbreacher, Quantum Riddler; ENGINE.md 30).
 pub(crate) const SEEN_DRAW_REPL: u16 = 128;
+/// A triggered ability that functions in a graveyard (Sword of the Meek).
+pub(crate) const SEEN_GY_TRIGGER: u16 = 256;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -651,6 +653,8 @@ pub enum Mark {
     Boasted(u16),
     /// It entered as a spell whose kicker {X} was paid with this X.
     KickerX(u8),
+    /// It became saddled in turn n (CR 702.171b: until end of turn).
+    Saddled(u16),
 }
 
 impl Game {
@@ -1070,8 +1074,10 @@ impl Game {
         // Its `Enters` event says whether it was cast and how many times an
         // additional cost was paid ("if you cast it", squad, offspring).
         // (A copy of a spell resolving wasn't cast, CR 707.10.)
-        // (Bits 9-15: the spell's X, for ravenous, CR 702.156a.)
-        let note = (cast && !self.is_copy_obj(idx)) as u16 | (times as u16) << 1 | (x.min(127) as u16) << 9;
+        // (Bits 9-14: the spell's X, for ravenous, CR 702.156a; bit 15: it
+        // came from a graveyard or exile, "enters from anywhere other than".)
+        let from_gy_exile = matches!(self.objs[idx.i()].zone, Zone::Graveyard | Zone::Exile);
+        let note = (cast && !self.is_copy_obj(idx)) as u16 | (times as u16) << 1 | (x.min(63) as u16) << 9 | (from_gy_exile as u16) << 15;
         self.enter_note = note;
         self.defer_enters = copy_choice;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));

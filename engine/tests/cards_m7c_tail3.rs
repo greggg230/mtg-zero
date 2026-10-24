@@ -864,3 +864,169 @@ fn splice_not_offered_without_its_cost_cr702_47a() {
         assert_eq!(g.pending_decision().unwrap().options.len(), 1, "only no");
     }
 }
+
+// ---- "Name Sticker" Goblin, Parallax Wave, Caustic Bronco, Sword of the Meek --------------
+
+/// "When this creature enters from anywhere other than a graveyard or exile,
+/// if it's on the battlefield and you control 9 or fewer creatures named
+/// "Name Sticker" Goblin, roll a 20-sided die" (CR 706): 1-6 {R}x4, 7-14
+/// {R}x5, 15-20 {R}x6.
+#[test]
+fn name_sticker_goblin_rolls_for_red_mana_cr706() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain"; 3])
+        .hand(0, &["\"Name Sticker\" Goblin"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "\"Name Sticker\" Goblin", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    settle(&mut g);
+    let r = g.player(0).pool.amt[3];
+    assert!((4..=6).contains(&r), "four to six red\n{}", log(&g));
+}
+
+/// From a graveyard (Exhume): no roll.
+#[test]
+fn name_sticker_goblin_from_a_graveyard_doesnt_roll_cr603_6a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Exhume"])
+        .graveyard(0, &["\"Name Sticker\" Goblin"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Exhume", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "\"Name Sticker\" Goblin", Zone::Battlefield), 1, "{}", log(&g));
+    assert_eq!(g.player(0).pool.total(), 0, "no roll");
+}
+
+/// Fading 5 (CR 702.32a); "Remove a fade counter from this enchantment:
+/// Exile target creature. When this enchantment leaves the battlefield,
+/// each player returns to the battlefield all cards they own exiled with it"
+/// (607.2a).
+#[test]
+fn parallax_wave_exiles_and_returns_when_it_leaves_cr702_32a_cr607_2a() {
+    let fade = engine::db::Counter::Named(db().subtype_id("counter:fade").unwrap());
+    let mut g = scen()
+        .battlefield(0, &["Parallax Wave", "Scrubland", "Scrubland", "Scrubland"])
+        .counters(0, "Parallax Wave", fade, 5)
+        .hand(0, &["Vindicate"])
+        .battlefield(1, &["Test Bear", "Test Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let wave = bf(&g, 0, "Parallax Wave");
+    let bear = bf(&g, 1, "Test Bear");
+    let giant = bf(&g, 1, "Test Giant");
+    for t in [bear, giant] {
+        g.choose(act(wave, 0));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(g.tgt(t));
+        settle(&mut g);
+    }
+    assert_eq!(g.permanents_of(1).count(), 0, "both exiled\n{}", log(&g));
+    let c = g.card(0, "Vindicate", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(wave));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.permanents_of(1).count(), 2, "they return under their owner's control\n{}", log(&g));
+}
+
+/// Fading: at the beginning of your upkeep, remove a fade counter; if you
+/// can't, sacrifice it (CR 702.32a).
+#[test]
+fn parallax_wave_fading_sacrificed_without_counters_cr702_32a() {
+    let fade = engine::db::Counter::Named(db().subtype_id("counter:fade").unwrap());
+    let mut g = scen().battlefield(0, &["Parallax Wave"]).counters(0, "Parallax Wave", fade, 5).battlefield(1, &["Test Bear"]).at(Step::Main1, 0).start();
+    let wave = bf(&g, 0, "Parallax Wave");
+    assert_eq!(g.counters_on(wave, fade), 5);
+    let bear = bf(&g, 1, "Test Bear");
+    for _ in 0..5 {
+        g.choose(act(wave, 0));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || at_priority(g));
+        if g.kind() == Some(DecisionKind::Target) {
+            g.choose(g.tgt(bear));
+        }
+        settle(&mut g);
+        if g.permanents_of(1).count() == 0 {
+            break;
+        }
+    }
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    let left = g.counters_on(wave, fade);
+    assert!(left == 3 || g.count_in(0, "Parallax Wave", Zone::Graveyard) == 1, "a fade counter removed ({left})\n{}", log(&g));
+}
+
+/// Saddle 3 (CR 702.171a: tap other creatures with total power 3 or more,
+/// as a sorcery); "Whenever this creature attacks, reveal the top card of
+/// your library and put it into your hand. You lose life equal to that
+/// card's mana value if this creature isn't saddled. Otherwise, each
+/// opponent loses that much life."
+#[test]
+fn caustic_bronco_saddled_makes_the_opponent_lose_cr702_171() {
+    let mut g = scen()
+        .battlefield(0, &["Caustic Bronco", "Test Bear", "Test Flyer"])
+        .library(0, &["Test Giant", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let bronco = bf(&g, 0, "Caustic Bronco");
+    g.choose(act(bronco, 0));
+    resolve_with(&mut g, |_| None);
+    assert!(g.obj(bf(&g, 0, "Test Bear")).tapped && g.obj(bf(&g, 0, "Test Flyer")).tapped, "2 + 2 power tapped");
+    attack_with(&mut g, &["Caustic Bronco"]);
+    settle(&mut g);
+    assert_eq!(g.life(0), 20, "{}", log(&g));
+    assert_eq!(g.life(1), 15, "the Giant's mana value");
+    assert_eq!(g.count_in(0, "Test Giant", Zone::Hand), 1);
+}
+
+/// Not saddled: you lose the life.
+#[test]
+fn caustic_bronco_unsaddled_you_lose_cr702_171() {
+    let mut g = scen().battlefield(0, &["Caustic Bronco"]).library(0, &["Test Giant", "Island"]).at(Step::Main1, 0).start();
+    attack_with(&mut g, &["Caustic Bronco"]);
+    settle(&mut g);
+    assert_eq!(g.life(0), 15, "{}", log(&g));
+}
+
+/// "Whenever a 1/1 creature you control enters, you may return this card
+/// from your graveyard to the battlefield, then attach it to that creature"
+/// (an ability that functions in the graveyard).
+#[test]
+fn sword_of_the_meek_returns_from_the_graveyard_and_attaches_cr301_5() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain"])
+        .hand(0, &["Test Dies Shock"])
+        .graveyard(0, &["Sword of the Meek"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Test Dies Shock", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::YesNo) { Some(Choice::Yes) } else { None });
+    let sword = bf(&g, 0, "Sword of the Meek");
+    let host = bf(&g, 0, "Test Dies Shock");
+    assert_eq!(g.obj(sword).attached.map(|r| r.idx), Some(host), "{}", log(&g));
+    assert_eq!(g.pt(host), (2, 3), "+1/+2");
+}
+
+/// On the battlefield the ability does nothing (it returns "this card from
+/// your graveyard").
+#[test]
+fn sword_of_the_meek_on_the_battlefield_doesnt_trigger() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Sword of the Meek"])
+        .hand(0, &["Test Dies Shock"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Test Dies Shock", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g) || g.kind() == Some(DecisionKind::YesNo));
+    assert_ne!(g.kind(), Some(DecisionKind::YesNo), "{}", log(&g));
+}

@@ -233,6 +233,49 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::RemoveCounterOrSacrifice { counter } => {
+                if let Some(&c) = self.objs_on(f, &crate::program::On::Source).first() {
+                    if self.counters_on(c, *counter) > 0 {
+                        self.remove_counters(c, *counter, 1);
+                    } else {
+                        self.sacrifice(c);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::LinkedToBattlefieldOwners => {
+                let cards = self.linked_cards(f.source);
+                self.links.retain(|l| l.source != f.source);
+                for c in cards {
+                    if self.objs[c.i()].zone == Zone::Exile {
+                        let owner = self.objs[c.i()].owner;
+                        self.put_onto_battlefield(c, owner);
+                    }
+                }
+                Flow::Next
+            }
+            Ext::BecomeSaddled => {
+                if let Some(&c) = self.objs_on(f, &crate::program::On::Source).first() {
+                    let r = self.obj_ref(c);
+                    let t = self.turn.number as u16;
+                    if !self.marks.contains(&(r, crate::game::Mark::Saddled(t))) {
+                        self.marks.push((r, crate::game::Mark::Saddled(t)));
+                    }
+                    self.note(|g| format!("{} becomes saddled", g.name(c)));
+                }
+                Flow::Next
+            }
+            Ext::AttachMadeToEventObj => {
+                let (Some(e), Some(h)) = (f.made, f.ev.obj) else { return Flow::Next };
+                if self.objs[e.i()].zone == Zone::Battlefield && self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield {
+                    let q = self.damage_source_of(e);
+                    if !self.is_creature(e) && self.is_creature(h.idx) && !self.protected_from(h.idx, &q) {
+                        self.objs[e.i()].attached = Some(h);
+                        self.note(|g| format!("{} attached to {}", g.name(e), g.name(h.idx)));
+                    }
+                }
+                Flow::Next
+            }
             _ => unreachable!("not a tail-3 op: {op:?}"),
         }
     }

@@ -98,7 +98,23 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
         }
         E::RollDieTable(nodes::RollDieTable { sides, table, gate }) => {
             // CR 706.3a: roll, then the effect of the result's range.
-            l.deny("RollDieTable.gate", gate);
+            // "Name Sticker" Goblin's gate: "if it's on the battlefield and
+            // you control 9 or fewer creatures named ..." as it resolves
+            // (CR 603.4).
+            let gate_at = match gate.as_deref() {
+                None => None,
+                Some(cats::Condition::NameStickerGate(nodes::NameStickerGate { name, at_most })) => {
+                    let n = l.int("NameStickerGate.at_most", *at_most, 0, 99) as u8;
+                    let on_bf = b.op(Op::Ext(Ext::JumpUnlessSource { filter: Filter::Any, to: 0 }));
+                    let f = Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Named(name.clone())));
+                    let count = b.op(Op::JumpUnless { cond: crate::db::Cond::ControlAtMost(f, n), to: 0 });
+                    Some((on_bf, count))
+                }
+                Some(other) => {
+                    l.unsupported(format!("RollDieTable.gate({})", other.tag()));
+                    None
+                }
+            };
             let sides = l.int("RollDieTable.sides", *sides, 2, 20) as u8;
             let targets = b.targets.len();
             let at = b.op(Op::Ext(Ext::RollDie { sides, table: Vec::new() }));
@@ -122,6 +138,10 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             b.patch(none);
             for x in ends {
                 b.patch(x);
+            }
+            if let Some((a, c)) = gate_at {
+                b.patch(a);
+                b.patch(c);
             }
         }
         E::AdjustSourceLoyalty(nodes::AdjustSourceLoyalty { delta }) => {

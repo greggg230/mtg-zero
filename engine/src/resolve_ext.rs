@@ -1580,7 +1580,11 @@ impl Game {
             | Ext::PlayerProtection
             | Ext::ExileTopUntilEndStep { .. }
             | Ext::ShuffleSourceIntoLibrary
-            | Ext::AttachTargetToSource { .. } => self.exec_tail3(f, op),
+            | Ext::AttachTargetToSource { .. }
+            | Ext::RemoveCounterOrSacrifice { .. }
+            | Ext::LinkedToBattlefieldOwners
+            | Ext::BecomeSaddled
+            | Ext::AttachMadeToEventObj => self.exec_tail3(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

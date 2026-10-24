@@ -10,6 +10,7 @@ use engine::lower::support::{threat_kinds, SupportReport, Threat};
 
 /// The supported set (M4b-2). Changing it is deliberate: update this list.
 const SUPPORTED: &[&str] = &[
+    "\"Name Sticker\" Goblin",
     "Aang, Swift Savior // Aang and La, Ocean's Fury",
     "Abandoned Air Temple",
     "Abrade",
@@ -68,6 +69,7 @@ const SUPPORTED: &[&str] = &[
     "Candelabra of Tawnos",
     "Carnage Interpreter",
     "Cathar Commando",
+    "Caustic Bronco",
     "Caves of Chaos Adventurer",
     "Cecil, Dark Knight // Cecil, Redeemed Paladin",
     "Chain Lightning",
@@ -311,6 +313,7 @@ const SUPPORTED: &[&str] = &[
     "Painter's Servant",
     "Palace Jailer",
     "Palantír of Orthanc",
+    "Parallax Wave",
     "Passageway Seer",
     "Path to Exile",
     "Pentad Prism",
@@ -416,6 +419,7 @@ const SUPPORTED: &[&str] = &[
     "Suplex",
     "Surrak, Elusive Hunter",
     "Swamp",
+    "Sword of the Meek",
     "Swords to Plowshares",
     "Sylvan Caryatid",
     "Sylvan Safekeeper",

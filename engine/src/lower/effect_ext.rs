@@ -395,9 +395,20 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             b.op(Op::Ext(Ext::Mill { who: Who::You, n }));
         }
         E::RevealTopCardToHandLoseLifeEqualMV(nodes::RevealTopCardToHandLoseLifeEqualMV { unless_saddled }) => {
-            l.deny("RevealTopCardToHandLoseLifeEqualMV.unless_saddled", unless_saddled);
             b.op(Op::Ext(Ext::RevealTopToHand { who: Who::You }));
-            b.op(Op::LoseLife { who: Who::You, n: Amount::LkiManaValue });
+            if *unless_saddled {
+                // "You lose life equal to that card's mana value if this
+                // creature isn't saddled. Otherwise, each opponent loses that
+                // much life" (Caustic Bronco; saddled as it resolves).
+                let saddled = b.op(Op::Ext(Ext::JumpUnlessSource { filter: Filter::Saddled, to: 0 }));
+                b.op(Op::LoseLife { who: Who::Opponent, n: Amount::LkiManaValue });
+                let end = b.op(Op::Jump { to: 0 });
+                b.patch(saddled);
+                b.op(Op::LoseLife { who: Who::You, n: Amount::LkiManaValue });
+                b.patch(end);
+            } else {
+                b.op(Op::LoseLife { who: Who::You, n: Amount::LkiManaValue });
+            }
         }
         E::EachOpponentLosesLife(nodes::EachOpponentLosesLife { amount }) => {
             let n = Amount::Fixed(l.int("EachOpponentLosesLife.amount", *amount, 0, 99));
