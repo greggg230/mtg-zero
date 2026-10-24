@@ -132,8 +132,15 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         l.sac_cost = cost.sacrifice.as_ref().is_some_and(|s| s.n == 1);
         let ab = lower_ability(l, effect);
         l.sac_cost = false;
+        if l.act_x && !ab.targets.iter().any(|t| t.max == crate::db::X_TARGETS) {
+            l.unsupported("ActivationCost.mana.x_pips(X not used by the effect)");
+        }
         ActEffect::Stack(ab)
     };
+    let x = std::mem::take(&mut l.act_x);
+    if x && matches!(effect, ActEffect::Mana(_)) {
+        l.unsupported("ActivationCost.mana.x_pips(mana ability)");
+    }
     if only_if.len() > 1 {
         l.unsupported("ActivatedAbility.only_if(more than one condition)");
     }
@@ -157,6 +164,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         loyalty,
         discounts,
         boast: *boast && from == From::Battlefield && !walker,
+        x,
     })
 }
 
@@ -221,10 +229,20 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     *loyalty_out = (*loyalty, *loyalty_x);
     l.deny("ActivationCost.exert_self", exert_self);
 
+    // "{X}" (CR 107.3, 602.2b): announced as the ability is activated; the
+    // effect must use it (`X_TARGETS`).
+    let x_mana = match mana.as_deref() {
+        Some(cats::ManaCost::ManaCost(n)) if n.x_pips == 1 && from == From::Battlefield => {
+            l.act_x = true;
+            Some(cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..n.clone() }))
+        }
+        _ => None,
+    };
     let mut cost = Cost {
-        mana: match mana {
-            Some(m) => lower_mana_cost(l, "ActivationCost.mana", m),
-            None => Default::default(),
+        mana: match (x_mana.as_ref(), mana) {
+            (Some(m), _) => lower_mana_cost(l, "ActivationCost.mana", m),
+            (None, Some(m)) => lower_mana_cost(l, "ActivationCost.mana", m),
+            (None, None) => Default::default(),
         },
         tap: *tap_self,
         life: l.int("ActivationCost.pay_life", *pay_life, 0, 99) as u8,

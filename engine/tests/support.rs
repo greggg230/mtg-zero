@@ -63,6 +63,7 @@ const SUPPORTED: &[&str] = &[
     "Broadside Bombardiers",
     "Burst Lightning",
     "Cabal Ritual",
+    "Candelabra of Tawnos",
     "Carnage Interpreter",
     "Cathar Commando",
     "Caves of Chaos Adventurer",

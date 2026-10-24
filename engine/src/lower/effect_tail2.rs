@@ -222,6 +222,22 @@ pub(crate) fn lower_effect_tail2(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let t = b.target(f, 0, 1);
             b.op(Op::Ext(Ext::Airbend { tgt: t, cost }));
         }
+        // "Untap X target lands" (Candelabra of Tawnos: X of its cost).
+        E::UntapXTargets(nodes::UntapXTargets { targets, target_count_is_x }) => {
+            if !*target_count_is_x || !l.act_x || targets.len() != 1 {
+                l.unsupported("UntapXTargets(not X of an activation cost)");
+                return true;
+            }
+            let cats::TargetSpec::TargetSpec(nodes::TargetSpec { filter, count_min, count_max, distinct_from }) = &targets[0];
+            l.deny("TargetSpec.distinct_from", distinct_from);
+            l.deny("TargetSpec.count_min", count_min);
+            if *count_max != card_ir::Count::Infinite {
+                l.unsupported("UntapXTargets.targets(count_max)");
+            }
+            let Some(f) = super::filter::lower_pred_or_oneof(l, filter) else { return true };
+            let t = b.target(f, 0, crate::db::X_TARGETS);
+            b.op(Op::Ext(Ext::Untap { on: crate::program::On::Target(t) }));
+        }
         _ => return false,
     }
     true

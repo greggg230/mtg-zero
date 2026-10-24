@@ -567,6 +567,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 loyalty: None,
                 discounts: Vec::new(),
                 boast: false,
+                x: false,
             },
         );
     } else if life > 0 {
@@ -593,6 +594,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 loyalty: None,
                 discounts: Vec::new(),
                 boast: false,
+                x: false,
             },
         );
     }

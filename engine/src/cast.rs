@@ -559,6 +559,35 @@ impl Game {
     /// `NUMBER`.
     pub(crate) fn choose_x(&mut self, id: u32) {
         let Some(pos) = self.item_index(id) else { return };
+        if let StackKind::Ability { ability, source } = self.stack[pos].kind {
+            // An activated ability's {X} (CR 602.2b): as much as can be paid,
+            // and no more than its "X targets" can have.
+            let p = self.stack[pos].controller;
+            match self.answer.take() {
+                Some(Choice::Number(x)) => {
+                    self.stack[pos].x = x;
+                    self.note(|_| format!("X = {x}"));
+                    return;
+                }
+                Some(other) => unreachable!("X answer {other:?}"),
+                None => {}
+            }
+            let ad = self.db.def(ability.def).activated_def(ability.slot);
+            let ctx = Ctx { controller: p, source: Some(source) };
+            let mut most = (act::NUMBER_N - 1) as u8;
+            if let crate::db::ActEffect::Stack(ab) = &ad.effect {
+                for tr in ab.targets.iter().filter(|t| t.max == crate::db::X_TARGETS) {
+                    most = most.min(self.target_candidates(tr, &ctx, &[Target::Stack(id)]).len().min(255) as u8);
+                }
+            }
+            let mut x = 0u8;
+            while x < most && self.can_pay_for(p, &self.act_mana_x(p, source.idx, ad, x + 1), 0) {
+                x += 1;
+            }
+            let opts = (0..=x).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) }).collect();
+            self.ask(Task::ChooseX { id }, p, DecisionKind::ChooseMode, opts);
+            return;
+        }
         let StackKind::Spell { card } = self.stack[pos].kind else { return };
         let p = self.stack[pos].controller;
         match self.answer.take() {
@@ -1486,8 +1515,11 @@ impl Game {
         // more targets than the amount (an X spell's X is announced first).
         let max = match self.db.ability(ar).divide {
             Some((r, amount)) if r == req && ar.mode.is_none() => (tr.max).min(amount.of(item.x)),
+            // "X targets": exactly X (CR 601.2c).
+            _ if tr.max == crate::db::X_TARGETS => item.x,
             _ => tr.max,
         };
+        let min = if tr.max == crate::db::X_TARGETS { item.x } else { tr.min };
         if already.len() >= max as usize {
             self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
             return;
@@ -1515,7 +1547,7 @@ impl Game {
             .iter()
             .map(|&t| Opt { action: self.target_action(ctx.controller, t), choice: Choice::Target(t) })
             .collect();
-        if already.len() >= tr.min as usize {
+        if already.len() >= min as usize {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
         if opts.is_empty() {

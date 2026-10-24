@@ -623,7 +623,15 @@ impl Heuristic {
                     Some(&Task::ChooseX { id }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Spell { card } if g.def_of(card).x_life)),
                     _ => false,
                 };
-                if x_life {
+                let ability = match g.agenda.last() {
+                    Some(&Task::ChooseX { id }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Ability { .. })),
+                    _ => false,
+                };
+                if ability {
+                    // An ability's X (Candelabra of Tawnos: untap X lands
+                    // paid for by tapping as many): none.
+                    d.options.first().map(|o| o.action)
+                } else if x_life {
                     // "Pay X life" (Fire Covenant): what the opponent's
                     // creatures need, at most half its life.
                     let need: i32 = g.creatures_of(opp(p)).map(|c| g.toughness(c).max(0)).sum();

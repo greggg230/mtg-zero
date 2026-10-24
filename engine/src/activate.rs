@@ -157,7 +157,14 @@ impl Game {
     /// "activated abilities of artifacts you control cost {1} less", which
     /// leaves at least one mana. Generic mana only.
     pub(crate) fn act_mana(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef) -> crate::mana::ManaCost {
+        self.act_mana_x(p, card, ad, 0)
+    }
+
+    /// [`act_mana`](Self::act_mana) with X announced (CR 601.2f: X is part
+    /// of the cost before reductions).
+    pub(crate) fn act_mana_x(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, x: u8) -> crate::mana::ManaCost {
         let mut m = ad.cost.mana;
+        m.generic = m.generic.saturating_add(x);
         if m.is_zero() {
             return m;
         }
@@ -322,6 +329,9 @@ impl Game {
         let ab = self.db.ability(ability);
         if ab.has_targets() {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
+        }
+        if ad.x {
+            self.agenda.push(Task::ChooseX { id }); // CR 602.2b, 601.2b
         }
         if ab.modes.is_some() {
             self.agenda.push(Task::ChooseModes { id }); // CR 700.2a, 602.2b
@@ -494,7 +504,8 @@ impl Game {
     /// 601.2g-h for an activation: the mana part first.
     pub(crate) fn act_pay(&mut self, id: u32) {
         let Some((p, card, ad)) = self.act_item(id) else { return };
-        let mana = self.act_mana(p, card, ad);
+        let x = self.item_index(id).map_or(0, |pos| self.stack[pos].x);
+        let mana = self.act_mana_x(p, card, ad, x);
         if mana.is_zero() {
             return;
         }

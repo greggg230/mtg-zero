@@ -99,6 +99,8 @@ pub struct Lowerer<'a> {
     pub watches_exile: bool,
     /// An effect of the card is cascade (CR 702.85a).
     pub cascade: bool,
+    /// The activated ability being lowered has {X} in its mana cost.
+    pub act_x: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -244,6 +246,7 @@ pub fn lower_card(
         sac_cost: false,
         watches_exile: false,
         cascade: false,
+        act_x: false,
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;

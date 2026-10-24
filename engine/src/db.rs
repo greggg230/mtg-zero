@@ -967,7 +967,14 @@ pub struct ActivatedDef {
     /// Boast (CR 702.142a): "activate only if this creature attacked this
     /// turn and only once each turn" (`Mark::Boasted`).
     pub boast: bool,
+    /// Its mana cost has {X} (CR 107.3, 602.2b: X announced as it is
+    /// activated; the stack item's `x`).
+    pub x: bool,
 }
+
+/// `TargetReq::max` meaning "X targets": exactly the announced X (CR
+/// 601.2c with 107.3; "untap X target lands").
+pub const X_TARGETS: u8 = u8::MAX;
 
 impl ActivatedDef {
     pub fn mana(&self) -> Option<&ManaAbility> {

@@ -1076,3 +1076,32 @@ fn aang_waterbends_with_creatures_and_artifacts_to_transform() {
     assert_eq!(g.name(a), "Aang and La, Ocean's Fury", "{}", log(&g));
     assert!(g.creatures_of(0).filter(|&c| c != a).all(|c| g.obj(c).tapped));
 }
+
+// ---- Candelabra of Tawnos --------------------------------------------------
+
+/// "{X}, {T}: Untap X target lands." (CR 602.2b: X announced as it is
+/// activated, before the targets, 601.2b-c; X is what can be paid and no
+/// more than the lands there are.)
+#[test]
+fn candelabra_of_tawnos_untaps_x_target_lands_cr602_2b() {
+    let mut g = scen()
+        .battlefield(0, &["Candelabra of Tawnos", "Island", "Island", "Island"])
+        .battlefield(1, &["Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = bf(&g, 0, "Candelabra of Tawnos");
+    g.choose(act(c, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    assert!(g.has_option(Choice::Number(3)) && !g.has_option(Choice::Number(4)), "three Islands pay at most {{3}}");
+    g.choose(Choice::Number(2));
+    let lands: Vec<CardIdx> = g.battlefield().iter().copied().filter(|&x| g.name(x) == "Island").collect();
+    g.choose(g.tgt(lands[0]));
+    assert!(!g.has_option(Choice::Pass), "exactly X targets");
+    g.choose(g.tgt(lands[1]));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(!g.obj(lands[0]).tapped && !g.obj(lands[1]).tapped, "{}", log(&g));
+    assert!(g.obj(c).tapped);
+    let tapped = lands.iter().filter(|&&x| g.obj(x).tapped).count();
+    assert!(tapped <= 1, "two paid, the two targets untapped: {}", log(&g));
+}
