@@ -177,6 +177,31 @@ pub(crate) fn lower_effect_tail2(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             l.cascade = true;
             b.op(Op::Ext(Ext::Cascade));
         }
+        // Ocelot Pride: "for each token you control that entered this
+        // turn, create a token that's a copy of it".
+        E::CopyEachTokenYouControlEnteredThisTurn(nodes::CopyEachTokenYouControlEnteredThisTurn {}) => {
+            b.op(Op::Ext(Ext::CopyTokensEnteredThisTurn));
+            b.op(Op::Ext(Ext::TokensCreated));
+        }
+        // "Mill three cards. You may put a land card from among them into
+        // your hand." (Six.)
+        E::MillThenMayPutLandIntoHand(nodes::MillThenMayPutLandIntoHand { n }) => {
+            let n = l.int("MillThenMayPutLandIntoHand.n", *n, 1, 20) as u8;
+            b.op(Op::Ext(Ext::MillThenLandToHand { n }));
+        }
+        // "You may cast an artifact, instant, or sorcery spell from your
+        // graveyard. If an instant or sorcery spell cast this way would be
+        // put into your graveyard, exile it instead." (Bilbo.)
+        E::MayCastSpellFromGraveyardNow(nodes::MayCastSpellFromGraveyardNow { card_filter, exile_instants_and_sorceries }) => {
+            let filter = match card_filter.as_deref() {
+                Some(f) => match super::filter::lower_card_filter(l, f) {
+                    Some(f) => f,
+                    None => return true,
+                },
+                None => Filter::Any,
+            };
+            b.op(Op::Ext(Ext::MayCastFromGraveyardNow { filter, exile: *exile_instants_and_sorceries }));
+        }
         _ => return false,
     }
     true

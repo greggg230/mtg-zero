@@ -618,7 +618,21 @@ impl Heuristic {
                 .max()
                 .map(|x| x.1),
             // X (CR 107.3): as much as it can pay.
-            K::ChooseMode if matches!(g.agenda.last(), Some(Task::ChooseX { .. })) => d.options.last().map(|o| o.action),
+            K::ChooseMode if matches!(g.agenda.last(), Some(Task::ChooseX { .. })) => {
+                let x_life = match g.agenda.last() {
+                    Some(&Task::ChooseX { id }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Spell { card } if g.def_of(card).x_life)),
+                    _ => false,
+                };
+                if x_life {
+                    // "Pay X life" (Fire Covenant): what the opponent's
+                    // creatures need, at most half its life.
+                    let need: i32 = g.creatures_of(opp(p)).map(|c| g.toughness(c).max(0)).sum();
+                    let x = need.min(g.life(p) / 2).max(0) as u16;
+                    d.options.iter().filter(|o| o.action <= act::NUMBER + x).last().map(|o| o.action)
+                } else {
+                    d.options.last().map(|o| o.action)
+                }
+            }
             K::ChooseMode => d.options.iter().find(|o| o.action != act::PASS).map(|o| o.action),
             // A land face while it has played no land this turn, else the
             // costlier spell face (CR 712.11b, 712.12, 715.3).

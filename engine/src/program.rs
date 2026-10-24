@@ -690,6 +690,18 @@ pub enum Ext {
     /// value is less; the rest go on the bottom in a random order. Choice:
     /// yes/no.
     Cascade,
+    /// "For each token you control that entered this turn, create a token
+    /// that's a copy of it" (the tokens locked in as it resolves, CR 608.2h;
+    /// the copies made at once).
+    CopyTokensEnteredThisTurn,
+    /// Mill n cards; the controller may put a land card from among them into
+    /// their hand. Choice: `ChooseGraveyardCard` or `PASS`.
+    MillThenLandToHand { n: u8 },
+    /// "You may cast a <filter> spell from your graveyard" now (CR 608.2g,
+    /// paying its costs); with `exile`, an instant or sorcery spell cast
+    /// this way is exiled instead of put into the graveyard. Choice:
+    /// `ChooseGraveyardCard` or `PASS`.
+    MayCastFromGraveyardNow { filter: Filter, exile: bool },
 }
 
 /// What a delayed trigger is about ("that card", "that much").

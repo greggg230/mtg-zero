@@ -54,7 +54,14 @@ impl Game {
             Cond::HasInitiative => self.initiative == Some(p),
             Cond::CompletedDungeon => self.dungeons[p as usize].completed > 0,
             Cond::LinkedTypesAtLeast(n) => source.is_some_and(|s| self.linked_types(s).count_ones() >= *n as u32),
+            Cond::CityBlessing => pl.city_blessing || self.ascends(p),
         }
+    }
+
+    /// Ascend (CR 702.131a): `p` controls a permanent with ascend and ten or
+    /// more permanents.
+    pub(crate) fn ascends(&self, p: PlayerId) -> bool {
+        self.permanents_of(p).any(|c| self.abilities(c).ascend) && self.permanents_of(p).count() >= 10
     }
 
     /// The card types among the cards exiled with `source` (CR 607.2a,
@@ -829,6 +836,32 @@ impl Game {
                         Opt { action: act::PLAYER + 1, choice: Choice::Target(Target::Player(crate::ids::opp(p))) },
                     ];
                     self.ask(Task::AsEnters { card }, p, DecisionKind::Target, opts);
+                }
+            }
+            return;
+        }
+        if self.def_of(card).chooses_land_type && self.chosen_land_color(card) == 0 {
+            // "As this land enters, choose a basic land type" (CR 614.12):
+            // index W U B R G = Plains Island Swamp Mountain Forest. "This
+            // land is the chosen type" (its subtype; its mana ability is
+            // `ManaProd::Chosen`). Then the life question below. Choice:
+            // `ChooseColor`.
+            let r = self.obj_ref(card);
+            match self.answer.take() {
+                Some(Choice::Number(k)) => {
+                    const BASICS: [&str; 5] = ["Plains", "Island", "Swamp", "Mountain", "Forest"];
+                    self.marks.push((r, crate::game::Mark::ChosenColor(k)));
+                    if let Some(s) = self.db.subtype_id(BASICS[k as usize]) {
+                        let m = crate::db::Mod::Types { add: 0, subtypes: vec![s], replace: false };
+                        self.add_effect(crate::layers::Affected::Obj(r), m, crate::layers::Until::Forever, p);
+                    }
+                    self.note(|_| format!("chosen basic land type: {}", BASICS[k as usize]));
+                    self.agenda.push(Task::AsEnters { card });
+                }
+                Some(other) => unreachable!("land type answer {other:?}"),
+                None => {
+                    let opts = (0..5u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
+                    self.ask(Task::AsEnters { card }, p, DecisionKind::ChooseColor, opts);
                 }
             }
             return;

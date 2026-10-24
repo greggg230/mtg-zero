@@ -300,8 +300,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
         l.deny("CardPrinting.produces_with_counter", produces_with_counter);
         l.deny("CardPrinting.opening_hand_action", opening_hand_action);
-        l.deny("CardPrinting.enters_choosing_basic_land_type", enters_choosing_basic_land_type);
-        l.deny("CardPrinting.is_chosen_basic_land_type", is_chosen_basic_land_type);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
@@ -336,7 +334,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.has_convoke", has_convoke);
         let _ = flashback_cost_str; // display form of `flashback_cost`
         let _ = buyback_cost_str; // display form of `buyback_cost`
-        l.deny("CardPrinting.additional_cost_pay_x_life", additional_cost_pay_x_life);
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
         let _ = alt_cost_exile_from_hand_count; // 1 (checked above)
         l.deny("CardPrinting.splice_onto", splice_onto);
@@ -357,7 +354,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.evoke_cost", evoke_cost);
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
-        l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
         l.deny("CardPrinting.chooses_card_name_as_enters", chooses_card_name_as_enters);
         l.deny("CardPrinting.named_spell_cost_increase", named_spell_cost_increase);
@@ -380,7 +376,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
         l.deny("CardPrinting.room_halves", room_halves);
-        l.deny("CardPrinting.teamwork_power", teamwork_power);
         l.deny("CardPrinting.roto_statics", roto_statics);
         l.deny("CardPrinting.enters_choosing_creature_type", enters_choosing_creature_type);
         l.deny("CardPrinting.cast_from_top_of_library_kinds", cast_from_top_of_library_kinds);
@@ -480,6 +475,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut protection = Prot::default();
     let mut keyword_triggers: Vec<TriggerDef> = Vec::new();
     let mut cascade_kw = false;
+    let mut cascade_kw_ascend = false;
     for k in keywords {
         match lower_keyword_full(l, k) {
             Some(KwOrProt::Kw(kw)) => kws.insert(kw),
@@ -489,6 +485,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::Prowess) => keyword_triggers.push(prowess()),
             Some(KwOrProt::Persist) => keyword_triggers.push(persist()),
             Some(KwOrProt::Cascade) => cascade_kw = true,
+            Some(KwOrProt::Ascend) => cascade_kw_ascend = true,
             None => {}
         }
     }
@@ -577,6 +574,30 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     } else if life > 0 {
         l.unsupported("CardPrinting.produces_life_cost(no produces ability)");
     }
+    // Multiversal Passage: "As this land enters, choose a basic land type
+    // ... This land is the chosen type" (CR 305.6: it has that type's mana
+    // ability).
+    let chooses_land_type = *enters_choosing_basic_land_type;
+    if chooses_land_type != *is_chosen_basic_land_type || chooses_land_type && ty & types::LAND == 0 {
+        l.unsupported("CardPrinting.enters_choosing_basic_land_type(without is_chosen_basic_land_type)");
+    }
+    if chooses_land_type {
+        activated.insert(
+            0,
+            ActivatedDef {
+                cost: Cost { tap: true, ..Cost::default() },
+                effect: ActEffect::Mana(ManaAbility { prod: ManaProd::Chosen, damage_to_you: 0, sac_if_no: None, only: 0, uncounterable: false }),
+                sorcery: false,
+                instant_only: false,
+                exhaust: false,
+                only_if: None,
+                your_turn: false,
+                loyalty: None,
+                discounts: Vec::new(),
+                boast: false,
+            },
+        );
+    }
     // (Checked again with the latent abilities, below.)
     // Lands pay only through their mana abilities here. The Python engine
     // lets a land without `mana_only_from_produces` pay one generic mana
@@ -661,7 +682,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             let mana = lower_mana_cost(l, "CardPrinting.kicker_cost", m);
             match spell_effect.as_deref() {
                 Some(cats::Effect::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(e) }))
-                    if matches!(**condition, cats::ConditionOrStatePredicate::SpellWasKicked(_)) && is_spell_card =>
+                    if matches!(**condition, cats::ConditionOrStatePredicate::SpellWasKicked(_)) && is_spell_card && *teamwork_power == 0 =>
                 {
                     if !additional.is_empty() {
                         l.unsupported("CardPrinting.kicker_cost(with additional costs)");
@@ -683,6 +704,38 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 }
             }
         }
+    };
+    // Teamwork n: "as an additional cost to cast this spell, you may tap any
+    // number of creatures you control with total power n or more" (crew's
+    // cost, CR 702.122a); "if this spell was cast using teamwork" picks the
+    // effect, as kicker's does.
+    let kicker = if *teamwork_power != 0 {
+        let n = l.int("CardPrinting.teamwork_power", *teamwork_power, 1, 20) as u8;
+        match spell_effect.as_deref() {
+            Some(cats::Effect::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(e) }))
+                if matches!(**condition, cats::ConditionOrStatePredicate::OptionalAdditionalCostPaid(_))
+                    && is_spell_card
+                    && kicker.is_none()
+                    && additional.is_empty() =>
+            {
+                additional = vec![Cost::default(), Cost { crew: n, ..Cost::default() }];
+                let plain = lower_ability(l, e);
+                let teamed = lower_ability(l, then_effect);
+                if plain.modes.is_some() || teamed.modes.is_some() || plain.divide.is_some() || teamed.divide.is_some() {
+                    l.unsupported("CardPrinting.teamwork_power(modal effect)");
+                }
+                Some(crate::db::AbilityDef {
+                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, teamed], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new() })),
+                    ..Default::default()
+                })
+            }
+            _ => {
+                l.unsupported("CardPrinting.teamwork_power(not \"if cast using teamwork ... else\")");
+                kicker
+            }
+        }
+    } else {
+        kicker
     };
     // Overload (CR 702.96): the alternative cost changes "target" to
     // "each": the two branches of "if the alternative cost was paid" are
@@ -1267,11 +1320,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // "Spells you cast from your graveyard cost {n} less to cast" (an
     // effect on its controller's spells, CR 601.2f).
     let mut gy_spell_discount = 0u8;
+    let mut outside_hand_discount = 0u8;
     for r in external_cost_reductions {
         let cats::ExternalCostReduction::ExternalCostReduction(nodes::ExternalCostReduction { amount, condition }) = r;
         match &**condition {
             cats::Condition::SpellCastFromGraveyard(nodes::SpellCastFromGraveyard {}) => {
                 gy_spell_discount += l.int("ExternalCostReduction.amount", *amount, 1, 9) as u8;
+            }
+            // "Spells you cast from anywhere other than your hand cost {1}
+            // less to cast" (Bilbo).
+            cats::Condition::SpellCastFromOutsideHand(nodes::SpellCastFromOutsideHand {}) => {
+                outside_hand_discount += l.int("ExternalCostReduction.amount", *amount, 1, 9) as u8;
             }
             other => l.unsupported(format!("ExternalCostReduction.condition({})", other.tag())),
         }
@@ -1356,7 +1415,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         wins_on_empty_draw: repl.wins_on_empty_draw,
         extra_mana_on_tap,
         emblem: false,
-        grants_retrace: None,
+        // "During your turn, nonland permanent cards in your graveyard have
+        // retrace" (Six; on a permanent, during its controller's turn).
+        grants_retrace: grants_retrace_to_nonland_permanents_during_your_turn.then(|| {
+            Filter::And(Box::new(Filter::Type(types::PERMANENT)), Box::new(Filter::Not(Box::new(Filter::Type(types::LAND)))))
+        }),
         back,
         modal,
         adventure,
@@ -1392,7 +1455,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         gy_play_k: if repl.gy_cast_mv > 0 { crate::db::NO_GRANT } else { gy_play_k },
         gy_play_land: gy_play_mv > 0,
         ability_discount: repl.ability_discount,
+        ascend: cascade_kw_ascend,
+        outside_hand_discount,
+        chooses_land_type,
+        x_life: *additional_cost_pay_x_life,
     };
+    if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
+        l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");
+    }
+    if *grants_retrace_to_nonland_permanents_during_your_turn && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn(not a permanent)");
+    }
     if repl.gy_cast_mv > 0 && gy_play_mv > 0 {
         l.unsupported("StaticAbility.graveyard_permanent_cast_mv_max(with another graveyard permission)");
     }
@@ -1706,6 +1779,8 @@ pub(crate) enum KwOrProt {
     Persist,
     /// Cascade (CR 702.85a): its triggered ability is in the IR too.
     Cascade,
+    /// Ascend (CR 702.131a, on a permanent).
+    Ascend,
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
@@ -1758,6 +1833,11 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
             l.deny("Keyword.n", n);
             l.deny("Keyword.quality", quality);
             return Some(KwOrProt::Cascade);
+        }
+        K::Ascend => {
+            l.deny("Keyword.n", n);
+            l.deny("Keyword.quality", quality);
+            return Some(KwOrProt::Ascend);
         }
         _ => {}
     }

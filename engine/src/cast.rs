@@ -53,7 +53,32 @@ impl Game {
                 cost.generic = cost.generic.saturating_sub(self.abilities(c).gy_spell_discount);
             }
         }
+        // "Spells you cast from anywhere other than your hand cost {1} less"
+        // (Bilbo): castability from another zone, or a spell cast from one.
+        let outside = match self.objs[card.i()].zone {
+            Zone::Hand => false,
+            Zone::Stack => self.stack.iter().any(|s| s.kind == StackKind::Spell { card } && s.origin != Zone::Hand),
+            _ => true,
+        };
+        if outside && cost.generic > 0 {
+            for c in self.permanents_of(p) {
+                cost.generic = cost.generic.saturating_sub(self.abilities(c).outside_hand_discount);
+            }
+        }
         cost
+    }
+
+    /// The colour mask of the basic land type chosen as `c` entered
+    /// (Multiversal Passage).
+    pub(crate) fn chosen_land_color(&self, c: CardIdx) -> crate::mana::ManaMask {
+        let r = self.obj_ref(c);
+        self.marks
+            .iter()
+            .find_map(|&(o, m)| match m {
+                crate::game::Mark::ChosenColor(k) if o == r => Some(1 << k),
+                _ => None,
+            })
+            .unwrap_or(0)
     }
 
     /// How much a cost reduction takes off for `p` now (generic mana).
@@ -449,6 +474,9 @@ impl Game {
             self.objs[e.i()].controller == p
                 && self.def_of(e).grants_retrace.as_ref().is_some_and(|f| self.card_matches(f, card, &ctx))
         })
+            // A permanent's: during its controller's turn (Six).
+            || self.turn.active == p
+                && self.permanents_of(p).any(|c| self.abilities(c).grants_retrace.as_ref().is_some_and(|f| self.card_matches(f, card, &ctx)))
     }
 
     /// The non-mana part of the cost for a cast `from` (escape's exiled
@@ -541,7 +569,11 @@ impl Game {
         let item = &self.stack[pos];
         let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. });
         let mut most = 0u8;
-        if !free {
+        if self.def_of(card).x_life {
+            // "Pay X life" (CR 119.4: no more than one's life total; X isn't
+            // in the mana cost, so a free cast doesn't fix it, 107.3b).
+            most = self.players[p as usize].life.clamp(0, (act::NUMBER_N - 1) as i32) as u8;
+        } else if !free {
             // CR 601.2f: X is part of the mana cost, before reductions.
             let mut tmp = item.clone();
             while most < (act::NUMBER_N - 1) as u8 {
@@ -1312,7 +1344,7 @@ impl Game {
         if self.def_of(card).additional.len() > 1 {
             self.agenda.push(Task::CastOption { id });
         }
-        if self.def_of(card).x_pips > 0 {
+        if self.def_of(card).x_pips > 0 || self.def_of(card).x_life {
             self.agenda.push(Task::ChooseX { id }); // CR 601.2b
         }
         if self.def_of(card).times_cost.is_some() {
@@ -1497,6 +1529,14 @@ impl Game {
         // CR 601.2f: the total cost, then delve's exiled cards pay for some
         // of its generic mana (702.66b).
         let cost = self.total_mana(card, item).less_generic(item.delved);
+        if def.x_life && item.x > 0 {
+            // "As an additional cost, pay X life" (CR 601.2h; 119.4).
+            let x = item.x as i32;
+            self.note(|_| format!("P{p} pays {x} life"));
+            self.lose_life(p, x);
+        }
+        let Some(pos) = self.item_index(id) else { return };
+        let item = &self.stack[pos];
         if item.alt > 0 {
             let k = item.alt as usize - 1;
             let mut pm = PayMana::new(p, cost);

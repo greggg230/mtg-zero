@@ -762,6 +762,8 @@ pub enum Cond {
     /// static ability's source (CR 607.2a, 205.2a; a static's own
     /// condition, read in `layers.rs`).
     LinkedTypesAtLeast(u8),
+    /// You have the city's blessing (CR 702.131).
+    CityBlessing,
 }
 
 /// What a mana ability makes (CR 106.1, 605.1a).
@@ -793,6 +795,9 @@ pub enum ManaProd {
     /// One mana of any type the land sacrificed for its cost could produce
     /// (Squandered Resources; CR 106.7, as the land last existed).
     SacrificedLand,
+    /// One mana of the colour of the basic land type chosen as the source
+    /// entered (CR 305.6: "this land is the chosen type").
+    Chosen,
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -1243,6 +1248,19 @@ pub struct CardDef {
     /// activate. This effect can't reduce the mana in that cost to less than
     /// one mana." (Zirda, the Dawnwaker.)
     pub ability_discount: u8,
+    /// Ascend (CR 702.131a): while it is on the battlefield, its controller
+    /// gets the city's blessing once they control ten or more permanents.
+    pub ascend: bool,
+    /// "Spells you cast from anywhere other than your hand cost {n} less to
+    /// cast" (Bilbo, Thief in the Night; CR 601.2f).
+    pub outside_hand_discount: u8,
+    /// "As this land enters, choose a basic land type ... This land is the
+    /// chosen type" (Multiversal Passage; `Mark::ChosenColor` holds the
+    /// type's index W U B R G: Plains Island Swamp Mountain Forest).
+    pub chooses_land_type: bool,
+    /// "As an additional cost to cast this spell, pay X life" (Fire
+    /// Covenant): X is announced (CR 601.2b) and paid as life.
+    pub x_life: bool,
 }
 
 /// `CardDef::gy_play_k` when the permission grants nothing.

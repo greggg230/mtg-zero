@@ -658,7 +658,7 @@ pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
         ManaProd::ColorAmong(_) => COLORS,
         ManaProd::IfElse { then, els, .. } => (0..6).filter(|&i| then[i] + els[i] > 0).fold(0, |m, i| m | (1 << i)),
         ManaProd::OneOf(v) => v.iter().flat_map(|f| (0..6).filter(move |&i| f[i] > 0)).fold(0, |m, i| m | (1 << i)),
-        ManaProd::Linked => COLORS,
+        ManaProd::Linked | ManaProd::Chosen => COLORS,
         ManaProd::SacrificedLand => 0b11_1111,
     }
 }

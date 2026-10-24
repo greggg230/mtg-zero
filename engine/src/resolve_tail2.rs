@@ -147,6 +147,94 @@ impl Game {
                 Flow::Next
             }
             Ext::Cascade => self.cascade(f),
+            Ext::CopyTokensEnteredThisTurn => {
+                let p = f.controller;
+                let turn = self.turn.number as u16;
+                let tokens: Vec<CardIdx> = self.permanents_of(p).filter(|&c| self.is_token(c) && self.objs[c.i()].entered == turn).collect();
+                let mut all = Vec::new();
+                for c in tokens {
+                    let vals = self.copiable(c);
+                    all.extend(self.create_token_copies(vals, p, 1));
+                }
+                f.made = all.first().copied();
+                f.made_all = all;
+                Flow::Next
+            }
+            Ext::MillThenLandToHand { n } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        self.move_card(c, Zone::Hand, Pos::Top);
+                        f.picked.clear();
+                        return Flow::Next;
+                    }
+                    Some(_) => {
+                        f.picked.clear();
+                        return Flow::Next;
+                    }
+                    None => {}
+                }
+                if f.i == 0 {
+                    f.i = 1;
+                    f.picked.clear();
+                    for _ in 0..*n {
+                        let Some(&top) = self.players[p as usize].library.last() else { break };
+                        self.move_card(top, Zone::Graveyard, Pos::Top);
+                        if self.objs[top.i()].zone == Zone::Graveyard {
+                            f.picked.push(top);
+                        }
+                    }
+                }
+                let lands: Vec<CardIdx> =
+                    f.picked.iter().copied().filter(|&c| self.objs[c.i()].zone == Zone::Graveyard && self.def_of(c).is(types::LAND)).collect();
+                if lands.is_empty() {
+                    f.picked.clear();
+                    return Flow::Next;
+                }
+                let mut opts: Vec<Opt> = lands.iter().map(|&c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }).collect();
+                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                Flow::Suspend
+            }
+            Ext::MayCastFromGraveyardNow { filter, exile } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        // The rest of the effect waits for the cast (CR
+                        // 608.2g).
+                        let mut back = f.clone();
+                        back.pc += 1;
+                        back.i = 0;
+                        back.floor = 0;
+                        back.picked.clear();
+                        self.agenda.push(Task::Run(back));
+                        let r = self.obj_ref(c);
+                        let kind = if *exile && self.def_of(c).is(types::INSTANT | types::SORCERY) {
+                            crate::game::PermKind::CastThenExile
+                        } else {
+                            crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None }
+                        };
+                        self.permissions.push(crate::game::Permission { card: r, player: p, turn: Some(self.turn.number), kind });
+                        self.begin_cast(p, c);
+                        Flow::Suspend
+                    }
+                    Some(_) => Flow::Next,
+                    None => {
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let cands: Vec<CardIdx> = self
+                            .graveyard_cards(p)
+                            .filter(|&c| self.card_matches(filter, c, &ctx) && self.can_cast_now(p, c))
+                            .collect();
+                        if cands.is_empty() {
+                            return Flow::Next;
+                        }
+                        let mut opts: Vec<Opt> = cands.iter().map(|&c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }).collect();
+                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                        Flow::Suspend
+                    }
+                }
+            }
             other => unreachable!("not a tail-2 op: {other:?}"),
         }
     }

@@ -618,3 +618,261 @@ fn laelia_grows_when_cards_leave_your_library_or_graveyard_for_exile() {
     settle(&mut g);
     assert_eq!(g.counters_on(l, engine::db::Counter::P1P1), 1);
 }
+
+// ---- Ocelot Pride ----------------------------------------------------------
+
+/// Attack with the Lifelinker (life gained), then go to the end step.
+fn ocelot_turn(names: &[&str]) -> Game {
+    let mut g = scen().battlefield(0, names).at(Step::DeclareAttackers, 0).start();
+    let l = bf(&g, 0, "Test Lifelinker");
+    g.choose(Choice::Card(l));
+    g.choose(Choice::Pass);
+    quiet_until(&mut g, |g| g.turn().step == Step::Cleanup || g.turn().number > 1 && g.turn().step == Step::Upkeep);
+    g
+}
+
+/// Ascend (CR 702.131): "If you control ten or more permanents, you get the
+/// city's blessing for the rest of the game." "At the beginning of your end
+/// step, if you gained life this turn, create a 1/1 white Cat creature
+/// token. Then if you have the city's blessing, for each token you control
+/// that entered this turn, create a token that's a copy of it."
+#[test]
+fn ocelot_pride_makes_a_cat_and_with_the_citys_blessing_copies_it_cr702_131() {
+    let g = ocelot_turn(&["Ocelot Pride", "Test Lifelinker"]);
+    assert_eq!(g.count_in(0, "Cat", Zone::Battlefield), 1, "{}", log(&g));
+    assert!(!g.player(0).city_blessing);
+    let mut ten = vec!["Ocelot Pride", "Test Lifelinker"];
+    ten.extend(["Plains"; 8]);
+    let g = ocelot_turn(&ten);
+    assert!(g.player(0).city_blessing);
+    assert_eq!(g.count_in(0, "Cat", Zone::Battlefield), 2, "the Cat and a copy: {}", log(&g));
+}
+
+/// No life gained: no trigger (an intervening "if", CR 603.4); the city's
+/// blessing stays once gotten (702.131b).
+#[test]
+fn ocelot_pride_needs_life_gained_and_keeps_the_blessing_cr702_131b() {
+    let mut nine = vec!["Ocelot Pride"];
+    nine.extend(["Plains"; 9]);
+    let mut g = scen().battlefield(0, &nine).hand(1, &["Lightning Bolt"]).battlefield(1, &["Mountain"]).at(Step::Main1, 0).start();
+    assert!(g.player(0).city_blessing, "ten permanents");
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.count_in(0, "Cat", Zone::Battlefield), 0, "no life gained");
+    // Below ten: still blessed.
+    let o = bf(&g, 0, "Ocelot Pride");
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(g.tgt(o));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(g.player(0).city_blessing);
+}
+
+// ---- Six -------------------------------------------------------------------
+
+/// "Whenever Six attacks, mill three cards. You may put a land card from
+/// among them into your hand." "During your turn, nonland permanent cards
+/// in your graveyard have retrace" (CR 702.81a: cast by discarding a land
+/// card in addition to its other costs).
+#[test]
+fn six_mills_three_takes_a_land_and_grants_retrace_on_your_turn_cr702_81a() {
+    let mut g = scen()
+        .battlefield(0, &["Six", "Forest", "Forest"])
+        .library(0, &["Forest", "Test Bear", "Lightning Bolt"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let six = bf(&g, 0, "Six");
+    g.choose(Choice::Card(six));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseGraveyardCard));
+    let forest = g.card(0, "Forest", Zone::Graveyard);
+    let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+    assert!(!g.has_option(Choice::Card(bolt)), "a land card");
+    g.choose(Choice::Card(forest));
+    g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+    assert_eq!(g.obj(forest).zone, Zone::Hand);
+    // Main 2: the Bear by retrace (the Forest discarded); not the Bolt.
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(bear)), "{:?}", g.options_desc());
+    assert!(!g.has_option(Choice::Cast(bolt)), "nonland permanent cards only");
+    g.choose(Choice::Cast(bear));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Discard) | Some(DecisionKind::DiscardCost) => Some(Choice::Card(g.card(0, "Forest", Zone::Hand))),
+        _ => None,
+    });
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.obj(forest).zone, Zone::Graveyard, "the land discarded");
+}
+
+/// Not during the opponent's turn.
+#[test]
+fn six_grants_retrace_only_during_your_turn() {
+    let g = scen()
+        .battlefield(0, &["Six", "Island", "Island"])
+        .hand(0, &["Forest"])
+        .graveyard(0, &["Test Flash"])
+        .at(Step::Main1, 1)
+        .start();
+    let fl = g.card(0, "Test Flash", Zone::Graveyard);
+    assert!(!g.has_option(Choice::Cast(fl)));
+}
+
+// ---- Bilbo, Thief in the Night ---------------------------------------------
+
+/// "Spells you cast from anywhere other than your hand cost {1} less to
+/// cast." "Whenever Bilbo attacks, you may cast an artifact, instant, or
+/// sorcery spell from your graveyard. If an instant or sorcery spell cast
+/// this way would be put into your graveyard, exile it instead." (CR
+/// 608.2g, 601.2f.)
+#[test]
+fn bilbo_casts_from_the_graveyard_on_attack_for_one_less_and_exiles_it_cr601_2f() {
+    let mut g = scen()
+        .battlefield(0, &["Bilbo, Thief in the Night", "Mountain"])
+        .graveyard(0, &["Lightning Bolt", "Test Bear"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let bilbo = bf(&g, 0, "Bilbo, Thief in the Night");
+    g.choose(Choice::Card(bilbo));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseGraveyardCard));
+    let bolt = g.card(0, "Lightning Bolt", Zone::Graveyard);
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    assert!(g.has_option(Choice::Card(bolt)));
+    assert!(!g.has_option(Choice::Card(bear)), "not a creature spell");
+    g.choose(Choice::Card(bolt));
+    g.choose(Choice::Target(Target::Player(1)));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.life(1), 17, "{}", log(&g));
+    assert_eq!(g.obj(bolt).zone, Zone::Exile, "exiled instead");
+    assert!(g.player(0).pool.amt.iter().all(|&x| x == 0));
+}
+
+/// The reduction (CR 601.2f): Grim Monolith ({2}) from the graveyard with
+/// one Mountain.
+#[test]
+fn bilbo_reduces_spells_cast_from_outside_the_hand_cr601_2f() {
+    let mut g = scen()
+        .battlefield(0, &["Bilbo, Thief in the Night", "Mountain"])
+        .graveyard(0, &["Grim Monolith"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let bilbo = bf(&g, 0, "Bilbo, Thief in the Night");
+    g.choose(Choice::Card(bilbo));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseGraveyardCard));
+    let m = g.card(0, "Grim Monolith", Zone::Graveyard);
+    g.choose(Choice::Card(m));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(m).zone, Zone::Battlefield, "{}", log(&g));
+}
+
+// ---- Multiversal Passage ---------------------------------------------------
+
+/// "As this land enters, choose a basic land type. Then you may pay 2
+/// life. If you don't, it enters tapped. This land is the chosen type."
+/// (CR 614.12, 305.6.)
+#[test]
+fn multiversal_passage_becomes_the_chosen_basic_type_cr305_6() {
+    let mut g = scen().hand(0, &["Multiversal Passage"]).at(Step::Main1, 0).start();
+    let m = g.card(0, "Multiversal Passage", Zone::Hand);
+    g.choose(Choice::Play(m));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseColor));
+    g.choose(Choice::Number(1)); // Island
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    g.choose(Choice::Yes);
+    g.drive_until(at_priority);
+    assert_eq!(g.life(0), 18);
+    assert!(!g.obj(m).tapped);
+    assert!(g.has_subtype(m, subtype("Island")) && !g.has_subtype(m, subtype("Forest")));
+    assert!(g.can_pay(0, &engine::mana::ManaCost::parse("{U}").unwrap()));
+    assert!(!g.can_pay(0, &engine::mana::ManaCost::parse("{G}").unwrap()));
+    // Declined: tapped.
+    let mut g = scen().hand(0, &["Multiversal Passage"]).at(Step::Main1, 0).start();
+    let m = g.card(0, "Multiversal Passage", Zone::Hand);
+    g.choose(Choice::Play(m));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseColor));
+    g.choose(Choice::Number(4));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    g.choose(Choice::Pass);
+    g.drive_until(at_priority);
+    assert!(g.obj(m).tapped && g.life(0) == 20);
+    assert!(g.has_subtype(m, subtype("Forest")));
+}
+
+// ---- Fire Covenant ---------------------------------------------------------
+
+/// "As an additional cost to cast this spell, pay X life. Fire Covenant
+/// deals X damage divided as you choose among any number of target
+/// creatures." (CR 601.2b: X announced; 601.2d: divided, each target at
+/// least 1; 119.4: no more life than one has.)
+#[test]
+fn fire_covenant_pays_x_life_and_divides_x_damage_cr601_2d() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Mountain", "Mountain"])
+        .hand(0, &["Fire Covenant"])
+        .battlefield(1, &["Test Giant", "Test Bear"])
+        .life(0, 6)
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Fire Covenant", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    assert!(g.has_option(Choice::Number(6)) && !g.has_option(Choice::Number(7)), "X at most 6 life");
+    g.choose(Choice::Number(5));
+    let giant = bf(&g, 1, "Test Giant");
+    let bear = bf(&g, 1, "Test Bear");
+    g.choose(g.tgt(giant));
+    g.choose(g.tgt(bear));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Target));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::DivideDamage) => {
+            // 3 to the Giant first? Take the option that gives the Giant 3.
+            let d = g.pending_decision().unwrap();
+            Some(d.options.iter().map(|o| o.choice).find(|c| *c == Choice::Number(3)).unwrap_or(d.options[0].choice))
+        }
+        _ => None,
+    });
+    assert_eq!(g.life(0), 1, "paid 5 life: {}", log(&g));
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.obj(giant).damage, 3);
+}
+
+// ---- We Say Thee Nay! ------------------------------------------------------
+
+/// Teamwork 2: "As an additional cost to cast this spell, you may tap any
+/// number of creatures you control with total power 2 or more." "Counter
+/// target spell unless its controller pays {2}. Counter that spell unless
+/// its controller pays {4} instead if this spell was cast using teamwork."
+#[test]
+fn we_say_thee_nay_with_teamwork_asks_four_cr702_122a() {
+    for (team, countered) in [(true, true), (false, false)] {
+        let mut g = scen()
+            .battlefield(0, &["Island", "Island", "Test Bear"])
+            .hand(0, &["We Say Thee Nay!"])
+            .battlefield(1, &["Mountain", "Mountain", "Mountain"])
+            .hand(1, &["Lightning Bolt"])
+            .at(Step::Main1, 1)
+            .start();
+        let b = g.card(1, "Lightning Bolt", Zone::Hand);
+        g.choose(Choice::Cast(b));
+        g.choose(Choice::Target(Target::Player(0)));
+        pay(&mut g);
+        g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+        let n = g.card(0, "We Say Thee Nay!", Zone::Hand);
+        g.choose(Choice::Cast(n));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseCost));
+        g.choose(Choice::Number(team as u8));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(g.tgt(b));
+        resolve_with(&mut g, |g| match g.kind() {
+            Some(DecisionKind::YesNo) if g.has_option(Choice::Yes) => Some(Choice::Yes),
+            _ => None,
+        });
+        assert_eq!(g.life(0), if countered { 20 } else { 17 }, "teamwork {team}: {}", log(&g));
+        assert_eq!(g.obj(bf(&g, 0, "Test Bear")).tapped, team);
+    }
+}

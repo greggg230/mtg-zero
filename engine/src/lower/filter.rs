@@ -221,6 +221,8 @@ pub(crate) fn lower_condition_or_state(l: &mut Lowerer, c: &cats::ConditionOrSta
         // initiative" (725).
         E::CompletedADungeon(nodes::CompletedADungeon {}) => Some(Cond::CompletedDungeon),
         E::HasInitiative(nodes::HasInitiative {}) => Some(Cond::HasInitiative),
+        // "If you have the city's blessing" (CR 702.131).
+        E::HasCitysBlessing(nodes::HasCitysBlessing {}) => Some(Cond::CityBlessing),
     })
 }
 

@@ -226,6 +226,8 @@ pub struct Player {
     /// "If a card would be put into your graveyard from anywhere this turn,
     /// exile that card instead" this turn (the turn number).
     pub gy_exile_turn: u32,
+    /// The city's blessing (CR 702.131b: for the rest of the game).
+    pub city_blessing: bool,
 }
 
 /// A player's dungeon (CR 309): the dungeon card in the command zone with the
@@ -676,6 +678,7 @@ impl Game {
             experience: 0,
             gy_play_turn: 0,
             gy_exile_turn: 0,
+            city_blessing: false,
         };
         Game {
             db,
@@ -1063,7 +1066,7 @@ impl Game {
         if self.def_of(idx).daybound || self.def_of(idx).nightbound {
             self.day_night_check();
         }
-        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player || self.def_of(idx).paints {
+        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player || self.def_of(idx).paints || self.def_of(idx).chooses_land_type {
             self.agenda.push(Task::AsEnters { card: idx });
         }
         // "This creature enters prepared" (CR 722.3a).

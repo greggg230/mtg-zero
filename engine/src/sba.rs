@@ -202,6 +202,16 @@ impl Game {
         if let Some(Choice::Card(c)) = self.answer.take() {
             keep.push(c);
         }
+        // Ascend (CR 702.131b): the city's blessing, for the rest of the
+        // game, once a player with an ascend permanent controls ten (a
+        // static ability: noted here, before anyone gets priority).
+        let ascend = self.battlefield.iter().any(|&c| self.db.def(self.objs[c.i()].def).ascend);
+        for p in 0..2u8 {
+            if ascend && !self.players[p as usize].city_blessing && self.ascends(p) {
+                self.players[p as usize].city_blessing = true;
+                self.note(|_| format!("P{p} gets the city's blessing"));
+            }
+        }
         if keep.is_empty() && !self.sba_possible() {
             if !self.waiting.is_empty() {
                 self.agenda.push(Task::SbaCheck { keep });

@@ -36,7 +36,8 @@ pub(crate) fn keyword_mods(l: &mut Lowerer, kws: &[cats::Keyword]) -> Vec<Mod> {
                 | super::printing::KwOrProt::BattleCry
                 | super::printing::KwOrProt::Prowess
                 | super::printing::KwOrProt::Persist
-                | super::printing::KwOrProt::Cascade,
+                | super::printing::KwOrProt::Cascade
+                | super::printing::KwOrProt::Ascend,
             ) => {
                 l.unsupported("Keyword(granted trigger)")
             }
@@ -850,10 +851,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     (crate::db::DivAmount::Fixed(n), n, 1)
                 }
                 card_ir::unions::IntOrFormula::Formula(f) if matches!(**f, cats::Formula::ResolvingX(_)) => {
-                    // ("Up to": with X = 0 there is nothing to divide.)
-                    if max_targets.is_none() {
-                        l.unsupported("DealDamageDividedAmongTargets(X among any number)");
-                    }
+                    // ("Up to": with X = 0 there is nothing to divide; "any
+                    // number": at most X, `cast::choose_targets`.)
                     (crate::db::DivAmount::X { double_at: dbl }, 20, 0)
                 }
                 card_ir::unions::IntOrFormula::Formula(f) => {

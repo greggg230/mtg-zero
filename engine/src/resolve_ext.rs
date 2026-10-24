@@ -1566,7 +1566,10 @@ impl Game {
             | Ext::LinkedToGraveyardThenToken { .. }
             | Ext::PlayFromGraveyardThisTurn
             | Ext::GraveyardToExileThisTurn
-            | Ext::Cascade => self.exec_tail2(f, op),
+            | Ext::Cascade
+            | Ext::CopyTokensEnteredThisTurn
+            | Ext::MillThenLandToHand { .. }
+            | Ext::MayCastFromGraveyardNow { .. } => self.exec_tail2(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

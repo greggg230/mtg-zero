@@ -167,6 +167,10 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
         }
         ManaProd::OneOf(v) => v.clone(),
+        ManaProd::Chosen => {
+            let m = src.map_or(0, |c| g.chosen_land_color(c));
+            (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
+        }
         // (Read from the sacrificed land as the ability is activated.)
         ManaProd::SacrificedLand => Vec::new(),
         ManaProd::ColorAmong(f) => {
@@ -352,7 +356,7 @@ impl Game {
                 // Same definition and ability: the same yield (it depends on
                 // the controller only; the linked colours on the source).
                 let same = |cl: &&mut Class| cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self;
-                if let Some(cl) = out.iter_mut().find(same).filter(|_| m.prod != ManaProd::Linked) {
+                if let Some(cl) = out.iter_mut().find(same).filter(|_| m.prod != ManaProd::Linked && m.prod != ManaProd::Chosen) {
                     cl.members.push(src);
                     continue;
                 }
@@ -479,6 +483,10 @@ impl Game {
             ManaProd::One(m) => Some(Yield::One(Unit { life, ..Unit::free(*m) })),
             ManaProd::Linked => {
                 let m = src.map_or(0, |c| self.linked_colors(c));
+                (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
+            }
+            ManaProd::Chosen => {
+                let m = src.map_or(0, |c| self.chosen_land_color(c));
                 (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
             }
             ManaProd::ColorAmong(f) => {
