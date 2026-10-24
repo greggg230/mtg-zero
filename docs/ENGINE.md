@@ -1,6 +1,9 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7b part 3b (spells and abilities on the stack as targets, "becomes the target", ward,
+Status: M7c tail part 1 (mana abilities with a mana cost or a choice, exhaust, spending
+restrictions, converge, a painted colour, incubate, turn skipping, granted leave triggers, a
+target linked to another's controller; 467 supported cube cards; section 28), 2026-10-23; M7b
+part 3b (spells and abilities on the stack as targets, "becomes the target", ward,
 improvise, the initiative and Undercity, abilities activated from graveyards, storm, mobilize,
 the cost-order fixes; 438 supported cube cards; section 27), 2026-10-23; M7b part 3 (copies: copy
 effects, token copies, copies of spells, entering as a copy; squad, offspring, replicate, spree,
@@ -630,8 +633,24 @@ mobilize (702.181), activated-ability cost reductions, "for as long as <the sour
 the battlefield"; the total cost of 601.2f with every additional cost and X before reductions,
 reductions on alternative costs (118.9d), graveyard counts of cards only (108.2).
 
-Supported cube cards: 438 (M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
-191, M4b-1: 133, M4a: 31); creatures 155 by their front faces (M7b part 3: 133, M7b part 2: 125,
+Implemented (M7c tail part 1, section 28): mana abilities with a mana cost or a choice in their
+cost (activated with priority, 605.3a), exhaust (702.177), mana abilities removing counters,
+imprint colours, a choice of fixed productions, "any type the sacrificed land could produce"
+(106.7), spending restrictions (106.6) and "that spell can't be countered", "whenever you tap a
+creature for mana", "when you play a land" (305.1), converge, "as this enters, choose a color"
+and a colour added to every card, spell and permanent, incubate and a double-faced token, turn
+skipping (614.10), a taxed play permission (601.2f), exile until the source leaves from a hand
+or the battlefield, triggered abilities effects give permanents (earthbend 701.65, Serra
+Paragon), a target linked to another target's controller; New in M7c tail part 1 (29): Badgermole
+Cub; Balance; Black Widow, Super Spy; Chrome Mox; City of Traitors; Cloak and Dagger, Entwined;
+Coalition Relic; Delighted Halfling; Demonic Consultation; Elite Spellbinder; Gemstone Mine;
+Goblin Welder; Lim-Dul's Vault; Loot, the Pathfinder; Malcolm, Alluring Scoundrel; Mana Vault;
+Mishra's Workshop; Orcish Lumberjack; Painter's Servant; Palantir of Orthanc; Prismatic Ending;
+Serra Paragon; Squandered Resources; Sunfall; Sunken Ruins; Tersa Lightshatter; Time Vault;
+Transmute Artifact; Ursine Monstrosity.
+
+Supported cube cards: 467 (M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
+191, M4b-1: 133, M4a: 31); creatures 168 by their front faces (M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
 M7b part 1: 113, M4b-2: 20); planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in
 M7b part 3b (28): Boseiju, Who Endures; Brain Freeze; Caves of Chaos Adventurer; Ertai
 Resurrected; Fallen Shinobi; Fanatic of Rhonas; Feywild Caretaker; Forensic Gadgeteer; From the
@@ -899,6 +918,11 @@ Deliberate simplifications and limits (each is small and local to change):
   times paid; Python's copy has none. ("Another target", 115.3: Python removes every target
   already chosen from every later choice; here only for the requirements that say "another" or
   belong to the same "target" word, so separate "target" words may name the same object.)
+* M7c tail part 1 (section 28): the 29 cards follow their Oracle text and the CR where the
+  IR's class names are all it says (Balance's APNAP choices, 101.4; Palantir's choice by the
+  opponent; Time Vault's skip as a replacement, 614.10; Mana Vault's draw-step "if" checked again
+  on resolution, 603.4; Goblin Welder's pair checked at resolution, 608.2b); the Python engine's
+  handling of these cards was not compared. Its simplifications are listed in 28.8.
 * M7b part 3b: ward (702.21). Python checks ward only for a spell, as it is cast, and pays it
   automatically when it can (an extra cost: mana by its automatic payment, life, a chosen
   discard; granted life costs summed into one payment). Here ward is a triggered ability: it
@@ -951,6 +975,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_costs.rs` | M7b part 3b: 601.2f (kicker and X before reductions), 118.9d (a reduction on an alternative cost), 108.2 (a token in a graveyard isn't a card) |
 | `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
 | `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
+| `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (30 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4), Chromatic Star's IR defect |
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
 | `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
 | `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
@@ -985,7 +1010,8 @@ M7b: 20,000 games over the 378 cards, no failure; on the way it found two faults
 both fixed (25.9). The check also asserts that no face is up in a hidden zone. M7b part 3:
 20,000 games over the 410 cards, no failure; three faults found on the way, all fixed (26.10).
 M7b part 3b: 20,000 games over the 438 cards, no failure (102 s); one fault found on the way,
-fixed (27.12).
+fixed (27.12). M7c tail part 1: 20,000 games over the 467 cards, no failure (70 s); four faults
+found on the way, all fixed (28.7).
 `POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
 earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
 `n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).
@@ -1063,6 +1089,17 @@ Desktop (i9-13900K, Windows 11, other work running), release build, one thread,
 | `clone` + `determinize(to_move)` (one search simulation's setup) | 1.72 us (main's code the same day: 2.55 us); on M7a's pool 1.46 us (M7a's code 1.81 us, main's 1.83 us); `determinize` alone 0.86 us (main's 1.23 us, M7a's 1.10 us on its pool) | 2.44 us (on main's pool 2.03 us; main's code the same day: 1.95 us) | 1.80 us (main's code the same day: 1.82 us) | 1.92 us (part 1's code the same day: 1.87 us) | 1.77 us | 1.6 us | 2.3 us | 2.3 us | 2.4 us |
 | `legal_actions` (copies cached ids) | 3-4 ns | 3-6 ns | 4-5 ns | 3 ns | 3 ns | 4 ns | 8 ns | 4-9 ns | 6 ns |
 | Fuzzer, 20,000 games, release | 67 s, no failure | 102 s, no failure | 93-110 s (the last three runs), no failure | 91-100 s (three runs), no failure | 82-91 s (two runs), no failure | 70 s, no failure | 104 s, no failure (determinize checked for both viewers, information sets) | 60 s | 28 s |
+
+**M7c tail part 1** (467 cards, branch `m7c-tail1`): pinned the same way, interleaved with
+main's code (7287cd1) in five rounds. On main's pool (the 29 new cards left out with
+`POOL_EXCLUDE`: the same games, 870,209 decisions) 5.42 us per decision median (5.34-5.44)
+against main's 5.35 (5.22-5.41), +1.3% (pairs -1.3% to +3.8%), 848 games/s against 859. The
+first build was +5%: the creature-mana bonus walked the permanents a second time per
+`mana_classes` and Serra Paragon's permission was looked for once per graveyard card; one walk
+and a once-per-walk cache took it back (and showed a fault, 28.7). On the full pool: 4.98-5.15
+us per decision (849,734 decisions), 914-946 games/s; `Game::clone` 1.13-1.18 us,
+`size_of::<Game>()` 1,264 B (`marks`, +24 B); clone + determinize 1.50-1.62 us. Fuzzer 20,000
+games: 70 s.
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -3260,3 +3297,181 @@ sacrifice (`tests/cards_m7b_stack3.rs::ninjutsu_cant_pay_its_mana_with_the_attac
   player, as Python passes it). `TargetConnives` repeats "attacking" in `attacking_only` and in
   its target filter (the lowering checks they agree). `CardPrinting.ward_discard_random` has no
   cube card and is a blocker. docs/ir_defects.md has the details; no new defect.
+
+## 28. The single-card tail, part 1 (M7c)
+
+Branch `m7c-tail1`, from main at 7287cd1 (438 cards): the cards that needed one feature each,
+and the mana cards that needed two. 29 cards came through, 467 supported; four stay blocked
+(28.9). Code: `lower/effect_tail.rs` (lowering), `resolve_tail.rs` (the new `Ext` instructions),
+the payment changes in `pay.rs` / `activate.rs` / `mana.rs`; tests `tests/cards_m7c_tail.rs`
+(30 tests, CR cited in each name).
+
+### 28.1 Mana abilities with a mana cost or a choice (CR 605.3a)
+
+Section 18's payment activates mana abilities while paying, and only those whose cost has no
+choice and no mana part (a payment inside a payment). A mana ability whose cost has a mana part
+(Chromatic Star, Sunken Ruins' {U/B}, Loot's {G}), a permanent to choose (Orcish Lumberjack's
+Forest, Squandered Resources' land), whose mana depends on what its cost sacrifices
+(Squandered), or that can be activated only once (exhaust) is now lowered as activated **with
+priority only**, like Lion's Eye Diamond (`ActivatedDef::instant_only`, set by the lowering):
+605.3a lets a player activate a mana ability whenever they have priority, and its mana then
+waits in the pool for the spell or ability it pays. The activation (`Task::ManaNow`, then
+`Task::ManaNowCosts`) pays the mana part first (`PayMana` with the source excluded, 601.2g-h by
+602.2b), then asks for the permanent to sacrifice (`Sacrifice`, one decision), pays {T}, life,
+counters and the source's own costs, then asks the production (`ChooseMana`). "One mana of any
+type the sacrificed land could produce" reads the land's mana abilities as it is sacrificed
+(106.7: the union of the types its productions make now; Wasteland: {C} only, no question;
+a land that makes none: nothing).
+
+* **Exhaust** (702.177a; Loot, the Pathfinder): `ActivatedDef::exhaust`; activating it records
+  `Mark::Exhausted(i)` on the object (a new object has its own), and an exhausted ability is not
+  offered again.
+* **Counters as a mana cost** (Gemstone Mine): a mana ability may remove a counter from its
+  source (`Cost::remove_counters`, one): it is a payment source only with a counter there, and
+  "if there are no mining counters on this land, sacrifice it" (`ManaAbility::sac_if_no`) runs
+  as part of the ability (605.3b); the last counter's activation counts as sacrificing its
+  source for the budgets and the activation order of section 18.
+* **Productions**: `ManaProd::Linked` (one mana of a colour among the cards exiled with the
+  source, 607.2a: Chrome Mox's imprint, read from `Game::links`), `ManaProd::OneOf` (Sunken
+  Ruins: {U}{U}, {U}{B} or {B}{B}), `ManaProd::SacrificedLand`. `pay::productions` takes the
+  source.
+* **"Whenever you tap a creature for mana, add an additional {G}"** (Badgermole Cub; a
+  triggered mana ability, 605.1b): `CardDef::extra_mana_creature`, added to the yield of every
+  creature source whose ability has {T} (the land version's walk, one walk for both) and to a
+  priority mana ability's productions.
+
+### 28.2 Spending restrictions (CR 106.6)
+
+"Spend this mana only to cast artifact spells" (Mishra's Workshop) and "... only to cast a
+legendary spell, and that spell can't be countered" (Delighted Halfling): `ManaAbility::only`
+(`SPEND_ARTIFACT`, `SPEND_LEGENDARY`) and `::uncounterable`. A payment says what it allows:
+`Keep::allow` (the restrictions casting this spell satisfies, `Game::spend_allow`) and
+`Keep::spell`. Mana classes carry `only`; candidates leave out the classes a payment may not use
+(`pay::cands`, only when such a class exists), and the `PayMana` options skip them. What a pool
+can hold is limited by the lowering to what the engine represents: several colorless mana for
+artifact spells (the Workshop: what its {C}{C}{C} leaves stays in the pool as artifact-only
+mana, `ManaPool::art`, spent first on an artifact spell and never on anything else), or one
+mana spent at once. Mana of a Halfling spent on a spell marks it uncounterable
+(`Mark::Uncounterable`, read by `spell_uncounterable`; read before the sources are activated).
+Every payability check of a spell (from hand, other zones, the mana-cost choice against an
+alternative cost, X, delve, spree, replicate) uses what the spell allows, so a cast is offered
+exactly when its payment can finish; activations and "unless pays" never use restricted mana.
+
+### 28.3 Rare per-object facts: `Game::marks`
+
+One vector (empty in nearly every game: a clone copies one empty vector) holds the tail's facts
+about objects, each stale with its object (CR 400.7; dead ones are dropped as a turn begins):
+`Exhausted(i)`, `ConvergePending` / `Converge(n)` (the colours of mana spent on a spell),
+`ChosenColor(c)` (Painter's Servant), `Uncounterable`, `LeaveTrigger { def, slot, exile }` (a
+triggered ability an effect gave the permanent), `GrantOnEnter` (a spell cast with Serra
+Paragon's permission), `UsedTurn(t)` ("once during each of your turns").
+
+**Triggered abilities an effect gives a permanent** ("when it dies [or is exiled]": earthbend,
+Serra Paragon): `Mark::LeaveTrigger` names a delayed ability of the granting card (603.7-style
+definition, `delayed_base + k`); `move_card` fires it as the permanent leaves the battlefield for
+a graveyard (or exile), about the card where it went (603.10a: it looks back), controlled by the
+permanent's controller.
+
+### 28.4 The cards
+
+| Card | What it needed | Decisions |
+|---|---|---|
+| Mana Vault | `OptionalManaCostThenEffect` ("you may pay {4}. If you do, untap it": `OfferPay`); "at the beginning of your draw step, if it is tapped" as an intervening if checked again on resolution (603.4: an "if" about the source of a beginning-of-step trigger adds `JumpUnlessSource`) | `YesNo`, `PayMana` |
+| Coalition Relic | charge counters; `RemoveAllCountersAddMana` (one mana of any colour per counter, 106.4) | `ChooseColor` per mana, non-decreasing |
+| Chrome Mox | imprint (`ExileFromHandLinked` from one's own hand); `ManaProd::Linked` | `ChooseDiscard` (own hand) |
+| City of Traitors | `EventKind::PlaysLand` (305.1: played, not put; subjects the land and the player), `Slot::Land` | - |
+| Gemstone Mine | 28.1 | - |
+| Sunken Ruins, Loot, Orcish Lumberjack, Squandered Resources | 28.1 (Loot's other two exhaust abilities are ordinary) | `PayMana`, `Sacrifice`, `ChooseMana` |
+| Mishra's Workshop, Delighted Halfling | 28.2 | - |
+| Badgermole Cub | earthbend (701.65a: the land becomes a 0/0 creature with haste, `Until::Forever`, +1/+1 counters, and gains "when it dies or is exiled, return it to the battlefield tapped", 28.3); 28.1 | `Target` |
+| Palantir of Orthanc | `LetDrawElseMill`: the target opponent decides (101.4), else mill X (the source's counters as it last existed) and they lose the milled mana value | `YesNo` (the opponent's) |
+| Tersa Lightshatter | `ExileRandomGraveyardPlayable` (a public chance key, `KEY_DIE`) with a play permission this turn | - |
+| Demonic Consultation | `NameExileRevealUntil` (24.5's naming: `PASS` names a card not in the library, exiling it all) | `NameCard` |
+| Balance | `Balance`: lands, then hands, then creatures; each player above the fewest chooses what goes (APNAP), permanents as a set in slot order, sacrificed at once; cards discarded one at a time; a player shielded from the controller's effects keeps everything | `Sacrifice`, `Discard` |
+| Ursine Monstrosity | `MillAttackPump`; `Mod::MustAttackPlayer` (attacks that player if able, never one of their planeswalkers; two players: the random opponent is the opponent) | - |
+| Transmute Artifact | `SacrificeTutorPayDifference` | `Sacrifice`, `SearchLibrary`, `YesNo`, `PayMana` |
+| Lim-Dul's Vault | `LookTopRepeatPayLife` then the pile on top (`PileTo`) | `YesNo` per round (life at least 1, 119.4), `PutOnTop` |
+| Malcolm, Alluring Scoundrel | `LootMayCastFree`: a free cast of the discarded card from the graveyard (608.2g; a graveyard permission's "without paying" now counts) | `Discard`, `YesNo` |
+| Time Vault | `CardDef::skip_turn_untap`: as a turn of its controller would begin while it is tapped, "skip that turn" replaces it (614.10; the next turn is computed as usual) and untaps it | `YesNo` (`Task::MaySkipTurn`) |
+| Elite Spellbinder | `ExileFromHandTaxed`: `PermKind::Taxed(n)` (its owner may play it while it stays exiled) and `CastFrom::Taxed(n)` (601.2f: {n} more) | `ChooseDiscard` (the seen hand) |
+| Cloak and Dagger, Entwined | target opponent and up to one creature they control; `ExileHandCardOrTargetUntil` (a nonland card of the revealed hand or that creature, until it leaves, 610.3) | `Target`, `ChooseDiscard` |
+| Black Widow, Super Spy | `ExileUntilNonlandCounterOrCast`: the counter, or a permission this turn with mana of any type (609.4b, `any_mana`) | `YesNo` |
+| Prismatic Ending | converge: `Filter::MvAtMostConverge`, `CardDef::converge`; the payment records the colours (28.8) | X, `Target`, `PayMana` |
+| Painter's Servant | "as it enters, choose a color" (`ChooseColor`, `Mark::ChosenColor`); every card, spell and permanent (not an emblem) has that colour too (`colors_of`, and a spell's damage source) | `ChooseColor` |
+| Sunfall | `ExileAllCreaturesIncubate`; the Incubator token is a double-faced token (its back face, Phyrexian Token, lowered with Sunfall's faces and placed by `CardDb::from_cards` with the token as its front); a token transforms when it is double-faced | - |
+| Serra Paragon | `CardDef::gy_play_mv`: once during each of its controller's turns (per Paragon, `Mark::UsedTurn`) a land played or a permanent spell of mana value 3 or less cast from their graveyard (`CastFrom::Paragon`), which gains its trigger (28.3) | - |
+| Goblin Welder | `TargetReq::pair`: the second target is a card owned by the controller of the first; offered only when a pair exists, the first target only if it can be paired; `SwapWithGraveyardCard` checks the pair again (608.2b) and sacrifices and returns in one batch | `Target` x2 |
+
+### 28.5 Decisions, tasks, the bot
+
+No new decision kind (39 still). New tasks: `ManaNowCosts` (asks `Sacrifice`; task code 12, as
+`PayCosts`) and `MaySkipTurn` (asks `YesNo`; task code 16, as `AsEnters`); every new `Ext` op is
+op code 37. The heuristic bot stays legal for every decision; it declines Time Vault's skip and
+Lim-Dul's Vault's life payments (it answered yes to every `YesNo`: it would skip its own turns
+and pay life down to 0) and still never activates mana abilities at priority. Measured after
+(`strength_against_the_old_policy_and_random`, 1,000 games each): heuristic vs random 95.6% +-
+0.6, vs `HeuristicV1` 64.3% +- 1.1 (section 21.4: 95.8, 62.9 on main's pool).
+`tests/bots.rs::registered_bot_beats_random` now plays 200 games: the new pool gave 0.833 on its
+first 60 (one game under 0.85) and 0.895 over 200.
+
+### 28.6 Encoding (layout v3, unchanged)
+
+Nothing in `az/encode.rs` changed: the new cards fill their identities. New token kind to
+register: the Incubator (an artifact, no power and toughness; its back face has the Incubator's
+identity, as a face has its front's). Not encoded (no spare floats were used): `Game::marks`
+(an exhaust used, a chosen colour, a converge count, a granted leave trigger, a Paragon used this
+turn) and `ManaPool::art` (the pool's {C} count includes it).
+
+### 28.7 Hidden information and fuzzing
+
+Demonic Consultation reveals every card it exiles or takes (face up); Lim-Dul's Vault's piles
+are looks (`look_top`), and the end puts the rest of the library on the bottom in a random
+order nobody knows (`put_on_bottom_randomly`: the shuffle, with the pile left on top); Balance's
+discards happen one at a time; Elite Spellbinder and Cloak and Dagger choose from a hand the
+chooser has seen (a `LIBRARY` slot of it); Tersa's random card is a public chance key.
+Transmute Artifact's found card waits, while the payment is decided, revealed on top of the
+library already shuffled (the shuffle comes early: nothing in between touches the library): the
+fuzzer's information-set check caught the first version, which revealed it at its library
+position (a position that differs between sampled worlds under the same keys).
+
+Fuzzing (20,000 games over the 467 cards): no failure (70 s). Faults found on the way, all fixed:
+that leak; the "can't be countered" check read the sources' abilities after they were activated (a source gone by then); a
+spell with an alternative cost offered as castable with restricted mana while the mana-cost
+choice ignored it ("ChooseAltCost with no options"); a Paragon permission looked up after the
+card moved to the stack. The speed measurement (17) caught one more: a card of mana value 0 was
+castable from a graveyard with no Serra Paragon (same games on main's pool after the fix).
+
+### 28.8 Simplifications (differences from the CR)
+
+* Mana abilities with a mana cost or a choice in their cost are activated only with priority
+  (28.1), never in the middle of a payment: their mana can't pay an "unless pays" cost or a
+  cost paid while no player has priority unless it was made before.
+* Converge counts the colours the payment could show: the pool's mana as the engine spent it,
+  several-mana sources' spent mana by type, and for single-mana sources the most colours an exact
+  payment by them can have (a player who taps a dual land chooses its colour, 106.1b; for
+  Prismatic Ending more is never worse). With more than seven such sources, an upper bound.
+* Lim-Dul's Vault puts each looked-at five on the bottom in the order looked at (an order the
+  player could choose; the library is shuffled at the end, so only a loop through the whole
+  library could tell).
+* Painter's Servant's colour is added before any "becomes [colour]" effect regardless of
+  timestamps (the cube has no such effect).
+* Serra Paragon: a card with a route of its own from the graveyard (escape, flashback, ...) is
+  cast that way, and a card with another face isn't cast with the Paragon (one route per card).
+* A permanent's granted leave trigger survives "loses all abilities" (no such interaction in the
+  cube's cards).
+* Goblin Welder: if "that player" is shielded from the controller's effects, the artifact isn't
+  sacrificed but the card still returns.
+
+### 28.9 Still blocked
+
+* **Chromatic Star**: an IR defect (docs/ir_defects.md 15): its "put into a graveyard from the
+  battlefield" trigger is `leaves_battlefield` in the IR (it would draw when exiled or bounced).
+  Its mana ability ({1}, {T}, sacrifice) lowers.
+* **Memory Jar** (`Effect:EachPlayerExilesHandDrawsNReturnsLater`) and **Headliner Scarlett**
+  (`ExileTopCardsWithPlayPermission.face_down`): face-down exile is a hidden zone the engine
+  doesn't have (section 10's knowledge, `determinize`, the view and the encoding all treat exile
+  as public).
+* **Rain of Filth** (`Effect:GrantAbilityToPermanentsYouControlUEOT`): "lands you control gain
+  'Sacrifice this land: Add {B}'" grants an ability of another card, usable together with the
+  land's own mana ability in one payment (tap it, then sacrifice it); section 18's payment takes
+  one ability per card.

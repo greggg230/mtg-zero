@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -50,6 +50,7 @@ permission) and a consumer can go wrong with it.
 | 12 | Minsc & Boo, Timeless Heroes | colour dropped | Boo's token printing with no `color_indicator` (a colourless Boo) | `color_indicator: [R]` | `cards/parser/effects_ext.py::_CREATE_NAMED_TOKEN`, `_token_printing` | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 13 | Ajani, Nacatl Pariah // Ajani, Nacatl Avenger | reflexive trigger flattened | the 0: `Sequence [CreateToken, IfCondition(ControlOtherPermanentOfColor, DealDamageFromEvent → any target)]` | a reflexive triggered ability (CR 603.12) after the token, its target chosen when it triggers | `cards/parser/layout_face_grammar.py` (`_WHEN_YOU_DO`) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 14 | The Sensational She-Hulk; Enduring Innocence | one flag, two rules | `TriggeredAbility.once_per_turn: true` for both | "do this only once each turn" (603.2h) apart from "this ability triggers only once each turn" | `TriggeredAbility.once_per_turn` (`turn.py::should_fire_trigger`) | told apart by the effect's shape | suspected |
+| 15 | Chromatic Star | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (the IR's "put into a graveyard from the battlefield", as Titania's) | `cards/parser/triggers.py` (the "this artifact is put into a graveyard from the battlefield" entry, ~line 744) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -238,6 +239,24 @@ Ajani, he deals damage equal to the number of creatures you control to any targe
   (`engine/tests/cards_m7b_faces4.rs`, "Test Ajani"), so it becomes supported once the IR is
   fixed and the lowering reads the reflexive form (the engine has reflexive triggers, ENGINE.md
   23.2).
+
+### G. A trigger event widened (M7c tail part 1)
+
+**15. Chromatic Star.** Oracle: "{1}, {T}, Sacrifice this artifact: Add one mana of any color.
+When this artifact is put into a graveyard from the battlefield, draw a card."
+
+* IR: the triggered ability's `event` is `leaves_battlefield` (with `IsSelf`): it would also draw
+  when the Star is exiled, bounced or put into a library.
+* Should be: `event: dies`, which the IR uses for "put into a graveyard from the battlefield" of
+  any permanent (Titania, Protector of Argoth's lands; the engine's `EventKind::Dies`).
+* Source: `cards/parser/triggers.py`, the phrase table entry `"this artifact is put into a
+  graveyard from the battlefield": (Event.LEAVES_BATTLEFIELD, IsSelf())` (~line 744); its comment
+  says it mirrors a static-registry simplification ("slightly looser - also fires if exiled",
+  Nutrient Block) for per-card parity.
+* Fix: map the phrase to `Event.DIES` with `IsSelf()` (and fix the registry entry it mirrors).
+* Engine: blocked, `IR:TriggeredAbility.event(leaves_battlefield for "put into a graveyard")`
+  (`lower::IR_DEFECTS`); `tests/cards_m7c_tail.rs::chromatic_star_is_blocked_by_its_ir_event`.
+  The other 29 cards of the batch: their IR matches their Oracle text.
 
 ## Suspected defects (representational)
 
