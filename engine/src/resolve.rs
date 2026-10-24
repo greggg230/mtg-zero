@@ -205,7 +205,23 @@ impl Game {
                         self.entering_x = item.x;
                         self.entering_times = item.times;
                         let bestowed = self.def_of(card).bestowed;
-                        self.put_onto_battlefield(card, item.controller);
+                        // Cast with Serra Paragon's permission: the permanent
+                        // gains its trigger.
+                        let grant = if self.marks.is_empty() {
+                            None
+                        } else {
+                            let r = self.obj_ref(card);
+                            self.marks.iter().find_map(|&(o, m)| match m {
+                                crate::game::Mark::GrantOnEnter { def, slot } if o == r => Some((def, slot)),
+                                _ => None,
+                            })
+                        };
+                        let entered = self.put_onto_battlefield(card, item.controller);
+                        if let Some((def, slot)) = grant {
+                            if self.live(entered) && self.objs[card.i()].zone == Zone::Battlefield {
+                                self.marks.push((entered, crate::game::Mark::LeaveTrigger { def, slot, exile: false }));
+                            }
+                        }
                         // CR 608.3c: a bestowed Aura enters attached to the
                         // creature it targeted (checked as it began
                         // resolving).

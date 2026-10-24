@@ -1198,6 +1198,16 @@ pub struct CardDef {
     /// battlefield, spells, and permanents are the chosen color in addition
     /// to their other colors" (Painter's Servant; layer 5, CR 613.1e).
     pub paints: bool,
+    /// "Whenever you tap a creature for mana, add an additional <mana>"
+    /// (Badgermole Cub; a triggered mana ability, CR 605.1b): per type.
+    pub extra_mana_creature: [u8; 6],
+    /// "Once during each of your turns, you may play a land from your
+    /// graveyard or cast a permanent spell with mana value n or less from
+    /// your graveyard" (Serra Paragon; 0 = none) ...
+    pub gy_play_mv: u8,
+    /// ... "If you do, it gains '<delayed ability k>'" (its trigger
+    /// `delayed_base + k`).
+    pub gy_play_k: u8,
 }
 
 /// A ward cost (CR 702.21a-b): mana, life, or a card to discard.

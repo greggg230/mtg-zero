@@ -979,3 +979,92 @@ fn delighted_halfling_mana_for_legends_that_cant_be_countered_cr101_2() {
     assert_eq!(g.obj(leg).zone, Zone::Battlefield, "it can't be countered");
     assert_eq!(g.obj(cs).zone, Zone::Graveyard);
 }
+
+// ---- Badgermole Cub --------------------------------------------------------
+
+/// Pay with sources on the named permanents (one pick each), in order.
+fn pay_with(g: &mut Game, cards: &[CardIdx]) {
+    for &c in cards {
+        assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", g.log_lines().join("\n"));
+        let pick = *opts(g).iter().find(|o| matches!(o, Choice::Ability(x, _) if *x == c)).expect("a source of that card");
+        g.choose(pick);
+    }
+}
+
+/// "Whenever you tap a creature for mana, add an additional {G}" (a
+/// triggered mana ability, CR 605.1b). Earthbend 1 (701.65a): "Target land
+/// you control becomes a 0/0 creature with haste that's still a land. Put a
+/// +1/+1 counter on it. When it dies or is exiled, return it to the
+/// battlefield tapped."
+#[test]
+fn badgermole_cub_earthbends_and_creatures_tap_for_more_cr701_65a() {
+    let g = scen().battlefield(0, &["Badgermole Cub", "Llanowar Elves"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{G}{G}")) && !g.can_pay(0, &cost("{G}{G}{G}")), "the Elves make {{G}}{{G}}");
+    let g = scen().battlefield(0, &["Llanowar Elves"]).at(Step::Main1, 0).start();
+    assert!(!g.can_pay(0, &cost("{G}{G}")));
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Plains", "Mountain"])
+        .hand(0, &["Badgermole Cub", "Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let forests: Vec<CardIdx> = g.permanents_of(0).filter(|&c| g.name(c) == "Forest").collect();
+    let plains = bf(&g, 0, "Plains");
+    let mountain = bf(&g, 0, "Mountain");
+    let cub = g.card(0, "Badgermole Cub", Zone::Hand);
+    g.choose(Choice::Cast(cub));
+    pay_with(&mut g, &forests);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(plains));
+    settle(&mut g);
+    assert!(g.is_creature(plains) && g.is_type(plains, engine::db::types::LAND));
+    assert_eq!((g.power(plains), g.toughness(plains)), (1, 1));
+    assert!(g.has_kw(plains, engine::db::Kw::Haste));
+    assert!(g.can_pay(0, &cost("{W}{G}")) && !g.can_pay(0, &cost("{W}{W}")), "tapped for mana as a creature: {{W}} and {{G}}");
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(plains));
+    pay_with(&mut g, &[mountain]);
+    settle(&mut g);
+    assert_eq!(g.obj(plains).zone, Zone::Battlefield, "it returns");
+    assert!(g.obj(plains).tapped, "tapped");
+    assert!(!g.is_creature(plains), "a new object: just a land");
+}
+
+// ---- Serra Paragon ---------------------------------------------------------
+
+/// "Once during each of your turns, you may play a land from your graveyard
+/// or cast a permanent spell with mana value 3 or less from your graveyard.
+/// If you do, it gains 'When this permanent is put into a graveyard from the
+/// battlefield, exile it and you gain 2 life'" (CR 601.2a, 305.1).
+#[test]
+fn serra_paragon_plays_one_card_from_the_graveyard_each_turn_cr601_2a() {
+    let mut g = scen()
+        .battlefield(0, &["Serra Paragon", "Forest", "Forest", "Mountain"])
+        .graveyard(0, &["Test Bear", "Island", "Test Giant"])
+        .hand(0, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    let island = g.card(0, "Island", Zone::Graveyard);
+    let giant = g.card(0, "Test Giant", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(bear)) && g.has_option(Choice::Play(island)));
+    assert!(!g.has_option(Choice::Cast(giant)), "mana value 5");
+    g.choose(Choice::Cast(bear));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    assert!(!g.has_option(Choice::Play(island)), "once each turn");
+    // The Bear dies: exiled, 2 life.
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(bear));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Exile, "exiled from the graveyard");
+    assert_eq!(g.life(0), 22);
+    // Not on the opponent's turn.
+    let g = scen().battlefield(0, &["Serra Paragon"]).graveyard(0, &["Island"]).at(Step::Main1, 1).start();
+    assert!(!g.has_option(Choice::Play(g.card(0, "Island", Zone::Graveyard))));
+}

@@ -214,6 +214,21 @@ fn units_of(v: &[u8; 6]) -> impl Iterator<Item = Unit> + '_ {
 }
 
 impl Game {
+    /// The mana `p`'s permanents add whenever `p` taps a creature for mana
+    /// (Badgermole Cub).
+    pub(crate) fn creature_mana_bonus(&self, p: PlayerId) -> [u8; 6] {
+        let mut v = [0u8; 6];
+        for x in self.permanents_of(p) {
+            let e = &self.abilities(x).extra_mana_creature;
+            if *e != [0; 6] {
+                for t in 0..6 {
+                    v[t] += e[t];
+                }
+            }
+        }
+        v
+    }
+
     /// The colours of the cards exiled with permanent `c` (CR 607.2a: an
     /// imprinted card), still in exile.
     pub(crate) fn linked_colors(&self, c: CardIdx) -> ManaMask {
@@ -293,6 +308,8 @@ impl Game {
             .permanents_of(p)
             .flat_map(|x| self.abilities(x).extra_mana_on_tap.iter().copied())
             .collect();
+        // "Whenever you tap a creature for mana, add an additional {G}."
+        let creature_bonus = self.creature_mana_bonus(p);
         for c in self.permanents_of(p) {
             if Some(c) == exclude {
                 continue;
@@ -328,6 +345,11 @@ impl Game {
                         if self.has_subtype(c, sub) {
                             extra[t as usize] += 1;
                         }
+                    }
+                }
+                if creature_bonus != [0; 6] && ad.cost.tap && self.is_creature(c) {
+                    for t in 0..6 {
+                        extra[t] += creature_bonus[t];
                     }
                 }
                 let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra, Some(c)) else { continue };

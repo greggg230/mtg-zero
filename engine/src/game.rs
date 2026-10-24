@@ -128,6 +128,9 @@ pub enum CastFrom {
     /// With a permission that taxes it (from exile): its mana cost plus {n}
     /// (Elite Spellbinder).
     Taxed(u8),
+    /// From its owner's graveyard, once during their turn, with Serra
+    /// Paragon's permission: for its mana cost.
+    Paragon,
 }
 
 /// A permission to play a card from a zone other than a hand (CR 601.2a,
@@ -573,6 +576,15 @@ pub enum Mark {
     ChosenColor(u8),
     /// This spell can't be countered (mana spent on it said so).
     Uncounterable,
+    /// It has a triggered ability an effect gave it: "when this is put into
+    /// a graveyard from the battlefield [or exiled], ..." (trigger `slot`
+    /// of definition `def`; Serra Paragon, earthbend).
+    LeaveTrigger { def: DefId, slot: u8, exile: bool },
+    /// This spell, cast with Serra Paragon's permission, gives the permanent
+    /// it becomes that trigger.
+    GrantOnEnter { def: DefId, slot: u8 },
+    /// Its "once during each of your turns" was used in turn n.
+    UsedTurn(u16),
 }
 
 impl Game {
@@ -1310,6 +1322,24 @@ impl Game {
         }
         if from == Zone::Battlefield && !self.links.is_empty() {
             self.release_links(old);
+        }
+        if from == Zone::Battlefield && !self.marks.is_empty() {
+            // Triggered abilities an effect gave it (CR 603.10a: they look
+            // back): "when it dies [or is exiled]", about the card now.
+            let fired: Vec<(DefId, u8)> = self
+                .marks
+                .iter()
+                .filter_map(|&(r, m)| match m {
+                    Mark::LeaveTrigger { def, slot, exile } if r == old && (to == Zone::Graveyard || exile && to == Zone::Exile) => {
+                        Some((def, slot))
+                    }
+                    _ => None,
+                })
+                .collect();
+            for (def, slot) in fired {
+                let ev = crate::triggers::EvCtx { obj: Some(new), ..Default::default() };
+                self.waiting.push(crate::triggers::PendingTrigger { controller: old_controller, source: old, source_def: def, slot, ev });
+            }
         }
         new
     }

@@ -359,7 +359,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to_nonland_permanents_during_your_turn", grants_retrace_to_nonland_permanents_during_your_turn);
-        l.deny("CardPrinting.grants_once_per_turn_graveyard_play_mv", grants_once_per_turn_graveyard_play_mv);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
         l.deny("CardPrinting.chooses_card_name_as_enters", chooses_card_name_as_enters);
         l.deny("CardPrinting.named_spell_cost_increase", named_spell_cost_increase);
@@ -367,7 +366,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.reconfigure_cost", reconfigure_cost);
         l.deny("CardPrinting.reconfigure_cost_str", reconfigure_cost_str);
         l.deny("CardPrinting.equipment_bonus_per_own_counter", equipment_bonus_per_own_counter);
-        l.deny("CardPrinting.extra_mana_when_you_tap_creature_for_mana", extra_mana_when_you_tap_creature_for_mana);
         l.deny("CardPrinting.void_exile_replacement", void_exile_replacement);
         l.deny("CardPrinting.zone_abilities", zone_abilities);
         l.deny("CardPrinting.emerge_cost", emerge_cost);
@@ -947,6 +945,27 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         n
     };
+    // Serra Paragon: what a permanent played or cast from the graveyard
+    // this way gains: "When this permanent is put into a graveyard from the
+    // battlefield, exile it and you gain 2 life" (a delayed ability of this
+    // card that the permanent's leaving triggers, ENGINE.md 28).
+    let gy_play_mv = l.int("CardPrinting.grants_once_per_turn_graveyard_play_mv", *grants_once_per_turn_graveyard_play_mv, 0, 20) as u8;
+    let gy_play_k = if gy_play_mv > 0 {
+        let mut b = crate::program::Builder::default();
+        b.op(crate::program::Op::Ext(crate::program::Ext::ExileEventCard));
+        b.op(crate::program::Op::GainLife { who: crate::program::Who::You, n: crate::program::Amount::Fixed(2) });
+        l.delayed_ability(b.finish())
+    } else {
+        0
+    };
+    // "Whenever you tap a creature for mana, add an additional {G}."
+    let mut extra_mana_creature = [0u8; 6];
+    for m in extra_mana_when_you_tap_creature_for_mana {
+        match letter_index(m) {
+            Some(i) => extra_mana_creature[i] += 1,
+            None => l.unsupported(format!("CardPrinting.extra_mana_when_you_tap_creature_for_mana({m})")),
+        }
+    }
     // Delayed triggered abilities come last (`delayed_base`).
     let delayed_base = triggers.len() as u8;
     triggers.extend(std::mem::replace(&mut l.delayed, saved_delayed));
@@ -1346,6 +1365,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         skip_turn_untap: *may_skip_turn_to_untap,
         converge: false,
         paints: *paints_all_objects_chosen_color_at_etb,
+        extra_mana_creature,
+        gy_play_mv,
+        gy_play_k,
     };
     // The bestowed face (CR 702.103b): an Aura enchantment with enchant
     // creature (an Aura spell targets a creature, 303.4a) whose enchanted

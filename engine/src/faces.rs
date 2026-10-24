@@ -449,7 +449,19 @@ impl Game {
     pub(crate) fn play_land(&mut self, p: PlayerId, c: CardIdx, face: Option<DefId>) {
         self.players[p as usize].lands_played += 1;
         self.entering_face = face;
+        // From a graveyard without a "play lands from your graveyard"
+        // permanent: Serra Paragon's permission.
+        let paragon = if self.objs[c.i()].zone == Zone::Graveyard && !self.lands_from_graveyard(p) {
+            self.paragon(p, 0).map(|s| self.use_paragon(s))
+        } else {
+            None
+        };
         let r = self.put_onto_battlefield(c, p);
+        if let Some((def, slot)) = paragon {
+            if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
+                self.marks.push((r, crate::game::Mark::LeaveTrigger { def, slot, exile: false }));
+            }
+        }
         self.note(|g| format!("P{p} plays {}", g.name(c)));
         // "Whenever a player plays a land" (City of Traitors).
         self.event(crate::triggers::Event {

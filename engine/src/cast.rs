@@ -364,6 +364,16 @@ impl Game {
                     Some(CastFrom::Retrace)
                 } else if self.mayhem_ok(p, card) {
                     Some(CastFrom::Mayhem)
+                } else if !def.is(types::LAND)
+                    && def.is_permanent_card()
+                    && def.other_face().is_none()
+                    && def.halves.is_none()
+                    && self.paragon(p, def.mana_value()).is_some()
+                {
+                    // (A route the card has of its own comes first: one
+                    // route per card; a card with another face isn't cast
+                    // this way, ENGINE.md 28.)
+                    Some(CastFrom::Paragon)
                 } else {
                     None
                 }
@@ -423,6 +433,7 @@ impl Game {
             CastFrom::Mayhem => with(def.cost),
             // "A spell cast this way costs {n} more" (CR 601.2f).
             CastFrom::Taxed(n) => with(def.cost.plus(&crate::mana::ManaCost { generic: n, ..Default::default() })),
+            CastFrom::Paragon => with(def.cost),
         }
     }
 
@@ -707,6 +718,32 @@ impl Game {
     }
 
     /// "You may play lands from your graveyard" (Crucible of Worlds).
+    /// A Serra Paragon of `p` whose "once during each of your turns" is
+    /// unused this turn and that allows mana value `mv` (CR 601.2a, 305.1).
+    pub(crate) fn paragon(&self, p: PlayerId, mv: u8) -> Option<CardIdx> {
+        if self.turn.active != p {
+            return None;
+        }
+        let turn = self.turn.number as u16;
+        self.permanents_of(p).find(|&c| {
+            let d = self.abilities(c);
+            d.gy_play_mv > 0 && mv <= d.gy_play_mv && {
+                let r = self.obj_ref(c);
+                !self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::UsedTurn(turn))
+            }
+        })
+    }
+
+    /// Use Serra Paragon `c`'s permission this turn; the trigger the
+    /// permanent will gain.
+    pub(crate) fn use_paragon(&mut self, c: CardIdx) -> (crate::ids::DefId, u8) {
+        let r = self.obj_ref(c);
+        self.marks.push((r, crate::game::Mark::UsedTurn(self.turn.number as u16)));
+        let def = self.objs[c.i()].def;
+        let d = self.abilities(c);
+        (def, d.delayed_base + d.gy_play_k)
+    }
+
     pub(crate) fn lands_from_graveyard(&self, p: PlayerId) -> bool {
         self.permanents_of(p).any(|c| self.abilities(c).lands_from_graveyard)
     }
@@ -752,7 +789,7 @@ impl Game {
                 opts.push(Opt { action, choice });
             }
         }
-        let lands_ok = land_ok && self.lands_from_graveyard(p);
+        let lands_ok = land_ok && (self.lands_from_graveyard(p) || self.paragon(p, 0).is_some());
         let mut esc = None;
         // (A token in a graveyard is not a card: nothing casts or plays it.)
         for c in self.graveyard_cards(p) {
@@ -1163,6 +1200,9 @@ impl Game {
     /// exist there (712.8f, 715.3b).
     pub(crate) fn begin_cast_face(&mut self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) {
         let from = self.cast_route(p, card).expect("a castable card");
+        // Serra Paragon's permission, found while the card is in the
+        // graveyard (used as it is cast).
+        let paragon = if from == crate::game::CastFrom::Paragon { self.paragon(p, self.def_of(card).mana_value()) } else { None };
         // "If that spell would be put into your graveyard, exile it
         // instead": a permission from a graveyard that says so (unless
         // flashback, which exiles it anyway, is how it is cast).
@@ -1182,6 +1222,12 @@ impl Game {
             self.objs[card.i()].def = f;
         }
         self.note(|g| format!("P{p} casts {} ({from:?})", g.name(card)));
+        if let Some(src) = paragon {
+            let (def, slot) = self.use_paragon(src);
+            // (The card is on the stack: the spell is marked.)
+            let r = self.obj_ref(card);
+            self.marks.push((r, crate::game::Mark::GrantOnEnter { def, slot }));
+        }
         if from == crate::game::CastFrom::Flashback {
             self.objs[card.i()].flashback = true;
         }

@@ -722,6 +722,19 @@ impl Game {
             }
             _ => productions(self, p, prod, Some(src.card)),
         };
+        // "Whenever you tap a creature for mana, add an additional {G}" (a
+        // triggered mana ability, CR 605.1b).
+        let mut prods = prods;
+        if ad.cost.tap && self.is_creature(src.card) {
+            let more = self.creature_mana_bonus(p);
+            if more != [0; 6] {
+                for v in prods.iter_mut() {
+                    for t in 0..6 {
+                        v[t] += more[t];
+                    }
+                }
+            }
+        }
         if let Some(c) = sac {
             self.sacrifice(c);
         }

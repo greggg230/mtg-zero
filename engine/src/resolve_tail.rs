@@ -115,6 +115,14 @@ impl Game {
                 }
             }
             Ext::ExileUntilNonlandCounterOrCast => self.exile_until_nonland_counter_or_cast(f),
+            Ext::GrantLeaveTrigger { on, k, exile } => {
+                let slot = self.db.def(f.source_def).delayed_base + k;
+                for c in self.objs_on(f, on) {
+                    let r = self.obj_ref(c);
+                    self.marks.push((r, crate::game::Mark::LeaveTrigger { def: f.source_def, slot, exile: *exile }));
+                }
+                Flow::Next
+            }
             Ext::ExileAllCreaturesIncubate { token } => {
                 let all: Vec<CardIdx> = self.battlefield.iter().copied().filter(|&c| self.is_creature(c)).collect();
                 self.begin_batch();

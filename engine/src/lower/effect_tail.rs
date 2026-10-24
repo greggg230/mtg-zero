@@ -164,6 +164,30 @@ pub(crate) fn lower_effect_tail(l: &mut Lowerer, b: &mut Builder, e: &cats::Effe
             let Some(token) = super::effect_ext::named_token(l, "Incubator") else { return true };
             b.op(Op::Ext(Ext::ExileAllCreaturesIncubate { token }));
         }
+        // Earthbend n (CR 701.65a): "Target land you control becomes a 0/0
+        // creature with haste that's still a land. Put n +1/+1 counters on
+        // it. When it dies or is exiled, return it to the battlefield
+        // tapped."
+        E::Earthbend(nodes::Earthbend { n }) => {
+            let n = l.int("Earthbend.n", *n, 1, 20);
+            let t = b.target(and(Filter::Type(types::LAND), Filter::Controller(true)), 1, 1);
+            let mods = vec![
+                crate::db::Mod::Types { add: types::CREATURE, subtypes: Vec::new(), replace: false },
+                crate::db::Mod::SetPt(0, 0),
+                crate::db::Mod::Keywords({
+                    let mut k = KwSet::default();
+                    k.insert(crate::db::Kw::Haste);
+                    k
+                }),
+            ];
+            b.op(Op::Ext(Ext::Apply { on: crate::program::On::Target(t), mods, until: crate::layers::Until::Forever }));
+            b.op(Op::Ext(Ext::PutCounters { on: crate::program::On::Target(t), counter: crate::db::Counter::P1P1, n: Amount::Fixed(n) }));
+            let mut back = Builder::default();
+            back.op(Op::Ext(Ext::ReturnEventCard));
+            back.op(Op::Ext(Ext::Tap { on: crate::program::On::Made }));
+            let k = l.delayed_ability(back.finish());
+            b.op(Op::Ext(Ext::GrantLeaveTrigger { on: crate::program::On::Target(t), k, exile: true }));
+        }
         E::ExileUntilNonlandThenCounterOrMayCastIt(nodes::ExileUntilNonlandThenCounterOrMayCastIt {}) => {
             b.op(Op::Ext(Ext::ExileUntilNonlandCounterOrCast));
         }

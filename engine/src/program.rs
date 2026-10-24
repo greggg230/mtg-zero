@@ -631,6 +631,10 @@ pub enum Ext {
     /// Exile all creatures; incubate X, X the number exiled this way (CR
     /// 701.53a: create `token`, an Incubator, with X +1/+1 counters).
     ExileAllCreaturesIncubate { token: u16 },
+    /// Each object of `on` gains delayed ability `k` of the source's card as
+    /// a triggered ability: "when it dies [or is exiled (`exile`)], ..."
+    /// (earthbend; the event's object is the card where it went).
+    GrantLeaveTrigger { on: On, k: u8, exile: bool },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
