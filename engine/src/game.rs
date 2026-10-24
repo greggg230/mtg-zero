@@ -577,6 +577,8 @@ pub struct Game {
     /// engine limit on a loop of optional actions, CR 732.2a: Zirda with
     /// Basalt Monolith makes unbounded mana; ENGINE.md 29).
     pub(crate) activations: Vec<(ObjRef, u8, u8)>,
+    /// `SEEN_*` bits: a card of this game has the rare rule (ENGINE.md 29).
+    pub(crate) seen: u8,
     // ---- M7b part 3b: the initiative and dungeons (ENGINE.md 27.4) ----
     /// The player who has the initiative (CR 725).
     pub(crate) initiative: Option<PlayerId>,
@@ -596,6 +598,18 @@ pub struct Game {
     pub(crate) marks: Vec<(ObjRef, Mark)>,
     pub(crate) log: Option<Vec<String>>,
 }
+
+/// `Game::seen`: some card of the game has ascend; an ability discount
+/// (Zirda); a discount for spells cast from outside the hand (Bilbo); a
+/// retrace grant (Six); miracle, per owner (bit 4 + player).
+pub(crate) const SEEN_ASCEND: u8 = 1;
+pub(crate) const SEEN_ABILITY_DISCOUNT: u8 = 2;
+pub(crate) const SEEN_OUTSIDE_DISCOUNT: u8 = 4;
+pub(crate) const SEEN_RETRACE: u8 = 8;
+pub(crate) const SEEN_MIRACLE_P0: u8 = 16;
+/// (Bits 16 and 32 are miracle's.) A trigger on cards exiled from a library
+/// or graveyard (Laelia).
+pub(crate) const SEEN_EXILE_WATCH: u8 = 64;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -780,6 +794,7 @@ impl Game {
             prepared: Vec::new(),
             may_copies: 0,
             activations: Vec::new(),
+            seen: 0,
             initiative: None,
             dungeons: [Dungeon::default(); 2],
             rules_src: None,
@@ -803,6 +818,14 @@ impl Game {
     pub(crate) fn add_card(&mut self, def: DefId, owner: PlayerId, zone: Zone) -> CardIdx {
         assert!(self.objs.len() < u16::MAX as usize, "too many objects");
         let idx = CardIdx(self.objs.len() as u16);
+        // Rare rules some card of this game has (its faces included; a copy
+        // copies a card of the game): the hot paths look only if one does.
+        let d = self.db.def(def);
+        let seen = d.seen_bits() | d.back.map_or(0, |b| self.db.def(b).seen_bits());
+        self.seen |= seen;
+        if d.miracle.is_some() {
+            self.seen |= SEEN_MIRACLE_P0 << owner;
+        }
         self.objs.push(Obj {
             def,
             owner,
@@ -1398,7 +1421,7 @@ impl Game {
         }
         // "Whenever one or more cards are put into exile from your library
         // and/or your graveyard" (Laelia).
-        if to == Zone::Exile && matches!(from, Zone::Library | Zone::Graveyard) {
+        if to == Zone::Exile && matches!(from, Zone::Library | Zone::Graveyard) && self.seen & SEEN_EXILE_WATCH != 0 {
             self.event(Event::player(EventKind::ExiledFromLibGy, owner));
         }
         if from == Zone::Battlefield && !self.marks.is_empty() {
@@ -1499,7 +1522,7 @@ impl Game {
 
     /// Does `p` own a card with miracle (ENGINE.md 29)?
     pub(crate) fn has_miracle_card(&self, p: PlayerId) -> bool {
-        self.objs.iter().any(|o| o.owner == p && self.db.def(o.def).miracle.is_some())
+        self.seen & (SEEN_MIRACLE_P0 << p) != 0
     }
 
     /// Shuffle a library (CR 701.20): positions become unknown to everyone;

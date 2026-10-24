@@ -55,12 +55,12 @@ impl Game {
         }
         // "Spells you cast from anywhere other than your hand cost {1} less"
         // (Bilbo): castability from another zone, or a spell cast from one.
-        let outside = match self.objs[card.i()].zone {
+        let outside = || match self.objs[card.i()].zone {
             Zone::Hand => false,
             Zone::Stack => self.stack.iter().any(|s| s.kind == StackKind::Spell { card } && s.origin != Zone::Hand),
             _ => true,
         };
-        if outside && cost.generic > 0 {
+        if self.seen & crate::game::SEEN_OUTSIDE_DISCOUNT != 0 && cost.generic > 0 && outside() {
             for c in self.permanents_of(p) {
                 cost.generic = cost.generic.saturating_sub(self.abilities(c).outside_hand_discount);
             }
@@ -479,7 +479,8 @@ impl Game {
                 && self.def_of(e).grants_retrace.as_ref().is_some_and(|f| self.card_matches(f, card, &ctx))
         })
             // A permanent's: during its controller's turn (Six).
-            || self.turn.active == p
+            || self.seen & crate::game::SEEN_RETRACE != 0
+                && self.turn.active == p
                 && self.permanents_of(p).any(|c| self.abilities(c).grants_retrace.as_ref().is_some_and(|f| self.card_matches(f, card, &ctx)))
     }
 

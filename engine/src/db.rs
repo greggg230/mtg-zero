@@ -976,6 +976,17 @@ pub struct ActivatedDef {
 /// 601.2c with 107.3; "untap X target lands").
 pub const X_TARGETS: u8 = u8::MAX;
 
+impl CardDef {
+    /// `game::SEEN_*` bits of the rare rules this definition has.
+    pub(crate) fn seen_bits(&self) -> u8 {
+        (if self.ascend { crate::game::SEEN_ASCEND } else { 0 })
+            | (if self.ability_discount > 0 { crate::game::SEEN_ABILITY_DISCOUNT } else { 0 })
+            | (if self.outside_hand_discount > 0 { crate::game::SEEN_OUTSIDE_DISCOUNT } else { 0 })
+            | (if self.grants_retrace.is_some() && !self.emblem { crate::game::SEEN_RETRACE } else { 0 })
+            | (if self.trig_mask & (1 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
+    }
+}
+
 impl ActivatedDef {
     pub fn mana(&self) -> Option<&ManaAbility> {
         match &self.effect {

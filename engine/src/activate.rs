@@ -197,7 +197,7 @@ impl Game {
         }
         // "Abilities you activate that aren't mana abilities cost {2} less"
         // (Zirda; at least one mana stays).
-        if ad.mana().is_none() && m.generic > 0 && m.total() > 1 {
+        if self.seen & crate::game::SEEN_ABILITY_DISCOUNT != 0 && ad.mana().is_none() && m.generic > 0 && m.total() > 1 {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).ability_discount;
                 if n > 0 {
