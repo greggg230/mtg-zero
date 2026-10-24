@@ -12,6 +12,9 @@ use crate::resolve::{Flow, Frame};
 /// `Permission::turn` with this bit: "until the end of your next turn", the
 /// low bits the permission player's turn count it ends with.
 pub const PERM_UNTIL_TURNS: u32 = 1 << 31;
+/// `Permission::turn` with this bit: "on a later turn" (warp), the low bits
+/// the turn number after which it holds.
+pub const PERM_LATER: u32 = 1 << 30;
 
 fn yes_no() -> Vec<Opt> {
     vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }]
@@ -147,6 +150,85 @@ impl Game {
                 Flow::Next
             }
             Ext::Cascade => self.cascade(f),
+            Ext::ExtraCombat => {
+                use crate::game::Step;
+                let combat = matches!(
+                    self.turn.step,
+                    Step::BeginCombat | Step::DeclareAttackers | Step::DeclareBlockers | Step::FirstStrikeDamage | Step::CombatDamage | Step::EndCombat
+                );
+                if combat {
+                    self.turn.extra_combats = self.turn.extra_combats.saturating_add(1);
+                    self.note(|_| "an additional combat phase follows".to_string());
+                }
+                Flow::Next
+            }
+            Ext::WarpExile => {
+                if let Some(&c) = self.objs_on(f, &On::EventObj).first() {
+                    let owner = self.objs[c.i()].owner;
+                    let token = self.is_token(c);
+                    let card = self.move_card(c, Zone::Exile, Pos::Top);
+                    if !token && self.objs[c.i()].zone == Zone::Exile {
+                        // "Then you may cast it from exile on a later turn."
+                        self.permissions.push(crate::game::Permission {
+                            card,
+                            player: owner,
+                            turn: Some(PERM_LATER | self.turn.number),
+                            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None },
+                        });
+                    }
+                }
+                Flow::Next
+            }
+            Ext::MiracleCast => {
+                let p = f.controller;
+                let Some(r) = f.ev.obj else { return Flow::Next };
+                let card = r.idx;
+                if !self.live(r) || self.objs[card.i()].zone != Zone::Hand || self.objs[card.i()].owner != p {
+                    return Flow::Next;
+                }
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        // The rest of the effect waits for the cast (CR
+                        // 608.2g).
+                        let mut back = f.clone();
+                        back.pc += 1;
+                        back.i = 0;
+                        self.agenda.push(Task::Run(back));
+                        self.miracle_cast = Some(card);
+                        self.begin_cast(p, card);
+                        Flow::Suspend
+                    }
+                    Some(_) => Flow::Next,
+                    None => {
+                        if !self.can_cast_miracle(p, card) {
+                            return Flow::Next;
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, yes_no());
+                        Flow::Suspend
+                    }
+                }
+            }
+            Ext::Airbend { tgt, cost } => {
+                for t in self.targets_of(f, *tgt) {
+                    let Target::Obj(o) = t else { continue };
+                    if !matches!(self.objs[o.idx.i()].zone, Zone::Battlefield | Zone::Stack) {
+                        continue;
+                    }
+                    let owner = self.objs[o.idx.i()].owner;
+                    let token = self.is_token(o.idx);
+                    self.note(|g| format!("{} is airbent", g.name(o.idx)));
+                    let card = self.move_card(o.idx, Zone::Exile, Pos::Top);
+                    if !token && self.objs[o.idx.i()].zone == Zone::Exile {
+                        self.permissions.push(crate::game::Permission {
+                            card,
+                            player: owner,
+                            turn: None,
+                            kind: crate::game::PermKind::Airbent(cost.generic),
+                        });
+                    }
+                }
+                Flow::Next
+            }
             Ext::CopyTokensEnteredThisTurn => {
                 let p = f.controller;
                 let turn = self.turn.number as u16;
@@ -297,6 +379,50 @@ impl Game {
         Flow::Next
     }
 
+    /// Could `p` cast `card` (in hand) for its miracle cost now (CR 702.94a,
+    /// 608.2g: timing ignored)?
+    pub(crate) fn can_cast_miracle(&self, p: PlayerId, card: CardIdx) -> bool {
+        if self.def_of(card).miracle.is_none() || self.def_of(card).is(types::LAND) || !self.may_cast_spells(p) {
+            return false;
+        }
+        if self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
+            return false;
+        }
+        let classes = self.mana_classes(p, None);
+        self.castable_via(p, card, crate::game::CastFrom::Miracle, &classes, true)
+    }
+
+    /// Miracle (CR 702.94a): the first card `p` drew this turn may be
+    /// revealed; if it is, its trigger waits. Asked even when the card has no
+    /// miracle (only `PASS`; ENGINE.md 10). Choice: yes/no.
+    pub(crate) fn miracle_reveal(&mut self, p: PlayerId, card: CardIdx) {
+        let ok = self.objs[card.i()].zone == Zone::Hand && self.objs[card.i()].owner == p && self.def_of(card).miracle.is_some();
+        match self.answer.take() {
+            Some(Choice::Yes) if ok => {
+                self.reveal(card);
+                let r = self.obj_ref(card);
+                let def = self.objs[card.i()].def;
+                let k = self.def_of(card).miracle.as_ref().map_or(0, |m| m.1);
+                self.note(|g| format!("P{p} reveals {} (miracle)", g.name(card)));
+                self.waiting.push(crate::triggers::PendingTrigger {
+                    controller: p,
+                    source: r,
+                    source_def: def,
+                    slot: self.db.def(def).delayed_base + k,
+                    ev: crate::triggers::EvCtx { obj: Some(r), player: Some(p), ..Default::default() },
+                });
+            }
+            Some(_) => {}
+            None => {
+                let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                if ok {
+                    opts.push(Opt { action: act::YES, choice: Choice::Yes });
+                }
+                self.ask(Task::MiracleReveal { p, card }, p, DecisionKind::YesNo, opts);
+            }
+        }
+    }
+
     /// The cards exiled with `source` still there (CR 607.2a), in link
     /// order.
     pub(crate) fn linked_cards(&self, source: crate::ids::ObjRef) -> Vec<CardIdx> {
@@ -312,6 +438,7 @@ impl Game {
     pub(crate) fn perm_turn_ok(&self, turn: Option<u32>, player: PlayerId) -> bool {
         match turn {
             None => true,
+            Some(t) if t & PERM_LATER != 0 => self.turn.number > t & !PERM_LATER,
             Some(t) if t & PERM_UNTIL_TURNS != 0 => {
                 let k = t & !PERM_UNTIL_TURNS;
                 let n = self.players[player as usize].turns;

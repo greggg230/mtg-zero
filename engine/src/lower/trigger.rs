@@ -203,6 +203,7 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::SpellPaid
         | TrigPred::OrCopy
         | TrigPred::EnteredXAtLeast(_)
+        | TrigPred::FirstAttack
         | TrigPred::Once => Vec::new(),
     }
 }
@@ -275,6 +276,8 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         }
         P::Source(nodes::Source { inner }) => Some(TrigPred::Source(lower_pred(l, inner)?)),
         P::HostAttacksWithAnother(nodes::HostAttacksWithAnother {}) => Some(TrigPred::HostAttacksWithAnother),
+        // "Whenever this creature attacks for the first time each turn".
+        P::FirstAttackThisTurn(nodes::FirstAttackThisTurn {}) => Some(TrigPred::FirstAttack),
         // Ravenous: "if X is 5 or more, draw a card when it enters" (CR
         // 702.156a).
         P::EnteringWithXAtLeast(nodes::EnteringWithXAtLeast { n }) => {

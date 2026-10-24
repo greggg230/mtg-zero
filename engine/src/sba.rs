@@ -202,6 +202,13 @@ impl Game {
         if let Some(Choice::Card(c)) = self.answer.take() {
             keep.push(c);
         }
+        // Miracle (CR 702.94a): the reveal question about a first card drawn
+        // this turn, before anyone gets priority.
+        if let Some((p, card)) = self.miracle_check.take() {
+            self.agenda.push(Task::SbaCheck { keep });
+            self.agenda.push(Task::MiracleReveal { p, card });
+            return;
+        }
         // Ascend (CR 702.131b): the city's blessing, for the rest of the
         // game, once a player with an ascend permanent controls ten (a
         // static ability: noted here, before anyone gets priority).

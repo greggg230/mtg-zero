@@ -261,8 +261,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // Which face this printing is (set by the caller for a face); the
         // printings lowered inside it (tokens, emblems) are cards.
         let face = std::mem::take(&mut l.face);
-        l.deny("CardPrinting.warp_cost", warp_cost);
-        l.deny("CardPrinting.warp_cost_str", warp_cost_str);
+        let _ = warp_cost_str; // display form of `warp_cost`
         l.deny("CardPrinting.warp_additional_life_cost", warp_additional_life_cost);
         l.deny("CardPrinting.warp_castable_from_graveyard", warp_castable_from_graveyard);
         l.deny("CardPrinting.impending_cost", impending_cost);
@@ -366,8 +365,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.emerge_cost", emerge_cost);
         l.deny("CardPrinting.emerge_cost_str", emerge_cost_str);
         l.deny_ne("CardPrinting.emerge_sacrifice_type", emerge_sacrifice_type, &generated::defaults::d_CardPrinting_emerge_sacrifice_type());
-        l.deny("CardPrinting.miracle_cost", miracle_cost);
-        l.deny("CardPrinting.miracle_cost_str", miracle_cost_str);
+        let _ = miracle_cost_str; // display form of `miracle_cost`
         l.deny("CardPrinting.additional_cost_exile_from_graveyard", additional_cost_exile_from_graveyard);
         l.deny("CardPrinting.chooses_parity_as_enters", chooses_parity_as_enters);
         l.deny("CardPrinting.x_min", x_min);
@@ -804,6 +802,27 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let k = l.delayed_ability(d.finish());
         AltCost { mana, dash: Some(k), ..AltCost::default() }
     });
+    // Warp (CR 702.185): an alternative cost from hand; the permanent is
+    // exiled at the beginning of the next end step, and its owner may cast
+    // it from exile on a later turn.
+    let warp = warp_cost.as_ref().map(|m| {
+        let mana = lower_mana_cost(l, "CardPrinting.warp_cost", m);
+        let mut d = crate::program::Builder::default();
+        d.op(crate::program::Op::Ext(crate::program::Ext::WarpExile));
+        let k = l.delayed_ability(d.finish());
+        AltCost { mana, dash: Some(k), warp: true, ..AltCost::default() }
+    });
+    if warp.is_some() && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.warp_cost(not a permanent card)");
+    }
+    // Miracle (CR 702.94): "when you reveal this card this way, you may cast
+    // it by paying [cost] rather than its mana cost".
+    let miracle = miracle_cost.as_ref().map(|m| {
+        let mana = lower_mana_cost(l, "CardPrinting.miracle_cost", m);
+        let mut d = crate::program::Builder::default();
+        d.op(crate::program::Op::Ext(crate::program::Ext::MiracleCast));
+        (mana, l.delayed_ability(d.finish()))
+    });
     if dash.is_some() && ty & types::CREATURE == 0 {
         l.unsupported("CardPrinting.dash_cost(not a creature)");
     }
@@ -1164,6 +1183,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     alt_costs.extend(dash);
+    alt_costs.extend(warp);
     if let Some((mana, _, _)) = &bestow {
         alt_costs.push(AltCost { mana: *mana, bestow: true, ..AltCost::default() });
     }
@@ -1459,6 +1479,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         outside_hand_discount,
         chooses_land_type,
         x_life: *additional_cost_pay_x_life,
+        miracle,
     };
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
         l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");

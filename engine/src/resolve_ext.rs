@@ -1569,7 +1569,11 @@ impl Game {
             | Ext::Cascade
             | Ext::CopyTokensEnteredThisTurn
             | Ext::MillThenLandToHand { .. }
-            | Ext::MayCastFromGraveyardNow { .. } => self.exec_tail2(f, op),
+            | Ext::MayCastFromGraveyardNow { .. }
+            | Ext::ExtraCombat
+            | Ext::WarpExile
+            | Ext::MiracleCast
+            | Ext::Airbend { .. } => self.exec_tail2(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

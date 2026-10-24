@@ -655,6 +655,9 @@ pub enum TrigPred {
     /// later than the source's timestamp (CR 613.7; a granted ward, whose
     /// triggered ability is the granter's here, ENGINE.md 27.3).
     Granted(Slot),
+    /// The attacker attacks for the first time this turn (it was declared
+    /// as an attacker once: additional combat phases, CR 500.8).
+    FirstAttack,
     /// "If X is n or more" of ravenous (CR 702.156a): the X of the spell
     /// that became the entering permanent (its `Enters` event's note).
     EnteredXAtLeast(u8),
@@ -869,6 +872,9 @@ pub struct Cost {
     /// untapped Rebel you control"; not {T}: summoning sickness doesn't
     /// matter, CR 302.6).
     pub tap_untapped: Option<SacCost>,
+    /// Waterbend: untapped artifacts and creatures may each pay {1} of the
+    /// mana (`PayMana::waterbend`).
+    pub waterbend: bool,
 }
 
 /// An alternative cost (CR 118.9): paid instead of the mana cost.
@@ -892,6 +898,9 @@ pub struct AltCost {
     /// Bestow (CR 702.103): cast bestowed, as the card's bestowed face
     /// (`CardDef::bestow`), an Aura spell.
     pub bestow: bool,
+    /// Warp (CR 702.185): `dash`'s delayed ability is warp's "exile it at
+    /// the beginning of the next end step" (no haste).
+    pub warp: bool,
 }
 
 /// An additional cost that may be paid a number of times as a spell is cast
@@ -1261,6 +1270,10 @@ pub struct CardDef {
     /// "As an additional cost to cast this spell, pay X life" (Fire
     /// Covenant): X is announced (CR 601.2b) and paid as life.
     pub x_life: bool,
+    /// Miracle (CR 702.94): its cost, and the delayed ability k (its
+    /// trigger `delayed_base + k`) "when you reveal this card this way, you
+    /// may cast it by paying [cost]".
+    pub miracle: Option<(ManaCost, u8)>,
 }
 
 /// `CardDef::gy_play_k` when the permission grants nothing.

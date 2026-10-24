@@ -126,6 +126,10 @@ pub(crate) struct PayMana {
     /// The spell has improvise (CR 702.126): untapped artifacts may pay for
     /// {1} each.
     pub improvise: bool,
+    /// A waterbend cost (CR 701.67? "while paying a waterbend cost, you can
+    /// tap your untapped artifacts and creatures to help; each one pays for
+    /// {1}"): improvise with creatures too.
+    pub waterbend: bool,
 }
 
 impl PayMana {
@@ -143,7 +147,14 @@ impl PayMana {
             phyrexian_life: 0,
             now: None,
             improvise: false,
+            waterbend: false,
         }
+    }
+
+    /// The types of untapped permanents that may pay for {1} each.
+    pub(crate) fn improvise_types(&self) -> u16 {
+        (if self.improvise { crate::db::types::ARTIFACT } else { 0 })
+            | (if self.waterbend { crate::db::types::ARTIFACT | crate::db::types::CREATURE } else { 0 })
     }
 
     fn used(&self, c: CardIdx) -> bool {
@@ -414,10 +425,10 @@ impl Game {
     /// for {1} of generic mana each (a unit of no mana type: only generic
     /// pips take it), one class per definition. An artifact with a mana
     /// ability has both as alternatives (both tap it).
-    pub(crate) fn improvise_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
+    pub(crate) fn improvise_classes(&self, p: PlayerId, exclude: Option<CardIdx>, types: u16) -> Vec<Class> {
         let mut out: Vec<Class> = Vec::new();
         for c in self.permanents_of(p) {
-            if Some(c) == exclude || self.objs[c.i()].tapped || !self.is_type(c, crate::db::types::ARTIFACT) {
+            if Some(c) == exclude || self.objs[c.i()].tapped || !self.is_type(c, types) {
                 continue;
             }
             let def = self.objs[c.i()].def;
@@ -432,10 +443,10 @@ impl Game {
 
     /// The sources of a payment: mana abilities, and with improvise the
     /// untapped artifacts.
-    pub(crate) fn pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: bool) -> Vec<Class> {
+    pub(crate) fn pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: u16) -> Vec<Class> {
         let mut classes = self.mana_classes(p, exclude);
-        if improvise {
-            classes.extend(self.improvise_classes(p, exclude));
+        if improvise != 0 {
+            classes.extend(self.improvise_classes(p, exclude, improvise));
         }
         classes
     }
@@ -795,7 +806,7 @@ impl Game {
                 }
                 Some(other) => unreachable!("Phyrexian answer {other:?}"),
                 None => {
-                    let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise);
+                    let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
                     let life = self.players[payer as usize].life;
                     let opts: Vec<Opt> = (0..=pm.cost.phyrexian[col])
                         .filter(|&k| {
@@ -849,7 +860,7 @@ impl Game {
             self.finish_payment(&pm);
             return;
         }
-        let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise);
+        let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
         if let Some(ch) = self.answer.take() {
             let (card, slot) = match ch {
                 Choice::Ability(card, slot) => (card, slot),
@@ -1028,7 +1039,7 @@ impl Game {
                 fixed |= 1 << t;
             }
         }
-        let classes = self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise);
+        let classes = self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types());
         let units: Vec<ManaMask> = pm
             .chosen
             .iter()

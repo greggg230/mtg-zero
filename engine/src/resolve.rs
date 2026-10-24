@@ -201,6 +201,7 @@ impl Game {
                         let alt = (item.alt > 0).then(|| &self.def_of(card).alt_costs[item.alt as usize - 1]);
                         self.entering_evoked = alt.is_some_and(|a| a.evoke);
                         self.entering_dash = alt.and_then(|a| a.dash);
+                        self.entering_warp = alt.is_some_and(|a| a.warp);
                         self.entering_escaped = item.from == crate::game::CastFrom::Escape;
                         self.entering_x = item.x;
                         self.entering_times = item.times;

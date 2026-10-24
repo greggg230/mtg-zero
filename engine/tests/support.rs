@@ -10,6 +10,7 @@ use engine::lower::support::{threat_kinds, SupportReport, Threat};
 
 /// The supported set (M4b-2). Changing it is deliberate: update this list.
 const SUPPORTED: &[&str] = &[
+    "Aang, Swift Savior // Aang and La, Ocean's Fury",
     "Abandoned Air Temple",
     "Abrade",
     "Abrupt Decay",
@@ -138,6 +139,7 @@ const SUPPORTED: &[&str] = &[
     "Fallen Shinobi",
     "Fanatic of Rhonas",
     "Fatal Push",
+    "Fear of Missing Out",
     "Feywild Caretaker",
     "Fiery Confluence",
     "Fiery Islet",
@@ -251,6 +253,7 @@ const SUPPORTED: &[&str] = &[
     "Manifold Key",
     "Marsh Flats",
     "Memory Lapse",
+    "Metamorphosis Fanatic",
     "Meticulous Archive",
     "Mind Stone",
     "Mind Twist",
@@ -303,6 +306,7 @@ const SUPPORTED: &[&str] = &[
     "Phelia, Exuberant Shepherd",
     "Phlage, Titan of Fire's Fury",
     "Phyrexian Metamorph",
+    "Pinnacle Emissary",
     "Plains",
     "Plateau",
     "Polluted Delta",

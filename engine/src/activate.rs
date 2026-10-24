@@ -245,6 +245,13 @@ impl Game {
             let prod = &ad.mana().unwrap().prod;
             return matches!(prod, crate::db::ManaProd::SacrificedLand) || !productions(self, p, prod, Some(card)).is_empty();
         }
+        let with_bending;
+        let classes = if ad.cost.waterbend {
+            with_bending = [classes, &self.improvise_classes(p, Self::mana_exclude(card, ad), types::ARTIFACT | types::CREATURE)[..]].concat();
+            &with_bending[..]
+        } else {
+            classes
+        };
         if !self.cost_payable(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad)) {
             return false;
         }
@@ -493,6 +500,7 @@ impl Game {
         }
         let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
+        pm.waterbend = ad.cost.waterbend;
         self.agenda.push(Task::PayMana(pm));
     }
 

@@ -220,7 +220,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     l.deny("ActivationCost.saddle", saddle);
     *loyalty_out = (*loyalty, *loyalty_x);
     l.deny("ActivationCost.exert_self", exert_self);
-    l.deny("ActivationCost.waterbend", waterbend);
 
     let mut cost = Cost {
         mana: match mana {
@@ -242,7 +241,12 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         remove_counters: None,
         crew: l.int("ActivationCost.crew", *crew, 0, 20) as u8,
         tap_untapped: None,
+        // "Waterbend {n}" (Avatar: tap artifacts and creatures to help pay).
+        waterbend: *waterbend,
     };
+    if *waterbend && (cost.mana.generic == 0 || from != From::Battlefield) {
+        l.unsupported("ActivationCost.waterbend(no generic mana)");
+    }
     // Ninjutsu (CR 702.49a): "return an unblocked attacking creature you
     // control to its owner's hand".
     if *return_unblocked_attacker {

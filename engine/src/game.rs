@@ -131,6 +131,11 @@ pub enum CastFrom {
     /// From its owner's graveyard, once during their turn, with Serra
     /// Paragon's permission: for its mana cost.
     Paragon,
+    /// From hand by its miracle trigger, for its miracle cost (CR 702.94a).
+    Miracle,
+    /// From exile, airbent: for this generic cost rather than its mana cost
+    /// (an alternative cost, CR 118.9).
+    Airbent(u8),
 }
 
 /// A permission to play a card from a zone other than a hand (CR 601.2a,
@@ -167,6 +172,9 @@ pub enum PermKind {
     /// `source`, the prepared permanent, may cast it (for its mana cost)
     /// while `source` stays prepared on the battlefield.
     Prepared { source: ObjRef },
+    /// Airbent (Aang): its owner may cast it for {n} rather than its mana
+    /// cost while it stays exiled.
+    Airbent(u8),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -336,6 +344,8 @@ pub struct Turn {
     pub normal: PlayerId,
     /// Another cleanup step follows this one (CR 514.3a).
     pub cleanup_again: bool,
+    /// Additional combat phases to follow this one (CR 500.8).
+    pub extra_combats: u8,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -504,6 +514,15 @@ pub struct Game {
     /// CR 614.1c-like; set and cleared around one move).
     pub(crate) entering_mods: Vec<crate::db::Mod>,
     pub(crate) entering_dash: Option<u8>,
+    /// The entering permanent's spell was warped (CR 702.185): `entering_dash`
+    /// is warp's delayed ability (no haste).
+    pub(crate) entering_warp: bool,
+    /// The card whose miracle trigger is casting it (CR 702.94a): cast for
+    /// its miracle cost (`CastFrom::Miracle`).
+    pub(crate) miracle_cast: Option<CardIdx>,
+    /// A first card drawn this turn whose owner may reveal it for miracle
+    /// (asked before the next priority, `sba_check`).
+    pub(crate) miracle_check: Option<(PlayerId, CardIdx)>,
     /// ... with this face up (a back face: "transformed", CR 712.14a; an
     /// MDFC's land face played, 712.12) instead of its front (712.14).
     pub(crate) entering_face: Option<DefId>,
@@ -699,6 +718,7 @@ impl Game {
                 starting: 0,
                 normal: 0,
                 cleanup_again: false,
+                extra_combats: 0,
             },
             agenda: Vec::new(),
             pending: None,
@@ -735,6 +755,9 @@ impl Game {
             entering_x: 0,
             entering_mods: Vec::new(),
             entering_dash: None,
+            entering_warp: false,
+            miracle_cast: None,
+            miracle_check: None,
             entering_face: None,
             day: None,
             done_once: Vec::new(),
@@ -1009,17 +1032,21 @@ impl Game {
         self.enter_note = note;
         self.defer_enters = copy_choice;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
+        let warp = std::mem::take(&mut self.entering_warp);
         if let (Some(k), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand
-            // at the beginning of the next end step.
-            let mut haste = crate::db::KwSet::default();
-            haste.insert(Kw::Haste);
-            self.add_effect(
-                crate::layers::Affected::Obj(r),
-                crate::db::Mod::Keywords(haste),
-                crate::layers::Until::Forever,
-                controller,
-            );
+            // at the beginning of the next end step. (Warp, 702.185a: no
+            // haste; exiled at the next end step.)
+            if !warp {
+                let mut haste = crate::db::KwSet::default();
+                haste.insert(Kw::Haste);
+                self.add_effect(
+                    crate::layers::Affected::Obj(r),
+                    crate::db::Mod::Keywords(haste),
+                    crate::layers::Until::Forever,
+                    controller,
+                );
+            }
             let def = self.objs[idx.i()].def;
             self.delayed.push(Delayed {
                 when: crate::db::DelayedWhen::NextEndStep,
@@ -1454,7 +1481,19 @@ impl Game {
         self.emit_private(KEY_DRAW, p, def as u64);
         let pl = &mut self.players[p as usize];
         pl.drawn = pl.drawn.saturating_add(1);
+        // Miracle (CR 702.94a): the first card drawn this turn may be
+        // revealed. Asked of a player whose deck has a miracle card at all
+        // (both decklists are known, ENGINE.md 10), on every first draw,
+        // so that the question says nothing about the card.
+        if self.players[p as usize].drawn == 1 && self.turn.number > 0 && self.has_miracle_card(p) {
+            self.miracle_check = Some((p, top));
+        }
         self.event(Event::player(EventKind::DrawsCard, p));
+    }
+
+    /// Does `p` own a card with miracle (ENGINE.md 29)?
+    pub(crate) fn has_miracle_card(&self, p: PlayerId) -> bool {
+        self.objs.iter().any(|o| o.owner == p && self.db.def(o.def).miracle.is_some())
     }
 
     /// Shuffle a library (CR 701.20): positions become unknown to everyone;

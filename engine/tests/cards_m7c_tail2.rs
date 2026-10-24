@@ -876,3 +876,203 @@ fn we_say_thee_nay_with_teamwork_asks_four_cr702_122a() {
         assert_eq!(g.obj(bf(&g, 0, "Test Bear")).tapped, team);
     }
 }
+
+// ---- Fear of Missing Out ---------------------------------------------------
+
+/// "Delirium - Whenever this creature attacks for the first time each turn,
+/// if there are four or more card types among cards in your graveyard,
+/// untap target creature. After this phase, there is an additional combat
+/// phase." (CR 500.8.)
+#[test]
+fn fear_of_missing_out_untaps_and_adds_a_combat_phase_once_cr500_8() {
+    let mut g = scen()
+        .battlefield(0, &["Fear of Missing Out"])
+        .graveyard(0, &["Lightning Bolt", "Test Bear", "Forest", "Sol Ring"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let f = bf(&g, 0, "Fear of Missing Out");
+    g.choose(Choice::Card(f));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(f));
+    settle(&mut g);
+    assert!(!g.obj(f).tapped, "untapped");
+    // The first combat's damage, then a second combat: it attacks again,
+    // not for the first time (no trigger).
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    assert_eq!(g.life(1), 18, "{}", log(&g));
+    g.choose(Choice::Card(f));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| at_priority(g));
+    assert!(g.stack().is_empty(), "no second trigger");
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2);
+    assert_eq!(g.life(1), 16);
+    // Without delirium: no trigger, one combat.
+    let mut g = scen().battlefield(0, &["Fear of Missing Out"]).graveyard(0, &["Lightning Bolt"]).at(Step::DeclareAttackers, 0).start();
+    let f = bf(&g, 0, "Fear of Missing Out");
+    g.choose(Choice::Card(f));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| at_priority(g));
+    assert!(g.stack().is_empty());
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 || g.kind() == Some(DecisionKind::DeclareAttackers));
+    assert_eq!(g.turn().step, Step::Main2);
+}
+
+// ---- Pinnacle Emissary -----------------------------------------------------
+
+/// Warp (CR 702.185a): "You may cast this card from your hand for its warp
+/// cost. Exile this creature at the beginning of the next end step, then you
+/// may cast it from exile on a later turn."
+#[test]
+fn pinnacle_emissary_warps_in_is_exiled_and_recast_on_a_later_turn_cr702_185a() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Mountain"])
+        .hand(0, &["Pinnacle Emissary"])
+        .at(Step::Main1, 0)
+        .start();
+    let e = g.card(0, "Pinnacle Emissary", Zone::Hand);
+    g.choose(Choice::Cast(e));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(e).zone, Zone::Battlefield);
+    assert!(!g.has_kw(e, engine::db::Kw::Haste), "no haste (not dash)");
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 1 && g.turn().step == Step::Upkeep && at_priority(g));
+    assert_eq!(g.obj(e).zone, Zone::Exile, "exiled at the end step: {}", log(&g));
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    assert!(g.has_option(Choice::Cast(e)), "a later turn: cast it from exile");
+    g.choose(Choice::Cast(e));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(e).zone, Zone::Battlefield);
+    let t2 = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t2 + 1 && g.turn().step == Step::Upkeep);
+    assert_eq!(g.obj(e).zone, Zone::Battlefield, "cast for its mana cost: it stays");
+}
+
+/// Not the same turn it was exiled.
+#[test]
+fn pinnacle_emissary_cant_be_recast_the_turn_it_is_exiled_cr702_185a() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Mountain", "Island"])
+        .hand(0, &["Pinnacle Emissary"])
+        .at(Step::Main2, 0)
+        .start();
+    let e = g.card(0, "Pinnacle Emissary", Zone::Hand);
+    g.choose(Choice::Cast(e));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    settle(&mut g);
+    quiet_until(&mut g, |g| g.turn().step == Step::End && at_priority(g) && g.stack().is_empty() && g.obj(e).zone == Zone::Exile);
+    assert!(!g.has_option(Choice::Cast(e)));
+}
+
+// ---- Metamorphosis Fanatic -------------------------------------------------
+
+/// Miracle (CR 702.94a): "You may cast this card for its miracle cost when
+/// you draw it if it's the first card you drew this turn." Its enters
+/// trigger: "return up to one target creature card from your graveyard to
+/// the battlefield with a lifelink counter on it."
+#[test]
+fn metamorphosis_fanatic_miracle_cast_for_two_cr702_94a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .library(0, &["Metamorphosis Fanatic"])
+        .graveyard(0, &["Test Bear"])
+        .turn_number(3)
+        .at(Step::Upkeep, 0)
+        .start();
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    let m = g.card(0, "Metamorphosis Fanatic", Zone::Hand);
+    g.choose(Choice::Yes); // reveal
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    g.choose(Choice::Yes); // cast it for {1}{B}
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || g.stack().is_empty() && at_priority(g));
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    g.choose(g.tgt(bear));
+    settle(&mut g);
+    assert_eq!(g.obj(m).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    assert!(g.has_kw(bear, engine::db::Kw::Lifelink), "a lifelink counter");
+}
+
+/// A first draw that isn't a miracle card is still asked about (only "no"),
+/// so the question says nothing; a second draw isn't asked.
+#[test]
+fn miracle_question_is_asked_on_every_first_draw_of_its_owner_cr702_94a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Metamorphosis Fanatic"])
+        .turn_number(3)
+        .at(Step::Upkeep, 0)
+        .start();
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    assert_eq!(g.pending_decision().unwrap().options.len(), 1, "an Island: only no");
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.turn().step == Step::Main1);
+    // The opponent (no miracle card) is never asked.
+    let mut g = scen().turn_number(4).at(Step::Upkeep, 1).start();
+    g.drive_until(|g| g.turn().step == Step::Main1 || g.kind() == Some(DecisionKind::YesNo));
+    assert_eq!(g.turn().step, Step::Main1);
+}
+
+// ---- Aang, Swift Savior ----------------------------------------------------
+
+/// "When Aang enters, airbend up to one other target creature or spell.
+/// (Exile it. While it's exiled, its owner may cast it for {2} rather than
+/// its mana cost.)"
+#[test]
+fn aang_airbends_a_spell_its_owner_may_recast_for_two() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Island", "Island"])
+        .hand(0, &["Aang, Swift Savior // Aang and La, Ocean's Fury"])
+        .battlefield(1, &["Mountain", "Mountain", "Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.choose(Choice::Target(Target::Player(0)));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let a = g.card(0, "Aang, Swift Savior // Aang and La, Ocean's Fury", Zone::Hand);
+    g.choose(Choice::Cast(a));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(b));
+    g.drive_until(|g| at_priority(g) && g.stack().is_empty());
+    assert_eq!(g.obj(b).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.life(0), 20);
+    // P1 casts it again for {2}.
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 1);
+    assert!(g.has_option(Choice::Cast(b)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(b));
+    g.choose(Choice::Target(Target::Player(0)));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.life(0), 17);
+}
+
+/// "Waterbend {8}: Transform Aang." (While paying a waterbend cost, you can
+/// tap your untapped artifacts and creatures to help; each pays for {1}.)
+#[test]
+fn aang_waterbends_with_creatures_and_artifacts_to_transform() {
+    let names = ["Aang, Swift Savior // Aang and La, Ocean's Fury", "Test Bear", "Test Bear", "Test Flyer", "Currency Converter", "Plains", "Plains"];
+    let g = scen().battlefield(0, &names).at(Step::Main1, 0).start();
+    let a = bf(&g, 0, "Aang, Swift Savior // Aang and La, Ocean's Fury");
+    assert!(!g.has_option(act(a, 0)), "seven: not enough");
+    let mut more = names.to_vec();
+    more.push("Test Reacher");
+    let mut g = scen().battlefield(0, &more).at(Step::Main1, 0).start();
+    let a = bf(&g, 0, "Aang, Swift Savior // Aang and La, Ocean's Fury");
+    assert!(g.has_option(act(a, 0)));
+    g.choose(act(a, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.name(a), "Aang and La, Ocean's Fury", "{}", log(&g));
+    assert!(g.creatures_of(0).filter(|&c| c != a).all(|c| g.obj(c).tapped));
+}

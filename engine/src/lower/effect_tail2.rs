@@ -202,6 +202,26 @@ pub(crate) fn lower_effect_tail2(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             };
             b.op(Op::Ext(Ext::MayCastFromGraveyardNow { filter, exile: *exile_instants_and_sorceries }));
         }
+        // "After this phase, there is an additional combat phase" (CR
+        // 500.8).
+        E::AdditionalCombatPhaseAfterThisPhase(nodes::AdditionalCombatPhaseAfterThisPhase {}) => {
+            b.op(Op::Ext(Ext::ExtraCombat));
+        }
+        // Airbend (Aang): "airbend up to one other target creature or
+        // spell. (Exile it. While it's exiled, its owner may cast it for
+        // {2} rather than its mana cost.)"
+        E::Airbend(nodes::Airbend { alt_cost }) => {
+            let Some(cost) = crate::mana::ManaCost::parse(alt_cost).filter(|c| c.total() == c.generic) else {
+                l.unsupported(format!("Airbend.alt_cost({alt_cost})"));
+                return true;
+            };
+            let f = Filter::Or(vec![
+                and(Filter::Type(types::CREATURE), Filter::Not(Box::new(Filter::Source))),
+                Filter::Spell(Box::new(Filter::Any)),
+            ]);
+            let t = b.target(f, 0, 1);
+            b.op(Op::Ext(Ext::Airbend { tgt: t, cost }));
+        }
         _ => return false,
     }
     true

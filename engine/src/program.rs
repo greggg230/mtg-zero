@@ -702,6 +702,20 @@ pub enum Ext {
     /// this way is exiled instead of put into the graveyard. Choice:
     /// `ChooseGraveyardCard` or `PASS`.
     MayCastFromGraveyardNow { filter: Filter, exile: bool },
+    /// "After this phase, there is an additional combat phase" (CR 500.8;
+    /// during a combat phase).
+    ExtraCombat,
+    /// Warp's delayed ability (CR 702.185a): exile the event's permanent;
+    /// its owner may cast it from exile on a later turn.
+    WarpExile,
+    /// Miracle's trigger (CR 702.94a): the controller may cast the event's
+    /// card (revealed, in their hand) by paying its miracle cost. Choice:
+    /// yes/no.
+    MiracleCast,
+    /// Airbend each legal target of requirement `tgt` (a creature or a
+    /// spell): exile it; while it is exiled, its owner may cast it for `cost`
+    /// rather than its mana cost.
+    Airbend { tgt: u8, cost: ManaCost },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -920,7 +934,7 @@ impl Op {
             Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
             Op::Ext(Ext::ReturnEventCardAs { .. }) | Op::Ext(Ext::ExileEventCardLinked { .. }) => true,
             Op::Ext(Ext::SacrificeN { who: w, .. }) => who(w),
-            Op::Ext(Ext::Cascade) => true,
+            Op::Ext(Ext::Cascade) | Op::Ext(Ext::WarpExile) | Op::Ext(Ext::MiracleCast) => true,
             Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
             Op::Ext(Ext::Reflexive { .. })

@@ -333,6 +333,10 @@ impl Game {
             },
             TrigPred::OrCopy => true,
             TrigPred::Once => true,
+            TrigPred::FirstAttack => match ev.a {
+                Subj::Obj(r) => self.players.iter().map(|pl| pl.attacked_with.iter().filter(|&&x| x == r).count()).sum::<usize>() == 1,
+                _ => false,
+            },
             TrigPred::Granted(s) => match ev.subject(*s) {
                 Subj::Obj(r) => {
                     let ts = self.objs[src.r.idx.i()].timestamp;

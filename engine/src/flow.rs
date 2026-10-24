@@ -28,6 +28,9 @@ pub(crate) enum Task {
     Priority,
     SbaCheck { keep: Vec<CardIdx> },
     PutTriggers,
+    /// Miracle (CR 702.94a): may `p` reveal `card`, the first card they drew
+    /// this turn? (Asked before the next priority.)
+    MiracleReveal { p: PlayerId, card: CardIdx },
     PriorityAsk,
     // combat (CR 508-510)
     DeclareAttackers { next: u8 },
@@ -198,6 +201,7 @@ impl Game {
                 self.agenda.push(Task::SbaCheck { keep: Vec::new() });
             }
             Task::SbaCheck { keep } => self.sba_check(keep),
+            Task::MiracleReveal { p, card } => self.miracle_reveal(p, card),
             Task::PutTriggers => self.put_triggers(),
             Task::PriorityAsk => self.priority_ask(),
             Task::DeclareAttackers { next } => self.declare_attackers(next),
@@ -364,6 +368,7 @@ impl Game {
         let prev_spells = (self.turn.number > 0).then(|| self.players[self.turn.active as usize].spells_cast);
         self.turn.number += 1;
         self.turn.active = next;
+        self.turn.extra_combats = 0;
         self.turn.step = Step::Untap;
         let n = self.turn.number;
         for pl in &mut self.players {
@@ -400,7 +405,9 @@ impl Game {
             .into_iter()
             .filter(|p| {
                 p.turn.is_none_or(|t| {
-                    if t & crate::resolve_tail2::PERM_UNTIL_TURNS != 0 {
+                    if t & crate::resolve_tail2::PERM_LATER != 0 {
+                        true
+                    } else if t & crate::resolve_tail2::PERM_UNTIL_TURNS != 0 {
                         // (Through the end of the player's k-th turn: their
                         // count once this turn begins.)
                         let k = t & !crate::resolve_tail2::PERM_UNTIL_TURNS;
@@ -541,7 +548,13 @@ impl Game {
             Step::CombatDamage => Step::EndCombat,
             Step::EndCombat => {
                 self.remove_from_combat(); // CR 511.3
-                Step::Main2
+                if self.turn.extra_combats > 0 {
+                    // CR 500.8: an additional combat phase follows.
+                    self.turn.extra_combats -= 1;
+                    Step::BeginCombat
+                } else {
+                    Step::Main2
+                }
             }
             Step::Main2 => Step::End,
             Step::End => Step::Cleanup,

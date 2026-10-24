@@ -208,7 +208,7 @@ impl Game {
         // the shared plain candidates, which have none).
         let with_artifacts;
         let cls = if def.improvise {
-            with_artifacts = [classes, &self.improvise_classes(p, None)[..]].concat();
+            with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
             &with_artifacts[..]
         } else {
             classes
@@ -326,7 +326,7 @@ impl Game {
             .find(|pm| {
                 pm.card == r
                     && self.permission_ok(pm, p)
-                    && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::Taxed(_))
+                    && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::Taxed(_) | crate::game::PermKind::Airbent(_))
             })
             .or_else(|| {
                 self.permissions.iter().find(|pm| {
@@ -353,6 +353,7 @@ impl Game {
         use crate::game::CastFrom;
         let def = self.def_of(card);
         match self.objs[card.i()].zone {
+            Zone::Hand if self.miracle_cast == Some(card) => Some(CastFrom::Miracle),
             Zone::Hand => Some(CastFrom::Hand),
             Zone::Graveyard => {
                 if self.objs[card.i()].owner != p {
@@ -414,6 +415,7 @@ impl Game {
                 crate::game::PermKind::Taxed(n) => Some(CastFrom::Taxed(n)),
                 // CR 722.3c: a copy of a prepare spell, for its mana cost.
                 crate::game::PermKind::Prepared { .. } => Some(CastFrom::Permission { free: false, any_mana: false }),
+                crate::game::PermKind::Airbent(n) => Some(CastFrom::Airbent(n)),
                 crate::game::PermKind::Flashback | crate::game::PermKind::CastThenExile => None,
             },
             _ => None,
@@ -463,6 +465,8 @@ impl Game {
             // "A spell cast this way costs {n} more" (CR 601.2f).
             CastFrom::Taxed(n) => with(def.cost.plus(&crate::mana::ManaCost { generic: n, ..Default::default() })),
             CastFrom::Paragon => with(def.cost),
+            CastFrom::Miracle => with(def.miracle.as_ref().map_or(def.cost, |m| m.0)),
+            CastFrom::Airbent(n) => with(crate::mana::ManaCost { generic: n, ..Default::default() }),
         }
     }
 
@@ -505,7 +509,7 @@ impl Game {
         // Improvise (CR 702.126).
         let with_artifacts;
         let classes = if def.improvise {
-            with_artifacts = [classes, &self.improvise_classes(p, None)[..]].concat();
+            with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
             &with_artifacts[..]
         } else {
             classes
@@ -821,6 +825,8 @@ impl Game {
                 Some(crate::game::PermKind::Play { cast_only, .. }) => cast_only,
                 // (Its owner may play it: a land too.)
                 Some(crate::game::PermKind::Taxed(_)) => false,
+                // (Airbent: cast.)
+                Some(crate::game::PermKind::Airbent(_)) => true,
                 // CR 715.3d: an adventurer card on an adventure (a creature
                 // card: cast only).
                 Some(crate::game::PermKind::Adventure) => true,
@@ -1272,6 +1278,7 @@ impl Game {
     /// exist there (712.8f, 715.3b).
     pub(crate) fn begin_cast_face(&mut self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) {
         let from = self.cast_route(p, card).expect("a castable card");
+        self.miracle_cast = None;
         // Serra Paragon's permission, found while the card is in the
         // graveyard (used as it is cast).
         let paragon = if from == crate::game::CastFrom::Paragon { self.paragon(p, self.def_of(card).mana_value(), false) } else { None };
