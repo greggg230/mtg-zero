@@ -357,6 +357,9 @@ pub enum Filter {
     /// Mana value at most the X of the resolving spell that is the context's
     /// source (CR 107.3).
     MvAtMostX,
+    /// Mana value at most the X its source paid as it was cast (kicker {X};
+    /// `Mark::KickerX` of the source permanent).
+    MvAtMostSourceX,
 }
 
 /// `Filter::Ability` kinds.
@@ -927,6 +930,9 @@ pub struct TimesCost {
     pub mana: ManaCost,
     /// At most this many times (1 for offspring).
     pub max: u8,
+    /// The cost has {X} (kicker {X}: X announced when it is paid, at least
+    /// `CardDef::x_min`; the stack item's `x`).
+    pub x: bool,
 }
 
 /// "You may have this enter as a copy of ..." (CR 707.5, 614.1c): what it
@@ -996,6 +1002,9 @@ pub const X_TARGETS: u8 = u8::MAX;
 pub const X_UP_TO: u8 = u8::MAX - 1;
 /// `CardDef::extra_lands` for "any number of lands" (Fastbond).
 pub const ANY_LANDS: u8 = u8::MAX;
+/// `TargetReq::max` for "up to X targets, where X is the number of times it
+/// was kicked" (Batroc: an enter trigger, X from its event's note).
+pub const KICKS_UP_TO: u8 = u8::MAX - 2;
 
 impl CardDef {
     /// `game::SEEN_*` bits of the rare rules this definition has.
@@ -1288,6 +1297,11 @@ pub struct CardDef {
     /// Sunburst (CR 702.44a): it enters with a +1/+1 counter (a creature) or
     /// this counter (charge) for each colour of mana spent to cast it.
     pub sunburst: Option<Counter>,
+    /// "Enters with a +1/+1 counter on it for each time it was kicked"
+    /// (multikicker, CR 702.33c).
+    pub enters_times_counters: bool,
+    /// The least X its kicker {X} may have ("X can't be 0").
+    pub x_min: u8,
     /// "As this enters, choose a color. All cards that aren't on the
     /// battlefield, spells, and permanents are the chosen color in addition
     /// to their other colors" (Painter's Servant; layer 5, CR 613.1e).

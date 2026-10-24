@@ -148,6 +148,20 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::AttachTargetToSource { tgt } => {
+                let host = self.objs_on(f, &crate::program::On::Source);
+                let eq = self.objs_on(f, &crate::program::On::Target(*tgt));
+                if let (Some(&e), Some(&h)) = (eq.first(), host.first()) {
+                    let q = self.damage_source_of(e);
+                    let equipment = self.has_subtype(e, self.db.subtype_id("Equipment").unwrap_or(u16::MAX));
+                    if equipment && !self.is_creature(e) && self.is_creature(h) && e != h && !self.protected_from(h, &q) {
+                        let hr = self.obj_ref(h);
+                        self.objs[e.i()].attached = Some(hr);
+                        self.note(|g| format!("{} attached to {}", g.name(e), g.name(h)));
+                    }
+                }
+                Flow::Next
+            }
             _ => unreachable!("not a tail-3 op: {op:?}"),
         }
     }

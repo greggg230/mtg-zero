@@ -128,6 +128,32 @@ pub(crate) fn lower_effect_tail3(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let n = l.int("DefendingPlayerSacrificesPermanents.count", *count, 1, 20) as u8;
             b.op(Op::Ext(Ext::SacrificeN { who: Who::Opponent, filter: Filter::Type(crate::db::types::PERMANENT), n }));
         }
+        // "He deals damage equal to his power to each of up to X targets,
+        // where X is the number of times he was kicked" (Batroc: the IR's
+        // target specification gives the filter; the count is the class's).
+        E::DealPowerDamageToEachOfUpToKickedTargets(nodes::DealPowerDamageToEachOfUpToKickedTargets { targets }) => {
+            let [cats::TargetSpec::TargetSpec(nodes::TargetSpec { filter, count_min, count_max, distinct_from })] = &targets[..] else {
+                l.unsupported("DealPowerDamageToEachOfUpToKickedTargets.targets(not one)");
+                return true;
+            };
+            l.deny("TargetSpec.distinct_from", distinct_from);
+            if *count_min != 0 || *count_max != card_ir::Count::Finite(1) {
+                l.unsupported("DealPowerDamageToEachOfUpToKickedTargets.targets(counts)");
+            }
+            let Some(f) = super::filter::lower_pred_or_oneof(l, filter) else { return true };
+            let t = b.target(f, 0, crate::db::KICKS_UP_TO);
+            b.op(Op::DealDamage { amount: Amount::SourcePower, to: t });
+        }
+        // "Gain control of target artifact with mana value X or less. If that
+        // artifact is an Equipment, attach it to this creature" (Thieving
+        // Skydiver; X its kicker's). The IR exports no target specification
+        // (docs/ir_defects.md 6): the target is the Oracle text's.
+        E::GainControlOfTargetThenAttachIfEquipment(nodes::GainControlOfTargetThenAttachIfEquipment {}) => {
+            let f = Filter::And(Box::new(Filter::Type(crate::db::types::ARTIFACT)), Box::new(Filter::MvAtMostSourceX));
+            let t = b.target(f, 1, 1);
+            b.op(Op::Ext(Ext::GainControl { tgt: t }));
+            b.op(Op::Ext(Ext::AttachTargetToSource { tgt: t }));
+        }
         _ => return false,
     }
     true

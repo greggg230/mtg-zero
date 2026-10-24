@@ -267,7 +267,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
-        let _ = kicker_cost_str; // display form of `kicker_cost`
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
         l.deny("CardPrinting.station_threshold", station_threshold);
         l.deny("CardPrinting.stationed_keywords", stationed_keywords);
@@ -352,8 +351,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let _ = escape_cost_str; // display form of `escape_cost`
         l.deny("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing", sacrifice_at_cleanup_if_cast_without_sorcery_timing);
         let _ = dash_cost_str; // display form of `dash_cost`
-        l.deny("CardPrinting.multikicker", multikicker);
-        l.deny("CardPrinting.enters_with_counter_per_kick", enters_with_counter_per_kick);
         l.deny("CardPrinting.evoke_cost", evoke_cost);
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
@@ -372,7 +369,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let _ = miracle_cost_str; // display form of `miracle_cost`
         l.deny("CardPrinting.additional_cost_exile_from_graveyard", additional_cost_exile_from_graveyard);
         l.deny("CardPrinting.chooses_parity_as_enters", chooses_parity_as_enters);
-        l.deny("CardPrinting.x_min", x_min);
         l.deny("CardPrinting.blocks_only_with_subtype", blocks_only_with_subtype);
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
@@ -479,6 +475,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut cascade_kw = false;
     let mut cascade_kw_ascend = false;
     let mut annihilator: Option<u8> = None;
+    let mut devoid = false;
     for k in keywords {
         match lower_keyword_full(l, k) {
             Some(KwOrProt::Kw(kw)) => kws.insert(kw),
@@ -490,6 +487,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::Cascade) => cascade_kw = true,
             Some(KwOrProt::Ascend) => cascade_kw_ascend = true,
             Some(KwOrProt::Annihilator(n)) => annihilator = Some(n),
+            Some(KwOrProt::Devoid) => devoid = true,
             None => {}
         }
     }
@@ -684,8 +682,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // Kicker (CR 702.33): an optional additional cost; "if this spell was
     // kicked" picks the effect, as a mode given by the cost (its targets
     // follow, CR 601.2c after 601.2b).
+    let mut perm_kicker: Option<(ManaCost, bool)> = None;
     let kicker = match kicker_cost {
         None => None,
+        // Kicker on a permanent card (CR 702.33): an optional additional
+        // cost, paid once (multikicker, 702.33c: any number of times);
+        // "if it was kicked" is how it was cast (the `Enters` event's note,
+        // or the spell's for a cast trigger). Kicker {X} announces X.
+        Some(m) if !is_spell_card && spell_effect.is_none() && ty & types::PERMANENT != 0 => {
+            perm_kicker = kicker_mana(l, m, kicker_cost_str);
+            None
+        }
         Some(m) => {
             let mana = lower_mana_cost(l, "CardPrinting.kicker_cost", m);
             match spell_effect.as_deref() {
@@ -877,7 +884,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         if times_cost.is_some() {
             l.unsupported(format!("CardPrinting.{what}(with another repeatable cost)"));
         }
-        times_cost = Some(crate::db::TimesCost { mana, max });
+        times_cost = Some(crate::db::TimesCost { mana, max, x: false });
     };
     match squad_cost.as_deref() {
         Some(m) => {
@@ -910,6 +917,30 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         keyword_triggers.push(storm());
     }
+    if let Some((mana, x)) = perm_kicker {
+        let max = if *multikicker { crate::decision::act::NUMBER_N as u8 - 1 } else { 1 };
+        if x && *multikicker {
+            l.unsupported("CardPrinting.multikicker(with {X})");
+        }
+        set_times(l, "kicker_cost", mana, max, true);
+        if let Some(t) = times_cost.as_mut() {
+            t.x = x;
+        }
+    } else if *multikicker {
+        l.unsupported("CardPrinting.multikicker(without a permanent's kicker)");
+    }
+    if *enters_with_counter_per_kick && !*multikicker {
+        l.unsupported("CardPrinting.enters_with_counter_per_kick(without multikicker)");
+    }
+    // "X can't be 0" (kicker {X}).
+    let x_least = match (*x_min, times_cost.as_ref().is_some_and(|t| t.x)) {
+        (0, _) => 0,
+        (n, true) => l.int("CardPrinting.x_min", n, 0, 9) as u8,
+        (_, false) => {
+            l.unsupported("CardPrinting.x_min(without kicker {X})");
+            0
+        }
+    };
     if times_cost.is_some() && (!additional.is_empty() || x_pips > 0) {
         l.unsupported("CardPrinting(a repeatable cost with other additional costs or X)");
     }
@@ -1405,7 +1436,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         types: ty,
         supertypes: sup,
         subtypes: subs,
-        colors: cost.colors() | indicator,
+        colors: if devoid { 0 } else { cost.colors() | indicator },
         cost,
         power: pw,
         toughness: tg,
@@ -1520,6 +1551,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         chooses_land_type,
         x_life: *additional_cost_pay_x_life,
         sunburst: sunburst_counter,
+        enters_times_counters: *enters_with_counter_per_kick,
+        x_min: x_least,
         miracle,
     };
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
@@ -1804,6 +1837,34 @@ fn lower_additional_option(l: &mut Lowerer, o: &cats::AdditionalCostOption) -> O
 }
 
 /// `ManaCost` without X (hybrid pairs and Phyrexian pips included).
+/// A permanent's kicker cost -> (its mana, it is {X}). The IR's structured
+/// cost counts {C} as generic (docs/ir_defects.md 5): its `kicker_cost_str`
+/// says which pips are {C}, read when the two agree otherwise (ENGINE.md 3,
+/// rule 4a).
+fn kicker_mana(l: &mut Lowerer, m: &cats::ManaCost, s: &str) -> Option<(ManaCost, bool)> {
+    let cats::ManaCost::ManaCost(n) = m;
+    if n.x_pips != 0 {
+        if (n.x_pips, n.generic) != (1, 0) || !n.colored.is_empty() || !n.hybrid.is_empty() || !n.phyrexian.is_empty() || s != "{X}" {
+            l.unsupported("CardPrinting.kicker_cost(an X with more)");
+            return None;
+        }
+        return Some((ManaCost::default(), true));
+    }
+    let plain = lower_mana_cost(l, "CardPrinting.kicker_cost", m);
+    let Some(text) = ManaCost::parse(s) else {
+        l.unsupported(format!("CardPrinting.kicker_cost_str({s})"));
+        return None;
+    };
+    let mut same = text;
+    same.generic = same.generic.saturating_add(same.pips[5]);
+    same.pips[5] = 0;
+    if same != plain {
+        l.unsupported("CardPrinting.kicker_cost_str(differs from kicker_cost)");
+        return None;
+    }
+    Some((text, false))
+}
+
 pub(crate) fn lower_mana_cost(l: &mut Lowerer, what: &str, c: &cats::ManaCost) -> ManaCost {
     let cats::ManaCost::ManaCost(nodes::ManaCost { generic, colored, x_pips, hybrid, phyrexian }) = c;
     l.deny(&format!("{what}.x_pips"), x_pips);
@@ -1845,6 +1906,8 @@ pub(crate) enum KwOrProt {
     Ascend,
     /// Annihilator n (CR 702.86a): its triggered ability is in the IR too.
     Annihilator(u8),
+    /// Devoid (CR 702.114a): the card has no colour.
+    Devoid,
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
@@ -1907,6 +1970,11 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
         }
         // Annihilator n (CR 702.86a): its triggered ability is in the IR
         // too (checked to agree).
+        K::Devoid => {
+            l.deny("Keyword.n", n);
+            l.deny("Keyword.quality", quality);
+            return Some(KwOrProt::Devoid);
+        }
         K::Annihilator => {
             l.deny("Keyword.quality", quality);
             return Some(KwOrProt::Annihilator(l.int("Keyword.n", *n, 1, 20) as u8));

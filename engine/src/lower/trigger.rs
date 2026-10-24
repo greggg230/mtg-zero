@@ -155,6 +155,10 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     if let Some(s) = slots_used(&pred).into_iter().find(|&s| event.slot_index(s).is_none()) {
         l.unsupported(format!("TriggerPredicate.subject({s:?} of {event:?})"));
     }
+    // "If this spell was kicked" on a cast trigger reads the spell.
+    if event == EventKind::IsCast {
+        pred = paid_on_cast(pred);
+    }
     // Predicates read from one event kind's note.
     let (enters, cast) = (needs(&pred, &|p| matches!(p, TrigPred::EnteredCast | TrigPred::EnteredPaid | TrigPred::EnteredXAtLeast(_))), needs(&pred, &|p| matches!(p, TrigPred::SpellPaid | TrigPred::OrCopy)));
     if enters && event != EventKind::Enters || cast && event != EventKind::IsCast {
@@ -183,6 +187,17 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     }
     let uses_event = ability.uses_event();
     Some(TriggerDef { event, pred, ability, uses_event })
+}
+
+/// `EnteredPaid` -> `SpellPaid` (a cast trigger's "if it was kicked").
+fn paid_on_cast(p: TrigPred) -> TrigPred {
+    match p {
+        TrigPred::EnteredPaid => TrigPred::SpellPaid,
+        TrigPred::And(a, b) => TrigPred::And(Box::new(paid_on_cast(*a)), Box::new(paid_on_cast(*b))),
+        TrigPred::Or(a, b) => TrigPred::Or(Box::new(paid_on_cast(*a)), Box::new(paid_on_cast(*b))),
+        TrigPred::Not(a) => TrigPred::Not(Box::new(paid_on_cast(*a))),
+        other => other,
+    }
 }
 
 /// A condition on the source at the top level of a predicate (`Source`,
@@ -324,6 +339,10 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
             Slot::Player,
             Filter::DrewThisTurn(l.int("NthCardDrawnThisTurn.n", *n, 1, 99) as u8),
         )),
+        // "If it was kicked" (CR 702.33d): how it was cast; `EnteredPaid`
+        // for an enter trigger, `SpellPaid` for a cast trigger (fixed up
+        // by the caller from the event).
+        P::ThisSpellWasKicked(nodes::ThisSpellWasKicked {}) => Some(TrigPred::EnteredPaid),
         P::StateBound(nodes::StateBound { inner }) => {
             let (c, intervening) = lower_state_pred(l, inner)?;
             Some(if intervening { TrigPred::If(c) } else { TrigPred::State(c) })

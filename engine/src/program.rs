@@ -743,6 +743,9 @@ pub enum Ext {
     /// The source, a card in a graveyard (still that object), is shuffled
     /// into its owner's library.
     ShuffleSourceIntoLibrary,
+    /// If the first legal target of `tgt` is an Equipment, attach it to the
+    /// source creature (CR 701.3, 301.5c).
+    AttachTargetToSource { tgt: u8 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").

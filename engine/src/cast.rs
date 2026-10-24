@@ -602,6 +602,26 @@ impl Game {
         }
         let item = &self.stack[pos];
         let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. });
+        if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
+            // Kicker {X} (CR 601.2b): announced only if kicked, at least
+            // `x_min`; as much as can be paid.
+            if item.times == 0 {
+                return;
+            }
+            let lo = self.def_of(card).x_min;
+            let mut tmp = item.clone();
+            let mut most = lo;
+            while most < (act::NUMBER_N - 1) as u8 {
+                tmp.x = most + 1;
+                if !self.can_pay_for(p, &self.total_mana(card, &tmp), self.spend_allow(card)) {
+                    break;
+                }
+                most += 1;
+            }
+            let opts = (lo..=most).map(|x| Opt { action: act::NUMBER + x as u16, choice: Choice::Number(x) }).collect();
+            self.ask(Task::ChooseX { id }, p, DecisionKind::ChooseMode, opts);
+            return;
+        }
         let mut most = 0u8;
         if self.def_of(card).x_life {
             // "Pay X life" (CR 119.4: no more than one's life total; X isn't
@@ -1061,6 +1081,9 @@ impl Game {
         if let Some(tc) = &def.times_cost {
             for _ in 0..item.times {
                 c = c.plus(&tc.mana);
+                if tc.x {
+                    c.generic = c.generic.saturating_add(item.x);
+                }
             }
         }
         if let Some(m) = def.spell.as_ref().and_then(|ab| ab.modes.as_ref()) {
@@ -1142,6 +1165,10 @@ impl Game {
         let mut more = crate::mana::ManaCost::default();
         while most < tc.max.min(act::NUMBER_N as u8 - 1) {
             more = more.plus(&tc.mana);
+            if tc.x {
+                // Kicker {X}: at least the least X.
+                more.generic = more.generic.saturating_add(self.def_of(card).x_min);
+            }
             if !self.can_pay_for(p, &self.announced_cost(card, &self.stack[pos], &more), self.spend_allow(card)) {
                 break;
             }
@@ -1388,7 +1415,7 @@ impl Game {
         if self.def_of(card).additional.len() > 1 {
             self.agenda.push(Task::CastOption { id });
         }
-        if self.def_of(card).x_pips > 0 || self.def_of(card).x_life {
+        if self.def_of(card).x_pips > 0 || self.def_of(card).x_life || self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             self.agenda.push(Task::ChooseX { id }); // CR 601.2b
         }
         if self.def_of(card).times_cost.is_some() {
@@ -1527,6 +1554,8 @@ impl Game {
             _ if tr.max == crate::db::X_TARGETS => item.x,
             // "Up to X targets".
             _ if tr.max == crate::db::X_UP_TO => item.x,
+            // "Up to X targets, X the times it was kicked" (its Enters note).
+            _ if tr.max == crate::db::KICKS_UP_TO => ((item.ev.amount >> 1) & 0xFF) as u8,
             _ => tr.max,
         };
         let min = if tr.max == crate::db::X_TARGETS { item.x } else { tr.min };
@@ -1886,6 +1915,15 @@ impl Game {
             }),
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
+            Filter::MvAtMostSourceX => {
+                let x = ctx.source.and_then(|s| {
+                    self.marks.iter().find_map(|&(o, m)| match m {
+                        crate::game::Mark::KickerX(x) if o == s => Some(x),
+                        _ => None,
+                    })
+                });
+                x.is_some_and(|x| self.mana_value_of(c) <= x)
+            }
             Filter::MvAtMostX => {
                 let x = ctx.source.and_then(|s| self.stack.iter().find(|i| i.kind == StackKind::Spell { card: s.idx })).map_or(0, |i| i.x);
                 self.mana_value_of(c) <= x

@@ -642,3 +642,131 @@ fn quantum_riddler_draws_one_more_with_one_or_fewer_cards_in_hand_cr614_1a() {
     quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
     assert_eq!(g.hand_sorted(0).len(), 3, "{}", log(&g));
 }
+
+// ---- Kicker on permanents: Batroc, Sowing Mycospawn, Thieving Skydiver ----------------
+
+/// Multikicker {2} (CR 702.33c): "Batroc enters with a +1/+1 counter on him
+/// for each time he was kicked. When Batroc enters, he deals damage equal to
+/// his power to each of up to X targets, where X is the number of times he
+/// was kicked."
+#[test]
+fn batroc_multikicked_twice_counters_and_up_to_two_targets_cr702_33c() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain"; 6])
+        .hand(0, &["Batroc the Leaper"])
+        .battlefield(1, &["Test Bear", "Test Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Batroc the Leaper", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    assert!(g.has_option(Choice::Number(2)) && !g.has_option(Choice::Number(3)), "kicked at most twice with six lands");
+    g.choose(Choice::Number(2));
+    pay(&mut g);
+    let bear = bf(&g, 1, "Test Bear");
+    let mut picked = 0;
+    for _ in 0..50 {
+        g.drive_until(|g| (g.stack().is_empty() && at_priority(g)) || g.kind() == Some(DecisionKind::Target) || at_priority(g));
+        match g.kind() {
+            Some(DecisionKind::Target) => {
+                let c = match picked {
+                    0 => g.tgt(bear),
+                    1 => Choice::Target(engine::Target::Player(1)),
+                    _ => Choice::Pass,
+                };
+                assert!(g.has_option(c), "pick {picked}");
+                picked += 1;
+                g.choose(c);
+            }
+            _ if g.stack().is_empty() => break,
+            _ => {
+                g.pass();
+            }
+        }
+    }
+    assert_eq!(picked, 2, "two targets, no third offered\n{}", log(&g));
+    let batroc = bf(&g, 0, "Batroc the Leaper");
+    assert_eq!(g.pt(batroc), (4, 4), "two +1/+1 counters");
+    assert_eq!(g.count_in(1, "Test Bear", Zone::Graveyard), 1);
+    assert_eq!(g.life(1), 16, "4 damage\n{}", log(&g));
+}
+
+/// Kicker {1}{C} (the IR's {2}, read from its text: a {C} pip needs
+/// colorless mana, CR 107.4c); devoid (702.114a); "when you cast this
+/// spell, search your library for a land card, put it onto the battlefield,
+/// then shuffle. When you cast this spell, if it was kicked, exile target
+/// land."
+#[test]
+fn sowing_mycospawn_kicked_with_colorless_mana_cast_triggers_cr702_33d() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest", "Forest", "Sol Ring"])
+        .hand(0, &["Sowing Mycospawn"])
+        .library(0, &["Island", "Island"])
+        .battlefield(1, &["Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Sowing Mycospawn", Zone::Hand);
+    assert_eq!(g.colors_of(c), 0, "devoid");
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    let forest = bf(&g, 1, "Forest");
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(g.tgt(forest)),
+        Some(DecisionKind::SearchLibrary) => g.pending_decision().unwrap().options.iter().find(|o| o.choice != Choice::Pass).map(|o| o.choice),
+        _ => None,
+    });
+    assert_eq!(g.count_in(1, "Forest", Zone::Exile), 1, "kicked: exile target land\n{}", log(&g));
+    assert_eq!(g.count_in(0, "Island", Zone::Battlefield), 1, "a land from the library");
+    assert_eq!(g.count_in(0, "Sowing Mycospawn", Zone::Battlefield), 1);
+}
+
+/// Without colorless mana the {C} of the kicker can't be paid: no kick.
+#[test]
+fn sowing_mycospawn_kicker_needs_colorless_mana_cr107_4c() {
+    let mut g = scen()
+        .battlefield(0, &["Forest"; 6])
+        .hand(0, &["Sowing Mycospawn"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Sowing Mycospawn", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode) || g.kind() == Some(DecisionKind::PayMana));
+    assert!(!g.has_option(Choice::Number(1)), "no {{C}}: not kicked\n{}", log(&g));
+}
+
+/// Kicker {X}, X can't be 0 (CR 601.2b, 107.3): "When this creature enters,
+/// if it was kicked, gain control of target artifact with mana value X or
+/// less. If that artifact is an Equipment, attach it to this creature."
+#[test]
+fn thieving_skydiver_kicker_x_steals_and_attaches_an_equipment_cr702_33d() {
+    let mut g = scen()
+        .battlefield(0, &["Island"; 4])
+        .hand(0, &["Thieving Skydiver"])
+        .battlefield(1, &["Lightning Greaves", "Coalition Relic"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Thieving Skydiver", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode) || g.kind() == Some(DecisionKind::PayMana));
+    assert!(!g.has_option(Choice::Number(0)), "X can't be 0");
+    assert!(g.has_option(Choice::Number(2)) && !g.has_option(Choice::Number(3)));
+    g.choose(Choice::Number(2));
+    pay(&mut g);
+    let greaves = bf(&g, 1, "Lightning Greaves");
+    let monolith = bf(&g, 1, "Coalition Relic");
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || (g.stack().is_empty() && at_priority(g)) || at_priority(g));
+    while g.kind() != Some(DecisionKind::Target) {
+        g.pass();
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || at_priority(g));
+    }
+    assert!(!g.has_option(g.tgt(monolith)), "mana value 3 is more than X");
+    g.choose(g.tgt(greaves));
+    settle(&mut g);
+    let sky = bf(&g, 0, "Thieving Skydiver");
+    assert_eq!(g.obj(greaves).controller, 0, "{}", log(&g));
+    assert_eq!(g.obj(greaves).attached.map(|r| r.idx), Some(sky), "attached");
+}

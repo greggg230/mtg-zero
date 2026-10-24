@@ -1579,7 +1579,8 @@ impl Game {
             | Ext::TokensFor { .. }
             | Ext::PlayerProtection
             | Ext::ExileTopUntilEndStep { .. }
-            | Ext::ShuffleSourceIntoLibrary => self.exec_tail3(f, op),
+            | Ext::ShuffleSourceIntoLibrary
+            | Ext::AttachTargetToSource { .. } => self.exec_tail3(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

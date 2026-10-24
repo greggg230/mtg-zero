@@ -646,6 +646,8 @@ pub enum Mark {
     Harnessed,
     /// Its boast ability was activated in turn n (CR 702.142a).
     Boasted(u16),
+    /// It entered as a spell whose kicker {X} was paid with this X.
+    KickerX(u8),
 }
 
 impl Game {
@@ -1100,6 +1102,16 @@ impl Game {
             return r;
         }
         self.entering(idx, tapped, x);
+        // Multikicker (CR 702.33c): a +1/+1 counter for each time it was
+        // kicked; kicker {X}: its X, for "mana value X or less".
+        if cast && times > 0 {
+            if self.def_of(idx).enters_times_counters {
+                self.add_counters(idx, crate::db::Counter::P1P1, times as u16);
+            }
+            if self.def_of(idx).times_cost.as_ref().is_some_and(|t| t.x) {
+                self.marks.push((r, Mark::KickerX(x)));
+            }
+        }
         r
     }
 
