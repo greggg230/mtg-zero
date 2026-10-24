@@ -293,7 +293,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
         l.deny("CardPrinting.ward_discard_random", ward_discard_random);
         l.deny("CardPrinting.has_graveyard_triggers", has_graveyard_triggers);
-        l.deny("CardPrinting.sunburst", sunburst);
+        // Sunburst (CR 702.44a): counters by the colours of mana spent to
+        // cast it (the payment records them, as for converge).
+        let sunburst_counter = sunburst.then(|| {
+            l.converge = true;
+            super::effect_ext::counter_by_name(l, "charge")
+        });
         l.deny("CardPrinting.grants_play_from_top_paying_life", grants_play_from_top_paying_life);
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
@@ -1491,6 +1496,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         outside_hand_discount,
         chooses_land_type,
         x_life: *additional_cost_pay_x_life,
+        sunburst: sunburst_counter,
         miracle,
     };
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {

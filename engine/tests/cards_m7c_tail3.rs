@@ -234,3 +234,184 @@ fn wizards_rockets_is_blocked_by_its_ir_event() {
     let err = engine::db::CardDb::cube().expect_id("Wizard's Rockets").unwrap_err();
     assert!(err.contains("IR:TriggeredAbility.event"), "{err}");
 }
+
+/// Pass, decline attacks and blocks, first option otherwise, until `stop`.
+fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
+    for _ in 0..10_000 {
+        if stop(g) {
+            return;
+        }
+        let d = g.pending_decision().expect("game running");
+        let c = match d.kind {
+            DecisionKind::Priority | DecisionKind::DeclareAttackers | DecisionKind::DeclareBlockers => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    panic!("quiet_until: no progress\n{}", log(g));
+}
+
+/// Pass priority until attackers are declared, then attack with `names`.
+fn attack_with(g: &mut Game, names: &[&str]) {
+    for _ in 0..100 {
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers) || at_priority(g));
+        if g.kind() == Some(DecisionKind::DeclareAttackers) {
+            break;
+        }
+        g.pass();
+    }
+    for n in names {
+        let c = bf(g, 0, n);
+        g.choose(Choice::Card(c));
+        g.drive_until(|g| g.kind() != Some(DecisionKind::AttackTarget));
+    }
+    g.choose(Choice::Pass);
+}
+
+// ---- Generous Plunderer ------------------------------------------------------------
+
+/// "At the beginning of your upkeep, you may create a Treasure token. When
+/// you do, target opponent creates a tapped Treasure token" (a reflexive
+/// trigger, CR 603.12). "Whenever this creature attacks, it deals damage to
+/// defending player equal to the number of artifacts they control."
+#[test]
+fn generous_plunderer_reflexive_treasure_cr603_12_and_damage_by_their_artifacts() {
+    let mut g = scen()
+        .battlefield(0, &["Generous Plunderer"])
+        .battlefield(1, &["Sol Ring"])
+        .at(Step::Main2, 1)
+        .start();
+    quiet_until(&mut g, |g| g.turn().active == 0 && g.kind() == Some(DecisionKind::YesNo));
+    g.choose(Choice::Yes);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(Choice::Target(engine::Target::Player(1))));
+    assert!(!g.has_option(Choice::Target(engine::Target::Player(0))), "target opponent");
+    g.choose(Choice::Target(engine::Target::Player(1)));
+    settle(&mut g);
+    let t0: Vec<_> = g.permanents_of(0).filter(|&c| g.name(c) == "Treasure").collect();
+    let t1: Vec<_> = g.permanents_of(1).filter(|&c| g.name(c) == "Treasure").collect();
+    assert_eq!((t0.len(), t1.len()), (1, 1), "{}", log(&g));
+    assert!(!g.obj(t0[0]).tapped && g.obj(t1[0]).tapped, "theirs is tapped");
+    attack_with(&mut g, &["Generous Plunderer"]);
+    settle(&mut g);
+    assert_eq!(g.life(1), 18, "Sol Ring and the Treasure: 2 damage\n{}", log(&g));
+}
+
+/// Declining the Treasure: no reflexive trigger.
+#[test]
+fn generous_plunderer_declined_makes_no_reflexive_trigger_cr603_12() {
+    let mut g = scen().battlefield(0, &["Generous Plunderer"]).at(Step::Main2, 1).start();
+    quiet_until(&mut g, |g| g.turn().active == 0 && g.kind() == Some(DecisionKind::YesNo));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::Target));
+    assert!(at_priority(&g) && g.stack().is_empty(), "nothing waits");
+    assert_eq!(g.permanents_of(1).count(), 0);
+}
+
+// ---- Inti, Seneschal of the Sun -------------------------------------------------------
+
+/// "Whenever you attack, you may discard a card. When you do, put a +1/+1
+/// counter on target attacking creature. It gains trample until end of
+/// turn." "Whenever you discard one or more cards, exile the top card of
+/// your library. You may play that card until your next end step."
+#[test]
+fn inti_discard_then_reflexive_counter_cr603_12_and_play_until_your_next_end_step() {
+    let mut g = scen()
+        .battlefield(0, &["Inti, Seneschal of the Sun", "Test Bear"])
+        .hand(0, &["Lightning Bolt"])
+        .library(0, &["Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    attack_with(&mut g, &["Inti, Seneschal of the Sun", "Test Bear"]);
+    g.drive_until(|g| matches!(g.kind(), Some(DecisionKind::Discard) | Some(DecisionKind::ChooseDiscard)));
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Card(bolt));
+    let bear = bf(&g, 0, "Test Bear");
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::Target) { Some(g.tgt(bear)) } else { None });
+    assert_eq!(g.pt(bear), (3, 3), "a +1/+1 counter\n{}", log(&g));
+    assert!(g.has_kw(bear, engine::db::Kw::Trample));
+    let forest = g.card(0, "Forest", Zone::Exile);
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
+    assert!(g.has_option(Choice::Play(forest)), "playable until your next end step");
+    quiet_until(&mut g, |g| g.turn().step == Step::End && at_priority(g) && g.turn().active == 0);
+    assert!(!g.has_option(Choice::Play(forest)), "not in the end step");
+}
+
+// ---- The One Ring -------------------------------------------------------------------------
+
+/// "When The One Ring enters, if you cast it, you gain protection from
+/// everything until your next turn" (CR 702.16j: can't be targeted, damage
+/// prevented); "{T}: Put a burden counter on The One Ring, then draw a card
+/// for each burden counter"; "at the beginning of your upkeep, you lose 1
+/// life for each burden counter".
+#[test]
+fn the_one_ring_protection_from_everything_cr702_16j_and_burden_counters() {
+    let mut g = scen()
+        .battlefield(0, &["Island"; 4])
+        .hand(0, &["The One Ring"])
+        .battlefield(1, &["Mountain", "Test Bear"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "The One Ring", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(g.log_lines().iter().any(|l| l.contains("protection from everything")), "{}", log(&g));
+    let ring = bf(&g, 0, "The One Ring");
+    g.choose(act(ring, 0));
+    settle(&mut g);
+    let burden = engine::db::Counter::Named(db().subtype_id("counter:burden").unwrap());
+    assert_eq!(g.counters_on(ring, burden), 1);
+    assert_eq!(g.hand_sorted(0).len(), 1, "one card drawn");
+    // P1's turn: P0 can't be targeted.
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(!g.has_option(Choice::Target(engine::Target::Player(0))), "protection: not a legal target");
+    assert!(g.has_option(Choice::Target(engine::Target::Player(1))));
+    g.choose(Choice::Target(engine::Target::Player(1)));
+    // P0's next upkeep: the protection is gone; 1 life per burden counter.
+    let life = g.life(0);
+    quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.life(0), life - 1, "{}", log(&g));
+}
+
+/// Put onto the battlefield without being cast: no protection.
+#[test]
+fn the_one_ring_not_cast_no_protection_cr603_4() {
+    let mut g = scen().battlefield(0, &["The One Ring"]).battlefield(1, &["Mountain"]).hand(1, &["Lightning Bolt"]).at(Step::Main1, 1).start();
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(Choice::Target(engine::Target::Player(0))));
+}
+
+// ---- Pentad Prism ---------------------------------------------------------------------------
+
+/// Sunburst (CR 702.44a): "This artifact enters with a charge counter on it
+/// for each color of mana spent to cast it." "Remove a charge counter from
+/// this artifact: Add one mana of any color."
+#[test]
+fn pentad_prism_sunburst_counters_cr702_44a_and_its_mana() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Plains"])
+        .hand(0, &["Pentad Prism"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Pentad Prism", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    settle(&mut g);
+    let prism = bf(&g, 0, "Pentad Prism");
+    let charge = engine::db::Counter::Named(db().subtype_id("counter:charge").unwrap());
+    assert_eq!(g.counters_on(prism, charge), 2, "red and white\n{}", log(&g));
+    // Activated with priority (no {T}: it may be activated again).
+    g.choose(act(prism, 0));
+    g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::ChooseMana) | Some(DecisionKind::ChooseColor)));
+    let k = g.pending_decision().unwrap().options[0].choice;
+    g.choose(k);
+    g.drive_until(at_priority);
+    assert_eq!(g.counters_on(prism, charge), 1, "{}", log(&g));
+}

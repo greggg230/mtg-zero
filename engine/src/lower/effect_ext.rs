@@ -1134,7 +1134,13 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // "That creature deals damage equal to its power to any
             // target" (Pyrogoyf); "it deals that much damage to any other
             // target" (Screaming Nemesis).
-            l.deny("DealDamageFromEvent.to_defending_player", to_defending_player);
+            if *to_defending_player {
+                if !targets.is_empty() || subject_slot.is_some() || *no_lifegain_if_player_hit {
+                    l.unsupported("DealDamageFromEvent.to_defending_player(with targets)");
+                }
+                super::effect_tail3::damage_defending_player(l, b, amount.as_deref());
+                return true;
+            }
             let amount = match amount.as_deref() {
                 Some(cats::Formula::EventSubjectPower(nodes::EventSubjectPower {})) => Amount::EventObjPower,
                 Some(cats::Formula::ResolvingDamageAmount(nodes::ResolvingDamageAmount {})) => Amount::EventAmount,
@@ -1262,6 +1268,12 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let this_turn = match duration {
                 enums::ExilePlayDuration::ThisTurn => attacked_subtype.is_none(),
                 enums::ExilePlayDuration::WhileExiled => false,
+                // "You may play that card until your next end step" (Inti).
+                enums::ExilePlayDuration::UntilYourNextEndStep if free_if.is_none() && attacked_subtype.is_none() => {
+                    let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+                    b.op(Op::Ext(Ext::ExileTopUntilEndStep { who, n, kind }));
+                    return true;
+                }
                 other => {
                     l.unsupported(format!("ExileTopCardsWithPlayPermission.duration({other:?})"));
                     true

@@ -236,6 +236,9 @@ pub struct Player {
     pub gy_exile_turn: u32,
     /// The city's blessing (CR 702.131b: for the rest of the game).
     pub city_blessing: bool,
+    /// Protection from everything until this player's turn count reaches
+    /// this (CR 702.16j; The One Ring): 0 = none.
+    pub prot_until: u32,
 }
 
 /// A player's dungeon (CR 309): the dungeon card in the command zone with the
@@ -509,6 +512,8 @@ pub struct Game {
     pub(crate) entering_escaped: bool,
     /// ... the X it was cast with.
     pub(crate) entering_x: u8,
+    /// ... the colours of mana spent to cast it (sunburst, CR 702.44a).
+    pub(crate) entering_sunburst: u8,
     /// Effects that apply to the next permanent put onto the battlefield as
     /// it enters ("it's an enchantment", "it's a Phyrexian in addition";
     /// CR 614.1c-like; set and cleared around one move).
@@ -717,6 +722,7 @@ impl Game {
             gy_play_turn: 0,
             gy_exile_turn: 0,
             city_blessing: false,
+            prot_until: 0,
         };
         Game {
             db,
@@ -772,6 +778,7 @@ impl Game {
             lki_counters: Vec::new(),
             entering_escaped: false,
             entering_x: 0,
+            entering_sunburst: 0,
             entering_mods: Vec::new(),
             entering_dash: None,
             entering_warp: false,
@@ -1107,6 +1114,12 @@ impl Game {
         }
         if self.def_of(idx).enters_x_counters && x > 0 {
             self.add_counters(idx, crate::db::Counter::P1P1, x as u16);
+        }
+        // CR 702.44a-b: sunburst counters (none if it wasn't cast).
+        let sun = std::mem::take(&mut self.entering_sunburst);
+        if let (Some(k), true) = (self.def_of(idx).sunburst, sun > 0) {
+            let k = if self.is_creature(idx) { crate::db::Counter::P1P1 } else { k };
+            self.add_counters(idx, k, sun as u16);
         }
         // CR 306.5b: a planeswalker enters with its printed loyalty.
         if let (Some(n), true) = (self.def_of(idx).loyalty, self.def_of(idx).is(types::PLANESWALKER)) {
@@ -1614,6 +1627,12 @@ impl Game {
             // (An ability can't be dealt damage.)
             Target::Stack(_) => return 0,
             Target::Player(p) => {
+                // CR 702.16e, j: damage to a player with protection from
+                // everything is prevented.
+                if self.player_protected(p) && !(self.combat_damage_now && self.combat_unpreventable(src.controller)) {
+                    self.note(|_| format!("damage to P{p} prevented (protection)"));
+                    return 0;
+                }
                 // CR 120.3a: the player loses that much life.
                 self.players[p as usize].life -= amount;
                 self.players[p as usize].lost_life = true;
@@ -1688,6 +1707,12 @@ impl Game {
                 self.put_onto_battlefield(l.card.idx, owner);
             }
         }
+    }
+
+    /// Player `p` has protection from everything (CR 702.16j).
+    pub(crate) fn player_protected(&self, p: PlayerId) -> bool {
+        let pl = &self.players[p as usize];
+        pl.turns < pl.prot_until
     }
 
     /// "Combat damage that would be dealt by creatures you control can't be

@@ -204,6 +204,9 @@ impl Game {
                         self.entering_warp = alt.is_some_and(|a| a.warp);
                         self.entering_escaped = item.from == crate::game::CastFrom::Escape;
                         self.entering_x = item.x;
+                        if self.def_of(card).sunburst.is_some() {
+                            self.entering_sunburst = self.converge_of(Some(self.obj_ref(card)));
+                        }
                         self.entering_times = item.times;
                         let bestowed = self.def_of(card).bestowed;
                         // Cast with Serra Paragon's permission: the permanent
@@ -348,6 +351,10 @@ impl Game {
             Amount::Devotion(color) => self.devotion(f.controller, color) as i32,
             Amount::X => f.spell_x as i32,
             Amount::XTimes(k) => f.spell_x as i32 * k as i32,
+            Amount::CountTypesOpp(bits) => {
+                let q = crate::ids::opp(f.controller);
+                self.permanents_of(q).filter(|&c| self.types_of(c) & bits != 0).count() as i32
+            }
             Amount::CountTypes(bits) => {
                 self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
             }

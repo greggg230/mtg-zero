@@ -1262,6 +1262,9 @@ pub struct CardDef {
     /// Its spell reads the colours of mana spent to cast it (converge): the
     /// payment records them (`Mark::Converge`).
     pub converge: bool,
+    /// Sunburst (CR 702.44a): it enters with a +1/+1 counter (a creature) or
+    /// this counter (charge) for each colour of mana spent to cast it.
+    pub sunburst: Option<Counter>,
     /// "As this enters, choose a color. All cards that aren't on the
     /// battlefield, spells, and permanents are the chosen color in addition
     /// to their other colors" (Painter's Servant; layer 5, CR 613.1e).

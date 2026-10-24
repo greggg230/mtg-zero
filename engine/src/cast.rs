@@ -1710,7 +1710,10 @@ impl Game {
     /// by spells with that quality, nor abilities from sources with it).
     pub(crate) fn targetable(&self, t: Target, ctx: &Ctx) -> bool {
         match t {
-            Target::Player(_) | Target::Stack(_) => true,
+            // CR 702.16b, j: a player with protection from everything can't
+            // be targeted.
+            Target::Player(p) => !self.player_protected(p),
+            Target::Stack(_) => true,
             Target::Obj(r) => {
                 if self.objs[r.idx.i()].zone != Zone::Battlefield {
                     return true;

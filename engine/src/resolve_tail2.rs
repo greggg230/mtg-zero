@@ -454,6 +454,11 @@ impl Game {
                 let n = self.players[player as usize].turns;
                 n < k || n == k && self.turn.active == player
             }
+            Some(t) if t & crate::resolve_tail3::PERM_UNTIL_END_STEP != 0 => {
+                let k = t & !crate::resolve_tail3::PERM_UNTIL_END_STEP;
+                let n = self.players[player as usize].turns;
+                n < k || n == k && self.turn.active == player && self.turn.step < crate::game::Step::End
+            }
             Some(t) => t == self.turn.number,
         }
     }

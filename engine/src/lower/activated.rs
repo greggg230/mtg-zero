@@ -79,6 +79,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
             || cost.sacrifice.is_some()
             || *exhaust
             || matches!(m.prod, ManaProd::SacrificedLand)
+            // "Remove a charge counter from this: add ..." (Pentad Prism):
+            // no {T}, so it can be activated again in one payment.
+            || (cost.remove_counters.is_some() && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self))
         {
             instant_only = true;
         }

@@ -10,6 +10,10 @@ use crate::layers::Affected;
 use crate::program::Ext;
 use crate::resolve::{Flow, Frame};
 
+/// `Permission::turn` with this bit: "until your next end step", the low
+/// bits the permission player's turn count whose end step ends it.
+pub const PERM_UNTIL_END_STEP: u32 = 1 << 29;
+
 impl Game {
     pub(crate) fn exec_tail3(&mut self, f: &mut Frame, op: &Ext) -> Flow {
         match op {
@@ -98,6 +102,40 @@ impl Game {
                         f.floor = 0;
                         f.i += 1;
                     }
+                }
+                Flow::Next
+            }
+            Ext::TokensFor { who, token, n, tapped } => {
+                f.made = None;
+                if let Some(p) = self.who(f, *who) {
+                    let def = self.db.token_def(*token);
+                    let made = self.create_tokens(def, p, *n as u32, *tapped);
+                    f.made = made.first().copied();
+                    f.made_all = made;
+                }
+                Flow::Next
+            }
+            Ext::PlayerProtection => {
+                // Until the player's next turn begins (their turn count).
+                let pl = &mut self.players[f.controller as usize];
+                pl.prot_until = pl.turns + 1;
+                self.note(|_| format!("P{} gains protection from everything", f.controller));
+                Flow::Next
+            }
+            Ext::ExileTopUntilEndStep { who, n, kind } => {
+                let Some(q) = self.who(f, *who) else { return Flow::Next };
+                // "Until your next end step": this turn's if it is the
+                // controller's turn before its end step, else their next
+                // turn's (the controller's turn count it ends in).
+                let p = f.controller;
+                let mine = self.turn.active == p && self.turn.step < crate::game::Step::End;
+                let k = self.players[p as usize].turns + (!mine) as u32;
+                for _ in 0..*n {
+                    let Some(&top) = self.players[q as usize].library.last() else { break };
+                    self.force_library_card(top, crate::hidden::KEY_REVEAL, q);
+                    self.reveal(top);
+                    let card = self.move_card(top, Zone::Exile, Pos::Top);
+                    self.permissions.push(crate::game::Permission { card, player: p, turn: Some(PERM_UNTIL_END_STEP | k), kind: *kind });
                 }
                 Flow::Next
             }

@@ -90,6 +90,9 @@ pub enum Amount {
     CostMvPlus(u8),
     /// k times the spell's X ("twice X").
     XTimes(u8),
+    /// The number of permanents of these card types the controller's
+    /// opponent controls ("the number of artifacts they control").
+    CountTypesOpp(u16),
 }
 
 /// Which objects an `Ext` op acts on.
@@ -728,6 +731,15 @@ pub enum Ext {
     /// onto the battlefield tapped, then shuffle (APNAP; a search may fail,
     /// CR 701.19b). Choice: `LIBRARY` (a definition) or `PASS` = done.
     ExileAll { filter: Filter, basics: Option<bool> },
+    /// `who` creates n tokens [tapped].
+    TokensFor { who: Who, token: u16, n: u8, tapped: bool },
+    /// The controller gains protection from everything until their next
+    /// turn (CR 702.16j: a player can't be targeted, damage to them is
+    /// prevented).
+    PlayerProtection,
+    /// Exile the top n cards of `who`'s library (revealed); the controller
+    /// may play them until their next end step.
+    ExileTopUntilEndStep { who: Who, n: u8, kind: crate::game::PermKind },
 }
 
 /// What a delayed trigger is about ("that card", "that much").

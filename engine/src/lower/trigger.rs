@@ -62,6 +62,9 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::BeginningOfEndStep) => Some(EventKind::BeginningOfEndStep),
         Some(E::DealtDamage) => Some(EventKind::DealtDamage),
         Some(E::CardDiscarded) => Some(EventKind::CardDiscarded),
+        // "Whenever you discard ..." (Inti): the same event, by the
+        // discarding player (one per card; "one or more" batches them).
+        Some(E::DiscardsCard) => Some(EventKind::CardDiscarded),
         Some(E::BecomesMonstrous) => Some(EventKind::BecomesMonstrous),
         Some(E::Blocks) => Some(EventKind::Blocks),
         Some(E::Transforms) => Some(EventKind::Transforms),
@@ -88,6 +91,16 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
             l.unsupported("TriggeredAbility.predicate(missing)");
             None
         }
+    };
+    // "When this enters, if you cast it, <effect>" (The One Ring; the IR's
+    // `ConditionalIfCastFromHand` stands for "if you cast it", its
+    // docstring's reading): an intervening "if" on how it entered (CR 603.4;
+    // it can't change before the ability resolves).
+    let (effect, pred) = match (effect.as_deref(), ev, pred) {
+        (Some(cats::Effect::ConditionalIfCastFromHand(nodes::ConditionalIfCastFromHand { inner_effect })), Some(EventKind::Enters), Some(p)) => {
+            (Some(inner_effect), Some(TrigPred::And(Box::new(p), Box::new(TrigPred::EnteredCast))))
+        }
+        (_, _, p) => (effect.as_ref(), p),
     };
     let mut ability = match effect {
         Some(e) => lower_ability(l, e),

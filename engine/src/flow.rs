@@ -408,10 +408,10 @@ impl Game {
                 p.turn.is_none_or(|t| {
                     if t & crate::resolve_tail2::PERM_LATER != 0 {
                         true
-                    } else if t & crate::resolve_tail2::PERM_UNTIL_TURNS != 0 {
+                    } else if t & (crate::resolve_tail2::PERM_UNTIL_TURNS | crate::resolve_tail3::PERM_UNTIL_END_STEP) != 0 {
                         // (Through the end of the player's k-th turn: their
                         // count once this turn begins.)
-                        let k = t & !crate::resolve_tail2::PERM_UNTIL_TURNS;
+                        let k = t & !(crate::resolve_tail2::PERM_UNTIL_TURNS | crate::resolve_tail3::PERM_UNTIL_END_STEP);
                         let turns = self.players[p.player as usize].turns + (p.player == next) as u32;
                         turns < k || turns == k && p.player == next
                     } else {
