@@ -306,6 +306,9 @@ pub struct StackItem {
     /// The times an additional cost that may be paid repeatedly was paid
     /// (replicate, squad, offspring: `CardDef::times_cost`).
     pub times: u8,
+    /// Cards spliced onto this spell (CR 702.47): their spell abilities
+    /// follow its own, their targets after its own.
+    pub spliced: Vec<DefId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

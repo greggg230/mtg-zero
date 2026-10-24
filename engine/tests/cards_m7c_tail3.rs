@@ -770,3 +770,97 @@ fn thieving_skydiver_kicker_x_steals_and_attaches_an_equipment_cr702_33d() {
     assert_eq!(g.obj(greaves).controller, 0, "{}", log(&g));
     assert_eq!(g.obj(greaves).attached.map(|r| r.idx), Some(sky), "attached");
 }
+
+// ---- Splice onto Arcane: Goryo's Vengeance, Through the Breach ----------------------------
+
+/// "Return target legendary creature card from your graveyard to the
+/// battlefield. That creature gains haste. Exile it at the beginning of the
+/// next end step" (CR 603.7).
+#[test]
+fn goryos_vengeance_returns_a_legend_with_haste_exiled_at_end_step_cr603_7() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Goryo's Vengeance"])
+        .graveyard(0, &["Griselbrand", "Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Goryo's Vengeance", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::ChooseHandCard));
+    if g.kind() == Some(DecisionKind::ChooseHandCard) {
+        g.choose(Choice::Pass);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    }
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    assert!(!g.has_option(g.tgt(bear)), "legendary only");
+    let gris = g.card(0, "Griselbrand", Zone::Graveyard);
+    g.choose(g.tgt(gris));
+    pay(&mut g);
+    settle(&mut g);
+    let gris = bf(&g, 0, "Griselbrand");
+    assert!(g.has_kw(gris, engine::db::Kw::Haste));
+    quiet_until(&mut g, |g| g.turn().step == Step::Cleanup || g.turn().active == 1);
+    assert_eq!(g.count_in(0, "Griselbrand", Zone::Exile), 1, "{}", log(&g));
+}
+
+/// Splice onto Arcane (CR 702.47): Through the Breach with Goryo's Vengeance
+/// spliced: one spell with both effects, the spliced card revealed and kept
+/// in hand, its splice cost paid with the rest, its target chosen with the
+/// spell's (702.47b-c).
+#[test]
+fn through_the_breach_with_goryos_spliced_cr702_47() {
+    let mut g = scen()
+        .battlefield(0, &["Badlands"; 8])
+        .hand(0, &["Through the Breach", "Goryo's Vengeance", "Test Bear"])
+        .graveyard(0, &["Griselbrand"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Through the Breach", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard));
+    let goryo = g.card(0, "Goryo's Vengeance", Zone::Hand);
+    assert!(g.has_option(Choice::Card(goryo)));
+    assert!(!g.has_option(Choice::Card(g.card(0, "Test Bear", Zone::Hand))), "not a splice card");
+    g.choose(Choice::Card(goryo));
+    // Spliced once: only "no more" left.
+    g.drive_until(|g| g.kind() != Some(DecisionKind::ChooseHandCard) || g.pending_decision().unwrap().options.len() == 1);
+    if g.kind() == Some(DecisionKind::ChooseHandCard) {
+        g.choose(Choice::Pass);
+    }
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let gris = g.card(0, "Griselbrand", Zone::Graveyard);
+    g.choose(g.tgt(gris));
+    pay(&mut g);
+    assert!(g.obj(goryo).known == 0b11, "revealed");
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseHandCard) => Some(Choice::Card(bear)),
+        Some(DecisionKind::YesNo) => Some(Choice::Yes),
+        _ => None,
+    });
+    assert_eq!(g.count_in(0, "Goryo's Vengeance", Zone::Hand), 1, "the spliced card stays in hand\n{}", log(&g));
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Battlefield), 1, "Through the Breach's effect");
+    assert_eq!(g.count_in(0, "Griselbrand", Zone::Battlefield), 1, "the spliced effect");
+    assert!(g.player(0).pool.total() == 0 && g.permanents_of(0).filter(|&c| g.obj(c).tapped).count() == 8, "4R + 2B paid");
+    quiet_until(&mut g, |g| g.turn().active == 1);
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Graveyard), 1, "sacrificed at the end step");
+    assert_eq!(g.count_in(0, "Griselbrand", Zone::Exile), 1, "exiled at the end step");
+}
+
+/// The splice cost must be payable with the rest: not offered with five
+/// lands.
+#[test]
+fn splice_not_offered_without_its_cost_cr702_47a() {
+    let mut g = scen()
+        .battlefield(0, &["Badlands"; 5])
+        .hand(0, &["Through the Breach", "Goryo's Vengeance"])
+        .graveyard(0, &["Griselbrand"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Through the Breach", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard) || g.kind() == Some(DecisionKind::PayMana));
+    if g.kind() == Some(DecisionKind::ChooseHandCard) {
+        assert_eq!(g.pending_decision().unwrap().options.len(), 1, "only no");
+    }
+}

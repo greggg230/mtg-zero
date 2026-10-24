@@ -100,7 +100,7 @@ impl Game {
             return;
         };
         let ab = self.db.ability(ar);
-        let reqs = ab.reqs(&item.modes);
+        let reqs = crate::resolve_tail3::item_reqs(self.db, &item, ar);
         let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.item_source(&item)) };
         let mut legal = 0u64;
         for (i, &(req, t)) in item.targets.iter().enumerate() {
@@ -157,10 +157,50 @@ impl Game {
             noted: item.noted.clone(),
             flips: item.flips,
         };
+        // The targets of requirements `offset..offset + n`, renumbered from 0,
+        // with their legality bits.
+        let part = |offset: u8, n: u8| {
+            let mut ts = Vec::new();
+            let mut bits = 0u64;
+            for (i, &(req, t)) in item.targets.iter().enumerate() {
+                if (offset..offset + n).contains(&req) {
+                    if legal & (1 << i) != 0 {
+                        bits |= 1 << ts.len();
+                    }
+                    ts.push((req - offset, t));
+                }
+            }
+            (ts, bits)
+        };
+        // Spliced cards' effects follow the spell's own, with their targets
+        // (CR 702.47b; their programs are their cards', the source the spell).
+        let mut spliced = Vec::with_capacity(item.spliced.len());
+        if !item.spliced.is_empty() {
+            let mut offset = reqs.len() as u8 - item.spliced.iter().map(|&d| self.db.def(d).spell.as_ref().map_or(0, |a| a.targets.len() as u8)).sum::<u8>();
+            for &d in &item.spliced {
+                let n = self.db.def(d).spell.as_ref().map_or(0, |a| a.targets.len() as u8);
+                let (ts, bits) = part(offset, n);
+                let mut fr = frame(AbilityRef { def: d, slot: crate::db::AbilitySlot::Spell, mode: None }, ts, bits);
+                fr.source_def = d;
+                spliced.push(fr);
+                offset += n;
+            }
+        }
         let Some(modes) = &ab.modes else {
-            self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
+            for f in spliced.into_iter().rev() {
+                self.agenda.push(Task::Run(f));
+            }
+            if item.spliced.is_empty() {
+                self.agenda.push(Task::Run(frame(ar, item.targets.clone(), legal)));
+            } else {
+                let (ts, bits) = part(0, ab.targets.len() as u8);
+                self.agenda.push(Task::Run(frame(ar, ts, bits)));
+            }
             return;
         };
+        for f in spliced.into_iter().rev() {
+            self.agenda.push(Task::Run(f));
+        }
         // A modal ability: each chosen mode instance runs in turn, in the
         // order chosen (non-decreasing, the order printed), with its own
         // targets (CR 700.2).

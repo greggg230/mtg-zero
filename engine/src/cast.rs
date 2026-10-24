@@ -1081,6 +1081,11 @@ impl Game {
         let StackKind::Spell { card } = item.kind else { return Default::default() };
         let def = self.def_of(card);
         let mut c = crate::mana::ManaCost::default();
+        for &d in &item.spliced {
+            if let Some((_, m)) = &self.db.def(d).splice {
+                c = c.plus(m);
+            }
+        }
         if let Some(tc) = &def.times_cost {
             for _ in 0..item.times {
                 c = c.plus(&tc.mana);
@@ -1102,6 +1107,10 @@ impl Game {
     /// The mana of spell `card`'s cost as announced so far (CR 601.2b) and
     /// `more`: its mana cost or alternative cost plus the additional costs,
     /// with increases and reductions (601.2f).
+    pub(crate) fn announced_cost_pub(&self, card: CardIdx, item: &StackItem, more: &crate::mana::ManaCost) -> crate::mana::ManaCost {
+        self.announced_cost(card, item, more)
+    }
+
     fn announced_cost(&self, card: CardIdx, item: &StackItem, more: &crate::mana::ManaCost) -> crate::mana::ManaCost {
         let p = item.controller;
         let extra = self.extra_costs(item).plus(more);
@@ -1397,6 +1406,7 @@ impl Game {
             flips: 0,
             origin,
             times: 0,
+            spliced: Vec::new(),
         });
         self.agenda.push(Task::CastDone { id });
         if self.def_of(card).spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| m.escalate_discard) {
@@ -1412,8 +1422,12 @@ impl Game {
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
             self.agenda.push(Task::Divide { id }); // CR 601.2d
         }
-        if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.has_targets()) {
+        let splice = self.splice_possible(p, card);
+        if splice || self.def_of(card).spell.as_ref().is_some_and(|ab| ab.has_targets()) {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
+        }
+        if splice {
+            self.agenda.push(Task::Splice { id }); // CR 601.2b, 702.47a
         }
         if self.def_of(card).additional.len() > 1 {
             self.agenda.push(Task::CastOption { id });
@@ -1521,7 +1535,7 @@ impl Game {
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         let Some(ar) = self.item_ability(item) else { return };
-        let reqs = self.db.ability(ar).reqs(&item.modes);
+        let reqs = crate::resolve_tail3::item_reqs(self.db, item, ar);
         let Some(&tr) = reqs.get(req as usize) else { return };
         let ctx = Ctx { controller: item.controller, source: Some(self.item_source(item)) };
         let already: Vec<Target> =

@@ -1302,6 +1302,8 @@ pub struct CardDef {
     pub enters_times_counters: bool,
     /// The least X its kicker {X} may have ("X can't be 0").
     pub x_min: u8,
+    /// Splice onto <subtype> <cost> (CR 702.47): the subtype, the cost.
+    pub splice: Option<(u16, ManaCost)>,
     /// "As this enters, choose a color. All cards that aren't on the
     /// battlefield, spells, and permanents are the chosen color in addition
     /// to their other colors" (Painter's Servant; layer 5, CR 613.1e).

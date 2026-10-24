@@ -707,8 +707,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // graveyard onto the battlefield [under your control] [with a
             // <kind> counter on it]. [If that creature would leave the
             // battlefield, exile it instead of putting it anywhere else.]"
-            l.deny("ReturnCardFromGraveyardToBattlefield.haste", haste);
-            l.deny("ReturnCardFromGraveyardToBattlefield.exile_at_next_end_step", exile_at_next_end_step);
             let Some(cf) = super::filter::lower_card_filter(l, card_filter) else { return true };
             let (inner, yours) = match source {
                 enums::ReanimateSource::TargetAnyGraveyard => (cf, true),
@@ -720,6 +718,23 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             };
             let t = b.target(Filter::InGraveyard(Box::new(inner)), if *up_to_one { 0 } else { 1 }, 1);
             b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: true, yours, tapped: false }));
+            // "That creature gains haste. Exile it at the beginning of the
+            // next end step" (Goryo's Vengeance).
+            if let Some(h) = haste {
+                let mut kw = KwSet::default();
+                kw.insert(Kw::Haste);
+                let until = match h {
+                    enums::HasteRider::UntilEndOfTurn => Until::EndOfTurn,
+                    enums::HasteRider::Permanent => Until::Forever,
+                };
+                apply(b, On::Made, vec![Mod::Keywords(kw)], until);
+            }
+            if *exile_at_next_end_step {
+                let mut d = Builder::default();
+                d.op(Op::Ext(Ext::ExileEventObj));
+                let k = l.delayed_ability(d.finish());
+                b.op(Op::Ext(Ext::Delay { k, when: DelayedWhen::NextEndStep, about: About::Made }));
+            }
             if let Some(name) = with_counter {
                 // (Put on it as it enters; ENGINE.md 27.8.)
                 let counter = counter_by_name(l, name);

@@ -339,9 +339,21 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let _ = buyback_cost_str; // display form of `buyback_cost`
         l.deny_ne("CardPrinting.alt_cost_exile_from_hand_count", alt_cost_exile_from_hand_count, &generated::defaults::d_CardPrinting_alt_cost_exile_from_hand_count());
         let _ = alt_cost_exile_from_hand_count; // 1 (checked above)
-        l.deny("CardPrinting.splice_onto", splice_onto);
-        l.deny("CardPrinting.splice_cost", splice_cost);
-        l.deny("CardPrinting.splice_cost_str", splice_cost_str);
+        // Splice onto <subtype> (CR 702.47): an instant or sorcery's.
+        let splice = match (splice_onto.as_deref(), splice_cost.as_deref()) {
+            (None, None) => {
+                l.deny("CardPrinting.splice_cost_str", splice_cost_str);
+                None
+            }
+            (Some(onto), Some(m)) => {
+                let mana = super::effect_copies::checked_cost(l, "CardPrinting.splice_cost", m, splice_cost_str);
+                Some((l.subtype(onto), mana))
+            }
+            _ => {
+                l.unsupported("CardPrinting.splice_onto(without its cost)");
+                None
+            }
+        };
         // Faces (`mdfc_back_face`, `transform_back_face`, `face_colors`,
         // `daybound`, `nightbound`, `adventure_face`): below.
         l.deny("CardPrinting.class_level", class_level);
@@ -941,6 +953,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             0
         }
     };
+    if splice.is_some() && (ty & (types::INSTANT | types::SORCERY) == 0 || spell_effect.is_none() || kicker.is_some() || overloaded.is_some()) {
+        l.unsupported("CardPrinting.splice_onto(not a plain instant or sorcery)");
+    }
     if times_cost.is_some() && (!additional.is_empty() || x_pips > 0) {
         l.unsupported("CardPrinting(a repeatable cost with other additional costs or X)");
     }
@@ -1553,6 +1568,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         sunburst: sunburst_counter,
         enters_times_counters: *enters_with_counter_per_kick,
         x_min: x_least,
+        splice,
         miracle,
     };
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {

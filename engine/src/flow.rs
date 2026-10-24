@@ -85,6 +85,9 @@ pub(crate) enum Task {
     /// Announce how many times an additional cost is paid (CR 601.2b:
     /// replicate, squad, offspring).
     ChooseTimes { id: u32 },
+    /// Splice cards from hand onto the spell (CR 702.47a, 601.2b): one card
+    /// per decision, `PASS` = no more.
+    Splice { id: u32 },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -236,6 +239,7 @@ impl Game {
             Task::EnterAsCopy { card, note } => self.enter_as_copy(card, note),
             Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
             Task::ChooseTimes { id } => self.choose_times(id),
+            Task::Splice { id } => self.choose_splice(id),
         }
     }
 

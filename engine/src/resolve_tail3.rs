@@ -14,7 +14,78 @@ use crate::resolve::{Flow, Frame};
 /// bits the permission player's turn count whose end step ends it.
 pub const PERM_UNTIL_END_STEP: u32 = 1 << 29;
 
+/// The target requirements of a stack item: its ability's (the chosen
+/// modes'), then each spliced card's (CR 702.47b).
+pub(crate) fn item_reqs(db: &'static crate::db::CardDb, item: &crate::game::StackItem, ar: crate::db::AbilityRef) -> Vec<&'static crate::db::TargetReq> {
+    let mut reqs = db.ability(ar).reqs(&item.modes);
+    for &d in &item.spliced {
+        if let Some(ab) = &db.def(d).spell {
+            reqs.extend(ab.targets.iter());
+        }
+    }
+    reqs
+}
+
 impl Game {
+    /// Splice may be asked as `p` casts `card` (CR 702.47a): an instant or
+    /// sorcery with a subtype some card of `p`'s deck splices onto. Asked
+    /// whatever `p`'s hand holds (decklists are open, ENGINE.md 10): the
+    /// question says nothing about the hand.
+    pub(crate) fn splice_possible(&self, p: PlayerId, card: crate::ids::CardIdx) -> bool {
+        let def = self.def_of(card);
+        if def.subtypes.is_empty() || !def.is(types::INSTANT | types::SORCERY) || self.is_copy_obj(card) {
+            return false;
+        }
+        self.objs.iter().any(|o| o.owner == p && self.db.def(o.def).splice.is_some_and(|(s, _)| def.subtypes.contains(&s)))
+    }
+
+    /// `Task::Splice`: offer each card in hand that splices onto the spell
+    /// (one per definition, a copy not spliced yet), whose cost can be paid
+    /// with the rest and whose targets exist; reveal and record the one
+    /// chosen, then ask again.
+    pub(crate) fn choose_splice(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let crate::game::StackKind::Spell { card } = self.stack[pos].kind else { return };
+        let p = self.stack[pos].controller;
+        // The k-th copy of a definition in hand (canonical order) not yet
+        // spliced.
+        let copy_of = |g: &Game, d: crate::ids::DefId| {
+            let k = g.stack[pos].spliced.iter().filter(|&&x| x == d).count();
+            g.hand_sorted_in(p).iter().copied().filter(|&c| g.objs[c.i()].def == d).nth(k)
+        };
+        match self.answer.take() {
+            Some(Choice::Card(c)) => {
+                let d = self.objs[c.i()].def;
+                let c = copy_of(self, d).unwrap_or(c);
+                self.reveal(c);
+                self.stack[pos].spliced.push(d);
+                self.note(|g| format!("splices {} onto {}", g.name(c), g.name(card)));
+                self.agenda.push(Task::Splice { id });
+                return;
+            }
+            Some(Choice::Pass) => return,
+            Some(other) => unreachable!("splice answer {other:?}"),
+            None => {}
+        }
+        let subs = self.def_of(card).subtypes.clone();
+        let allow = self.spend_allow(card);
+        let mut opts = Vec::new();
+        for (action, c) in self.hand_slots(p) {
+            let d = self.objs[c.i()].def;
+            let Some((s, cost)) = self.db.def(d).splice.clone() else { continue };
+            if !subs.contains(&s) || copy_of(self, d).is_none() {
+                continue;
+            }
+            let ok_targets = self.db.def(d).spell.as_ref().is_none_or(|ab| self.targets_available(ab, p, Some(self.obj_ref(card))));
+            let item = &self.stack[pos];
+            if ok_targets && self.can_pay_for(p, &self.announced_cost_pub(card, item, &cost), allow) {
+                opts.push(Opt { action, choice: Choice::Card(c) });
+            }
+        }
+        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+        self.ask(Task::Splice { id }, p, DecisionKind::ChooseHandCard, opts);
+    }
+
     pub(crate) fn exec_tail3(&mut self, f: &mut Frame, op: &Ext) -> Flow {
         match op {
             Ext::ApplyPtX { on, p, t } => {

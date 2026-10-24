@@ -289,7 +289,7 @@ fn task_code(t: &Task) -> usize {
         Task::ChooseFace { .. } => 20,
         Task::EnterAsCopy { .. } => 21,
         Task::CopyTargets { .. } => 22,
-        Task::ChooseTimes { .. } => 23,
+        Task::ChooseTimes { .. } | Task::Splice { .. } => 23,
         _ => 18,
     }
 }
@@ -921,7 +921,8 @@ impl Game {
                 | Task::CastPay { id }
                 | Task::ActPay { id }
                 | Task::CopyTargets { id, .. }
-                | Task::ChooseTimes { id } => stack_item(*id),
+                | Task::ChooseTimes { id }
+                | Task::Splice { id } => stack_item(*id),
                 _ => None,
             }
         };

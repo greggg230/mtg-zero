@@ -345,6 +345,7 @@ impl Game {
             flips: self.objs[card.i()].flips,
             origin: Zone::Nowhere,
             times: 0,
+            spliced: Vec::new(),
         });
         self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         self.agenda.push(Task::ActPay { id });

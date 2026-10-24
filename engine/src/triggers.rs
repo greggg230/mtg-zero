@@ -481,6 +481,7 @@ impl Game {
             flips: if self.live(t.source) { self.objs[t.source.idx.i()].flips } else { 0 },
             origin: Zone::Nowhere,
             times: 0,
+            spliced: Vec::new(),
         });
         self.note(|g| format!("trigger of {} goes on the stack", g.db.def(t.source_def).name));
         if ab.divide.is_some() {

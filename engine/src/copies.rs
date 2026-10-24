@@ -313,6 +313,7 @@ impl Game {
             flips: 0,
             origin: Zone::Nowhere,
             times: item.times,
+            spliced: item.spliced.clone(),
         });
         self.note(|g| format!("P{controller} copies {}", g.db.def(def).name));
         self.event(Event { kind: crate::db::EventKind::IsCast, a: Subj::Obj(r), b: Subj::Player(controller), amount: COPIED });
@@ -546,7 +547,7 @@ impl Game {
         }
         let item = &self.stack[pos];
         let Some(ar) = self.item_ability(item) else { return };
-        let reqs = self.db.ability(ar).reqs(&item.modes);
+        let reqs = crate::resolve_tail3::item_reqs(self.db, item, ar);
         let (req, cur) = item.targets[k as usize];
         let tr = reqs[req as usize];
         let p = item.controller;
