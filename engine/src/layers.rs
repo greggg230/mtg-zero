@@ -608,6 +608,11 @@ impl Game {
         if k == Counter::Lore && self.objs[c.i()].zone == Zone::Battlefield {
             self.chapters_reached(c, before, before.saturating_add(n));
         }
+        // "Whenever one or more +1/+1 counters are put on this" (CR 122.6).
+        if k == Counter::P1P1 && self.seen & crate::game::SEEN_RARE_EVENTS != 0 && self.objs[c.i()].zone == Zone::Battlefield {
+            let r = self.obj_ref(c);
+            self.event(crate::triggers::Event::obj(crate::db::EventKind::CountersAdded, r));
+        }
     }
 
     /// Remove up to n counters of kind `k`; returns how many were removed.

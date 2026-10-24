@@ -1030,3 +1030,148 @@ fn sword_of_the_meek_on_the_battlefield_doesnt_trigger() {
     g.drive_until(|g| g.stack().is_empty() && at_priority(g) || g.kind() == Some(DecisionKind::YesNo));
     assert_ne!(g.kind(), Some(DecisionKind::YesNo), "{}", log(&g));
 }
+
+// ---- Gollum, Emperor of Bones, Wan Shi Tong, Coveted Jewel ---------------------------------
+
+/// "As Gollum enters, choose odd or even" (CR 614.12). "Whenever an opponent
+/// casts a spell with mana value of the chosen quality, choose one that
+/// hasn't been chosen" (700.2): each mode once.
+#[test]
+fn gollum_parity_trigger_each_mode_once_cr700_2() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Gollum, Riddle Master"])
+        .battlefield(1, &["Forest"; 8])
+        .hand(1, &["Test Bear", "Test Bear", "Test Bear", "Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Gollum, Riddle Master", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(0)); // even
+    settle(&mut g);
+    let gollum = bf(&g, 0, "Gollum, Riddle Master");
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    let mut offered = Vec::new();
+    for k in 0..4 {
+        let bear = g.card(1, "Test Bear", Zone::Hand);
+        g.choose(Choice::Cast(bear));
+        pay(&mut g);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode) || (at_priority(g) && g.pending_decision().unwrap().player == 1 && g.stack().is_empty()) || at_priority(g));
+        if g.kind() == Some(DecisionKind::ChooseMode) {
+            let opts: Vec<_> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+            offered.push(opts.len());
+            g.choose(opts[0]);
+        } else {
+            offered.push(0);
+        }
+        settle(&mut g);
+        let _ = k;
+    }
+    assert_eq!(offered, vec![3, 2, 1, 0], "each mode once, then nothing\n{}", log(&g));
+    assert_eq!(g.pt(gollum), (4, 2), "one +1/+1 counter");
+    assert_eq!(g.life(1), 18);
+    assert_eq!(g.life(0), 22);
+}
+
+/// "At the beginning of combat on your turn, exile up to one target card
+/// from a graveyard. {1}{B}: Adapt 2 (701.46a). Whenever one or more +1/+1
+/// counters are put on this creature, put a creature card exiled with this
+/// creature onto the battlefield under your control with a finality counter
+/// on it (122.1i). It gains haste. Sacrifice it at the beginning of the next
+/// end step."
+#[test]
+fn emperor_of_bones_adapt_reanimates_with_a_finality_counter_cr701_46a() {
+    let mut g = scen()
+        .battlefield(0, &["Emperor of Bones", "Swamp", "Swamp"])
+        .graveyard(1, &["Test Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let emp = bf(&g, 0, "Emperor of Bones");
+    let giant = g.card(1, "Test Giant", Zone::Graveyard);
+    g.pass();
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(giant));
+    settle(&mut g);
+    assert_eq!(g.count_in(1, "Test Giant", Zone::Exile), 1, "{}", log(&g));
+    g.choose(act(emp, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.pt(emp), (4, 4), "adapt 2");
+    let giant = g.card(1, "Test Giant", Zone::Battlefield);
+    assert_eq!(g.obj(giant).controller, 0, "under your control\n{}", log(&g));
+    assert!(g.has_kw(giant, engine::db::Kw::Haste));
+    // A second adapt does nothing (it has +1/+1 counters).
+    quiet_until(&mut g, |g| g.turn().active == 1);
+    assert_eq!(g.count_in(1, "Test Giant", Zone::Exile), 1, "sacrificed, exiled by its finality counter\n{}", log(&g));
+}
+
+/// "When Wan Shi Tong enters, target nonland permanent's owner puts it into
+/// their library second from the top or on the bottom. Whenever one or more
+/// cards are put into a library from anywhere, create two 1/1 colorless
+/// Spirit creature tokens with "This token can't block or be blocked by
+/// non-Spirit creatures.""
+#[test]
+fn wan_shi_tong_second_from_the_top_and_spirits_cr509_1b() {
+    let mut g = scen()
+        .battlefield(0, &["Island"; 5])
+        .hand(0, &["Wan Shi Tong, All-Knowing"])
+        .battlefield(1, &["Test Giant", "Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Wan Shi Tong, All-Knowing", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    let giant = bf(&g, 1, "Test Giant");
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(g.tgt(giant)),
+        Some(DecisionKind::YesNo) => {
+            assert_eq!(g.pending_decision().unwrap().player, 1, "its owner chooses");
+            Some(Choice::Yes)
+        }
+        _ => None,
+    });
+    let lib = g.library_sorted(1);
+    assert!(lib.iter().any(|&c| g.name(c) == "Test Giant"), "{}", log(&g));
+    let spirits: Vec<_> = g.permanents_of(0).filter(|&c| g.name(c) == "Spirit").collect();
+    assert_eq!(spirits.len(), 2, "{}", log(&g));
+    // A Spirit can't be blocked by the Bear.
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.kind() == Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Card(spirits[0]));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::AttackTarget));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers) || g.turn().step >= Step::CombatDamage);
+    if g.kind() == Some(DecisionKind::DeclareBlockers) {
+        assert!(!g.has_option(Choice::Card(spirits[0])), "a non-Spirit can't block it");
+    }
+}
+
+/// "Whenever one or more creatures an opponent controls attack you and
+/// aren't blocked, that player draws three cards and gains control of this
+/// artifact. Untap it."
+#[test]
+fn coveted_jewel_changes_hands_when_attackers_are_unblocked_cr509_1h() {
+    let mut g = scen()
+        .battlefield(0, &["Coveted Jewel"])
+        .battlefield(1, &["Test Bear"])
+        .at(Step::Main1, 1)
+        .start();
+    let jewel = bf(&g, 0, "Coveted Jewel");
+    for _ in 0..100 {
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers) || at_priority(g));
+        if g.kind() == Some(DecisionKind::DeclareAttackers) {
+            break;
+        }
+        g.pass();
+    }
+    g.choose(Choice::Card(bf(&g, 1, "Test Bear")));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::AttackTarget));
+    g.choose(Choice::Pass);
+    let hand = g.hand_sorted(1).len();
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2);
+    assert_eq!(g.obj(jewel).controller, 1, "{}", log(&g));
+    assert!(!g.obj(jewel).tapped);
+    assert_eq!(g.hand_sorted(1).len(), hand + 3);
+}

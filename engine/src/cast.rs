@@ -984,6 +984,13 @@ impl Game {
             Some(Choice::Number(k)) => {
                 self.note(|_| format!("mode {k}"));
                 self.stack[pos].modes.push(k);
+                if m.once_each {
+                    let src = self.item_source(&self.stack[pos]);
+                    match self.marks.iter_mut().find(|(o, x)| *o == src && matches!(x, crate::game::Mark::ModesUsed(_))) {
+                        Some((_, crate::game::Mark::ModesUsed(b))) => *b |= 1 << k,
+                        _ => self.marks.push((src, crate::game::Mark::ModesUsed(1 << k))),
+                    }
+                }
                 self.agenda.push(Task::ChooseModes { id });
                 return;
             }
@@ -1026,6 +1033,17 @@ impl Game {
                 }
             }
         }
+        // "Choose one that hasn't been chosen" (the source object's record).
+        if m.once_each {
+            let src = self.item_source(item);
+            let used = self.marks.iter().find_map(|&(o, k)| match k {
+                crate::game::Mark::ModesUsed(b) if o == src => Some(b),
+                _ => None,
+            });
+            for (k, a) in avail.iter_mut().enumerate() {
+                *a = *a && used.is_none_or(|b| b & (1 << k) == 0);
+            }
+        }
         let floor = item.modes.last().map_or(0, |&l| if m.repeat { l } else { l + 1 }) as usize;
         let need = (m.min as usize).saturating_sub(chosen + 1);
         let mut opts = Vec::new();
@@ -1039,6 +1057,13 @@ impl Game {
         }
         if chosen >= m.min as usize {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+        }
+        if opts.is_empty() && m.once_each && chosen == 0 {
+            // Every mode was chosen before: no mode can be chosen, the
+            // triggered ability is removed (CR 700.2b, 603.3c).
+            self.note(|_| "no mode left: the trigger is removed".to_string());
+            self.stack.remove(pos);
+            return;
         }
         self.ask(Task::ChooseModes { id }, p, DecisionKind::ChooseMode, opts);
     }

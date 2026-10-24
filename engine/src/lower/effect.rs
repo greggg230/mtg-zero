@@ -14,9 +14,15 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     use cats::Effect as E;
     // A modal spell or ability (CR 700.2): every mode is an ability.
     let mut costs: Vec<ManaCost> = Vec::new();
+    let mut once_each = false;
     let modal = match e {
         E::ModalChooseOne(nodes::ModalChooseOne { modes, or_both }) => {
             Some((modes, 1, if *or_both { 2 } else { 1 }, false, false))
+        }
+        // "Choose one that hasn't been chosen" (Gollum, Riddle Master).
+        E::ModalChooseOneNotYetChosen(nodes::ModalChooseOneNotYetChosen { modes }) => {
+            once_each = true;
+            Some((modes, 1, 1, false, false))
         }
         E::ChooseModes(nodes::ChooseModes {
             modes,
@@ -69,7 +75,7 @@ pub(crate) fn lower_ability(l: &mut Lowerer, e: &cats::Effect) -> AbilityDef {
     AbilityDef {
         targets: Vec::new(),
         program: Vec::new(),
-        modes: Some(Box::new(Modes { list, min, max, repeat, escalate_discard, costs })),
+        modes: Some(Box::new(Modes { list, min, max, repeat, escalate_discard, costs, once_each })),
         divide: None,
     }
 }

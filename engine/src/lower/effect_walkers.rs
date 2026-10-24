@@ -82,7 +82,7 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             if triggers.is_empty() && statics.is_empty() && grants_retrace.is_none() {
                 l.unsupported("CreateEmblemWithAbilities(no ability)");
             }
-            let trig_mask = triggers.iter().fold(0u32, |m, t| m | 1 << t.event as u32);
+            let trig_mask = triggers.iter().fold(0u64, |m, t| m | 1 << t.event as u32);
             let def = CardDef {
                 name: format!("{} emblem", l.card_name),
                 emblem: true,

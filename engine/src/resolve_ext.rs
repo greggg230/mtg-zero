@@ -1584,7 +1584,10 @@ impl Game {
             | Ext::RemoveCounterOrSacrifice { .. }
             | Ext::LinkedToBattlefieldOwners
             | Ext::BecomeSaddled
-            | Ext::AttachMadeToEventObj => self.exec_tail3(f, op),
+            | Ext::AttachMadeToEventObj
+            | Ext::LinkedCreatureToBattlefield { .. }
+            | Ext::OwnerPutsSecondOrBottom { .. }
+            | Ext::EventPlayerTakesSourceUntapped => self.exec_tail3(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

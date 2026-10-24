@@ -379,8 +379,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny_ne("CardPrinting.emerge_sacrifice_type", emerge_sacrifice_type, &generated::defaults::d_CardPrinting_emerge_sacrifice_type());
         let _ = miracle_cost_str; // display form of `miracle_cost`
         l.deny("CardPrinting.additional_cost_exile_from_graveyard", additional_cost_exile_from_graveyard);
-        l.deny("CardPrinting.chooses_parity_as_enters", chooses_parity_as_enters);
-        l.deny("CardPrinting.blocks_only_with_subtype", blocks_only_with_subtype);
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
@@ -720,7 +718,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                         l.unsupported("CardPrinting.kicker_cost(modal effect)");
                     }
                     Some(crate::db::AbilityDef {
-                        modes: Some(Box::new(crate::db::Modes { list: vec![plain, kicked], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new() })),
+                        modes: Some(Box::new(crate::db::Modes { list: vec![plain, kicked], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new(), once_each: false })),
                         ..Default::default()
                     })
                 }
@@ -751,7 +749,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                     l.unsupported("CardPrinting.teamwork_power(modal effect)");
                 }
                 Some(crate::db::AbilityDef {
-                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, teamed], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new() })),
+                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, teamed], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new(), once_each: false })),
                     ..Default::default()
                 })
             }
@@ -781,7 +779,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                     l.unsupported("AlternativeCost.overload(shape)");
                 }
                 Some(crate::db::AbilityDef {
-                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, each], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new() })),
+                    modes: Some(Box::new(crate::db::Modes { list: vec![plain, each], min: 1, max: 1, repeat: false, escalate_discard: false, costs: Vec::new(), once_each: false })),
                     ..Default::default()
                 })
             }
@@ -1097,7 +1095,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.watched_in_graveyard(without a \"from anywhere\" ability)");
     }
     triggers.extend(keyword_triggers);
-    let trig_mask = triggers.iter().fold(0u32, |m, t| m | 1 << t.event as u32);
+    let trig_mask = triggers.iter().fold(0u64, |m, t| m | 1 << t.event as u32);
     // Sagas (CR 714): the final chapter number is the greatest of its
     // chapter abilities' (714.2d); the IR also states it (`chapter_count`),
     // which must agree (ENGINE.md 3, rule 4a).
@@ -1574,6 +1572,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         enters_times_counters: *enters_with_counter_per_kick,
         x_min: x_least,
         gy_triggers,
+        chooses_parity: *chooses_parity_as_enters,
+        blocks_only_subtype: (!blocks_only_with_subtype.is_empty()).then(|| l.subtype(blocks_only_with_subtype)),
         splice,
         miracle,
     };

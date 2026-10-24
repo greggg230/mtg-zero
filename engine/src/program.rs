@@ -757,6 +757,17 @@ pub enum Ext {
     /// Attach the made object (an Equipment) to the event's object, if it is
     /// still a creature on the battlefield (CR 701.3, 301.5c).
     AttachMadeToEventObj,
+    /// Put a creature card exiled with the source (CR 607.2a; the
+    /// controller's choice if several) onto the battlefield under the
+    /// controller's control with a counter of this kind; it becomes the made
+    /// object. Choice: `ChooseExiled`.
+    LinkedCreatureToBattlefield { counter: crate::db::Counter },
+    /// The owner of each legal target of `tgt` (a permanent) puts it into
+    /// their library second from the top or on the bottom. Choice: yes/no
+    /// (`YES` = second from the top).
+    OwnerPutsSecondOrBottom { tgt: u8 },
+    /// The event's player gains control of the source and untaps it.
+    EventPlayerTakesSourceUntapped,
 }
 
 /// What a delayed trigger is about ("that card", "that much").

@@ -622,6 +622,9 @@ pub(crate) const SEEN_EXILE_WATCH: u16 = 64;
 pub(crate) const SEEN_DRAW_REPL: u16 = 128;
 /// A triggered ability that functions in a graveyard (Sword of the Meek).
 pub(crate) const SEEN_GY_TRIGGER: u16 = 256;
+/// Triggers on +1/+1 counters put on, cards put into a library, attackers
+/// unblocked (Emperor of Bones, Wan Shi Tong, Coveted Jewel).
+pub(crate) const SEEN_RARE_EVENTS: u16 = 512;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -655,6 +658,11 @@ pub enum Mark {
     KickerX(u8),
     /// It became saddled in turn n (CR 702.171b: until end of turn).
     Saddled(u16),
+    /// The modes (a bit each) chosen so far for its "choose one that hasn't
+    /// been chosen" ability.
+    ModesUsed(u8),
+    /// "Odd" (1) or "even" (0) chosen as it entered (Gollum).
+    Parity(u8),
 }
 
 impl Game {
@@ -1158,7 +1166,7 @@ impl Game {
         if self.def_of(idx).daybound || self.def_of(idx).nightbound {
             self.day_night_check();
         }
-        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player || self.def_of(idx).paints || self.def_of(idx).chooses_land_type {
+        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player || self.def_of(idx).paints || self.def_of(idx).chooses_land_type || self.def_of(idx).chooses_parity {
             self.agenda.push(Task::AsEnters { card: idx });
         }
         // "This creature enters prepared" (CR 722.3a).
@@ -1274,7 +1282,10 @@ impl Game {
         // (Yawgmoth's Will; a card, not a token).
         let to = if from == Zone::Battlefield && to != Zone::Exile {
             let fl = self.flags_of(idx);
-            if (to == Zone::Graveyard && fl.exile_if_dies) || fl.exile_if_leaves {
+            // A finality counter: "if this would be put into a graveyard from
+            // the battlefield, exile it instead" (CR 122.1i).
+            let finality = to == Zone::Graveyard && !self.counters.is_empty() && self.db.finality.is_some_and(|k| self.counters_on(idx, k) > 0);
+            if (to == Zone::Graveyard && fl.exile_if_dies) || fl.exile_if_leaves || finality {
                 Zone::Exile
             } else {
                 to
@@ -1463,9 +1474,13 @@ impl Game {
         if from == Zone::Battlefield && !self.links.is_empty() {
             self.release_links(old);
         }
+        // "Whenever one or more cards are put into a library from anywhere".
+        if to == Zone::Library && from != Zone::Library && self.seen & SEEN_RARE_EVENTS != 0 {
+            self.event(Event::player(EventKind::CardsPutIntoLibrary, owner));
+        }
         // "When this is put into a graveyard from anywhere" (its own
         // ability, from the graveyard).
-        if to == Zone::Graveyard && self.db.def(self.objs[idx.i()].def).trig_mask & (1 << EventKind::ToGraveyard as u32) != 0 {
+        if to == Zone::Graveyard && self.db.def(self.objs[idx.i()].def).trig_mask & (1u64 << EventKind::ToGraveyard as u32) != 0 {
             self.event(Event::obj(EventKind::ToGraveyard, new));
         }
         // "Whenever one or more cards are put into exile from your library

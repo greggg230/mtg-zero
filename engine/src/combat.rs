@@ -106,6 +106,17 @@ impl Game {
         if self.abilities(b).blocks_only_flyers && !ka.has(Kw::Flying) {
             return false;
         }
+        // "This can't block or be blocked by non-Spirit creatures."
+        if let Some(s) = self.abilities(b).blocks_only_subtype {
+            if !self.has_subtype(a, s) {
+                return false;
+            }
+        }
+        if let Some(s) = self.abilities(a).blocks_only_subtype {
+            if !self.has_subtype(b, s) {
+                return false;
+            }
+        }
         if let Some(f) = &self.abilities(a).unblockable_by {
             let ctx = crate::cast::Ctx { controller: self.objs[a.i()].controller, source: Some(self.obj_ref(a)) };
             if self.card_matches(f, b, &ctx) {
@@ -246,6 +257,14 @@ impl Game {
             for (c, a) in blocks {
                 let (r, ar) = (self.obj_ref(c), self.obj_ref(a));
                 self.event(Event { kind: EventKind::Blocks, a: Subj::Obj(r), b: Subj::Obj(ar), amount: 0 });
+            }
+            // "Whenever one or more creatures an opponent controls attack you
+            // and aren't blocked" (Coveted Jewel): attacking the player.
+            if self.seen & crate::game::SEEN_RARE_EVENTS != 0
+                && self.attackers().into_iter().any(|a| !self.objs[a.i()].blocked && self.objs[a.i()].attacks.is_none())
+            {
+                let ap = self.turn.active;
+                self.event(Event { kind: EventKind::AttackersUnblocked, a: Subj::Player(ap), b: Subj::Player(dp), amount: 0 });
             }
             return;
         };

@@ -915,6 +915,23 @@ impl Game {
             }
             return;
         }
+        if self.def_of(card).chooses_parity && self.parity_of(self.obj_ref(card)).is_none() {
+            // "As Gollum enters, choose odd or even" (CR 614.12). Choice:
+            // `ChooseMode`: `NUMBER` 0 = even, 1 = odd.
+            let r = self.obj_ref(card);
+            match self.answer.take() {
+                Some(Choice::Number(k)) => {
+                    self.marks.push((r, crate::game::Mark::Parity(k)));
+                    self.note(|_| format!("chosen: {}", if k == 1 { "odd" } else { "even" }));
+                }
+                Some(other) => unreachable!("parity answer {other:?}"),
+                None => {
+                    let opts = (0..2u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
+                    self.ask(Task::AsEnters { card }, p, DecisionKind::ChooseMode, opts);
+                }
+            }
+            return;
+        }
         if self.def_of(card).paints {
             // "As this enters, choose a color" (CR 614.12). Choice:
             // `ChooseColor`.
@@ -950,6 +967,14 @@ impl Game {
                 self.ask(Task::AsEnters { card }, p, DecisionKind::YesNo, opts);
             }
         }
+    }
+
+    /// The parity chosen as `r` entered (1 = odd), if any.
+    pub(crate) fn parity_of(&self, r: crate::ids::ObjRef) -> Option<u8> {
+        self.marks.iter().find_map(|&(o, m)| match m {
+            crate::game::Mark::Parity(k) if o == r => Some(k),
+            _ => None,
+        })
     }
 
     /// Would a permanent with this definition enter tapped for `p` (CR

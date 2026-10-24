@@ -276,6 +276,62 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::LinkedCreatureToBattlefield { counter } => {
+                f.made = None;
+                let p = f.controller;
+                let cands: Vec<_> = self.linked_cards(f.source).into_iter().filter(|&c| self.def_of(c).is(types::CREATURE)).collect();
+                let pick = match self.answer.take() {
+                    Some(Choice::Card(c)) => c,
+                    Some(other) => unreachable!("linked card answer {other:?}"),
+                    None if cands.len() == 1 => cands[0],
+                    None => {
+                        if cands.is_empty() {
+                            return Flow::Next;
+                        }
+                        let opts = cands
+                            .iter()
+                            .take(act::EXILE_N as usize)
+                            .enumerate()
+                            .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
+                            .collect();
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                        return Flow::Suspend;
+                    }
+                };
+                let r = self.put_onto_battlefield(pick, p);
+                if self.objs[pick.i()].zone == Zone::Battlefield {
+                    let _ = r;
+                    self.add_counters(pick, *counter, 1);
+                    f.made = Some(pick);
+                }
+                Flow::Next
+            }
+            Ext::OwnerPutsSecondOrBottom { tgt } => {
+                let Some(&c) = self.objs_on(f, &crate::program::On::Target(*tgt)).first() else { return Flow::Next };
+                let owner = self.objs[c.i()].owner;
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        self.move_card(c, Zone::Library, Pos::FromTop(1));
+                    }
+                    Some(_) => {
+                        self.move_card(c, Zone::Library, Pos::Bottom);
+                    }
+                    None => {
+                        let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
+                        self.ask(Task::Run(f.clone()), owner, DecisionKind::YesNo, opts);
+                        return Flow::Suspend;
+                    }
+                }
+                Flow::Next
+            }
+            Ext::EventPlayerTakesSourceUntapped => {
+                let Some(q) = self.who(f, crate::program::Who::EventPlayer) else { return Flow::Next };
+                if let Some(&c) = self.objs_on(f, &crate::program::On::Source).first() {
+                    self.change_control(c, q);
+                    self.untap(c);
+                }
+                Flow::Next
+            }
             _ => unreachable!("not a tail-3 op: {op:?}"),
         }
     }

@@ -432,6 +432,10 @@ pub struct Modes {
     /// Spree (CR 702.172): the additional cost of each mode, paid for each
     /// mode chosen (700.2h); empty for other modal spells.
     pub costs: Vec<ManaCost>,
+    /// "Choose one that hasn't been chosen" (Gollum): a mode chosen once for
+    /// this ability of its source object is not offered again
+    /// (`Mark::ModesUsed`).
+    pub once_each: bool,
 }
 
 impl AbilityDef {
@@ -539,6 +543,15 @@ pub enum EventKind {
     /// put into a graveyard (emitted only for such cards; its own ability
     /// sees it there). Subject: the card in the graveyard.
     ToGraveyard,
+    /// One or more +1/+1 counters were put on a permanent (CR 122.6).
+    /// Subject: the permanent.
+    CountersAdded,
+    /// One or more cards were put into a library from anywhere ("one or
+    /// more": once among the triggers waiting). Subject: the library's owner.
+    CardsPutIntoLibrary,
+    /// Creatures a player controls attack another and some aren't blocked
+    /// (CR 509.1h). Subjects: the attacking player, the defending player.
+    AttackersUnblocked,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -580,7 +593,9 @@ impl EventKind {
             | E::BeginningOfEndStep
             | E::CreatureTokensCreated
             | E::ExiledFromLibGy => (&[Slot::Player], &[]),
-            E::ToGraveyard => (&[Slot::Obj], &[]),
+            E::ToGraveyard | E::CountersAdded => (&[Slot::Obj], &[]),
+            E::CardsPutIntoLibrary => (&[Slot::Player], &[]),
+            E::AttackersUnblocked => (&[Slot::Player], &[Slot::Defender]),
             E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
             E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
@@ -617,6 +632,8 @@ pub enum Slot {
     TargetSpell,
     /// The land a player played (`PlaysLand`).
     Land,
+    /// The defending player (attackers unblocked).
+    Defender,
 }
 
 /// When a triggered ability triggers (CR 603.2), over the event's subjects
@@ -692,6 +709,9 @@ pub enum TrigPred {
     /// The ability functions in its card's graveyard, and only there
     /// ("return this card from your graveyard", CR 113.6m-like).
     InGraveyard,
+    /// The event's spell's mana value has the parity chosen as the source
+    /// entered (`Mark::Parity`).
+    SpellMvParity,
 }
 
 impl TrigPred {
@@ -1025,9 +1045,14 @@ impl CardDef {
             | (if self.ability_discount > 0 { crate::game::SEEN_ABILITY_DISCOUNT } else { 0 })
             | (if self.outside_hand_discount > 0 { crate::game::SEEN_OUTSIDE_DISCOUNT } else { 0 })
             | (if self.grants_retrace.is_some() && !self.emblem { crate::game::SEEN_RETRACE } else { 0 })
-            | (if self.trig_mask & (1 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
+            | (if self.trig_mask & (1u64 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
             | (if self.opp_draw_token.is_some() || self.draw_plus.is_some() { crate::game::SEEN_DRAW_REPL } else { 0 })
             | (if self.gy_triggers { crate::game::SEEN_GY_TRIGGER } else { 0 })
+            | (if self.trig_mask & (1u64 << EventKind::CountersAdded as u32 | 1u64 << EventKind::CardsPutIntoLibrary as u32 | 1u64 << EventKind::AttackersUnblocked as u32) != 0 {
+                crate::game::SEEN_RARE_EVENTS
+            } else {
+                0
+            })
     }
 }
 
@@ -1109,7 +1134,7 @@ pub struct CardDef {
     /// Counters it enters the battlefield with (CR 122.6).
     pub enters_counters: Vec<(Counter, u8)>,
     /// Bit k set: one of its triggered abilities listens for `EventKind` k.
-    pub trig_mask: u32,
+    pub trig_mask: u64,
     /// Printed protection (CR 702.16).
     pub protection: Prot,
     /// "Spells matching the filter cost {n} more to cast" (every player's;
@@ -1318,6 +1343,11 @@ pub struct CardDef {
     /// Some triggered ability of it functions in its owner's graveyard
     /// (`TrigPred::InGraveyard`).
     pub gy_triggers: bool,
+    /// "As this enters, choose odd or even" (Gollum).
+    pub chooses_parity: bool,
+    /// "This can't block or be blocked by non-<subtype> creatures" (Wan Shi
+    /// Tong's Spirits).
+    pub blocks_only_subtype: Option<u16>,
     /// Splice onto <subtype> <cost> (CR 702.47): the subtype, the cost.
     pub splice: Option<(u16, ManaCost)>,
     /// "As this enters, choose a color. All cards that aren't on the
@@ -1437,6 +1467,8 @@ pub struct CardDb {
     subtypes: Vec<String>,
     /// The interned "Equipment" subtype, if any card has it.
     equipment: Option<u16>,
+    /// The finality counter (CR 122.1i), if any card names it.
+    pub(crate) finality: Option<Counter>,
 }
 
 impl CardDb {
@@ -1481,6 +1513,7 @@ impl CardDb {
             }
         }
         db.equipment = db.subtype_id("Equipment");
+        db.finality = db.subtype_id("counter:finality").map(Counter::Named);
         // Tokens the cards create (CR 111), interned during lowering.
         db.token_base = db.defs.len() as DefId;
         db.defs.extend(tokens);

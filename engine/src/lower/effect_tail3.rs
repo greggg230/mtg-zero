@@ -180,6 +180,50 @@ pub(crate) fn lower_effect_tail3(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             b.op(Op::Ext(Ext::SourceFromGraveyard { tapped: false }));
             b.op(Op::Ext(Ext::AttachMadeToEventObj));
         }
+        // Adapt n (CR 701.46a): "if this creature has no +1/+1 counters on
+        // it, put n +1/+1 counters on it."
+        E::Adapt(nodes::Adapt { amount }) => {
+            let n = l.int("Adapt.amount", *amount, 1, 20);
+            let at = b.op(Op::Ext(Ext::JumpUnlessSourceNoCounters { counter: Counter::P1P1, to: 0 }));
+            b.op(Op::Ext(Ext::PutCounters { on: crate::program::On::Source, counter: Counter::P1P1, n: Amount::Fixed(n) }));
+            b.patch(at);
+        }
+        // "Exile up to one target card from a graveyard" (linked to the
+        // source, CR 607.2a: Emperor of Bones).
+        E::ExileUpToOneTargetGraveyardCardWithSource(nodes::ExileUpToOneTargetGraveyardCardWithSource {}) => {
+            let t = b.target(Filter::InGraveyard(Box::new(Filter::Any)), 0, 1);
+            b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: false }));
+        }
+        // "Put a creature card exiled with this creature onto the battlefield
+        // under your control with a finality counter on it. It gains haste.
+        // Sacrifice it at the beginning of the next end step."
+        E::ReanimateExiledWithSourceFinalityHasteSacrifice(nodes::ReanimateExiledWithSourceFinalityHasteSacrifice {}) => {
+            let finality = super::effect_ext::counter_by_name(l, "finality");
+            b.op(Op::Ext(Ext::LinkedCreatureToBattlefield { counter: finality }));
+            let mut kw = crate::db::KwSet::default();
+            kw.insert(crate::db::Kw::Haste);
+            b.op(Op::Ext(Ext::Apply { on: crate::program::On::Made, mods: vec![crate::db::Mod::Keywords(kw)], until: crate::layers::Until::Forever }));
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::SacrificeEventObj));
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::Delay { k, when: crate::db::DelayedWhen::NextEndStep, about: crate::program::About::Made }));
+        }
+        // "Target nonland permanent's owner puts it into their library
+        // second from the top or on the bottom" (Wan Shi Tong; the IR's node
+        // has no target specification, docs/ir_defects.md 6: the Oracle
+        // text's).
+        E::OwnerPutsTargetSecondFromTopOrBottom(nodes::OwnerPutsTargetSecondFromTopOrBottom {}) => {
+            let f = Filter::And(Box::new(Filter::Type(crate::db::types::PERMANENT)), Box::new(Filter::Not(Box::new(Filter::Type(crate::db::types::LAND)))));
+            let t = b.target(f, 1, 1);
+            b.op(Op::Ext(Ext::OwnerPutsSecondOrBottom { tgt: t }));
+        }
+        // "That player draws three cards and gains control of this artifact.
+        // Untap it." (Coveted Jewel: the attacking player.)
+        E::ThatPlayerDrawsAndGainsControlOfSource(nodes::ThatPlayerDrawsAndGainsControlOfSource { amount }) => {
+            let n = l.int("ThatPlayerDrawsAndGainsControlOfSource.amount", *amount, 0, 20);
+            b.op(Op::Draw { who: Who::EventPlayer, n: Amount::Fixed(n) });
+            b.op(Op::Ext(Ext::EventPlayerTakesSourceUntapped));
+        }
         _ => return false,
     }
     true

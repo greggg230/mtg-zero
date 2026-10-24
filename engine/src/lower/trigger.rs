@@ -94,6 +94,13 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::BecomesTarget) => Some(EventKind::BecomesTarget),
         // "When you play another land" (CR 305.1: playing, not putting).
         Some(E::PlaysLand) => Some(EventKind::PlaysLand),
+        // "Whenever one or more +1/+1 counters are put on this creature".
+        Some(E::CountersAdded) => Some(EventKind::CountersAdded),
+        // "Whenever one or more cards are put into a library from anywhere".
+        Some(E::CardsPutIntoLibrary) => Some(EventKind::CardsPutIntoLibrary),
+        // "Whenever one or more creatures an opponent controls attack you and
+        // aren't blocked".
+        Some(E::AttackersUnblocked) => Some(EventKind::AttackersUnblocked),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));
             None
@@ -257,7 +264,8 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::FirstAttack
         | TrigPred::Once
         | TrigPred::EnteredNotFromGyExile
-        | TrigPred::InGraveyard => Vec::new(),
+        | TrigPred::InGraveyard
+        | TrigPred::SpellMvParity => Vec::new(),
     }
 }
 
@@ -276,6 +284,7 @@ fn slot(l: &mut Lowerer, s: &Option<enums::EventSubject>) -> Option<Slot> {
         Some(S::Card) => Slot::Card,
         Some(S::TargetSpell) => Slot::TargetSpell,
         Some(S::Land) => Slot::Land,
+        Some(S::Defender) => Slot::Defender,
         Some(other) => {
             l.unsupported(format!("TriggerPredicate.subject({other:?})"));
             return None;
@@ -346,6 +355,8 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
             Slot::Player,
             Filter::DrewThisTurn(l.int("NthCardDrawnThisTurn.n", *n, 1, 99) as u8),
         )),
+        // "A spell with mana value of the chosen quality" (Gollum).
+        P::SpellMVHasSourceParity(nodes::SpellMVHasSourceParity {}) => Some(TrigPred::SpellMvParity),
         // "Enters from anywhere other than a graveyard or exile" ("Name
         // Sticker" Goblin).
         P::EnteredNotFromZones(nodes::EnteredNotFromZones { zones }) => {

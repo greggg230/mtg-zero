@@ -154,7 +154,7 @@ impl Game {
     /// ("when you cast this spell"). Leave-the-battlefield events are
     /// recorded before the object moves, so they see the game as it was.
     pub(crate) fn event(&mut self, ev: Event) {
-        let bit = 1u32 << ev.kind as u32;
+        let bit = 1u64 << ev.kind as u32;
         let mut obs: Vec<Observer> = Vec::new();
         // Permanents (not one that lost all its abilities, CR 613.1f), then
         // emblems (their abilities function in the command zone, 114.4).
@@ -261,8 +261,8 @@ impl Game {
                     // and/or your graveyard": once among the triggers waiting
                     // to be put on the stack (one instruction's or one cost's
                     // exiles; ENGINE.md 29).
-                    if ev.kind == crate::db::EventKind::ExiledFromLibGy
-                        && has_batch(&t.pred)
+                    if (ev.kind == crate::db::EventKind::ExiledFromLibGy && has_batch(&t.pred)
+                        || ev.kind == crate::db::EventKind::CardsPutIntoLibrary)
                         && self.waiting.iter().any(|w| w.source == o.r && w.slot == i as u8)
                     {
                         continue;
@@ -363,6 +363,10 @@ impl Game {
             TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && (ev.amount >> 9) & 0x3F >= *n as u16,
             TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
             TrigPred::InGraveyard => true,
+            TrigPred::SpellMvParity => match (ev.a, self.parity_of(src.r)) {
+                (Subj::Obj(r), Some(k)) => self.mana_value_of(r.idx) % 2 == k,
+                _ => false,
+            },
             TrigPred::SpellPaid => match ev.a {
                 Subj::Obj(r) => self.stack.iter().any(|s| s.kind == StackKind::Spell { card: r.idx } && s.times > 0),
                 _ => false,
