@@ -1,6 +1,9 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7c tail part 1 (mana abilities with a mana cost or a choice, exhaust, spending
+Status: M7c tail part 2 (cascade, miracle, warp, boast, ascend, airbend and waterbend, harness,
+teamwork, additional combat phases, Yawgmoth's Will, X in activation costs and "X targets", X
+life, "triggers only once each turn"; 491 supported cube cards; section 29), 2026-10-24; M7c tail
+part 1 (mana abilities with a mana cost or a choice, exhaust, spending
 restrictions, converge, a painted colour, incubate, turn skipping, granted leave triggers, a
 target linked to another's controller; 467 supported cube cards; section 28), 2026-10-23; M7b
 part 3b (spells and abilities on the stack as targets, "becomes the target", ward,
@@ -649,8 +652,26 @@ Mishra's Workshop; Orcish Lumberjack; Painter's Servant; Palantir of Orthanc; Pr
 Serra Paragon; Squandered Resources; Sunfall; Sunken Ruins; Tersa Lightshatter; Time Vault;
 Transmute Artifact; Ursine Monstrosity.
 
-Supported cube cards: 467 (M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
-191, M4b-1: 133, M4a: 31); creatures 168 by their front faces (M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
+Implemented (M7c tail part 2, section 29): a set of n sacrificed at once, effects that apply as a
+permanent enters, harness, "until the end of your next turn" and "on a later turn" permissions,
+ravenous, "this ability triggers only once each turn", linked card types as a static's condition,
+an ability discount (Zirda), a graveyard permission for permanent spells only (Lurrus), boast,
+the sacrificed permanent's mana value, Yawgmoth's Will (graveyard play and its exile
+replacement), cascade (702.85), cards exiled from a library or graveyard as an event, ascend and
+the city's blessing (702.131), copies of tokens that entered this turn, mill-then-land, a
+permanent's retrace grant, a discount for spells cast from outside the hand, casting from a
+graveyard during a resolution, a basic land type chosen as a land enters, X announced for a life
+cost, teamwork, additional combat phases (500.8), "attacks for the first time each turn", warp
+(702.185), miracle (702.94), airbend and waterbend, {X} in activation costs with "X targets", a cap
+on a loop of activations (732.2a). New in M7c tail part 2 (24): Aang, Swift Savior; Bilbo, Thief
+in the Night; Bloodbraid Challenger; Broadside Bombardiers; Candelabra of Tawnos; Currency
+Converter; Enduring Innocence; Fear of Missing Out; Fire Covenant; Jacked Rabbit; Keen-Eyed
+Curator; Laelia, the Blade Reforged; Lurrus of the Dream-Den; Metamorphosis Fanatic; Multiversal
+Passage; Ocelot Pride; Pinnacle Emissary; Portal to Phyrexia; Six; The Mind Stone; Thor, God of
+Thunder; We Say Thee Nay!; Yawgmoth's Will; Zirda, the Dawnwaker.
+
+Supported cube cards: 491 (M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
+191, M4b-1: 133, M4a: 31); creatures 184 by their front faces (M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
 M7b part 1: 113, M4b-2: 20); planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in
 M7b part 3b (28): Boseiju, Who Endures; Brain Freeze; Caves of Chaos Adventurer; Ertai
 Resurrected; Fallen Shinobi; Fanatic of Rhonas; Feywild Caretaker; Forensic Gadgeteer; From the
@@ -923,6 +944,13 @@ Deliberate simplifications and limits (each is small and local to change):
   opponent; Time Vault's skip as a replacement, 614.10; Mana Vault's draw-step "if" checked again
   on resolution, 603.4; Goblin Welder's pair checked at resolution, 608.2b); the Python engine's
   handling of these cards was not compared. Its simplifications are listed in 28.8.
+* M7c tail part 2 (section 29): the 24 cards follow their Oracle text and the CR. Where the Python
+  engine's model is known to differ: it has one combat per turn (Fear of Missing Out's additional
+  combat phase is 500.8 here), it reads `once_per_turn` as "triggers only once each turn" for
+  every card (here only for an effect that isn't "you may", ir_defects 14), it sweeps Laelia's
+  exiles once per state-based-action pass (here once among the waiting triggers), and it fires
+  "dies" for a creature an "exile it instead" replacement exiles (fixed here, 29.2). The other
+  cards' Python handling was not compared; the simplifications are listed in 29.6.
 * M7b part 3b: ward (702.21). Python checks ward only for a spell, as it is cast, and pays it
   automatically when it can (an extra cost: mana by its automatic payment, life, a chosen
   discard; granted life costs summed into one payment). Here ward is a triggered ability: it
@@ -975,6 +1003,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_costs.rs` | M7b part 3b: 601.2f (kicker and X before reductions), 118.9d (a reduction on an alternative cost), 108.2 (a token in a graveyard isn't a card) |
 | `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
 | `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
+| `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (37 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), the search of Green Sun's Zenith on a custom card, the two IR defects |
 | `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (30 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4), Chromatic Star's IR defect |
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
 | `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
@@ -1011,7 +1040,8 @@ both fixed (25.9). The check also asserts that no face is up in a hidden zone. M
 20,000 games over the 410 cards, no failure; three faults found on the way, all fixed (26.10).
 M7b part 3b: 20,000 games over the 438 cards, no failure (102 s); one fault found on the way,
 fixed (27.12). M7c tail part 1: 20,000 games over the 467 cards, no failure (70 s); four faults
-found on the way, all fixed (28.7).
+found on the way, all fixed (28.7). M7c tail part 2: 20,000 games over the 491 cards, no failure
+(72 s); four faults found on the way, all fixed (29.5).
 `POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
 earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
 `n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).
@@ -1102,6 +1132,21 @@ and a once-per-walk cache took it back (and showed a fault, 28.7). On the full p
 us per decision (849,734 decisions), 914-946 games/s; `Game::clone` 1.13-1.18 us,
 `size_of::<Game>()` 1,264 B (`marks`, +24 B); clone + determinize 1.50-1.62 us. Fuzzer 20,000
 games: 70 s.
+
+**M7c tail part 2** (491 cards, branch `m7c-tail2`): pinned the same way, interleaved with
+main's code (32e5225) in four rounds, with a training run using the GPU and about eight threads
+on the machine (one earlier batch of runs came out four times slower and was discarded). On
+main's pool (the 24 new cards and `Test Green Sun` left out with `POOL_EXCLUDE`) 5.21-5.40 us per
+decision against main's 5.12-5.17, +2% to +5% (872-904 games/s against 910-919); 849,494
+decisions against 849,734: a few games differ, by the rules fixes (an "exile it instead"
+replacement no longer fires "dies"; at most 31 activations of one ability a turn). The first
+build was +7%: Zirda's discount walked the permanents for every ability with a mana cost, Six's
+retrace grant for every graveyard card at every priority, ascend at every SBA check; `Game::seen`
+(29.2) took them off games without such a card. On the full pool: 5.13-5.16 us per decision
+(845,409 decisions), 897-922 games/s; `Game::clone` 1.18-1.24 us (main 1.13-1.17),
+`size_of::<Game>()` 1,344 B (+80: the entering effects, the activation counts, the miracle
+question, the seen bits, the players' turn effects); clone + determinize 1.55-1.74 us (main
+1.40-1.59). Fuzzer 20,000 games: 72 s.
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -3496,3 +3541,127 @@ castable from a graveyard with no Serra Paragon (same games on main's pool after
   'Sacrifice this land: Add {B}'" grants an ability of another card, usable together with the
   land's own mana ability in one payment (tap it, then sacrifice it); section 18's payment takes
   one ability per card.
+
+## 29. The single-card tail, part 2 (M7c)
+
+Branch `m7c-tail2`, from main at 32e5225 (467 cards): the cards that needed two features each. 24
+came through, 491 supported (184 creatures); six stay blocked (29.8). Code: `lower/effect_tail2.rs`
+(lowering), `resolve_tail2.rs` (the new `Ext` instructions, cascade, miracle, the permission turn
+bounds), changes in `cast.rs`, `activate.rs`, `pay.rs`, `triggers.rs`, `flow.rs`, `game.rs`;
+tests `tests/cards_m7c_tail2.rs` (37 tests, the CR cited in each name).
+
+### 29.1 The cards
+
+| Card | What it needed | Decisions |
+|---|---|---|
+| Portal to Phyrexia | `SacrificeN`: each opponent chooses three creatures (a set, increasing slot order, always leaving enough; all of them, no decision, with three or fewer), sacrificed at once (701.21a); `FromGraveyardAs`: "put target creature card from a graveyard onto the battlefield under your control. It's a Phyrexian in addition" (the subtype applies as it enters, `Game::entering_mods`) | `Sacrifice`, `Target` |
+| The Mind Stone | harness (`Mark::Harnessed`, `Filter::Harnessed`); its infinity trigger exists only once harnessed (no intervening "if": the trigger resolves without its source, 113.7a) | `Target` |
+| Lurrus of the Dream-Den | Serra Paragon's permission (28.4) without lands (`CardDef::gy_play_land`) and without a granted trigger (`NO_GRANT`); companion not needed | - |
+| Zirda, the Dawnwaker | `CardDef::ability_discount`: every non-mana ability its controller activates costs {2} less, at least one mana left (602.2b, 601.2f) | - |
+| Thor, God of Thunder | `ExilePlayUntilNextTurn` (a permission "until the end of your next turn": `PERM_UNTIL_TURNS`, the player's turn count it ends with); `Amount::EventSpellMv` ("that spell's mana value", with its X on the stack, else as it last existed, 608.2h) | `Target` |
+| Jacked Rabbit | ravenous (702.156a): the spell's X in the `Enters` note (bits 9-15), `TrigPred::EnteredXAtLeast`; tokens equal to its power (`CreateTokensN` with `SourcePower`) | X |
+| Enduring Innocence | "this ability triggers only once each turn" (`TrigPred::Once`: once it triggers, `done_once` holds it for the turn; ir_defects 14); "return it ... It's an enchantment" (`ReturnEventCardAs`: `BecomeTypes` as it enters, its creature types gone, 205.3d) | - |
+| Keen-Eyed Curator | the linked exile of a graveyard card; `Cond::LinkedTypesAtLeast` (card types among the cards exiled with the source, a static's condition, 607.2a) | `Target` |
+| Currency Converter | `ExileEventCardLinked` ("you may exile that card from your graveyard"); `LinkedToGraveyardThenToken` (a linked card to its owner's graveyard, then a Treasure or a 2/2 Rogue) | `YesNo`, `ChooseExiled` |
+| Broadside Bombardiers | boast (702.142a: `ActivatedDef::boast`, `Mark::Boasted`, "attacked this turn" from `attacked_with`); `Amount::CostMvPlus` (the sacrificed permanent's mana value, kept on the stack item as it is paid) | `Target`, `Sacrifice` |
+| Yawgmoth's Will | `Player::gy_play_turn` (lands and spells from the graveyard this turn, a cast route for its mana cost); `Player::gy_exile_turn` (614.1a: a card, not a token, put into that player's graveyard goes to exile; it exiles the Will itself) | - |
+| Bloodbraid Challenger | cascade (702.85a; keyword and trigger checked to agree): exiled cards revealed one at a time, the hit cast free (608.2g), the rest on the bottom in a random order after the cast | `YesNo` |
+| Laelia, the Blade Reforged | `EventKind::ExiledFromLibGy` (a card into exile from its owner's library or graveyard), "one or more": once among the triggers waiting to be put on the stack | - |
+| Ocelot Pride | ascend (702.131: `Player::city_blessing`, set by the SBA check once a player with an ascend permanent controls ten permanents; `Cond::CityBlessing`); `CopyTokensEnteredThisTurn` | `Target` |
+| Six | `MillThenLandToHand`; a permanent's retrace grant (`CardDef::grants_retrace` on a permanent: during its controller's turn) | `ChooseGraveyardCard`, `Discard` |
+| Bilbo, Thief in the Night | `CardDef::outside_hand_discount` (601.2f: a card not in hand, or a spell cast from elsewhere); `MayCastFromGraveyardNow` (cast during the resolution paying its costs, 608.2g; an instant or sorcery with `CastThenExile`) | `ChooseGraveyardCard` |
+| Multiversal Passage | "as this land enters, choose a basic land type" (`ChooseColor`: W U B R G = Plains ... Forest, `Mark::ChosenColor`), then the shock-land life question; the type as a forever effect on the object, its mana ability `ManaProd::Chosen` (305.6) | `ChooseColor`, `YesNo` |
+| Fire Covenant | `CardDef::x_life`: X announced (601.2b, at most the life the mana payment leaves, 119.4), paid as life with the mana; X damage divided among any number of target creatures (at most X targets) | X, `Target`, divide |
+| We Say Thee Nay! | teamwork n as kicker's modes (the cost option picks "if cast using teamwork"): crew's cost (702.122a), here by creatures without mana abilities (29.6) | `ChooseCost`, `ChoosePermanent` |
+| Fear of Missing Out | `Turn::extra_combats` (500.8: after this combat phase another one); `TrigPred::FirstAttack` (declared as an attacker once this turn) | `Target` |
+| Pinnacle Emissary | warp (702.185a): an alternative cost from hand whose delayed ability (dash's plumbing, no haste) exiles the permanent at the next end step with a permission from a later turn on (`PERM_LATER`) | `ChooseAltCost` |
+| Metamorphosis Fanatic | miracle (702.94a): on every first draw of a turn by a player whose deck has a miracle card, `Task::MiracleReveal` before the next priority (only "no" when the card has no miracle, so the question says nothing); revealed, its trigger (`MiracleCast`) may cast it for its miracle cost (`CastFrom::Miracle`) | `YesNo` x2 |
+| Aang, Swift Savior | airbend: a creature or a spell exiled, its owner may cast it for {2} rather than its mana cost (`PermKind::Airbent`, `CastFrom::Airbent`); waterbend (`Cost::waterbend`, `PayMana::waterbend`: improvise with creatures too) | `Target`, `PayMana` |
+| Candelabra of Tawnos | {X} in an activation cost (`ActivatedDef::x`; X announced, 602.2b, at most what can be paid and no more than the targets there are); exactly X targets (`X_TARGETS`) | X, `Target` |
+
+### 29.2 Rules added on the way
+
+* **Exile replacements before the events.** "If it would die, exile it instead" and "if it would
+  leave the battlefield, exile it instead" were applied after the "dies" event fired (a creature
+  exiled by Suplex triggered "when this dies"); they, and Yawgmoth's Will's, are now decided first.
+* **Entering with effects** (`Game::entering_mods`): effects that apply to a permanent as it
+  enters (614.1c-like), in place before its `Enters` event.
+* **Permission turn bounds**: `Permission::turn` is exact, or `PERM_UNTIL_TURNS | k` ("until the end
+  of your next turn": through the player's k-th turn), or `PERM_LATER | t` ("on a later turn").
+* **A loop of optional actions** (732.2a): at most 31 activations of one permanent's non-mana
+  ability a turn (`ACTIVATION_CAP`, as `MAY_COPY_CAP`): Zirda with Basalt Monolith makes unbounded
+  mana, and random play never ended a game (the fuzzer).
+* **Fast paths** (`Game::seen`): the tail's rare rules (ascend, the ability and spell discounts, a
+  permanent's retrace grant, the exile watch, miracle per owner) are looked at only in games with
+  such a card (set as objects are made; a copy copies a card of the game).
+
+### 29.3 Decisions, tasks, the bot
+
+No new decision kind (39 still). New task: `MiracleReveal` (asks `YesNo`; task code 16, as
+`AsEnters`); every new `Ext` op is op code 37. The heuristic bot stays legal for every decision;
+it pays X life for what the opponent's creatures need, at most half its life (Fire Covenant: it
+would pay all of it), and announces X = 0 for an ability (Candelabra).
+
+### 29.4 Encoding (layout v3, unchanged)
+
+Nothing in `az/encode.rs` changed; the new cards fill their identities. New token kinds to
+register: Cat (1/1 white, Ocelot Pride), Drone (1/1 colorless artifact creature, flying, blocks
+only fliers; Pinnacle Emissary), Rabbit (1/1 white, Jacked Rabbit), Rogue (2/2 black, Currency
+Converter); the Treasure is registered already. Not encoded (no spare floats used): harnessed,
+boasted, the chosen basic land type (`marks`), the city's blessing, Yawgmoth's Will's turn
+effects, additional combat phases, activation counts, a permission's kind and turn bound (airbent,
+warp, until your next turn).
+
+### 29.5 Hidden information and fuzzing
+
+Cascade reveals each card as it is exiled (a public move keyed `KEY_REVEAL`, `force_library_card`
+as for Demonic Consultation). Miracle's question is asked of a player on every first draw of a
+turn if their deck has a miracle card (open decklists, section 10), with only "no" unless the
+drawn card has miracle: whether it is asked depends on the deck, not the card; a revealed card
+becomes known to both. Six mills face up; Laelia's exiles are public.
+
+Fuzzing (20,000 games over the 491 cards): no failure (72 s). Faults found on the way, all fixed:
+cascade's pending question, re-run by a refresh for the other player, acted instead of asking
+again (the information-set check); Fire Covenant's X took life a painland's mana needed; teamwork's
+taps and the mana payment both wanted a mana creature; Zirda with Basalt Monolith never ended a
+random game (29.2).
+
+### 29.6 Simplifications (differences from the CR)
+
+* Laelia triggers at most once among the triggers waiting to be put on the stack (one
+  instruction's or one cost's exiles at once), not once per separate exile event within one
+  resolution.
+* Lurrus and Serra Paragon: when both allow a spell, the first permanent found grants it.
+* Teamwork's creatures exclude creatures with a mana ability (so the mana and the taps never
+  compete; 29.1), and a creature's crew bonus counts.
+* "After this phase, there is an additional combat phase" works during a combat phase (the only
+  place the cube's card makes it).
+* Miracle's reveal is asked before the next priority after the draw, not at the instant of the
+  draw (nothing a player could do comes in between).
+* At most 31 activations of one permanent's non-mana ability a turn (29.2).
+* Thor's "until the end of your next turn" and warp's "a later turn" are counted in the player's
+  turns and the turn number; extra turns are counted as turns.
+
+### 29.7 IR
+
+Two new defects (docs/ir_defects.md 16, 17): Forth Eorlingas! writes "one or more ... this turn"
+as `once_per_turn`, which is "this ability triggers only once each turn" (it would not trigger in
+a second combat damage step); Green Sun's Zenith writes "shuffle it into its owner's library" as
+a replacement from anywhere (countered, discarded or milled it would go to the library). Both are
+blocked (`lower::IR_DEFECTS`). Green Sun's Zenith's search is built and tested on a custom card
+(`Test Green Sun`). The other 24 cards' IR matches their Oracle text; Laelia's placeholder event
+and the doubled cascade are noted under "Checked and not defects".
+
+### 29.8 Still blocked
+
+* **Forth Eorlingas!**, **Green Sun's Zenith**: their IR (29.7).
+* **Abhorrent Oculus** (`Effect:ManifestDread`): manifest dread puts a card onto the battlefield
+  face down as a 2/2 (708): face-down permanents need hidden identities on the battlefield (the
+  determinization would resample permanents), characteristics overridden in every layer and
+  turning face up; not built. Its "exile six cards from your graveyard" additional cost is not
+  lowered either.
+* **Shelldock Isle** (hideaway 702.75), **Memory Jar**, **Headliner Scarlett**: face-down exile is
+  a hidden zone the engine doesn't have (section 10's knowledge, `determinize`, the view and the
+  encoding all treat exile as public); a zone for it, with its clouds and play permissions, is the
+  work they need together.
+* Rain of Filth (28.9) and the cards with three or more blockers (part 3).

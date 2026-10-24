@@ -412,8 +412,9 @@ once each turn."
 * Fix: two fields (`once_per_turn_action`, `triggers_once_per_turn`), or an enum.
 * Engine: told apart by the effect's shape. A `once_per_turn` trigger whose effect starts with
   "you may" (`Op::May { You }`) is lowered as "do this only once each turn" (`Ext::OnceMay`, CR
-  603.2h; She-Hulk is supported); any other is a blocker
-  (`TriggeredAbility.once_per_turn(not "you may ... only once each turn")`, Enduring Innocence).
+  603.2h; She-Hulk is supported); any other, since M7c tail part 2, as "this ability triggers
+  only once each turn" (`TrigPred::Once`; Enduring Innocence is supported). Forth Eorlingas!'s
+  flag means neither (entry 16) and is blocked by name.
 
 ## Checked and not defects
 
