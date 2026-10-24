@@ -1281,3 +1281,113 @@ fn shelldock_isle_hideaway_then_cast_free_cr702_75a() {
     resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::YesNo) { Some(Choice::Yes) } else { None });
     assert_eq!(g.count_in(0, "Griselbrand", Zone::Battlefield), 1, "cast without paying its mana cost\n{}", log(&g));
 }
+
+// ---- Reanimating Auras: Animate Dead, Necromancy -------------------------------------------
+
+/// Animate Dead: "Enchant creature card in a graveyard" (an Aura spell's
+/// target, CR 303.4a); "return enchanted creature card to the battlefield
+/// under your control and attach this Aura to it ... When this Aura leaves
+/// the battlefield, that creature's controller sacrifices it. Enchanted
+/// creature gets -1/-0."
+#[test]
+fn animate_dead_reanimates_and_its_leaving_sacrifices_the_creature_cr303_4a() {
+    let mut g = scen()
+        .battlefield(0, &["Scrubland"; 5])
+        .hand(0, &["Animate Dead", "Vindicate"])
+        .graveyard(1, &["Griselbrand"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Animate Dead", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let gris = g.card(1, "Griselbrand", Zone::Graveyard);
+    g.choose(g.tgt(gris));
+    pay(&mut g);
+    settle(&mut g);
+    let gris = g.card(1, "Griselbrand", Zone::Battlefield);
+    let ad = bf(&g, 0, "Animate Dead");
+    assert_eq!(g.obj(gris).controller, 0, "under your control\n{}", log(&g));
+    assert_eq!(g.obj(ad).attached.map(|r| r.idx), Some(gris));
+    assert_eq!(g.pt(gris), (6, 7), "-1/-0");
+    let v = g.card(0, "Vindicate", Zone::Hand);
+    g.choose(Choice::Cast(v));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(ad));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.count_in(1, "Griselbrand", Zone::Graveyard), 1, "sacrificed\n{}", log(&g));
+}
+
+/// The Aura spell's target left the graveyard: it doesn't resolve (CR
+/// 608.3a): Soul-Guide Lantern exiles the card in response.
+#[test]
+fn animate_dead_with_an_illegal_target_doesnt_resolve_cr608_3a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Soul-Guide Lantern"])
+        .hand(0, &["Animate Dead"])
+        .graveyard(1, &["Griselbrand"])
+        .at(Step::Main1, 0)
+        .start();
+    let gris = g.card(1, "Griselbrand", Zone::Graveyard);
+    let c = g.card(0, "Animate Dead", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(gris));
+    pay(&mut g);
+    g.drive_until(at_priority);
+    let lantern = bf(&g, 0, "Soul-Guide Lantern");
+    g.choose(act(lantern, 0));
+    settle(&mut g);
+    assert_eq!(g.count_in(1, "Griselbrand", Zone::Exile), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Animate Dead", Zone::Graveyard), 1, "it didn't resolve");
+}
+
+/// Necromancy: "You may cast this spell as though it had flash. If you cast
+/// it any time a sorcery couldn't have been cast, the controller of the
+/// permanent it becomes sacrifices it at the beginning of the next cleanup
+/// step" (CR 514.3a); "put target creature card from a graveyard onto the
+/// battlefield under your control and attach this enchantment to it"; "when
+/// this enchantment leaves the battlefield, that creature's controller
+/// sacrifices it".
+#[test]
+fn necromancy_at_instant_speed_is_sacrificed_at_cleanup_cr514_3a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp"; 3])
+        .hand(0, &["Necromancy"])
+        .graveyard(0, &["Griselbrand"])
+        .at(Step::Main1, 1)
+        .start();
+    g.pass();
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let c = g.card(0, "Necromancy", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    let gris = g.card(0, "Griselbrand", Zone::Graveyard);
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::Target) { Some(g.tgt(gris)) } else { None });
+    let gris = g.card(0, "Griselbrand", Zone::Battlefield);
+    let nec = bf(&g, 0, "Necromancy");
+    assert_eq!(g.obj(nec).attached.map(|r| r.idx), Some(gris), "{}", log(&g));
+    assert!(g.has_subtype(nec, db().subtype_id("Aura").unwrap()), "it became an Aura");
+    quiet_until(&mut g, |g| g.turn().active == 0);
+    assert_eq!(g.count_in(0, "Necromancy", Zone::Graveyard), 1, "sacrificed at cleanup\n{}", log(&g));
+    assert_eq!(g.count_in(0, "Griselbrand", Zone::Graveyard), 1, "and the creature with it");
+}
+
+/// Cast as a sorcery: it stays.
+#[test]
+fn necromancy_at_sorcery_speed_stays_cr514_3a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp"; 3])
+        .hand(0, &["Necromancy"])
+        .graveyard(1, &["Test Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Necromancy", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    let giant = g.card(1, "Test Giant", Zone::Graveyard);
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::Target) { Some(g.tgt(giant)) } else { None });
+    quiet_until(&mut g, |g| g.turn().active == 1);
+    assert_eq!(g.count_in(0, "Necromancy", Zone::Battlefield), 1, "{}", log(&g));
+    assert_eq!(g.obj(g.card(1, "Test Giant", Zone::Battlefield)).controller, 0);
+}

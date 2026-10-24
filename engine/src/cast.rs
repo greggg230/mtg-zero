@@ -1449,6 +1449,13 @@ impl Game {
         if self.def_of(card).spell.as_ref().is_some_and(|ab| ab.divide.is_some()) {
             self.agenda.push(Task::Divide { id }); // CR 601.2d
         }
+        if self.def_of(card).cleanup_sac.is_some() {
+            let sorcery_time = self.turn.active == p && self.turn.step.is_main() && self.stack.len() <= 1;
+            if !sorcery_time {
+                let r = self.obj_ref(card);
+                self.marks.push((r, crate::game::Mark::NotSorceryTiming));
+            }
+        }
         let splice = self.splice_possible(p, card);
         if splice || self.def_of(card).spell.as_ref().is_some_and(|ab| ab.has_targets()) {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });

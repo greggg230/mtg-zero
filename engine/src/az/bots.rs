@@ -620,8 +620,11 @@ impl Heuristic {
             // X (CR 107.3): as much as it can pay.
             K::ChooseMode if matches!(g.agenda.last(), Some(Task::ChooseX { .. })) => {
                 let x_life = match g.agenda.last() {
-                    Some(&Task::ChooseX { id }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Spell { card } if g.def_of(card).x_life)),
-                    _ => false,
+                    Some(&Task::ChooseX { id }) => g.stack().iter().find_map(|s| match s.kind {
+                        StackKind::Spell { card } if s.id == id && g.def_of(card).x_life => Some(card),
+                        _ => None,
+                    }),
+                    _ => None,
                 };
                 let ability = match g.agenda.last() {
                     Some(&Task::ChooseX { id }) => g.stack().iter().any(|s| s.id == id && matches!(s.kind, StackKind::Ability { .. })),
@@ -631,10 +634,26 @@ impl Heuristic {
                     // An ability's X (Candelabra of Tawnos: untap X lands
                     // paid for by tapping as many): none.
                     d.options.first().map(|o| o.action)
-                } else if x_life {
-                    // "Pay X life" (Fire Covenant): what the opponent's
-                    // creatures need, at most half its life.
-                    let need: i32 = g.creatures_of(opp(p)).map(|c| g.toughness(c).max(0)).sum();
+                } else if let Some(card) = x_life {
+                    // "Pay X life": what the opponent's creatures need, at
+                    // most half its life. Divided damage (Fire Covenant):
+                    // their toughness together; -X/-X to all (Toxic Deluge):
+                    // the toughest; "mana value X or less" (Vicious Rivalry):
+                    // the costliest artifact or creature.
+                    let prog = g.def_of(card).spell.as_ref().map(|ab| ab.program.clone()).unwrap_or_default();
+                    let pump = prog.iter().any(|o| matches!(o, crate::program::Op::Ext(crate::program::Ext::ApplyPtX { .. })));
+                    let by_mv = prog.iter().any(|o| matches!(o, crate::program::Op::DestroyAll { filter } if format!("{filter:?}").contains("MvAtMostX")));
+                    let need: i32 = if pump {
+                        g.creatures_of(opp(p)).map(|c| g.toughness(c).max(0)).max().unwrap_or(0)
+                    } else if by_mv {
+                        g.permanents_of(opp(p))
+                            .filter(|&c| g.is_creature(c) || g.is_type(c, crate::db::types::ARTIFACT))
+                            .map(|c| g.mana_value_of(c) as i32)
+                            .max()
+                            .unwrap_or(0)
+                    } else {
+                        g.creatures_of(opp(p)).map(|c| g.toughness(c).max(0)).sum()
+                    };
                     let x = need.min(g.life(p) / 2).max(0) as u16;
                     d.options.iter().filter(|o| o.action <= act::NUMBER + x).last().map(|o| o.action)
                 } else {

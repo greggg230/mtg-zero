@@ -782,6 +782,15 @@ pub enum Ext {
     /// land only if they could play a land now). Choice: yes/no (asked
     /// whenever the card is there and a library is that small).
     PlayLinkedFaceDownFree { library_at_most: u8 },
+    /// If the source is on the battlefield: put the creature card it
+    /// enchants (`tgt` None) or the first legal target of `tgt` onto the
+    /// battlefield under the controller's control and attach the source to
+    /// it (`Mark::Reanimated`); with `aura`, the source first becomes an Aura
+    /// (that subtype).
+    ReanimateAttach { tgt: Option<u8>, aura: Option<u16> },
+    /// The creature the source reanimated (`Mark::Reanimated`, as the source
+    /// last existed) is sacrificed by its controller.
+    SacrificeReanimated,
 }
 
 /// What a delayed trigger is about ("that card", "that much").

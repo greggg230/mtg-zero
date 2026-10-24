@@ -364,25 +364,36 @@ impl Game {
                     sac_self |= m.sac_if_no == Some(k) && have == n as u16;
                 }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
+                // The additional mana tapping this source adds (its land
+                // subtypes; a creature's), which depends on the object.
+                let extra_of = |x: CardIdx| {
+                    let mut extra = [0u8; 6];
+                    if !bonus.is_empty() && self.is_type(x, crate::db::types::LAND) {
+                        for &(sub, t) in &bonus {
+                            if self.has_subtype(x, sub) {
+                                extra[t as usize] += 1;
+                            }
+                        }
+                    }
+                    if creature_bonus != [0; 6] && ad.cost.tap && self.is_creature(x) {
+                        for t in 0..6 {
+                            extra[t] += creature_bonus[t];
+                        }
+                    }
+                    extra
+                };
+                let extra = extra_of(c);
+                let bonuses = !bonus.is_empty() || creature_bonus != [0; 6];
                 // Same definition and ability: the same yield (it depends on
-                // the controller only; the linked colours on the source).
-                let same = |cl: &&mut Class| cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self;
+                // the controller only; the linked colours on the source; the
+                // additional mana of the object: an animated land of a
+                // definition is a creature, another isn't).
+                let same = |cl: &&mut Class| {
+                    cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self && (!bonuses || extra_of(cl.members[0].card) == extra)
+                };
                 if let Some(cl) = out.iter_mut().find(same).filter(|_| m.prod != ManaProd::Linked && m.prod != ManaProd::Chosen) {
                     cl.members.push(src);
                     continue;
-                }
-                let mut extra = [0u8; 6];
-                if !bonus.is_empty() && self.is_type(c, crate::db::types::LAND) {
-                    for &(sub, t) in &bonus {
-                        if self.has_subtype(c, sub) {
-                            extra[t as usize] += 1;
-                        }
-                    }
-                }
-                if creature_bonus != [0; 6] && ad.cost.tap && self.is_creature(c) {
-                    for t in 0..6 {
-                        extra[t] += creature_bonus[t];
-                    }
                 }
                 let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra, Some(c)) else { continue };
                 let cl = Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self, only: m.only };

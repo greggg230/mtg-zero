@@ -534,6 +534,7 @@ impl Game {
         let (step, ap) = (self.turn.step, self.turn.active);
         let fires = |d: &crate::game::Delayed| match d.when {
             W::NextEndStep => step == crate::game::Step::End,
+            W::NextCleanup => step == crate::game::Step::Cleanup,
             W::NextUpkeep => step == crate::game::Step::Upkeep,
             W::YourNextMainPhase => step.is_main() && ap == d.controller,
         };

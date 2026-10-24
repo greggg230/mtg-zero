@@ -75,6 +75,25 @@ impl Game {
     pub(crate) fn resolve_top(&mut self) {
         let item = self.stack.last().expect("resolve with an empty stack").clone();
         if let StackKind::Spell { card } = item.kind {
+            if self.def_of(card).aura_spell {
+                // An Aura spell (CR 608.3a): with an illegal target it doesn't
+                // resolve (to its owner's graveyard); else it enters attached
+                // to it (608.3c, below).
+                let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)) };
+                let legal = match (self.item_ability(&item), item.targets.first()) {
+                    (Some(ar), Some(&(req, t))) => self.target_legal(self.db.ability(ar).reqs(&item.modes)[req as usize], t, &ctx),
+                    _ => false,
+                };
+                if !legal {
+                    self.note(|_| "fizzles".to_string());
+                    self.move_card(card, Zone::Graveyard, Pos::Top);
+                    self.turn.priority = self.turn.active;
+                    self.turn.passes = 0;
+                    return;
+                }
+                self.agenda.push(Task::FinishResolve { id: item.id });
+                return;
+            }
             if self.def_of(card).bestowed {
                 // A bestowed Aura spell (CR 702.103e, 608.3b): with an illegal
                 // target it ceases to be bestowed and resolves as a creature
@@ -265,7 +284,24 @@ impl Game {
                                 _ => None,
                             })
                         };
+                        // Necromancy cast when a sorcery couldn't have been:
+                        // sacrificed at the beginning of the next cleanup step.
+                        let cleanup_sac = self.def_of(card).cleanup_sac.filter(|_| {
+                            let r = self.obj_ref(card);
+                            self.marks.contains(&(r, crate::game::Mark::NotSorceryTiming))
+                        });
                         let entered = self.put_onto_battlefield(card, item.controller);
+                        if let (Some(k), true) = (cleanup_sac, self.objs[card.i()].zone == Zone::Battlefield) {
+                            let def = self.objs[card.i()].def;
+                            self.delayed.push(crate::game::Delayed {
+                                when: crate::db::DelayedWhen::NextCleanup,
+                                controller: item.controller,
+                                source: entered,
+                                source_def: def,
+                                slot: self.db.def(def).delayed_base + k,
+                                ev: crate::triggers::EvCtx { obj: Some(entered), ..Default::default() },
+                            });
+                        }
                         if let Some((def, slot)) = grant {
                             if self.live(entered) && self.objs[card.i()].zone == Zone::Battlefield {
                                 self.marks.push((entered, crate::game::Mark::LeaveTrigger { def, slot, exile: false }));
@@ -274,7 +310,7 @@ impl Game {
                         // CR 608.3c: a bestowed Aura enters attached to the
                         // creature it targeted (checked as it began
                         // resolving).
-                        if bestowed && self.objs[card.i()].zone == Zone::Battlefield {
+                        if (bestowed || self.def_of(card).aura_spell) && self.objs[card.i()].zone == Zone::Battlefield {
                             if let Some(&(_, Target::Obj(h))) = item.targets.first() {
                                 self.objs[card.i()].attached = Some(h);
                             }

@@ -105,6 +105,9 @@ pub struct Lowerer<'a> {
     /// The printing being lowered has an X its spell announces (its mana
     /// cost's {X}, or "pay X life").
     pub spell_x: bool,
+    /// An effect of the card reanimates and attaches it (a reanimating
+    /// Aura).
+    pub reanimates: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -256,6 +259,7 @@ pub fn lower_card(
         cascade: false,
         act_x: false,
         spell_x: false,
+        reanimates: false,
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;

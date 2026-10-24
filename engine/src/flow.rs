@@ -480,6 +480,11 @@ impl Game {
             }
             Step::Cleanup => {
                 self.turn.cleanup_again = false;
+                // "At the beginning of the next cleanup step" (514.3a: a
+                // trigger then gives priority, and another cleanup follows).
+                if !self.delayed.is_empty() {
+                    self.fire_delayed();
+                }
                 self.agenda.push(Task::CleanupRest);
                 self.agenda.push(Task::CleanupDiscard);
             }

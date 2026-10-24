@@ -415,6 +415,46 @@ impl Game {
                     }
                 }
             }
+            Ext::ReanimateAttach { tgt, aura } => {
+                let r = f.source;
+                if !self.live(r) || self.objs[r.idx.i()].zone != Zone::Battlefield {
+                    return Flow::Next; // (603.4: "if it's on the battlefield")
+                }
+                let card = match tgt {
+                    Some(t) => self.targets_of(f, *t).into_iter().find_map(|t| match t {
+                        crate::ids::Target::Obj(o) if self.objs[o.idx.i()].zone == Zone::Graveyard => Some(o),
+                        _ => None,
+                    }),
+                    None => self.objs[r.idx.i()].attached.filter(|&h| self.live(h) && self.objs[h.idx.i()].zone == Zone::Graveyard),
+                };
+                if let Some(s) = aura {
+                    // "It becomes an Aura with 'enchant creature put onto the
+                    // battlefield with Necromancy'" (layer 4).
+                    let m = crate::db::Mod::Types { add: 0, subtypes: vec![*s], replace: false };
+                    self.add_effect(Affected::Obj(r), m, crate::layers::Until::Forever, f.controller);
+                }
+                let Some(h) = card else { return Flow::Next };
+                if !self.def_of(h.idx).is(types::CREATURE) {
+                    return Flow::Next;
+                }
+                let made = self.put_onto_battlefield(h.idx, f.controller);
+                if self.objs[h.idx.i()].zone == Zone::Battlefield {
+                    self.objs[r.idx.i()].attached = Some(made);
+                    self.marks.push((r, crate::game::Mark::Reanimated(made)));
+                    self.note(|g| format!("{} attached to {}", g.name(r.idx), g.name(h.idx)));
+                }
+                Flow::Next
+            }
+            Ext::SacrificeReanimated => {
+                let target = self.marks.iter().find_map(|&(o, m)| match m {
+                    crate::game::Mark::Reanimated(c) if o == f.source => Some(c),
+                    _ => None,
+                });
+                if let Some(c) = target.filter(|&c| self.live(c) && self.objs[c.idx.i()].zone == Zone::Battlefield) {
+                    self.sacrifice(c.idx);
+                }
+                Flow::Next
+            }
             _ => unreachable!("not a tail-3 op: {op:?}"),
         }
     }

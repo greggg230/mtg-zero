@@ -1591,7 +1591,9 @@ impl Game {
             | Ext::ExileTopFaceDownPlayable
             | Ext::HandsFaceDownLinked
             | Ext::LinkedFaceDownToHand
-            | Ext::PlayLinkedFaceDownFree { .. } => self.exec_tail3(f, op),
+            | Ext::PlayLinkedFaceDownFree { .. }
+            | Ext::ReanimateAttach { .. }
+            | Ext::SacrificeReanimated => self.exec_tail3(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

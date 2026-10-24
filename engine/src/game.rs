@@ -666,6 +666,11 @@ pub enum Mark {
     ModesUsed(u8),
     /// "Odd" (1) or "even" (0) chosen as it entered (Gollum).
     Parity(u8),
+    /// This reanimating Aura put this creature onto the battlefield (and
+    /// enchants it).
+    Reanimated(ObjRef),
+    /// This spell was cast when a sorcery couldn't have been (Necromancy).
+    NotSorceryTiming,
 }
 
 impl Game {

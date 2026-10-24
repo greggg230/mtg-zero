@@ -559,6 +559,8 @@ pub enum EventKind {
 pub enum DelayedWhen {
     /// At the beginning of the next end step.
     NextEndStep,
+    /// At the beginning of the next cleanup step (CR 514.3a).
+    NextCleanup,
     /// At the beginning of the next turn's upkeep.
     NextUpkeep,
     /// At the beginning of its controller's next main phase.
@@ -1348,6 +1350,18 @@ pub struct CardDef {
     /// "This can't block or be blocked by non-<subtype> creatures" (Wan Shi
     /// Tong's Spirits).
     pub blocks_only_subtype: Option<u16>,
+    /// A reanimating Aura (Animate Dead, Necromancy): attached to the
+    /// creature it put onto the battlefield (`Mark::Reanimated`), or, before
+    /// that, to the creature card in a graveyard it enchants; otherwise it is
+    /// put into its owner's graveyard (CR 704.5m).
+    pub reanimates: bool,
+    /// An Aura spell's target (CR 303.4a; Animate Dead: "enchant creature
+    /// card in a graveyard"): its `spell` holds the requirement.
+    pub aura_spell: bool,
+    /// "If you cast it any time a sorcery couldn't have been cast, ...
+    /// sacrifices it at the beginning of the next cleanup step" (Necromancy):
+    /// that delayed ability's index.
+    pub cleanup_sac: Option<u8>,
     /// Splice onto <subtype> <cost> (CR 702.47): the subtype, the cost.
     pub splice: Option<(u16, ManaCost)>,
     /// "As this enters, choose a color. All cards that aren't on the

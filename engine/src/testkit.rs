@@ -374,11 +374,15 @@ impl Game {
             obj(&mut v, c);
         }
         v.push(u64::MAX);
-        // Cards exiled face down (ENGINE.md 30): their owners, and the
-        // identities the viewer knows.
-        for &c in &self.face_down {
-            let o = &self.objs[c.i()];
-            v.extend([o.owner as u64, if self.knows(viewer, c) { o.def as u64 } else { u64::MAX - 3 }]);
+        // Cards exiled face down (ENGINE.md 30), per owner: how many, and the
+        // identities the viewer knows (a pile with no order to see).
+        for p in 0..2u8 {
+            let mine: Vec<CardIdx> = self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == p).collect();
+            let mut known: Vec<u64> = mine.iter().filter(|&&c| self.knows(viewer, c)).map(|&c| self.objs[c.i()].def as u64).collect();
+            known.sort_unstable();
+            v.push(mine.len() as u64);
+            v.extend(known);
+            v.push(u64::MAX - 3);
         }
         v.push(u64::MAX);
         // Emblems (public, CR 114).

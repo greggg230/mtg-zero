@@ -255,6 +255,26 @@ pub(crate) fn lower_effect_tail3(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let k = l.delayed_ability(d.finish());
             b.op(Op::Ext(Ext::Delay { k, when: crate::db::DelayedWhen::NextEndStep, about: crate::program::About::Nothing }));
         }
+        // "Return enchanted creature card to the battlefield under your
+        // control and attach this Aura to it" (Animate Dead), or "it becomes
+        // an Aura ... Put target creature card from a graveyard onto the
+        // battlefield under your control and attach this enchantment to it"
+        // (Necromancy); "if it's on the battlefield" as it resolves.
+        E::ReanimateAndAttachSource(nodes::ReanimateAndAttachSource { from_target }) => {
+            l.reanimates = true;
+            if *from_target {
+                let t = b.target(Filter::InGraveyard(Box::new(Filter::Type(crate::db::types::CREATURE))), 1, 1);
+                let aura = l.subtype("Aura");
+                b.op(Op::Ext(Ext::ReanimateAttach { tgt: Some(t), aura: Some(aura) }));
+            } else {
+                b.op(Op::Ext(Ext::ReanimateAttach { tgt: None, aura: None }));
+            }
+        }
+        // "When this leaves the battlefield, that creature's controller
+        // sacrifices it" (the creature it reanimated).
+        E::LinkedCreatureControllerSacrifices(nodes::LinkedCreatureControllerSacrifices {}) => {
+            b.op(Op::Ext(Ext::SacrificeReanimated));
+        }
         _ => return false,
     }
     true
