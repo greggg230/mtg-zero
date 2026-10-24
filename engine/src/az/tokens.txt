@@ -45,3 +45,5 @@ The initiative rules
 Elemental 1/1 R c Elemental
 Warrior 1/1 R c Warrior
 Incubator -/- C a Incubator
+Rogue 2/2 B c Rogue
+Rabbit 1/1 W c Rabbit
