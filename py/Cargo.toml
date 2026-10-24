@@ -14,3 +14,6 @@ pyo3 = { version = "0.23", features = ["extension-module"] }
 zero_py = { path = "../third_party/zero-core/crates/py" }
 zero_search = { path = "../third_party/zero-core/crates/search" }
 engine = { path = "../engine" }
+# The process-wide allocator of the module (the Windows heap is slow and erratic for the engine's
+# small allocations: docs/ENGINE.md 17). Built from C by the cc crate (MSVC / clang).
+mimalloc = { version = "0.1", default-features = false }

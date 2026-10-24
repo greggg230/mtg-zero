@@ -1220,6 +1220,25 @@ A faster allocator
 (mimalloc) would likely cut the rest of the allocation cost, but it belongs to the binary, not
 the engine.
 
+**The allocator (M7c).** The Python module `mtgz._engine` (crate `py`, the binary that runs
+self-play, evaluation and the search) uses mimalloc as its global allocator (`py/src/lib.rs`;
+crate `mimalloc` 0.1, built from C by `cc` with MSVC here, clang on a Mac). The engine crate and
+its tests keep the system allocator. `python -m mtgz.az.bench search --game mtg --threads 4
+--games 25 --sims 64` (zero-core's Rust driver and search with a uniform evaluator), three rounds
+interleaved with the same code on the Windows heap, the same games:
+
+| | Windows heap | mimalloc |
+|---|---|---|
+| search time per simulation and thread | 29.7 / 32.5 / 34.5 us | 18.1 / 18.0 / 18.4 us |
+| simulations per second (the driver, Python included) | 18,296 / 16,798 / 15,338 | 24,573 / 24,687 / 24,003 |
+| leaves per second | 11,664 / 10,709 / 9,778 | 15,665 / 15,739 / 15,302 |
+| wall time | 168 / 183 / 201 s | 125 / 125 / 128 s |
+
+The search's own time falls by 40-48% and stops drifting (the Windows heap slowed by 16% over
+the three rounds; mimalloc stayed within 2%): the clones, determinizations and options of four
+search threads allocate concurrently, where the Windows heap contends and degrades. With a
+network the evaluator's share grows, so self-play gains less than this in wall time.
+
 ## 18. Costs, activated abilities and mana abilities (CR 118, 602, 605)
 
 **Costs.** A `Cost` is the mana (`ManaCost`: generic, coloured, two-colour hybrid, Phyrexian)
