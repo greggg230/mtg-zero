@@ -78,17 +78,22 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     // "You may [do this]. Do this only once each turn" (The Sensational
     // She-Hulk, CR 603.2h): what is limited is the optional action, done
     // or not; the ability doesn't trigger once it was done that turn
-    // (`triggers.rs`). ("This ability triggers only once each turn" is
-    // another rule, not built.)
+    // (`triggers.rs`). Any other effect: "this ability triggers only once
+    // each turn" (Enduring Innocence; the IR's one flag for both,
+    // docs/ir_defects.md 14), `TrigPred::Once`.
+    let mut once = false;
     if *once_per_turn {
         match ability.program.first() {
             Some(&crate::program::Op::May { who: crate::program::Who::You, skip }) if ability.modes.is_none() => {
                 ability.program[0] = crate::program::Op::Ext(crate::program::Ext::OnceMay { skip });
             }
-            _ => l.unsupported("TriggeredAbility.once_per_turn(not \"you may ... only once each turn\")"),
+            _ => once = true,
         }
     }
     let (event, mut pred) = (ev?, pred?);
+    if once {
+        pred = TrigPred::And(Box::new(TrigPred::Once), Box::new(pred));
+    }
     // "When this creature dies" (CR 700.4): it was a creature as it left;
     // the IR's `dies` event covers any permanent put into a graveyard from
     // the battlefield, with typed subjects for the others.
@@ -99,7 +104,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         l.unsupported(format!("TriggerPredicate.subject({s:?} of {event:?})"));
     }
     // Predicates read from one event kind's note.
-    let (enters, cast) = (needs(&pred, &|p| matches!(p, TrigPred::EnteredCast | TrigPred::EnteredPaid)), needs(&pred, &|p| matches!(p, TrigPred::SpellPaid | TrigPred::OrCopy)));
+    let (enters, cast) = (needs(&pred, &|p| matches!(p, TrigPred::EnteredCast | TrigPred::EnteredPaid | TrigPred::EnteredXAtLeast(_))), needs(&pred, &|p| matches!(p, TrigPred::SpellPaid | TrigPred::OrCopy)));
     if enters && event != EventKind::Enters || cast && event != EventKind::IsCast {
         l.unsupported(format!("TriggerPredicate(how it was cast, on {event:?})"));
     }
@@ -115,7 +120,9 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
             | EventKind::BeginningOfEndStep
     );
     if step {
-        if let Some(f) = source_condition(&pred) {
+        // (Not "once harnessed": that says whether the ability exists, and
+        // a triggered ability resolves without its source, CR 113.7a.)
+        if let Some(f) = source_condition(&pred).filter(|f| *f != Filter::Harnessed) {
             let mut b = crate::program::Builder { program: std::mem::take(&mut ability.program), ..Default::default() };
             b.insert(0, crate::program::Op::Ext(crate::program::Ext::JumpUnlessSource { filter: f, to: 0 }));
             b.patch(0);
@@ -173,7 +180,9 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::EnteredCast
         | TrigPred::EnteredPaid
         | TrigPred::SpellPaid
-        | TrigPred::OrCopy => Vec::new(),
+        | TrigPred::OrCopy
+        | TrigPred::EnteredXAtLeast(_)
+        | TrigPred::Once => Vec::new(),
     }
 }
 
@@ -245,6 +254,11 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         }
         P::Source(nodes::Source { inner }) => Some(TrigPred::Source(lower_pred(l, inner)?)),
         P::HostAttacksWithAnother(nodes::HostAttacksWithAnother {}) => Some(TrigPred::HostAttacksWithAnother),
+        // Ravenous: "if X is 5 or more, draw a card when it enters" (CR
+        // 702.156a).
+        P::EnteringWithXAtLeast(nodes::EnteringWithXAtLeast { n }) => {
+            Some(TrigPred::EnteredXAtLeast(l.int("EnteringWithXAtLeast.n", *n, 1, 99) as u8))
+        }
         // "Whenever one or more ..." (one trigger per simultaneous batch).
         P::OneOrMoreBatch(nodes::OneOrMoreBatch {}) => Some(TrigPred::Batch),
         // A chapter ability (CR 714.2b).

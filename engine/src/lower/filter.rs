@@ -70,6 +70,9 @@ macro_rules! lower_object_predicate {
             }
             E::ObjectNot(nodes::ObjectNot { inner }) => Some(Filter::Not(Box::new(lower_pred($l, inner)?))),
             E::WasEvoked(nodes::WasEvoked {}) => Some(Filter::Evoked),
+            // "Once harnessed, its infinity ability is active" (The Mind
+            // Stone).
+            E::IsHarnessed(nodes::IsHarnessed {}) => Some(Filter::Harnessed),
             E::DrawIsFirstInOwnDrawStep(nodes::DrawIsFirstInOwnDrawStep {}) => Some(Filter::FirstDrawInDrawStep),
             E::HasDrawnNCardsThisTurn(nodes::HasDrawnNCardsThisTurn { n }) => {
                 Some(Filter::DrewThisTurn($l.int("HasDrawnNCardsThisTurn.n", *n, 0, 99) as u8))
@@ -200,7 +203,13 @@ macro_rules! lower_condition {
 }
 
 pub(crate) fn lower_condition(l: &mut Lowerer, c: &cats::Condition) -> Option<Cond> {
-    lower_condition!(l, c, Condition, {})
+    lower_condition!(l, c, Condition, {
+        // "As long as there are four or more card types among cards exiled
+        // with this creature" (Keen-Eyed Curator; CR 607.2a, 205.2a).
+        E::CardTypesAmongExiledWithSourceAtLeast(nodes::CardTypesAmongExiledWithSourceAtLeast { n }) => {
+            Some(Cond::LinkedTypesAtLeast(l.int("CardTypesAmongExiledWithSourceAtLeast.n", *n, 1, 8) as u8))
+        }
+    })
 }
 
 pub(crate) fn lower_condition_or_state(l: &mut Lowerer, c: &cats::ConditionOrStatePredicate) -> Option<Cond> {

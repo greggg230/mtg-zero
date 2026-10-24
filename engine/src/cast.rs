@@ -264,7 +264,7 @@ impl Game {
 
     /// Does permission `pm` let `p` play its card now?
     pub(crate) fn permission_ok(&self, pm: &crate::game::Permission, p: PlayerId) -> bool {
-        if !self.live(pm.card) || pm.turn.is_some_and(|t| t != self.turn.number) {
+        if !self.live(pm.card) || !self.perm_turn_ok(pm.turn, pm.player) {
             return false;
         }
         // CR 722.3c: the prepared permanent's controller, while it stays
@@ -719,16 +719,17 @@ impl Game {
     }
 
     /// "You may play lands from your graveyard" (Crucible of Worlds).
-    /// A Serra Paragon of `p` whose "once during each of your turns" is
-    /// unused this turn and that allows mana value `mv` (CR 601.2a, 305.1).
-    pub(crate) fn paragon(&self, p: PlayerId, mv: u8) -> Option<CardIdx> {
+    /// A Serra Paragon (or Lurrus) of `p` whose "once during each of your
+    /// turns" is unused this turn and that allows mana value `mv` (a land
+    /// with `land`; CR 601.2a, 305.1).
+    pub(crate) fn paragon(&self, p: PlayerId, mv: u8, land: bool) -> Option<CardIdx> {
         if self.turn.active != p {
             return None;
         }
         let turn = self.turn.number as u16;
         self.permanents_of(p).find(|&c| {
             let d = self.abilities(c);
-            d.gy_play_mv > 0 && mv <= d.gy_play_mv && {
+            d.gy_play_mv > 0 && mv <= d.gy_play_mv && (!land || d.gy_play_land) && {
                 let r = self.obj_ref(c);
                 !self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::UsedTurn(turn))
             }
@@ -754,13 +755,13 @@ impl Game {
     }
 
     /// Use Serra Paragon `c`'s permission this turn; the trigger the
-    /// permanent will gain.
-    pub(crate) fn use_paragon(&mut self, c: CardIdx) -> (crate::ids::DefId, u8) {
+    /// permanent will gain (none for Lurrus).
+    pub(crate) fn use_paragon(&mut self, c: CardIdx) -> Option<(crate::ids::DefId, u8)> {
         let r = self.obj_ref(c);
         self.marks.push((r, crate::game::Mark::UsedTurn(self.turn.number as u16)));
         let def = self.objs[c.i()].def;
         let d = self.abilities(c);
-        (def, d.delayed_base + d.gy_play_k)
+        (d.gy_play_k != crate::db::NO_GRANT).then(|| (def, d.delayed_base + d.gy_play_k))
     }
 
     pub(crate) fn lands_from_graveyard(&self, p: PlayerId) -> bool {
@@ -810,7 +811,8 @@ impl Game {
         }
         let mut esc = None;
         let mut para = None;
-        let lands_ok = land_ok && (self.lands_from_graveyard(p) || *para.get_or_insert_with(|| self.paragon_mv(p)) > 0);
+        let lands_ok = land_ok
+            && (self.lands_from_graveyard(p) || *para.get_or_insert_with(|| self.paragon_mv(p)) > 0 && self.paragon(p, 0, true).is_some());
         // (A token in a graveyard is not a card: nothing casts or plays it.)
         for c in self.graveyard_cards(p) {
             let front = if self.def_of(c).halves.is_some() {
@@ -1230,7 +1232,7 @@ impl Game {
         let from = self.cast_route(p, card).expect("a castable card");
         // Serra Paragon's permission, found while the card is in the
         // graveyard (used as it is cast).
-        let paragon = if from == crate::game::CastFrom::Paragon { self.paragon(p, self.def_of(card).mana_value()) } else { None };
+        let paragon = if from == crate::game::CastFrom::Paragon { self.paragon(p, self.def_of(card).mana_value(), false) } else { None };
         // "If that spell would be put into your graveyard, exile it
         // instead": a permission from a graveyard that says so (unless
         // flashback, which exiles it anyway, is how it is cast).
@@ -1250,8 +1252,7 @@ impl Game {
             self.objs[card.i()].def = f;
         }
         self.note(|g| format!("P{p} casts {} ({from:?})", g.name(card)));
-        if let Some(src) = paragon {
-            let (def, slot) = self.use_paragon(src);
+        if let Some((def, slot)) = paragon.and_then(|src| self.use_paragon(src)) {
             // (The card is on the stack: the spell is marked.)
             let r = self.obj_ref(card);
             self.marks.push((r, crate::game::Mark::GrantOnEnter { def, slot }));
@@ -1781,6 +1782,10 @@ impl Game {
             }),
             Filter::DrewThisTurn(_) | Filter::InGraveyard(_) => false,
             Filter::Evoked => self.objs[c.i()].evoked,
+            Filter::Harnessed => {
+                let r = self.obj_ref(c);
+                self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::Harnessed)
+            }
             Filter::Owner(you) => (self.objs[c.i()].owner == ctx.controller) == *you,
             Filter::FirstDrawInDrawStep | Filter::OathTarget => false,
             Filter::NoCounters(k) => self.counters_on(c, *k) == 0,

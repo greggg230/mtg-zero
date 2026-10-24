@@ -53,7 +53,17 @@ impl Game {
             Cond::SpellsCastAtLeast(n) => pl.spells_cast >= *n,
             Cond::HasInitiative => self.initiative == Some(p),
             Cond::CompletedDungeon => self.dungeons[p as usize].completed > 0,
+            Cond::LinkedTypesAtLeast(n) => source.is_some_and(|s| self.linked_types(s).count_ones() >= *n as u32),
         }
+    }
+
+    /// The card types among the cards exiled with `source` (CR 607.2a,
+    /// 205.2a): linked cards still in exile.
+    pub(crate) fn linked_types(&self, source: crate::ids::ObjRef) -> u16 {
+        self.links
+            .iter()
+            .filter(|l| l.source == source && self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile)
+            .fold(0u16, |m, l| m | self.types_of(l.card.idx))
     }
 
     /// CR 606.3: no loyalty ability of this permanent was activated this
@@ -151,6 +161,17 @@ impl Game {
         if ob.zone == Zone::Battlefield && ob.controller == p && self.is_type(card, types::ARTIFACT) {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).artifact_ability_discount;
+                if n > 0 {
+                    let floor = m.total().saturating_sub(1);
+                    m.generic = m.generic.saturating_sub(n.min(floor));
+                }
+            }
+        }
+        // "Abilities you activate that aren't mana abilities cost {2} less"
+        // (Zirda; at least one mana stays).
+        if ad.mana().is_none() && m.generic > 0 && m.total() > 1 {
+            for c in self.permanents_of(p) {
+                let n = self.abilities(c).ability_discount;
                 if n > 0 {
                     let floor = m.total().saturating_sub(1);
                     m.generic = m.generic.saturating_sub(n.min(floor));

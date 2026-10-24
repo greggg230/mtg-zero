@@ -1366,9 +1366,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         converge: false,
         paints: *paints_all_objects_chosen_color_at_etb,
         extra_mana_creature,
-        gy_play_mv,
-        gy_play_k,
+        gy_play_mv: if repl.gy_cast_mv > 0 { repl.gy_cast_mv } else { gy_play_mv },
+        gy_play_k: if repl.gy_cast_mv > 0 { crate::db::NO_GRANT } else { gy_play_k },
+        gy_play_land: gy_play_mv > 0,
+        ability_discount: repl.ability_discount,
     };
+    if repl.gy_cast_mv > 0 && gy_play_mv > 0 {
+        l.unsupported("StaticAbility.graveyard_permanent_cast_mv_max(with another graveyard permission)");
+    }
     // The bestowed face (CR 702.103b): an Aura enchantment with enchant
     // creature (an Aura spell targets a creature, 303.4a) whose enchanted
     // creature gets the bonus; no creature types, no power and toughness;

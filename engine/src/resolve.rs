@@ -369,10 +369,19 @@ impl Game {
             }
             Amount::Remembered => f.x,
             Amount::HalfLibraryUp => (self.players[f.controller as usize].library.len() as i32 + 1) / 2,
-            Amount::EventTimes => (f.ev.amount >> 1) as i32,
+            Amount::EventTimes => ((f.ev.amount >> 1) & 0xFF) as i32,
             Amount::EventSpellTimes => self.event_spell_times(f) as i32,
             Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
             Amount::Experience => self.players[f.controller as usize].experience as i32,
+            Amount::EventSpellMv => match f.ev.obj {
+                Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack => self.mana_value_of(r.idx) as i32,
+                Some(r) => self
+                    .spell_lki
+                    .iter()
+                    .find(|x| x.0 == r)
+                    .map_or(0, |x| self.db.def(x.1).mana_value() as i32 + x.2.x as i32 * self.db.def(x.1).x_pips as i32),
+                None => 0,
+            },
         }
     }
 

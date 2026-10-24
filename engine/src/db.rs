@@ -343,6 +343,9 @@ pub enum Filter {
     /// triggered; CR 113.1, 115.1: "target activated or triggered
     /// ability"). Mana abilities never use the stack (605.3b).
     Ability(u8),
+    /// It has been harnessed (`Mark::Harnessed`; "once harnessed, its
+    /// infinity ability is active").
+    Harnessed,
 }
 
 /// `Filter::Ability` kinds.
@@ -645,6 +648,12 @@ pub enum TrigPred {
     /// later than the source's timestamp (CR 613.7; a granted ward, whose
     /// triggered ability is the granter's here, ENGINE.md 27.3).
     Granted(Slot),
+    /// "If X is n or more" of ravenous (CR 702.156a): the X of the spell
+    /// that became the entering permanent (its `Enters` event's note).
+    EnteredXAtLeast(u8),
+    /// "This ability triggers only once each turn" (always true; once it
+    /// has triggered, it doesn't trigger again that turn, `triggers.rs`).
+    Once,
 }
 
 impl TrigPred {
@@ -742,6 +751,10 @@ pub enum Cond {
     CompletedDungeon,
     /// All of these hold (a static ability's own conditions included).
     All(Vec<Cond>),
+    /// There are n or more card types among the cards exiled with the
+    /// static ability's source (CR 607.2a, 205.2a; a static's own
+    /// condition, read in `layers.rs`).
+    LinkedTypesAtLeast(u8),
 }
 
 /// What a mana ability makes (CR 106.1, 605.1a).
@@ -1210,9 +1223,20 @@ pub struct CardDef {
     /// your graveyard" (Serra Paragon; 0 = none) ...
     pub gy_play_mv: u8,
     /// ... "If you do, it gains '<delayed ability k>'" (its trigger
-    /// `delayed_base + k`).
+    /// `delayed_base + k`; `NO_GRANT`: nothing).
     pub gy_play_k: u8,
+    /// ... and a land may be played this way (Serra Paragon; not Lurrus of
+    /// the Dream-Den, "a permanent spell").
+    pub gy_play_land: bool,
+    // ---- M7c: the single-card tail, part 2 (ENGINE.md 29) ----
+    /// "Abilities you activate that aren't mana abilities cost {n} less to
+    /// activate. This effect can't reduce the mana in that cost to less than
+    /// one mana." (Zirda, the Dawnwaker.)
+    pub ability_discount: u8,
 }
+
+/// `CardDef::gy_play_k` when the permission grants nothing.
+pub const NO_GRANT: u8 = u8::MAX;
 
 /// A ward cost (CR 702.21a-b): mana, life, or a card to discard.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

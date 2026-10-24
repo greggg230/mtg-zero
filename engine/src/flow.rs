@@ -396,7 +396,22 @@ impl Game {
         self.may_copies = 0;
         // Permissions end with their turn, or when the card moves.
         let perms = std::mem::take(&mut self.permissions);
-        self.permissions = perms.into_iter().filter(|p| p.turn.is_none_or(|t| t >= n) && self.live(p.card)).collect();
+        self.permissions = perms
+            .into_iter()
+            .filter(|p| {
+                p.turn.is_none_or(|t| {
+                    if t & crate::resolve_tail2::PERM_UNTIL_TURNS != 0 {
+                        // (Through the end of the player's k-th turn: their
+                        // count once this turn begins.)
+                        let k = t & !crate::resolve_tail2::PERM_UNTIL_TURNS;
+                        let turns = self.players[p.player as usize].turns + (p.player == next) as u32;
+                        turns < k || turns == k && p.player == next
+                    } else {
+                        t >= n
+                    }
+                }) && self.live(p.card)
+            })
+            .collect();
         let pl = &mut self.players[next as usize];
         pl.last_turn = n;
         pl.turns += 1;

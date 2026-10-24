@@ -15,6 +15,7 @@ pub mod effect_ext;
 pub mod effect_faces;
 pub mod effect_stack;
 pub mod effect_tail;
+pub mod effect_tail2;
 pub mod effect_walkers;
 pub mod filter;
 pub mod printing;
@@ -195,6 +196,13 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // the Star is exiled or bounced too); the IR's `dies` event is "put
     // into a graveyard from the battlefield" (Titania's lands).
     ("Chromatic Star", "IR:TriggeredAbility.event(leaves_battlefield for \"put into a graveyard\")"),
+    // "Whenever one or more creatures you control deal combat damage to one
+    // or more players this turn, you become the monarch": the IR writes
+    // "one or more" as `once_per_turn` (one combat per turn in the Python
+    // model), which is "this ability triggers only once each turn"; the
+    // Oracle text triggers once per combat damage step (first strike,
+    // extra combats).
+    ("Forth Eorlingas!", "IR:TriggeredAbility.once_per_turn(\"one or more\" written as once each turn)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

@@ -452,7 +452,7 @@ impl Game {
         // From a graveyard without a "play lands from your graveyard"
         // permanent: Serra Paragon's permission.
         let paragon = if self.objs[c.i()].zone == Zone::Graveyard && !self.lands_from_graveyard(p) {
-            self.paragon(p, 0).map(|s| self.use_paragon(s))
+            self.paragon(p, 0, true).and_then(|s| self.use_paragon(s))
         } else {
             None
         };

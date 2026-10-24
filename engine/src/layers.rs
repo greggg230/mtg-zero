@@ -123,6 +123,7 @@ impl Game {
                 n >= *lo as u16 && hi.is_none_or(|h| n <= h as u16)
             }
             Cond::All(v) => v.iter().all(|x| self.static_cond(s, x, ctl)),
+            Cond::LinkedTypesAtLeast(_) => self.cond_holds_from(k, ctl, Some(self.obj_ref(s))),
             _ => self.cond_holds(k, ctl),
         }
     }

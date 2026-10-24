@@ -80,6 +80,10 @@ pub enum Amount {
     Attacking,
     /// The controller's experience counters (CR 122.1).
     Experience,
+    /// The mana value of the triggered ability's event spell ("that
+    /// spell's mana value"): on the stack now (with its X, CR 202.3e), or as
+    /// it last existed there (608.2h).
+    EventSpellMv,
 }
 
 /// Which objects an `Ext` op acts on.
@@ -640,6 +644,36 @@ pub enum Ext {
     /// returns the card of requirement `b` (in their graveyard) to the
     /// battlefield (Goblin Welder).
     SwapWithGraveyardCard { a: u8, b: u8 },
+    // ---- M7c: the single-card tail, part 2 (ENGINE.md 29) ----
+    /// `who` sacrifices n permanents matching `filter` ("you" in the filter
+    /// is `who`) of their choice, at once (CR 701.21a): one decision per
+    /// permanent in increasing slot order, always leaving enough to reach n;
+    /// with n or fewer, all of them without a decision. Choice:
+    /// `Sacrifice`.
+    SacrificeN { who: Who, filter: Filter, n: u8 },
+    /// Put each legal target of requirement `tgt` (a card in a graveyard)
+    /// onto the battlefield under the controller's control, `mods` applying
+    /// to it as it enters ("it's a Phyrexian in addition to its other
+    /// types").
+    FromGraveyardAs { tgt: u8, mods: Vec<Mod> },
+    /// Return the event's card (in a graveyard or exile) to the battlefield
+    /// under its owner's control, `mods` applying to it as it enters ("it's
+    /// an enchantment. (It's not a creature.)").
+    ReturnEventCardAs { mods: Vec<Mod> },
+    /// Harness the source (it stays harnessed while it is that object;
+    /// `Mark::Harnessed`).
+    Harness,
+    /// Exile each legal target of requirement `tgt` (a card in a
+    /// graveyard); the controller may play it until the end of their next
+    /// turn.
+    ExilePlayUntilNextTurn { tgt: u8 },
+    /// The controller may exile the event's card from their graveyard,
+    /// linked to the source (CR 607.2a). Choice: yes/no (with `optional`).
+    ExileEventCardLinked { optional: bool },
+    /// The controller puts a card exiled with the source (their choice)
+    /// into its owner's graveyard; then creates token `land` if it is a
+    /// land card, else token `nonland`. Choice: `ChooseExiled`.
+    LinkedToGraveyardThenToken { land: u16, nonland: u16 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -843,7 +877,7 @@ pub enum Op {
 impl Op {
     /// Does the op read its triggered ability's event?
     pub fn uses_event(&self) -> bool {
-        let amt = |a: &Amount| matches!(a, Amount::EventAmount | Amount::EventObjPower | Amount::EventTimes | Amount::EventSpellTimes);
+        let amt = |a: &Amount| matches!(a, Amount::EventAmount | Amount::EventObjPower | Amount::EventTimes | Amount::EventSpellTimes | Amount::EventSpellMv);
         let who = |w: &Who| matches!(w, Who::EventPlayer);
         match self {
             Op::Ext(Ext::Apply { on, .. })
@@ -856,6 +890,8 @@ impl Op {
             Op::Ext(Ext::ApplyRules { who: w, .. }) | Op::Ext(Ext::RevealTopToHand { who: w }) => who(w),
             Op::Ext(Ext::Mill { who: w, n }) => who(w) || amt(n),
             Op::Ext(Ext::ReturnEventCard) | Op::Ext(Ext::SacrificeEventObj) | Op::Ext(Ext::ExileEventObj) => true,
+            Op::Ext(Ext::ReturnEventCardAs { .. }) | Op::Ext(Ext::ExileEventCardLinked { .. }) => true,
+            Op::Ext(Ext::SacrificeN { who: w, .. }) => who(w),
             Op::Ext(Ext::AddColorless { n }) => amt(n),
             Op::Ext(Ext::DamageFrom { event_obj, amount, .. }) => *event_obj || amt(amount),
             Op::Ext(Ext::Reflexive { .. })

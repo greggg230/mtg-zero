@@ -941,6 +941,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     until: false,
                 }));
             }
+            // "Exile target card from a graveyard" (Keen-Eyed Curator).
+            E::ExileTargetCardFromGraveyard(nodes::ExileTargetCardFromGraveyard {}) => {
+                let t = b.target(Filter::InGraveyard(Box::new(Filter::Any)), 1, 1);
+                b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: false }));
+            }
             other => l.unsupported(format!("LinkExiledCardsToSource.inner({})", other.tag())),
         },
         E::ReturnCardsExiledWithSourceToOwnersHand(nodes::ReturnCardsExiledWithSourceToOwnersHand {}) => {
@@ -1113,6 +1118,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let amount = match amount.as_deref() {
                 Some(cats::Formula::EventSubjectPower(nodes::EventSubjectPower {})) => Amount::EventObjPower,
                 Some(cats::Formula::ResolvingDamageAmount(nodes::ResolvingDamageAmount {})) => Amount::EventAmount,
+                // "Damage equal to that spell's mana value" (Thor).
+                Some(cats::Formula::EventSubjectManaValue(nodes::EventSubjectManaValue {})) => Amount::EventSpellMv,
                 // "Damage equal to the number of creatures you control" (as
                 // it resolves).
                 Some(cats::Formula::CountControlledMatching(nodes::CountControlledMatching { predicate })) => {
@@ -1135,6 +1142,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             };
             let event_obj = match subject_slot {
                 None => false,
+                // (The spell's mana value; the source deals the damage.)
+                Some(enums::EventSubject::Spell) if amount == Amount::EventSpellMv => false,
                 Some(enums::EventSubject::Obj) => true,
                 Some(other) => {
                     l.unsupported(format!("DealDamageFromEvent.subject_slot({other:?})"));

@@ -106,6 +106,16 @@ fn has_batch(p: &TrigPred) -> bool {
     }
 }
 
+/// Does the predicate say "this ability triggers only once each turn"
+/// (`Once`, at the top level)?
+fn has_once(p: &TrigPred) -> bool {
+    match p {
+        TrigPred::Once => true,
+        TrigPred::And(a, b) => has_once(a) || has_once(b),
+        _ => false,
+    }
+}
+
 /// Does the predicate say "cast or copy" (`OrCopy`)?
 fn has_or_copy(p: &TrigPred) -> bool {
     match p {
@@ -225,6 +235,11 @@ impl Game {
                         slot: i as u8,
                         ev: ctx,
                     });
+                    // "This ability triggers only once each turn": not
+                    // again this turn (the object's; a new object is new).
+                    if has_once(&t.pred) {
+                        self.done_once.push((o.r, i as u8));
+                    }
                 }
             }
         }
@@ -300,12 +315,14 @@ impl Game {
             TrigPred::Batch => true,
             // The `Enters` event's note (`Game::put_onto_battlefield`).
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
-            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && ev.amount >> 1 != 0,
+            TrigPred::EnteredPaid => ev.kind == EventKind::Enters && (ev.amount >> 1) & 0xFF != 0,
+            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && ev.amount >> 9 >= *n as u16,
             TrigPred::SpellPaid => match ev.a {
                 Subj::Obj(r) => self.stack.iter().any(|s| s.kind == StackKind::Spell { card: r.idx } && s.times > 0),
                 _ => false,
             },
             TrigPred::OrCopy => true,
+            TrigPred::Once => true,
             TrigPred::Granted(s) => match ev.subject(*s) {
                 Subj::Obj(r) => {
                     let ts = self.objs[src.r.idx.i()].timestamp;

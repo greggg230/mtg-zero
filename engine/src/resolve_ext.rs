@@ -1557,6 +1557,13 @@ impl Game {
             | Ext::ExileAllCreaturesIncubate { .. }
             | Ext::GrantLeaveTrigger { .. }
             | Ext::SwapWithGraveyardCard { .. } => self.exec_tail(f, op),
+            Ext::SacrificeN { .. }
+            | Ext::FromGraveyardAs { .. }
+            | Ext::ReturnEventCardAs { .. }
+            | Ext::Harness
+            | Ext::ExilePlayUntilNextTurn { .. }
+            | Ext::ExileEventCardLinked { .. }
+            | Ext::LinkedToGraveyardThenToken { .. } => self.exec_tail2(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

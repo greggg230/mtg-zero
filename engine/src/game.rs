@@ -491,6 +491,10 @@ pub struct Game {
     pub(crate) entering_escaped: bool,
     /// ... the X it was cast with.
     pub(crate) entering_x: u8,
+    /// Effects that apply to the next permanent put onto the battlefield as
+    /// it enters ("it's an enchantment", "it's a Phyrexian in addition";
+    /// CR 614.1c-like; set and cleared around one move).
+    pub(crate) entering_mods: Vec<crate::db::Mod>,
     pub(crate) entering_dash: Option<u8>,
     /// ... with this face up (a back face: "transformed", CR 712.14a; an
     /// MDFC's land face played, 712.12) instead of its front (712.14).
@@ -585,6 +589,8 @@ pub enum Mark {
     GrantOnEnter { def: DefId, slot: u8 },
     /// Its "once during each of your turns" was used in turn n.
     UsedTurn(u16),
+    /// It has been harnessed (The Mind Stone).
+    Harnessed,
 }
 
 impl Game {
@@ -714,6 +720,7 @@ impl Game {
             lki_counters: Vec::new(),
             entering_escaped: false,
             entering_x: 0,
+            entering_mods: Vec::new(),
             entering_dash: None,
             entering_face: None,
             day: None,
@@ -984,7 +991,8 @@ impl Game {
         // Its `Enters` event says whether it was cast and how many times an
         // additional cost was paid ("if you cast it", squad, offspring).
         // (A copy of a spell resolving wasn't cast, CR 707.10.)
-        let note = (cast && !self.is_copy_obj(idx)) as u16 | (times as u16) << 1;
+        // (Bits 9-15: the spell's X, for ravenous, CR 702.156a.)
+        let note = (cast && !self.is_copy_obj(idx)) as u16 | (times as u16) << 1 | (x.min(127) as u16) << 9;
         self.enter_note = note;
         self.defer_enters = copy_choice;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
@@ -1312,6 +1320,12 @@ impl Game {
         }
         let new = self.obj_ref(idx);
         self.note(|g| format!("{} {:?} -> {:?}", g.name(idx), from, to));
+        if to == Zone::Battlefield && !self.entering_mods.is_empty() {
+            let ctl = self.objs[idx.i()].controller;
+            for m in std::mem::take(&mut self.entering_mods) {
+                self.add_effect(crate::layers::Affected::Obj(new), m, crate::layers::Until::Forever, ctl);
+            }
+        }
         if to == Zone::Battlefield {
             // (The note: cast, times paid; an "enter as a copy" choice holds
             // the event back, `copies.rs`.)

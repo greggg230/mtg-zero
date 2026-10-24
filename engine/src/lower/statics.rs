@@ -40,6 +40,12 @@ pub(crate) struct Repl {
     pub spells_uncounterable: bool,
     /// "Other creatures you control have ward—<cost>" (CR 702.21).
     pub grants_ward: Option<crate::db::WardCost>,
+    /// "Once during each of your turns, you may cast a permanent spell with
+    /// mana value n or less from your graveyard" (Lurrus).
+    pub gy_cast_mv: u8,
+    /// "Abilities you activate that aren't mana abilities cost {n} less to
+    /// activate" (Zirda).
+    pub ability_discount: u8,
 }
 
 /// A static ability's replacement effect -> `repl`.
@@ -89,17 +95,48 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     l.deny("StaticAbility.tier_threshold", tier_threshold);
     l.deny("StaticAbility.room_half", room_half);
     l.deny("StaticAbility.grants_creature_spells_uncounterable", grants_creature_spells_uncounterable);
-    l.deny("StaticAbility.activation_cost_reduction", activation_cost_reduction);
-    l.deny_ne(
-        "StaticAbility.graveyard_permanent_cast_mv_max",
-        graveyard_permanent_cast_mv_max,
-        &generated::defaults::d_StaticAbility_graveyard_permanent_cast_mv_max(),
-    );
     l.deny("StaticAbility.granted_becomes_target_effect", granted_becomes_target_effect);
     l.deny("StaticAbility.granted_trigger_limit_per_turn", granted_trigger_limit_per_turn);
     l.deny("StaticAbility.skips_your_draw_step", skips_your_draw_step);
 
     let scope = lower_scope(l, scope)?;
+    // Rules for the controller alone (ENGINE.md 29): a cost reduction of
+    // abilities, a graveyard permission. Nothing else in the static.
+    let alone = |l: &mut Lowerer, what: &str| {
+        let other = *power_bonus != 0
+            || *toughness_bonus != 0
+            || !granted_keywords.is_empty()
+            || *must_attack_each_combat
+            || continuous_effect.is_some()
+            || replacement_effect.is_some()
+            || !opponents_enter_tapped_types.is_empty()
+            || *bonus_per_condition_count
+            || *grants_no_max_hand_size
+            || *grants_spells_uncounterable
+            || *grants_ward_life_cost != 0
+            || condition.is_some();
+        if !matches!(scope, Scope::This) || other {
+            l.unsupported(format!("StaticAbility.{what}(with more)"));
+        }
+    };
+    // "Abilities you activate that aren't mana abilities cost {2} less to
+    // activate. This effect can't reduce the mana in that cost to less than
+    // one mana." (Zirda; CR 602.2b, 601.2f.)
+    if *activation_cost_reduction != 0 {
+        alone(l, "activation_cost_reduction");
+        if *graveyard_permanent_cast_mv_max != generated::defaults::d_StaticAbility_graveyard_permanent_cast_mv_max() {
+            l.unsupported("StaticAbility.activation_cost_reduction(with a graveyard permission)");
+        }
+        repl.ability_discount = l.int("StaticAbility.activation_cost_reduction", *activation_cost_reduction, 1, 9) as u8;
+        return None;
+    }
+    // "Once during each of your turns, you may cast a permanent spell with
+    // mana value 2 or less from your graveyard." (Lurrus; CR 601.2a.)
+    if *graveyard_permanent_cast_mv_max != generated::defaults::d_StaticAbility_graveyard_permanent_cast_mv_max() {
+        alone(l, "graveyard_permanent_cast_mv_max");
+        repl.gy_cast_mv = l.int("StaticAbility.graveyard_permanent_cast_mv_max", *graveyard_permanent_cast_mv_max, 1, 20) as u8;
+        return None;
+    }
     let mods_besides = |cond: bool| {
         *power_bonus != 0
             || *toughness_bonus != 0
