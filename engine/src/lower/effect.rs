@@ -287,21 +287,41 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 }
                 Some(cats::RemovalRider::OtherPlayersCreateTokenCopy(nodes::OtherPlayersCreateTokenCopy {})) => Some(Rider::OthersCopy),
             };
-            l.deny("RemoveTargetPermanents.count_from_x", count_from_x);
             // No card in the cube regenerates (no regeneration shield
             // exists), so "can't be regenerated" changes nothing (CR
             // 701.15).
             let _ = can_be_regenerated;
             // The IR repeats the target filter; the two must agree.
             let tf = lower_pred(l, target_filter);
-            let Some(tgt) = lower_targets(l, b, targets, "RemoveTargetPermanents") else { return };
+            let tgt = if *count_from_x {
+                // "Up to X target ..." (Pest Infestation): the IR writes the
+                // counts as 0 with `count_from_x`, in the action and in its
+                // one target specification (docs/ir_defects.md 10); read
+                // only that exact shape, on a spell with X.
+                let [cats::TargetSpec::TargetSpec(nodes::TargetSpec { filter, count_min: tmin, count_max: tmax, distinct_from })] =
+                    &targets[..]
+                else {
+                    l.unsupported("RemoveTargetPermanents.targets(count_from_x, not one)");
+                    return;
+                };
+                l.deny("TargetSpec.distinct_from", distinct_from);
+                if (*count_min, *count_max, *tmin, *tmax) != (0, 0, 0, Count::Finite(0)) || !l.spell_x {
+                    l.unsupported("RemoveTargetPermanents.count_from_x(not \"up to X\" of a spell's X)");
+                    return;
+                }
+                let Some(f) = super::filter::lower_pred_or_oneof(l, filter) else { return };
+                b.target(f, 0, crate::db::X_UP_TO)
+            } else {
+                let Some(tgt) = lower_targets(l, b, targets, "RemoveTargetPermanents") else { return };
+                // The IR repeats the target counts too.
+                let req = &b.targets[tgt as usize];
+                if (*count_min, *count_max) != (req.min as i64, req.max as i64) {
+                    l.unsupported("RemoveTargetPermanents.count(differs from targets)");
+                }
+                tgt
+            };
             if tf.as_ref() != Some(&b.targets[tgt as usize].filter) {
                 l.unsupported("RemoveTargetPermanents.target_filter(differs from targets)");
-            }
-            // The IR repeats the target counts too.
-            let req = &b.targets[tgt as usize];
-            if (*count_min, *count_max) != (req.min as i64, req.max as i64) {
-                l.unsupported("RemoveTargetPermanents.count(differs from targets)");
             }
             // "Destroy target creature if it has mana value 2 or less": a
             // check on resolution, not a targeting restriction.
@@ -393,21 +413,40 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             label,
         }) => {
             let _ = label; // display text
-            l.deny("RemoveAllMatching.max_mana_value_from_x", max_mana_value_from_x);
-            l.deny("RemoveAllMatching.rider", rider);
-            // Regeneration does not exist yet: "can't be regenerated" is
-            // the only form that changes nothing (CR 701.15).
-            l.deny_ne(
-                "RemoveAllMatching.can_be_regenerated",
-                can_be_regenerated,
-                &false,
-            );
-            let Some(filter) = lower_pred(l, permanent_filter) else { return };
-            match action {
-                enums::RemovalAction::Destroy => {
+            // No card in the cube regenerates (no regeneration shield
+            // exists), so "can['t] be regenerated" changes nothing (CR
+            // 701.15).
+            let _ = can_be_regenerated;
+            let Some(mut filter) = lower_pred(l, permanent_filter) else { return };
+            // "With mana value X or less" (the spell's X: Vicious Rivalry's
+            // X is the life paid, CR 107.3).
+            if *max_mana_value_from_x {
+                if !l.spell_x {
+                    l.unsupported("RemoveAllMatching.max_mana_value_from_x(no X)");
+                }
+                filter = Filter::And(Box::new(filter), Box::new(Filter::MvAtMostX));
+            }
+            // "For each creature exiled this way, its controller searches
+            // their library for a basic land card ..." (Winds of Abandon's
+            // overload).
+            let basics = match rider.as_deref() {
+                None => None,
+                Some(cats::RemovalRider::ControllerSearchesForBasicLand(nodes::ControllerSearchesForBasicLand { optional })) => {
+                    Some(*optional)
+                }
+                Some(other) => {
+                    l.unsupported(format!("RemoveAllMatching.rider({})", other.tag()));
+                    return;
+                }
+            };
+            match (action, basics) {
+                (enums::RemovalAction::Destroy, None) => {
                     b.op(Op::DestroyAll { filter });
                 }
-                other => l.unsupported(format!("RemoveAllMatching.action({other:?})")),
+                (enums::RemovalAction::Exile, basics) => {
+                    b.op(Op::Ext(crate::program::Ext::ExileAll { filter, basics }));
+                }
+                (other, _) => l.unsupported(format!("RemoveAllMatching.action({other:?} with a rider)")),
             }
         }
         E::GainLife(nodes::GainLife { amount }) => {
@@ -844,6 +883,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::effect_stack::lower_effect_stack(l, b, other)
                 && !super::effect_tail::lower_effect_tail(l, b, other)
                 && !super::effect_tail2::lower_effect_tail2(l, b, other)
+                && !super::effect_tail3::lower_effect_tail3(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

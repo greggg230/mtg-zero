@@ -767,6 +767,9 @@ pub enum Cond {
     LinkedTypesAtLeast(u8),
     /// You have the city's blessing (CR 702.131).
     CityBlessing,
+    /// You played at least n lands this turn (Fastbond: "if it wasn't the
+    /// first land you played this turn").
+    LandsPlayedAtLeast(u8),
 }
 
 /// What a mana ability makes (CR 106.1, 605.1a).
@@ -975,6 +978,11 @@ pub struct ActivatedDef {
 /// `TargetReq::max` meaning "X targets": exactly the announced X (CR
 /// 601.2c with 107.3; "untap X target lands").
 pub const X_TARGETS: u8 = u8::MAX;
+/// `TargetReq::max` for "up to X targets" (Pest Infestation): between `min`
+/// and the spell's X.
+pub const X_UP_TO: u8 = u8::MAX - 1;
+/// `CardDef::extra_lands` for "any number of lands" (Fastbond).
+pub const ANY_LANDS: u8 = u8::MAX;
 
 impl CardDef {
     /// `game::SEEN_*` bits of the rare rules this definition has.
@@ -1114,7 +1122,8 @@ pub struct CardDef {
     pub x_pips: u8,
     /// "Enters with X +1/+1 counters" (the X it was cast with).
     pub enters_x_counters: bool,
-    /// "You may play n additional lands on each of your turns."
+    /// "You may play n additional lands on each of your turns" (`ANY_LANDS`:
+    /// any number).
     pub extra_lands: u8,
     /// Buyback (CR 702.27): `additional` is [none, buyback]; bought back,
     /// it goes to its owner's hand as it resolves.

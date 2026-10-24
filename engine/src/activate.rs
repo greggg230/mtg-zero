@@ -59,6 +59,7 @@ impl Game {
             Cond::CompletedDungeon => self.dungeons[p as usize].completed > 0,
             Cond::LinkedTypesAtLeast(n) => source.is_some_and(|s| self.linked_types(s).count_ones() >= *n as u32),
             Cond::CityBlessing => pl.city_blessing || self.ascends(p),
+            Cond::LandsPlayedAtLeast(n) => pl.lands_played >= *n,
         }
     }
 

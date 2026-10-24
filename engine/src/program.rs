@@ -88,6 +88,8 @@ pub enum Amount {
     /// activated ability's cost ("2 plus the sacrificed permanent's mana
     /// value"; as it last existed, CR 608.2h).
     CostMvPlus(u8),
+    /// k times the spell's X ("twice X").
+    XTimes(u8),
 }
 
 /// Which objects an `Ext` op acts on.
@@ -716,6 +718,16 @@ pub enum Ext {
     /// spell): exile it; while it is exiled, its owner may cast it for `cost`
     /// rather than its mana cost.
     Airbend { tgt: u8, cost: ManaCost },
+    // ---- M7c: the single-card tail, part 3 (`resolve_tail3.rs`, ENGINE.md 30) ----
+    /// Each object of `on` gets +p*X/+t*X until end of turn, X the spell's
+    /// (locked in as it resolves, CR 608.2h).
+    ApplyPtX { on: On, p: i8, t: i8 },
+    /// Exile every permanent matching the filter (at once); with `basics`,
+    /// for each permanent exiled this way its controller searches their
+    /// library for a basic land card, and those players put those cards
+    /// onto the battlefield tapped, then shuffle (APNAP; a search may fail,
+    /// CR 701.19b). Choice: `LIBRARY` (a definition) or `PASS` = done.
+    ExileAll { filter: Filter, basics: Option<bool> },
 }
 
 /// What a delayed trigger is about ("that card", "that much").

@@ -502,6 +502,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     }
     let saved_land_colors = l.land_colors;
+    // The card's spell has an X (its mana cost's, or "pay X life").
+    let saved_spell_x = std::mem::replace(&mut l.spell_x, x_pips > 0 || *additional_cost_pay_x_life);
     let saved_delayed = std::mem::take(&mut l.delayed);
     let saved_latent = std::mem::take(&mut l.latent);
     l.land_colors = prod & crate::mana::COLORS;
@@ -1224,6 +1226,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
 
     l.land_colors = saved_land_colors;
+    l.spell_x = saved_spell_x;
 
     // The card's other faces (CR 712, 715; ENGINE.md 25): each is lowered
     // like a printing into a definition of its own (`l.faces`).
@@ -1417,7 +1420,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         discard_land_to_enter: *enters_only_by_discarding_land,
         x_pips,
         enters_x_counters,
-        extra_lands: l.int("CardPrinting.grants_additional_land_per_turn", *grants_additional_land_per_turn, 0, 3) as u8,
+        // "You may play any number of lands on each of your turns"
+        // (Fastbond): the IR's sentinel 1,000,000 (docs/ir_defects.md 10),
+        // read as `ANY_LANDS`, more land drops than a game has lands.
+        extra_lands: if *grants_additional_land_per_turn == 1_000_000 {
+            crate::db::ANY_LANDS
+        } else {
+            l.int("CardPrinting.grants_additional_land_per_turn", *grants_additional_land_per_turn, 0, 3) as u8
+        },
         buyback,
         overload: overloaded.is_some(),
         one_spell_each_turn: *each_player_one_spell_per_turn,

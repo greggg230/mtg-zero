@@ -1574,6 +1574,7 @@ impl Game {
             | Ext::WarpExile
             | Ext::MiracleCast
             | Ext::Airbend { .. } => self.exec_tail2(f, op),
+            Ext::ApplyPtX { .. } | Ext::ExileAll { .. } => self.exec_tail3(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

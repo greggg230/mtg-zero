@@ -338,6 +338,11 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
         // dungeon" (309.7).
         S::HasInitiative(nodes::HasInitiative {}) => (Cond::HasInitiative, true),
         S::CompletedADungeon(nodes::CompletedADungeon {}) => (Cond::CompletedDungeon, true),
+        // "If it wasn't the first land you played this turn" (Fastbond; n
+        // = 2 by the schema's default).
+        S::LandsPlayedThisTurnAtLeast(nodes::LandsPlayedThisTurnAtLeast { n }) => {
+            (Cond::LandsPlayedAtLeast(l.int("LandsPlayedThisTurnAtLeast.n", *n, 1, 99) as u8), true)
+        }
         other => {
             l.unsupported(format!("StatePredicate:{}", other.tag()));
             return None;

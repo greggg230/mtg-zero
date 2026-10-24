@@ -1525,6 +1525,8 @@ impl Game {
             Some((r, amount)) if r == req && ar.mode.is_none() => (tr.max).min(amount.of(item.x)),
             // "X targets": exactly X (CR 601.2c).
             _ if tr.max == crate::db::X_TARGETS => item.x,
+            // "Up to X targets".
+            _ if tr.max == crate::db::X_UP_TO => item.x,
             _ => tr.max,
         };
         let min = if tr.max == crate::db::X_TARGETS { item.x } else { tr.min };

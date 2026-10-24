@@ -216,11 +216,20 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             apply(b, On::Source, mods, Until::EndOfTurn);
         }
         E::PumpAllCreaturesUEOT(nodes::PumpAllCreaturesUEOT { power, toughness, x_power, x_toughness, exclude_source }) => {
-            l.deny("PumpAllCreaturesUEOT.x_power", x_power);
-            l.deny("PumpAllCreaturesUEOT.x_toughness", x_toughness);
             let mut f = creature();
             if *exclude_source {
                 f = and(f, not(Filter::Source));
+            }
+            if *x_power != 0 || *x_toughness != 0 {
+                // "All creatures get -X/-X until end of turn" (Toxic Deluge:
+                // the spell's X, locked in as it resolves, CR 608.2h).
+                if !l.spell_x || *power != 0 || *toughness != 0 {
+                    l.unsupported("PumpAllCreaturesUEOT.x_power(not the spell's X alone)");
+                }
+                let p = l.int("PumpAllCreaturesUEOT.x_power", *x_power, -9, 9) as i8;
+                let t = l.int("PumpAllCreaturesUEOT.x_toughness", *x_toughness, -9, 9) as i8;
+                b.op(Op::Ext(Ext::ApplyPtX { on: On::Each(f), p, t }));
+                return true;
             }
             let mods = pump_mods(l, *power, *toughness, &[]);
             apply(b, On::Each(f), mods, Until::EndOfTurn);
@@ -356,9 +365,14 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             b.op(Op::Ext(Ext::Attach { tgt: t }));
         }
         E::SourceFightsTarget(nodes::SourceFightsTarget { optional, other, targets, np_filter, exile_if_dies_this_turn }) => {
-            l.deny("SourceFightsTarget.np_filter", np_filter);
-            l.deny("SourceFightsTarget.exile_if_dies_this_turn", exile_if_dies_this_turn);
             let Some(t) = lower_targets(l, b, targets, "SourceFightsTarget") else { return true };
+            // The IR repeats the target filter (`np_filter`); they must agree
+            // (ENGINE.md 3, rule 4a).
+            if let Some(p) = np_filter {
+                if super::filter::lower_pred(l, p).as_ref() != Some(&b.targets[t as usize].filter) {
+                    l.unsupported("SourceFightsTarget.np_filter(differs from targets)");
+                }
+            }
             let req = &b.targets[t as usize];
             if *optional && req.min != 0 {
                 l.unsupported("SourceFightsTarget.optional(with a required target)");
@@ -367,6 +381,12 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 l.unsupported("SourceFightsTarget.other(target may be the source)");
             }
             b.op(Op::Ext(Ext::Fight { tgt: t }));
+            // "If that creature would die this turn, exile it instead"
+            // (Mawloc: a replacement effect the resolution creates, CR 614,
+            // whether or not the fight happened).
+            if *exile_if_dies_this_turn {
+                apply(b, On::Target(t), vec![Mod::ExileIfDies], Until::EndOfTurn);
+            }
         }
         E::SelfMill(nodes::SelfMill { amount }) => {
             let n = Amount::Fixed(l.int("SelfMill.amount", *amount, 0, 99));

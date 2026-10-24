@@ -447,7 +447,7 @@ impl Game {
     /// another zone with a permission) with face `face` up (an MDFC's land
     /// face, 712.12; `None` = its front).
     pub(crate) fn play_land(&mut self, p: PlayerId, c: CardIdx, face: Option<DefId>) {
-        self.players[p as usize].lands_played += 1;
+        self.players[p as usize].lands_played = self.players[p as usize].lands_played.saturating_add(1);
         self.entering_face = face;
         // From a graveyard without a "play lands from your graveyard"
         // permanent: Serra Paragon's permission.

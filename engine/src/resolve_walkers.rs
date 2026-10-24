@@ -469,7 +469,7 @@ impl Game {
 
     /// The end of `Ext::SearchAnyNumber`: the found cards go where the
     /// effect says, then the library is shuffled (CR 701.19, 701.20).
-    fn finish_search_any(&mut self, f: &mut Frame, p: PlayerId, tapped: bool, exile_free: bool) {
+    pub(crate) fn finish_search_any(&mut self, f: &mut Frame, p: PlayerId, tapped: bool, exile_free: bool) {
         let found = std::mem::take(&mut f.picked);
         // Which cards were taken is private until they are revealed: the
         // other player loses track of the library (ENGINE.md 10).

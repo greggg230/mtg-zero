@@ -347,6 +347,7 @@ impl Game {
             Amount::LkiManaValue => f.x,
             Amount::Devotion(color) => self.devotion(f.controller, color) as i32,
             Amount::X => f.spell_x as i32,
+            Amount::XTimes(k) => f.spell_x as i32 * k as i32,
             Amount::CountTypes(bits) => {
                 self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
             }

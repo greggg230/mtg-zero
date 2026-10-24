@@ -16,6 +16,7 @@ pub mod effect_faces;
 pub mod effect_stack;
 pub mod effect_tail;
 pub mod effect_tail2;
+pub mod effect_tail3;
 pub mod effect_walkers;
 pub mod filter;
 pub mod printing;
@@ -101,6 +102,9 @@ pub struct Lowerer<'a> {
     pub cascade: bool,
     /// The activated ability being lowered has {X} in its mana cost.
     pub act_x: bool,
+    /// The printing being lowered has an X its spell announces (its mana
+    /// cost's {X}, or "pay X life").
+    pub spell_x: bool,
 }
 
 /// Which face of a card a printing describes (ENGINE.md 25).
@@ -218,6 +222,10 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // replacement "if it would be put into a graveyard from anywhere"
     // (countered, discarded or milled, it would go to the library too).
     ("Green Sun's Zenith", "IR:StaticAbility.replacement_effect(\"shuffle it into its library\" as a replacement from anywhere)"),
+    // "When this artifact is put into a graveyard from the battlefield, draw
+    // a card" (Wizard's Rockets): `leaves_battlefield` in the IR, as
+    // Chromatic Star's (it would draw when exiled or bounced too).
+    ("Wizard's Rockets", "IR:TriggeredAbility.event(leaves_battlefield for \"put into a graveyard\")"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.
@@ -247,6 +255,7 @@ pub fn lower_card(
         watches_exile: false,
         cascade: false,
         act_x: false,
+        spell_x: false,
     };
     let mut def = printing::lower_printing(&mut l, p);
     def.converge = l.converge;
