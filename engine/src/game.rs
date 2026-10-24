@@ -583,7 +583,7 @@ pub struct Game {
     /// Basalt Monolith makes unbounded mana; ENGINE.md 29).
     pub(crate) activations: Vec<(ObjRef, u8, u8)>,
     /// `SEEN_*` bits: a card of this game has the rare rule (ENGINE.md 29).
-    pub(crate) seen: u8,
+    pub(crate) seen: u16,
     // ---- M7b part 3b: the initiative and dungeons (ENGINE.md 27.4) ----
     /// The player who has the initiative (CR 725).
     pub(crate) initiative: Option<PlayerId>,
@@ -607,14 +607,16 @@ pub struct Game {
 /// `Game::seen`: some card of the game has ascend; an ability discount
 /// (Zirda); a discount for spells cast from outside the hand (Bilbo); a
 /// retrace grant (Six); miracle, per owner (bit 4 + player).
-pub(crate) const SEEN_ASCEND: u8 = 1;
-pub(crate) const SEEN_ABILITY_DISCOUNT: u8 = 2;
-pub(crate) const SEEN_OUTSIDE_DISCOUNT: u8 = 4;
-pub(crate) const SEEN_RETRACE: u8 = 8;
-pub(crate) const SEEN_MIRACLE_P0: u8 = 16;
+pub(crate) const SEEN_ASCEND: u16 = 1;
+pub(crate) const SEEN_ABILITY_DISCOUNT: u16 = 2;
+pub(crate) const SEEN_OUTSIDE_DISCOUNT: u16 = 4;
+pub(crate) const SEEN_RETRACE: u16 = 8;
+pub(crate) const SEEN_MIRACLE_P0: u16 = 16;
 /// (Bits 16 and 32 are miracle's.) A trigger on cards exiled from a library
 /// or graveyard (Laelia).
-pub(crate) const SEEN_EXILE_WATCH: u8 = 64;
+pub(crate) const SEEN_EXILE_WATCH: u16 = 64;
+/// A replacement of draws (Hullbreacher, Quantum Riddler; ENGINE.md 30).
+pub(crate) const SEEN_DRAW_REPL: u16 = 128;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -1511,6 +1513,29 @@ impl Game {
         self.links.retain(|l| objs[l.card.idx.i()].inc == l.card.inc && objs[l.card.idx.i()].zone == Zone::Exile);
     }
 
+    /// `p` draws n cards (one instruction, CR 121.2): "if you would draw one
+    /// or more cards, you draw that many plus d instead" (Quantum Riddler,
+    /// while its controller has few cards in hand) applies to it as a whole.
+    pub(crate) fn draw_cards(&mut self, p: PlayerId, n: u32) {
+        let mut n = n;
+        if n > 0 && self.seen & SEEN_DRAW_REPL != 0 {
+            let hand = self.players[p as usize].hand.len();
+            let plus: u32 = self
+                .permanents_of(p)
+                .filter_map(|c| self.abilities(c).draw_plus)
+                .filter(|&(_, at_most)| hand <= at_most as usize)
+                .map(|(d, _)| d as u32)
+                .sum();
+            if plus > 0 {
+                self.note(|_| format!("P{p} draws {plus} more (a replacement)"));
+                n += plus;
+            }
+        }
+        for _ in 0..n {
+            self.draw(p);
+        }
+    }
+
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.
     pub(crate) fn draw(&mut self, p: PlayerId) {
         // "Each opponent can't draw more than one card each turn" (Narset).
@@ -1520,6 +1545,22 @@ impl Game {
         {
             self.note(|_| format!("P{p} can't draw another card this turn"));
             return;
+        }
+        // "If an opponent would draw a card except the first one they draw in
+        // each of their draw steps, instead you create a Treasure token"
+        // (Hullbreacher, CR 614.1a: the draw doesn't happen).
+        if self.seen & SEEN_DRAW_REPL != 0 && self.turn.number > 0 {
+            let first_in_draw_step = self.turn.step == Step::Draw && self.turn.active == p && self.players[p as usize].draw_step_draws == 0;
+            if !first_in_draw_step {
+                let q = opp(p);
+                let token = self.permanents_of(q).find_map(|c| self.abilities(c).opp_draw_token);
+                if let Some(token) = token {
+                    self.note(|_| format!("P{p} would draw: P{q} creates a token instead"));
+                    let def = self.db.token_def(token);
+                    self.create_tokens(def, q, 1, false);
+                    return;
+                }
+            }
         }
         // "If you would draw a card while your library has no cards in it,
         // you win the game instead" (CR 614.1a, 104.2b).

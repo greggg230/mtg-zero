@@ -213,9 +213,7 @@ impl Game {
                 }
                 if f.i == 0 {
                     f.i = 1;
-                    for _ in 0..n {
-                        self.draw(p);
-                    }
+                    self.draw_cards(p, n as u32);
                 }
                 if f.i > n || self.players[p as usize].hand.is_empty() {
                     if let (Some(c), true) = (it, f.x > 0) {
@@ -232,9 +230,7 @@ impl Game {
     }
 
     fn draw_n(&mut self, p: PlayerId, n: u8) {
-        for _ in 0..n {
-            self.draw(p);
-        }
+        self.draw_cards(p, n as u32);
     }
 
     /// Etali's "each player exiles cards from the top of their library until

@@ -1471,6 +1471,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         token_factor: repl.token_factor,
         wins_on_empty_draw: repl.wins_on_empty_draw,
         gy_to_library: repl.gy_to_library,
+        opp_draw_token: repl.opp_draw_token,
+        draw_plus: repl.draw_plus,
         extra_mana_on_tap,
         emblem: false,
         // "During your turn, nonland permanent cards in your graveyard have

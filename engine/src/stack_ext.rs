@@ -189,9 +189,7 @@ impl Game {
                 if *by_type {
                     f.x = (f.x as u32).count_ones() as i32;
                 }
-                for _ in 0..*draw {
-                    self.draw(p);
-                }
+                self.draw_cards(p, *draw as u32);
                 Flow::Next
             }
             Ext::SourceFromGraveyard { tapped } => {

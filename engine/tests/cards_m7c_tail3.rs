@@ -589,3 +589,56 @@ fn emrakul_cant_be_targeted_by_a_colored_spell_cr702_16b() {
     assert!(!g.has_option(g.tgt(emrakul)), "protection from coloured spells");
     assert!(g.has_option(g.tgt(bf(&g, 1, "Test Bear"))));
 }
+
+// ---- Draw replacements: Hullbreacher, Quantum Riddler ----------------------------------
+
+/// "If an opponent would draw a card except the first one they draw in each
+/// of their draw steps, instead you create a Treasure token" (CR 614.1a).
+#[test]
+fn hullbreacher_replaces_an_opponents_draws_but_the_first_in_their_draw_step_cr614_1a() {
+    let mut g = scen()
+        .battlefield(0, &["Hullbreacher"])
+        .battlefield(1, &["Island"])
+        .hand(1, &["Ancestral Recall"])
+        .at(Step::Main1, 1)
+        .start();
+    let c = g.card(1, "Ancestral Recall", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(Choice::Target(engine::Target::Player(1)));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.hand_sorted(1).len(), 0, "no card drawn\n{}", log(&g));
+    assert_eq!(g.permanents_of(0).filter(|&c| g.name(c) == "Treasure").count(), 3);
+    // P1's next draw step: the first draw is theirs.
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.hand_sorted(1).len(), 1, "{}", log(&g));
+    assert_eq!(g.permanents_of(0).filter(|&c| g.name(c) == "Treasure").count(), 3);
+}
+
+/// "As long as you have one or fewer cards in hand, if you would draw one or
+/// more cards, you draw that many cards plus one instead" (CR 614.1a: one
+/// draw instruction).
+#[test]
+fn quantum_riddler_draws_one_more_with_one_or_fewer_cards_in_hand_cr614_1a() {
+    let mut g = scen()
+        .battlefield(0, &["Island"; 5])
+        .hand(0, &["Quantum Riddler"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Quantum Riddler", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::ChooseAltCost) | Some(DecisionKind::PayMana)));
+    if g.kind() == Some(DecisionKind::ChooseAltCost) {
+        g.choose(Choice::Number(0));
+    }
+    pay(&mut g);
+    settle(&mut g);
+    // Its enter trigger: "draw a card" with an empty hand: two.
+    assert_eq!(g.hand_sorted(0).len(), 2, "{}", log(&g));
+    // Next draw step with two cards in hand: one.
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.hand_sorted(0).len(), 3, "{}", log(&g));
+}

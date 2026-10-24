@@ -209,7 +209,7 @@ impl Game {
         match self.answer.take() {
             Some(Choice::Yes) => {
                 self.note(|_| format!("P{q} lets P{p} draw"));
-                self.draw(p);
+                self.draw_cards(p, 1);
             }
             Some(_) => {
                 // X: the counters on the source, as it last existed on the
@@ -527,7 +527,7 @@ impl Game {
     fn loot_may_cast_free(&mut self, f: &mut Frame, counter: Counter, n: u8) -> Flow {
         let p = f.controller;
         if f.i == 0 {
-            self.draw(p);
+            self.draw_cards(p, 1);
             f.i = 1;
         }
         if f.i == 1 {

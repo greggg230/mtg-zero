@@ -999,12 +999,13 @@ pub const ANY_LANDS: u8 = u8::MAX;
 
 impl CardDef {
     /// `game::SEEN_*` bits of the rare rules this definition has.
-    pub(crate) fn seen_bits(&self) -> u8 {
+    pub(crate) fn seen_bits(&self) -> u16 {
         (if self.ascend { crate::game::SEEN_ASCEND } else { 0 })
             | (if self.ability_discount > 0 { crate::game::SEEN_ABILITY_DISCOUNT } else { 0 })
             | (if self.outside_hand_discount > 0 { crate::game::SEEN_OUTSIDE_DISCOUNT } else { 0 })
             | (if self.grants_retrace.is_some() && !self.emblem { crate::game::SEEN_RETRACE } else { 0 })
             | (if self.trig_mask & (1 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
+            | (if self.opp_draw_token.is_some() || self.draw_plus.is_some() { crate::game::SEEN_DRAW_REPL } else { 0 })
     }
 }
 
@@ -1180,6 +1181,12 @@ pub struct CardDef {
     /// "If this would be put into a graveyard from anywhere, reveal it and
     /// shuffle it into its owner's library instead" (Blightsteel Colossus).
     pub gy_to_library: bool,
+    /// Hullbreacher: an opponent's draw, but the first in their draw step,
+    /// becomes this token for the controller (CR 614.1a).
+    pub opp_draw_token: Option<u16>,
+    /// Quantum Riddler: (d, n): with n or fewer cards in hand, its
+    /// controller draws d more cards with each draw instruction.
+    pub draw_plus: Option<(u8, u8)>,
     /// "Whenever you tap a <land subtype> for mana, add an additional
     /// <mana>" (a triggered mana ability, CR 605.1b): (subtype, mana type).
     pub extra_mana_on_tap: Vec<(u16, u8)>,

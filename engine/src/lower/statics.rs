@@ -49,16 +49,66 @@ pub(crate) struct Repl {
     /// "If this would be put into a graveyard from anywhere, ... shuffle it
     /// into its owner's library instead" (a self-scoped replacement).
     pub gy_to_library: bool,
+    /// "If an opponent would draw a card except the first one they draw in
+    /// each of their draw steps, instead you create <token>" (Hullbreacher).
+    pub opp_draw_token: Option<u16>,
+    /// "As long as you have n or fewer cards in hand, if you would draw one
+    /// or more cards, you draw that many cards plus d instead" (Quantum
+    /// Riddler): (d, n).
+    pub draw_plus: Option<(u8, u8)>,
 }
 
 /// A static ability's replacement effect -> `repl`.
-fn lower_replacement(l: &mut Lowerer, r: &cats::ReplacementEffect, repl: &mut Repl) {
+fn lower_replacement(l: &mut Lowerer, r: &cats::ReplacementEffect, repl: &mut Repl, condition: Option<&cats::Condition>) {
     let cats::ReplacementEffect::ReplacementEffect(nodes::ReplacementEffect { event_pattern, transform, scope_filter, affects }) = r;
     let cats::EventPattern::EventPattern(nodes::EventPattern { event, subject_filters }) = &**event_pattern;
     l.deny("ReplacementEffect.scope_filter", scope_filter);
+    // "If an opponent would draw a card except the first one they draw in
+    // each of their draw steps, instead you create a Treasure token"
+    // (Hullbreacher; CR 614.1a, 614.11).
+    if let (enums::Event::WouldDrawACard, cats::EventTransform::InsteadForSourceController(nodes::InsteadForSourceController { effect })) =
+        (event, &**transform)
+    {
+        let first_draw_excepted = matches!(
+            subject_filters.as_slice(),
+            [(s, p)] if s == "player"
+                && super::filter::lower_pred(l, p) == Some(Filter::Not(Box::new(Filter::FirstDrawInDrawStep)))
+        );
+        if !first_draw_excepted || *affects != enums::AffectedPlayers::Opponents || condition.is_some() {
+            l.unsupported("ReplacementEffect(WouldDrawACard, not an opponent's draw but the first in their draw step)");
+            return;
+        }
+        match &**effect {
+            cats::Effect::CreateToken(nodes::CreateToken { token_printing, count, tapped, each_player, attacking, schedule_end_of_combat_sacrifice })
+                if *count == 1 && !*tapped && !*each_player && !*attacking && !*schedule_end_of_combat_sacrifice =>
+            {
+                let cats::CardPrinting::CardPrinting(tp) = &**token_printing;
+                let def = super::printing::lower_printing(l, tp);
+                repl.opp_draw_token = Some(l.token(def));
+            }
+            other => l.unsupported(format!("InsteadForSourceController.effect({})", other.tag())),
+        }
+        return;
+    }
     l.deny("EventPattern.subject_filters", subject_filters);
     if *affects != enums::AffectedPlayers::You {
         l.unsupported(format!("ReplacementEffect.affects({affects:?})"));
+    }
+    // "As long as you have one or fewer cards in hand, if you would draw one
+    // or more cards, you draw that many cards plus one instead" (Quantum
+    // Riddler; CR 614.1a, 614.11).
+    if let (enums::Event::WouldDrawCards, cats::EventTransform::AddToCount(nodes::AddToCount { delta })) = (event, &**transform) {
+        let d = l.int("AddToCount.delta", *delta, 1, 3) as u8;
+        match condition {
+            Some(cats::Condition::HandSizeAtMost(nodes::HandSizeAtMost { n })) => {
+                repl.draw_plus = Some((d, l.int("HandSizeAtMost.n", *n, 0, 20) as u8));
+            }
+            _ => l.unsupported("ReplacementEffect(WouldDrawCards, without \"as long as you have n or fewer cards in hand\")"),
+        }
+        return;
+    }
+    if condition.is_some() {
+        l.unsupported("StaticAbility.replacement_effect(conditional)");
     }
     match (event, &**transform) {
         (enums::Event::WouldCreateToken, cats::EventTransform::MultiplyCount(nodes::MultiplyCount { factor })) => {
@@ -202,10 +252,10 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     // A replacement effect (CR 614.1a) of the card itself: no condition, no
     // modification besides it.
     if let Some(r) = replacement_effect.as_deref() {
-        if !matches!(scope, Scope::This) || condition.is_some() {
-            l.unsupported("StaticAbility.replacement_effect(scoped or conditional)");
+        if !matches!(scope, Scope::This) {
+            l.unsupported("StaticAbility.replacement_effect(scoped)");
         }
-        lower_replacement(l, r, repl);
+        lower_replacement(l, r, repl, condition.as_deref());
         let other = *power_bonus != 0
             || *toughness_bonus != 0
             || !granted_keywords.is_empty()

@@ -449,9 +449,8 @@ impl Game {
             }
             Op::Draw { who, n } => {
                 if let Some(p) = self.who(f, who) {
-                    for _ in 0..self.amount(f, n) {
-                        self.draw(p);
-                    }
+                    let n = self.amount(f, n).max(0) as u32;
+                    self.draw_cards(p, n);
                 }
                 Flow::Next
             }

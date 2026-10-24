@@ -453,7 +453,7 @@ impl Game {
             Step::Draw => {
                 // CR 504.1; the starting player skips their first draw (103.8a).
                 if self.turn.number > 1 {
-                    self.draw(ap);
+                    self.draw_cards(ap, 1);
                 }
                 self.event(Event::player(EventKind::BeginningOfDrawStep, ap));
                 self.agenda.push(Task::Priority);
@@ -507,7 +507,7 @@ impl Game {
                 // CR 724.2: at the beginning of the monarch's end step, they
                 // draw a card (here as the step begins, not on the stack).
                 if self.turn.step == Step::End && self.monarch == Some(ap) {
-                    self.draw(ap);
+                    self.draw_cards(ap, 1);
                 }
                 // Delayed triggered abilities whose moment it is (603.7).
                 if !self.delayed.is_empty() {
