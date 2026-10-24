@@ -150,7 +150,9 @@ fn always_legal_and_every_game_ends() {
 #[test]
 fn registered_bot_beats_random() {
     let sp = spec();
-    let (mut score, n) = (0.0, 60u64);
+    // (200 games: 60 were too few to hold 0.85 once the pool changed, M7c
+    // tail: 0.833 on the first 60, 0.895 on 200.)
+    let (mut score, n) = (0.0, 200u64);
     let mut legal = Vec::new();
     for s in 0..n {
         let mut g = MtgAz::new_game(&sp, 2, 9000 + s).unwrap();

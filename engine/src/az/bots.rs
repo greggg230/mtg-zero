@@ -520,7 +520,17 @@ impl Heuristic {
             K::AssignDamage => Self::assign(g, d),
             K::YesNo => {
                 let shock = matches!(g.agenda.last(), Some(Task::AsEnters { .. }));
-                if shock && g.life(p) <= 6 {
+                // (M7c tail: never skip its own turn for Time Vault; never
+                // pay life to dig with Lim-Dul's Vault.)
+                let declined = match g.agenda.last() {
+                    Some(Task::MaySkipTurn { .. }) => true,
+                    Some(Task::Run(f)) => matches!(
+                        g.db.ability(f.ability).program.get(f.pc as usize),
+                        Some(Op::Ext(crate::program::Ext::LookTopRepeatPayLife { .. }))
+                    ),
+                    _ => false,
+                };
+                if declined || shock && g.life(p) <= 6 {
                     Some(act::PASS)
                 } else {
                     d.options.iter().find(|o| o.action == act::YES).map(|o| o.action)
