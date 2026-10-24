@@ -70,6 +70,13 @@ _M2 = dict(game='mtg', spec=SPEC, eval_spec=EVAL_SPEC, players=[2], iters=40, ga
            keep_data=6)
 PRESETS['mtg-2'] = _M2
 PRESETS['mtg-2-mlp'] = dict(_M2, arch='mlp', hidden=256, blocks=3)
+# the third run (M7c, docs/ENGINE.md 22.6, 27-28): the 467-card pool, layout v3, the M7c heuristic
+# (activations) as the yardstick, mimalloc search, and the GPU for inference and training, which
+# lets the token network grow (128 x 4). A layout v3 sample is ~60 KB (float16), ~3 GB per 600-game
+# iteration: a 12 GB window budget.
+PRESETS['mtg-3'] = dict(_M2, hidden=128, blocks=4, heads=4, ff=256, threads=8, groups=2, infer_workers=1,
+                        infer_device='cuda', train_device='cuda', ram_budget_gb=12.0, elo_games=20,
+                        elo_opponents=2, elo_together=1)
 
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
