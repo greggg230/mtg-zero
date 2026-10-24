@@ -600,10 +600,10 @@ fn threat_report() {
 #[test]
 fn unsupported_cards_fail_loudly() {
     let db = CardDb::cube();
-    let err = db.expect_id("Memory Jar").unwrap_err();
-    assert!(err.contains("Effect:EachPlayerExilesHandDrawsNReturnsLater"), "{err}");
-    let err = db.expect_id("Headliner Scarlett").unwrap_err();
-    assert!(err.contains("ExileTopCardsWithPlayPermission.face_down"), "{err}");
+    let err = db.expect_id("Abhorrent Oculus").unwrap_err();
+    assert!(err.contains("Effect:ManifestDread"), "{err}");
+    let err = db.expect_id("Urza, Lord High Artificer").unwrap_err();
+    assert!(err.contains("ActivationCost.tap_permanent_type"), "{err}");
     assert!(db.expect_id("No Such Card").is_err());
 }
 
