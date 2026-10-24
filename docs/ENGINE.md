@@ -1026,8 +1026,10 @@ decider's encoding (`encode_features`, bit for bit); every 20th decision a deter
 the decider (its decision and legal actions, both players' hand and library identities in order,
 five random actions played in it with their legal actions and keys); the outcome, the turn and
 the number of decisions. `cargo test --release -p engine --test digest -- --ignored --nocapture`
-(about 10 s) compares every game with `tests/data/digests.txt`, recorded on main at 79ddaf9
-(combined digest f9b5d7c9db1b2931), and names the games that differ. `DIGEST_WRITE=1` records
+(about 10 s) compares every game with `tests/data/digests.txt` (first recorded on main at
+79ddaf9, combined digest f9b5d7c9db1b2931; re-recorded for the new heuristic, 25d09a0a57ab2d12,
+and for the 467-card pool of the tail's part 1, 7216a12287fefeaa), and names the games that
+differ. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
 are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every

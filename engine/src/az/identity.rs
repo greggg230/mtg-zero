@@ -107,18 +107,23 @@ fn compute(db: &CardDb) -> Vec<u16> {
     let pos: std::collections::HashMap<&str, u16> = names.iter().enumerate().map(|(i, n)| (n.as_str(), i as u16)).collect();
     let reg: std::collections::HashMap<&str, u16> = registry().into_iter().enumerate().map(|(i, k)| (k, i as u16)).collect();
     assert!(CUBE_CAP + reg.len() < D, "the token registry ({}) exceeds the identity capacity", reg.len());
+    let of = |d: &CardDef| -> u16 {
+        if d.token || d.rules {
+            reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
+        } else if d.emblem {
+            d.name.strip_suffix(" emblem").and_then(|n| pos.get(n).copied()).unwrap_or(UNKNOWN)
+        } else {
+            pos.get(d.name.as_str()).copied().unwrap_or(UNKNOWN)
+        }
+    };
     (0..db.len())
         .map(|i| {
             let d = db.def(i as DefId);
-            if d.token || d.rules {
-                reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
-            } else if d.emblem {
-                d.name.strip_suffix(" emblem").and_then(|n| pos.get(n).copied()).unwrap_or(UNKNOWN)
-            } else if let Some(f) = d.front {
-                // A face (a back face, an Adventure) is its card (ENGINE.md 25).
-                pos.get(db.def(f).name.as_str()).copied().unwrap_or(UNKNOWN)
-            } else {
-                pos.get(d.name.as_str()).copied().unwrap_or(UNKNOWN)
+            // A face (a back face, an Adventure) is its card (ENGINE.md 25), a token's face its
+            // token (Sunfall's Incubator, ENGINE.md 28).
+            match d.front {
+                Some(f) => of(db.def(f)),
+                None => of(d),
             }
         })
         .collect()
