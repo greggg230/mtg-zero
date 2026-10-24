@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -51,6 +51,8 @@ permission) and a consumer can go wrong with it.
 | 13 | Ajani, Nacatl Pariah // Ajani, Nacatl Avenger | reflexive trigger flattened | the 0: `Sequence [CreateToken, IfCondition(ControlOtherPermanentOfColor, DealDamageFromEvent → any target)]` | a reflexive triggered ability (CR 603.12) after the token, its target chosen when it triggers | `cards/parser/layout_face_grammar.py` (`_WHEN_YOU_DO`) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 14 | The Sensational She-Hulk; Enduring Innocence | one flag, two rules | `TriggeredAbility.once_per_turn: true` for both | "do this only once each turn" (603.2h) apart from "this ability triggers only once each turn" | `TriggeredAbility.once_per_turn` (`turn.py::should_fire_trigger`) | told apart by the effect's shape | suspected |
 | 15 | Chromatic Star | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (the IR's "put into a graveyard from the battlefield", as Titania's) | `cards/parser/triggers.py` (the "this artifact is put into a graveyard from the battlefield" entry, ~line 744) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 16 | Forth Eorlingas! | "one or more" as once per turn | the this-turn trigger "whenever one or more creatures you control deal combat damage to one or more players" with `once_per_turn: true` | a trigger per combat damage step ("one or more": `OneOrMoreBatch`), no once-per-turn limit | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to one or more players" entry, ~line 1050) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 17 | Green Sun's Zenith | instruction as a replacement | "Shuffle Green Sun's Zenith into its owner's library" as a self static `ReplacementEffect(would_go_to_graveyard, Replace(library))` (from anywhere) | the last instruction of the spell's effect (only as it resolves) | `cards/parser/spell_builder.py` (`_SELF_SHUFFLE_GSZ_RE`, `_detect_shuffle_self_statics`, ~line 430) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -258,6 +260,53 @@ When this artifact is put into a graveyard from the battlefield, draw a card."
   (`lower::IR_DEFECTS`); `tests/cards_m7c_tail.rs::chromatic_star_is_blocked_by_its_ir_event`.
   The other 29 cards of the batch: their IR matches their Oracle text.
 
+### H. "One or more" and a resolution instruction rewritten (M7c tail part 2)
+
+**16. Forth Eorlingas!** Oracle: "Create X 2/2 red Human Knight creature tokens with trample and
+haste. Whenever one or more creatures you control deal combat damage to one or more players this
+turn, you become the monarch."
+
+* IR: the this-turn trigger (`CreateThisTurnTriggeredAbility`) has `event: deals_combat_damage`,
+  a per-source predicate, and `once_per_turn: true`.
+* Should be: "one or more" (`OneOrMoreBatch`): one trigger per combat damage step in which
+  creatures of yours deal combat damage to players, with no once-per-turn limit. With a
+  first-strike damage step, an additional combat (Fear of Missing Out) or the monarchy taken away
+  between them, the Oracle text makes the player the monarch again; the IR doesn't.
+* Source: `cards/parser/triggers.py`, the phrase table entry `"one or more creatures you control
+  deal combat damage to one or more players"` (~line 1050) threads `once_per_turn=True`; its
+  comment says "with one combat per turn, once per turn is once per combat" (the Python engine's
+  single-combat model). Locker Room's entry above it has the same shape.
+* Fix: emit `OneOrMoreBatch` in the predicate and no `once_per_turn` (or a separate
+  "once per combat damage step" flag if the Python dispatcher needs one).
+* Engine: blocked, `IR:TriggeredAbility.once_per_turn("one or more" written as once each turn)`
+  (`lower::IR_DEFECTS`): the engine now reads `once_per_turn` on a non-"you may" effect as "this
+  ability triggers only once each turn" (entry 14), which this is not;
+  `tests/cards_m7c_tail2.rs::forth_eorlingas_is_blocked_by_its_ir_once_per_turn`. Its two effect
+  classes (`CreateTokensScaledByX`, `CreateThisTurnTriggeredAbility`) are not lowered yet either.
+
+**17. Green Sun's Zenith.** Oracle: "Search your library for a green creature card with mana value
+X or less, put it onto the battlefield, then shuffle. Shuffle Green Sun's Zenith into its owner's
+library."
+
+* IR: `spell_effect: SearchLibraryForGreenCreatureWithMVAtMostX`, and the last sentence as a
+  self-scoped static `ReplacementEffect { event_pattern: would_go_to_graveyard, transform:
+  Replace { new_destination: library } }`, with no zone: "if this card would be put into a
+  graveyard from anywhere, put it into its library instead" (Nexus of Fate's wording, which the
+  same parser path also produces).
+* Should be: an instruction of the effect, done as the spell resolves (CR 608.2c). Countered, it
+  goes to its owner's graveyard; discarded or milled, likewise. The IR would put it into the
+  library in all three cases.
+* Source: `cards/parser/spell_builder.py`: `_SELF_SHUFFLE_GSZ_RE` and `_SELF_SHUFFLE_NEXUS_RE`
+  (~line 459) drop the sentence from the effect stream, and `_detect_shuffle_self_statics` wires
+  both forms as the same static replacement.
+* Fix: emit the GSZ form as an effect step (a `ShuffleSourceIntoOwnersLibrary` at the end of the
+  `Sequence`, as Worldspine Wurm's IR already has the class), and keep the replacement for the
+  Nexus form only.
+* Engine: blocked, `IR:StaticAbility.replacement_effect("shuffle it into its library" as a
+  replacement from anywhere)` (`lower::IR_DEFECTS`); also `ReplacementEffect(WouldGoToGraveyard,
+  Replace)` (not built). Its search is built (`Filter::MvAtMostX`) and tested on a custom card
+  without the last sentence (`Test Green Sun`, `tests/cards_m7c_tail2.rs`).
+
 ## Suspected defects (representational)
 
 **7. Animate Dead.** Oracle: "... Enchanted creature gets -1/-0."
@@ -421,3 +470,18 @@ once each turn."
   target), not a chosen target; the name misleads, the data is right. `TargetConnives` states
   "attacking" twice (`attacking_only` and its target filter); they agree. `ward_discard_random`
   (Alpharael, not in the cube) is unused here and a blocker.
+* M7c tail part 2, the 24 cards (ENGINE.md 29): the IR matches the Oracle text. Representational
+  notes: Laelia's "whenever one or more cards are put into exile from your library and/or your
+  graveyard" is a marker predicate (`CardsExiledFromLibraryOrGraveyard`) on a placeholder
+  `event: dies` plus the printing flag `watches_library_graveyard_exile` (the Python engine sweeps
+  for it, `effects/generic/cube_creatures_rmc.py::sweep_library_graveyard_exile_watch`); the
+  engine reads the three together and checks they agree. Bloodbraid Challenger states cascade
+  twice (the keyword and its "when you cast this spell" trigger with `Cascade`); they agree.
+  Enduring Innocence's `once_per_turn` is "this ability triggers only once each turn" (entry 14's
+  second reading, now lowered). Multiversal Passage's `shock_land_life_cost` is its "then you may
+  pay 2 life"; We Say Thee Nay!'s `teamwork_power` and `OptionalAdditionalCostPaid` describe
+  teamwork as kicker-like modes; Fire Covenant's X is defined by `additional_cost_pay_x_life`
+  (`DealDamageDividedAmongTargets.amount: ResolvingX`); Candelabra of Tawnos's
+  `UntapXTargets.target_count_is_x` with `count_max: inf`. Still blocked by engine features, not
+  the IR: Abhorrent Oculus (manifest dread, face-down permanents), Shelldock Isle, Memory Jar and
+  Headliner Scarlett (face-down exile).

@@ -1105,3 +1105,21 @@ fn candelabra_of_tawnos_untaps_x_target_lands_cr602_2b() {
     let tapped = lands.iter().filter(|&&x| g.obj(x).tapped).count();
     assert!(tapped <= 1, "two paid, the two targets untapped: {}", log(&g));
 }
+
+/// Zirda with Basalt Monolith ("{T}: Add {C}{C}{C}"; "{3}: Untap", now
+/// {1}) makes unbounded mana: a loop of optional actions (CR 732.2a) the
+/// engine cuts at 31 activations of one permanent's ability a turn.
+#[test]
+fn zirda_and_basalt_monolith_loop_is_cut_at_31_activations_cr732_2a() {
+    let mut g = scen().battlefield(0, &["Zirda, the Dawnwaker", "Basalt Monolith"]).at(Step::Main1, 0).start();
+    let m = bf(&g, 0, "Basalt Monolith");
+    let mut n = 0;
+    while g.has_option(act(m, 1)) {
+        g.choose(act(m, 1));
+        pay(&mut g);
+        settle(&mut g);
+        n += 1;
+        assert!(n <= 31, "{}", log(&g));
+    }
+    assert_eq!(n, 31);
+}

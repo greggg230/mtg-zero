@@ -9,6 +9,10 @@ use crate::game::{Game, Pos, StackItem, StackKind};
 use crate::ids::{Target, CardIdx, PlayerId, Zone};
 use crate::pay::{productions, Class, Keep, PayMana, Src};
 
+/// Activations of one permanent's non-mana ability in a turn the engine offers
+/// (a loop of optional actions, CR 732.2a; as `copies::MAY_COPY_CAP`).
+pub(crate) const ACTIVATION_CAP: u8 = 31;
+
 impl Game {
     /// Does condition `c` hold for player `p`?
     pub(crate) fn cond_holds(&self, c: &Cond, p: PlayerId) -> bool {
@@ -64,6 +68,13 @@ impl Game {
         self.permanents_of(p).any(|c| self.abilities(c).ascend) && self.permanents_of(p).count() >= 10
     }
 
+    /// A permanent's activated ability `i` was activated `ACTIVATION_CAP`
+    /// times this turn.
+    pub(crate) fn activation_capped(&self, c: CardIdx, i: u8) -> bool {
+        let r = self.obj_ref(c);
+        self.activations.iter().any(|x| x.0 == r && x.1 == i && x.2 >= ACTIVATION_CAP)
+    }
+
     /// The card types among the cards exiled with `source` (CR 607.2a,
     /// 205.2a): linked cards still in exile.
     pub(crate) fn linked_types(&self, source: crate::ids::ObjRef) -> u16 {
@@ -117,6 +128,9 @@ impl Game {
                 }
                 if ad.exhaust && self.exhausted(c, i as u8) {
                     continue; // CR 702.177a: only once
+                }
+                if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+                    continue; // a loop of optional actions (ENGINE.md 29)
                 }
                 let slot = AbilitySlot::Activated(i as u8);
                 if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
@@ -294,6 +308,13 @@ impl Game {
             let r = self.obj_ref(card);
             self.marks.push((r, crate::game::Mark::Boasted(self.turn.number as u16)));
         }
+        if let (AbilitySlot::Activated(i), crate::db::ActEffect::Stack(_), Zone::Battlefield) = (slot, &ad.effect, self.objs[card.i()].zone) {
+            let r = self.obj_ref(card);
+            match self.activations.iter_mut().find(|x| x.0 == r && x.1 == i) {
+                Some(x) => x.2 = x.2.saturating_add(1),
+                None => self.activations.push((r, i, 1)),
+            }
+        }
         if ad.mana().is_some() {
             self.agenda.push(Task::ManaNow { src: Src { card, slot } });
             return;
@@ -450,7 +471,14 @@ impl Game {
     /// Creatures that can crew `vehicle` for `p`: untapped creatures they
     /// control other than it.
     pub(crate) fn crew_eligible(&self, p: PlayerId, vehicle: CardIdx) -> Vec<CardIdx> {
-        self.creatures_of(p).filter(|&c| c != vehicle && !self.objs[c.i()].tapped).collect()
+        // Teamwork (a spell's crew-like cost, ENGINE.md 29): not a creature
+        // with a mana ability, so the mana payment and the taps never compete
+        // (a simplification: such a creature could help in the CR).
+        let spell = matches!(self.objs[vehicle.i()].zone, Zone::Hand | Zone::Stack | Zone::Graveyard | Zone::Exile);
+        self.creatures_of(p)
+            .filter(|&c| c != vehicle && !self.objs[c.i()].tapped)
+            .filter(|&c| !spell || !self.abilities(c).activated.iter().any(|a| a.mana().is_some()))
+            .collect()
     }
 
     /// The most power `p` can tap to crew `vehicle`.

@@ -367,7 +367,17 @@ impl Game {
                     self.cast_free_now(p, hit);
                     return Flow::Suspend;
                 }
-                _ => {
+                Some(_) => {
+                    let rest = std::mem::take(&mut f.picked);
+                    self.put_on_bottom_randomly(p, rest);
+                    return Flow::Next;
+                }
+                // (Asked again: a refresh of the pending decision.)
+                None => {
+                    if self.objs[hit.i()].zone == Zone::Exile && self.can_cast_free_now(p, hit) {
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, yes_no());
+                        return Flow::Suspend;
+                    }
                     let rest = std::mem::take(&mut f.picked);
                     self.put_on_bottom_randomly(p, rest);
                     return Flow::Next;

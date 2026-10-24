@@ -572,6 +572,11 @@ pub struct Game {
     /// (an engine limit on a loop of optional actions, CR 732.2a, 732.3;
     /// ENGINE.md 26.11).
     pub(crate) may_copies: u8,
+    /// Activations this turn of each permanent's non-mana activated ability
+    /// (object, ability, count): at `ACTIVATION_CAP` no more are offered (an
+    /// engine limit on a loop of optional actions, CR 732.2a: Zirda with
+    /// Basalt Monolith makes unbounded mana; ENGINE.md 29).
+    pub(crate) activations: Vec<(ObjRef, u8, u8)>,
     // ---- M7b part 3b: the initiative and dungeons (ENGINE.md 27.4) ----
     /// The player who has the initiative (CR 725).
     pub(crate) initiative: Option<PlayerId>,
@@ -774,6 +779,7 @@ impl Game {
             defer_enters: false,
             prepared: Vec::new(),
             may_copies: 0,
+            activations: Vec::new(),
             initiative: None,
             dungeons: [Dungeon::default(); 2],
             rules_src: None,

@@ -608,6 +608,9 @@ impl Game {
         self.initiative.hash(&mut h);
         self.dungeons.hash(&mut h);
         self.rules_src.hash(&mut h);
+        self.activations.hash(&mut h);
+        self.miracle_check.hash(&mut h);
+        self.marks.hash(&mut h);
         h.finish()
     }
 

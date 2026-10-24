@@ -605,7 +605,14 @@ impl Game {
         if self.def_of(card).x_life {
             // "Pay X life" (CR 119.4: no more than one's life total; X isn't
             // in the mana cost, so a free cast doesn't fix it, 107.3b).
-            most = self.players[p as usize].life.clamp(0, (act::NUMBER_N - 1) as i32) as u8;
+            // The life the mana payment may need is kept (a painland).
+            let life = self.players[p as usize].life.clamp(0, (act::NUMBER_N - 1) as i32) as u8;
+            let cost = self.total_mana(card, item);
+            let classes = self.mana_classes(p, None);
+            let allow = self.spend_allow(card);
+            while most < life && self.can_pay_with(p, &cost, &classes, &crate::pay::Keep { life: most + 1, allow, ..Default::default() }) {
+                most += 1;
+            }
         } else if !free {
             // CR 601.2f: X is part of the mana cost, before reductions.
             let mut tmp = item.clone();

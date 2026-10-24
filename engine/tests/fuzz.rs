@@ -55,7 +55,9 @@ fn play(seed: u64, checks: bool) -> Played {
         g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
         actions.push(a);
         steps += 1;
-        assert!(steps < 100_000, "seed {seed}: game does not end");
+        assert!(steps < 100_000, "seed {seed}: game does not end
+{}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
+"));
     }
     Played { actions, keys, fingerprint: g.fingerprint(), outcome: g.outcome().unwrap(), turns: g.turn().number }
 }
