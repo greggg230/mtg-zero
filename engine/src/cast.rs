@@ -375,10 +375,13 @@ impl Game {
                         _ => None,
                     }
                 });
-                if def.flashback.is_some() || granted {
-                    Some(CastFrom::Flashback)
-                } else if let Some((free, any_mana)) = permitted {
+                // (A permission for this card, an effect's "you may cast it
+                // now" (Bilbo, Malcolm), comes before its flashback: the
+                // effect offered it for its mana cost, `can_cast_now`.)
+                if let Some((free, any_mana)) = permitted {
                     Some(CastFrom::Permission { free, any_mana })
+                } else if def.flashback.is_some() || granted {
+                    Some(CastFrom::Flashback)
                 } else if self.gy_play_now(p) {
                     // Yawgmoth's Will: for its mana cost (CR 601.2a).
                     Some(CastFrom::Permission { free: false, any_mana: false })

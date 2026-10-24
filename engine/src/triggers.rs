@@ -388,6 +388,27 @@ impl Game {
                 && a.slot == b.slot
                 && (a.ev == b.ev || !db.def(a.source_def).triggers[a.slot as usize].uses_event)
         };
+        // More waiting triggers than `TRIGGER` slots (a board of tokens
+        // dying): the first of each interchangeable group first, the copies
+        // after (their order among themselves can't matter), so that the
+        // groups' ids stay in range.
+        let mine = if mine.len() > act::TRIGGER_N as usize && self.answer.is_none() {
+            let (mut firsts, mut rest) = (Vec::new(), Vec::new());
+            for (k, &i) in mine.iter().enumerate() {
+                if mine[..k].iter().any(|&j| same(&self.waiting[j], &self.waiting[i])) {
+                    rest.push(self.waiting[i]);
+                } else {
+                    firsts.push(self.waiting[i]);
+                }
+            }
+            firsts.extend(rest);
+            for (&i, t) in mine.iter().zip(firsts) {
+                self.waiting[i] = t;
+            }
+            mine
+        } else {
+            mine
+        };
         let pick = match self.answer.take() {
             Some(Choice::Trigger(k)) => mine[k as usize],
             Some(other) => unreachable!("trigger answer {other:?}"),
