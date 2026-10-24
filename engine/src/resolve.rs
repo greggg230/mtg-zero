@@ -1041,7 +1041,10 @@ impl Game {
             PileDest::Graveyard => self.move_card(c, Zone::Graveyard, Pos::Top),
             PileDest::Hand => self.move_card(c, Zone::Hand, Pos::Top),
         };
-        if self.objs[c.i()].zone.is_hidden() {
+        // (Not a card a replacement shuffled into the library instead:
+        // Blightsteel Colossus.)
+        let shuffled = dest == PileDest::Graveyard;
+        if self.objs[c.i()].zone.is_hidden() && !shuffled {
             self.objs[c.i()].known |= 1 << p;
         }
     }

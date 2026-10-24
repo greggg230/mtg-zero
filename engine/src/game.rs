@@ -1497,7 +1497,12 @@ impl Game {
         }
         self.note(|g| format!("{} is shuffled into its owner's library instead", g.name(idx)));
         let owner = self.objs[idx.i()].owner;
-        let r = self.move_card_ctl(idx, Zone::Library, Pos::Top, None);
+        // (From its owner's library, a mill or a surveil: it stays there.)
+        let r = if from == Zone::Library && self.objs[idx.i()].owner == owner {
+            self.obj_ref(idx)
+        } else {
+            self.move_card_ctl(idx, Zone::Library, Pos::Top, None)
+        };
         self.shuffle_library(owner);
         r
     }
