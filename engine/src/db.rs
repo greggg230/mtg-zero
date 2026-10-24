@@ -357,6 +357,10 @@ pub struct TargetReq {
     /// Bit k: the targets of this requirement must differ from those
     /// chosen for requirement k ("another target", CR 115.3).
     pub distinct: u8,
+    /// k + 1: a card owned by the controller of the target chosen for
+    /// requirement k ("target artifact card in that player's graveyard",
+    /// Goblin Welder); 0 = no such link.
+    pub pair: u8,
 }
 
 /// A spell or ability's effect: its target requirements and program; or,

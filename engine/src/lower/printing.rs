@@ -1381,7 +1381,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         f.toughness = None;
         f.pt_cda = None;
         f.statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::Pt(p, t)] });
-        let req = crate::db::TargetReq { filter: Filter::Type(types::CREATURE), min: 1, max: 1, distinct: 0 };
+        let req = crate::db::TargetReq { filter: Filter::Type(types::CREATURE), min: 1, max: 1, distinct: 0, pair: 0 };
         f.spell = Some(crate::db::AbilityDef { targets: vec![req], ..Default::default() });
         f.bestowed = true;
         l.faces.push(f);

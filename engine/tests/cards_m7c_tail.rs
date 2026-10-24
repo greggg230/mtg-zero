@@ -1068,3 +1068,39 @@ fn serra_paragon_plays_one_card_from_the_graveyard_each_turn_cr601_2a() {
     let g = scen().battlefield(0, &["Serra Paragon"]).graveyard(0, &["Island"]).at(Step::Main1, 1).start();
     assert!(!g.has_option(Choice::Play(g.card(0, "Island", Zone::Graveyard))));
 }
+
+// ---- Goblin Welder ---------------------------------------------------------
+
+/// "{T}: Choose target artifact a player controls and target artifact card
+/// in that player's graveyard. If both targets are still legal as this
+/// ability resolves, that player simultaneously sacrifices the artifact and
+/// returns the artifact card to the battlefield" (CR 115.1: the second
+/// target depends on the first; 608.2b).
+#[test]
+fn goblin_welder_swaps_an_artifact_with_one_in_its_controllers_graveyard_cr608_2b() {
+    let mut g = scen()
+        .battlefield(0, &["Goblin Welder", "Sol Ring"])
+        .battlefield(1, &["Voltaic Key"])
+        .graveyard(0, &["Coalition Relic"])
+        .graveyard(1, &["Grim Monolith"])
+        .at(Step::Main1, 0)
+        .start();
+    let w = bf(&g, 0, "Goblin Welder");
+    let key = bf(&g, 1, "Voltaic Key");
+    let sol = bf(&g, 0, "Sol Ring");
+    let relic = g.card(0, "Coalition Relic", Zone::Graveyard);
+    let mono = g.card(1, "Grim Monolith", Zone::Graveyard);
+    g.choose(act(w, 0));
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    g.choose(g.tgt(key));
+    assert!(g.has_option(g.tgt(mono)) && !g.has_option(g.tgt(relic)), "a card in that player's graveyard");
+    g.choose(g.tgt(mono));
+    settle(&mut g);
+    assert_eq!(g.obj(key).zone, Zone::Graveyard);
+    assert_eq!(g.obj(mono).zone, Zone::Battlefield);
+    assert_eq!(g.obj(mono).controller, 1, "under that player's control");
+    assert_eq!(g.obj(sol).zone, Zone::Battlefield);
+    // No artifact card in any controller's graveyard: not offered.
+    let g = scen().battlefield(0, &["Goblin Welder", "Sol Ring"]).graveyard(1, &["Grim Monolith"]).at(Step::Main1, 0).start();
+    assert!(!g.has_option(act(bf(&g, 0, "Goblin Welder"), 0)));
+}

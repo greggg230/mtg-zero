@@ -166,6 +166,7 @@ const SUPPORTED: &[&str] = &[
     "Glimmer Lens",
     "Goblin Bombardment",
     "Goblin Engineer",
+    "Goblin Welder",
     "Godless Shrine",
     "Golos, Tireless Pilgrim",
     "Grief",

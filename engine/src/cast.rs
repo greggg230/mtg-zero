@@ -820,6 +820,14 @@ impl Game {
         match &ab.modes {
             None => {
                 let ctx = Ctx { controller, source };
+                if let Some(r) = ab.targets.iter().position(|tr| tr.pair != 0) {
+                    // (Goblin Welder: an artifact whose controller has an
+                    // artifact card in their graveyard.)
+                    let k = ab.targets[r].pair as usize - 1;
+                    let firsts = self.target_candidates(&ab.targets[k], &ctx, &[]);
+                    let seconds = self.target_candidates(&ab.targets[r], &ctx, &[]);
+                    return firsts.iter().any(|&a| seconds.iter().any(|&b| self.paired(a, b)));
+                }
                 if ab.targets.iter().any(|tr| tr.distinct != 0) {
                     let reqs: Vec<&TargetReq> = ab.targets.iter().collect();
                     return self.distinct_choosable(&reqs, 0, &mut Vec::new(), &ctx);
@@ -1415,6 +1423,18 @@ impl Game {
             return;
         }
         let mut cands = self.target_candidates(tr, &ctx, &exclude);
+        if tr.pair != 0 {
+            // A card of the player whose permanent was chosen.
+            let k = tr.pair - 1;
+            let first: Vec<Target> = item.targets.iter().filter(|(r, _)| *r == k).map(|&(_, t)| t).collect();
+            cands.retain(|&b| first.iter().any(|&a| self.paired(a, b)));
+        }
+        if let Some(later) = reqs.iter().find(|r| r.pair == req + 1) {
+            // Only a permanent a later linked target can pair with (a cast is
+            // offered only if it can be completed).
+            let seconds = self.target_candidates(later, &ctx, &[]);
+            cands.retain(|&a| seconds.iter().any(|&b| self.paired(a, b)));
+        }
         if reqs.iter().any(|r| r.distinct & (1 << req) != 0) {
             // Keep a later requirement that must differ from this one
             // choosable (a cast is offered only if it can be completed).
@@ -1518,6 +1538,14 @@ impl Game {
     /// (stack, top first). A spell or ability cannot target itself (115.5);
     /// `exclude` holds the targets already chosen for this requirement
     /// (the same object once per "target", 115.3).
+    /// Is `b` (a card) owned by the controller of `a` (a permanent)?
+    pub(crate) fn paired(&self, a: Target, b: Target) -> bool {
+        match (a, b) {
+            (Target::Obj(x), Target::Obj(y)) => self.objs[x.idx.i()].controller == self.objs[y.idx.i()].owner,
+            _ => false,
+        }
+    }
+
     pub(crate) fn target_candidates(&self, tr: &TargetReq, ctx: &Ctx, exclude: &[Target]) -> Vec<Target> {
         let mut out = Vec::new();
         let consider = |t: Target, out: &mut Vec<Target>| {

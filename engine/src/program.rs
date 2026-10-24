@@ -635,6 +635,11 @@ pub enum Ext {
     /// a triggered ability: "when it dies [or is exiled (`exile`)], ..."
     /// (earthbend; the event's object is the card where it went).
     GrantLeaveTrigger { on: On, k: u8, exile: bool },
+    /// If both targets are still legal (and still paired), the controller
+    /// of the permanent of requirement `a` simultaneously sacrifices it and
+    /// returns the card of requirement `b` (in their graveyard) to the
+    /// battlefield (Goblin Welder).
+    SwapWithGraveyardCard { a: u8, b: u8 },
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -923,7 +928,7 @@ pub struct Builder {
 impl Builder {
     /// Add a target requirement; returns its index.
     pub fn target(&mut self, filter: Filter, min: u8, max: u8) -> u8 {
-        let req = TargetReq { filter, min, max, distinct: 0 };
+        let req = TargetReq { filter, min, max, distinct: 0, pair: 0 };
         if let Some(k) = self.reuse {
             if self.targets.get(k) == Some(&req) {
                 self.reuse = Some(k + 1);

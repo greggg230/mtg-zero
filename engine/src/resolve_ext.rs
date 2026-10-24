@@ -1555,7 +1555,8 @@ impl Game {
             | Ext::ExileHandCardOrTargetUntil { .. }
             | Ext::ExileUntilNonlandCounterOrCast
             | Ext::ExileAllCreaturesIncubate { .. }
-            | Ext::GrantLeaveTrigger { .. } => self.exec_tail(f, op),
+            | Ext::GrantLeaveTrigger { .. }
+            | Ext::SwapWithGraveyardCard { .. } => self.exec_tail(f, op),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

@@ -188,6 +188,18 @@ pub(crate) fn lower_effect_tail(l: &mut Lowerer, b: &mut Builder, e: &cats::Effe
             let k = l.delayed_ability(back.finish());
             b.op(Op::Ext(Ext::GrantLeaveTrigger { on: crate::program::On::Target(t), k, exile: true }));
         }
+        // "Choose target artifact a player controls and target artifact card
+        // in that player's graveyard. If both targets are still legal as
+        // this ability resolves, that player simultaneously sacrifices the
+        // artifact and returns the artifact card to the battlefield."
+        // (Goblin Welder.)
+        E::SwapArtifactWithGraveyardArtifact(nodes::SwapArtifactWithGraveyardArtifact {}) => {
+            let artifact = Filter::Type(types::ARTIFACT);
+            let a = b.target(artifact.clone(), 1, 1);
+            let c = b.target(Filter::InGraveyard(Box::new(artifact)), 1, 1);
+            b.targets[c as usize].pair = a + 1;
+            b.op(Op::Ext(Ext::SwapWithGraveyardCard { a, b: c }));
+        }
         E::ExileUntilNonlandThenCounterOrMayCastIt(nodes::ExileUntilNonlandThenCounterOrMayCastIt {}) => {
             b.op(Op::Ext(Ext::ExileUntilNonlandCounterOrCast));
         }

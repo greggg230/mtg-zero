@@ -115,6 +115,24 @@ impl Game {
                 }
             }
             Ext::ExileUntilNonlandCounterOrCast => self.exile_until_nonland_counter_or_cast(f),
+            Ext::SwapWithGraveyardCard { a, b } => {
+                let (Some(&art), Some(card)) = (self.objs_on(f, &On::Target(*a)).first(), self.targets_of(f, *b).into_iter().next()) else {
+                    return Flow::Next;
+                };
+                let Target::Obj(card) = card else { return Flow::Next };
+                if self.objs[card.idx.i()].zone != Zone::Graveyard || !self.paired(Target::Obj(self.obj_ref(art)), Target::Obj(card)) {
+                    return Flow::Next;
+                }
+                let q = self.objs[art.i()].controller;
+                // At once (one batch): the sacrifice and the return.
+                self.begin_batch();
+                if !self.shielded_from(q, f.controller) {
+                    self.sacrifice(art);
+                }
+                self.put_onto_battlefield(card.idx, q);
+                self.end_batch();
+                Flow::Next
+            }
             Ext::GrantLeaveTrigger { on, k, exile } => {
                 let slot = self.db.def(f.source_def).delayed_base + k;
                 for c in self.objs_on(f, on) {
