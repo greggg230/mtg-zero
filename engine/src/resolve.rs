@@ -408,6 +408,8 @@ impl Game {
             controller: f.controller,
             deathtouch: d.keywords.has(Kw::Deathtouch),
             lifelink: d.keywords.has(Kw::Lifelink),
+            infect: d.keywords.has(Kw::Infect),
+            spell: f.ability.slot == crate::db::AbilitySlot::Spell,
             colors: d.colors | if self.marks.is_empty() { 0 } else { self.painted() },
             types: d.types,
             obj: Some(f.source),

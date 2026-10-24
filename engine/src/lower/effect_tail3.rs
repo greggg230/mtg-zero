@@ -112,6 +112,22 @@ pub(crate) fn lower_effect_tail3(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let k: Counter = super::effect_ext::counter_by_name(l, kind);
             b.op(Op::Draw { who: Who::You, n: Amount::SourceCounters(k) });
         }
+        // "Shuffle it into its owner's library" (Worldspine Wurm: the card
+        // in the graveyard that triggered).
+        E::ShuffleSourceIntoOwnersLibrary(nodes::ShuffleSourceIntoOwnersLibrary {}) => {
+            b.op(Op::Ext(Ext::ShuffleSourceIntoLibrary));
+        }
+        // "Its owner shuffles their graveyard into their library" (Emrakul:
+        // the ability's controller is the card's owner).
+        E::OwnerShufflesGraveyardIntoLibrary(nodes::OwnerShufflesGraveyardIntoLibrary {}) => {
+            b.op(Op::ShuffleIntoLibrary { who: Who::You, hand: false, graveyard: true });
+        }
+        // Annihilator's trigger: "defending player sacrifices n permanents"
+        // (two players: the controller's opponent).
+        E::DefendingPlayerSacrificesPermanents(nodes::DefendingPlayerSacrificesPermanents { count }) => {
+            let n = l.int("DefendingPlayerSacrificesPermanents.count", *count, 1, 20) as u8;
+            b.op(Op::Ext(Ext::SacrificeN { who: Who::Opponent, filter: Filter::Type(crate::db::types::PERMANENT), n }));
+        }
         _ => return false,
     }
     true

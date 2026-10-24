@@ -1755,6 +1755,8 @@ impl Game {
             controller: ctx.controller,
             deathtouch: false,
             lifelink: false,
+            infect: false,
+            spell: false,
             colors: d.colors,
             types: d.types,
             obj: None,

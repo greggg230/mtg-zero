@@ -44,6 +44,24 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         let uses_event = ability.uses_event();
         return Some(TriggerDef { event: EventKind::ExiledFromLibGy, pred, ability, uses_event });
     }
+    // "When this is put into a graveyard from anywhere" (Worldspine Wurm,
+    // Emrakul): the IR's `dies` event with this marker predicate; it
+    // triggers from the graveyard, the card's own ability (CR 603.6a, its
+    // owner controls it).
+    if let (Some(E::Dies), Some(cats::TriggerPredicate::PutIntoGraveyardFromAnywhere(nodes::PutIntoGraveyardFromAnywhere {}))) =
+        (event, predicate.as_deref())
+    {
+        let Some(e) = effect else {
+            l.unsupported("TriggeredAbility.effect(missing)");
+            return None;
+        };
+        if *once_per_turn {
+            l.unsupported("TriggeredAbility.once_per_turn(from anywhere)");
+        }
+        let ability = lower_ability(l, e);
+        let uses_event = ability.uses_event();
+        return Some(TriggerDef { event: EventKind::ToGraveyard, pred: TrigPred::IsSelf(Slot::Default), ability, uses_event });
+    }
     let ev = match event {
         Some(E::Enters) => Some(EventKind::Enters),
         Some(E::Dies) => Some(EventKind::Dies),

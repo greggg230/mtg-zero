@@ -1233,6 +1233,14 @@ impl Game {
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
         let from = self.objs[idx.i()].zone;
+        // "If this would be put into a graveyard from anywhere, reveal it and
+        // shuffle it into its owner's library instead" (Blightsteel; CR
+        // 614.1a). Applied before the other replacements of a graveyard
+        // destination (the affected object's controller chooses the order,
+        // 616.1: the library).
+        if to == Zone::Graveyard && self.def_of(idx).gy_to_library && from != Zone::Nowhere {
+            return self.shuffle_in_instead(idx, from);
+        }
         let old = self.obj_ref(idx);
         let old_controller = self.objs[idx.i()].controller;
         // Replacements of where it goes (CR 614.1a), decided before the
@@ -1432,6 +1440,11 @@ impl Game {
         if from == Zone::Battlefield && !self.links.is_empty() {
             self.release_links(old);
         }
+        // "When this is put into a graveyard from anywhere" (its own
+        // ability, from the graveyard).
+        if to == Zone::Graveyard && self.db.def(self.objs[idx.i()].def).trig_mask & (1 << EventKind::ToGraveyard as u32) != 0 {
+            self.event(Event::obj(EventKind::ToGraveyard, new));
+        }
         // "Whenever one or more cards are put into exile from your library
         // and/or your graveyard" (Laelia).
         if to == Zone::Exile && matches!(from, Zone::Library | Zone::Graveyard) && self.seen & SEEN_EXILE_WATCH != 0 {
@@ -1456,6 +1469,20 @@ impl Game {
             }
         }
         new
+    }
+
+    /// Blightsteel's replacement: revealed (from a hidden zone), put into its
+    /// owner's library, which is shuffled. A permanent going there doesn't
+    /// die (CR 700.4); its leave triggers see it leave.
+    fn shuffle_in_instead(&mut self, idx: CardIdx, from: Zone) -> ObjRef {
+        if from.is_hidden() {
+            self.reveal(idx);
+        }
+        self.note(|g| format!("{} is shuffled into its owner's library instead", g.name(idx)));
+        let owner = self.objs[idx.i()].owner;
+        let r = self.move_card_ctl(idx, Zone::Library, Pos::Top, None);
+        self.shuffle_library(owner);
+        r
     }
 
     /// CR 610.3a: the cards exiled "until" `source` leaves the battlefield
@@ -1633,9 +1660,15 @@ impl Game {
                     self.note(|_| format!("damage to P{p} prevented (protection)"));
                     return 0;
                 }
-                // CR 120.3a: the player loses that much life.
-                self.players[p as usize].life -= amount;
-                self.players[p as usize].lost_life = true;
+                if src.infect {
+                    // CR 702.90b: poison counters instead of life loss.
+                    let pl = &mut self.players[p as usize];
+                    pl.poison = pl.poison.saturating_add(amount.min(u16::MAX as i32) as u16);
+                } else {
+                    // CR 120.3a: the player loses that much life.
+                    self.players[p as usize].life -= amount;
+                    self.players[p as usize].lost_life = true;
+                }
             }
             Target::Obj(r) => {
                 if !self.live(r) || self.objs[r.idx.i()].zone != Zone::Battlefield {
@@ -1655,7 +1688,13 @@ impl Game {
                     // CR 120.3c: that many loyalty counters are removed.
                     self.remove_counters(r.idx, crate::db::Counter::Loyalty, amt);
                 }
-                if creature {
+                if creature && src.infect {
+                    // CR 702.90c: -1/-1 counters instead of marked damage.
+                    self.add_counters(r.idx, crate::db::Counter::M1M1, amt);
+                    if src.deathtouch {
+                        self.objs[r.idx.i()].deathtouched = true;
+                    }
+                } else if creature {
                     // CR 120.3e: damage is marked (both, for a planeswalker
                     // creature).
                     let heals = self.abilities(r.idx).heals_on_damage;
@@ -1734,6 +1773,7 @@ impl Game {
             || p.types & src.types != 0
             || (p.opponents && src.controller != self.objs[c.i()].controller)
             || (p.chosen_player && self.objs[c.i()].chosen_player == Some(src.controller))
+            || (p.colored_spells && src.spell && src.colors != 0)
     }
 
     /// The characteristics of a permanent (or spell) as a source of damage
@@ -1744,6 +1784,8 @@ impl Game {
             controller: self.objs[idx.i()].controller,
             deathtouch: kws.has(Kw::Deathtouch),
             lifelink: kws.has(Kw::Lifelink),
+            infect: kws.has(Kw::Infect),
+            spell: self.objs[idx.i()].zone == Zone::Stack,
             colors: self.colors_of(idx),
             types: self.types_of(idx),
             obj: Some(self.obj_ref(idx)),
@@ -1779,6 +1821,10 @@ pub struct DamageSource {
     pub controller: PlayerId,
     pub deathtouch: bool,
     pub lifelink: bool,
+    /// Infect (CR 702.90b-c).
+    pub infect: bool,
+    /// The source is a spell (on the stack).
+    pub spell: bool,
     /// Its colours and card types (protection, CR 702.16).
     pub colors: crate::mana::ManaMask,
     pub types: u16,

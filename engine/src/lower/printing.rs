@@ -352,7 +352,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let _ = escape_cost_str; // display form of `escape_cost`
         l.deny("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing", sacrifice_at_cleanup_if_cast_without_sorcery_timing);
         let _ = dash_cost_str; // display form of `dash_cost`
-        l.deny("CardPrinting.watched_in_graveyard", watched_in_graveyard);
         l.deny("CardPrinting.multikicker", multikicker);
         l.deny("CardPrinting.enters_with_counter_per_kick", enters_with_counter_per_kick);
         l.deny("CardPrinting.evoke_cost", evoke_cost);
@@ -479,6 +478,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut keyword_triggers: Vec<TriggerDef> = Vec::new();
     let mut cascade_kw = false;
     let mut cascade_kw_ascend = false;
+    let mut annihilator: Option<u8> = None;
     for k in keywords {
         match lower_keyword_full(l, k) {
             Some(KwOrProt::Kw(kw)) => kws.insert(kw),
@@ -489,6 +489,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             Some(KwOrProt::Persist) => keyword_triggers.push(persist()),
             Some(KwOrProt::Cascade) => cascade_kw = true,
             Some(KwOrProt::Ascend) => cascade_kw_ascend = true,
+            Some(KwOrProt::Annihilator(n)) => annihilator = Some(n),
             None => {}
         }
     }
@@ -1025,6 +1026,25 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if cascade_kw != cascade_trigger || l.cascade != cascade_kw {
         l.unsupported("Keyword:Cascade(keyword and trigger disagree)");
     }
+    // Annihilator n: the keyword and its "whenever this creature attacks,
+    // defending player sacrifices n permanents" trigger (CR 702.86a).
+    let annihilator_trigger = triggers.iter().find_map(|t| match t.ability.program.as_slice() {
+        [crate::program::Op::Ext(crate::program::Ext::SacrificeN { who: crate::program::Who::Opponent, filter: Filter::Type(types::PERMANENT), n })]
+            if t.event == EventKind::Attacks && t.pred == TrigPred::IsSelf(Slot::Default) =>
+        {
+            Some(*n)
+        }
+        _ => None,
+    });
+    if annihilator != annihilator_trigger {
+        l.unsupported("Keyword:Annihilator(keyword and trigger disagree)");
+    }
+    // "Put into a graveyard from anywhere" (a trigger, or a replacement):
+    // the printing says it watches the card there (`watched_in_graveyard`).
+    let gy_watch = triggers.iter().any(|t| t.event == EventKind::ToGraveyard) || repl.gy_to_library;
+    if gy_watch != *watched_in_graveyard {
+        l.unsupported("CardPrinting.watched_in_graveyard(without a \"from anywhere\" ability)");
+    }
     triggers.extend(keyword_triggers);
     let trig_mask = triggers.iter().fold(0u32, |m, t| m | 1 << t.event as u32);
     // Sagas (CR 714): the final chapter number is the greatest of its
@@ -1450,6 +1470,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         no_forced_discard_sac: *opponents_cant_make_you_discard_or_sacrifice,
         token_factor: repl.token_factor,
         wins_on_empty_draw: repl.wins_on_empty_draw,
+        gy_to_library: repl.gy_to_library,
         extra_mana_on_tap,
         emblem: false,
         // "During your turn, nonland permanent cards in your graveyard have
@@ -1820,6 +1841,8 @@ pub(crate) enum KwOrProt {
     Cascade,
     /// Ascend (CR 702.131a, on a permanent).
     Ascend,
+    /// Annihilator n (CR 702.86a): its triggered ability is in the IR too.
+    Annihilator(u8),
 }
 
 pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<KwOrProt> {
@@ -1851,6 +1874,8 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
                 Q::EachOfYourOpponents => p.opponents = true,
                 // (The player chosen as it entered; CR 614.12.)
                 Q::TheChosenPlayer => p.chosen_player = true,
+                // "Protection from spells that are one or more colors".
+                Q::SpellsThatAreOneOrMoreColors => p.colored_spells = true,
                 other => {
                     l.unsupported(format!("Keyword.quality({other:?})"));
                     return None;
@@ -1877,6 +1902,12 @@ pub(crate) fn lower_keyword_full(l: &mut Lowerer, k: &cats::Keyword) -> Option<K
             l.deny("Keyword.n", n);
             l.deny("Keyword.quality", quality);
             return Some(KwOrProt::Ascend);
+        }
+        // Annihilator n (CR 702.86a): its triggered ability is in the IR
+        // too (checked to agree).
+        K::Annihilator => {
+            l.deny("Keyword.quality", quality);
+            return Some(KwOrProt::Annihilator(l.int("Keyword.n", *n, 1, 20) as u8));
         }
         _ => {}
     }
@@ -1976,6 +2007,7 @@ fn lower_keyword(l: &mut Lowerer, k: &cats::Keyword) -> Option<Kw> {
         K::Hexproof => Kw::Hexproof,
         K::Shroud => Kw::Shroud,
         K::Indestructible => Kw::Indestructible,
+        K::Infect => Kw::Infect,
         other => {
             l.unsupported(format!("Keyword:{other:?}"));
             return None;

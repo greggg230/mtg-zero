@@ -46,6 +46,9 @@ pub(crate) struct Repl {
     /// "Abilities you activate that aren't mana abilities cost {n} less to
     /// activate" (Zirda).
     pub ability_discount: u8,
+    /// "If this would be put into a graveyard from anywhere, ... shuffle it
+    /// into its owner's library instead" (a self-scoped replacement).
+    pub gy_to_library: bool,
 }
 
 /// A static ability's replacement effect -> `repl`.
@@ -63,6 +66,15 @@ fn lower_replacement(l: &mut Lowerer, r: &cats::ReplacementEffect, repl: &mut Re
         }
         (enums::Event::WouldDrawFromEmptyLibrary, cats::EventTransform::WinTheGameInstead(nodes::WinTheGameInstead {})) => {
             repl.wins_on_empty_draw = true;
+        }
+        // "If <this> would be put into a graveyard from anywhere, reveal it
+        // and shuffle it into its owner's library instead" (Blightsteel;
+        // the scope, self, is checked by the caller).
+        (enums::Event::WouldGoToGraveyard, cats::EventTransform::Replace(nodes::Replace { new_destination })) => {
+            if *new_destination != enums::ZoneName::Library {
+                l.unsupported(format!("Replace.new_destination({new_destination:?})"));
+            }
+            repl.gy_to_library = true;
         }
         (e, t) => l.unsupported(format!("ReplacementEffect({e:?}, {})", t.tag())),
     }

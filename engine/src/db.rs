@@ -74,6 +74,11 @@ pub enum Kw {
     Hexproof,
     Shroud,
     Indestructible,
+    /// Infect (CR 702.90): damage to players as poison counters, to
+    /// creatures as -1/-1 counters. (Not in the encoding's keyword list,
+    /// which layout v3 fixes: a card's printed keywords come with its
+    /// identity.)
+    Infect,
 }
 
 impl Kw {
@@ -129,6 +134,8 @@ pub struct Prot {
     pub opponents: bool,
     /// From the player chosen as the permanent entered (True-Name Nemesis).
     pub chosen_player: bool,
+    /// From spells that are one or more colours (Emrakul, the Aeons Torn).
+    pub colored_spells: bool,
 }
 
 impl Prot {
@@ -142,6 +149,7 @@ impl Prot {
         self.types |= o.types;
         self.opponents |= o.opponents;
         self.chosen_player |= o.chosen_player;
+        self.colored_spells |= o.colored_spells;
     }
 }
 
@@ -518,6 +526,10 @@ pub enum EventKind {
     /// A card was put into exile from its owner's library or graveyard.
     /// Subject: the owner.
     ExiledFromLibGy,
+    /// A card with "when this is put into a graveyard from anywhere" was
+    /// put into a graveyard (emitted only for such cards; its own ability
+    /// sees it there). Subject: the card in the graveyard.
+    ToGraveyard,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -559,6 +571,7 @@ impl EventKind {
             | E::BeginningOfEndStep
             | E::CreatureTokensCreated
             | E::ExiledFromLibGy => (&[Slot::Player], &[]),
+            E::ToGraveyard => (&[Slot::Obj], &[]),
             E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
             E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
@@ -1164,6 +1177,9 @@ pub struct CardDef {
     /// "If you would draw a card while your library has no cards in it, you
     /// win the game instead" (CR 614.1a).
     pub wins_on_empty_draw: bool,
+    /// "If this would be put into a graveyard from anywhere, reveal it and
+    /// shuffle it into its owner's library instead" (Blightsteel Colossus).
+    pub gy_to_library: bool,
     /// "Whenever you tap a <land subtype> for mana, add an additional
     /// <mana>" (a triggered mana ability, CR 605.1b): (subtype, mana type).
     pub extra_mana_on_tap: Vec<(u16, u8)>,

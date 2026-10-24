@@ -415,3 +415,177 @@ fn pentad_prism_sunburst_counters_cr702_44a_and_its_mana() {
     g.drive_until(at_priority);
     assert_eq!(g.counters_on(prism, charge), 1, "{}", log(&g));
 }
+
+// ---- "Put into a graveyard from anywhere": Worldspine Wurm, Emrakul, Blightsteel ----
+
+/// "When this creature dies, create three 5/5 green Wurm creature tokens with
+/// trample. When Worldspine Wurm is put into a graveyard from anywhere,
+/// shuffle it into its owner's library" (its own ability from the
+/// graveyard, CR 603.6a; the owner controls it).
+#[test]
+fn worldspine_wurm_dies_makes_wurms_and_shuffles_itself_in_cr603_6a() {
+    let mut g = scen()
+        .battlefield(0, &["Plains"; 4])
+        .hand(0, &["Wrath of God"])
+        .battlefield(1, &["Worldspine Wurm"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Wrath of God", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    settle(&mut g);
+    let wurms: Vec<_> = g.permanents_of(1).filter(|&c| g.name(c) == "Wurm").collect();
+    assert_eq!(wurms.len(), 3, "{}", log(&g));
+    assert_eq!(g.pt(wurms[0]), (5, 5));
+    assert_eq!(g.count_in(1, "Worldspine Wurm", Zone::Library), 1, "shuffled into its owner's library\n{}", log(&g));
+    assert_eq!(g.count_in(1, "Worldspine Wurm", Zone::Graveyard), 0);
+}
+
+/// From the library (Entomb): put into a graveyard from anywhere.
+#[test]
+fn worldspine_wurm_entombed_is_shuffled_back_cr603_6a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Entomb"])
+        .library(0, &["Worldspine Wurm", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Entomb", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    let wurm = g.card(0, "Worldspine Wurm", Zone::Library);
+    let d = g.obj(wurm).def;
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::SearchLibrary) { Some(Choice::Def(d)) } else { None });
+    assert_eq!(g.count_in(0, "Worldspine Wurm", Zone::Library), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Worldspine Wurm", Zone::Graveyard), 0);
+}
+
+/// Emrakul, the Aeons Torn: "When you cast this spell, take an extra turn
+/// after this one"; protection from spells that are one or more colors (CR
+/// 702.16: not a legal target of a coloured spell); annihilator 6 (702.86a).
+#[test]
+fn emrakul_extra_turn_colored_spell_protection_and_annihilator_cr702_86a() {
+    let mut g = scen()
+        .battlefield(0, &["Island"; 15])
+        .hand(0, &["Emrakul, the Aeons Torn"])
+        .battlefield(1, &["Mountain", "Mountain", "Forest", "Forest", "Test Bear", "Sol Ring", "Mind Stone"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Emrakul, the Aeons Torn", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    settle(&mut g);
+    let emrakul = bf(&g, 0, "Emrakul, the Aeons Torn");
+    let t = g.turn().number;
+    // The extra turn: P0 again.
+    quiet_until(&mut g, |g| g.turn().number == t + 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.turn().active, 0, "an extra turn\n{}", log(&g));
+    let _ = emrakul;
+    attack_with(&mut g, &["Emrakul, the Aeons Torn"]);
+    // Annihilator 6: P1 sacrifices six of seven permanents.
+    resolve_with(&mut g, |_| None);
+    assert_eq!(g.permanents_of(1).count(), 1, "six sacrificed\n{}", log(&g));
+}
+
+/// "When Emrakul is put into a graveyard from anywhere, its owner shuffles
+/// their graveyard into their library."
+#[test]
+fn emrakul_put_into_a_graveyard_shuffles_the_graveyard_in_cr603_6a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Entomb"])
+        .graveyard(0, &["Test Bear", "Lightning Bolt"])
+        .library(0, &["Emrakul, the Aeons Torn", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Entomb", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    let e = g.card(0, "Emrakul, the Aeons Torn", Zone::Library);
+    let d = g.obj(e).def;
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::SearchLibrary) { Some(Choice::Def(d)) } else { None });
+    assert_eq!(g.graveyard_cards(0).count(), 0, "the graveyard, Emrakul and Entomb too\n{}", log(&g));
+    assert_eq!(g.count_in(0, "Emrakul, the Aeons Torn", Zone::Library), 1);
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Library), 1);
+}
+
+/// Blightsteel Colossus: infect (CR 702.90b-c: poison counters for a
+/// player, -1/-1 counters for a creature); "if Blightsteel Colossus would
+/// be put into a graveyard from anywhere, reveal it and shuffle it into its
+/// owner's library instead" (614.1a).
+#[test]
+fn blightsteel_infect_poison_and_minus_counters_cr702_90() {
+    let mut g = scen()
+        .battlefield(0, &["Blightsteel Colossus"])
+        .battlefield(1, &["Test Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let giant = bf(&g, 1, "Test Giant");
+    attack_with(&mut g, &["Blightsteel Colossus"]);
+    // P1 blocks with the Giant: 5 -1/-1 counters kill it; 6 trample over as
+    // poison.
+    for _ in 0..200 {
+        match g.kind() {
+            Some(DecisionKind::DeclareBlockers) => {
+                let o = g.pending_decision().unwrap().options.iter().find(|o| o.choice != Choice::Pass).unwrap().choice;
+                g.choose(o);
+            }
+            Some(DecisionKind::AssignDamage) => {
+                let d = g.pending_decision().unwrap();
+                let k = d.options.iter().find(|o| o.choice == Choice::Number(5)).map(|o| o.choice).unwrap_or(d.options[0].choice);
+                g.choose(k);
+            }
+            Some(DecisionKind::Priority) if g.turn().step == Step::Main2 => break,
+            Some(DecisionKind::Priority) => {
+                g.pass();
+            }
+            _ => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c);
+            }
+        }
+    }
+    assert_eq!(g.count_in(1, "Test Giant", Zone::Graveyard), 1, "-1/-1 counters\n{}", log(&g));
+    assert_eq!(g.player(1).poison, 6, "trample damage as poison\n{}", log(&g));
+    assert_eq!(g.life(1), 20, "no life lost");
+    let _ = giant;
+}
+
+/// The replacement from the library (Entomb) and from the battlefield (no
+/// "dies", CR 700.4).
+#[test]
+fn blightsteel_would_go_to_a_graveyard_is_shuffled_into_the_library_cr614_1a() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Entomb"])
+        .library(0, &["Blightsteel Colossus", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Entomb", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    pay(&mut g);
+    let b = g.card(0, "Blightsteel Colossus", Zone::Library);
+    let d = g.obj(b).def;
+    resolve_with(&mut g, |g| if g.kind() == Some(DecisionKind::SearchLibrary) { Some(Choice::Def(d)) } else { None });
+    assert_eq!(g.count_in(0, "Blightsteel Colossus", Zone::Library), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Blightsteel Colossus", Zone::Graveyard), 0);
+    assert!(g.log_lines().iter().any(|l| l.contains("shuffled into its owner's library instead")));
+}
+
+/// Protection from spells that are one or more colors (CR 702.16b): a red
+/// spell can't target Emrakul; an ability can.
+#[test]
+fn emrakul_cant_be_targeted_by_a_colored_spell_cr702_16b() {
+    let mut g = scen()
+        .battlefield(0, &["Emrakul, the Aeons Torn"])
+        .battlefield(1, &["Mountain", "Test Bear"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let emrakul = bf(&g, 0, "Emrakul, the Aeons Torn");
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(!g.has_option(g.tgt(emrakul)), "protection from coloured spells");
+    assert!(g.has_option(g.tgt(bf(&g, 1, "Test Bear"))));
+}

@@ -740,6 +740,9 @@ pub enum Ext {
     /// Exile the top n cards of `who`'s library (revealed); the controller
     /// may play them until their next end step.
     ExileTopUntilEndStep { who: Who, n: u8, kind: crate::game::PermKind },
+    /// The source, a card in a graveyard (still that object), is shuffled
+    /// into its owner's library.
+    ShuffleSourceIntoLibrary,
 }
 
 /// What a delayed trigger is about ("that card", "that much").

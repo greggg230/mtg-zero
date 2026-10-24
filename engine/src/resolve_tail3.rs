@@ -139,6 +139,15 @@ impl Game {
                 }
                 Flow::Next
             }
+            Ext::ShuffleSourceIntoLibrary => {
+                let r = f.source;
+                if self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard {
+                    let owner = self.objs[r.idx.i()].owner;
+                    self.move_card(r.idx, Zone::Library, Pos::Top);
+                    self.shuffle_library(owner);
+                }
+                Flow::Next
+            }
             _ => unreachable!("not a tail-3 op: {op:?}"),
         }
     }

@@ -165,6 +165,14 @@ impl Game {
                 }
             }
         }
+        // "When this is put into a graveyard from anywhere": the card itself,
+        // its owner's ability.
+        if ev.kind == EventKind::ToGraveyard {
+            if let Subj::Obj(r) = ev.a {
+                let o = &self.objs[r.idx.i()];
+                obs.push(Observer { r, def: o.def, controller: o.owner, spell: false });
+            }
+        }
         if ev.kind == EventKind::IsCast {
             if let Subj::Obj(r) = ev.a {
                 let o = &self.objs[r.idx.i()];
