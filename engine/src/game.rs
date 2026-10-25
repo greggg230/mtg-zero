@@ -649,6 +649,8 @@ pub(crate) const SEEN_NAMED_TAX: u16 = 2048;
 /// The top card of a library looked at any time and played (Bolas's
 /// Citadel; M7d).
 pub(crate) const SEEN_TOP: u16 = 4096;
+/// A granted "sacrifice this: add <mana>" (Rain of Filth; M7d).
+pub(crate) const SEEN_SAC_MANA: u16 = 8192;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).

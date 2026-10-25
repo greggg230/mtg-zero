@@ -214,7 +214,8 @@ impl Game {
     /// Does `viewer` know the identity of this card exactly?
     pub fn knows(&self, viewer: PlayerId, idx: CardIdx) -> bool {
         let o = &self.objs[idx.i()];
-        !(o.zone.is_hidden() || o.def == self.db.face_down_def()) || o.known & (1 << viewer) != 0
+        let hidden = o.zone.is_hidden() || (!self.face_down_ids.is_empty() && o.def == self.db.face_down_def());
+        !hidden || o.known & (1 << viewer) != 0
     }
 
     /// Is `c`'s identity hidden where it is: in a hidden zone, or a
@@ -222,7 +223,7 @@ impl Game {
     #[inline]
     pub(crate) fn hidden_obj(&self, c: CardIdx) -> bool {
         let o = &self.objs[c.i()];
-        o.zone.is_hidden() || o.def == self.db.face_down_def()
+        o.zone.is_hidden() || (!self.face_down_ids.is_empty() && o.def == self.db.face_down_def())
     }
 
     /// The partial knowledge in the game (tests, analysis).

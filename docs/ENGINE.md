@@ -1,6 +1,13 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7c tail part 2 (cascade, miracle, warp, boast, ascend, airbend and waterbend, harness,
+Status: M7d (the last cards that needed subsystems: face-down permanents and manifest dread, plot,
+an opening-hand action, shadow and void counters, reconfigure, Class levels, a granted target
+trigger with a limit, a card name chosen as it enters, a mana ability that taps another
+permanent, exert and haste mana, emerge, the top card looked at and cast for life, a granted
+sacrifice mana ability used with the land's own; 537 supported cube cards, the 9 others blocked by
+IR defects; section 31), 2026-10-24; M7c tail part 3 (face-down exile, splice, kicker on
+permanents, reanimating Auras and more; 524 supported cube cards; section 30), 2026-10-24; M7c
+tail part 2 (cascade, miracle, warp, boast, ascend, airbend and waterbend, harness,
 teamwork, additional combat phases, Yawgmoth's Will, X in activation costs and "X targets", X
 life, "triggers only once each turn"; 491 supported cube cards; section 29), 2026-10-24; M7c tail
 part 1 (mana abilities with a mana cost or a choice, exhaust, spending
@@ -456,6 +463,14 @@ at once (704.5e, section 26.4).
   face-down cards as a pile without order (the order a hand was exiled in is not observable).
   Questions about a face-down card (Shelldock Isle's "you may play it") are asked whenever the
   card is there, so whether they are asked says nothing about it.
+* **Face-down permanents** (M7d, section 31.2; manifest dread): the slot is on the battlefield
+  with the face-down definition (a 2/2 with no text, CR 708.2a), and the card it is is hidden like
+  a library card (`Game::face_down_ids`, `hidden_obj`, `ident`): its `known` bits, clouds by
+  slot, `determinize` deals it again with its owner's hidden cards for a viewer who doesn't know
+  it, never for its controller (who looked at it, 708.5); the view and the encoding show the card
+  only to a viewer who knows it (otherwise an unknown 2/2). Turned face up or leaving the
+  battlefield it is revealed (708.8-9). Bolas's Citadel's top card (31.1) is known to its
+  controller before every decision (a keyed private look).
 * **Checks** (`tests/fuzz.rs`, every ~40 actions): `determinize(to_move)` keeps the viewer's
   legal actions and its whole observable view (`Game::view_of`: public zones and objects
   named by public place, sizes, life, mana, the turn, its own hand, the cards it knows
@@ -551,8 +566,12 @@ moves into, 309.5a) and `PutOntoBattlefield` (`LIBRARY`: a card of a revealed pi
 battlefield, Throne of the Dead Three); an ability on the stack is targeted with its `STACK` id;
 ward's costs are a `YesNo` (mana, life) or a `Discard` with `PASS` (section 27). M7c tail part 3
 (section 30.6) adds no kind: splicing is a `ChooseHandCard` per spliced card (`PASS` = no more),
-hideaway's face-down pick a `PutInHand`, "odd or even" a `ChooseMode`. There are 39
-decision kinds; the context block holds 64 since layout v3 (section 22.6).
+hideaway's face-down pick a `PutInHand`, "odd or even" a `ChooseMode`. M7d (section 31.6) adds
+none either: the opening-hand action is a `ChooseHandCard` with `PASS` and an `ExileCost`,
+emerge's artifact a `Sacrifice`, manifest dread's pick a `PutOntoBattlefield`, the chosen name a
+`NameCard`; special actions (plot, turning a face-down permanent face up) use activated-ability
+ids, the Citadel's top card `LIBRARY` + 0 at priority. There are 39 decision kinds; the context
+block holds 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
@@ -702,8 +721,21 @@ Infestation; Quantum Riddler; Shelldock Isle; Sowing Mycospawn; Sword of the Mee
 Thieving Skydiver; Through the Breach; Toxic Deluge; Vicious Rivalry; Wan Shi Tong, All-Knowing;
 Winds of Abandon; Worldspine Wurm.
 
-Supported cube cards: 524 (M7c tail part 2: 491, M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
-191, M4b-1: 133, M4a: 31); creatures 201 by their front faces (M7c tail part 2: 184, M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
+Implemented (M7d, section 31): face-down permanents (CR 708: a 2/2 with no text in every rule and
+layer, a hidden identity, turning face up as a special action, revealed as it leaves) and manifest
+dread (701.62), special actions (116.2: plot 702.170, turning face up), an opening-hand action
+(103.6), shadow (702.28), "exile it with a void counter instead" (614.1a), reconfigure (702.151),
+Class levels (716), a granted "becomes the target" triggered ability limited per creature, a card
+name chosen as a permanent enters and taxes on that name, a mana ability whose cost taps another
+permanent, exert (701.39) and mana that gives haste, emerge (702.119), a random card from a
+graveyard and from a hand exiled, a top card known to its controller and cast for life, a granted
+sacrifice mana ability used together with the land's own in one payment, a mandatory graveyard
+exile on a permanent spell. New in M7d (13): Abhorrent Oculus; Anointed Peacekeeper; Arena of
+Glory; Bolas's Citadel; Crabomination; Dauthi Voidwalker; Does Machines; Gemstone Caverns; Lion
+Sash; Nadu, Winged Wisdom; Pillage the Bog; Rain of Filth; Urza, Lord High Artificer.
+
+Supported cube cards: 537 (M7c tail part 3: 524, M7c tail part 2: 491, M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
+191, M4b-1: 133, M4a: 31); creatures 208 by their front faces (M7c tail part 3: 201, M7c tail part 2: 184, M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
 M7b part 1: 113, M4b-2: 20); planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in
 M7b part 3b (28): Boseiju, Who Endures; Brain Freeze; Caves of Chaos Adventurer; Ertai
 Resurrected; Fallen Shinobi; Fanatic of Rhonas; Feywild Caretaker; Forensic Gadgeteer; From the
@@ -781,18 +813,15 @@ Reprieve, Sear, Simian Spirit Guide, Sol Ring, Stern Scolding, Swords to Plowsha
 Caryatid, the six Talismans, Time Warp, Unholy Heat, Vindicate, Voltaic Key, Wheel of
 Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED`.
 
-Not yet (later milestones; each is a blocker in the support report, never a silent no-op; the
-cube cards still blocked are listed in 28.9, 29.8 and 30.8): face-down permanents (manifest,
-manifest dread, morph, disguise: CR 708), battles, meld, flip cards, convert, "cast
-transformed", read ahead, fuse, Class levels (716), reconfigure (702.151), emerge, plot, exert,
-opening-hand actions (103.6), dungeons other than Undercity ("venture into the dungeon"), ward that
-discards at random or that an Aura or Equipment grants, replacement and prevention effects beyond
-the ones above (void counters, Dauthi Voidwalker), shadow, Auras other than bestowed and
+Not yet (later milestones; each is a blocker in the support report, never a silent no-op; no
+cube card is blocked by them since M7d: the 9 cube cards still blocked are IR defects, 31.9):
+face-down permanents other than manifested ones (morph, disguise, cloak; face-down spells),
+battles, meld, flip cards, convert, "cast transformed", read ahead, fuse, dungeons other than
+Undercity ("venture into the dungeon"), ward that discards at random or that an Aura or Equipment
+grants, replacement and prevention effects beyond the ones above, Auras other than bestowed and
 reanimating ones (enchant creature, land, artifact), granted triggered abilities other than an
-Equipment's with a limit per turn (Nadu), a card name chosen as a permanent enters (Anointed
-Peacekeeper), a top card its owner may look at any time and plays from the library (Bolas's
-Citadel), mana abilities whose cost taps another permanent (Urza), mana that gives haste to what
-it is spent on, a random card from a hand, the play/draw choice.
+Equipment's and the "becomes the target" one of 31.1, abilities granted to permanents other than
+Rain of Filth's mana ability, the play/draw choice.
 
 Deliberate simplifications and limits (each is small and local to change):
 
@@ -978,6 +1007,12 @@ Deliberate simplifications and limits (each is small and local to change):
   opponent; Time Vault's skip as a replacement, 614.10; Mana Vault's draw-step "if" checked again
   on resolution, 603.4; Goblin Welder's pair checked at resolution, 608.2b); the Python engine's
   handling of these cards was not compared. Its simplifications are listed in 28.8.
+* M7d (section 31): the 13 cards follow their Oracle text and the CR. Their Python handling was
+  not compared card by card; where it was read, it agrees on manifest dread's look at the top two
+  (one card left: that one is manifested), tags haste mana per mana in the pool as here, and skips
+  copies of spells for Dauthi Voidwalker's replacement as here. The faults of 31.5 (an ability's X
+  counting its own tapped source, more waiting triggers than the action layout's slots, Rain of
+  Filth's exponential feasibility) are engine-side. The simplifications are listed in 31.7.
 * M7c tail part 3 (section 30): the 33 cards follow their Oracle text and the CR. Where the
   Python engine's model is known to differ: it gates "if you cast it" on a cast from hand (the
   class's name; here "if you cast it", from anywhere, as its docstring and the Oracle text say),
@@ -1046,6 +1081,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_costs.rs` | M7b part 3b: 601.2f (kicker and X before reductions), 118.9d (a reduction on an alternative cost), 108.2 (a token in a graveyard isn't a card) |
 | `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
 | `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
+| `tests/cards_m7d.rs` | M7d: the 13 cards against their Oracle text (26 tests, the CR cited in each name: 702.170, 103.6, 106.1, 702.28, 614.1a, 702.151, 716, 603.2e, 601.2f, 605.1a, 302.6, 601.2a, 701.39, 106.6, 702.119, 118.9, 701.21, 601.2g, 601.2b, 701.62, 708.2, 708.5, 701.40b, 708.9); face-down permanents and the Citadel's top card hidden from the opponent in every world it samples, never for their controller; the encoding of a face-down permanent the same in every world of each viewer |
 | `tests/cards_m7c_tail3.rs` | M7c tail part 3: the 33 cards against their Oracle text (48 tests, the CR cited in each name: 107.3, 702.96, 701.14, 305.2, 601.2c, 603.12, 702.16j, 603.4, 702.44a, 603.6a, 702.86a, 702.16b, 702.90, 614.1a, 702.33c, 702.33d, 107.4c, 603.7, 702.47, 706, 702.32a, 607.2a, 702.171, 301.5, 700.2, 701.46a, 509.1b, 509.1h, 406.3, 702.75a, 303.4a, 608.3a, 514.3a); face-down cards hidden from the other player in every world it samples, never for their owner; Wizard's Rockets's IR defect |
 | `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (38 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), the search of Green Sun's Zenith on a custom card, the two IR defects; Bilbo's cast of a flashback card for the cost its offer was checked for |
 | `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (31 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4, 118.9a), Chromatic Star's IR defect; the state the run mtg3 crashed in (Malcolm's free cast of Echo of Eons, section 15) |
@@ -1088,7 +1124,10 @@ found on the way, all fixed (28.7). M7c tail part 2: 20,000 games over the 491 c
 (72 s); four faults found on the way, all fixed (29.5). M7c tail part 3: 20,000 games over the 524
 cards, no failure (69-70 s); the faults found on the way are 30.5's and the face-down view's (30.2).
 The fuzzer's view, known-card and information-set checks cover the face-down cards (`view_of`
-lists them per owner, by identity only where the viewer knows them).
+lists them per owner, by identity only where the viewer knows them). M7d: 20,000 games over the
+537 cards and the custom cards (Test Manifester puts face-down permanents into many games), no
+failure (131 s; 5.6 million options completed); four faults found on the way, all fixed (31.8). The known-card check also compares
+a face-down permanent's card (`ident`).
 
 **Option completion** (M7c, branch `m7c-payfix`). Sections 6 and 18 promise that a cast, an
 activation or an alternative cost is offered only if it can be completed; the fuzzer checks it
@@ -1242,6 +1281,18 @@ B (+24: the face-down list); clone + determinize 1.55-1.82 us (main 1.51-1.69), 
 alone 0.86-0.88 us (main 0.84-0.89). On the full pool: 5.59-5.67 us per decision (832,306
 decisions), 848-860 games/s; `Game::clone` 1.30-1.32 us; clone + determinize 1.72-1.90 us.
 Fuzzer 20,000 games: 69-70 s.
+
+**M7d** (537 cards, branch `m7d-last`): pinned the same way, interleaved with main's code (0577e06)
+in three rounds, with a training run using the GPU and about eight threads on the machine. On
+main's pool (`POOL_EXCLUDE` leaves the 13 new cards and Test Manifester out: the same games,
+832,306 decisions both) 5.53-5.60 us per decision against main's 5.42-5.49, pairs +0.9% to +3.3%
+(858-870 games/s against 875-887); `Game::clone` 1.24-1.27 us (main 1.27), `size_of::<Game>()`
+1,392 B (+24: the face-down identities); clone + determinize 1.77-1.96 us (main 1.66-1.72). The
+new rules are looked at only in games with such a card (`SEEN_VOID`, `SEEN_NAMED_TAX`,
+`SEEN_TOP`, `SEEN_SAC_MANA`; the knowledge accessors check the face-down list's emptiness
+first). On the full pool: 5.56-5.70 us per decision (838,909 decisions), 836-857 games/s;
+`Game::clone` 1.28-1.31 us; clone + determinize 1.65-1.79 us. Fuzzer 20,000 games: 131-137 s (with
+the option-completion check; 125-137 s on main, section 15).
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -3979,3 +4030,208 @@ against 845,409 (a few games differ by 30.5's fixes); `Game::clone` 1.18-1.25 us
 `size_of::<Game>()` 1,368 B (+24: the face-down list); clone + determinize 1.55-1.82 us against
 1.51-1.69. On the full pool: 5.59-5.67 us per decision (832,306 decisions), 848-860 games/s;
 `Game::clone` 1.30-1.32 us; clone + determinize 1.72-1.90 us.
+
+## 31. The last cards that needed subsystems (M7d)
+
+Branch `m7d-last`, from main at 0577e06 (524 cards): the 13 cube cards left that each needed an
+engine subsystem. All 13 came through: 537 supported (208 creatures by their front faces); the 9
+cards still blocked are IR defects (31.9). Code: `lower/effect_m7d.rs` (lowering),
+`resolve_m7d.rs` (the `Ext::M7d` instructions, special actions, face-down permanents, the opening-
+hand action, emerge, the Citadel's top card, Rain of Filth's sources), changes in `pay.rs`,
+`hidden.rs`, `game.rs`, `cast.rs`, `activate.rs`, `flow.rs`, `layers.rs`, `triggers.rs`,
+`lower/printing.rs`, `lower/activated.rs`, `lower/statics.rs`, `lower/trigger.rs`,
+`az/encode.rs`, `az/bots.rs`; tests `tests/cards_m7d.rs` (26 tests, the CR cited in each name) and
+the custom card Test Manifester ("when this enters, manifest dread": the fuzzer meets face-down
+permanents in many games). The work went from the cheapest card to the largest: plot, the
+opening-hand action, shadow and the void replacement, reconfigure, Class levels, Nadu, the chosen
+name, Urza, exert, emerge, the Citadel, Rain of Filth, face-down permanents.
+
+### 31.1 The cards
+
+| Card | What it needed | Decisions |
+|---|---|---|
+| Pillage the Bog | plot (702.170a): a special action from hand (116.2k), offered as the card's hand ability (`ActivatedDef::special`, `HAND_ABILITY` id; no stack: `Task::Special` after its mana); exiled with a permission to cast it without paying its mana cost on a later turn (`PERM_LATER`; a sorcery's timing, the lowering checks it is one); "twice the number of lands you control" (`Formula:Scaled`, `Amount::CountTypesTimes`) | `PayMana`, `PutInHand` |
+| Gemstone Caverns | an opening-hand action (103.6): `Task::Opening` after the mulligans, the starting player first; asked whenever the player's deck has such a card (open decklists), `ChooseHandCard` with `PASS`; then the luck counter and `ExileCost` for the card exiled from hand; `ManaProd::IfCounter` ({C}, or any colour with a luck counter, as the ability resolves; `produces_with_counter` checked against it) | `ChooseHandCard`, `ExileCost` |
+| Dauthi Voidwalker | shadow (702.28b, `Kw::Shadow`); "if a card would be put into an opponent's graveyard from anywhere, instead exile it with a void counter on it" (614.1a in `move_card`: a card, not a token or a copy of a spell; decided before the events, so it doesn't die; after Yawgmoth's Will's; a Voidwalker leaving in the same simultaneous move still applies; `SEEN_VOID`); `M7d::ExiledWithCounterPlayFree` (a free play permission this turn) | `ChooseExiled` |
+| Lion Sash | reconfigure (702.151): `CardDef::reconfigure` (attached, not a creature: `types_of`, 702.151b; it may equip while a creature, 301.5c), the two abilities checked against `reconfigure_cost`, unattach only while attached (`Cond::SourceAttached`; `activation_ready` now gives "activate only if" its source); `Mod::PtPerSourceCounter`; `M7d::ExileTargetCounterIfPermanent` | `Target` |
+| Does Machines | Class levels (716): each level's printing is a face (`Face::Level`, `CardDef::levels`, `class_level`) with the Class's abilities at that level; gaining a level turns that face up (`set_face`: the same object, as a transform); `EventKind::ClassLevel`, `TrigPred::Level`; `M7d::BecomeCreatureIfNot` (a 0/0 Robot creature in addition, forever, if it isn't one) | `Target` |
+| Nadu, Winged Wisdom | a granted "whenever this creature becomes the target of a spell or ability" triggered ability: the granter's own trigger for its controller's creatures that have the granted abilities (`TrigPred::Granted`, as granted ward, 27.3); "this ability triggers only twice each turn", per creature (`TrigPred::TimesPerSubject`, `Mark::Triggered`); `M7d::RevealTopLandElseHand` | - |
+| Anointed Peacekeeper | "as this enters, look at an opponent's hand, then choose any card name" (`AsEnters`: the look once, `Mark::LookedHand`, then `NameCard` over the names of the opponent's cards, open decklists: the same in every world; `PASS` = a name of no such card; `Mark::ChosenName`); "spells your opponents cast with the chosen name cost {2} more" (`cost_with`, 601.2f) and "activated abilities of sources with the chosen name cost {2} more to activate unless they're mana abilities" (`act_mana_x`, anyone's, with the increases; a special action isn't an ability); `SEEN_NAMED_TAX` | `NameCard` |
+| Urza, Lord High Artificer | a mana ability whose cost taps another permanent ("tap an untapped artifact you control: add {U}"; the IR's `tap_permanent_you_control`): each untapped artifact is a source of {U} while paying (`pay::TAP_FOR`, its `MY_PERM` id; 31.4); `M7d::ShuffleExileTopPlayFree` (a free play permission this turn); the Construct token (registered) | `PayMana` |
+| Arena of Glory | exert as a cost (701.39: `Cost::exert`, `Mark::Exerted`; its controller's next untap step skips it); mana that gives haste (`ManaAbility::haste`, `ManaPool::haste`: its {R}{R}, made with priority (28.1), is spent first on a creature spell and last on anything else; `Mark::HasteMana` gives the permanent haste until end of turn) | - |
+| Crabomination | emerge (702.119): `AltCost::emerge`; `Task::Emerge` chooses the artifact before the cost is determined (601.2f; `StackItem::noted`), the cost is reduced by its mana value and leaves out a source that sacrifices it, and it is sacrificed after the mana (601.2h); `M7d::OppExilesThreeMayCastOne`: the top card (keyed, forced), a random graveyard card (a public chance key), a random hand card (the forced hand pick of a random discard), then a free cast of one of them (608.2g) | `ChooseAltCost`, `Sacrifice`, `ChooseExiled` (`PASS` = none) |
+| Rain of Filth | `Mod::GainSacMana` on the lands its controller controls (locked in, 611.2c); `pay::SAC_FOR`: the granted ability used together with the land's own (31.4) | `PayMana`, `ChooseMana` |
+| Bolas's Citadel | "you may look at the top card of your library any time" (`Game::look_tops` before every decision: a private look, keyed and forced, `SEEN_TOP`); "play lands and cast spells from the top of your library ... pay life equal to its mana value rather than pay its mana cost" (`CastFrom::LibraryTop`: an alternative cost, X 0, cost increases still apply; `LIBRARY` + 0 at priority); "sacrifice ten nonland permanents" (the IR range raised to 10) | `Sacrifice` x10 |
+| Abhorrent Oculus | face-down permanents (31.2) and manifest dread (701.62a: `M7d::ManifestDread`, a look at the top two, the face-down pick, the other into the graveyard; one card left: that one); "as an additional cost, exile six cards from your graveyard" (a mandatory additional cost, the only one allowed on a permanent card) | `PutOntoBattlefield`, `ChooseGraveyardCard` |
+
+### 31.2 Face-down permanents (CR 708)
+
+A face-down permanent's slot has the database's face-down definition (`CardDb::face_down_def`,
+appended after every card, token and face): a 2/2 creature with no name, colour, mana cost,
+subtypes or abilities (708.2a). Every rule and every layer reads it like any definition: its
+power and toughness with counters and pumps, combat, targeting, copies of it (707.2: a 2/2 with
+no name), "a creature entered", the legend rule (no name), Containment Priest's replacement (it
+isn't cast). The card it is waits in `Game::face_down_ids` (slot, definition).
+
+Its identity is hidden like a library card's (section 10): `Game::hidden_obj` (a hidden zone or a
+face-down permanent), `knows` (its `Obj::known` bits keep their meaning on the battlefield),
+`ident` / `set_ident` (the card it is; what knowledge and `determinize` read and write). Entering
+face down is a move between hidden places (`knowledge_moves`: a cloud whose domain held the card
+keeps it by its slot, as for face-down exile, 30.2; no reveal key); `learn`, `reveal`, `scramble`,
+`tidy_clouds`, `domain` and `check_knowledge` treat the slot as hidden; `determinize` deals a
+face-down permanent the viewer doesn't know again with its owner's other hidden cards
+(`unknown_to_in`), never for a player who knows it. Its controller knows it (708.5: the look of
+manifest dread, and `change_control` gives the new controller a private look). The view
+(`view_of`) adds, after the permanent, the card it is for a viewer who knows it; the encoding
+gives the permanent's card code the card's identity for a viewer who knows it and the face-down
+definition's (`UNKNOWN`, a 2/2 creature) otherwise, and puts the opponent's unknown face-down
+permanents in `OPP_HIDDEN` (`perm_identity`). Nothing in layout v3 changed.
+
+Turning it face up (708.7, 701.40b: a manifested creature card, for its mana cost; X 0) is a
+special action of its controller any time they have priority: the face-down definition's one
+activated entry (`Special::TurnFaceUp`, `ACTIVATE` + slot * 4), offered when the cost can be paid
+(only its controller knows whether, so only its controller's own decisions depend on it). It is
+the same permanent (708.8: `set_face`, counters, damage and effects stay; no enter abilities); its
+identity becomes public (`knowledge_leaves`, a public reveal key). Leaving the battlefield (708.9)
+it leaves as a face-down 2/2 (its leave events and last known information see that, so its card's
+"when this dies" doesn't trigger), then is revealed and is its card in the new zone
+(`move_card`, `Game::unface`, with the knowledge bits it had: the fuzzer found the first version
+reading them after the move had reset them).
+
+### 31.3 Special actions (CR 116.2)
+
+`ActivatedDef::special` marks a special action the engine offers as an activated ability: plot
+(a hand ability) and turning a face-down permanent face up (an ability of the face-down
+definition). `begin_activate` pays its mana (`special_mana`: plot's cost, or the face-down card's
+mana cost) and then `Task::Special` does it at once, without the stack; the player keeps
+priority. It isn't an ability: Zirda's and Anointed Peacekeeper's ability costs don't apply,
+"activated abilities can't be activated" locks don't stop turning a card face up, and it isn't
+counted against the 31-activations cap of 29.2.
+
+### 31.4 Payments: another permanent's tap, two abilities of one land
+
+Section 18's payment lets each card contribute one way (its mana abilities tap, sacrifice or
+exile it, so they are alternatives). Two kinds of sources join it:
+
+* **Urza** (`pay::TAP_FOR`): each untapped artifact its controller controls is a source of {U}
+  while paying, picked by its `MY_PERM` id; activating it taps the artifact (not "tapped for
+  mana", 106.12a: no Badgermole bonus). An artifact with its own mana ability has both as
+  alternatives (both tap it); improvise doesn't offer an artifact Urza can tap (the same tap, and
+  {U} pays for {1} too). `has_mana_ability` counts an artifact Urza can tap, so the costs that tap
+  creatures besides the mana (teamwork, "tap an untapped <type>") never compete with the payment.
+* **Rain of Filth** (`pay::SAC_FOR`): the question was whether one source may contribute two
+  abilities whose costs don't conflict. It may (601.2g lets a player tap a land for mana and then
+  sacrifice it for {B} in one payment), and the one-way-per-card rule stays: the land's ways are
+  its own {T} ability, the granted sacrifice alone, or both, and "both" is one more way of the
+  card. The granted ability is one class per land: a several-mana class whose units are its own
+  {T} mana and the sacrifice's {B} (its productions: {B}, or one of its {T} mana plus {B}; the
+  excess stays in the pool as for any several-mana source), or for a tapped land a one-mana class;
+  its id is `ACTIVATE` + slot * 4 + the land's own number of abilities. Activating it activates the
+  {T} ability first, then sacrifices the land. Only the land's {T} abilities of one mana without a
+  life, damage or spending restriction are combined (31.7).
+
+The feasibility search (`cands`) branched on every card with several ways; a board of Rain lands
+made it exponential (seconds per decision, found by the fuzzer's timing). A card whose ways use no
+budget and one of which makes every other's units is now that way's units alone (more units never
+make a cost unpayable), so the search doesn't branch on it.
+
+### 31.5 Rules added and fixed on the way
+
+* **An activated ability's X counted its own source** (`choose_x`): with Urza, the Candelabra of
+  Tawnos (an artifact) could be tapped for {U} while its own {T} was the cost; the X is now
+  computed without the source when the cost taps it (the option-completion check found it, seed
+  1012).
+* **More distinct waiting triggers than `TRIGGER` slots** (seventeen "whenever you discard" triggers
+  as a player discarded at cleanup; a crash in random play, found by the speed measurement): the
+  first sixteen are offered, the others come next.
+* `activation_ready` evaluates "activate only if" with its source (`cond_holds_from`).
+* An additional cost on a permanent card is allowed for the graveyard exile (Oculus).
+* The `Game::marks` facts added: `Triggered`, `LookedHand`, `ChosenName`, `Exerted`, `HasteMana`.
+* `Game::seen` bits added: `SEEN_VOID`, `SEEN_NAMED_TAX`, `SEEN_TOP`, `SEEN_SAC_MANA` (the new
+  rules are looked at only in games with such a card).
+
+### 31.6 Decisions, tasks, encoding, the bot
+
+No new decision kind (39 still). New contexts for existing kinds: the opening-hand action
+(`ChooseHandCard` with `PASS`, then `ExileCost`), emerge's artifact (`Sacrifice`, before the
+mana), Dauthi's card (`ChooseExiled`) and Crabomination's free spell (`ChooseExiled` with `PASS`),
+the chosen name (`NameCard`), manifest dread's pick (`PutOntoBattlefield`), Rain's production
+(`ChooseMana`). New action meanings: plot is the card's `HAND_ABILITY` id; the Citadel's top card
+is `LIBRARY` + 0 at priority; turning a face-down permanent face up is its `ACTIVATE` + 0; Rain's
+ability `ACTIVATE` + its number of abilities; an artifact Urza taps its `MY_PERM` id. New tasks:
+`Special` (asks nothing), `Opening` (task code 16, as `AsEnters`), `Emerge` (12, as `PayCosts`);
+every new instruction is `Ext::M7d` (op code 37).
+
+Layout v3 is unchanged (31.2 for face-down permanents). Not encoded (no spare floats used): a
+pool's haste mana (the pool's {R} count includes it), exerted, a Class's level (its face's
+descriptor shows a face other than the front is up), the chosen name, a plotted card's permission
+(it is in exile), the void counters (named counters), Nadu's trigger counts, Rain's granted
+ability (its `ACTIVATE` option is encoded while paying). New token kinds to register: none (Urza's
+Construct, `Construct 0/0 C ac Construct`, is registered).
+
+The heuristic bot stays legal for every decision (the long test: 4,000 games, all 39 kinds). It
+plots a card it doesn't cast in its second main phase, turns a face-down creature face up in its
+main phase when the card is bigger than a 2/2, gains Class levels in its main phases, reconfigures
+Lion Sash only with two or more counters on it, begins the game with Gemstone Caverns and exiles
+its worst card, names the opponent's costliest card for Anointed Peacekeeper, casts the costliest
+of Crabomination's cards, and casts from the top of its library with the Citadel only below half
+its life. Measured (`strength_against_the_old_policy_and_random`, 2,000 games each): heuristic vs
+random 94.8% +- 0.5, vs `HeuristicV1` 61.6% +- 0.8.
+
+### 31.7 Simplifications (differences from the CR)
+
+* Arena of Glory's mana is made with priority only (28.8) and spent by the pool's rule: its haste
+  mana first on a creature spell, last on anything else (the player chooses which mana pays, 106.4;
+  that order is never worse for them).
+* Rain of Filth's granted ability is used while paying only (as every mana ability, 13); a land's
+  {T} ability with a life, damage or spending condition is not combined with it (only the
+  sacrifice alone); a land with four abilities of its own doesn't get the id (none in the cube).
+* Emerge's artifact is chosen right after the alternative cost, before modes, X and targets (the CR
+  determines it with the total cost, 601.2f; the cube's emerge card has no spell targets).
+* Bolas's Citadel offers the top card's front face only (a split card is not offered); the top
+  card is known before every decision, not between two of them.
+* Anointed Peacekeeper names among its opponent's cards (any card name in the CR: a name of its
+  controller's own cards would tax only that player's own abilities).
+* Nadu's limit is counted per creature and granting definition (two Nadus would share one count;
+  each grants its own ability in the CR; Nadu is legendary).
+* "Loses all abilities" also takes the face-down definition's turn-face-up action (a special
+  action in the CR); a copy of a Class doesn't gain levels; morph, disguise and cloak are not
+  built; a face-down spell can't be cast.
+* More distinct waiting triggers than 16 offer the first 16 for the next (31.5).
+* Dauthi Voidwalker's replacement applies after Yawgmoth's Will's (the card's owner chooses the
+  order, 616.1; the Will's denies the void counter).
+
+### 31.8 Hidden information and fuzzing
+
+Face-down permanents (31.2): hidden from the opponent in every world it samples, never resampled
+for their controller (tests: the view, the encoding and the identity over 40 worlds of each
+player). The Citadel's top card is known to its controller only (a test over 30 worlds). Anointed
+Peacekeeper's look is private (`KEY_LOOK` per card); Crabomination's random graveyard card is a
+public chance key and its random hand card the keyed reveal of a random discard; manifest dread's
+look is private and the card put into the graveyard is revealed. The fuzzer's known-card check
+also compares `ident`.
+
+Fuzzing (20,000 games over the 537 cards and the custom cards with Test Manifester): no failure
+(131-137 s; 5,624,843 options completed, 6.3 million decisions after them). Faults found on the way, all fixed: the face-down knowledge bits read after the move
+(a cloud lost its card; seed 2150); an activated ability's X counting its source (seed 1012);
+Rain of Filth's exponential feasibility (one game took 31 s: seed 1784); seventeen waiting
+triggers (31.5).
+
+### 31.9 IR
+
+No new defect. All 13 cards' IR matches their Oracle text; representational notes in
+docs/ir_defects.md ("Checked and not defects"). Still blocked, all by IR defects (`lower::IR_DEFECTS`,
+not in scope): Ajani, Nacatl Pariah; Celestial Colonnade; Creeping Tar Pit; Minsc & Boo; Strip
+Mine; Chromatic Star; Forth Eorlingas!; Green Sun's Zenith; Wizard's Rockets.
+
+### 31.10 Measurements
+
+Speed (pinned to logical CPU 2, `tests/perf.rs`, interleaved with main's code 0577e06 in three
+rounds, a training run using the GPU and about eight threads on the machine): on main's pool
+(`POOL_EXCLUDE` leaves the 13 new cards and Test Manifester out: the same games, 832,306 decisions
+both) 5.53-5.60 us per decision against main's 5.42-5.49 (858-870 games/s against 875-887; pairs
++0.9% to +3.3%); `Game::clone` 1.24-1.27 us against 1.27; `size_of::<Game>()` 1,392 B (+24: the
+face-down identities); clone + determinize 1.77-1.96 us against 1.66-1.72. On the full pool:
+5.56-5.70 us per decision (838,909 decisions), 836-857 games/s; `Game::clone` 1.28-1.31 us; clone +
+determinize 1.65-1.79 us. The new rules are looked at only in games with such a card (31.5's
+`SEEN_*` bits); the knowledge accessors check the face-down list's emptiness first.

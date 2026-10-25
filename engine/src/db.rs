@@ -1104,6 +1104,13 @@ impl CardDef {
             | (if self.void_exile.is_some() { crate::game::SEEN_VOID } else { 0 })
             | (if self.named_spell_tax > 0 || self.named_ability_tax > 0 { crate::game::SEEN_NAMED_TAX } else { 0 })
             | (if self.look_top || self.play_top_life { crate::game::SEEN_TOP } else { 0 })
+            | (if self.spell.as_ref().is_some_and(|ab| {
+                ab.program.iter().any(|op| matches!(op, Op::Ext(crate::program::Ext::Apply { mods, .. }) if mods.iter().any(|m| matches!(m, Mod::GainSacMana(_)))))
+            }) {
+                crate::game::SEEN_SAC_MANA
+            } else {
+                0
+            })
             | (if self.trig_mask & (1u64 << EventKind::CountersAdded as u32 | 1u64 << EventKind::CardsPutIntoLibrary as u32 | 1u64 << EventKind::AttackersUnblocked as u32) != 0 {
                 crate::game::SEEN_RARE_EVENTS
             } else {

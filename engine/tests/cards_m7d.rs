@@ -341,9 +341,9 @@ fn dauthi_voidwalker_exiles_opponents_cards_with_void_counters_and_plays_one_fre
 }
 
 /// A spell an opponent casts goes to exile with a void counter as it
-/// resolves; a discarded card too (CR 614.1a: "from anywhere").
+/// resolves (CR 614.1a: "from anywhere").
 #[test]
-fn dauthi_voidwalker_exiles_opponents_spells_and_discards_cr614_1a() {
+fn dauthi_voidwalker_exiles_opponents_spells_cr614_1a() {
     let void = named("void");
     let mut g = scen()
         .battlefield(1, &["Dauthi Voidwalker"])
@@ -1018,4 +1018,29 @@ fn a_face_down_permanent_dies_revealed_cr708_9() {
     assert_eq!(g3.count_in(0, "Test Dies Draw", Zone::Graveyard), 1, "revealed, its card\n{}", log(&g3));
     assert_eq!(g3.player(0).hand.len(), hand, "no 'when this dies' of the card: it died face down");
     assert!(g3.knows(1, dd));
+}
+
+/// Bolas's Citadel's top card is its controller's to know (determinize keeps
+/// it for them, deals it again for the opponent, whose view doesn't change).
+#[test]
+fn bolas_citadel_top_card_is_known_to_its_controller_only() {
+    let g = scen()
+        .library(0, &["Test Giant", "Forest", "Lightning Bolt", "Test Bear"])
+        .battlefield(0, &["Bolas's Citadel"])
+        .at(Step::Main1, 0)
+        .start();
+    let top = *g.player(0).library.last().unwrap();
+    let giant = db().id("Test Giant").unwrap();
+    let mut other = false;
+    for s in 0..30u64 {
+        let mut d0 = g.clone();
+        d0.determinize(0, &mut engine::rng::Rng::new(s));
+        assert_eq!(d0.ident(top), giant);
+        assert_eq!(d0.pending_decision().unwrap().options, g.pending_decision().unwrap().options);
+        let mut d1 = g.clone();
+        d1.determinize(1, &mut engine::rng::Rng::new(s));
+        assert_eq!(d1.view_of(1), g.view_of(1));
+        other |= d1.ident(top) != giant;
+    }
+    assert!(other, "the opponent's worlds deal it again");
 }

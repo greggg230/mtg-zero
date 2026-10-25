@@ -68,7 +68,7 @@ impl Game {
 
     /// Set slot `c`'s identity (`determinize`): a face-down permanent's card.
     pub(crate) fn set_ident(&mut self, c: CardIdx, d: crate::ids::DefId) {
-        if self.objs[c.i()].def == self.db.face_down_def() {
+        if !self.face_down_ids.is_empty() && self.objs[c.i()].def == self.db.face_down_def() {
             if let Some(x) = self.face_down_ids.iter_mut().find(|x| x.0 == c) {
                 x.1 = d;
                 return;

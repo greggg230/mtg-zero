@@ -436,7 +436,7 @@ impl Game {
         // Granted "sacrifice this: add <mana>" abilities (Rain of Filth):
         // several-mana classes (the sacrifice alone, or its own tap ability
         // first), one per permanent.
-        if !self.effects.is_empty() && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
+        if self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
             for c in self.permanents_of(p) {
                 if Some(c) == exclude {
                     continue;

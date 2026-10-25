@@ -443,6 +443,20 @@ once each turn."
 
 ## Checked and not defects
 
+* M7d, the 13 cards (ENGINE.md 31): the IR matches the Oracle text. Representational notes, each
+  read together with what it summarises and checked to agree: Gemstone Caverns'
+  `produces_with_counter` (its mana ability's `IfConditionElse` on `SourceHasCounter`); Lion
+  Sash's `reconfigure_cost` (its two abilities, `ReconfigureAttach` and `ReconfigureUnattach`, both
+  sorcery-speed) and `equipment_bonus_per_own_counter` as `[counter, p, t]`; Does Machines'
+  `class_levels` (each level's whole printing, with the card's name, cost and types, its
+  `GainClassLevel` default level 2); Abhorrent Oculus's `ManifestDread.count` default 1; Urza's
+  "tap an untapped artifact you control" as `tap_permanent_you_control` with
+  `tap_permanent_type: "Artifact"`; Nadu's grant as `granted_becomes_target_effect` with
+  `granted_trigger_limit_per_turn: 2` on a "creatures you control" scope; Pillage the Bog's
+  `Scaled { factor: 2 }` count; Arena of Glory's `exert_self` and
+  `grants_haste_to_creature_spell`; Crabomination's `emerge_sacrifice_type: "Artifact"` and
+  `TargetOpponentExilesThreeMayCastOneFree` (the three exiles and the free cast are the class's).
+
 * `CardPrinting.kicker_cost(not "if kicked ... else")` (Batroc the Leaper, Sowing Mycospawn,
   Thieving Skydiver): the IR states kicker through the `ThisSpellWasKicked` trigger predicate and
   multikicker, which the engine doesn't lower yet; the IR matches the Oracle text (apart from #5
@@ -456,7 +470,7 @@ once each turn."
   `transform_back_face`; the two are equal (the lowering checks it) and each carries the back
   face's own mana cost, as it should for a modal face (CR 712.8f).
 * `ActivationCost.sacrifice_n_nonland_permanents(out of range 10)` (Bolas's Citadel): 10 is the
-  Oracle text; the range is the engine's.
+  Oracle text; the range was the engine's (10 since M7d).
 * Planeswalker `ActivationCost.loyalty` is the signed loyalty *cost* (a "+1" ability is
   `loyalty: -1`); consistent over all 23 planeswalker faces and documented in
   `effects/base.py:~540-560`.
