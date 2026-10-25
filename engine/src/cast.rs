@@ -2119,7 +2119,7 @@ impl Game {
             for c in late {
                 if let Some(cl) = classes.iter().find(|cl| cl.sac_self && cl.members.iter().any(|s| s.card == c)) {
                     let s = *cl.members.iter().find(|s| s.card == c).unwrap();
-                    pm.forced.push(s);
+                    pm.forced.push((s, true));
                 }
             }
         }
@@ -2133,6 +2133,7 @@ impl Game {
         let mut taps_first = false;
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
+            pm.forced.extend(self.exile_sources(p, card, extra, None));
             if extra.crew > 0 {
                 taps_first = true;
             } else {

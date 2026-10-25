@@ -379,3 +379,29 @@ fn cr_601_2h_x_life_is_paid_after_the_mana_abilities() {
     assert!(tomb < life, "{}", log(&g));
     assert_eq!(g.player(0).life, 4);
 }
+
+/// CR 601.2g-h: "exile five other cards from your graveyard" (Uro's escape)
+/// is paid after the mana abilities: a Lotus Petal sacrificed for the mana is
+/// one of the five. The engine counted the graveyard before: not castable.
+#[test]
+fn cr_601_2h_a_lotus_petal_sacrificed_for_mana_pays_an_escape_exile() {
+    let mut g = scen()
+        .graveyard(0, &["Uro, Titan of Nature's Wrath", "Island", "Island", "Island", "Island"])
+        .battlefield(0, &["Lotus Petal", "Tropical Island", "Tropical Island", "Tropical Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let uro = g.card(0, "Uro, Titan of Nature's Wrath", Zone::Graveyard);
+    let petal = bf(&g, 0, "Lotus Petal");
+    assert!(g.has_option(Choice::Cast(uro)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(uro));
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(petal).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Island", Zone::Exile), 4);
+    // Three cards: not castable.
+    let g = scen()
+        .graveyard(0, &["Uro, Titan of Nature's Wrath", "Island", "Island", "Island"])
+        .battlefield(0, &["Lotus Petal", "Tropical Island", "Tropical Island", "Tropical Island"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(!g.has_option(Choice::Cast(g.card(0, "Uro, Titan of Nature's Wrath", Zone::Graveyard))));
+}

@@ -490,7 +490,10 @@ impl Game {
                 return false;
             }
         }
-        if cost.exile_graveyard > 0 && cost.exile_graveyard as usize > self.graveyard_cards(p).filter(|&c| c != card).count() {
+        // (Mana sources that sacrifice themselves are cards in the graveyard
+        // by then: activated first, CR 601.2g-h.)
+        let short = self.exile_short(p, card, cost);
+        if short > 0 && short > self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude).count() {
             return false;
         }
         if mana.is_zero() {
@@ -635,13 +638,41 @@ impl Game {
         let Some((p, card, ad)) = self.act_item(id) else { return };
         let x = self.item_index(id).map_or(0, |pos| self.stack[pos].x);
         let mana = self.act_mana_x(p, card, ad, x);
-        if mana.is_zero() {
+        if mana.is_zero() && self.exile_short(p, card, &ad.cost) == 0 {
             return;
         }
         let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
         pm.waterbend = ad.cost.waterbend;
+        pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
         self.agenda.push(Task::PayMana(Box::new(pm)));
+    }
+
+    /// How many more cards "exile n cards from your graveyard" needs than
+    /// the graveyard has (`card`, the cost's, left out).
+    pub(crate) fn exile_short(&self, p: PlayerId, card: CardIdx, cost: &Cost) -> usize {
+        if cost.exile_graveyard == 0 {
+            return 0;
+        }
+        (cost.exile_graveyard as usize).saturating_sub(self.graveyard_cards(p).filter(|&c| c != card).count())
+    }
+
+    /// The mana sources a payment activates first so that they are in the
+    /// graveyard for `cost`'s "exile n cards from your graveyard" (CR
+    /// 601.2g-h; the first in canonical order: Lotus Petals alike).
+    pub(crate) fn exile_sources(&self, p: PlayerId, card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Vec<(crate::pay::Src, bool)> {
+        let short = self.exile_short(p, card, cost);
+        if short == 0 {
+            return Vec::new();
+        }
+        let classes = self.mana_classes(p, exclude);
+        self.delve_sources(p)
+            .into_iter()
+            .filter(|&c| c != card && Some(c) != exclude)
+            .take(short)
+            .filter_map(|c| classes.iter().find_map(|cl| cl.members.iter().find(|s| s.card == c && cl.sac_self).copied()))
+            .map(|s| (s, false))
+            .collect()
     }
 
     /// The rest of a cost after its mana (601.2h): sacrifice and discard

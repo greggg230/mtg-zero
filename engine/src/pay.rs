@@ -301,9 +301,11 @@ pub(crate) struct PayMana {
     /// The pools the payment may leave (`PayPool`, CR 106.4, 601.2h), asked
     /// once the sources are picked.
     pub spend: Option<Vec<Rem>>,
-    /// Sources the payment activates first (CR 601.2g), then exiles from the
-    /// graveyard for delve (601.2h: a Lotus Petal the spell's delve exiles).
-    pub forced: Vec<Src>,
+    /// Sources the payment activates first (CR 601.2g): with `true`, exiled
+    /// from the graveyard for delve after (601.2h: a Lotus Petal the spell's
+    /// delve exiles); else for another cost's "exile n cards from your
+    /// graveyard" paid next.
+    pub forced: Vec<(Src, bool)>,
     /// Their cards, exiled once the mana abilities are activated.
     pub delve_late: Vec<CardIdx>,
     /// Life the cost takes after the mana (X life, Bolas's Citadel's): paid
@@ -1382,10 +1384,12 @@ impl Game {
         // Sources delve exiles once activated: first, each with its mana's
         // type (its mana joins the virtual pool).
         if pm.now.is_none() && self.answer.is_none() {
-            if let Some(src) = pm.forced.pop() {
+            if let Some((src, delve)) = pm.forced.pop() {
                 let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("a delve source's class");
                 let Yield::One(u) = classes[ci].yld else { unreachable!("a delve source makes one mana") };
-                pm.delve_late.push(src.card);
+                if delve {
+                    pm.delve_late.push(src.card);
+                }
                 let (budget, dmg) = self.budget(payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
                 let rest = self.pay_cands(&pm, &classes, 0, Some(src), dmg);
                 let prods: Vec<[u8; 6]> = (0..6)
@@ -1414,6 +1418,11 @@ impl Game {
                 Some(Choice::Number(k)) => {
                     let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
                     self.pick_multi(&mut pm, &classes, ci, src, prods[k as usize]);
+                    if !pm.forced.is_empty() {
+                        // (The next of delve's sources first.)
+                        self.agenda.push(Task::PayMana(pm));
+                        return;
+                    }
                 }
                 Some(other) => unreachable!("production answer {other:?}"),
                 None => {
