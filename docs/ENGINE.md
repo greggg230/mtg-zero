@@ -1239,7 +1239,7 @@ the number of decisions. `cargo test --release -p engine --test digest -- --igno
 for the 467-card pool of the tail's part 1, 7216a12287fefeaa, and for the 491-card pool of part 2
 with its four token kinds registered, 7b815998fc563509, and for the 524-card pool of part 3 before
 its three new token kinds are registered, 023fa8874a183eae, and for M7d's 537-card pool with Test
-Manifester, 5cbbaf9280a01797, and for the whole cube with M7d's IR fixes, 53a9548b176ec879: the pool deals
+Manifester, 5cbbaf9280a01797, and for the whole cube with M7d's IR fixes, 1f210100db7b442e: the pool deals
 other decks, every game differs), and names the games that differ. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
@@ -4416,4 +4416,4 @@ cast check took the card in hand for its source, not a spell; `cast::Ctx::spell`
 `hidden.rs` compares a player's cards by identity (a face-down permanent's card, 31.2, may move to
 another of the player's hidden cards in a determinized world; the new pool's random decks put
 Test Manifester's face-down cards into its games). Behaviour digests re-recorded for the 546-card
-pool (section 15: 53a9548b176ec879), before the red Boo's token kind is registered.
+pool (section 15: 1f210100db7b442e), before the red Boo's token kind is registered.
