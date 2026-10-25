@@ -365,9 +365,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
         l.deny("CardPrinting.zone_abilities", zone_abilities);
-        l.deny("CardPrinting.emerge_cost", emerge_cost);
-        l.deny("CardPrinting.emerge_cost_str", emerge_cost_str);
-        l.deny_ne("CardPrinting.emerge_sacrifice_type", emerge_sacrifice_type, &generated::defaults::d_CardPrinting_emerge_sacrifice_type());
         let _ = miracle_cost_str; // display form of `miracle_cost`
         l.deny("CardPrinting.additional_cost_exile_from_graveyard", additional_cost_exile_from_graveyard);
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
@@ -1331,6 +1328,26 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     alt_costs.extend(dash);
     alt_costs.extend(warp);
+    // Emerge (CR 702.119a): "you may cast this spell by paying [cost] and
+    // sacrificing a <type> rather than paying its mana cost"; the cost is
+    // reduced by its mana value (702.119b, 601.2f).
+    match emerge_cost.as_deref() {
+        Some(m) => {
+            let mana = super::effect_copies::checked_cost(l, "CardPrinting.emerge_cost", m, emerge_cost_str);
+            let bits = types::from_name(emerge_sacrifice_type).unwrap_or_else(|| {
+                l.unsupported(format!("CardPrinting.emerge_sacrifice_type({emerge_sacrifice_type})"));
+                0
+            });
+            if ty & types::CREATURE == 0 || bits & types::PERMANENT == 0 {
+                l.unsupported("CardPrinting.emerge_cost(not a creature, or not a permanent type)");
+            }
+            alt_costs.push(AltCost { mana, emerge: Some(Filter::Type(bits)), ..AltCost::default() });
+        }
+        None => {
+            l.deny("CardPrinting.emerge_cost_str", emerge_cost_str);
+            l.deny_ne("CardPrinting.emerge_sacrifice_type", emerge_sacrifice_type, &generated::defaults::d_CardPrinting_emerge_sacrifice_type());
+        }
+    }
     if let Some((mana, _, _)) = &bestow {
         alt_costs.push(AltCost { mana: *mana, bestow: true, ..AltCost::default() });
     }

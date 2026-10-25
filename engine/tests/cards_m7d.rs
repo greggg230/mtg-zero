@@ -722,3 +722,50 @@ fn arena_of_glory_haste_mana_on_a_noncreature_spell_cr106_6() {
     assert_eq!(g.player(0).pool.amt[3], 1);
     assert_eq!(g.player(0).pool.haste, 1, "{}", log(&g));
 }
+
+// ---- Crabomination (emerge, CR 702.119) ---------------------------------------
+
+/// "Emerge from artifact {5}{B}{B} (You may cast this spell by sacrificing an
+/// artifact and paying the emerge cost reduced by that artifact's mana
+/// value.)" "When this creature enters, target opponent exiles the top card
+/// of their library, a card at random from their graveyard, and a card at
+/// random from their hand. You may cast a spell from among cards exiled this
+/// way without paying its mana cost."
+#[test]
+fn crabomination_emerges_and_casts_an_exiled_card_free_cr702_119() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp", "Swamp", "Mind Stone"])
+        .hand(0, &["Crabomination"])
+        .library(1, &["Lightning Bolt"])
+        .graveyard(1, &["Test Bear"])
+        .hand(1, &["Test Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    let crab = g.card(0, "Crabomination", Zone::Hand);
+    g.choose(Choice::Cast(crab));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    assert!(g.has_option(Choice::Number(1)), "emerge: {:?}", g.options_desc());
+    g.choose(Choice::Number(1));
+    assert_eq!(g.kind(), Some(DecisionKind::Sacrifice), "the artifact first (601.2f)\n{}", log(&g));
+    let stone = bf(&g, 0, "Mind Stone");
+    g.choose(Choice::Card(stone));
+    pay(&mut g);
+    assert_eq!(g.count_in(0, "Mind Stone", Zone::Graveyard), 1, "sacrificed\n{}", log(&g));
+    assert_eq!(g.lands_of(0).filter(|&l| g.obj(l).tapped).count(), 5, "{{3}}{{B}}{{B}}: reduced by 2");
+    // The enter trigger: P1 is the only target.
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseExiled) || g.kind() == Some(DecisionKind::Target) || (at_priority(g) && g.stack().is_empty()));
+    if g.kind() == Some(DecisionKind::Target) {
+        g.choose(Choice::Target(engine::Target::Player(1)));
+    }
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseExiled) || (at_priority(g) && g.stack().is_empty()));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseExiled), "{}", log(&g));
+    for n in ["Lightning Bolt", "Test Bear", "Test Giant"] {
+        assert_eq!(g.count_in(1, n, Zone::Exile), 1, "{n} exiled\n{}", log(&g));
+    }
+    let giant = g.card(1, "Test Giant", Zone::Exile);
+    assert!(g.has_option(Choice::Pass), "may");
+    g.choose(Choice::Card(giant));
+    settle(&mut g);
+    let giant = g.card(1, "Test Giant", Zone::Battlefield);
+    assert_eq!(g.obj(giant).controller, 0, "cast without paying its mana cost\n{}", log(&g));
+}

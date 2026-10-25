@@ -983,6 +983,10 @@ pub struct AltCost {
     /// Warp (CR 702.185): `dash`'s delayed ability is warp's "exile it at
     /// the beginning of the next end step" (no haste).
     pub warp: bool,
+    /// Emerge (CR 702.119): sacrifice a permanent matching the filter; the
+    /// cost is reduced by its mana value. The permanent is chosen before the
+    /// mana is paid (`Task::Emerge`, `StackItem::noted`).
+    pub emerge: Option<Filter>,
 }
 
 /// An additional cost that may be paid a number of times as a spell is cast

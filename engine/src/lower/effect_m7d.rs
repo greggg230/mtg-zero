@@ -74,6 +74,14 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::ShuffleThenExileTopMayPlayFree(nodes::ShuffleThenExileTopMayPlayFree {}) => {
             b.op(Op::Ext(Ext::M7d(M7d::ShuffleExileTopPlayFree)));
         }
+        // "Target opponent exiles the top card of their library, a card at
+        // random from their graveyard, and a card at random from their hand.
+        // You may cast a spell from among cards exiled this way without
+        // paying its mana cost." (Crabomination.)
+        E::TargetOpponentExilesThreeMayCastOneFree(nodes::TargetOpponentExilesThreeMayCastOneFree {}) => {
+            let tgt = b.target(Filter::And(Box::new(Filter::Player), Box::new(Filter::Opponent)), 1, 1);
+            b.op(Op::Ext(Ext::M7d(M7d::OppExilesThreeMayCastOne { tgt })));
+        }
         _ => return false,
     }
     true

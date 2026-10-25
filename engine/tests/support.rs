@@ -99,6 +99,7 @@ const SUPPORTED: &[&str] = &[
     "Council's Judgment",
     "Counterspell",
     "Coveted Jewel",
+    "Crabomination",
     "Crop Rotation",
     "Crucible of Worlds",
     "Cryogen Relic",

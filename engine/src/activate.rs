@@ -219,7 +219,7 @@ impl Game {
 
     /// The source is excluded from paying the ability's mana when the cost
     /// also taps or moves it (ENGINE.md 18).
-    fn mana_exclude(card: CardIdx, ad: &ActivatedDef) -> Option<CardIdx> {
+    pub(crate) fn mana_exclude(card: CardIdx, ad: &ActivatedDef) -> Option<CardIdx> {
         let c = &ad.cost;
         (c.tap || c.sac_self || c.exile_self || c.discard_self).then_some(card)
     }

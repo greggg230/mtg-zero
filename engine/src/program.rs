@@ -124,6 +124,11 @@ pub enum M7d {
     /// The controller shuffles their library, then exiles its top card; they
     /// may play it this turn without paying its mana cost (Urza).
     ShuffleExileTopPlayFree,
+    /// The target opponent (`tgt`) exiles the top card of their library, a
+    /// card at random from their graveyard and one at random from their
+    /// hand; the controller may cast a spell from among them without paying
+    /// its mana cost (Crabomination). Choice: `ChooseExiled` (`PASS` = no).
+    OppExilesThreeMayCastOne { tgt: u8 },
 }
 
 /// Which objects an `Ext` op acts on.

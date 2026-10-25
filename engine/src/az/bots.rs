@@ -498,6 +498,13 @@ impl Heuristic {
             // A name for a tax (Anointed Peacekeeper): the opponent's most
             // expensive card.
             K::NameCard if matches!(g.agenda.last(), Some(Task::AsEnters { .. })) => Some(Self::best_card(g, d)),
+            // A free spell from among the exiled cards (Crabomination): the
+            // costliest.
+            K::ChooseExiled if matches!(g.agenda.last(), Some(Task::Run(f))
+                if matches!(g.db.ability(f.ability).program.get(f.pc as usize), Some(Op::Ext(Ext::M7d(crate::program::M7d::OppExilesThreeMayCastOne { .. }))))) =>
+            {
+                Some(Self::best_card(g, d))
+            }
             // The card an opening-hand action exiles (Gemstone Caverns).
             K::ExileCost if matches!(g.agenda.last(), Some(Task::Opening { .. })) => Some(Self::worst_hand_card(g, d, p)),
             K::Target => self.target(g, d, p),

@@ -93,6 +93,9 @@ pub(crate) enum Task {
     /// Opening-hand actions (CR 103.6): `p` may begin the game with a card
     /// on the battlefield; `exile` cards still to exile from hand for it.
     Opening { p: PlayerId, exile: u8 },
+    /// Emerge (CR 702.119): choose the permanent to sacrifice (`sac`: false),
+    /// or sacrifice it once the mana is paid (601.2h).
+    Emerge { id: u32, sac: bool },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -247,6 +250,7 @@ impl Game {
             Task::Splice { id } => self.choose_splice(id),
             Task::Special { p, card, sp } => self.special_action(p, card, sp),
             Task::Opening { p, exile } => self.opening_actions(p, exile),
+            Task::Emerge { id, sac } => self.emerge(id, sac),
         }
     }
 

@@ -288,6 +288,64 @@ impl Game {
                 }
                 Flow::Next
             }
+            M7d::OppExilesThreeMayCastOne { tgt } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        // The rest of the effect waits for the cast (CR
+                        // 608.2g).
+                        let mut back = f.clone();
+                        back.pc += 1;
+                        back.i = 0;
+                        back.picked.clear();
+                        self.agenda.push(Task::Run(back));
+                        self.cast_free_now(p, c);
+                        return Flow::Suspend;
+                    }
+                    Some(_) => {
+                        f.picked.clear();
+                        return Flow::Next;
+                    }
+                    None => {}
+                }
+                if f.picked.is_empty() {
+                    let Some(q) = self.who(f, crate::program::Who::TargetPlayer(*tgt)) else { return Flow::Next };
+                    let mut exiled = Vec::new();
+                    // The top card of their library (revealed as it moves).
+                    if let Some(&top) = self.players[q as usize].library.last() {
+                        self.force_library_card(top, crate::hidden::KEY_REVEAL, q);
+                        exiled.push(top);
+                    }
+                    // A card at random from their graveyard (a public
+                    // chance key) and from their hand (keyed by its reveal).
+                    let gy: Vec<CardIdx> = self.graveyard_cards(q).collect();
+                    let from_gy = (!gy.is_empty()).then(|| {
+                        let k = self.rng.below(gy.len() as u32) as usize;
+                        self.emit_public(crate::hidden::KEY_DIE, q, k as u64 + 1);
+                        gy[k]
+                    });
+                    let sorted = self.hand_sorted(q);
+                    let from_hand = (!sorted.is_empty()).then(|| match self.forced_hand_pick(q, &sorted) {
+                        Some(c) => c,
+                        None => sorted[self.rng.below(sorted.len() as u32) as usize],
+                    });
+                    exiled.extend(from_gy);
+                    exiled.extend(from_hand);
+                    for &c in &exiled {
+                        self.move_card(c, Zone::Exile, Pos::Top);
+                    }
+                    f.picked = exiled.into_iter().filter(|&c| self.objs[c.i()].zone == Zone::Exile).collect();
+                }
+                let cands: Vec<CardIdx> = self.exile.iter().copied().filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c)).collect();
+                if cands.is_empty() {
+                    f.picked.clear();
+                    return Flow::Next;
+                }
+                let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                opts.extend(cands.iter().take(act::EXILE_N as usize).enumerate().map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }));
+                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
+                Flow::Suspend
+            }
             M7d::UnattachSource => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     let c = f.source.idx;
@@ -440,6 +498,71 @@ impl Game {
             let c = pm.keep.spell.unwrap();
             let r = self.obj_ref(c);
             self.marks.push((r, crate::game::Mark::HasteMana));
+        }
+    }
+}
+
+// ---- emerge (CR 702.119) -----------------------------------------------------
+
+impl Game {
+    /// Does one of `c`'s mana abilities sacrifice it (Lotus Petal)? Such a
+    /// permanent, sacrificed for emerge, can't also pay that way.
+    pub(crate) fn sacrifices_itself_for_mana(&self, c: CardIdx) -> bool {
+        self.abilities(c).activated.iter().any(|a| a.mana().is_some() && a.cost.sac_self)
+    }
+
+    /// The permanents `p` could sacrifice to cast `card` with its emerge
+    /// alternative cost `k`: those leaving the reduced cost payable.
+    pub(crate) fn emerge_options(&self, p: PlayerId, card: CardIdx, k: usize, classes: &[crate::pay::Class]) -> Vec<CardIdx> {
+        let a = &self.def_of(card).alt_costs[k];
+        let Some(filter) = &a.emerge else { return Vec::new() };
+        let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
+        let mana = self.alt_mana(card, p, k);
+        let keep = crate::pay::Keep { allow: self.spend_allow(card), ..Default::default() };
+        self.sacrifice_candidates(p, card, &s)
+            .into_iter()
+            .filter(|&x| {
+                let m = mana.less_generic(self.mana_value_of(x));
+                let without = if self.sacrifices_itself_for_mana(x) { Some(x) } else { Some(card) };
+                m.is_zero() || self.can_pay_without(p, &m, classes, &keep, without)
+            })
+            .collect()
+    }
+
+    /// `Task::Emerge`: choose the permanent to sacrifice (a `Sacrifice`
+    /// decision, before the cost is determined, CR 702.119, 601.2f), or
+    /// sacrifice it after the mana is paid (601.2h).
+    pub(crate) fn emerge(&mut self, id: u32, sac: bool) {
+        use crate::decision::{Choice, DecisionKind, Opt};
+        use crate::flow::Task;
+        let Some(pos) = self.item_index(id) else { return };
+        let crate::game::StackKind::Spell { card } = self.stack[pos].kind else { return };
+        let p = self.stack[pos].controller;
+        if sac {
+            if let Some(r) = self.stack[pos].noted.first().copied() {
+                if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
+                    self.note(|g| format!("P{p} sacrifices {} for emerge", g.name(r.idx)));
+                    self.sacrifice(r.idx);
+                }
+            }
+            return;
+        }
+        match self.answer.take() {
+            Some(Choice::Card(c)) => {
+                let r = self.obj_ref(c);
+                self.stack[pos].noted = vec![r];
+            }
+            Some(other) => unreachable!("emerge answer {other:?}"),
+            None => {
+                let k = self.stack[pos].alt as usize - 1;
+                let classes = self.mana_classes(p, None);
+                let opts: Vec<Opt> = self
+                    .emerge_options(p, card, k, &classes)
+                    .into_iter()
+                    .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                    .collect();
+                self.ask(Task::Emerge { id, sac }, p, DecisionKind::Sacrifice, opts);
+            }
         }
     }
 }

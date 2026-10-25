@@ -589,8 +589,13 @@ impl Game {
                     most = most.min(self.target_candidates(tr, &ctx, &[Target::Stack(id)]).len().min(255) as u8);
                 }
             }
+            // (Not with the source's own mana when the cost taps it: an
+            // artifact Urza could tap for mana, ENGINE.md 31.)
+            let exclude = Self::mana_exclude(source.idx, ad);
+            let classes = self.mana_classes(p, exclude);
+            let keep = Self::keep_for(source.idx, &ad.cost, exclude);
             let mut x = 0u8;
-            while x < most && self.can_pay_for(p, &self.act_mana_x(p, source.idx, ad, x + 1), 0) {
+            while x < most && self.can_pay_without(p, &self.act_mana_x(p, source.idx, ad, x + 1), &classes, &keep, exclude) {
                 x += 1;
             }
             let opts = (0..=x).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) }).collect();
@@ -1304,6 +1309,9 @@ impl Game {
         if a.only_if.as_ref().is_some_and(|c| !self.cond_holds(c, p)) {
             return false;
         }
+        if a.emerge.is_some() {
+            return !self.emerge_options(p, card, k, classes).is_empty();
+        }
         let mana = self.alt_mana(card, p, k);
         // (A card cast from hand is on the stack while its cost is paid.)
         self.cost_payable(p, card, &a.cost, &mana, classes, Some(card))
@@ -1342,6 +1350,11 @@ impl Game {
                 if self.def_of(card).overload {
                     // CR 702.96a: overloaded, "target" becomes "each".
                     self.stack[pos].modes = vec![(k > 0) as u8];
+                }
+                if k > 0 && self.def_of(card).alt_costs[k as usize - 1].emerge.is_some() {
+                    // CR 702.119: the permanent to sacrifice, before the
+                    // total cost (601.2f) is determined.
+                    self.agenda.push(Task::Emerge { id, sac: false });
                 }
                 if k > 0 && self.def_of(card).alt_costs[k as usize - 1].bestow {
                     // CR 702.103b: cast bestowed, it becomes an Aura spell
@@ -1673,11 +1686,22 @@ impl Game {
         let item = &self.stack[pos];
         if item.alt > 0 {
             let k = item.alt as usize - 1;
+            // Emerge: reduced by the chosen permanent's mana value; its mana
+            // abilities that sacrifice it can't pay (it is sacrificed next).
+            let emerge = def.alt_costs[k].emerge.as_ref().and(item.noted.first().copied()).filter(|r| self.live(*r));
+            let cost = match emerge {
+                Some(r) => cost.less_generic(self.mana_value_of(r.idx)),
+                None => cost,
+            };
             let mut pm = PayMana::new(p, cost);
             pm.improvise = def.improvise;
             pm.keep = Self::keep_for(card, &def.alt_costs[k].cost, None);
             pm.keep.allow = self.spend_allow(card);
             pm.keep.spell = Some(card);
+            if let Some(r) = emerge {
+                pm.keep.exclude = self.sacrifices_itself_for_mana(r.idx).then_some(r.idx);
+                self.agenda.push(Task::Emerge { id, sac: true });
+            }
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
                 self.agenda.push(Task::PayMana(pm));
