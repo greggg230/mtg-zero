@@ -566,6 +566,23 @@ fn cube_support_report() {
         }
         std::fs::write(&path, s).unwrap();
     }
+    if let Ok(path) = std::env::var("SUPPORT_DEFS") {
+        // Every definition (cards, tokens, faces), lowered, to diff the
+        // lowering of two IRs: the interned subtypes (`@subtype id name`),
+        // then `#id kind name` and its `CardDef` (Debug). Token, face and
+        // subtype ids differ when another card's support changes;
+        // `tools/diff_defs.py` compares them by name.
+        let mut s = String::new();
+        for (k, name) in db.subtype_names().iter().enumerate() {
+            s.push_str(&format!("@subtype {k} {name}\n"));
+        }
+        for i in 0..db.len() {
+            let d = db.def(i as engine::ids::DefId);
+            let kind = if i < db.num_cards() { "card" } else if db.is_face(i as engine::ids::DefId) { "face" } else { "token" };
+            s.push_str(&format!("#{i} {kind} {}\n{d:#?}\n", d.name));
+        }
+        std::fs::write(&path, s).unwrap();
+    }
     println!("{}", r.render(40));
     println!("greedy staging (feature, cards it completes, cumulative):");
     for (f, n, total) in r.greedy(30) {

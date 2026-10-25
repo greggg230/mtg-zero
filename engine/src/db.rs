@@ -1783,6 +1783,11 @@ impl CardDb {
         &self.subtypes[id as usize]
     }
 
+    /// Every interned subtype (and counter name), by id.
+    pub fn subtype_names(&self) -> &[String] {
+        &self.subtypes
+    }
+
     /// The "Equipment" subtype's id.
     pub fn equipment_subtype(&self) -> Option<u16> {
         self.equipment
