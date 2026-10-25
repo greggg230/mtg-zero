@@ -1047,15 +1047,15 @@ they isolate one keyword or trigger each.
 | `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
 | `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
 | `tests/cards_m7c_tail3.rs` | M7c tail part 3: the 33 cards against their Oracle text (48 tests, the CR cited in each name: 107.3, 702.96, 701.14, 305.2, 601.2c, 603.12, 702.16j, 603.4, 702.44a, 603.6a, 702.86a, 702.16b, 702.90, 614.1a, 702.33c, 702.33d, 107.4c, 603.7, 702.47, 706, 702.32a, 607.2a, 702.171, 301.5, 700.2, 701.46a, 509.1b, 509.1h, 406.3, 702.75a, 303.4a, 608.3a, 514.3a); face-down cards hidden from the other player in every world it samples, never for their owner; Wizard's Rockets's IR defect |
-| `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (37 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), the search of Green Sun's Zenith on a custom card, the two IR defects |
-| `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (30 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4), Chromatic Star's IR defect |
+| `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (38 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), the search of Green Sun's Zenith on a custom card, the two IR defects; Bilbo's cast of a flashback card for the cost its offer was checked for |
+| `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (31 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4, 118.9a), Chromatic Star's IR defect; the state the run mtg3 crashed in (Malcolm's free cast of Echo of Eons, section 15) |
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
 | `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
 | `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
-| `tests/fuzz.rs` | random play (below) and replay determinism |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
@@ -1089,6 +1089,38 @@ found on the way, all fixed (28.7). M7c tail part 2: 20,000 games over the 491 c
 cards, no failure (69-70 s); the faults found on the way are 30.5's and the face-down view's (30.2).
 The fuzzer's view, known-card and information-set checks cover the face-down cards (`view_of`
 lists them per owner, by identity only where the viewer knows them).
+
+**Option completion** (M7c, branch `m7c-payfix`). Sections 6 and 18 promise that a cast, an
+activation or an alternative cost is offered only if it can be completed; the fuzzer checks it
+(`check_options_complete`). Every legal action of a decision (at priority all but passing and
+playing a land) is applied to a clone and the decisions after it are answered along one random
+legal path (a generator of its own: the games are the same with or without the check) until the
+next priority decision, which comes after the targets, the announcements, the payment and the
+cast triggers (601.2i, 117.3c): nothing may panic or fail. In the game it runs at every decision
+but mulligans and combat declarations (at a random half of the frequent priority, `PayMana` and
+`Target` decisions: a castable card stays castable over many of them; at every rarer one: an
+effect's "cast it?", a cost option, an X, a sacrifice), and at the ~1-in-40 checkpoints above
+in each world `determinize` samples for either viewer (what the search explores), every
+decision kind. A failure names the seed, the world, the option and the path after it. 20,000
+games: 5.6 million options tried, no failure on main (524 cards), 125-137 s in all against 66 s
+without the check (the same games). A one-off sweep (not committed) of 30,000 games of the
+heuristic bot on self-play's random decks (a quarter of the actions random), every decision
+checked, two worlds every eighth, two paths per option (the first options, a random one): 27
+million options, no failure either.
+It came after the self-play run mtg3 (preset `mtg-3`, engine 4613d0f, tail part 2's 491 cards)
+crashed in iteration 3 with "PayMana: no way to pay {2}{U}": in a world the search had
+determinized (not a cause: the cards involved were public), Malcolm, Alluring Scoundrel with four
+chorus counters had P0 discard Echo of Eons and offered its free cast; the offer was checked for
+the free cast (`can_cast_free_now`), but `cast_route` put flashback before the effect's
+permission, so the card was cast for its flashback cost {2}{U} with two one-mana sources. Casting
+"without paying its mana cost" is the alternative cost the effect gives (608.2g, 118.9), and
+flashback is another (118.9a: one at most), so the cast is free and the spell is not exiled
+(702.34a). Tail part 3 (b85a3c6) had already put an effect's permission first (30.5), found by
+the fuzzer through Bilbo, so main does not crash; on 4613d0f the new check finds the same fault at
+seed 4670 within 30 s (Bilbo's cast of Lingering Souls, checked for its mana cost, cast for its
+flashback cost {1}{B}), where 20,000 games of plain random play never chose the bad option.
+Tests: `cards_m7c_tail.rs` (the crash's state: Malcolm, Echo of Eons, Sylvan Caryatid and Breeding
+Pool; it panics on 4613d0f) and `cards_m7c_tail2.rs` (Bilbo, Lingering Souls).
 `POOL_EXCLUDE=<file>` (names, one per line) leaves cards out of the random decks, to replay an
 earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
 `n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).

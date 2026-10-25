@@ -3,14 +3,17 @@
 //! structural invariants hold (every card in exactly one zone), legal
 //! actions are sorted, unique and non-empty, and the game terminates; that
 //! the same seed and actions replay bit for bit; that a clone continues
-//! identically; and that `determinize` keeps the decider's view.
+//! identically; that `determinize` keeps the decider's view; and that every
+//! option of a sampled decision can be completed, in the game and in the
+//! worlds `determinize` samples.
 //!
 //! `FUZZ_GAMES=n` sets the number of games (default 300).
 
 mod common;
 
 use engine::rng::Rng;
-use engine::{Game, GameSpec, Outcome, NUM_ACTIONS};
+use engine::{Choice, DecisionKind, Game, GameSpec, Outcome, NUM_ACTIONS};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 struct Played {
     actions: Vec<u16>,
@@ -37,6 +40,9 @@ fn new_game(seed: u64) -> Game {
 fn play(seed: u64, checks: bool) -> Played {
     let mut g = new_game(seed);
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 1);
+    // (The completion check's sampling: its own generator, so the game's
+    // actions are the same with or without it.)
+    let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
     let mut legal = Vec::new();
     let mut actions = Vec::new();
     let mut keys = Vec::new();
@@ -50,6 +56,9 @@ fn play(seed: u64, checks: bool) -> Played {
         if checks && rng.below(40) == 0 {
             check_clone(&g, a, seed);
             check_determinize(&g, seed, &mut rng);
+        }
+        if checks && complete_now(&g, &mut crng) {
+            check_options_complete(&g, seed, "the game");
         }
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
@@ -107,6 +116,8 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
             }
         }
         d.check_invariants().unwrap();
+        // What the search does in that world: try every option.
+        check_options_complete(&d, seed, &format!("a world determinized for P{viewer} (mover P{mover})"));
         if viewer == mover {
             check_information_set(g, viewer, seed, rng);
         }
@@ -125,6 +136,98 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
                 )
             });
         }
+    }
+}
+
+/// Decisions followed after an option before giving up on reaching priority.
+const COMPLETE_STEPS: usize = 64;
+
+/// Options the completion check tried, and the decisions it answered after
+/// them (reported by `fuzz_random_games`).
+static OPTIONS_TRIED: AtomicU64 = AtomicU64::new(0);
+static OPTION_STEPS: AtomicU64 = AtomicU64::new(0);
+
+/// Whether the completion check runs at this decision of the game: not at
+/// mulligans and combat declarations (no cast or activation starts there), at
+/// half of the frequent priority, payment and target decisions (a castable
+/// card stays castable over many of them), at every other one (the rare
+/// ones: an effect's "cast it?", a cost option, an X, a sacrifice, ...).
+fn complete_now(g: &Game, rng: &mut Rng) -> bool {
+    use DecisionKind as K;
+    match g.kind() {
+        None | Some(K::Mulligan | K::MulliganBottom | K::DeclareAttackers | K::DeclareBlockers | K::AssignDamage | K::AttackTarget) => {
+            false
+        }
+        Some(K::Priority | K::PayMana | K::Target) => rng.below(2) == 0,
+        Some(_) => true,
+    }
+}
+
+/// Every option of the pending decision can be completed (ENGINE.md 6, 18: a
+/// cast, an activation or an alternative cost is offered only if it can be
+/// completed, so nothing is ever rewound): each legal action, applied to a
+/// clone, then the decisions after it answered along one legal path (random,
+/// from a generator of its own: the game's sequence is unchanged) until the
+/// next priority decision, never panics or fails. The payment's own
+/// decisions (targets, X, the cost option, mana sources, sacrifices,
+/// discards) all come before the caster's next priority (CR 601.2i, 117.3c).
+/// At priority, passing and playing a land are left out (no cost to
+/// complete).
+fn check_options_complete(g: &Game, seed: u64, world: &str) {
+    let Some(d) = g.pending_decision() else { return };
+    if d.options.len() < 2 {
+        return; // (the game itself takes the one option)
+    }
+    let priority = d.kind == DecisionKind::Priority;
+    for o in &d.options {
+        if priority && matches!(o.choice, Choice::Pass | Choice::Play(_) | Choice::PlayFace(_)) {
+            continue;
+        }
+        let a = o.action;
+        let path_seed = seed ^ (g.decisions() as u64).wrapping_mul(0x9E37_79B9) ^ ((a as u64) << 40);
+        // The option, then one random legal path to the next priority;
+        // `describe` keeps the path's descriptions (for a failure).
+        let follow = |describe: &mut Option<Vec<String>>| -> Result<(), String> {
+            let mut prng = Rng::new(path_seed);
+            let mut x = g.clone();
+            let (mut keys, mut l) = (Vec::new(), Vec::new());
+            x.apply(a, &mut keys)?;
+            for _ in 0..COMPLETE_STEPS {
+                if x.is_over() || x.kind() == Some(DecisionKind::Priority) {
+                    break;
+                }
+                x.legal_actions(&mut l);
+                let b = l[prng.below(l.len() as u32) as usize];
+                if let Some(p) = describe {
+                    p.push(format!("{b} = {}", x.describe_action(b).unwrap_or_default()));
+                }
+                OPTION_STEPS.fetch_add(1, Ordering::Relaxed);
+                x.apply(b, &mut keys)?;
+            }
+            Ok(())
+        };
+        OPTIONS_TRIED.fetch_add(1, Ordering::Relaxed);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| follow(&mut None)));
+        let err = match r {
+            Ok(Ok(())) => continue,
+            Ok(Err(e)) => e,
+            Err(p) => p
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default(),
+        };
+        // The same path again, described.
+        let mut path = Some(Vec::new());
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| follow(&mut path)));
+        panic!(
+            "seed {seed}: in {world}, option {a} ({}) of {:?} for P{} can't be completed: {err}\npath after it: {:?}\noptions: {:?}",
+            g.describe_action(a).unwrap_or_default(),
+            d.kind,
+            d.player,
+            path.unwrap_or_default(),
+            g.options_desc()
+        );
     }
 }
 
@@ -193,9 +296,11 @@ fn fuzz_random_games() {
         decisions += p.actions.len() as u64;
     }
     println!(
-        "{n} games: wins {wins:?}, draws {draws}, mean turns {:.1}, mean decisions {:.1}",
+        "{n} games: wins {wins:?}, draws {draws}, mean turns {:.1}, mean decisions {:.1}; {} options completed ({} decisions after them)",
         turns as f64 / n as f64,
-        decisions as f64 / n as f64
+        decisions as f64 / n as f64,
+        OPTIONS_TRIED.load(Ordering::Relaxed),
+        OPTION_STEPS.load(Ordering::Relaxed)
     );
 }
 
