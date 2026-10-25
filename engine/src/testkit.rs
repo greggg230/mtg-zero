@@ -368,6 +368,11 @@ impl Game {
         };
         for &c in &self.battlefield {
             obj(&mut v, c);
+            // A face-down permanent (CR 708): its card only if the viewer
+            // knows it (ENGINE.md 31).
+            if self.objs[c.i()].def == self.db.face_down_def() {
+                v.push(if self.knows(viewer, c) { self.ident(c) as u64 } else { u64::MAX - 4 });
+            }
         }
         v.push(u64::MAX);
         for &c in &self.exile {
@@ -622,6 +627,8 @@ impl Game {
         self.activations.hash(&mut h);
         self.miracle_check.hash(&mut h);
         self.marks.hash(&mut h);
+        self.face_down.hash(&mut h);
+        self.face_down_ids.hash(&mut h);
         h.finish()
     }
 

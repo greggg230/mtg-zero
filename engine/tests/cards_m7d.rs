@@ -857,7 +857,11 @@ fn rain_of_filth_lands_tap_then_sacrifice_in_one_payment_cr601_2g() {
         g.drive_until(|g| g.kind() == Some(DecisionKind::PayMana));
     }
     assert!(g.has_option(Choice::Ability(untapped, sac_for)), "{:?}", g.options_desc());
-    assert!(g.has_option(Choice::Ability(tapped, sac_for)), "a tapped land can be sacrificed: {:?}", g.options_desc());
+    // (The other way: the untapped Swamp's own {B}, then the tapped one
+    // sacrificed: a tapped land can be sacrificed.)
+    let mut h = g.clone();
+    h.choose(act(untapped, 0));
+    assert!(h.has_option(Choice::Ability(tapped, sac_for)), "a tapped land can be sacrificed: {:?}", h.options_desc());
     g.choose(Choice::Ability(untapped, sac_for));
     assert_eq!(g.kind(), Some(DecisionKind::ChooseMana), "{{B}} or {{B}}{{B}}: {:?}", g.options_desc());
     let bb = g.pending_decision().unwrap().options.last().unwrap().choice;
@@ -868,4 +872,150 @@ fn rain_of_filth_lands_tap_then_sacrifice_in_one_payment_cr601_2g() {
     // The tapped Swamp is left: sacrificed for Dark Ritual.
     let ritual = g.card(0, "Dark Ritual", Zone::Hand);
     assert!(g.has_option(Choice::Cast(ritual)), "{:?}", g.options_desc());
+}
+
+// ---- Abhorrent Oculus (manifest dread, face-down permanents, CR 701.62, 708) ------
+
+/// "As an additional cost to cast this spell, exile six cards from your
+/// graveyard." (CR 601.2b.)
+#[test]
+fn abhorrent_oculus_exiles_six_graveyard_cards_to_cast_cr601_2b() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island"])
+        .hand(0, &["Abhorrent Oculus"])
+        .graveyard(0, &["Forest"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let oc = g.card(0, "Abhorrent Oculus", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(oc)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(oc));
+    resolve_with(&mut g, |_| None);
+    assert_eq!(g.count_in(0, "Forest", Zone::Exile), 6, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Abhorrent Oculus", Zone::Battlefield), 1);
+    // Five cards in the graveyard: not castable.
+    let g = scen()
+        .battlefield(0, &["Island", "Island", "Island"])
+        .hand(0, &["Abhorrent Oculus"])
+        .graveyard(0, &["Forest"; 5])
+        .at(Step::Main1, 0)
+        .start();
+    let oc = g.card(0, "Abhorrent Oculus", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(oc)));
+}
+
+/// A game where P0's Oculus manifests dread at P1's upkeep: the top two cards
+/// are a Test Giant and a Lightning Bolt; the Giant is manifested.
+fn manifested() -> (Game, CardIdx) {
+    let mut g = scen()
+        .library(0, &["Test Giant", "Lightning Bolt"])
+        .battlefield(0, &["Abhorrent Oculus", "Forest", "Forest", "Forest", "Forest", "Forest"])
+        .at(Step::End, 0)
+        .start();
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::PutOntoBattlefield));
+    assert_eq!(g.turn().active, 1, "each opponent's upkeep");
+    assert_eq!(g.pending_decision().unwrap().player, 0);
+    let giant = g.card(0, "Test Giant", Zone::Library);
+    g.choose(Choice::Card(giant));
+    (g, giant)
+}
+
+/// "At the beginning of each opponent's upkeep, manifest dread. (Look at the
+/// top two cards of your library. Put one onto the battlefield face down as
+/// a 2/2 creature and the other into your graveyard.)" A face-down
+/// permanent is a 2/2 with no name, colour, mana cost, subtypes or
+/// abilities (CR 708.2a); its controller knows what it is, the opponent
+/// doesn't (708.5).
+#[test]
+fn abhorrent_oculus_manifests_dread_face_down_cr701_62_708_2() {
+    let (g, giant) = manifested();
+    assert_eq!(g.obj(giant).zone, Zone::Battlefield);
+    assert!(g.is_face_down(giant));
+    assert_eq!(g.pt(giant), (2, 2), "a 2/2");
+    assert_eq!(g.name(giant), "", "no name");
+    assert_eq!(g.colors_of(giant), 0);
+    assert!(g.is_creature(giant) && g.keywords_of(giant).is_empty());
+    assert_eq!(g.count_in(0, "Lightning Bolt", Zone::Graveyard), 1, "the other card: the graveyard");
+    assert!(g.knows(0, giant), "its controller knows it");
+    assert!(!g.knows(1, giant), "the opponent doesn't");
+    assert_eq!(g.ident(giant), db().id("Test Giant").unwrap());
+}
+
+/// The face-down card is hidden from the opponent in every world it samples
+/// and never resampled for its controller; the encoding shows the opponent
+/// an unknown 2/2.
+#[test]
+fn a_face_down_permanent_is_hidden_from_the_opponent_cr708_5() {
+    let (g, giant) = manifested();
+    let giant_def = db().id("Test Giant").unwrap();
+    let mut seen_other = false;
+    for s in 0..40u64 {
+        let mut d0 = g.clone();
+        d0.determinize(0, &mut engine::rng::Rng::new(s));
+        assert_eq!(d0.ident(giant), giant_def, "never resampled for its controller");
+        let mut d1 = g.clone();
+        d1.determinize(1, &mut engine::rng::Rng::new(s));
+        assert_eq!(d1.view_of(1), g.view_of(1), "the opponent's view is the same in its worlds");
+        if d1.ident(giant) != giant_def {
+            seen_other = true;
+        }
+        assert_eq!(enc(&d1, 1), enc(&g, 1), "the opponent's encoding is the same in its worlds");
+        assert_eq!(enc(&d0, 0), enc(&g, 0), "the controller's too");
+    }
+    assert!(seen_other, "the opponent's worlds deal it again");
+}
+
+fn enc(g: &Game, viewer: PlayerId) -> Vec<f32> {
+    let mut f = vec![0.0; engine::az::NUM_FEATURES];
+    g.encode_features(viewer, &mut f);
+    f
+}
+
+/// "Turn it face up any time for its mana cost if it's a creature card."
+/// (CR 701.40b, 708.7: a special action; 708.8: the same permanent.)
+#[test]
+fn a_manifested_creature_turns_face_up_for_its_mana_cost_cr701_40b() {
+    let (mut g, giant) = manifested();
+    settle(&mut g);
+    // P1's turn: P0 gets priority after P1 passes in P1's upkeep.
+    quiet_until(&mut g, |g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let up = act(giant, 0);
+    assert!(g.has_option(up), "{{4}}{{G}} with five Forests: {:?}", g.options_desc());
+    let lands = g.lands_of(0).filter(|&l| !g.obj(l).tapped).count();
+    g.choose(up);
+    pay(&mut g);
+    assert!(g.stack().is_empty(), "a special action: no stack");
+    assert!(!g.is_face_down(giant));
+    assert_eq!(g.name(giant), "Test Giant", "{}", log(&g));
+    assert_eq!(g.pt(giant), (5, 5));
+    assert_eq!(g.lands_of(0).filter(|&l| !g.obj(l).tapped).count(), lands - 5);
+    assert!(g.knows(1, giant), "public now");
+}
+
+/// A face-down permanent that dies is revealed and goes to the graveyard as
+/// its card (CR 708.9); it died as a face-down 2/2 (no abilities of its
+/// card trigger, 603.10a).
+#[test]
+fn a_face_down_permanent_dies_revealed_cr708_9() {
+    let mut g3 = scen()
+        .library(0, &["Test Dies Draw", "Lightning Bolt"])
+        .battlefield(0, &["Abhorrent Oculus"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::End, 0)
+        .start();
+    quiet_until(&mut g3, |g| g.kind() == Some(DecisionKind::PutOntoBattlefield));
+    let dd = g3.card(0, "Test Dies Draw", Zone::Library);
+    g3.choose(Choice::Card(dd));
+    settle(&mut g3);
+    quiet_until(&mut g3, |g| at_priority(g) && g.pending_decision().unwrap().player == 1 && g.turn().step == Step::Main1);
+    let bolt = g3.card(1, "Lightning Bolt", Zone::Hand);
+    g3.choose(Choice::Cast(bolt));
+    g3.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g3.choose(g3.tgt(dd));
+    pay(&mut g3);
+    let hand = g3.player(0).hand.len();
+    settle(&mut g3);
+    assert_eq!(g3.count_in(0, "Test Dies Draw", Zone::Graveyard), 1, "revealed, its card\n{}", log(&g3));
+    assert_eq!(g3.player(0).hand.len(), hand, "no 'when this dies' of the card: it died face down");
+    assert!(g3.knows(1, dd));
 }

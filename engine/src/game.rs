@@ -438,6 +438,15 @@ pub struct Game {
     /// Cards exiled face down (`Zone::FaceDown`), both players', in the
     /// order they were exiled.
     pub(crate) face_down: Vec<CardIdx>,
+    /// Face-down permanents (CR 708; manifest dread): the slot, whose `def`
+    /// is the database's face-down definition, and the card it is. Its
+    /// identity is hidden like a library card's (`Obj::known`, ENGINE.md
+    /// 31).
+    pub(crate) face_down_ids: Vec<(CardIdx, DefId)>,
+    /// The next permanent put onto the battlefield enters face down
+    /// (`put_onto_battlefield`, then `move_card`).
+    pub(crate) entering_face_down: bool,
+    pub(crate) moving_face_down: bool,
     /// Emblems (CR 114), in creation order.
     pub(crate) command: Vec<CardIdx>,
     /// Last = top.
@@ -793,6 +802,9 @@ impl Game {
             battlefield: Vec::new(),
             exile: Vec::new(),
             face_down: Vec::new(),
+            face_down_ids: Vec::new(),
+            entering_face_down: false,
+            moving_face_down: false,
             command: Vec::new(),
             stack: Vec::new(),
             turn: Turn {
@@ -1085,6 +1097,15 @@ impl Game {
     /// 614.1c, decided before it moves) and queueing "as this enters"
     /// choices (614.12, a task that runs next).
     pub(crate) fn put_onto_battlefield(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
+        // Face down (CR 708; manifest): a 2/2 with no text from the moment it
+        // enters; the card it is waits in `face_down_ids` (ENGINE.md 31).
+        if std::mem::take(&mut self.entering_face_down) {
+            let real = self.objs[idx.i()].def;
+            self.face_down_ids.push((idx, real));
+            self.objs[idx.i()].def = self.db.face_down_def();
+            self.moving_face_down = true;
+            self.entering_face = None;
+        }
         // The face it enters with (CR 712.13-14): the one it had on the
         // stack, its front, or the face an effect names ("return it
         // transformed", 712.14a; an MDFC's land face, 712.12); a daybound
@@ -1109,6 +1130,14 @@ impl Game {
                 .any(|&c| self.abilities(c).exiles_uncast_creatures);
             if replaced {
                 self.entering_copy = None;
+                // (A card that would have entered face down is exiled face
+                // up: it never was a permanent.)
+                if std::mem::take(&mut self.moving_face_down) {
+                    if let Some(i) = self.face_down_ids.iter().position(|x| x.0 == idx) {
+                        let (_, real) = self.face_down_ids.remove(i);
+                        self.objs[idx.i()].def = real;
+                    }
+                }
                 self.note(|g| format!("{} is exiled instead (not cast)", g.name(idx)));
                 return self.move_card(idx, Zone::Exile, Pos::Top);
             }
@@ -1292,6 +1321,10 @@ impl Game {
             return;
         }
         let turn = self.turn.number;
+        // CR 708.5: the controller of a face-down permanent may look at it.
+        if !self.face_down_ids.is_empty() && self.face_down_ids.iter().any(|x| x.0 == c) {
+            self.look_face_down(c, p);
+        }
         let o = &mut self.objs[c.i()];
         o.controller = p;
         o.control_since = turn;
@@ -1326,6 +1359,12 @@ impl Game {
 
     fn move_card_ctl(&mut self, idx: CardIdx, to: Zone, pos: Pos, controller: Option<PlayerId>) -> ObjRef {
         let from = self.objs[idx.i()].zone;
+        // Entering face down (manifest, CR 701.40a): its identity stays as
+        // hidden as in the library it comes from.
+        let fd_enter = to == Zone::Battlefield && std::mem::take(&mut self.moving_face_down);
+        // (A face-down permanent's knowledge bits, before the move resets
+        // them: who knew the card it is.)
+        let fd_known = self.objs[idx.i()].known;
         // "If this would be put into a graveyard from anywhere, reveal it and
         // shuffle it into its owner's library instead" (Blightsteel; CR
         // 614.1a). Applied before the other replacements of a graveyard
@@ -1451,7 +1490,7 @@ impl Game {
             o.blocked = false;
             o.blocking = None;
             o.struck_first = false;
-            o.known = if to.is_hidden() { known_before } else { 0b11 };
+            o.known = if to.is_hidden() || fd_enter { known_before } else { 0b11 };
             o.attached = None;
             o.evoked = to == Zone::Battlefield && std::mem::take(&mut self.entering_evoked);
             if lki_power.is_some() {
@@ -1496,6 +1535,11 @@ impl Game {
         if !self.copies.is_empty() {
             self.copies_on_move(idx, old);
         }
+        // A face-down permanent leaving the battlefield is revealed and is
+        // its card again (CR 708.9; it left as a face-down 2/2, above).
+        if from == Zone::Battlefield && !self.face_down_ids.is_empty() && self.face_down_ids.iter().any(|x| x.0 == idx) {
+            self.unface(idx, fd_known);
+        }
         // CR 712.8a, 715.4: outside the battlefield and the stack a card has
         // only its front face's characteristics (the face it had there was
         // last known information, used above). A spell becoming a permanent
@@ -1523,7 +1567,11 @@ impl Game {
             // (The card's identity: a land played with its back face up, an
             // MDFC, has that face already, `put_onto_battlefield`.)
             let def = self.db.def(self.objs[idx.i()].def).card_def(self.objs[idx.i()].def);
-            if to.is_hidden() {
+            if fd_enter {
+                // (Hidden to hidden: a cloud keeps it by its slot, as a card
+                // exiled face down.)
+                self.knowledge_moves(idx, owner, from, Zone::FaceDown);
+            } else if to.is_hidden() {
                 self.knowledge_moves(idx, owner, from, to);
             } else {
                 self.knowledge_leaves(idx, owner, from, def, known_before);

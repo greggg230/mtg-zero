@@ -1579,6 +1579,11 @@ pub struct CardDb {
     equipment: Option<u16>,
     /// The finality counter (CR 122.1i), if any card names it.
     pub(crate) finality: Option<Counter>,
+    /// The definition of a face-down permanent (CR 708.2a): a 2/2 creature
+    /// with no text, no name, no subtypes and no mana cost; its one
+    /// "ability" is the special action that turns it face up (708.7). The
+    /// card it is waits in `Game::face_down_ids`.
+    pub(crate) face_down: DefId,
 }
 
 impl CardDb {
@@ -1623,6 +1628,7 @@ impl CardDb {
             }
         }
         db.equipment = db.subtype_id("Equipment");
+        // (Placed with the faces, below: after every card and token.)
         db.finality = db.subtype_id("counter:finality").map(Counter::Named);
         // Tokens the cards create (CR 111), interned during lowering.
         db.token_base = db.defs.len() as DefId;
@@ -1661,7 +1667,14 @@ impl CardDb {
                 db.defs.push(f);
             }
         }
+        db.face_down = db.defs.len() as DefId;
+        db.defs.push(face_down_def());
         db
+    }
+
+    /// The definition of face-down permanents (CR 708.2a).
+    pub fn face_down_def(&self) -> DefId {
+        self.face_down
     }
 
     /// Is this a face's definition (a back face, an Adventure: CR 712, 715)
@@ -1780,4 +1793,32 @@ pub const CUBE_IR: &str = include_str!("../../data/cards/powerlsv.ir.json");
 
 pub fn load_cube_document() -> card_ir::Document {
     card_ir::load_document(CUBE_IR).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// A face-down permanent's characteristics (CR 708.2a): a 2/2 creature, no
+/// name, colour, mana cost, subtypes or abilities. Its one activated entry is
+/// the special action of turning it face up (CR 708.7, 701.40b; its cost is
+/// the card's mana cost, `Game::face_down_cost`).
+fn face_down_def() -> CardDef {
+    CardDef {
+        name: String::new(),
+        types: types::CREATURE,
+        power: Some(2),
+        toughness: Some(2),
+        activated: vec![ActivatedDef {
+            cost: Cost::default(),
+            effect: ActEffect::Stack(AbilityDef::default()),
+            sorcery: false,
+            instant_only: false,
+            exhaust: false,
+            only_if: None,
+            your_turn: false,
+            loyalty: None,
+            discounts: Vec::new(),
+            boast: false,
+            x: false,
+            special: Some(Special::TurnFaceUp),
+        }],
+        ..CardDef::default()
+    }
 }

@@ -105,6 +105,13 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let on = crate::program::On::Each(Filter::And(Box::new(filter), Box::new(Filter::Controller(true))));
             b.op(Op::Ext(Ext::Apply { on, mods: vec![crate::db::Mod::GainSacMana(mask)], until: crate::layers::Until::EndOfTurn }));
         }
+        // Manifest dread (CR 701.62a; Abhorrent Oculus).
+        E::ManifestDread(nodes::ManifestDread { count }) => {
+            if *count != 1 {
+                l.unsupported("ManifestDread.count(not 1)");
+            }
+            b.op(Op::Ext(Ext::M7d(M7d::ManifestDread)));
+        }
         _ => return false,
     }
     true

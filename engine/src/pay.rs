@@ -442,8 +442,12 @@ impl Game {
                     continue;
                 }
                 let Some(cl) = self.sac_for_class(p, c, locks) else { continue };
-                out.insert(n_multi, cl);
-                n_multi += 1;
+                if matches!(cl.yld, Yield::Multi { .. }) {
+                    out.insert(n_multi, cl);
+                    n_multi += 1;
+                } else {
+                    out.push(cl);
+                }
             }
         }
         // The permanents another's mana ability taps (`TAP_FOR`), one class
@@ -1311,7 +1315,18 @@ fn cands(
     }
     // A single unit carries its budget use itself.
     let as_unit = |w: &Way| Unit { life: w.life as u8, sac: w.sac > 0, ..w.units[0] };
-    for (_, ways) in per_card {
+    for (_, mut ways) in per_card {
+        // A card whose ways take no budget and one of which makes every
+        // other's units (Rain of Filth's tap-then-sacrifice, ENGINE.md 31):
+        // that way stands for the card (more units never make a cost
+        // unpayable), so the search doesn't branch on it.
+        if ways.len() > 1 && ways.iter().all(|w| w.life == 0 && w.sac == 0) {
+            if let Some(k) = (0..ways.len()).find(|&k| ways.iter().all(|w| covers(&ways[k].units, &w.units))) {
+                out.fixed.extend(ways[k].units.iter().map(|u| Unit::free(u.mask)));
+                continue;
+            }
+        }
+        let ways = std::mem::take(&mut ways);
         let same_use = |a: &Way, b: &Way| (a.life, a.sac) == (b.life, b.sac);
         if ways.iter().all(|w| w.units.len() == 1 && same_use(w, &ways[0])) {
             let mask = ways.iter().fold(0, |m, w| m | w.units[0].mask);
@@ -1321,6 +1336,16 @@ fn cands(
         }
     }
     out
+}
+
+/// Can the units `a` make every unit of `b` (each of `b`'s units by its own
+/// unit of `a` whose mask holds it)? Ways have at most four units.
+fn covers(a: &[Unit], b: &[Unit]) -> bool {
+    fn go(a: &[Unit], used: u8, b: &[Unit]) -> bool {
+        let Some((first, rest)) = b.split_first() else { return true };
+        (0..a.len()).any(|i| used & (1 << i) == 0 && first.mask & !a[i].mask == 0 && go(a, used | (1 << i), rest))
+    }
+    b.len() <= a.len() && go(a, 0, b)
 }
 
 /// [`payable_within`] over candidates, trying each way (or none) of the

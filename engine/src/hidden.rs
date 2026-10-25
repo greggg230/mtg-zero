@@ -214,7 +214,15 @@ impl Game {
     /// Does `viewer` know the identity of this card exactly?
     pub fn knows(&self, viewer: PlayerId, idx: CardIdx) -> bool {
         let o = &self.objs[idx.i()];
-        !o.zone.is_hidden() || o.known & (1 << viewer) != 0
+        !(o.zone.is_hidden() || o.def == self.db.face_down_def()) || o.known & (1 << viewer) != 0
+    }
+
+    /// Is `c`'s identity hidden where it is: in a hidden zone, or a
+    /// face-down permanent (CR 708; ENGINE.md 31)?
+    #[inline]
+    pub(crate) fn hidden_obj(&self, c: CardIdx) -> bool {
+        let o = &self.objs[c.i()];
+        o.zone.is_hidden() || o.def == self.db.face_down_def()
     }
 
     /// The partial knowledge in the game (tests, analysis).
@@ -233,9 +241,11 @@ impl Game {
     fn unknown_to_in(&self, viewer: PlayerId, owner: PlayerId) -> SVec<CardIdx, 64> {
         let pl = &self.players[owner as usize];
         let hand = if owner != viewer { &pl.hand[..] } else { &[][..] };
-        // (Cards exiled face down: hidden too, ENGINE.md 30.)
+        // (Cards exiled face down: hidden too, ENGINE.md 30; face-down
+        // permanents, 31.)
         let face_down = self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == owner);
-        hand.iter().chain(pl.library.iter()).copied().chain(face_down).filter(|&c| !self.knows(viewer, c)).collect()
+        let fd_perms = self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].owner == owner);
+        hand.iter().chain(pl.library.iter()).copied().chain(face_down).chain(fd_perms).filter(|&c| !self.knows(viewer, c)).collect()
     }
 
     // ---- knowledge events (ENGINE.md 10) ----------------------------------
@@ -258,7 +268,7 @@ impl Game {
         }
         for &c in &k.slots {
             let o = &self.objs[c.i()];
-            if o.owner == k.owner && o.zone.is_hidden() && !v.contains(&c) {
+            if o.owner == k.owner && self.hidden_obj(c) && !v.contains(&c) {
                 v.push(c);
             }
         }
@@ -270,10 +280,10 @@ impl Game {
     /// loses that entry (the listed card may be this one).
     pub(crate) fn learn(&mut self, q: PlayerId, c: CardIdx) {
         let o = &self.objs[c.i()];
-        if o.known & (1 << q) != 0 || !o.zone.is_hidden() {
+        if o.known & (1 << q) != 0 || !self.hidden_obj(c) {
             return;
         }
-        let (owner, zone, d) = (o.owner, o.zone, o.def);
+        let (owner, zone, d) = (o.owner, o.zone, self.ident(c));
         for k in self.clouds.iter_mut().filter(|k| k.viewer == q) {
             if Self::in_domain_at(k, owner, c, zone) {
                 take_one(&mut k.defs, d);
@@ -287,8 +297,8 @@ impl Game {
     /// Reveal a card in a hidden zone to everyone (CR 701.16; 602.2a).
     pub(crate) fn reveal(&mut self, idx: CardIdx) {
         let o = &self.objs[idx.i()];
-        if o.zone.is_hidden() && o.known != 0b11 {
-            let (owner, def) = (o.owner, o.def);
+        if self.hidden_obj(idx) && o.known != 0b11 {
+            let (owner, def) = (o.owner, self.ident(idx));
             for q in 0..2 {
                 self.learn(q, idx);
             }
@@ -378,10 +388,11 @@ impl Game {
                 !((hand && z == Zone::Hand) || (library && z == Zone::Library))
             });
             for c in self.domain(&k) {
+                let d = self.ident(c);
                 let o = &mut self.objs[c.i()];
                 if o.known & (1 << q) != 0 {
                     o.known &= !(1 << q);
-                    insert_sorted(&mut k.defs, o.def);
+                    insert_sorted(&mut k.defs, d);
                 }
             }
             self.clouds.push(k);
@@ -460,11 +471,12 @@ impl Game {
             }
         }
         let objs = &self.objs;
+        let fd = self.db.face_down_def();
         for k in &mut self.clouds {
             let (hand, library) = (k.hand, k.library);
             k.slots.retain(|&c| {
                 let z = objs[c.i()].zone;
-                z.is_hidden() && !((hand && z == Zone::Hand) || (library && z == Zone::Library))
+                (z.is_hidden() || objs[c.i()].def == fd) && !((hand && z == Zone::Hand) || (library && z == Zone::Library))
             });
             k.slots.sort_unstable();
         }
@@ -495,7 +507,7 @@ impl Game {
                 .domain(k)
                 .into_iter()
                 .filter(|&c| !self.knows(k.viewer, c))
-                .map(|c| self.objs[c.i()].def)
+                .map(|c| self.ident(c))
                 .collect();
             have.sort_unstable();
             for &d in &k.defs {
@@ -539,11 +551,11 @@ impl Game {
                     !pin
                 });
             }
-            let mut defs: SVec<DefId, 64> = slots.iter().map(|c| self.objs[c.i()].def).collect();
+            let mut defs: SVec<DefId, 64> = slots.iter().map(|&c| self.ident(c)).collect();
             if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
                 rng.shuffle(&mut defs);
-                for (c, &d) in slots.iter().zip(defs.iter()) {
-                    self.objs[c.i()].def = d;
+                for (&c, &d) in slots.iter().zip(defs.iter()) {
+                    self.set_ident(c, d);
                 }
                 continue;
             }
@@ -626,7 +638,7 @@ impl Game {
                 }
                 None => free.next().expect("pool covers every place"),
             };
-            self.objs[c.i()].def = d;
+            self.set_ident(c, d);
         }
     }
 

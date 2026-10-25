@@ -129,6 +129,8 @@ pub enum M7d {
     /// hand; the controller may cast a spell from among them without paying
     /// its mana cost (Crabomination). Choice: `ChooseExiled` (`PASS` = no).
     OppExilesThreeMayCastOne { tgt: u8 },
+    /// Manifest dread (CR 701.62a). Choice: `PutOntoBattlefield`.
+    ManifestDread,
 }
 
 /// Which objects an `Ext` op acts on.

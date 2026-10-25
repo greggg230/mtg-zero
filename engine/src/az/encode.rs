@@ -230,6 +230,19 @@ fn digits(out: &mut [f32], ids: &[u16], def: DefId) {
 
 /// A card code with the identity of `who` and the descriptor of `def` (a
 /// copy: what it is, and the copiable values it has; ENGINE.md 26).
+impl Game {
+    /// A permanent's identity for viewer `me` (ENGINE.md 26, 31): what it is
+    /// without copy effects; a face-down permanent's card only for a viewer
+    /// who knows it (else the face-down definition: an unknown 2/2).
+    fn perm_identity(&self, me: PlayerId, c: CardIdx) -> DefId {
+        match self.face_down_id(c) {
+            Some(d) if self.knows(me, c) => d,
+            Some(_) => self.objs[c.i()].def,
+            None => self.own_def(c),
+        }
+    }
+}
+
 fn code_of(out: &mut [f32], db: &CardDb, ids: &[u16], who: DefId, def: DefId) {
     digits(out, ids, who);
     let d = db.def(def);
@@ -434,7 +447,7 @@ impl Game {
                 let ob = &self.objs[c.i()];
                 // What it is (its identity) and the copiable values it has
                 // (the descriptor; a copy's copied face, CR 707.2).
-                code_of(&mut out[o..o + CODE], self.db, ids, self.own_def(c), ob.def);
+                code_of(&mut out[o..o + CODE], self.db, ids, self.perm_identity(me, c), ob.def);
                 out[o + 46] = self.is_token(c) as u8 as f32;
                 // A copy's exceptions to the copiable values (CR 707.9b:
                 // eternalize's black 4/4 with no mana cost).
@@ -700,7 +713,7 @@ impl Game {
         for &c in &self.battlefield {
             // (By what it is: a copy by its own identity, ENGINE.md 26.)
             let o = &self.objs[c.i()];
-            bag_add(out, ids, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, self.own_def(c));
+            bag_add(out, ids, if o.controller == me { bag::MY_BATTLEFIELD } else { bag::OPP_BATTLEFIELD }, self.perm_identity(me, c));
         }
         for p in [me, op_] {
             for &c in &self.players[p as usize].graveyard {
@@ -736,8 +749,11 @@ impl Game {
         }
         let opl = &self.players[op_ as usize];
         let opp_face_down = self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(me, c));
-        for c in opl.hand.iter().copied().chain(opl.library.iter().copied()).chain(opp_face_down) {
-            let d = self.objs[c.i()].def;
+        // (Their face-down permanents the viewer doesn't know: in the
+        // hidden pool; ENGINE.md 31.)
+        let opp_fd_perms = self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(me, c));
+        for c in opl.hand.iter().copied().chain(opl.library.iter().copied()).chain(opp_face_down).chain(opp_fd_perms) {
+            let d = self.ident(c);
             if !self.knows(me, c) {
                 bag_add(out, ids, bag::OPP_HIDDEN, d);
             } else if self.objs[c.i()].zone == Zone::Hand {

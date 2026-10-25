@@ -240,6 +240,11 @@ impl Game {
         if mana_ability && !ad.instant_only {
             return false; // activated while paying (ENGINE.md 18)
         }
+        // Turning a face-down permanent face up (CR 708.7, 116.2b): any time
+        // its controller has priority, for its card's mana cost.
+        if ad.special == Some(crate::db::Special::TurnFaceUp) {
+            return self.face_down_cost(card).is_some_and(|m| self.can_pay_without(p, &m, classes, &Keep::default(), Some(card)) || m.is_zero());
+        }
         match ad.loyalty {
             // CR 606.3: once each turn, at sorcery speed ("as long as this
             // entered this turn, any time you could cast an instant": The

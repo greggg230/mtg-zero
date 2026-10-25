@@ -477,7 +477,12 @@ impl Game {
                         if mine[..k].iter().any(|&j| same(&self.waiting[j], &self.waiting[i])) {
                             continue;
                         }
-                        assert!((k as u16) < act::TRIGGER_N, "too many waiting triggers");
+                        // (More distinct triggers than `TRIGGER` slots, each
+                        // card a discard made: the first ones are offered; the
+                        // others come next. A limit of the action layout.)
+                        if k as u16 >= act::TRIGGER_N {
+                            break;
+                        }
                         opts.push(Opt { action: act::TRIGGER + k as u16, choice: Choice::Trigger(k as u8) });
                     }
                     self.ask(Task::PutTriggers, p, DecisionKind::OrderTriggers, opts);

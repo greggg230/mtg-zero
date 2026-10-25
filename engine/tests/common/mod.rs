@@ -65,7 +65,12 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
     let dies_shock = json!({"triggered_abilities": [{"$t": "TriggeredAbility", "event": "dies",
         "predicate": {"$t": "IsSelf"}, "effect": {"$t": "DealDamageToTargetCreature", "amount": 1,
         "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsCreature"}}]}}]});
+    // When this enters, manifest dread (M7d: face-down permanents, fuzzed
+    // often).
+    let manifest = json!({"triggered_abilities": [{"$t": "TriggeredAbility", "event": "enters",
+        "predicate": {"$t": "IsSelf"}, "effect": {"$t": "ManifestDread"}}]});
     let cards = vec![
+        creature("Test Manifester", "{1}{U}", 1, 1, &[], false, manifest),
         creature("Test Bear", "{1}{G}", 2, 2, &[], false, none.clone()),
         creature("Test Flyer", "{1}{U}", 2, 2, &["flying"], false, none.clone()),
         creature("Test Reacher", "{1}{G}", 1, 3, &["reach"], false, none.clone()),

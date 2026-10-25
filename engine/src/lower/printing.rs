@@ -364,7 +364,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
         l.deny("CardPrinting.zone_abilities", zone_abilities);
         let _ = miracle_cost_str; // display form of `miracle_cost`
-        l.deny("CardPrinting.additional_cost_exile_from_graveyard", additional_cost_exile_from_graveyard);
         l.deny("CardPrinting.enters_as_copy_add_triggers", enters_as_copy_add_triggers);
         l.deny("CardPrinting.enters_as_copy_max_mv_mana_spent", enters_as_copy_max_mv_mana_spent);
         l.deny("CardPrinting.rebound", rebound);
@@ -720,7 +719,19 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             additional.push(Cost { sacrifice: Some(SacCost { filter, n: 1, another: false }), ..Cost::default() });
         }
     }
-    if !additional.is_empty() && !is_spell_card_any(ty) {
+    // "As an additional cost to cast this spell, exile n cards from your
+    // graveyard" (Abhorrent Oculus; CR 601.2b, 118.8).
+    if *additional_cost_exile_from_graveyard != 0 {
+        let n = l.int("CardPrinting.additional_cost_exile_from_graveyard", *additional_cost_exile_from_graveyard, 1, 20) as u8;
+        if !additional.is_empty() {
+            l.unsupported("CardPrinting.additional_cost_exile_from_graveyard(with other additional costs)");
+        }
+        additional.push(Cost { exile_graveyard: n, ..Cost::default() });
+    }
+    // (On a permanent card only the graveyard exile, a cost paid like a
+    // spell's: Abhorrent Oculus.)
+    let gy_only = *additional_cost_exile_from_graveyard != 0 && additional.len() == 1;
+    if !additional.is_empty() && !is_spell_card_any(ty) && !gy_only {
         l.unsupported("CardPrinting.additional_cost(on a permanent card)");
     }
     if shock_life > 0 && entry != EntersTapped::No {

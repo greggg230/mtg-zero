@@ -13,6 +13,7 @@ const SUPPORTED: &[&str] = &[
     "\"Name Sticker\" Goblin",
     "Aang, Swift Savior // Aang and La, Ocean's Fury",
     "Abandoned Air Temple",
+    "Abhorrent Oculus",
     "Abrade",
     "Abrupt Decay",
     "Adeline, Resplendent Cathar",

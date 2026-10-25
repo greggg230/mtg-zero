@@ -61,7 +61,9 @@ fn play(seed: u64, checks: bool) -> Played {
             check_options_complete(&g, seed, "the game");
         }
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
-        g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}"));
+        g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}
+{}", g.log_lines().iter().rev().take(60).rev().cloned().collect::<Vec<_>>().join("
+")));
         actions.push(a);
         steps += 1;
         assert!(steps < 100_000, "seed {seed}: game does not end
@@ -113,6 +115,7 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
             let c = engine::CardIdx(i as u16);
             if g.knows(viewer, c) {
                 assert_eq!(o.def, d.obj(c).def, "seed {seed}: a card P{viewer} knows was resampled");
+                assert_eq!(g.ident(c), d.ident(c), "seed {seed}: a face-down card P{viewer} knows was resampled");
             }
         }
         d.check_invariants().unwrap();

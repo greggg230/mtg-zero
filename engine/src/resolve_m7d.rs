@@ -49,25 +49,146 @@ impl Game {
 // ---- face-down permanents (CR 708; ENGINE.md 31) -------------------------
 
 impl Game {
-    /// The mana cost of the card a face-down permanent is (CR 701.40b), if it
-    /// may be turned face up for it (a creature card).
-    pub(crate) fn face_down_cost(&self, _card: CardIdx) -> Option<ManaCost> {
-        None
+    /// The card a face-down permanent is, if `c` is one (its slot's `def` is
+    /// the face-down definition, CR 708.2a).
+    #[inline]
+    pub(crate) fn face_down_id(&self, c: CardIdx) -> Option<crate::ids::DefId> {
+        if self.face_down_ids.is_empty() || self.objs[c.i()].def != self.db.face_down_def() {
+            return None;
+        }
+        self.face_down_ids.iter().find(|x| x.0 == c).map(|x| x.1)
     }
-
-    /// Turn a face-down permanent face up (CR 708.8).
-    pub(crate) fn turn_face_up(&mut self, _card: CardIdx) {}
 
     /// The identity of slot `c`: its definition, or for a face-down
-    /// permanent the card it is (CR 708.2).
+    /// permanent the card it is (CR 708.2; what knowledge and `determinize`
+    /// deal with, ENGINE.md 10, 31).
     pub fn ident(&self, c: CardIdx) -> crate::ids::DefId {
-        self.objs[c.i()].def
+        self.face_down_id(c).unwrap_or(self.objs[c.i()].def)
     }
 
-    /// The card a face-down permanent is (its owner's identity), if `c` is
-    /// one.
-    pub(crate) fn face_down_def(&self, _c: CardIdx) -> Option<&'static crate::db::CardDef> {
-        None
+    /// Set slot `c`'s identity (`determinize`): a face-down permanent's card.
+    pub(crate) fn set_ident(&mut self, c: CardIdx, d: crate::ids::DefId) {
+        if self.objs[c.i()].def == self.db.face_down_def() {
+            if let Some(x) = self.face_down_ids.iter_mut().find(|x| x.0 == c) {
+                x.1 = d;
+                return;
+            }
+        }
+        self.objs[c.i()].def = d;
+    }
+
+    /// Is `c` a face-down permanent?
+    pub fn is_face_down(&self, c: CardIdx) -> bool {
+        self.face_down_id(c).is_some()
+    }
+
+    /// The card a face-down permanent is, if `c` is one.
+    pub(crate) fn face_down_def(&self, c: CardIdx) -> Option<&'static crate::db::CardDef> {
+        self.face_down_id(c).map(|d| self.db.def(d))
+    }
+
+    /// The mana cost to turn a face-down permanent face up (CR 701.40b: a
+    /// manifested creature card, for its mana cost; X is 0), if it can be.
+    pub(crate) fn face_down_cost(&self, c: CardIdx) -> Option<ManaCost> {
+        let d = self.face_down_def(c)?;
+        d.is(crate::db::types::CREATURE).then_some(d.cost)
+    }
+
+    /// A face-down permanent's identity becomes public (CR 708.8 turned
+    /// face up, 708.9 leaving the battlefield): every player who didn't know
+    /// it sees it (clouds lose it, as for a card leaving a hidden zone), a
+    /// public reveal key; it is its card again.
+    fn reveal_face_down(&mut self, c: CardIdx, known: u8) -> Option<crate::ids::DefId> {
+        let i = self.face_down_ids.iter().position(|x| x.0 == c)?;
+        let real = self.face_down_ids[i].1;
+        let owner = self.objs[c.i()].owner;
+        self.knowledge_leaves(c, owner, Zone::Battlefield, real, known);
+        self.face_down_ids.remove(i);
+        self.emit_public(crate::hidden::KEY_REVEAL, owner, real as u64);
+        self.objs[c.i()].known = 0b11;
+        Some(real)
+    }
+
+    /// Turn a face-down permanent face up (CR 708.8: the same permanent, its
+    /// copiable values now its card's; no enter abilities).
+    pub(crate) fn turn_face_up(&mut self, c: CardIdx) {
+        if self.objs[c.i()].zone != Zone::Battlefield {
+            return;
+        }
+        let known = self.objs[c.i()].known;
+        let Some(real) = self.reveal_face_down(c, known) else { return };
+        self.set_face(c, real);
+        self.note(|g| format!("{} is turned face up", g.name(c)));
+    }
+
+    /// A face-down permanent that just left the battlefield (it left as a
+    /// face-down 2/2, CR 603.10a) is revealed and is its card again (708.9).
+    /// `known`: its knowledge bits as it left.
+    pub(crate) fn unface(&mut self, c: CardIdx, known: u8) {
+        if let Some(real) = self.reveal_face_down(c, known) {
+            self.objs[c.i()].def = real;
+        }
+    }
+
+    /// CR 708.5: `p`, who now controls face-down permanent `c`, may look at
+    /// it.
+    pub(crate) fn look_face_down(&mut self, c: CardIdx, p: PlayerId) {
+        if self.objs[c.i()].known & (1 << p) == 0 {
+            self.learn(p, c);
+            let d = self.ident(c);
+            self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+        }
+    }
+
+    /// Manifest dread (CR 701.62a): look at the top two cards of your
+    /// library, put one onto the battlefield face down as a 2/2 creature
+    /// (manifest, 701.40a) and the other into your graveyard. Choice:
+    /// `PutOntoBattlefield` (the pile's cards by definition).
+    pub(crate) fn manifest_dread(&mut self, f: &mut crate::resolve::Frame) -> crate::resolve::Flow {
+        use crate::decision::{act, Choice, DecisionKind, Opt};
+        use crate::flow::Task;
+        use crate::resolve::Flow;
+        let p = f.controller;
+        let pick = match self.answer.take() {
+            Some(Choice::Card(c)) => Some(c),
+            Some(other) => unreachable!("manifest answer {other:?}"),
+            None => None,
+        };
+        if pick.is_none() {
+            if f.pile.is_empty() {
+                self.look_top(f, p, 2, false);
+            }
+            let pile: Vec<CardIdx> = f.pile.iter().copied().filter(|&c| self.objs[c.i()].zone == Zone::Library).collect();
+            if pile.is_empty() {
+                f.pile.clear();
+                return Flow::Next;
+            }
+            let mut sorted = pile.clone();
+            sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+            let mut opts = Vec::new();
+            for (k, &c) in sorted.iter().enumerate() {
+                if k > 0 && self.objs[sorted[k - 1].i()].def == self.objs[c.i()].def {
+                    continue;
+                }
+                opts.push(Opt { action: act::LIBRARY + k as u16, choice: Choice::Card(c) });
+            }
+            self.ask(Task::Run(f.clone()), p, DecisionKind::PutOntoBattlefield, opts);
+            return Flow::Suspend;
+        }
+        let c = pick.unwrap();
+        let rest: Vec<CardIdx> = f.pile.iter().copied().filter(|&x| x != c && self.objs[x.i()].zone == Zone::Library).collect();
+        f.pile.clear();
+        if self.objs[c.i()].zone == Zone::Library {
+            self.note(|_| format!("P{p} manifests a card"));
+            self.entering_face_down = true;
+            self.put_onto_battlefield(c, p);
+            self.entering_face_down = false;
+            f.made = (self.objs[c.i()].zone == Zone::Battlefield).then_some(c);
+        }
+        for x in rest {
+            self.move_card(x, Zone::Graveyard, Pos::Top);
+        }
+        Flow::Next
     }
 }
 
@@ -346,6 +467,7 @@ impl Game {
                 self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
                 Flow::Suspend
             }
+            M7d::ManifestDread => self.manifest_dread(f),
             M7d::UnattachSource => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     let c = f.source.idx;
@@ -628,9 +750,9 @@ impl Game {
     }
 
     /// The own mana abilities of `c` its granted sacrifice may follow in one
-    /// payment: {T} only, no life or damage, ready now (CR 601.2g: tap it
-    /// for mana, then sacrifice it).
-    fn sac_for_taps(&self, p: PlayerId, c: CardIdx, locks: u16) -> Vec<(u8, Vec<[u8; 6]>)> {
+    /// payment: {T} only, one mana, no life or damage, ready now (CR 601.2g:
+    /// tap it for mana, then sacrifice it); their masks.
+    fn sac_for_taps(&self, p: PlayerId, c: CardIdx, locks: u16) -> Vec<(u8, crate::mana::ManaMask)> {
         let d = self.abilities(c);
         d.activated
             .iter()
@@ -641,7 +763,8 @@ impl Game {
                 if !plain || ad.instant_only || !self.activation_ready(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
                     return None;
                 }
-                Some((i as u8, crate::pay::productions(self, p, &m.prod, Some(c))))
+                let crate::db::ManaProd::One(mask) = m.prod else { return None };
+                Some((i as u8, mask))
             })
             .collect()
     }
@@ -654,18 +777,18 @@ impl Game {
         if mask == 0 || self.abilities(c).activated.len() >= 4 || self.activation_locks_hit(c, locks) {
             return None;
         }
-        let mut prods: Vec<[u8; 6]> = (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
+        let one = |t: usize| -> [u8; 6] { std::array::from_fn(|i| (i == t) as u8) };
+        let mut prods: Vec<[u8; 6]> = (0..6).filter(|&t| mask & (1 << t) != 0).map(one).collect();
         let base = prods.clone();
-        for (_, ps) in self.sac_for_taps(p, c, locks) {
-            for v in ps {
-                for b in &base {
-                    let mut w = v;
-                    for t in 0..6 {
-                        w[t] += b[t];
-                    }
-                    if !prods.contains(&w) {
-                        prods.push(w);
-                    }
+        let tap = self.sac_for_taps(p, c, locks).iter().fold(0, |m, &(_, k)| m | k);
+        for t in (0..6).filter(|&t| tap & (1 << t) != 0) {
+            for b in &base {
+                let mut w = one(t);
+                for i in 0..6 {
+                    w[i] += b[i];
+                }
+                if !prods.contains(&w) {
+                    prods.push(w);
                 }
             }
         }
@@ -673,7 +796,14 @@ impl Game {
         let src = crate::pay::Src { card: c, slot: crate::pay::SAC_FOR };
         let mut members = crate::pay::Members::new();
         members.push(src);
-        Some(crate::pay::Class { def, members, yld: crate::pay::Yield::Multi { prods, units: None }, dmg: 0, sac_self: true, only: 0 })
+        // (Its mana as independent units, its tap ability's and the
+        // sacrifice's: any of them may be spent, the rest stays in the pool.)
+        let yld = if tap == 0 {
+            crate::pay::Yield::One(crate::mana::Unit::free(mask))
+        } else {
+            crate::pay::Yield::Multi { prods, units: Some(vec![crate::mana::Unit::free(tap), crate::mana::Unit::free(mask)]) }
+        };
+        Some(crate::pay::Class { def, members, yld, dmg: 0, sac_self: true, only: 0 })
     }
 
     fn activation_locks_hit(&self, c: CardIdx, locks: u16) -> bool {
@@ -692,7 +822,8 @@ impl Game {
         }
         if rest != [0; 6] {
             let locks = self.activation_locks();
-            if let Some((i, _)) = self.sac_for_taps(p, c, locks).into_iter().find(|(_, ps)| ps.contains(&rest)) {
+            let t = rest.iter().position(|&n| n > 0).unwrap_or(0);
+            if let Some((i, _)) = self.sac_for_taps(p, c, locks).into_iter().find(|&(_, k)| k & (1 << t) != 0) {
                 self.activate_mana_costs(crate::pay::Src { card: c, slot: crate::db::AbilitySlot::Activated(i) });
             }
         }
