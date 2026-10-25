@@ -191,6 +191,9 @@ impl Game {
             }
         }
         self.other_zone_options(p, &classes, sorcery_ok, land_ok, &mut opts);
+        if self.seen & crate::game::SEEN_TOP != 0 {
+            self.top_options(p, &classes, sorcery_ok, land_ok, &mut opts);
+        }
         self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
         opts
     }
@@ -358,6 +361,8 @@ impl Game {
         use crate::game::CastFrom;
         let def = self.def_of(card);
         match self.objs[card.i()].zone {
+            // Bolas's Citadel: the top card of the caster's library.
+            Zone::Library if self.top_play_ok(p, card) => Some(CastFrom::LibraryTop),
             Zone::Hand if self.miracle_cast == Some(card) => Some(CastFrom::Miracle),
             Zone::Hand => Some(CastFrom::Hand),
             Zone::Graveyard => {
@@ -475,6 +480,8 @@ impl Game {
             CastFrom::Paragon => with(def.cost),
             CastFrom::Miracle => with(def.miracle.as_ref().map_or(def.cost, |m| m.0)),
             CastFrom::Airbent(n) => with(crate::mana::ManaCost { generic: n, ..Default::default() }),
+            // Life rather than its mana cost (increases still apply, 601.2f).
+            CastFrom::LibraryTop => with(Default::default()),
         }
     }
 
@@ -524,6 +531,12 @@ impl Game {
             classes
         };
         let keep = self.escape_exiles(card, from);
+        // Bolas's Citadel: life equal to its mana value (CR 119.4), kept from
+        // the mana payment.
+        let top_life = if from == crate::game::CastFrom::LibraryTop { def.mana_value() } else { 0 };
+        if top_life as i32 > self.players[p as usize].life {
+            return false;
+        }
         // `extra`: the mana of additional costs announced (CR 601.2f).
         let paid = |extra: &crate::mana::ManaCost| {
             let mana = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, extra), keep);
@@ -532,7 +545,7 @@ impl Game {
                     self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
                 }
                 _ if !def.additional.is_empty() => self.options_payable(p, card, from, extra, keep, classes, None),
-                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow(card), ..Default::default() }),
+                _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow(card), life: top_life, ..Default::default() }),
             }
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
@@ -614,7 +627,7 @@ impl Game {
             None => {}
         }
         let item = &self.stack[pos];
-        let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. });
+        let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. } | crate::game::CastFrom::LibraryTop);
         if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             // Kicker {X} (CR 601.2b): announced only if kicked, at least
             // `x_min`; as much as can be paid.
@@ -1676,11 +1689,21 @@ impl Game {
         // CR 601.2f: the total cost, then delve's exiled cards pay for some
         // of its generic mana (702.66b).
         let cost = self.total_mana(card, item).less_generic(item.delved);
+        let from_top = item.from == crate::game::CastFrom::LibraryTop;
         if def.x_life && item.x > 0 {
             // "As an additional cost, pay X life" (CR 601.2h; 119.4).
             let x = item.x as i32;
             self.note(|_| format!("P{p} pays {x} life"));
             self.lose_life(p, x);
+        }
+        if from_top {
+            // Bolas's Citadel: life equal to its mana value rather than its
+            // mana cost (CR 118.9, 601.2h).
+            let n = self.mana_value_of(card) as i32;
+            if n > 0 {
+                self.note(|_| format!("P{p} pays {n} life"));
+                self.lose_life(p, n);
+            }
         }
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];

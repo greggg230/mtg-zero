@@ -170,6 +170,11 @@ impl Game {
             self.answer = None;
             self.agenda.clear();
         }
+        // "You may look at the top card of your library any time" (Bolas's
+        // Citadel): before any decision, its controller knows it.
+        if self.seen & crate::game::SEEN_TOP != 0 && self.outcome.is_none() {
+            self.look_tops();
+        }
         self.canon_hand_knowledge();
     }
 

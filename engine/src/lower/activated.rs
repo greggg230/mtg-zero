@@ -363,7 +363,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         sacs.push(SacCost { filter: Filter::Subtype(l.subtype(sacrifice_subtype)), n: 1, another: false });
     }
     if *sacrifice_n_nonland_permanents > 0 {
-        let n = l.int("ActivationCost.sacrifice_n_nonland_permanents", *sacrifice_n_nonland_permanents, 1, 9) as u8;
+        let n = l.int("ActivationCost.sacrifice_n_nonland_permanents", *sacrifice_n_nonland_permanents, 1, 10) as u8;
         sacs.push(SacCost {
             filter: Filter::And(Box::new(t(types::PERMANENT)), Box::new(Filter::Not(Box::new(t(types::LAND))))),
             n,

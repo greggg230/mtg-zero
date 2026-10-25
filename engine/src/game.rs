@@ -136,6 +136,10 @@ pub enum CastFrom {
     /// From exile, airbent: for this generic cost rather than its mana cost
     /// (an alternative cost, CR 118.9).
     Airbent(u8),
+    /// From the top of its owner's library (Bolas's Citadel): life equal to
+    /// its mana value rather than its mana cost (an alternative cost, CR
+    /// 118.9; X is 0, 107.3b).
+    LibraryTop,
 }
 
 /// A permission to play a card from a zone other than a hand (CR 601.2a,
@@ -633,6 +637,9 @@ pub(crate) const SEEN_RARE_EVENTS: u16 = 512;
 pub(crate) const SEEN_VOID: u16 = 1024;
 /// Taxes on a chosen card name (Anointed Peacekeeper; M7d).
 pub(crate) const SEEN_NAMED_TAX: u16 = 2048;
+/// The top card of a library looked at any time and played (Bolas's
+/// Citadel; M7d).
+pub(crate) const SEEN_TOP: u16 = 4096;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).

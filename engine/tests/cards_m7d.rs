@@ -769,3 +769,59 @@ fn crabomination_emerges_and_casts_an_exiled_card_free_cr702_119() {
     let giant = g.card(1, "Test Giant", Zone::Battlefield);
     assert_eq!(g.obj(giant).controller, 0, "cast without paying its mana cost\n{}", log(&g));
 }
+
+// ---- Bolas's Citadel (the top card looked at any time and played) ---------------
+
+/// "You may look at the top card of your library any time. You may play lands
+/// and cast spells from the top of your library. If you cast a spell this
+/// way, pay life equal to its mana value rather than pay its mana cost."
+/// (CR 118.9: an alternative cost; 401.? the top card known to its owner.)
+#[test]
+fn bolas_citadel_casts_from_the_top_paying_life_cr118_9() {
+    let mut g = scen()
+        .library(0, &["Test Giant", "Forest", "Lightning Bolt"])
+        .battlefield(0, &["Bolas's Citadel"])
+        .at(Step::Main1, 0)
+        .start();
+    let top = *g.player(0).library.last().unwrap();
+    assert_eq!(g.name(top), "Test Giant");
+    assert!(g.knows(0, top), "its controller looks at it any time");
+    assert!(!g.knows(1, top), "not the opponent");
+    assert!(g.has_option(Choice::Cast(top)), "{:?}", g.options_desc());
+    assert_eq!(g.pending_decision().unwrap().action_of(Choice::Cast(top)), Some(engine::act::LIBRARY));
+    g.choose(Choice::Cast(top));
+    settle(&mut g);
+    assert_eq!(g.life(0), 15, "life equal to its mana value\n{}", log(&g));
+    assert_eq!(g.count_in(0, "Test Giant", Zone::Battlefield), 1);
+    // The next top card, a land: played (the land drop).
+    let top = *g.player(0).library.last().unwrap();
+    assert_eq!(g.name(top), "Forest");
+    assert!(g.knows(0, top), "the new top card is seen at once");
+    assert!(g.has_option(Choice::Play(top)), "{:?}", g.options_desc());
+    g.choose(Choice::Play(top));
+    let bolt = *g.player(0).library.last().unwrap();
+    assert!(!g.has_option(Choice::Play(bolt)) && g.has_option(Choice::Cast(bolt)), "an instant, castable: {:?}", g.options_desc());
+}
+
+/// "{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life."
+#[test]
+fn bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21() {
+    let mut g = scen()
+        .battlefield(0, &["Bolas's Citadel"])
+        .battlefield(0, &["Test Bear"; 9])
+        .at(Step::Main1, 0)
+        .start();
+    let cit = bf(&g, 0, "Bolas's Citadel");
+    assert!(g.has_option(act(cit, 0)), "ten with itself: {:?}", g.options_desc());
+    g.choose(act(cit, 0));
+    for _ in 0..20 {
+        if g.kind() != Some(DecisionKind::Sacrifice) {
+            break;
+        }
+        let c = g.pending_decision().unwrap().options[0].choice;
+        g.choose(c);
+    }
+    settle(&mut g);
+    assert_eq!(g.life(1), 10, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Graveyard), 9);
+}

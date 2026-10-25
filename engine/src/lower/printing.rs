@@ -282,7 +282,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.attached_grants_activated_abilities", attached_grants_activated_abilities);
         l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
         l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
-        l.deny("CardPrinting.grants_look_at_top_of_library", grants_look_at_top_of_library);
         l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
         l.deny("CardPrinting.grants_first_spell_each_turn_free", grants_first_spell_each_turn_free);
         l.deny("CardPrinting.grants_food_to_your_artifacts", grants_food_to_your_artifacts);
@@ -297,7 +296,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.converge = true;
             super::effect_ext::counter_by_name(l, "charge")
         });
-        l.deny("CardPrinting.grants_play_from_top_paying_life", grants_play_from_top_paying_life);
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
@@ -1607,7 +1605,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if (named_spell_tax > 0 || named_ability_tax > 0) && !*chooses_card_name_as_enters || *chooses_card_name_as_enters && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.named_spell_cost_increase(without a name chosen as it enters)");
     }
+    if *grants_play_from_top_paying_life && !*grants_look_at_top_of_library || (*grants_look_at_top_of_library && ty & types::PERMANENT == 0) {
+        l.unsupported("CardPrinting.grants_play_from_top_paying_life(without looking at the top card)");
+    }
     let mut def = CardDef {
+        look_top: *grants_look_at_top_of_library,
+        play_top_life: *grants_play_from_top_paying_life,
         chooses_name: *chooses_card_name_as_enters,
         named_spell_tax,
         named_ability_tax,

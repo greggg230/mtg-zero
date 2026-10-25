@@ -57,6 +57,7 @@ const SUPPORTED: &[&str] = &[
     "Bloodstained Mire",
     "Bloodtithe Harvester",
     "Blooming Marsh",
+    "Bolas's Citadel",
     "Bone Shards",
     "Boomerang Basics",
     "Boseiju, Who Endures",

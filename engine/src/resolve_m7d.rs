@@ -566,3 +566,50 @@ impl Game {
         }
     }
 }
+
+// ---- the top card of a library, looked at and played (Bolas's Citadel) -------
+
+impl Game {
+    /// "You may look at the top card of your library any time": each player
+    /// controlling such a permanent knows their top card (a private look,
+    /// keyed and forced like any look at a library's top).
+    pub(crate) fn look_tops(&mut self) {
+        for p in 0..2u8 {
+            let Some(&top) = self.players[p as usize].library.last() else { continue };
+            if self.objs[top.i()].known & (1 << p) != 0 || !self.permanents_of(p).any(|c| self.abilities(c).look_top) {
+                continue;
+            }
+            self.force_library_card(top, crate::hidden::KEY_LOOK, p);
+            self.learn(p, top);
+            let d = self.objs[top.i()].def;
+            self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+        }
+    }
+
+    /// May `p` play `card`, the top card of their library, with a permanent
+    /// that lets them (Bolas's Citadel)?
+    pub(crate) fn top_play_ok(&self, p: PlayerId, card: CardIdx) -> bool {
+        self.seen & crate::game::SEEN_TOP != 0
+            && self.objs[card.i()].owner == p
+            && self.players[p as usize].library.last() == Some(&card)
+            && self.permanents_of(p).any(|c| self.abilities(c).play_top_life)
+    }
+
+    /// Priority: play or cast the top card of `p`'s library (`LIBRARY` + 0),
+    /// its front face (a split card's halves are not offered).
+    pub(crate) fn top_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<crate::decision::Opt>) {
+        use crate::decision::{act, Choice, Opt};
+        let Some(&top) = self.players[p as usize].library.last() else { return };
+        if !self.top_play_ok(p, top) || self.def_of(top).halves.is_some() {
+            return;
+        }
+        let choice = if self.def_of(top).is(crate::db::types::LAND) {
+            land_ok.then_some(Choice::Play(top))
+        } else {
+            self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok).then_some(Choice::Cast(top))
+        };
+        if let Some(choice) = choice {
+            opts.push(Opt { action: act::LIBRARY, choice });
+        }
+    }
+}

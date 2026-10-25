@@ -783,6 +783,9 @@ impl Heuristic {
         let mut casts: Vec<(&'static crate::db::CardDef, u16)> = Vec::new();
         for o in &d.options {
             match o.choice {
+                // (From the top of its library paying life, Bolas's Citadel:
+                // not at half its life or more.)
+                Choice::Cast(c) if g.obj(c).zone == Zone::Library && g.def_of(c).mana_value() as i32 * 2 >= g.life(p) => {}
                 Choice::Cast(c) => casts.push((g.def_of(c), o.action)),
                 Choice::CastFace(c) => casts.extend(g.other_face(c).map(|f| (g.db.def(f), o.action))),
                 Choice::Faces(c, m) => {

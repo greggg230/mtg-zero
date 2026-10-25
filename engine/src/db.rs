@@ -1099,6 +1099,7 @@ impl CardDef {
             | (if self.gy_triggers { crate::game::SEEN_GY_TRIGGER } else { 0 })
             | (if self.void_exile.is_some() { crate::game::SEEN_VOID } else { 0 })
             | (if self.named_spell_tax > 0 || self.named_ability_tax > 0 { crate::game::SEEN_NAMED_TAX } else { 0 })
+            | (if self.look_top || self.play_top_life { crate::game::SEEN_TOP } else { 0 })
             | (if self.trig_mask & (1u64 << EventKind::CountersAdded as u32 | 1u64 << EventKind::CardsPutIntoLibrary as u32 | 1u64 << EventKind::AttackersUnblocked as u32) != 0 {
                 crate::game::SEEN_RARE_EVENTS
             } else {
@@ -1477,6 +1478,13 @@ pub struct CardDef {
     pub chooses_name: bool,
     pub named_spell_tax: u8,
     pub named_ability_tax: u8,
+    /// "You may look at the top card of your library any time" (Bolas's
+    /// Citadel): its controller knows their top card (`Game::look_tops`).
+    pub look_top: bool,
+    /// "You may play lands and cast spells from the top of your library. If
+    /// you cast a spell this way, pay life equal to its mana value rather
+    /// than pay its mana cost" (`CastFrom::LibraryTop`).
+    pub play_top_life: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
