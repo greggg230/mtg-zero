@@ -460,7 +460,7 @@ impl Game {
                 let mut back = f.clone();
                 back.i = 3;
                 self.agenda.push(Task::Run(back));
-                self.agenda.push(Task::PayMana(crate::pay::PayMana::new(p, cost)));
+                self.agenda.push(Task::PayMana(Box::new(crate::pay::PayMana::new(p, cost))));
                 Flow::Suspend
             }
             Some(_) => {

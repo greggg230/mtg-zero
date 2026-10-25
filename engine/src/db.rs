@@ -1087,9 +1087,8 @@ pub struct ActivatedDef {
     /// "Activate only as a sorcery" (CR 602.5d).
     pub sorcery: bool,
     /// "Activate only as an instant." For a mana ability: only with
-    /// priority, never while paying a cost (Lion's Eye Diamond); also a
-    /// mana ability whose cost has a mana part or a choice (Chromatic Star,
-    /// Orcish Lumberjack: ENGINE.md 28).
+    /// priority, never while paying a cost (Lion's Eye Diamond; ENGINE.md
+    /// 18).
     pub instant_only: bool,
     /// Exhaust (CR 702.177): each object activates it only once.
     pub exhaust: bool,

@@ -108,7 +108,7 @@ impl Game {
     /// The activated abilities `p` may activate with priority now (CR
     /// 602.2, 117.1b): permanents' abilities, then hand abilities. Mana
     /// abilities are activated while paying costs instead (ENGINE.md 18),
-    /// except those that may be activated only as an instant.
+    /// except those `mana_with_priority` names.
     pub(crate) fn activation_options(
         &self,
         p: PlayerId,
@@ -122,7 +122,7 @@ impl Game {
         for c in self.permanents_of(p) {
             let d = self.abilities(c);
             for (i, ad) in d.activated.iter().enumerate() {
-                if ad.mana().is_some() && !ad.instant_only {
+                if ad.mana().is_some() && !self.mana_with_priority(c, ad) {
                     continue; // paid with while paying a cost (ENGINE.md 18)
                 }
                 if d.latent > 0 && !self.has_activated(c, i) {
@@ -247,7 +247,7 @@ impl Game {
         locks: u16,
     ) -> bool {
         let mana_ability = ad.mana().is_some();
-        if mana_ability && !ad.instant_only {
+        if mana_ability && !self.mana_with_priority(card, ad) {
             return false; // activated while paying (ENGINE.md 18)
         }
         // Turning a face-down permanent face up (CR 708.7, 116.2b): any time
@@ -349,7 +349,7 @@ impl Game {
             if !mana.is_zero() {
                 let mut pm = PayMana::new(p, mana);
                 pm.keep = Self::keep_for(card, &ad.cost, Some(card));
-                self.agenda.push(Task::PayMana(pm));
+                self.agenda.push(Task::PayMana(Box::new(pm)));
             }
             return;
         }
@@ -641,7 +641,7 @@ impl Game {
         let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
         pm.waterbend = ad.cost.waterbend;
-        self.agenda.push(Task::PayMana(pm));
+        self.agenda.push(Task::PayMana(Box::new(pm)));
     }
 
     /// The rest of a cost after its mana (601.2h): sacrifice and discard
@@ -886,6 +886,30 @@ impl Game {
         }
     }
 
+    /// Is mana ability `ad` of `c` offered with priority (ENGINE.md 18)? One
+    /// that may be activated only as an instant (Lion's Eye Diamond: never
+    /// while paying), or one that sacrifices its source when the source has
+    /// a triggered ability of its own as it goes (Chromatic Star, Wizard's
+    /// Rockets: "when this is put into a graveyard, draw a card"; activated
+    /// for nothing but that, CR 605.3a). Every other mana ability is
+    /// activated while paying a cost only: floating its mana first can't
+    /// matter (the pool empties between steps, CR 106.4, 500.4).
+    pub(crate) fn mana_with_priority(&self, c: CardIdx, ad: &ActivatedDef) -> bool {
+        fn is_self(p: &crate::db::TrigPred) -> bool {
+            match p {
+                crate::db::TrigPred::IsSelf(_) => true,
+                crate::db::TrigPred::And(a, b) => is_self(a) || is_self(b),
+                _ => false,
+            }
+        }
+        ad.mana().is_some()
+            && (ad.instant_only
+                || (ad.cost.sac_self
+                    && self.def_of(c).triggers.iter().any(|t| {
+                        matches!(t.event, crate::db::EventKind::Dies | crate::db::EventKind::LeavesBattlefield) && is_self(&t.pred)
+                    })))
+    }
+
     /// Has `c` activated its exhaust ability `i` (CR 702.177a)?
     pub(crate) fn exhausted(&self, c: CardIdx, i: u8) -> bool {
         let r = self.obj_ref(c);
@@ -932,7 +956,7 @@ impl Game {
         if !mana.is_zero() {
             let mut pm = PayMana::new(p, mana);
             pm.keep = Self::keep_for(src.card, &ad.cost, Self::mana_exclude(src.card, ad));
-            self.agenda.push(Task::PayMana(pm));
+            self.agenda.push(Task::PayMana(Box::new(pm)));
         }
     }
 

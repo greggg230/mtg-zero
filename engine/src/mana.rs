@@ -16,6 +16,25 @@ pub type ManaMask = u8;
 /// The five colours.
 pub const COLORS: ManaMask = 0b1_1111;
 
+/// The six mana types.
+pub const TYPES: ManaMask = 0b11_1111;
+
+/// A unit made in this payment by a mana ability with a mana cost of its
+/// own (Sunken Ruins; ENGINE.md 18): such mana never pays such a cost, so
+/// no ability pays for itself.
+pub const MADE: ManaMask = 1 << 6;
+
+/// A need of a payment that `MADE` units can't pay: the mana cost of a
+/// mana ability activated within the payment (CR 605.3a, 602.2b).
+pub const NOT_MADE: ManaMask = 1 << 7;
+
+/// Can a unit of `unit` pay a need of `need` (their types meet; a `MADE`
+/// unit never pays a `NOT_MADE` need)?
+#[inline]
+pub fn fits(unit: ManaMask, need: ManaMask) -> bool {
+    unit & need & TYPES != 0 && (need & NOT_MADE == 0 || unit & MADE == 0)
+}
+
 /// Two-colour hybrid pairs (CR 107.4e) in index order.
 pub const PAIRS: [(usize, usize); 10] =
     [(W, U), (W, B), (W, R), (W, G), (U, B), (U, R), (U, G), (B, R), (B, G), (R, G)];
@@ -263,13 +282,26 @@ impl ManaPool {
 /// a matching; among matchings we maximise the chosen units used on pips,
 /// and the leftover chosen units must fit into the generic part.
 pub fn payable(cost: &ManaCost, chosen: &[ManaMask], available: &[ManaMask]) -> bool {
-    payable_iter(cost, chosen, available.iter().copied(), available.len())
+    payable_iter(cost, &[], chosen, available.iter().copied(), available.len())
+}
+
+/// [`payable`] with `extra` needs besides the cost (one mana each, of a
+/// type in the mask; `NOT_MADE` ones: the mana costs of mana abilities
+/// activated in the payment).
+pub fn payable_n(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask], available: &[ManaMask]) -> bool {
+    payable_iter(cost, extra, chosen, available.iter().copied(), available.len())
 }
 
 /// [`payable`] over any sequence of available masks (no allocation: this
 /// runs for every castable card at every priority decision).
-fn payable_iter(cost: &ManaCost, chosen: &[ManaMask], available: impl Iterator<Item = ManaMask>, n: usize) -> bool {
-    let need = cost.total() as usize;
+fn payable_iter(
+    cost: &ManaCost,
+    extra: &[ManaMask],
+    chosen: &[ManaMask],
+    available: impl Iterator<Item = ManaMask>,
+    n: usize,
+) -> bool {
+    let need = cost.total() as usize + extra.len();
     if chosen.len() > need || chosen.len() + n < need {
         return false;
     }
@@ -288,8 +320,17 @@ fn payable_iter(cost: &ManaCost, chosen: &[ManaMask], available: impl Iterator<I
     for m in available {
         add(m, false);
     }
-    let mut needs = [(0u8, 0u8); 16];
+    let mut needs = [(0u8, 0u8); 24];
     let mut nn = 0;
+    for &m in extra {
+        match needs[..nn].iter_mut().find(|x| x.0 == m) {
+            Some(x) => x.1 += 1,
+            None => {
+                needs[nn] = (m, 1);
+                nn += 1;
+            }
+        }
+    }
     for c in 0..6 {
         if cost.pips[c] > 0 {
             needs[nn] = (1 << c, cost.pips[c]);
@@ -303,7 +344,12 @@ fn payable_iter(cost: &ManaCost, chosen: &[ManaMask], available: impl Iterator<I
         }
     }
     debug_assert!(!cost.has_phyrexian());
-    match best_chosen(&needs[..nn], &mut groups[..ng], chosen.len() as u8) {
+    let best = if extra.iter().any(|&m| m & NOT_MADE != 0) {
+        best_chosen::<true>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
+    } else {
+        best_chosen::<false>(&needs[..nn], &mut groups[..ng], chosen.len() as u8)
+    };
+    match best {
         Some(used) => chosen.len() - used as usize <= cost.generic as usize,
         None => false,
     }
@@ -311,14 +357,16 @@ fn payable_iter(cost: &ManaCost, chosen: &[ManaMask], available: impl Iterator<I
 
 /// The most chosen units the coloured needs can use (stops at `cap`, all of
 /// them); `None` if the needs cannot be met.
-fn best_chosen(needs: &[(ManaMask, u8)], groups: &mut [(ManaMask, bool, u8)], cap: u8) -> Option<u8> {
+/// (`STRICT`: some need is `NOT_MADE`; otherwise any meeting of types fits,
+/// the fast path.)
+fn best_chosen<const STRICT: bool>(needs: &[(ManaMask, u8)], groups: &mut [(ManaMask, bool, u8)], cap: u8) -> Option<u8> {
     match needs.split_first() {
         None => Some(0),
-        Some((&(c, k), rest)) => distribute(c, k, 0, rest, groups, cap),
+        Some((&(c, k), rest)) => distribute::<STRICT>(c, k, 0, rest, groups, cap),
     }
 }
 
-fn distribute(
+fn distribute<const STRICT: bool>(
     need: ManaMask,
     k: u8,
     gi: usize,
@@ -327,18 +375,19 @@ fn distribute(
     cap: u8,
 ) -> Option<u8> {
     if k == 0 {
-        return best_chosen(rest, groups, cap);
+        return best_chosen::<STRICT>(rest, groups, cap);
     }
     if gi == groups.len() {
         return None;
     }
     let (mask, ch, cnt) = groups[gi];
-    let most = if mask & need != 0 { k.min(cnt) } else { 0 };
+    let meets = if STRICT { fits(mask, need) } else { mask & need != 0 };
+    let most = if meets { k.min(cnt) } else { 0 };
     let mut best: Option<u8> = None;
     for t in (0..=most).rev() {
         let used = if ch { t } else { 0 };
         groups[gi].2 -= t;
-        let r = distribute(need, k - t, gi + 1, rest, groups, cap.saturating_sub(used));
+        let r = distribute::<STRICT>(need, k - t, gi + 1, rest, groups, cap.saturating_sub(used));
         groups[gi].2 += t;
         if let Some(v) = r {
             let v = v + used;
@@ -391,8 +440,13 @@ impl Budget {
 
 /// [`payable`] within a [`Budget`] for the available units used.
 pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], budget: Budget) -> bool {
+    payable_within_n(cost, &[], chosen, available, budget)
+}
+
+/// [`payable_within`] with `extra` needs (see [`payable_n`]).
+pub fn payable_within_n(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask], available: &[Unit], budget: Budget) -> bool {
     if available.iter().try_fold(budget, |b, u| if u.budgeted() { b.take(u, 1) } else { Some(b) }).is_some() {
-        return payable_iter(cost, chosen, available.iter().map(|u| u.mask), available.len());
+        return payable_iter(cost, extra, chosen, available.iter().map(|u| u.mask), available.len());
     }
     let free: Vec<ManaMask> = available.iter().filter(|u| !u.budgeted()).map(|u| u.mask).collect();
     let paid: Vec<Unit> = available.iter().copied().filter(|u| u.budgeted()).collect();
@@ -405,13 +459,13 @@ pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], 
             None => groups.push((u, 1)),
         }
     }
-    fn go(cost: &ManaCost, chosen: &[ManaMask], units: &mut Vec<ManaMask>, groups: &[(Unit, u8)], b: Budget) -> bool {
-        let Some(((u, n), rest)) = groups.split_first() else { return payable(cost, chosen, units) };
+    fn go(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask], units: &mut Vec<ManaMask>, groups: &[(Unit, u8)], b: Budget) -> bool {
+        let Some(((u, n), rest)) = groups.split_first() else { return payable_n(cost, extra, chosen, units) };
         for take in (0..=*n).rev() {
             let Some(left) = b.take(u, take as i32) else { continue };
             let len = units.len();
             units.extend(std::iter::repeat_n(u.mask, take as usize));
-            let ok = go(cost, chosen, units, rest, left);
+            let ok = go(cost, extra, chosen, units, rest, left);
             units.truncate(len);
             if ok {
                 return true;
@@ -420,7 +474,7 @@ pub fn payable_within(cost: &ManaCost, chosen: &[ManaMask], available: &[Unit], 
         false
     }
     let mut units = free;
-    go(cost, chosen, &mut units, &groups, budget)
+    go(cost, extra, chosen, &mut units, &groups, budget)
 }
 
 #[cfg(test)]

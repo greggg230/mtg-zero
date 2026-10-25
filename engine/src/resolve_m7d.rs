@@ -639,30 +639,6 @@ impl Game {
     }
 }
 
-// ---- mana that gives haste (Arena of Glory) --------------------------------
-
-impl Game {
-    /// The pool paid part of `pm`'s cost (from `before`): the haste mana
-    /// spent goes first on a creature spell (the player's best choice: it
-    /// gains haste), last on anything else; a creature spell it was spent
-    /// on is marked (`Mark::HasteMana`).
-    pub(crate) fn spend_haste_mana(&mut self, pm: &crate::pay::PayMana, before: crate::mana::ManaPool) {
-        use crate::mana::R;
-        let p = pm.payer;
-        let after = self.players[p as usize].pool;
-        let spent = before.amt[R].saturating_sub(after.amt[R]);
-        let creature = pm.keep.spell.is_some_and(|c| self.is_type(c, crate::db::types::CREATURE));
-        let plain = before.amt[R] - before.haste;
-        let used = if creature { spent.min(before.haste) } else { spent.saturating_sub(plain) };
-        self.players[p as usize].pool.haste = before.haste - used;
-        if creature && used > 0 {
-            let c = pm.keep.spell.unwrap();
-            let r = self.obj_ref(c);
-            self.marks.push((r, crate::game::Mark::HasteMana));
-        }
-    }
-}
-
 // ---- emerge (CR 702.119) -----------------------------------------------------
 
 impl Game {
@@ -854,7 +830,7 @@ impl Game {
         } else {
             crate::pay::Yield::Multi { prods, units: Some(vec![crate::mana::Unit::free(tap), crate::mana::Unit::free(mask)]) }
         };
-        Some(crate::pay::Class { def, members, yld, dmg: 0, sac_self: true, only: 0 })
+        Some(crate::pay::Class { members, sac_self: true, ..crate::pay::Class::of(def, src, yld) })
     }
 
     fn activation_locks_hit(&self, c: CardIdx, locks: u16) -> bool {

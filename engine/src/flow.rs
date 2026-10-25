@@ -44,7 +44,7 @@ pub(crate) enum Task {
     ChooseTargets { id: u32, req: u8 },
     CastPay { id: u32 },
     CastDone { id: u32 },
-    PayMana(PayMana),
+    PayMana(Box<PayMana>),
     Resolve,
     Run(Frame),
     FinishResolve { id: u32 },

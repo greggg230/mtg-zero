@@ -255,51 +255,55 @@ fn gemstone_mine_spends_a_mining_counter_per_mana_and_goes_at_zero_cr605_3b() {
 // ---- Sunken Ruins, Loot, Orcish Lumberjack, Squandered Resources -----------
 
 /// "{U/B}, {T}: Add {U}{U}, {U}{B}, or {B}{B}": a mana ability with a mana
-/// cost, activated with priority (CR 605.3a; ENGINE.md 28), never while
-/// paying another cost.
+/// cost, activated while paying (CR 605.3a; ENGINE.md 18): its {U/B} is
+/// paid within the payment, never by its own mana.
 #[test]
-fn sunken_ruins_filters_with_priority_cr605_3a() {
-    let mut g = scen().battlefield(0, &["Sunken Ruins", "Island"]).at(Step::Main1, 0).start();
+fn sunken_ruins_filters_while_paying_cr605_3a() {
+    let mut g = scen().battlefield(0, &["Sunken Ruins", "Island"]).hand(0, &["Dark Ritual"]).at(Step::Main1, 0).start();
     let r = bf(&g, 0, "Sunken Ruins");
     assert!(g.can_pay(0, &cost("{C}{U}")), "{{T}}: Add {{C}}");
-    assert!(!g.can_pay(0, &cost("{B}")), "not a source while paying");
-    assert!(g.has_option(act(r, 1)));
+    assert!(g.can_pay(0, &cost("{B}{B}")), "the Island pays {{U/B}}");
+    assert!(!g.can_pay(0, &cost("{B}{B}{U}")), "nothing pays for itself");
+    assert!(!g.has_option(act(r, 1)), "not with priority");
+    let dr = g.card(0, "Dark Ritual", Zone::Hand);
+    g.choose(Choice::Cast(dr));
+    g.drive_until(|g| !at_priority(g));
+    assert_eq!(opts(&g), vec![act(r, 1)], "the Ruins (several mana) first");
     g.choose(act(r, 1));
-    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{{U/B}} first");
-    let c = opts(&g)[0];
-    g.choose(c);
-    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
     assert_eq!(g.kind(), Some(DecisionKind::ChooseMana));
-    assert_eq!(opts(&g).len(), 3, "UU, UB, BB");
-    g.choose(Choice::Number(2));
-    g.drive_until(at_priority);
-    assert_eq!(pool(&g, 0), [0, 0, 2, 0, 0, 0]);
-    assert!(g.obj(r).tapped);
+    assert_eq!(opts(&g).len(), 2, "UB or BB: UU pays nothing");
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(pool(&g, 0), [0, 0, 4, 0, 0, 0], "{{B}} left and the Ritual's {{B}}{{B}}{{B}}");
+    assert!(g.obj(r).tapped && g.obj(bf(&g, 0, "Island")).tapped);
 }
 
 /// Exhaust (CR 702.177a: "activate each exhaust ability only once"):
 /// "{G}, {T}: Add three mana of any one color."
 #[test]
 fn loot_exhaust_mana_ability_only_once_cr702_177a() {
-    let mut g = scen().battlefield(0, &["Loot, the Pathfinder", "Forest"]).at(Step::Main1, 0).start();
+    let mut g = scen().battlefield(0, &["Loot, the Pathfinder", "Forest"]).hand(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
     let l = bf(&g, 0, "Loot, the Pathfinder");
-    assert!(!g.can_pay(0, &cost("{R}")), "not a source while paying");
+    assert!(g.can_pay(0, &cost("{R}{R}{R}")), "the Forest pays {{G}}: a source while paying (CR 605.3a)");
+    assert!(!g.has_option(act(l, 0)), "not with priority");
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(Choice::Target(Target::Player(1)));
+    g.drive_until(|g| !at_priority(g));
     g.choose(act(l, 0));
-    let c = opts(&g)[0];
-    g.choose(c);
-    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
-    assert_eq!(opts(&g).len(), 5);
-    g.choose(Choice::Number(3));
-    g.drive_until(at_priority);
-    assert_eq!(pool(&g, 0), [0, 0, 0, 3, 0, 0]);
+    assert_eq!(opts(&g).len(), 1, "three red: the rest of the colours pay nothing");
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(pool(&g, 0), [0, 0, 0, 2, 0, 0], "{}", g.log_lines().join("\n"));
     let t = g.turn().number;
     quiet_until(&mut g, |g| g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(g));
     assert!(!g.obj(l).tapped);
-    assert!(!g.has_option(act(l, 0)), "exhausted");
+    assert!(!g.can_pay(0, &cost("{R}")), "exhausted");
     // Another Loot (a new object) has its own.
     let g = scen().battlefield(0, &["Loot, the Pathfinder", "Forest", "Island"]).at(Step::Main1, 0).start();
-    let l = bf(&g, 0, "Loot, the Pathfinder");
-    assert!(g.has_option(act(l, 0)) && g.has_option(act(l, 1)));
+    assert!(g.can_pay(0, &cost("{R}{R}{R}{U}")));
 }
 
 /// "{T}, Sacrifice a Forest: Add three mana in any combination of {R}
@@ -707,7 +711,9 @@ fn chromatic_star_draws_when_put_into_a_graveyard_not_when_exiled_cr603_10a() {
     let mut g = scen().battlefield(0, &["Chromatic Star", "Island"]).at(Step::Main1, 0).start();
     let s = bf(&g, 0, "Chromatic Star");
     let hand = g.player(0).hand.len();
-    assert!(!g.can_pay(0, &cost("{R}")), "not a source while paying");
+    assert!(g.can_pay(0, &cost("{R}")), "the Island pays {{1}} (CR 605.3a)");
+    assert!(!g.can_pay(0, &cost("{R}{U}")), "nothing pays for itself");
+    // With priority too (its draw is reason enough, ENGINE.md 18).
     g.choose(act(s, 0));
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{{1}} first");
     let c = opts(&g)[0];

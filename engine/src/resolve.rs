@@ -583,7 +583,7 @@ impl Game {
                         back.i = 0;
                         back.floor = 0;
                         self.agenda.push(Task::Run(back));
-                        self.agenda.push(Task::PayMana(PayMana::new(p, cost)));
+                        self.agenda.push(Task::PayMana(Box::new(PayMana::new(p, cost))));
                         Flow::Suspend
                     }
                     Some(_) => Flow::Next,

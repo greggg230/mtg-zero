@@ -173,6 +173,12 @@ pub enum DecisionKind {
     /// Will, escape, retrace, mayhem, Serra Paragon, Lurrus), when several
     /// can (CR 601.2a-b). M7e.
     ChooseRoute,
+    /// Which mana of the pool a payment leaves (CR 106.4, 601.2h: the
+    /// player chooses which mana pays): `NUMBER` + k = the k-th pool it can
+    /// leave, asked once the sources are picked and only when the pools
+    /// differ (the pool's mana, or a several-mana source's, beyond what the
+    /// cost needs). M7e part 2.
+    PayPool,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

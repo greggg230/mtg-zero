@@ -2009,7 +2009,7 @@ impl Game {
             }
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
-                self.agenda.push(Task::PayMana(pm));
+                self.agenda.push(Task::PayMana(Box::new(pm)));
             }
             return;
         }
@@ -2038,7 +2038,7 @@ impl Game {
             pm.keep.discard = Some((escalated, card));
         }
         let _ = def;
-        self.agenda.push(Task::PayMana(pm));
+        self.agenda.push(Task::PayMana(Box::new(pm)));
         if taps_first {
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
         }

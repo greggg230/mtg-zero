@@ -679,15 +679,16 @@ fn arena_of_glory_exerts_for_mana_that_gives_haste_cr701_39() {
         .at(Step::Main1, 0)
         .start();
     let arena = bf(&g, 0, "Arena of Glory");
-    assert!(g.has_option(act(arena, 1)), "the exert ability at priority: {:?}", g.options_desc());
-    g.choose(act(arena, 1));
-    pay(&mut g);
-    g.drive_until(|g| at_priority(g));
-    assert_eq!(g.player(0).pool.amt[3], 2, "{{R}}{{R}} in the pool\n{}", log(&g));
-    assert!(g.obj(arena).tapped);
+    // A mana ability with a mana cost, activated while paying (CR 605.3a;
+    // ENGINE.md 18): the Mountain pays its {R}, its {R}{R} the Dwarf.
+    assert!(!g.has_option(act(arena, 1)), "not with priority: {:?}", g.options_desc());
     let dwarf = g.card(0, "Test Dwarf", Zone::Hand);
     g.choose(Choice::Cast(dwarf));
+    g.drive_until(|g| !at_priority(g));
+    assert!(g.has_option(act(arena, 1)), "{:?}", g.options_desc());
+    g.choose(act(arena, 1));
     pay(&mut g);
+    assert!(g.obj(arena).tapped);
     settle(&mut g);
     let dwarf = bf(&g, 0, "Test Dwarf");
     assert!(g.has_kw(dwarf, engine::db::Kw::Haste), "the creature spell gained haste\n{}", log(&g));
@@ -706,13 +707,9 @@ fn arena_of_glory_haste_mana_on_a_noncreature_spell_cr106_6() {
     let mut g = scen()
         .battlefield(0, &["Mountain", "Mountain", "Arena of Glory"])
         .hand(0, &["Lightning Bolt", "Test Dwarf"])
+        .pool(0, [0, 0, 0, 2, 0, 0], 2)
         .at(Step::Main1, 0)
         .start();
-    let arena = bf(&g, 0, "Arena of Glory");
-    g.choose(act(arena, 1));
-    pay(&mut g);
-    g.drive_until(|g| at_priority(g));
-    assert_eq!(g.player(0).pool.haste, 2);
     let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
     g.choose(Choice::Cast(bolt));
     g.drive_until(|g| g.kind() == Some(DecisionKind::Target));

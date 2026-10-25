@@ -187,6 +187,13 @@ impl Scenario {
         self
     }
 
+    /// Mana in `p`'s pool as the step starts (W U B R G C; `haste` of the
+    /// red is Arena of Glory's).
+    pub fn pool(mut self, p: PlayerId, amt: [u8; 6], haste: u8) -> Self {
+        self.g.players[p as usize].pool = crate::mana::ManaPool { amt, art: 0, haste };
+        self
+    }
+
     pub fn life(mut self, p: PlayerId, n: i32) -> Self {
         self.g.players[p as usize].life = n;
         self

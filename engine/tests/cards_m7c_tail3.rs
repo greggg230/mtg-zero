@@ -451,13 +451,10 @@ fn pentad_prism_sunburst_counters_cr702_44a_and_its_mana() {
     let prism = bf(&g, 0, "Pentad Prism");
     let charge = engine::db::Counter::Named(db().subtype_id("counter:charge").unwrap());
     assert_eq!(g.counters_on(prism, charge), 2, "red and white\n{}", log(&g));
-    // Activated with priority (no {T}: it may be activated again).
-    g.choose(act(prism, 0));
-    g.drive_until(|g| at_priority(g) || matches!(g.kind(), Some(DecisionKind::ChooseMana) | Some(DecisionKind::ChooseColor)));
-    let k = g.pending_decision().unwrap().options[0].choice;
-    g.choose(k);
-    g.drive_until(at_priority);
-    assert_eq!(g.counters_on(prism, charge), 1, "{}", log(&g));
+    // Activated while paying (CR 605.3a), once per counter (no {T}).
+    assert!(!g.has_option(act(prism, 0)), "not with priority");
+    assert!(g.can_pay(0, &engine::mana::ManaCost::parse("{U}{B}").unwrap()));
+    assert!(!g.can_pay(0, &engine::mana::ManaCost::parse("{U}{B}{G}").unwrap()));
 }
 
 // ---- "Put into a graveyard from anywhere": Worldspine Wurm, Emrakul, Blightsteel ----

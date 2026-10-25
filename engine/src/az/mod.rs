@@ -261,7 +261,9 @@ impl SearchGame for MtgAz {
     /// Minor: which mana source to tap next while paying (ENGINE.md 22; zero-core searches it
     /// with the seat's `sims_minor` and never records it).
     fn minor_decision(&self) -> bool {
-        self.g.pending_decision().is_some_and(|d| d.kind == crate::decision::DecisionKind::PayMana)
+        self.g
+            .pending_decision()
+            .is_some_and(|d| matches!(d.kind, crate::decision::DecisionKind::PayMana | crate::decision::DecisionKind::PayPool))
     }
 
     fn bot_names() -> &'static [&'static str] {

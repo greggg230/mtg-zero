@@ -1115,7 +1115,7 @@ impl Game {
                         back.i = 0;
                         back.floor = 0;
                         self.agenda.push(Task::Run(back));
-                        self.agenda.push(Task::PayMana(crate::pay::PayMana::new(p, cost)));
+                        self.agenda.push(Task::PayMana(Box::new(crate::pay::PayMana::new(p, cost))));
                         Flow::Suspend
                     }
                     Some(_) => {

@@ -12,7 +12,7 @@ use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{DamageSource, Game, Pos};
 use crate::ids::{CardIdx, DefId, PlayerId, Target, Zone};
-use crate::mana::{payable_within, Budget, ManaCost, ManaMask, ManaPool, Unit, COLORS};
+use crate::mana::{payable_n, payable_within_n, Budget, ManaCost, ManaMask, Unit, COLORS, MADE, TYPES};
 use crate::svec::SVec;
 
 /// The `Src` slot of an artifact tapped for improvise (CR 702.126a: not a
@@ -66,23 +66,24 @@ pub(crate) fn classes_without(classes: &[Class], cards: &[CardIdx]) -> Vec<Class
         .collect()
 }
 
-/// Converge with many single-mana sources (exact, any number): the most
-/// colours (with `fixed`, already spent) an exact payment of `cost` by one
-/// mana from each of `units` (the types each can make) can show. A colour
-/// set S is reachable iff the sources can be matched to the coloured pips
-/// and to one mana of each colour of S not yet shown (the rest pay the
-/// generic part): a bipartite matching per S. `None` with hybrid or
-/// Phyrexian pips (not modelled here).
-fn most_colors_matching(units: &[ManaMask], cost: &ManaCost, fixed: u8) -> Option<u32> {
+/// Converge (exact, any number of units): the most colours (with `fixed`,
+/// already spent) an exact payment of `cost` and of the `marked` needs (the
+/// mana costs of mana abilities activated in the payment: not spent on the
+/// spell) by one mana from each of `units` (the types each can make) can
+/// show. A colour set S is reachable iff the units can be matched to the
+/// coloured pips, the marked needs and one mana of each colour of S not yet
+/// shown (the rest pay the generic part): a bipartite matching per S.
+/// `None` with hybrid or Phyrexian pips (not modelled here).
+fn most_colors_matching(units: &[ManaMask], cost: &ManaCost, marked: &[ManaMask], fixed: u8) -> Option<u32> {
     if cost.hybrid.iter().any(|&n| n > 0) || cost.phyrexian.iter().any(|&n| n > 0) {
         return None;
     }
-    if cost.pips.iter().map(|&n| n as usize).sum::<usize>() + cost.generic as usize != units.len() {
-        return None; // (not an exact payment by these sources)
+    if cost.pips.iter().map(|&n| n as usize).sum::<usize>() + cost.generic as usize + marked.len() != units.len() {
+        return None; // (not an exact payment by these units)
     }
     fn augment(slot: usize, slots: &[u8], units: &[ManaMask], seen: &mut [bool], owner: &mut [usize]) -> bool {
         for (u, &m) in units.iter().enumerate() {
-            if m & (1 << slots[slot]) != 0 && !seen[u] {
+            if crate::mana::fits(m, slots[slot]) && !seen[u] {
                 seen[u] = true;
                 if owner[u] == usize::MAX || augment(owner[u], slots, units, seen, owner) {
                     owner[u] = slot;
@@ -94,13 +95,15 @@ fn most_colors_matching(units: &[ManaMask], cost: &ManaCost, fixed: u8) -> Optio
     }
     let mut best = None;
     for s in 0u8..32 {
-        let mut slots: Vec<u8> = Vec::new();
+        let mut slots: Vec<u8> = marked.to_vec();
+        let mut shows = 0;
         for t in 0..6u8 {
             let show = t < 5 && s & (1 << t) != 0 && fixed & (1 << t) == 0;
+            shows += (show && cost.pips[t as usize] == 0) as u8;
             let need = cost.pips[t as usize].max(show as u8);
-            slots.extend(std::iter::repeat_n(t, need as usize));
+            slots.extend(std::iter::repeat_n(1u8 << t, need as usize));
         }
-        if slots.len() > units.len() {
+        if slots.len() > units.len() || shows > cost.generic {
             continue;
         }
         let mut owner = vec![usize::MAX; units.len()];
@@ -147,6 +150,46 @@ pub(crate) struct Class {
     /// Its mana's spending restriction (`ManaAbility::only`): usable only
     /// when the payment allows it (`Keep::allow`).
     pub only: u8,
+    /// The ability's own mana cost, one mana paid within the payment (CR
+    /// 605.3a, 602.2b: Sunken Ruins' {U/B}): `NOT_MADE` | its types, else 0.
+    /// Its mana is `MADE` (it never pays such a cost: nothing pays for
+    /// itself).
+    pub need: ManaMask,
+    /// How many times a member may be activated in one payment (Pentad
+    /// Prism: once per charge counter; 1 otherwise).
+    pub reuse: u8,
+    /// "{X}, {T}, sacrifice this: add X mana in any combination of colors"
+    /// (Wizard's Rockets): picked, the payment's mana may be of any colour
+    /// (its X is paid by the mana it turns into colours).
+    pub convert: bool,
+    /// Its mana gives haste to the creature spell it is spent on (Arena of
+    /// Glory, `ManaPool::haste`).
+    pub haste: bool,
+}
+
+impl Class {
+    /// A class of one source with nothing special.
+    pub(crate) fn of(def: DefId, src: Src, yld: Yield) -> Class {
+        Class { def, members: one_member(src), yld, dmg: 0, sac_self: false, only: 0, need: 0, reuse: 1, convert: false, haste: false }
+    }
+}
+
+/// The one-mana cost of a mana ability as a `NOT_MADE` need (0: none;
+/// {1}: any type).
+fn need_of(cost: &ManaCost) -> ManaMask {
+    let pip = (0..6).find(|&t| cost.pips[t] > 0).map(|t| 1u8 << t);
+    let hyb = (0..10).find(|&i| cost.hybrid[i] > 0).map(crate::mana::pair_mask);
+    let generic = (cost.generic > 0).then_some(TYPES);
+    pip.or(hyb).or(generic).map_or(0, |m| m | crate::mana::NOT_MADE)
+}
+
+/// What the pool holds after a payment (CR 106.4, 601.2h): the amounts,
+/// and the artifact-only {C} and the haste {R} among them.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub(crate) struct Rem {
+    pub amt: [u8; 6],
+    pub art: u8,
+    pub haste: u8,
 }
 
 /// What later parts of a cost need from the payment of its mana (601.2h:
@@ -174,23 +217,42 @@ pub(crate) struct Keep {
 }
 
 /// Paying a mana cost (ENGINE.md 6, 18). Stages: Phyrexian pips (how many
-/// of each colour are paid with life), the pool, then sources, one class at
-/// a time in non-decreasing class order.
+/// of each colour are paid with life), then sources, one class at a time in
+/// non-decreasing class order, then which mana of the pool pays (601.2h).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct PayMana {
     pub payer: PlayerId,
-    /// Remaining cost (after the pool and the several-mana picks).
+    /// The cost (after the Phyrexian split): paid at the end by the picked
+    /// single-mana sources and `vm` mana of the virtual pool (the player's
+    /// pool and the several-mana sources' mana).
     pub cost: ManaCost,
+    /// The mana costs of the mana abilities picked that have one
+    /// (`NOT_MADE` needs, paid within the payment: CR 605.3a).
+    pub marked: Vec<ManaMask>,
     /// Several-mana sources picked, with their productions.
     pub multi: Vec<(Src, [u8; 6])>,
-    /// Their mana not yet spent (it stays in the pool at the end).
+    /// Their mana (spent, or left in the pool at the end).
     pub extra: [u8; 6],
     /// The part of `extra[C]` that is artifact-only.
     pub extra_art: u8,
+    /// The part of `extra` made by abilities with a mana cost (`MADE`).
+    pub extra_made: [u8; 6],
+    /// The part of `extra[R]` that gives haste (Arena of Glory).
+    pub extra_haste: u8,
     /// Single-mana sources picked.
     pub chosen: Vec<Src>,
     pub min_class: u8,
+    /// `vm` is known.
     pub pooled: bool,
+    /// How much of the virtual pool's mana the payment spends: as much as
+    /// it can, the single-mana sources paying the rest (ENGINE.md 18);
+    /// `None` while several-mana sources must still be picked.
+    pub vm: Option<u8>,
+    /// Wizard's Rockets picked: the payment's mana may be of any colour.
+    pub convert: bool,
+    /// The pools the payment may leave (`PayPool`, CR 106.4, 601.2h), asked
+    /// once the sources are picked.
+    pub spend: Option<Vec<Rem>>,
     /// What later parts of the cost need.
     pub keep: Keep,
     /// Life to pay for Phyrexian pips once the mana abilities are done.
@@ -212,12 +274,18 @@ impl PayMana {
         PayMana {
             payer,
             cost,
+            marked: Vec::new(),
             multi: Vec::new(),
             extra: [0; 6],
             extra_art: 0,
+            extra_made: [0; 6],
+            extra_haste: 0,
             chosen: Vec::new(),
             min_class: 0,
             pooled: false,
+            vm: None,
+            convert: false,
+            spend: None,
             keep: Keep::default(),
             phyrexian_life: 0,
             now: None,
@@ -232,8 +300,15 @@ impl PayMana {
             | (if self.waterbend { crate::db::types::ARTIFACT | crate::db::types::CREATURE } else { 0 })
     }
 
-    fn used(&self, c: CardIdx) -> bool {
-        self.chosen.iter().any(|s| s.card == c) || self.multi.iter().any(|(s, _)| s.card == c)
+    /// How many times card `c` was picked (once, but Pentad Prism's
+    /// counters).
+    fn uses(&self, c: CardIdx) -> u8 {
+        (self.chosen.iter().filter(|s| s.card == c).count() + self.multi.iter().filter(|(s, _)| s.card == c).count()) as u8
+    }
+
+    /// The mana the payment needs: the cost and the picked abilities' own.
+    fn need_total(&self) -> usize {
+        self.cost.total() as usize + self.marked.len()
     }
 }
 
@@ -439,6 +514,9 @@ impl Game {
                 if ad.instant_only || !self.activation_ready(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
                     continue;
                 }
+                if ad.exhaust && self.exhausted(c, i as u8) {
+                    continue; // CR 702.177a: once
+                }
                 if let Some(t) = &ad.cost.tap_untapped {
                     if let ManaProd::One(mask) = m.prod {
                         if tap_for.is_none() {
@@ -450,12 +528,17 @@ impl Game {
                 // "Remove a counter from this" (Gemstone Mine): it needs
                 // one; removing the last one sacrifices it (`sac_if_no`).
                 let mut sac_self = ad.cost.sac_self;
+                let mut reuse = 1u8;
                 if let Some((k, n)) = ad.cost.remove_counters {
                     let have = self.counters_on(c, k);
                     if have < n as u16 {
                         continue;
                     }
                     sac_self |= m.sac_if_no == Some(k) && have == n as u16;
+                    // Without {T} (Pentad Prism): once per counter.
+                    if !(ad.cost.tap || ad.cost.sac_self || ad.cost.exile_self) {
+                        reuse = (have / n as u16).min(32) as u8;
+                    }
                 }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
                 // The additional mana tapping this source adds (its land
@@ -485,13 +568,39 @@ impl Game {
                 let same = |cl: &&mut Class| {
                     cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self && (!bonuses || extra_of(cl.members[0].card) == extra)
                 };
-                let per_source = matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::IfCounter { .. });
+                let per_source = matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::IfCounter { .. }) || reuse > 1;
                 if let Some(cl) = out.iter_mut().find(same).filter(|_| !per_source) {
                     cl.members.push(src);
                     continue;
                 }
-                let Some(yld) = self.yield_with(p, &m.prod, ad.cost.life, extra, Some(c)) else { continue };
-                let cl = Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self, only: m.only };
+                // ("{X}: add X mana in any combination of colors": the
+                // payment's mana may become any colours, `Class::convert`.)
+                let need = if ad.cost.mana.is_zero() { 0 } else { need_of(&ad.cost.mana) };
+                let yld = if ad.x {
+                    Yield::Multi { prods: vec![[0; 6]], units: Some(Vec::new()) }
+                } else {
+                    match self.yield_with(p, &m.prod, ad.cost.life, extra, Some(c)) {
+                        // (One mana with a mana cost, Chromatic Star: its
+                        // mana joins the virtual pool like a several-mana
+                        // source's, its type chosen.)
+                        Some(Yield::One(u)) if need != 0 => Yield::Multi {
+                            prods: (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| one(t, 1)).collect(),
+                            units: Some(vec![Unit::free(u.mask)]),
+                        },
+                        Some(yld) => yld,
+                        None => continue,
+                    }
+                };
+                let cl = Class {
+                    dmg: m.damage_to_you,
+                    sac_self,
+                    only: m.only,
+                    need,
+                    reuse,
+                    convert: ad.x,
+                    haste: m.haste,
+                    ..Class::of(def, src, yld)
+                };
                 if matches!(cl.yld, Yield::Multi { .. }) {
                     out.insert(n_multi, cl);
                     n_multi += 1;
@@ -529,7 +638,7 @@ impl Game {
                 let src = Src { card: x, slot: TAP_FOR };
                 match out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == TAP_FOR) {
                     Some(cl) => cl.members.push(src),
-                    None => out.push(Class { def, members: one_member(src), yld: Yield::One(Unit::free(mask)), dmg: 0, sac_self: false, only: 0 }),
+                    None => out.push(Class::of(def, src, Yield::One(Unit::free(mask)))),
                 }
             }
         }
@@ -553,7 +662,7 @@ impl Game {
                         continue;
                     }
                     let Some(yld) = self.yield_of(p, &m.prod, ad.cost.life, Some(c)) else { continue };
-                    out.push(Class { def, members: one_member(src), yld, dmg: m.damage_to_you, sac_self: false, only: m.only });
+                    out.push(Class { dmg: m.damage_to_you, only: m.only, ..Class::of(def, src, yld) });
                 }
             }
         }
@@ -574,7 +683,7 @@ impl Game {
             let src = Src { card: c, slot: IMPROVISE };
             match out.iter_mut().find(|cl| cl.def == def) {
                 Some(cl) => cl.members.push(src),
-                None => out.push(Class { def, members: one_member(src), yld: Yield::One(Unit::free(0)), dmg: 0, sac_self: false, only: 0 }),
+                None => out.push(Class::of(def, src, Yield::One(Unit::free(0)))),
             }
         }
         out
@@ -724,7 +833,115 @@ impl Game {
     }
 
     fn cands(&self, p: PlayerId, keep: &Keep, classes: &[Class], use_src: &dyn Fn(&Src) -> bool, dmg: bool) -> Cands {
-        cands(classes, use_src, dmg, &|cl, s| self.reserved(p, keep, cl, s), keep.allow)
+        cands(classes, use_src, &|_| 0, dmg, &|cl, s| self.reserved(p, keep, cl, s), keep.allow)
+    }
+
+    /// The candidates of the rest of payment `pm`: the sources of
+    /// `classes[from..]` not picked yet (Pentad Prism: its counters left),
+    /// `plus` counted as picked once more.
+    fn pay_cands(&self, pm: &PayMana, classes: &[Class], from: usize, plus: Option<Src>, dmg: bool) -> Cands {
+        let uses = |s: &Src| pm.uses(s.card) + plus.is_some_and(|x| x.card == s.card) as u8;
+        let mut c = cands(&classes[from..], &|_| true, &uses, dmg, &|cl, s| self.reserved(pm.payer, &pm.keep, cl, s), pm.keep.allow);
+        c.converted = pm.convert;
+        c
+    }
+
+    /// The pool's mana as candidate units: any of it may pay (CR 106.4;
+    /// artifact-only {C} when `allow` lets it).
+    fn add_pool(&self, p: PlayerId, allow: u8, c: &mut Cands) {
+        let pool = &self.players[p as usize].pool;
+        if pool.total() == 0 {
+            return;
+        }
+        for t in 0..6 {
+            let held = if t == crate::mana::C && allow & crate::db::SPEND_ARTIFACT == 0 { pool.art } else { 0 };
+            for _ in 0..pool.amt[t] - held {
+                c.fixed.push(Unit::free(1 << t));
+            }
+        }
+    }
+
+    /// The virtual pool of payment `pm` (ENGINE.md 18): the player's pool
+    /// and the mana of the several-mana sources picked, as groups (kind,
+    /// count); a kind is a type, + 8 for `MADE`.
+    fn vgroups(&self, pm: &PayMana) -> SVec<(u8, u8), 12> {
+        let pool = &self.players[pm.payer as usize].pool;
+        let art_ok = pm.keep.allow & crate::db::SPEND_ARTIFACT != 0;
+        let mut g = SVec::new();
+        for t in 0..6 {
+            let held = if t == crate::mana::C && !art_ok { pool.art } else { 0 };
+            let n = pool.amt[t] - held + pm.extra[t] - pm.extra_made[t];
+            if n > 0 {
+                g.push((t as u8, n));
+            }
+            if pm.extra_made[t] > 0 {
+                g.push((t as u8 | 8, pm.extra_made[t]));
+            }
+        }
+        g
+    }
+
+    /// The most mana of the virtual pool `groups` a payment of `pm.cost`
+    /// and `marked` can spend with every unit of `chosen` and some of
+    /// `rest`; `None` if it can't be paid. Wizard's Rockets' colours count
+    /// only when nothing else pays (ENGINE.md 18).
+    fn most_spent(&self, pm: &PayMana, groups: &[(u8, u8)], marked: &[ManaMask], chosen: &[ManaMask], rest: &Cands, budget: Budget) -> Option<u8> {
+        self.most_spent_from(pm, groups, marked, chosen, rest, budget, 0)
+    }
+
+    /// [`most_spent`](Self::most_spent) if it is `floor` or more.
+    #[allow(clippy::too_many_arguments)]
+    fn most_spent_from(
+        &self,
+        pm: &PayMana,
+        groups: &[(u8, u8)],
+        marked: &[ManaMask],
+        chosen: &[ManaMask],
+        rest: &Cands,
+        budget: Budget,
+        floor: usize,
+    ) -> Option<u8> {
+        let total: usize = groups.iter().map(|g| g.1 as usize).sum();
+        let need = pm.cost.total() as usize + marked.len();
+        let top = total.min(need.saturating_sub(chosen.len()));
+        let most = |convert: bool| {
+            for k in (floor..=top).rev() {
+                let mut found = false;
+                each_subset(groups, k, &mut SVec::new(), &mut |cnt| {
+                    let mut ch: SVec<ManaMask, 16> = chosen.iter().copied().collect();
+                    ch.extend(masks_of(groups, cnt));
+                    found = cands_payable_c(&pm.cost, marked, &ch, rest, budget, convert);
+                    found
+                });
+                if found {
+                    return Some(k as u8);
+                }
+            }
+            None
+        };
+        most(false).or_else(|| if rest.convert.is_some() { most(true) } else { None })
+    }
+
+    /// The most of virtual pool `groups` a payment (with `marked` needs) can
+    /// spend with single-mana sources paying the rest (`plus` picked once
+    /// more); `None` if they can't.
+    fn singles_vm(&self, pm: &PayMana, classes: &[Class], groups: &[(u8, u8)], marked: &[ManaMask], plus: Option<Src>, budget: Budget, dmg: bool) -> Option<u8> {
+        let first = classes.iter().position(|cl| matches!(cl.yld, Yield::One(_))).unwrap_or(classes.len());
+        let rest = self.pay_cands(pm, classes, first.max(pm.min_class as usize), plus, dmg);
+        self.most_spent(pm, groups, marked, &[], &rest, budget)
+    }
+
+    /// `pm.vm` again (after a several-mana pick).
+    fn recount(&self, pm: &mut PayMana, classes: &[Class]) {
+        // (An empty virtual pool spends nothing: whether single-mana
+        // sources can pay is asked of each option, ENGINE.md 17.)
+        if pm.marked.is_empty() && !pm.convert && pm.extra == [0; 6] && self.players[pm.payer as usize].pool.total() == 0 {
+            pm.vm = Some(0);
+            return;
+        }
+        let (budget, dmg) = self.budget(pm.payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
+        let budget = self.after_picks(pm, classes, dmg, budget, None).expect("picks within the budget");
+        pm.vm = self.singles_vm(pm, classes, &self.vgroups(pm), &pm.marked, None, budget, dmg);
     }
 
     /// Can `p` pay `cost` (Phyrexian pips included) from their pool and the
@@ -749,7 +966,7 @@ impl Game {
                 return true;
             }
             let most = match &cl.yld {
-                Yield::One(_) => 1,
+                Yield::One(_) => cl.reuse as u32,
                 Yield::Multi { prods, .. } => prods.iter().map(|v| v.iter().map(|&n| n as u32).sum::<u32>()).max().unwrap_or(0),
             };
             have += most * cl.members.iter().filter(|s| Some(s.card) != without).count() as u32;
@@ -785,11 +1002,13 @@ impl Game {
         let life_total = self.players[p as usize].life;
         match (0..5).find(|&c| cost.phyrexian[c] > 0) {
             None => {
-                let mut c = *cost;
-                let mut pool = self.players[p as usize].pool;
-                pool.pay_into_for(&mut c, keep.allow & crate::db::SPEND_ARTIFACT != 0);
+                if cost.is_zero() {
+                    return true;
+                }
                 let (budget, dmg) = self.budget(p, keep, later);
-                c.is_zero() || cands_payable(&c, &[], &self.cands(p, keep, classes, &|s| Some(s.card) != without, dmg), budget)
+                let mut c = self.cands(p, keep, classes, &|s| Some(s.card) != without, dmg);
+                self.add_pool(p, keep.allow, &mut c);
+                cands_payable(cost, &[], &[], &c, budget)
             }
             Some(col) => (0..=cost.phyrexian[col]).any(|k| {
                 let later = later as i32 + 2 * k as i32;
@@ -802,7 +1021,9 @@ impl Game {
     /// The candidates of an unrestricted payment by `p` (computed once per
     /// priority decision).
     pub(crate) fn plain_cands(&self, p: PlayerId, classes: &[Class]) -> Cands {
-        self.cands(p, &Keep::default(), classes, &|_| true, false)
+        let mut c = self.cands(p, &Keep::default(), classes, &|_| true, false);
+        self.add_pool(p, 0, &mut c);
+        c
     }
 
     /// [`can_pay_with`](Self::can_pay_with) for an unrestricted payment,
@@ -811,11 +1032,8 @@ impl Game {
         if cost.has_phyrexian() {
             return self.can_pay_with(p, cost, classes, &Keep::default());
         }
-        let mut c = *cost;
-        let mut pool = self.players[p as usize].pool;
-        pool.pay_into(&mut c);
         let life = self.players[p as usize].life.max(0);
-        c.is_zero() || cands_payable(&c, &[], plain, Budget { life, sac: i32::MAX })
+        cost.is_zero() || cands_payable(cost, &[], &[], plain, Budget { life, sac: i32::MAX })
     }
 
     /// [`can_pay`](Self::can_pay) for a payment that satisfies the spending
@@ -909,26 +1127,70 @@ impl Game {
         }
     }
 
-    /// Productions of the several-mana source `src` (class `ci`) that pay
-    /// part of the cost and leave the rest payable by the sources of the
-    /// classes from `ci` on.
+    /// Productions of the several-mana source `src` (class `ci`) whose mana
+    /// the payment spends some of (the virtual pool pays more: CR 601.2g,
+    /// no mana is made for nothing) and that leave the rest payable by the
+    /// sources of the classes from `ci` on.
     fn feasible_prods(&self, pm: &PayMana, classes: &[Class], ci: usize, src: Src) -> Vec<[u8; 6]> {
-        let Yield::Multi { prods, .. } = &classes[ci].yld else { unreachable!() };
+        let cl = &classes[ci];
+        let Yield::Multi { prods, .. } = &cl.yld else { unreachable!() };
         let p = pm.payer;
         let (budget, dmg) = self.budget(p, &pm.keep, pm.keep.life + pm.phyrexian_life);
         let Some(budget) = self.after_picks(pm, classes, dmg, budget, Some((ci, src))) else { return Vec::new() };
-        let rest = self.cands(p, &pm.keep, &classes[ci..], &|s| s.card != src.card && !pm.used(s.card), dmg);
+        let first = classes.iter().position(|cl| matches!(cl.yld, Yield::One(_))).unwrap_or(classes.len());
+        let singles = self.pay_cands(pm, classes, first.max(ci), Some(src), dmg);
+        let base = self.vgroups(pm);
+        let mut marked = pm.marked.clone();
+        if cl.need != 0 {
+            marked.push(cl.need);
+        }
         prods
             .iter()
             .copied()
             .filter(|prod| {
-                let mut cost = pm.cost;
-                let mut pool = ManaPool { amt: pm.extra, art: 0, haste: 0 };
-                pool.add(prod);
-                pool.pay_into_for(&mut cost, true);
-                cost.total() < pm.cost.total() && (cost.is_zero() || cands_payable(&cost, &[], &rest, budget))
+                let mut groups = base.clone();
+                for t in 0..6 {
+                    if prod[t] > 0 {
+                        let kind = t as u8 | if cl.need != 0 { 8 } else { 0 };
+                        match groups.iter_mut().find(|g| g.0 == kind) {
+                            Some(g) => g.1 += prod[t],
+                            None => groups.push((kind, prod[t])),
+                        }
+                    }
+                }
+                // Useful: the pool pays more, or more several-mana sources
+                // are needed still (and then feasible with them).
+                let floor = pm.vm.map_or(0, |a| a as usize + 1);
+                match (pm.vm, self.most_spent_from(pm, &groups, &marked, &[], &singles, budget, floor)) {
+                    (_, Some(_)) => true,
+                    (Some(_), None) if self.most_spent_from(pm, &groups, &marked, &[], &singles, budget, 0).is_some() => false,
+                    (_, None) => {
+                        let rest = self.pay_cands(pm, classes, ci, Some(src), dmg);
+                        self.most_spent(pm, &groups, &marked, &[], &rest, budget).is_some()
+                    }
+                }
             })
             .collect()
+    }
+
+    /// Can Wizard's Rockets (class `ci`, member `src`), picked now, leave the
+    /// payment payable, when it can't be paid without it (ENGINE.md 18:
+    /// using it otherwise only keeps a land of another colour untapped,
+    /// and its card is drawn with priority as well)?
+    fn convert_ok(&self, pm: &PayMana, classes: &[Class], ci: usize, src: Src) -> bool {
+        let (budget, dmg) = self.budget(pm.payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
+        let Some(left) = self.after_picks(pm, classes, dmg, budget, Some((ci, src))) else { return false };
+        let groups = self.vgroups(pm);
+        let mut without = self.pay_cands(pm, classes, ci, None, dmg);
+        without.convert = None;
+        let now = self.after_picks(pm, classes, dmg, budget, None).expect("picks within the budget");
+        if self.most_spent(pm, &groups, &pm.marked, &[], &without, now).is_some() {
+            return false;
+        }
+        let mut with = self.pay_cands(pm, classes, ci, Some(src), dmg);
+        with.converted = true;
+        with.convert = None;
+        self.most_spent(pm, &groups, &pm.marked, &[], &with, left).is_some()
     }
 
     /// The budget left after the picks so far (and `extra`, a source about
@@ -960,7 +1222,7 @@ impl Game {
     }
 
     /// The `PayMana` task (ENGINE.md 6, 18).
-    pub(crate) fn pay_mana(&mut self, mut pm: PayMana) {
+    pub(crate) fn pay_mana(&mut self, mut pm: Box<PayMana>) {
         let payer = pm.payer;
         // CR 107.4f: per colour, how many Phyrexian pips are paid with 2 life
         // (paid at the end, after the mana abilities).
@@ -995,26 +1257,33 @@ impl Game {
             }
             return;
         }
+        // CR 601.2h: which of the pool's mana pays, the sources picked.
+        if let Some(rems) = pm.spend.take() {
+            match self.answer.take() {
+                Some(Choice::Number(k)) => self.finish_payment(&pm, rems[k as usize]),
+                Some(other) => unreachable!("pool answer {other:?}"),
+                None => self.end_payment(pm, rems),
+            }
+            return;
+        }
+        // (Paid by single-mana sources alone: done, no sources looked at.)
+        if pm.vm == Some(0) && pm.now.is_none() && pm.chosen.len() == pm.need_total() {
+            let rem = self.pool_rems(&pm, &[])[0];
+            self.finish_payment(&pm, rem);
+            return;
+        }
+        let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
         if !pm.pooled {
-            let before = self.players[payer as usize].pool;
-            self.players[payer as usize].pool.pay_into_for(&mut pm.cost, pm.keep.allow & crate::db::SPEND_ARTIFACT != 0);
+            // The pool pays as much as it can (ENGINE.md 18).
             pm.pooled = true;
-            if before.haste > 0 {
-                self.spend_haste_mana(&pm, before);
-            }
-            if !self.marks.is_empty() {
-                let after = self.players[payer as usize].pool;
-                let spent = (0..5).filter(|&t| before.amt[t] > after.amt[t]).fold(0u8, |m, t| m | (1 << t));
-                for (_, m) in self.marks.iter_mut() {
-                    if let crate::game::Mark::ConvergePending(x) = m {
-                        *x |= spent;
-                    }
-                }
-            }
+            self.recount(&mut pm, &classes);
         }
         if let Some((src, prods)) = pm.now.take() {
             match self.answer.take() {
-                Some(Choice::Number(k)) => self.pick_multi(&mut pm, src, prods[k as usize]),
+                Some(Choice::Number(k)) => {
+                    let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
+                    self.pick_multi(&mut pm, &classes, ci, src, prods[k as usize]);
+                }
                 Some(other) => unreachable!("production answer {other:?}"),
                 None => {
                     let opts = (0..prods.len())
@@ -1026,11 +1295,14 @@ impl Game {
                 }
             }
         }
-        if pm.chosen.len() == pm.cost.total() as usize {
-            self.finish_payment(&pm);
-            return;
+        if pm.vm.is_some_and(|vm| pm.chosen.len() + vm as usize == pm.need_total()) {
+            // (Unless Wizard's Rockets must be picked for the colours.)
+            let rems = self.pool_rems(&pm, &classes);
+            if !rems.is_empty() {
+                self.end_payment(pm, rems);
+                return;
+            }
         }
-        let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
         if let Some(ch) = self.answer.take() {
             let (card, slot) = match ch {
                 Choice::Ability(card, slot) => (card, slot),
@@ -1051,13 +1323,20 @@ impl Game {
                 // resamples a card the payment counts on (ENGINE.md 10).
                 self.reveal(card);
             }
-            match &classes[ci].yld {
-                Yield::One(_) => pm.chosen.push(src),
-                Yield::Multi { prods, .. } => {
-                    if prods.len() == 1 {
-                        self.pick_multi(&mut pm, src, prods[0]);
-                    } else {
-                        pm.now = Some((src, self.feasible_prods(&pm, &classes, ci, src)));
+            if classes[ci].convert {
+                pm.convert = true;
+                pm.multi.push((src, [0; 6]));
+                self.recount(&mut pm, &classes);
+            } else {
+                match &classes[ci].yld {
+                    Yield::One(_) => pm.chosen.push(src),
+                    Yield::Multi { prods, .. } => {
+                        if prods.len() == 1 {
+                            let prod = prods[0];
+                            self.pick_multi(&mut pm, &classes, ci, src, prod);
+                        } else {
+                            pm.now = Some((src, self.feasible_prods(&pm, &classes, ci, src)));
+                        }
                     }
                 }
             }
@@ -1072,35 +1351,62 @@ impl Game {
             }
         };
         let chosen_masks: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| unit_of(s).mask).collect();
+        // The spends of `vm` mana of the virtual pool that can still complete
+        // the payment (one, empty, when the pool is empty).
+        let groups = self.vgroups(&pm);
+        let spends: Vec<SVec<ManaMask, 16>> = if groups.is_empty() {
+            Vec::new() // (not used)
+        } else {
+            let now = self.after_picks(&pm, &classes, dmg, budget, None).expect("picks within the budget");
+            let rest = self.pay_cands(&pm, &classes, pm.min_class as usize, None, dmg);
+            let mut v = Vec::new();
+            each_subset(&groups, pm.vm.map_or(usize::MAX, |vm| vm as usize), &mut SVec::new(), &mut |cnt| {
+                let s = masks_of(&groups, cnt);
+                let mut ch = chosen_masks.clone();
+                ch.extend(s.iter().copied());
+                if cands_payable(&pm.cost, &pm.marked, &ch, &rest, now) {
+                    v.push(s);
+                }
+                false
+            });
+            v
+        };
         let mut opts = Vec::new();
         for (ci, cl) in classes.iter().enumerate().skip(pm.min_class as usize) {
             if cl.only & !pm.keep.allow != 0 {
                 continue; // its mana can't be spent on this (CR 106.6)
             }
             // A card already picked for one of its abilities is spent.
-            let Some(&rep) = cl.members.iter().find(|s| !pm.used(s.card)) else { continue };
-            let ok = match &cl.yld {
-                Yield::One(u) => match self.after_picks(&pm, &classes, dmg, budget, Some((ci, rep))) {
-                    None => false,
-                    Some(left) => {
-                        let mut ch = chosen_masks.clone();
-                        ch.push(u.mask);
-                        // Only classes from this one on can complete the set
-                        // (the canonical order), so feasibility is checked
-                        // against those; they all make one mana.
-                        let rest = self.cands(
-                            payer,
-                            &pm.keep,
-                            &classes[ci..],
-                            &|s| s.card != rep.card && !pm.used(s.card),
-                            dmg,
-                        );
-                        cands_payable(&pm.cost, &ch, &rest, left)
+            let Some(&rep) = cl.members.iter().find(|s| pm.uses(s.card) < cl.reuse) else { continue };
+            let ok = if cl.convert {
+                !pm.convert && pm.chosen.is_empty() && self.convert_ok(&pm, &classes, ci, rep)
+            } else {
+                match &cl.yld {
+                    Yield::One(u) => match self.after_picks(&pm, &classes, dmg, budget, Some((ci, rep))) {
+                        None => false,
+                        Some(left) => {
+                            // Only classes from this one on can complete the
+                            // set (the canonical order), so feasibility is
+                            // checked against those; they all make one mana.
+                            let rest = self.pay_cands(&pm, &classes, ci, Some(rep), dmg);
+                            if groups.is_empty() {
+                                let mut ch = chosen_masks.clone();
+                                ch.push(u.mask);
+                                cands_payable(&pm.cost, &pm.marked, &ch, &rest, left)
+                            } else {
+                                spends.iter().any(|s| {
+                                let mut ch = chosen_masks.clone();
+                                ch.push(u.mask);
+                                ch.extend(s.iter().copied());
+                                cands_payable(&pm.cost, &pm.marked, &ch, &rest, left)
+                            })
+                            }
+                        }
+                    },
+                    Yield::Multi { .. } => {
+                        debug_assert!(pm.chosen.is_empty(), "several-mana classes come first");
+                        !self.feasible_prods(&pm, &classes, ci, rep).is_empty()
                     }
-                },
-                Yield::Multi { .. } => {
-                    debug_assert!(pm.chosen.is_empty(), "several-mana classes come first");
-                    !self.feasible_prods(&pm, &classes, ci, rep).is_empty()
                 }
             };
             if ok {
@@ -1129,40 +1435,131 @@ impl Game {
         self.ask(Task::PayMana(pm), payer, DecisionKind::PayMana, opts);
     }
 
-    /// A several-mana source picked with production `prod`: its mana pays
-    /// what it can of the rest now (it is activated at the end).
-    fn pick_multi(&self, pm: &mut PayMana, src: Src, prod: [u8; 6]) {
-        // (Artifact-only mana is spent first; what is left stays
-        // artifact-only in the pool.)
-        let only = if src.slot == SAC_FOR { 0 } else { self.def_of(src.card).activated_def(src.slot).mana().map_or(0, |m| m.only) };
-        let mut pool = ManaPool { amt: pm.extra, art: pm.extra_art, haste: 0 };
-        pool.add(&prod);
-        if only & crate::db::SPEND_ARTIFACT != 0 {
-            pool.art += prod[crate::mana::C];
+    /// The sources are picked (CR 601.2g): which mana of the virtual pool
+    /// pays (601.2h), asked when the pools it can leave differ (`PayPool`).
+    fn end_payment(&mut self, mut pm: Box<PayMana>, rems: Vec<Rem>) {
+        if rems.len() == 1 {
+            self.finish_payment(&pm, rems[0]);
+            return;
         }
-        pool.pay_into_for(&mut pm.cost, true);
-        pm.extra = pool.amt;
-        pm.extra_art = pool.art;
+        let opts = (0..rems.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
+        let payer = pm.payer;
+        pm.spend = Some(rems);
+        self.ask(Task::PayMana(pm), payer, DecisionKind::PayPool, opts);
+    }
+
+    /// The pools payment `pm` can leave, each once (CR 106.4: two mana of
+    /// one type and tag are the same): `vm` mana of the virtual pool spent
+    /// with every picked source's. Artifact-only {C} is spent before other
+    /// {C} and haste {R} after other {R} on anything but a creature spell
+    /// (never worse for the player); on a creature spell which {R} pays is
+    /// the player's choice (CR 106.4: the haste goes to this spell or stays
+    /// for another).
+    fn pool_rems(&self, pm: &PayMana, classes: &[Class]) -> Vec<Rem> {
+        use crate::mana::{C, R};
+        let pool = self.players[pm.payer as usize].pool;
+        let groups = self.vgroups(pm);
+        let mut vamt = pool.amt;
+        for t in 0..6 {
+            vamt[t] += pm.extra[t];
+        }
+        let vart = pool.art + pm.extra_art;
+        let vhaste = pool.haste + pm.extra_haste;
+        let vm = pm.vm.expect("the pool's spend is known") as usize;
+        if vm == 0 {
+            return vec![Rem { amt: vamt, art: vart, haste: vhaste }];
+        }
+        let art_ok = pm.keep.allow & crate::db::SPEND_ARTIFACT != 0;
+        let creature = pm.keep.spell.is_some_and(|c| self.is_type(c, crate::db::types::CREATURE));
+        let chosen: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| chosen_mask(classes, s)).collect();
+        let conv = |m: ManaMask| if pm.convert { convert(m) } else { m };
+        let mut out: Vec<Rem> = Vec::new();
+        each_subset(&groups, vm, &mut SVec::new(), &mut |cnt| {
+            let mut ch: SVec<ManaMask, 16> = chosen.iter().map(|&m| conv(m)).collect();
+            ch.extend(masks_of(&groups, cnt).iter().map(|&m| conv(m)));
+            if !payable_n(&pm.cost, &pm.marked, &ch, &[]) {
+                return false;
+            }
+            let mut spent = [0u8; 6];
+            for (g, &n) in groups.iter().zip(cnt.iter()) {
+                spent[(g.0 & 7) as usize] += n;
+            }
+            let mut amt = vamt;
+            for t in 0..6 {
+                amt[t] -= spent[t];
+            }
+            let art = if art_ok { vart - vart.min(spent[C]) } else { vart };
+            let lo = spent[R].saturating_sub(vamt[R] - vhaste);
+            let hi = if creature { spent[R].min(vhaste) } else { lo };
+            for h in lo..=hi {
+                let r = Rem { amt, art, haste: vhaste - h };
+                if !out.contains(&r) {
+                    out.push(r);
+                }
+            }
+            false
+        });
+        // (The first keeps the most types, then the most of the earlier
+        // ones; at most `NUMBER` options.)
+        out.sort_by_key(|r| (std::cmp::Reverse(r.amt.iter().filter(|&&n| n > 0).count()), std::cmp::Reverse(r.amt), std::cmp::Reverse(r.haste)));
+        out.truncate(act::NUMBER_N as usize);
+        out
+    }
+
+    /// A several-mana source picked with production `prod`: its mana joins
+    /// the virtual pool (activated at the end); a mana cost of its own is
+    /// one more need of the payment.
+    fn pick_multi(&self, pm: &mut PayMana, classes: &[Class], ci: usize, src: Src, prod: [u8; 6]) {
+        let cl = &classes[ci];
+        for t in 0..6 {
+            pm.extra[t] += prod[t];
+            if cl.need != 0 {
+                pm.extra_made[t] += prod[t];
+            }
+        }
+        if cl.need != 0 {
+            pm.marked.push(cl.need);
+        }
+        if cl.haste {
+            pm.extra_haste += prod[crate::mana::R];
+        }
+        if cl.only & crate::db::SPEND_ARTIFACT != 0 {
+            pm.extra_art += prod[crate::mana::C];
+        }
         pm.multi.push((src, prod));
+        self.recount(pm, classes);
     }
 
     /// The picks cover the cost: activate everything (CR 601.2g) in an
-    /// order the rules allow, then pay Phyrexian life (601.2h). Single-mana
-    /// sources' mana is spent at once (colours by matching); the unspent
-    /// mana of several-mana sources stays in the pool.
-    fn finish_payment(&mut self, pm: &PayMana) {
+    /// order the rules allow, leave `rem` in the pool (601.2h), then pay
+    /// Phyrexian life.
+    fn finish_payment(&mut self, pm: &PayMana, rem: Rem) {
         let payer = pm.payer;
+        let pool = self.players[payer as usize].pool;
+        let mut spent = [0u8; 6];
+        for t in 0..6 {
+            spent[t] = pool.amt[t] + pm.extra[t] - rem.amt[t];
+        }
         if self.marks.iter().any(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) {
-            self.record_converge(pm);
+            let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
+            let conv = |m: ManaMask| if pm.convert { convert(m) } else { m };
+            let mut units: Vec<ManaMask> = pm.chosen.iter().map(|s| conv(chosen_mask(&classes, s))).collect();
+            for t in 0..6 {
+                let made = spent[t].min(pm.extra_made[t]);
+                units.extend(std::iter::repeat_n(conv((1 << t) | MADE), made as usize));
+                units.extend(std::iter::repeat_n(conv(1 << t), (spent[t] - made) as usize));
+            }
+            self.record_converge(pm, &units);
         }
         // "That spell can't be countered" (Delighted Halfling): its mana
         // was spent on the spell (read before the sources are activated).
         if let Some(card) = pm.keep.spell {
+            let special = |s: &Src| s.slot == IMPROVISE || s.slot == TAP_FOR || s.slot == SAC_FOR;
             let uncounterable = pm
                 .chosen
                 .iter()
                 .chain(pm.multi.iter().map(|m| &m.0))
-                .any(|s| s.slot != IMPROVISE && s.slot != TAP_FOR && s.slot != SAC_FOR && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
+                .any(|s| !special(s) && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
             if uncounterable {
                 let r = self.obj_ref(card);
                 self.marks.push((r, crate::game::Mark::Uncounterable));
@@ -1202,11 +1599,26 @@ impl Game {
                 let prod = pm.multi.iter().find(|m| m.0 == src).map(|m| m.1).unwrap_or([0; 6]);
                 self.activate_sac_for(src.card, prod);
             } else {
+                if let AbilitySlot::Activated(i) = src.slot {
+                    if self.def_of(src.card).activated_def(src.slot).exhaust {
+                        let r = self.obj_ref(src.card);
+                        self.marks.push((r, crate::game::Mark::Exhausted(i))); // CR 702.177a
+                    }
+                }
                 self.activate_mana_costs(src);
             }
         }
-        self.add_mana(payer, &pm.extra);
-        self.players[payer as usize].pool.art += pm.extra_art;
+        let p = &mut self.players[payer as usize].pool;
+        p.amt = rem.amt;
+        p.art = rem.art;
+        p.haste = rem.haste;
+        // Arena of Glory's mana spent on a creature spell gives it haste.
+        if pool.haste + pm.extra_haste > rem.haste {
+            if let Some(c) = pm.keep.spell.filter(|&c| self.is_type(c, crate::db::types::CREATURE)) {
+                let r = self.obj_ref(c);
+                self.marks.push((r, crate::game::Mark::HasteMana));
+            }
+        }
         if pm.phyrexian_life > 0 {
             self.lose_life(payer, pm.phyrexian_life as i32);
             let n = pm.phyrexian_life;
@@ -1214,35 +1626,16 @@ impl Game {
         }
     }
 
-    /// Converge (ENGINE.md 28): the colours of mana spent on a spell. The
-    /// pool's mana counts as spent; several-mana sources' spent mana by
-    /// type; each single-mana source makes the colour the player prefers,
-    /// so the count is the most colours an exact payment of the rest by
-    /// those sources can show (the player chooses each mana's type as the
-    /// ability resolves, CR 106.1b).
-    fn record_converge(&mut self, pm: &PayMana) {
+    /// Converge (ENGINE.md 28): the colours of mana spent on a spell, from
+    /// the payment's `units` (the picked single-mana sources' types, the
+    /// pool's and several-mana sources' mana spent): each single-mana
+    /// source makes the colour the player prefers, so the count is the most
+    /// colours an exact payment by those units can show (the player chooses
+    /// each mana's type as the ability resolves, CR 106.1b; 601.2h which
+    /// pays what).
+    fn record_converge(&mut self, pm: &PayMana, units: &[ManaMask]) {
         let Some(k) = self.marks.iter().position(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) else { return };
-        let crate::game::Mark::ConvergePending(mut fixed) = self.marks[k].1 else { unreachable!() };
-        let mut made = [0u8; 6];
-        for (_, v) in &pm.multi {
-            for t in 0..6 {
-                made[t] += v[t];
-            }
-        }
-        for t in 0..5 {
-            if made[t] > pm.extra[t] {
-                fixed |= 1 << t;
-            }
-        }
-        let classes = self.pay_classes(pm.payer, pm.keep.exclude, pm.improvise_types());
-        let units: Vec<ManaMask> = pm
-            .chosen
-            .iter()
-            .map(|s| match classes.iter().find(|cl| cl.members.contains(s)).map(|cl| &cl.yld) {
-                Some(Yield::One(u)) => u.mask,
-                _ => 0,
-            })
-            .collect();
+        let crate::game::Mark::ConvergePending(fixed) = self.marks[k].1 else { unreachable!() };
         fn best(i: usize, units: &[ManaMask], cost: &ManaCost, got: &mut Vec<ManaMask>, fixed: u8) -> u32 {
             if i == units.len() {
                 if !crate::mana::payable(cost, &[], got) {
@@ -1250,7 +1643,11 @@ impl Game {
                 }
                 return (got.iter().fold(fixed, |m, &x| m | x) & COLORS).count_ones();
             }
-            let options: SVec<ManaMask, 6> = if units[i] == 0 { [0u8].into_iter().collect() } else { (0..6).filter(|t| units[i] & (1 << t) != 0).map(|t| 1u8 << t).collect() };
+            let options: SVec<ManaMask, 6> = if units[i] & TYPES == 0 {
+                [units[i]].into_iter().collect()
+            } else {
+                (0..6).filter(|t| units[i] & (1 << t) != 0).map(|t| (1u8 << t) | (units[i] & MADE)).collect()
+            };
             let mut b = 0;
             for o in options.iter() {
                 got.push(*o);
@@ -1259,12 +1656,12 @@ impl Game {
             }
             b
         }
-        let n = if units.len() <= 7 {
-            best(0, &units, &pm.cost, &mut Vec::new(), fixed)
+        let n = if units.len() <= 7 && pm.marked.is_empty() {
+            best(0, units, &pm.cost, &mut Vec::new(), fixed)
         } else {
-            match most_colors_matching(&units, &pm.cost, fixed) {
+            match most_colors_matching(units, &pm.cost, &pm.marked, fixed) {
                 Some(n) => n,
-                // (Hybrid or Phyrexian pips left with many sources: no
+                // (Hybrid or Phyrexian pips left with many units: no
                 // converge spell in the cube has them; an upper bound.)
                 None => {
                     let all = units.iter().fold(fixed, |m, &x| m | x) & COLORS;
@@ -1303,16 +1700,76 @@ fn split_phyrexian(cost: &ManaCost, col: usize, k: u8) -> ManaCost {
     c
 }
 
+/// The mask of a picked single-mana source's unit.
+fn chosen_mask(classes: &[Class], s: &Src) -> ManaMask {
+    match classes.iter().find(|cl| cl.members.contains(s)).map(|cl| &cl.yld) {
+        Some(Yield::One(u)) => u.mask,
+        _ => unreachable!("chosen sources make one mana"),
+    }
+}
+
+/// A unit's mask with Wizard's Rockets: any colour as well (a unit of no
+/// type, improvise's, stays generic only).
+fn convert(m: ManaMask) -> ManaMask {
+    if m & TYPES == 0 {
+        m
+    } else {
+        m | COLORS
+    }
+}
+
+/// Every multiset of `k` units of `groups` (kind, count), as counts per
+/// group in `cur`, until `f` says stop (returned).
+fn each_subset(groups: &[(u8, u8)], k: usize, cur: &mut SVec<u8, 12>, f: &mut dyn FnMut(&[u8]) -> bool) -> bool {
+    let i = cur.len();
+    if i == groups.len() {
+        return k == 0 && f(cur);
+    }
+    let left: usize = groups[i + 1..].iter().map(|g| g.1 as usize).sum();
+    let lo = k.saturating_sub(left);
+    let hi = k.min(groups[i].1 as usize);
+    if lo > hi {
+        return false;
+    }
+    for n in (lo..=hi).rev() {
+        cur.push(n as u8);
+        let stop = each_subset(groups, k - n, cur, f);
+        cur.truncate(i);
+        if stop {
+            return true;
+        }
+    }
+    false
+}
+
+/// The units of `counts` of `groups` as masks (`MADE` for kinds + 8).
+fn masks_of(groups: &[(u8, u8)], counts: &[u8]) -> SVec<ManaMask, 16> {
+    let mut v = SVec::new();
+    for (g, &n) in groups.iter().zip(counts) {
+        let m = (1u8 << (g.0 & 7)) | if g.0 & 8 != 0 { MADE } else { 0 };
+        for _ in 0..n {
+            v.push(m);
+        }
+    }
+    v
+}
+
 /// Feasibility candidates. A card's mana abilities are mutually exclusive
 /// (each taps, sacrifices or exiles it; the lowering checks), so each card
 /// contributes at most one way to help. A one-mana way is a unit carrying
 /// its own budget use; several single-mana ways with the same use merge into
 /// one unit. Otherwise the card is a list of ways to try (each with the
-/// budget its activation takes, charged once, all its mana or none). With
-/// `dmg`, the damage an ability deals its controller weighs like life.
+/// budget its activation takes, charged once, all its mana or none; an
+/// ability with a mana cost adds its need). With `dmg`, the damage an
+/// ability deals its controller weighs like life.
 pub(crate) struct Cands {
     fixed: Units,
     alts: Vec<Vec<Way>>,
+    /// Wizard's Rockets can be used (the budget its activation takes): the
+    /// payment's mana may be of any colour.
+    convert: Option<Way>,
+    /// It was picked: every unit is of any colour.
+    converted: bool,
 }
 
 /// Candidate units, inline up to 32 (ENGINE.md 17).
@@ -1323,11 +1780,16 @@ struct Way {
     units: SVec<Unit, 4>,
     life: i32,
     sac: i32,
+    /// The ability's own mana cost (`Class::need`), 0 for none.
+    need: ManaMask,
 }
 
+/// `uses`: how many times a source was picked already (a source picked
+/// once more than its class allows is out).
 fn cands(
     classes: &[Class],
     use_src: &dyn Fn(&Src) -> bool,
+    uses: &dyn Fn(&Src) -> u8,
     dmg: bool,
     reserved: &dyn Fn(&Class, &Src) -> bool,
     allow: u8,
@@ -1340,46 +1802,74 @@ fn cands(
     } else {
         classes
     };
-    // How many usable abilities each card has: a card with one simple way
-    // goes straight to the fixed units.
+    // How many times each member may still be used (in order), and how
+    // many usable abilities each card has: a card with one simple way goes
+    // straight to the fixed units.
+    let mut lefts: SVec<u8, 32> = SVec::new();
     let mut count: SVec<(CardIdx, u8), 32> = SVec::new();
     for cl in classes {
-        for s in cl.members.iter().filter(|s| use_src(s)) {
-            match count.iter_mut().find(|(c, _)| *c == s.card) {
-                Some((_, n)) => *n += 1,
-                None => count.push((s.card, 1)),
+        for s in cl.members.iter() {
+            let n = if !use_src(s) {
+                0
+            } else if cl.reuse == 1 {
+                (uses(s) == 0) as u8
+            } else {
+                cl.reuse.saturating_sub(uses(s))
+            };
+            lefts.push(n);
+            if n > 0 {
+                match count.iter_mut().find(|(c, _)| *c == s.card) {
+                    Some((_, k)) => *k += 1,
+                    None => count.push((s.card, 1)),
+                }
             }
         }
     }
+    let mut li = 0;
     let alone = |c: CardIdx| count.iter().any(|&(x, n)| x == c && n == 1);
-    let mut out = Cands { fixed: Units::new(), alts: Vec::new() };
+    let mut out = Cands { fixed: Units::new(), alts: Vec::new(), convert: None, converted: false };
     let mut per_card: Vec<(CardIdx, Vec<Way>)> = Vec::new();
     for cl in classes {
         let extra = if dmg { cl.dmg as i32 } else { 0 };
-        for s in cl.members.iter().filter(|s| use_src(s)) {
+        let made = if cl.need != 0 { MADE } else { 0 };
+        for s in cl.members.iter() {
+            let n = lefts[li];
+            li += 1;
+            if n == 0 {
+                continue;
+            }
             let sac = reserved(cl, s) as i32;
+            if cl.convert {
+                if out.convert.as_ref().map_or(true, |w| (w.life, w.sac) > (extra, sac)) {
+                    out.convert = Some(Way { units: SVec::new(), life: extra, sac, need: 0 });
+                }
+                continue;
+            }
             match &cl.yld {
                 Yield::One(u) if alone(s.card) => {
-                    out.fixed.push(Unit { mask: u.mask, life: (u.life as i32 + extra) as u8, sac: sac > 0 });
+                    for _ in 0..n {
+                        out.fixed.push(Unit { mask: u.mask, life: (u.life as i32 + extra) as u8, sac: sac > 0 });
+                    }
                     continue;
                 }
-                Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 => {
+                Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 && cl.need == 0 => {
                     out.fixed.extend(us.iter().map(|u| Unit::free(u.mask)));
                     continue;
                 }
                 _ => {}
             }
-            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac };
+            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac, need: cl.need };
             let ways: Vec<Way> = match &cl.yld {
                 Yield::One(u) => {
-                    let mut units = SVec::new();
-                    units.push(Unit::free(u.mask));
-                    vec![Way { units, life: u.life as i32 + extra, sac }]
+                    let units = std::iter::repeat_n(Unit::free(u.mask), n as usize).collect();
+                    vec![Way { units, life: u.life as i32 + extra, sac, need: 0 }]
                 }
                 Yield::Multi { units: Some(us), .. } => {
-                    vec![multi(us.iter().map(|u| Unit::free(u.mask)).collect())]
+                    vec![multi(us.iter().map(|u| Unit::free(u.mask | made)).collect())]
                 }
-                Yield::Multi { prods, units: None } => prods.iter().map(|p| multi(units_of(p).collect())).collect(),
+                Yield::Multi { prods, units: None } => {
+                    prods.iter().map(|p| multi(units_of(p).map(|u| Unit::free(u.mask | made)).collect())).collect()
+                }
             };
             match per_card.iter_mut().find(|(c, _)| *c == s.card) {
                 Some((_, w)) => w.extend(ways),
@@ -1394,15 +1884,15 @@ fn cands(
         // other's units (Rain of Filth's tap-then-sacrifice, ENGINE.md 31):
         // that way stands for the card (more units never make a cost
         // unpayable), so the search doesn't branch on it.
-        if ways.len() > 1 && ways.iter().all(|w| w.life == 0 && w.sac == 0) {
+        if ways.len() > 1 && ways.iter().all(|w| w.life == 0 && w.sac == 0 && w.need == 0) {
             if let Some(k) = (0..ways.len()).find(|&k| ways.iter().all(|w| covers(&ways[k].units, &w.units))) {
                 out.fixed.extend(ways[k].units.iter().map(|u| Unit::free(u.mask)));
                 continue;
             }
         }
         let ways = std::mem::take(&mut ways);
-        let same_use = |a: &Way, b: &Way| (a.life, a.sac) == (b.life, b.sac);
-        if ways.iter().all(|w| w.units.len() == 1 && same_use(w, &ways[0])) {
+        let same_use = |a: &Way, b: &Way| (a.life, a.sac, a.need) == (b.life, b.sac, b.need);
+        if ways.iter().all(|w| w.units.len() == 1 && w.need == 0 && same_use(w, &ways[0])) {
             let mask = ways.iter().fold(0, |m, w| m | w.units[0].mask);
             out.fixed.push(Unit { mask, ..as_unit(&ways[0]) });
         } else {
@@ -1422,29 +1912,70 @@ fn covers(a: &[Unit], b: &[Unit]) -> bool {
     b.len() <= a.len() && go(a, 0, b)
 }
 
-/// [`payable_within`] over candidates, trying each way (or none) of the
-/// cards that have several or whose activation takes budget.
-fn cands_payable(cost: &ManaCost, chosen: &[ManaMask], c: &Cands, budget: Budget) -> bool {
-    fn go(cost: &ManaCost, chosen: &[ManaMask], units: &mut Units, alts: &[Vec<Way>], b: Budget) -> bool {
+/// [`payable_within_n`] over candidates (with `marked` needs and every unit
+/// of `chosen`), trying each way (or none) of the cards that have several
+/// or whose activation takes budget, then Wizard's Rockets' colours.
+fn cands_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c: &Cands, budget: Budget) -> bool {
+    cands_payable_c(cost, marked, chosen, c, budget, true)
+}
+
+/// [`cands_payable`], Wizard's Rockets' colours only with `convert`.
+fn cands_payable_c(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c: &Cands, budget: Budget, convert: bool) -> bool {
+    if c.converted {
+        return payable_converted(cost, marked, chosen, c, budget);
+    }
+    if ways_payable(cost, marked, chosen, &c.fixed, &c.alts, budget) {
+        return true;
+    }
+    match &c.convert {
+        Some(w) if convert => {
+            let left = Budget { life: budget.life - w.life, sac: budget.sac - w.sac };
+            left.life >= 0 && left.sac >= 0 && payable_converted(cost, marked, chosen, c, left)
+        }
+        _ => false,
+    }
+}
+
+/// [`cands_payable`] with every unit of any colour (Wizard's Rockets).
+fn payable_converted(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c: &Cands, budget: Budget) -> bool {
+    let chosen: SVec<ManaMask, 16> = chosen.iter().map(|&m| convert(m)).collect();
+    let fixed: Units = c.fixed.iter().map(|u| Unit { mask: convert(u.mask), ..*u }).collect();
+    let alts: Vec<Vec<Way>> = c
+        .alts
+        .iter()
+        .map(|ws| ws.iter().map(|w| Way { units: w.units.iter().map(|u| Unit { mask: convert(u.mask), ..*u }).collect(), ..w.clone() }).collect())
+        .collect();
+    ways_payable(cost, marked, &chosen, &fixed, &alts, budget)
+}
+
+fn ways_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], fixed: &Units, alts: &[Vec<Way>], budget: Budget) -> bool {
+    fn go(cost: &ManaCost, needs: &mut SVec<ManaMask, 8>, chosen: &[ManaMask], units: &mut Units, alts: &[Vec<Way>], b: Budget) -> bool {
         let Some((first, rest)) = alts.split_first() else {
-            return payable_within(cost, chosen, units, b);
+            return payable_within_n(cost, needs, chosen, units, b);
         };
-        let use_way = |w: &Way, units: &mut Units| {
+        for w in first {
             let left = Budget { life: b.life - w.life, sac: b.sac - w.sac };
             if left.life < 0 || left.sac < 0 {
-                return false;
+                continue;
             }
-            let len = units.len();
+            let (len, nl) = (units.len(), needs.len());
             units.extend(w.units.iter().copied());
-            let ok = go(cost, chosen, units, rest, left);
+            if w.need != 0 {
+                needs.push(w.need);
+            }
+            let ok = go(cost, needs, chosen, units, rest, left);
             units.truncate(len);
-            ok
-        };
-        first.iter().any(|w| use_way(w, units)) || go(cost, chosen, units, rest, b)
+            needs.truncate(nl);
+            if ok {
+                return true;
+            }
+        }
+        go(cost, needs, chosen, units, rest, b)
     }
-    if c.alts.is_empty() {
-        return payable_within(cost, chosen, &c.fixed, budget);
+    if alts.is_empty() {
+        return payable_within_n(cost, marked, chosen, fixed, budget);
     }
-    let mut units = c.fixed.clone();
-    go(cost, chosen, &mut units, &c.alts, budget)
+    let mut units = fixed.clone();
+    let mut needs: SVec<ManaMask, 8> = marked.iter().copied().collect();
+    go(cost, &mut needs, chosen, &mut units, alts, budget)
 }

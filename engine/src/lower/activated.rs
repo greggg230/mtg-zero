@@ -68,24 +68,22 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     let mut instant_only = *activate_only_as_instant;
     let effect = if *is_mana_ability {
         let m = lower_mana_ability(l, effect)?;
-        // Mana abilities are activated while paying a cost (ENGINE.md 18):
-        // only costs without choices and no mana cost of their own (a
-        // nested payment). One whose cost has a mana part or a choice, or
-        // whose mana depends on the permanent its cost sacrifices, or that
-        // can be activated only once (exhaust), is activated with priority
-        // only, like Lion's Eye Diamond (ENGINE.md 28; CR 605.3a lets a
-        // player activate it then).
-        if !cost.mana.is_zero()
-            // ("{X}": announced, a choice.)
-            || l.act_x
-            || cost.sacrifice.is_some()
-            || *exhaust
-            || matches!(m.prod, ManaProd::SacrificedLand)
-            // "Remove a charge counter from this: add ..." (Pentad Prism):
-            // no {T}, so it can be activated again in one payment.
-            || (cost.remove_counters.is_some() && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self))
-        {
+        // Mana abilities are activated while paying a cost (ENGINE.md 18,
+        // CR 605.3a), those with a mana cost of their own too (one mana paid
+        // within the payment: Sunken Ruins, Loot, Arena of Glory, Chromatic
+        // Star; {X}: Wizard's Rockets), an exhaust one (Loot) and one without
+        // {T} (Pentad Prism: once per counter). One whose cost sacrifices a
+        // permanent of the player's choice is activated with priority only
+        // (ENGINE.md 28).
+        if cost.sacrifice.is_some() || matches!(m.prod, ManaProd::SacrificedLand) {
             instant_only = true;
+        }
+        let pips = cost.mana.pips.iter().sum::<u8>() + cost.mana.hybrid.iter().sum::<u8>();
+        if !cost.mana.is_zero() && !(pips + cost.mana.generic == 1 && !cost.mana.has_phyrexian()) {
+            l.unsupported("ManaAbility.cost.mana(more than one mana)");
+        }
+        if (!cost.mana.is_zero() || l.act_x) && (cost.life > 0 || m.damage_to_you > 0 || m.only != 0) {
+            l.unsupported("ManaAbility.cost.mana(with life, damage or a spending restriction)");
         }
         if matches!(m.prod, ManaProd::SacrificedLand) && cost.sacrifice.is_none() {
             l.unsupported("ManaAbility:AddOneManaSacrificedLandCouldProduce(no sacrifice)");
@@ -101,10 +99,6 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         }
         if *sorcery_speed {
             l.unsupported("ManaAbility.sorcery_speed");
-        }
-        // (Haste mana is made with priority only: its pool tag.)
-        if m.haste && !instant_only {
-            l.unsupported("AddManaToPool.grants_haste_to_creature_spell(paid while paying)");
         }
         if cost.exert && !(cost.tap && !cost.mana.is_zero()) {
             l.unsupported("ActivationCost.exert_self(not with {T} and mana)");
@@ -137,7 +131,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         }
         // Payment treats a card's mana abilities as exclusive alternatives,
         // true when each one taps, sacrifices or exiles its source.
-        if !instant_only && !tap_other && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
+        if !instant_only && !tap_other && cost.remove_counters.is_none() && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
             l.unsupported("ManaAbility.cost(no tap or sacrifice of the source)");
         }
         if from == From::Hand && !matches!(m.prod, ManaProd::One(_)) {
