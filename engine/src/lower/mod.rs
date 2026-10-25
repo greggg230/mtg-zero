@@ -128,6 +128,8 @@ pub enum Face {
     Half,
     /// A preparation card's prepare spell (CR 722.2a).
     Prepare,
+    /// A Class's level (CR 716): the card's abilities at that level.
+    Level,
 }
 
 impl Lowerer<'_> {

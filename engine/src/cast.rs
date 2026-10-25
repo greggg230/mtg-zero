@@ -35,6 +35,11 @@ impl Game {
                 }
             }
         }
+        // "Spells your opponents cast with the chosen name cost {2} more to
+        // cast" (Anointed Peacekeeper).
+        if self.seen & crate::game::SEEN_NAMED_TAX != 0 {
+            cost.generic = cost.generic.saturating_add(self.named_tax(card, Some(p)));
+        }
         // Then reductions (CR 601.2f: increases, then reductions; generic
         // mana only, not below zero).
         for d in &self.def_of(card).discounts {

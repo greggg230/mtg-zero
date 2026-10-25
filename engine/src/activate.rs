@@ -181,6 +181,12 @@ impl Game {
     pub(crate) fn act_mana_x(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, x: u8) -> crate::mana::ManaCost {
         let mut m = ad.cost.mana;
         m.generic = m.generic.saturating_add(x);
+        // "Activated abilities of sources with the chosen name cost {2} more
+        // to activate unless they're mana abilities" (Anointed Peacekeeper;
+        // CR 602.2b, 601.2f: increases first).
+        if self.seen & crate::game::SEEN_NAMED_TAX != 0 && ad.mana().is_none() && ad.special.is_none() {
+            m.generic = m.generic.saturating_add(self.named_tax(card, None));
+        }
         if m.is_zero() {
             return m;
         }
@@ -942,6 +948,10 @@ impl Game {
                     self.ask(Task::AsEnters { card }, p, DecisionKind::ChooseMode, opts);
                 }
             }
+            return;
+        }
+        if self.def_of(card).chooses_name && self.chosen_name(self.obj_ref(card)).is_none() {
+            self.choose_name_as_enters(card);
             return;
         }
         if self.def_of(card).paints {

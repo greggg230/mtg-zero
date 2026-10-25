@@ -1067,7 +1067,7 @@ impl Game {
 
     /// `owner`'s hand is revealed to everyone (`looker: None`) or looked at
     /// by `looker`: keys per card in definition order (CR 701.16).
-    fn reveal_hand(&mut self, owner: PlayerId, looker: Option<PlayerId>) {
+    pub(crate) fn reveal_hand(&mut self, owner: PlayerId, looker: Option<PlayerId>) {
         for c in self.hand_sorted(owner) {
             match looker {
                 None => self.reveal(c),

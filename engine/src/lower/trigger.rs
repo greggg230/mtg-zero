@@ -87,6 +87,8 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         Some(E::Blocks) => Some(EventKind::Blocks),
         Some(E::Transforms) => Some(EventKind::Transforms),
         Some(E::SagaChapter) => Some(EventKind::Chapter),
+        // "When this Class becomes level n" (CR 716.2c).
+        Some(E::ClassLevelGained) => Some(EventKind::ClassLevel),
         Some(E::DealsDamage) => Some(EventKind::DealsDamage),
         Some(E::DealsCombatDamageToCreature) => Some(EventKind::DealsCombatDamageToCreature),
         Some(E::CreatureTokensCreated) => Some(EventKind::CreatureTokensCreated),
@@ -254,6 +256,8 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::State(_)
         | TrigPred::Source(_)
         | TrigPred::Chapter(_)
+        | TrigPred::Level(_)
+        | TrigPred::TimesPerSubject(..)
         | TrigPred::Batch
         | TrigPred::HostAttacksWithAnother
         | TrigPred::EnteredCast
@@ -349,6 +353,8 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         P::OneOrMoreBatch(nodes::OneOrMoreBatch {}) => Some(TrigPred::Batch),
         // A chapter ability (CR 714.2b).
         P::ChapterReached(nodes::ChapterReached { n }) => Some(TrigPred::Chapter(l.int("ChapterReached.n", *n, 1, 20) as u8)),
+        // "When this Class becomes level n" (CR 716.2c).
+        P::ClassLevelReached(nodes::ClassLevelReached { n }) => Some(TrigPred::Level(l.int("ClassLevelReached.n", *n, 2, 9) as u8)),
         // "When you draw your nth card in a turn": the drawing player (the
         // draw event's subject, after the draw counts) has drawn n.
         P::NthCardDrawnThisTurn(nodes::NthCardDrawnThisTurn { n }) => Some(TrigPred::Subject(

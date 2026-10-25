@@ -111,6 +111,16 @@ pub enum M7d {
     ExileTargetCounterIfPermanent { tgt: u8 },
     /// The source becomes unattached (reconfigure, CR 702.151a).
     UnattachSource,
+    /// The source (a Class) becomes level `level` (CR 716.2a): its face of
+    /// that level is turned up.
+    GainClassLevel { level: u8 },
+    /// Each legal target of requirement `tgt` that isn't a creature becomes
+    /// a p/t creature with this subtype in addition to its other types
+    /// (forever).
+    BecomeCreatureIfNot { tgt: u8, p: i32, t: i32, subtype: u16 },
+    /// The controller reveals the top card of their library: a land card is
+    /// put onto the battlefield, anything else into their hand (Nadu).
+    RevealTopLandElseHand,
 }
 
 /// Which objects an `Ext` op acts on.

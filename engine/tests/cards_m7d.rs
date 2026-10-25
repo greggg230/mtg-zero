@@ -442,3 +442,153 @@ fn lion_sash_unattaches_as_a_sorcery_cr702_151a() {
     let sash2 = bf(&g2, 0, "Lion Sash");
     assert!(g2.pending_decision().is_none_or(|d| d.player != 0 || d.options.iter().all(|o| o.choice != act(sash2, 1))));
 }
+
+// ---- Does Machines (Class levels, CR 716) --------------------------------------------
+
+/// "When this Class enters, mill two cards, draw two cards, then discard two
+/// cards. {1}{U}: Level 2. When this Class becomes level 2, return up to two
+/// target artifact cards from your graveyard to your hand. {4}{U}: Level 3.
+/// At the beginning of combat on your turn, put three +1/+1 counters on
+/// target artifact you control. If it isn't a creature, it becomes a 0/0
+/// Robot creature in addition to its other types." (CR 716.2a: a level
+/// ability is sorcery-speed and only from level N-1; 716.2c.)
+#[test]
+fn does_machines_gains_levels_cr716() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Island", "Island", "Island", "Island", "Sol Ring"])
+        .hand(0, &["Does Machines"])
+        .graveyard(0, &["Mox Pearl", "Mind Stone", "Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let dm = g.card(0, "Does Machines", Zone::Hand);
+    g.choose(Choice::Cast(dm));
+    pay(&mut g);
+    // The enter trigger: mill two, draw two, discard two.
+    let lib = g.player(0).library.len();
+    resolve_with(&mut g, |g| g.pending_decision().and_then(|d| d.options.iter().find(|o| o.choice != Choice::Pass)).map(|o| o.choice));
+    assert_eq!(g.player(0).library.len(), lib - 4, "milled two, drew two\n{}", log(&g));
+    assert_eq!(g.player(0).hand.len(), 0, "discarded two");
+    let dm = bf(&g, 0, "Does Machines");
+    assert!(g.has_option(act(dm, 0)), "{{1}}{{U}}: Level 2: {:?}", g.options_desc());
+    g.choose(act(dm, 0));
+    pay(&mut g);
+    // Resolves: level 2; its trigger targets up to two artifact cards.
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || (at_priority(g) && g.stack().is_empty()));
+    assert_eq!(g.kind(), Some(DecisionKind::Target), "{}", log(&g));
+    let mox = g.card(0, "Mox Pearl", Zone::Graveyard);
+    let stone = g.card(0, "Mind Stone", Zone::Graveyard);
+    assert!(!g.has_option(g.tgt(g.card(0, "Lightning Bolt", Zone::Graveyard))), "artifact cards only");
+    g.choose(g.tgt(mox));
+    g.choose(g.tgt(stone));
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Mox Pearl", Zone::Hand), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Mind Stone", Zone::Hand), 1);
+    let dm = bf(&g, 0, "Does Machines");
+    assert!(!g.has_option(act(dm, 0)) || g.def_of(dm).activated.len() == 1, "no second Level 2");
+    // Level 3 ({4}{U}: five Islands left? two tapped for level 2).
+    assert!(g.has_option(act(dm, 0)), "{{4}}{{U}}: Level 3: {:?}", g.options_desc());
+    g.choose(act(dm, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(log(&g).contains("becomes level 3"), "{}", log(&g));
+    let ring = bf(&g, 0, "Sol Ring");
+    assert!(!g.is_creature(ring));
+    // The beginning of combat: three counters on the Sol Ring, a 0/0 Robot
+    // creature in addition.
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || g.turn().step > Step::BeginCombat);
+    assert_eq!(g.kind(), Some(DecisionKind::Target), "{}", log(&g));
+    g.choose(g.tgt(ring));
+    settle(&mut g);
+    assert!(g.is_creature(ring), "{}", log(&g));
+    assert_eq!(g.pt(ring), (3, 3));
+    assert!(g.is_type(ring, engine::db::types::ARTIFACT), "in addition to its other types");
+}
+
+// ---- Nadu, Winged Wisdom (a granted "becomes the target" trigger) ----------------
+
+/// "Creatures you control have 'Whenever this creature becomes the target of
+/// a spell or ability, reveal the top card of your library. If it's a land
+/// card, put it onto the battlefield. Otherwise, put it into your hand. This
+/// ability triggers only twice each turn.'" (CR 603.2e; the limit is each
+/// creature's.)
+#[test]
+fn nadu_grants_a_target_trigger_twice_each_turn_per_creature_cr603_2e() {
+    let mut g = scen()
+        .library(0, &["Forest", "Lightning Bolt", "Mountain", "Plains"])
+        .battlefield(0, &["Nadu, Winged Wisdom", "Test Giant"])
+        .battlefield(1, &["Test Tapper", "Test Tapper", "Test Tapper", "Test Tapper"])
+        .at(Step::Main1, 1)
+        .start();
+    let giant = bf(&g, 0, "Test Giant");
+    let nadu = bf(&g, 0, "Nadu, Winged Wisdom");
+    let tappers: Vec<CardIdx> = g.permanents_of(1).collect();
+    let ping = |g: &mut Game, t: CardIdx, at: CardIdx| {
+        g.choose(act(t, 0));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(g.tgt(at));
+        settle(g);
+    };
+    let forest_before = g.count_in(0, "Forest", Zone::Battlefield);
+    ping(&mut g, tappers[0], giant);
+    assert_eq!(g.count_in(0, "Forest", Zone::Battlefield), forest_before + 1, "a land: onto the battlefield\n{}", log(&g));
+    ping(&mut g, tappers[1], giant);
+    assert_eq!(g.count_in(0, "Lightning Bolt", Zone::Hand), 1, "not a land: into the hand\n{}", log(&g));
+    let lib = g.player(0).library.len();
+    ping(&mut g, tappers[2], giant);
+    assert_eq!(g.player(0).library.len(), lib, "only twice each turn for this creature\n{}", log(&g));
+    // Another creature's own ability still triggers.
+    ping(&mut g, tappers[3], nadu);
+    assert_eq!(g.player(0).library.len(), lib - 1, "Nadu's own: a third reveal\n{}", log(&g));
+}
+
+// ---- Anointed Peacekeeper (a card name chosen as it enters) ----------------------
+
+/// "As this creature enters, look at an opponent's hand, then choose any card
+/// name. Spells your opponents cast with the chosen name cost {2} more to
+/// cast. Activated abilities of sources with the chosen name cost {2} more to
+/// activate unless they're mana abilities." (CR 614.12, 601.2f, 602.2b.)
+#[test]
+fn anointed_peacekeeper_names_a_card_and_taxes_it_cr601_2f() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains", "Mountain"])
+        .hand(0, &["Anointed Peacekeeper", "Lightning Bolt"])
+        .hand(1, &["Lightning Bolt", "Test Bear"])
+        .battlefield(1, &["Mountain", "Mountain", "Test Tapper"])
+        .at(Step::Main1, 0)
+        .start();
+    let ap = g.card(0, "Anointed Peacekeeper", Zone::Hand);
+    g.choose(Choice::Cast(ap));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::NameCard));
+    assert_eq!(g.kind(), Some(DecisionKind::NameCard), "{}", log(&g));
+    // It looked at the opponent's hand.
+    let bolt1 = g.card(1, "Lightning Bolt", Zone::Hand);
+    assert!(g.knows(0, bolt1), "P0 saw P1's hand");
+    let bolt_def = db().id("Lightning Bolt").unwrap();
+    assert!(g.has_option(Choice::Def(bolt_def)), "{:?}", g.options_desc());
+    g.choose(Choice::Def(bolt_def));
+    settle(&mut g);
+    // P0's own Bolt: {R}; P1's: {2}{R} (two Mountains: not castable).
+    let bolt0 = g.card(0, "Lightning Bolt", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(bolt0)), "its controller's spells are not taxed");
+    g.pass();
+    assert_eq!(g.pending_decision().unwrap().player, 1);
+    assert!(!g.has_option(Choice::Cast(bolt1)), "{{2}}{{R}} with two lands: {:?}", g.options_desc());
+    // Naming Test Tapper instead: its ability costs {2} more.
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .hand(0, &["Anointed Peacekeeper"])
+        .battlefield(1, &["Mountain", "Test Tapper"])
+        .at(Step::Main1, 0)
+        .start();
+    let ap = g.card(0, "Anointed Peacekeeper", Zone::Hand);
+    g.choose(Choice::Cast(ap));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::NameCard));
+    let tapper_def = db().id("Test Tapper").unwrap();
+    g.choose(Choice::Def(tapper_def));
+    settle(&mut g);
+    let tapper = bf(&g, 1, "Test Tapper");
+    g.pass();
+    assert!(!g.has_option(act(tapper, 0)), "{{2}} more with one land: {:?}", g.options_desc());
+}

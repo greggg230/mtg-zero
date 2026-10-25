@@ -495,6 +495,9 @@ impl Heuristic {
                     if matches!(g.db.ability(f.ability).program.get(f.pc as usize), Some(Op::PutFromHandOnTop { .. })));
                 Some(if put_back { Self::worst_hand_card(g, d, p) } else { Self::best_card(g, d) })
             }
+            // A name for a tax (Anointed Peacekeeper): the opponent's most
+            // expensive card.
+            K::NameCard if matches!(g.agenda.last(), Some(Task::AsEnters { .. })) => Some(Self::best_card(g, d)),
             // The card an opening-hand action exiles (Gemstone Caverns).
             K::ExileCost if matches!(g.agenda.last(), Some(Task::Opening { .. })) => Some(Self::worst_hand_card(g, d, p)),
             K::Target => self.target(g, d, p),
@@ -845,6 +848,10 @@ impl Heuristic {
             None => {}
         }
         let ActEffect::Stack(ab) = &ad.effect else { return None };
+        // A Class's level (CR 716): after the spells, in a main phase.
+        if ab.program.iter().any(|o| matches!(o, Op::Ext(Ext::M7d(crate::program::M7d::GainClassLevel { .. })))) {
+            return matches!(w, When::Main1 | When::Main2).then_some((1, 200, false));
+        }
         let kind = classify(g, ad, slot);
         if let Some(d) = ad.loyalty {
             return self.loyalty_score(g, p, c, ab, kind, d as i32).map(|s| (2, s, false));

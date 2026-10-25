@@ -631,6 +631,8 @@ pub(crate) const SEEN_RARE_EVENTS: u16 = 512;
 /// "If a card would be put into an opponent's graveyard from anywhere,
 /// instead exile it with a void counter on it" (Dauthi Voidwalker; M7d).
 pub(crate) const SEEN_VOID: u16 = 1024;
+/// Taxes on a chosen card name (Anointed Peacekeeper; M7d).
+pub(crate) const SEEN_NAMED_TAX: u16 = 2048;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -674,7 +676,20 @@ pub enum Mark {
     Reanimated(ObjRef),
     /// This spell was cast when a sorcery couldn't have been (Necromancy).
     NotSorceryTiming,
+    /// The triggered ability (`slot` of `def`) a static ability grants this
+    /// object triggered `n` times in turn `turn` (M7d: Nadu's "only twice
+    /// each turn").
+    Triggered { def: DefId, slot: u8, turn: u16, n: u8 },
+    /// It looked at an opponent's hand as it entered (Anointed Peacekeeper:
+    /// the name is chosen next).
+    LookedHand,
+    /// The card name chosen as it entered (a definition; `NO_NAME`: a name
+    /// of no card in the game).
+    ChosenName(DefId),
 }
+
+/// `Mark::ChosenName` of a name no card of the game has.
+pub(crate) const NO_NAME: DefId = DefId::MAX;
 
 impl Game {
     /// A new game: shuffle, pick the starting player, draw opening hands,
@@ -1181,7 +1196,13 @@ impl Game {
         if self.def_of(idx).daybound || self.def_of(idx).nightbound {
             self.day_night_check();
         }
-        if self.def_of(idx).shock_life > 0 || self.def_of(idx).chooses_player || self.def_of(idx).paints || self.def_of(idx).chooses_land_type || self.def_of(idx).chooses_parity {
+        if self.def_of(idx).shock_life > 0
+            || self.def_of(idx).chooses_player
+            || self.def_of(idx).paints
+            || self.def_of(idx).chooses_land_type
+            || self.def_of(idx).chooses_parity
+            || self.def_of(idx).chooses_name
+        {
             self.agenda.push(Task::AsEnters { card: idx });
         }
         // "This creature enters prepared" (CR 722.3a).

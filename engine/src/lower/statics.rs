@@ -56,6 +56,11 @@ pub(crate) struct Repl {
     /// or more cards, you draw that many cards plus d instead" (Quantum
     /// Riddler): (d, n).
     pub draw_plus: Option<(u8, u8)>,
+    /// "Creatures you control have 'Whenever this creature becomes the
+    /// target of a spell or ability, <effect>. This ability triggers only n
+    /// times each turn'" (Nadu, Winged Wisdom): the granted triggered
+    /// ability is this card's (as granted ward's, ENGINE.md 27.3).
+    pub grants_target_trigger: Option<(crate::db::AbilityDef, u8)>,
 }
 
 /// A static ability's replacement effect -> `repl`.
@@ -157,11 +162,37 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
     l.deny("StaticAbility.tier_threshold", tier_threshold);
     l.deny("StaticAbility.room_half", room_half);
     l.deny("StaticAbility.grants_creature_spells_uncounterable", grants_creature_spells_uncounterable);
-    l.deny("StaticAbility.granted_becomes_target_effect", granted_becomes_target_effect);
-    l.deny("StaticAbility.granted_trigger_limit_per_turn", granted_trigger_limit_per_turn);
     l.deny("StaticAbility.skips_your_draw_step", skips_your_draw_step);
 
     let scope = lower_scope(l, scope)?;
+    // A granted "whenever this creature becomes the target of a spell or
+    // ability" triggered ability (Nadu; M7d, ENGINE.md 31).
+    if let Some(e) = granted_becomes_target_effect.as_deref() {
+        let creatures_yours = Scope::Matching {
+            filter: Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Controller(true))),
+            other: false,
+        };
+        let other = *power_bonus != 0
+            || *toughness_bonus != 0
+            || !granted_keywords.is_empty()
+            || *must_attack_each_combat
+            || continuous_effect.is_some()
+            || replacement_effect.is_some()
+            || !opponents_enter_tapped_types.is_empty()
+            || *bonus_per_condition_count
+            || *grants_no_max_hand_size
+            || *grants_spells_uncounterable
+            || *grants_ward_life_cost != 0
+            || condition.is_some();
+        if scope != creatures_yours || other || repl.grants_target_trigger.is_some() {
+            l.unsupported("StaticAbility.granted_becomes_target_effect(not creatures you control alone)");
+        }
+        let n = l.int("StaticAbility.granted_trigger_limit_per_turn", *granted_trigger_limit_per_turn, 1, 9) as u8;
+        let ab = super::effect::lower_ability(l, e);
+        repl.grants_target_trigger = Some((ab, n));
+        return None;
+    }
+    l.deny("StaticAbility.granted_trigger_limit_per_turn", granted_trigger_limit_per_turn);
     // Rules for the controller alone (ENGINE.md 29): a cost reduction of
     // abilities, a graveyard permission. Nothing else in the static.
     let alone = |l: &mut Lowerer, what: &str| {

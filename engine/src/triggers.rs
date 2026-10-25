@@ -128,6 +128,16 @@ fn has_once(p: &TrigPred) -> bool {
     }
 }
 
+/// The subject slot of a "triggers only n times each turn" limit, if the
+/// predicate has one (at the top level).
+fn times_slot(p: &TrigPred) -> Option<crate::db::Slot> {
+    match p {
+        TrigPred::TimesPerSubject(s, _) => Some(*s),
+        TrigPred::And(a, b) => times_slot(a).or_else(|| times_slot(b)),
+        _ => None,
+    }
+}
+
 /// Does the predicate say "cast or copy" (`OrCopy`)?
 fn has_or_copy(p: &TrigPred) -> bool {
     match p {
@@ -284,6 +294,12 @@ impl Game {
                     if has_once(&t.pred) {
                         self.done_once.push((o.r, i as u8));
                     }
+                    // "... only twice each turn", per granted object (Nadu).
+                    if let Some(s) = times_slot(&t.pred) {
+                        if let Subj::Obj(r) = ev.subject(s) {
+                            self.note_granted_trigger(r, o.def, i as u8);
+                        }
+                    }
                 }
             }
         }
@@ -356,6 +372,11 @@ impl Game {
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
             }
             TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u16,
+            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u16,
+            TrigPred::TimesPerSubject(s, n) => match ev.subject(*s) {
+                Subj::Obj(r) => self.granted_triggered(r, src.def) < *n,
+                _ => false,
+            },
             TrigPred::Batch => true,
             // The `Enters` event's note (`Game::put_onto_battlefield`).
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,

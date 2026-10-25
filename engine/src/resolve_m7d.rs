@@ -58,6 +58,12 @@ impl Game {
     /// Turn a face-down permanent face up (CR 708.8).
     pub(crate) fn turn_face_up(&mut self, _card: CardIdx) {}
 
+    /// The identity of slot `c`: its definition, or for a face-down
+    /// permanent the card it is (CR 708.2).
+    pub fn ident(&self, c: CardIdx) -> crate::ids::DefId {
+        self.objs[c.i()].def
+    }
+
     /// The card a face-down permanent is (its owner's identity), if `c` is
     /// one.
     pub(crate) fn face_down_def(&self, _c: CardIdx) -> Option<&'static crate::db::CardDef> {
@@ -214,6 +220,56 @@ impl Game {
                 }
                 Flow::Next
             }
+            M7d::GainClassLevel { level } => {
+                // CR 716.2a: the Class's level becomes N (the same object,
+                // as a transform: counters, damage and effects stay). A copy
+                // of a Class doesn't (no such copy in the cube).
+                if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield && !self.is_copy(f.source.idx) {
+                    let c = f.source.idx;
+                    let d = self.def_of(c);
+                    if d.class_level < *level {
+                        if let Some(&face) = d.levels.get(*level as usize - 2) {
+                            self.set_face(c, face);
+                            self.note(|g| format!("{} becomes level {level}", g.name(c)));
+                            let r = self.obj_ref(c);
+                            let ev = crate::triggers::Event {
+                                kind: crate::db::EventKind::ClassLevel,
+                                a: crate::triggers::Subj::Obj(r),
+                                b: crate::triggers::Subj::None,
+                                amount: *level as u16,
+                            };
+                            self.event(ev);
+                        }
+                    }
+                }
+                Flow::Next
+            }
+            M7d::BecomeCreatureIfNot { tgt, p, t, subtype } => {
+                let ctl = f.controller;
+                for c in self.objs_on(f, &crate::program::On::Target(*tgt)) {
+                    if self.is_creature(c) {
+                        continue;
+                    }
+                    let r = self.obj_ref(c);
+                    let ty = crate::db::Mod::Types { add: crate::db::types::CREATURE, subtypes: vec![*subtype], replace: false };
+                    self.add_effect(crate::layers::Affected::Obj(r), ty, crate::layers::Until::Forever, ctl);
+                    self.add_effect(crate::layers::Affected::Obj(r), crate::db::Mod::SetPt(*p, *t), crate::layers::Until::Forever, ctl);
+                }
+                Flow::Next
+            }
+            M7d::RevealTopLandElseHand => {
+                let p = f.controller;
+                if let Some(&top) = self.players[p as usize].library.last() {
+                    self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
+                    self.reveal(top);
+                    if self.def_of(top).is(crate::db::types::LAND) {
+                        self.put_onto_battlefield(top, p);
+                    } else {
+                        self.move_card(top, Zone::Hand, Pos::Top);
+                    }
+                }
+                Flow::Next
+            }
             M7d::UnattachSource => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     let c = f.source.idx;
@@ -224,5 +280,124 @@ impl Game {
                 Flow::Next
             }
         }
+    }
+}
+
+// ---- granted triggered abilities with a limit (Nadu) -----------------------
+
+impl Game {
+    /// How many times this turn the triggered ability granted by a static
+    /// ability of definition `def` triggered for object `r`.
+    pub(crate) fn granted_triggered(&self, r: crate::ids::ObjRef, def: crate::ids::DefId) -> u8 {
+        let turn = self.turn.number as u16;
+        self.marks
+            .iter()
+            .find_map(|&(o, m)| match m {
+                crate::game::Mark::Triggered { def: d, turn: t, n, .. } if o == r && d == def && t == turn => Some(n),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn note_granted_trigger(&mut self, r: crate::ids::ObjRef, def: crate::ids::DefId, slot: u8) {
+        let turn = self.turn.number as u16;
+        for (o, m) in self.marks.iter_mut() {
+            if let crate::game::Mark::Triggered { def: d, slot: s, turn: t, n } = m {
+                if *o == r && *d == def && *s == slot {
+                    if *t == turn {
+                        *n += 1;
+                    } else {
+                        *t = turn;
+                        *n = 1;
+                    }
+                    return;
+                }
+            }
+        }
+        self.marks.push((r, crate::game::Mark::Triggered { def, slot, turn, n: 1 }));
+    }
+}
+
+// ---- a card name chosen as a permanent enters (Anointed Peacekeeper) -------
+
+impl Game {
+    /// The name chosen as `r` entered (`NO_NAME`: a name of no card here).
+    pub(crate) fn chosen_name(&self, r: crate::ids::ObjRef) -> Option<crate::ids::DefId> {
+        self.marks.iter().find_map(|&(o, m)| match m {
+            crate::game::Mark::ChosenName(d) if o == r => Some(d),
+            _ => None,
+        })
+    }
+
+    /// `Task::AsEnters` for "as this enters, look at an opponent's hand, then
+    /// choose any card name" (CR 614.12): the look first (once: re-running
+    /// the asker must ask the same question, ENGINE.md 4), then `NameCard`
+    /// over the names of the opponent's cards (decklists are open: the
+    /// names are the same in every world), `PASS` = a name of no card in the
+    /// game.
+    pub(crate) fn choose_name_as_enters(&mut self, card: CardIdx) {
+        use crate::decision::{act, Choice, DecisionKind, Opt};
+        use crate::flow::Task;
+        let p = self.objs[card.i()].controller;
+        let q = crate::ids::opp(p);
+        let r = self.obj_ref(card);
+        let looked = self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::LookedHand);
+        if !looked {
+            self.reveal_hand(q, Some(p));
+            self.marks.push((r, crate::game::Mark::LookedHand));
+            self.agenda.push(Task::AsEnters { card });
+            return;
+        }
+        match self.answer.take() {
+            Some(Choice::Def(d)) => {
+                self.marks.push((r, crate::game::Mark::ChosenName(d)));
+                self.note(|g| format!("chosen name: {}", g.db.def(d).name));
+            }
+            Some(Choice::Pass) => self.marks.push((r, crate::game::Mark::ChosenName(crate::game::NO_NAME))),
+            Some(other) => unreachable!("name answer {other:?}"),
+            None => {
+                let mut defs: Vec<crate::ids::DefId> = (0..self.objs.len())
+                    .map(|i| CardIdx(i as u16))
+                    .filter(|&c| self.objs[c.i()].owner == q && !self.is_token(c) && !self.is_copy_obj(c) && self.objs[c.i()].zone != Zone::Nowhere)
+                    .map(|c| self.ident_card(c))
+                    .collect();
+                defs.sort_unstable();
+                defs.dedup();
+                let mut opts: Vec<Opt> = defs
+                    .iter()
+                    .take(act::LIBRARY_N as usize)
+                    .enumerate()
+                    .map(|(i, &d)| Opt { action: act::LIBRARY + i as u16, choice: Choice::Def(d) })
+                    .collect();
+                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                self.ask(Task::AsEnters { card }, p, DecisionKind::NameCard, opts);
+            }
+        }
+    }
+
+    /// The card a slot is (its front face's definition; a face-down
+    /// permanent's own card).
+    pub(crate) fn ident_card(&self, c: CardIdx) -> crate::ids::DefId {
+        let d = self.ident(c);
+        self.db.def(d).card_def(d)
+    }
+
+    /// The tax of names chosen for `card`: a spell `caster` casts (an
+    /// opponent of the chooser's), else an activated ability of `card` as a
+    /// source (anyone's).
+    pub(crate) fn named_tax(&self, card: CardIdx, caster: Option<PlayerId>) -> u8 {
+        let mut tax = 0u8;
+        for &c in &self.battlefield {
+            let d = self.abilities(c);
+            let n = if caster.is_some() { d.named_spell_tax } else { d.named_ability_tax };
+            if n == 0 || caster.is_some_and(|p| self.objs[c.i()].controller == p) {
+                continue;
+            }
+            let Some(nd) = self.chosen_name(self.obj_ref(c)) else { continue };
+            if nd != crate::game::NO_NAME && self.name(card) == self.db.def(nd).name {
+                tax = tax.saturating_add(n);
+            }
+        }
+        tax
     }
 }

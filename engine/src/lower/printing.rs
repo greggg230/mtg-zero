@@ -358,17 +358,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         };
         // Faces (`mdfc_back_face`, `transform_back_face`, `face_colors`,
         // `daybound`, `nightbound`, `adventure_face`): below.
-        l.deny("CardPrinting.class_level", class_level);
-        l.deny("CardPrinting.class_levels", class_levels);
         let _ = escape_cost_str; // display form of `escape_cost`
         let _ = dash_cost_str; // display form of `dash_cost`
         l.deny("CardPrinting.evoke_cost", evoke_cost);
         l.deny("CardPrinting.evoke_cost_str", evoke_cost_str);
         l.deny("CardPrinting.locks_opponents_activated_abilities_of", locks_opponents_activated_abilities_of);
         l.deny("CardPrinting.grants_retrace_to", grants_retrace_to);
-        l.deny("CardPrinting.chooses_card_name_as_enters", chooses_card_name_as_enters);
-        l.deny("CardPrinting.named_spell_cost_increase", named_spell_cost_increase);
-        l.deny("CardPrinting.named_ability_cost_increase", named_ability_cost_increase);
         l.deny("CardPrinting.zone_abilities", zone_abilities);
         l.deny("CardPrinting.emerge_cost", emerge_cost);
         l.deny("CardPrinting.emerge_cost_str", emerge_cost_str);
@@ -1088,6 +1083,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if let Some(w) = repl.grants_ward {
         keyword_triggers.push(super::effect_stack::ward_trigger(w, true));
     }
+    if let Some((ability, n)) = repl.grants_target_trigger.take() {
+        keyword_triggers.push(super::effect_m7d::granted_target_trigger(ability, n));
+    }
     let mut triggers = Vec::new();
     // Triggered abilities an Equipment grants (Kaldra Compleat).
     for t in equipment_granted_triggers {
@@ -1377,6 +1375,33 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // like a printing into a definition of its own (`l.faces`).
     let (mut back, mut modal, mut adventure) = (None, false, None);
     let mut back_nightbound = false;
+    // A Class (CR 716): the IR's `class_levels` are the printings of its
+    // levels 2, 3, ..., each with every ability the Class has at that level;
+    // each is lowered as a face (gaining a level turns it up).
+    let mut levels: Vec<crate::ids::DefId> = Vec::new();
+    let class_lv = l.int("CardPrinting.class_level", *class_level, 0, 9) as u8;
+    let class_sub = l.subtype("Class");
+    match face {
+        super::Face::Level => {
+            if class_lv < 2 || !class_levels.is_empty() {
+                l.unsupported("CardPrinting.class_levels(a level's shape)");
+            }
+        }
+        _ if class_lv == 0 && class_levels.is_empty() => {}
+        super::Face::Card if class_lv == 1 && !class_levels.is_empty() && subs.contains(&class_sub) && ty == types::ENCHANTMENT => {
+            for (i, lp) in class_levels.iter().enumerate() {
+                let cats::CardPrinting::CardPrinting(lp) = lp;
+                if lp.class_level != i as i64 + 2 || lp.name != *name || lp.mana_cost != *mana_cost || lp.card_types != *card_types || lp.subtypes != *subtypes {
+                    l.unsupported("CardPrinting.class_levels(a level unlike its card)");
+                }
+                l.face = super::Face::Level; // (taken by the face's lower_printing)
+                let d = lower_printing(l, lp);
+                l.faces.push(d);
+                levels.push((l.faces.len() - 1) as crate::ids::DefId);
+            }
+        }
+        _ => l.unsupported("CardPrinting.class_level(not a Class with levels)"),
+    }
     if face != super::Face::Card {
         l.deny("CardPrinting.transform_back_face(on a face)", transform_back_face);
         l.deny("CardPrinting.mdfc_back_face(on a face)", mdfc_back_face);
@@ -1559,7 +1584,18 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     });
     let void_exile = void_exile_replacement.then(|| super::effect_ext::counter_by_name(l, "void"));
+    // Anointed Peacekeeper: the name chosen as it enters, and its taxes.
+    let named_spell_tax = l.int("CardPrinting.named_spell_cost_increase", *named_spell_cost_increase, 0, 9) as u8;
+    let named_ability_tax = l.int("CardPrinting.named_ability_cost_increase", *named_ability_cost_increase, 0, 9) as u8;
+    if (named_spell_tax > 0 || named_ability_tax > 0) && !*chooses_card_name_as_enters || *chooses_card_name_as_enters && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.named_spell_cost_increase(without a name chosen as it enters)");
+    }
     let mut def = CardDef {
+        chooses_name: *chooses_card_name_as_enters,
+        named_spell_tax,
+        named_ability_tax,
+        class_level: class_lv,
+        levels,
         reconfigure,
         void_exile,
         opening,

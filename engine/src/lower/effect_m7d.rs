@@ -39,6 +39,36 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::ReconfigureUnattach(nodes::ReconfigureUnattach {}) => {
             b.op(Op::Ext(Ext::M7d(M7d::UnattachSource)));
         }
+        // "{1}{U}: Level 2" (CR 716.2a: "this Class's level becomes N"; the
+        // ability is its level N-1 face's, sorcery-speed in the IR).
+        E::GainClassLevel(nodes::GainClassLevel { level }) => {
+            let level = l.int("GainClassLevel.level", *level, 2, 9) as u8;
+            b.op(Op::Ext(Ext::M7d(M7d::GainClassLevel { level })));
+        }
+        // "Put three +1/+1 counters on target artifact you control. If it
+        // isn't a creature, it becomes a 0/0 Robot creature in addition to
+        // its other types." (Does Machines' level 3.)
+        E::ThenTargetBecomesCreatureIfNot(nodes::ThenTargetBecomesCreatureIfNot { inner, power, toughness, subtype }) => {
+            let Some(inner) = inner.as_deref() else {
+                l.unsupported("ThenTargetBecomesCreatureIfNot.inner(missing)");
+                return true;
+            };
+            let n = b.targets.len();
+            super::effect::lower_effect(l, b, inner);
+            if b.targets.len() != n + 1 || subtype.is_empty() {
+                l.unsupported("ThenTargetBecomesCreatureIfNot(not one target)");
+                return true;
+            }
+            let p = l.int("ThenTargetBecomesCreatureIfNot.power", *power, 0, 20);
+            let t = l.int("ThenTargetBecomesCreatureIfNot.toughness", *toughness, 0, 20);
+            let subtype = l.subtype(subtype);
+            b.op(Op::Ext(Ext::M7d(M7d::BecomeCreatureIfNot { tgt: n as u8, p, t, subtype })));
+        }
+        // "Reveal the top card of your library. If it's a land card, put it
+        // onto the battlefield. Otherwise, put it into your hand." (Nadu.)
+        E::RevealTopLandToBattlefieldElseHand(nodes::RevealTopLandToBattlefieldElseHand {}) => {
+            b.op(Op::Ext(Ext::M7d(M7d::RevealTopLandElseHand)));
+        }
         _ => return false,
     }
     true
@@ -72,4 +102,18 @@ pub(crate) fn reconfigure_abilities(l: &mut Lowerer, activated: &mut [ActivatedD
     if found != (true, true) {
         l.unsupported("CardPrinting.reconfigure_cost(without its two abilities)");
     }
+}
+
+/// The triggered ability "creatures you control have" (Nadu, Winged Wisdom):
+/// "whenever this creature becomes the target of a spell or ability, <the
+/// ability>. This ability triggers only n times each turn" (per creature).
+/// It is the granting card's own trigger, for its controller's creatures
+/// that have the granted abilities (`TrigPred::Granted`, ENGINE.md 27.3).
+pub(crate) fn granted_target_trigger(ability: crate::db::AbilityDef, n: u8) -> crate::db::TriggerDef {
+    use crate::db::{EventKind, Slot, TrigPred};
+    let creature_yours = Filter::And(Box::new(Filter::Type(crate::db::types::CREATURE)), Box::new(Filter::Controller(true)));
+    let subject = TrigPred::And(Box::new(TrigPred::Subject(Slot::Target, creature_yours)), Box::new(TrigPred::Granted(Slot::Target)));
+    let pred = TrigPred::And(Box::new(subject), Box::new(TrigPred::TimesPerSubject(Slot::Target, n)));
+    let uses_event = ability.uses_event();
+    crate::db::TriggerDef { event: EventKind::BecomesTarget, pred, ability, uses_event }
 }

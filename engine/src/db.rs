@@ -559,6 +559,8 @@ pub enum EventKind {
     /// Creatures a player controls attack another and some aren't blocked
     /// (CR 509.1h). Subjects: the attacking player, the defending player.
     AttackersUnblocked,
+    /// A Class became level `amount` (CR 716.2c). Subject: obj.
+    ClassLevel,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -591,7 +593,7 @@ impl EventKind {
             }
             E::Attacks | E::AttacksAlone => (&[Slot::Attacker], &[]),
             E::Blocks => (&[Slot::Blocker], &[]),
-            E::Transforms | E::Chapter => (&[Slot::Obj], &[]),
+            E::Transforms | E::Chapter | E::ClassLevel => (&[Slot::Obj], &[]),
             E::DealsDamage => (&[Slot::Source], &[]),
             E::YouAttack
             | E::DrawsCard
@@ -681,6 +683,13 @@ pub enum TrigPred {
     /// A chapter ability (CR 714.2b): this Saga's lore counters reached
     /// chapter n (a `Chapter` event of the source with amount n).
     Chapter(u8),
+    /// "When this Class becomes level n" (CR 716.2c: a `ClassLevel` event of
+    /// the source with amount n).
+    Level(u8),
+    /// "This ability triggers only n times each turn", the ability a static
+    /// ability of the source grants to the subject (Nadu): per subject
+    /// object (`Mark::Triggered`).
+    TimesPerSubject(Slot, u8),
     /// "Whenever one or more ...": triggers once for the events of one
     /// simultaneous move (a batch, `Game::begin_batch`), however many match.
     Batch,
@@ -1079,6 +1088,7 @@ impl CardDef {
             | (if self.opp_draw_token.is_some() || self.draw_plus.is_some() { crate::game::SEEN_DRAW_REPL } else { 0 })
             | (if self.gy_triggers { crate::game::SEEN_GY_TRIGGER } else { 0 })
             | (if self.void_exile.is_some() { crate::game::SEEN_VOID } else { 0 })
+            | (if self.named_spell_tax > 0 || self.named_ability_tax > 0 { crate::game::SEEN_NAMED_TAX } else { 0 })
             | (if self.trig_mask & (1u64 << EventKind::CountersAdded as u32 | 1u64 << EventKind::CardsPutIntoLibrary as u32 | 1u64 << EventKind::AttackersUnblocked as u32) != 0 {
                 crate::game::SEEN_RARE_EVENTS
             } else {
@@ -1443,6 +1453,20 @@ pub struct CardDef {
     /// Reconfigure (CR 702.151): while attached to a creature, it isn't a
     /// creature (702.151b); it may equip while a creature (301.5c).
     pub reconfigure: bool,
+    /// A Class (CR 716): its level (1 on the card, n on level n's face; 0 =
+    /// not a Class), and the faces of levels 2, 3, ... in order (on the card
+    /// and on each level face). A Class gaining a level turns that face up
+    /// (the same object, as transforming).
+    pub class_level: u8,
+    pub levels: Vec<DefId>,
+    /// "As this enters, look at an opponent's hand, then choose any card
+    /// name" (Anointed Peacekeeper; `Mark::ChosenName`); "spells your
+    /// opponents cast with the chosen name cost {n} more", "activated
+    /// abilities of sources with the chosen name cost {m} more to activate
+    /// unless they're mana abilities" (CR 601.2f, 602.2b).
+    pub chooses_name: bool,
+    pub named_spell_tax: u8,
+    pub named_ability_tax: u8,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1593,8 +1617,15 @@ impl CardDb {
             card.bestow = card.bestow.map(|k| base + k);
             card.prepare = card.prepare.map(|k| base + k);
             card.halves = card.halves.map(|(a, b)| (base + a, base + b));
+            for k in card.levels.iter_mut() {
+                *k += base;
+            }
+            let levels = card.levels.clone();
             for (k, mut f) in fs.into_iter().enumerate() {
                 f.front = Some(id);
+                if levels.contains(&(base + k as DefId)) {
+                    f.levels = levels.clone();
+                }
                 if back == Some(base + k as DefId) {
                     f.back = Some(id); // a back face transforms into its front
                 }
