@@ -759,6 +759,10 @@ pub enum Mark {
     /// Mana that gives haste was spent on this creature spell (Arena of
     /// Glory): the permanent it becomes gains haste until end of turn.
     HasteMana,
+    /// A mana source that sacrifices itself, chosen to be exiled by the
+    /// delve of the spell being cast once its mana ability is activated
+    /// (CR 601.2g before 601.2h; ENGINE.md 18).
+    DelveLate,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.

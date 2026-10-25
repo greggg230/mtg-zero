@@ -329,3 +329,53 @@ fn cr_601_2g_squandered_resources_after_a_tap_ability_with_life() {
     assert!(g.can_pay(0, &cost("{U}")), "sacrificed without its life: {}", log(&g));
     assert!(!g.can_pay(0, &cost("{U}{R}")), "no life to pay (CR 119.4)");
 }
+
+// ---- 13.2: mana abilities are activated before the costs are paid ------------
+
+/// CR 601.2g-h: mana abilities are activated before the total cost is paid,
+/// so a Lotus Petal sacrificed for mana is in the graveyard when delve's
+/// cards are exiled (702.66a). Six cards in the graveyard and a Lotus Petal
+/// cast Treasure Cruise ({7}{U}): the Petal's {U}, then six cards and the
+/// Petal itself exiled. The engine exiled delve's cards first: not castable.
+#[test]
+fn cr_601_2g_a_lotus_petal_sacrificed_for_mana_is_delved() {
+    let mut g = scen()
+        .graveyard(0, &["Island"; 6])
+        .battlefield(0, &["Lotus Petal"])
+        .hand(0, &["Treasure Cruise"])
+        .at(Step::Main1, 0)
+        .start();
+    let tc = g.card(0, "Treasure Cruise", Zone::Hand);
+    let petal = bf(&g, 0, "Lotus Petal");
+    assert!(g.has_option(Choice::Cast(tc)), "{:?}", g.options_desc());
+    let hand = g.player(0).hand.len();
+    g.choose(Choice::Cast(tc));
+    assert!(g.has_option(Choice::Card(petal)), "{:?}", g.options_desc());
+    finish(&mut g, |g| options(g).into_iter().find(|&c| c == Choice::Card(petal)));
+    assert_eq!(g.obj(petal).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Island", Zone::Exile), 6);
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), hand - 1 + 3, "{}", log(&g));
+    // Five cards: not castable (the Petal pays {U} and is one card).
+    let g = scen().graveyard(0, &["Island"; 5]).battlefield(0, &["Lotus Petal"]).hand(0, &["Treasure Cruise"]).at(Step::Main1, 0).start();
+    assert!(!g.has_option(Choice::Cast(g.card(0, "Treasure Cruise", Zone::Hand))));
+}
+
+/// CR 601.2g-h: "pay X life" (Toxic Deluge) is paid with the total cost,
+/// after the mana abilities: Ancient Tomb's 2 damage first. The engine paid
+/// the life before any mana ability was activated.
+#[test]
+fn cr_601_2h_x_life_is_paid_after_the_mana_abilities() {
+    let mut g = scen().battlefield(0, &["Ancient Tomb", "Swamp"]).hand(0, &["Toxic Deluge"]).life(0, 9).at(Step::Main1, 0).start();
+    let td = g.card(0, "Toxic Deluge", Zone::Hand);
+    g.choose(Choice::Cast(td));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "X: {}", log(&g));
+    assert_eq!(options(&g).last(), Some(&Choice::Number(7)), "X + the Tomb's 2 damage within 9 life");
+    g.choose(Choice::Number(3));
+    finish(&mut g, |_| None);
+    let lines = g.log_lines();
+    let tomb = lines.iter().position(|l| l.contains("mana ability of Ancient Tomb")).expect("the Tomb");
+    let life = lines.iter().position(|l| l.contains("pays 3 life")).expect("the life");
+    assert!(tomb < life, "{}", log(&g));
+    assert_eq!(g.player(0).life, 4);
+}

@@ -253,6 +253,10 @@ impl Game {
         } else {
             classes
         };
+        // Delve: its mana sources that sacrifice themselves too (ENGINE.md
+        // 18).
+        let delved = self.delve_classes(c, cls);
+        let cls = &delved[..];
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let extras = self.spree_extras(c, p);
@@ -271,7 +275,7 @@ impl Game {
                 let keep = crate::pay::Keep { allow, ..Default::default() };
                 return self.can_pay_without(p, &cost, cls, &keep, Some(c));
             }
-            if self.hand_mana_source(c) || def.improvise {
+            if self.hand_mana_source(c) || def.improvise || def.delve {
                 // A card cast from hand is on the stack while its cost is
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
                 self.can_pay_without(p, &cost, cls, &Default::default(), Some(c))
@@ -691,6 +695,8 @@ impl Game {
         } else {
             classes
         };
+        let delved = self.delve_classes(card, classes);
+        let classes = &delved[..];
         let keep = self.escape_exiles(card, from);
         // Bolas's Citadel: life equal to its mana value (CR 119.4), kept from
         // the mana payment.
@@ -859,6 +865,8 @@ impl Game {
         exclude: Option<CardIdx>,
     ) -> bool {
         let def = self.def_of(card);
+        let delved = self.delve_classes(card, classes);
+        let classes = &delved[..];
         // (A granted escape or retrace with the option: their one cost.)
         def.additional.iter().enumerate().filter_map(|(k, _)| self.route_extra(card, from, k as u8).map(|o| (k, o))).any(|(k, o)| {
             (!def.kicker
@@ -885,6 +893,72 @@ impl Game {
         cost.less_generic(n)
     }
 
+    /// `p`'s mana sources that sacrifice themselves and are cards (one mana,
+    /// no mana cost: Lotus Petal), in canonical order: delve may exile them
+    /// once their mana ability is activated (CR 601.2g-h).
+    pub(crate) fn delve_sources(&self, p: PlayerId) -> Vec<CardIdx> {
+        let classes = self.mana_classes(p, None);
+        let mut out: Vec<CardIdx> = Vec::new();
+        for cl in &classes {
+            if cl.sac_self && cl.need == 0 && matches!(cl.yld, crate::pay::Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot) {
+                for s in cl.members.iter() {
+                    if !self.is_token(s.card) && !out.contains(&s.card) {
+                        out.push(s.card);
+                    }
+                }
+            }
+        }
+        out.sort_by_key(|c| self.permanents_of(p).position(|x| x == *c));
+        out
+    }
+
+    /// Was `c` chosen to be exiled for delve once activated?
+    pub(crate) fn delve_late(&self, c: CardIdx) -> bool {
+        let r = self.obj_ref(c);
+        self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::DelveLate)
+    }
+
+    /// `classes` with delve's due (ENGINE.md 18): each mana source that
+    /// sacrifices itself and is a card pays its mana and, exiled from the
+    /// graveyard afterwards, one more generic mana of a delve spell.
+    pub(crate) fn delve_classes<'a>(&self, card: CardIdx, classes: &'a [crate::pay::Class]) -> std::borrow::Cow<'a, [crate::pay::Class]> {
+        use crate::pay::Yield;
+        if !self.def_of(card).delve
+            || !classes.iter().any(|cl| cl.sac_self && cl.need == 0 && matches!(cl.yld, Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot))
+        {
+            return std::borrow::Cow::Borrowed(classes);
+        }
+        let mut out = classes.to_vec();
+        let mut tokens = Vec::new();
+        for cl in out.iter_mut() {
+            if !(cl.sac_self && cl.need == 0 && !crate::pay::is_sac_slot(cl.members[0].slot)) {
+                continue;
+            }
+            let Yield::One(u) = cl.yld else { continue };
+            // (Tokens cease to exist: no delve.)
+            let mut cards = crate::pay::Members::new();
+            for s in cl.members.iter() {
+                if self.is_token(s.card) {
+                    tokens.push((cl.clone(), *s));
+                } else {
+                    cards.push(*s);
+                }
+            }
+            if cards.is_empty() {
+                continue;
+            }
+            cl.members = cards;
+            let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
+            cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0)]) };
+        }
+        for (cl, s) in tokens {
+            let mut m = crate::pay::Members::new();
+            m.push(s);
+            out.push(crate::pay::Class { members: m, ..cl });
+        }
+        std::borrow::Cow::Owned(out)
+    }
+
     /// Graveyard cards an escape cost exiles (0 for other routes).
     pub(crate) fn escape_exiles(&self, card: CardIdx, from: crate::game::CastFrom) -> u8 {
         match from {
@@ -901,6 +975,15 @@ impl Game {
         let StackKind::Spell { card } = self.stack[pos].kind else { return };
         let p = self.stack[pos].controller;
         match self.answer.take() {
+            // A mana source that sacrifices itself: activated while paying,
+            // then exiled (CR 601.2g-h; `Mark::DelveLate`).
+            Some(Choice::Card(c)) if self.objs[c.i()].zone == Zone::Battlefield => {
+                let r = self.obj_ref(c);
+                self.marks.push((r, crate::game::Mark::DelveLate));
+                self.stack[pos].delved += 1;
+                self.agenda.push(Task::Delve { id });
+                return;
+            }
             Some(Choice::Card(c)) => {
                 let at = self.players[p as usize].graveyard.iter().position(|&x| x == c).unwrap_or(0);
                 self.move_card(c, Zone::Exile, Pos::Top);
@@ -937,6 +1020,21 @@ impl Game {
             .filter(|&(i, _)| card_at(i) && i >= floor && (i..gy.len()).filter(|&j| card_at(j)).count() >= need && n_cards > keep)
             .map(|(_, &c)| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
             .collect();
+        // Mana sources that sacrifice themselves (Lotus Petal), first and
+        // in canonical order: in the graveyard by the time delve's cards are
+        // exiled (CR 601.2g before 601.2h), when the rest stays payable.
+        let late = self.delve_sources(p);
+        let committed: Vec<CardIdx> = late.iter().copied().filter(|&c| self.delve_late(c)).collect();
+        if item.delved as usize == committed.len() {
+            let gy_left = n_cards.saturating_sub(keep);
+            let after = late.iter().rposition(|c| committed.contains(c)).map_or(0, |i| i + 1);
+            for &c in &late[after..] {
+                let rest = cost.less_generic(1);
+                if (0..=gy_left.min(rest.generic as usize)).any(|d| self.can_pay_for(p, &rest.less_generic(d as u8), allow)) {
+                    opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
+                }
+            }
+        }
         if need == 0 || opts.is_empty() {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
@@ -1597,6 +1695,8 @@ impl Game {
     /// any)?
     pub(crate) fn normal_payable(&self, p: PlayerId, card: CardIdx, classes: &[crate::pay::Class]) -> bool {
         let def = self.def_of(card);
+        let delved = self.delve_classes(card, classes);
+        let classes = &delved[..];
         let cost = self.spell_cost(card, p);
         let cost = self.delve_reduced(card, p, cost, 0);
         if !def.additional.is_empty() {
@@ -1817,6 +1917,7 @@ impl Game {
             None => {
                 let def = self.def_of(card);
                 let classes = self.mana_classes(p, None);
+                let classes = self.delve_classes(card, &classes).into_owned();
                 let keep = self.escape_exiles(card, item.from);
                 let src = Some(self.obj_ref(card));
                 let kicker_ok = |k: usize| {
@@ -1972,21 +2073,11 @@ impl Game {
         // of its generic mana (702.66b).
         let cost = self.total_mana(card, item).less_generic(item.delved);
         let from_top = item.from == crate::game::CastFrom::LibraryTop;
-        if def.x_life && item.x > 0 {
-            // "As an additional cost, pay X life" (CR 601.2h; 119.4).
-            let x = item.x as i32;
-            self.note(|_| format!("P{p} pays {x} life"));
-            self.lose_life(p, x);
-        }
-        if from_top {
-            // Bolas's Citadel: life equal to its mana value rather than its
-            // mana cost (CR 118.9, 601.2h).
-            let n = self.mana_value_of(card) as i32;
-            if n > 0 {
-                self.note(|_| format!("P{p} pays {n} life"));
-                self.lose_life(p, n);
-            }
-        }
+        // "As an additional cost, pay X life" (CR 601.2h; 119.4), and Bolas's
+        // Citadel's life equal to its mana value rather than its mana cost
+        // (118.9): paid after the mana abilities are activated (601.2g; a
+        // painland's damage first), by the payment (`PayMana::life_after`).
+        let life_later = (if def.x_life { item.x } else { 0 }).saturating_add(if from_top { self.mana_value_of(card) } else { 0 });
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         if item.alt > 0 {
@@ -2009,12 +2100,29 @@ impl Game {
             }
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
             if !pm.cost.is_zero() {
+                pm.keep.life = pm.keep.life.saturating_add(life_later);
+                pm.life_after = life_later;
                 self.agenda.push(Task::PayMana(Box::new(pm)));
+            } else if life_later > 0 {
+                self.note(|_| format!("P{p} pays {life_later} life"));
+                self.lose_life(p, life_later as i32);
             }
             return;
         }
         let mut pm = PayMana::new(p, cost);
         pm.improvise = def.improvise;
+        // Delve's mana sources (`Mark::DelveLate`), activated first.
+        if def.delve && self.marks.iter().any(|(_, m)| *m == crate::game::Mark::DelveLate) {
+            let late: Vec<CardIdx> = self.delve_sources(p).into_iter().filter(|&c| self.delve_late(c)).collect();
+            self.marks.retain(|(_, m)| *m != crate::game::Mark::DelveLate);
+            let classes = self.mana_classes(p, None);
+            for c in late {
+                if let Some(cl) = classes.iter().find(|cl| cl.sac_self && cl.members.iter().any(|s| s.card == c)) {
+                    let s = *cl.members.iter().find(|s| s.card == c).unwrap();
+                    pm.forced.push(s);
+                }
+            }
+        }
         if def.converge {
             // The payment records the colours spent (ENGINE.md 28).
             let r = self.obj_ref(card);
@@ -2038,6 +2146,8 @@ impl Game {
             pm.keep.discard = Some((escalated, card));
         }
         let _ = def;
+        pm.keep.life = pm.keep.life.saturating_add(life_later);
+        pm.life_after = life_later;
         self.agenda.push(Task::PayMana(Box::new(pm)));
         if taps_first {
             self.agenda.push(Task::PayCosts { id, picked: Vec::new() });

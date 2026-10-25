@@ -47,7 +47,7 @@ pub(crate) const SAC: u8 = 2;
 
 /// The slots of a permanent sacrificed for another's or a granted mana
 /// ability.
-fn sac_slot(slot: AbilitySlot) -> bool {
+pub(crate) fn is_sac_slot(slot: AbilitySlot) -> bool {
     slot == SAC_FOR || slot == SQ_FOR || slot == LJ_FOR
 }
 
@@ -301,6 +301,14 @@ pub(crate) struct PayMana {
     /// The pools the payment may leave (`PayPool`, CR 106.4, 601.2h), asked
     /// once the sources are picked.
     pub spend: Option<Vec<Rem>>,
+    /// Sources the payment activates first (CR 601.2g), then exiles from the
+    /// graveyard for delve (601.2h: a Lotus Petal the spell's delve exiles).
+    pub forced: Vec<Src>,
+    /// Their cards, exiled once the mana abilities are activated.
+    pub delve_late: Vec<CardIdx>,
+    /// Life the cost takes after the mana (X life, Bolas's Citadel's): paid
+    /// at the end (CR 601.2h after 601.2g), reserved in `keep.life`.
+    pub life_after: u8,
     /// What later parts of the cost need.
     pub keep: Keep,
     /// Life to pay for Phyrexian pips once the mana abilities are done.
@@ -334,6 +342,9 @@ impl PayMana {
             vm: None,
             convert: false,
             spend: None,
+            forced: Vec::new(),
+            delve_late: Vec::new(),
+            life_after: 0,
             keep: Keep::default(),
             phyrexian_life: 0,
             now: None,
@@ -1053,7 +1064,10 @@ impl Game {
             }
             let most = match &cl.yld {
                 Yield::One(_) => cl.reuse as u32,
-                Yield::Multi { prods, .. } => prods.iter().map(|v| v.iter().map(|&n| n as u32).sum::<u32>()).max().unwrap_or(0),
+                Yield::Multi { prods, units } => {
+                    let most = prods.iter().map(|v| v.iter().map(|&n| n as u32).sum::<u32>()).max().unwrap_or(0);
+                    most.max(units.as_ref().map_or(0, |us| us.len() as u32))
+                }
             };
             have += most * cl.members.iter().filter(|s| Some(s.card) != without).count() as u32;
         }
@@ -1365,6 +1379,36 @@ impl Game {
             pm.pooled = true;
             self.recount(&mut pm, &classes);
         }
+        // Sources delve exiles once activated: first, each with its mana's
+        // type (its mana joins the virtual pool).
+        if pm.now.is_none() && self.answer.is_none() {
+            if let Some(src) = pm.forced.pop() {
+                let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("a delve source's class");
+                let Yield::One(u) = classes[ci].yld else { unreachable!("a delve source makes one mana") };
+                pm.delve_late.push(src.card);
+                let (budget, dmg) = self.budget(payer, &pm.keep, pm.keep.life + pm.phyrexian_life);
+                let rest = self.pay_cands(&pm, &classes, 0, Some(src), dmg);
+                let prods: Vec<[u8; 6]> = (0..6)
+                    .filter(|&t| u.mask & (1 << t) != 0)
+                    .map(|t| one(t, 1))
+                    .filter(|prod| {
+                        let mut groups = self.vgroups(&pm);
+                        let t = prod.iter().position(|&n| n > 0).unwrap() as u8;
+                        match groups.iter_mut().find(|g| g.0 == t) {
+                            Some(g) => g.1 += 1,
+                            None => groups.push((t, 1)),
+                        }
+                        self.most_spent(&pm, &groups, &pm.marked, &[], &rest, budget).is_some()
+                    })
+                    .collect();
+                if prods.len() == 1 {
+                    self.pick_multi(&mut pm, &classes, ci, src, prods[0]);
+                    self.agenda.push(Task::PayMana(pm));
+                    return;
+                }
+                pm.now = Some((src, prods));
+            }
+        }
         if let Some((src, prods)) = pm.now.take() {
             match self.answer.take() {
                 Some(Choice::Number(k)) => {
@@ -1497,7 +1541,7 @@ impl Game {
                 }
             };
             if ok {
-                opts.push(if sac_slot(rep.slot) {
+                opts.push(if is_sac_slot(rep.slot) {
                     // A granted ability or another's sacrificing it: after
                     // its own (`ACTIVATE` + `slot_id`; `sac_classes` checks
                     // there is room).
@@ -1641,7 +1685,7 @@ impl Game {
         // "That spell can't be countered" (Delighted Halfling): its mana
         // was spent on the spell (read before the sources are activated).
         if let Some(card) = pm.keep.spell {
-            let special = |s: &Src| s.slot == IMPROVISE || s.slot == TAP_FOR || sac_slot(s.slot);
+            let special = |s: &Src| s.slot == IMPROVISE || s.slot == TAP_FOR || is_sac_slot(s.slot);
             let uncounterable = pm
                 .chosen
                 .iter()
@@ -1665,7 +1709,7 @@ impl Game {
             if s.slot == TAP_FOR {
                 return (false, false, false, false);
             }
-            if sac_slot(s.slot) {
+            if is_sac_slot(s.slot) {
                 return (false, true, false, true);
             }
             let ad = self.def_of(s.card).activated_def(s.slot);
@@ -1682,7 +1726,7 @@ impl Game {
                 // for mana", CR 106.12a.)
                 self.note(|g| format!("P{payer} taps {} for a mana ability", g.name(src.card)));
                 self.tap(src.card);
-            } else if sac_slot(src.slot) {
+            } else if is_sac_slot(src.slot) {
                 self.activate_sac_for(src);
             } else {
                 if let AbilitySlot::Activated(i) = src.slot {
@@ -1698,6 +1742,13 @@ impl Game {
         p.amt = rem.amt;
         p.art = rem.art;
         p.haste = rem.haste;
+        // Delve's cards that were mana sources (CR 601.2h, after 601.2g).
+        for &c in &pm.delve_late {
+            if self.objs[c.i()].zone == Zone::Graveyard {
+                self.note(|g| format!("P{payer} exiles {} (delve)", g.name(c)));
+                self.move_card(c, Zone::Exile, Pos::Top);
+            }
+        }
         // Arena of Glory's mana spent on a creature spell gives it haste.
         if pool.haste + pm.extra_haste > rem.haste {
             if let Some(c) = pm.keep.spell.filter(|&c| self.is_type(c, crate::db::types::CREATURE)) {
@@ -1709,6 +1760,11 @@ impl Game {
             self.lose_life(payer, pm.phyrexian_life as i32);
             let n = pm.phyrexian_life;
             self.note(|_| format!("P{payer} pays {n} life for Phyrexian mana"));
+        }
+        if pm.life_after > 0 {
+            let n = pm.life_after;
+            self.note(|_| format!("P{payer} pays {n} life"));
+            self.lose_life(payer, n as i32);
         }
     }
 
