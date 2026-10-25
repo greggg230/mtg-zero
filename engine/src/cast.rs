@@ -6,6 +6,7 @@ use crate::flow::Task;
 use crate::game::{Game, Pos, StackItem, StackKind};
 use crate::ids::{CardIdx, ObjRef, PlayerId, Target, Zone};
 use crate::pay::PayMana;
+use crate::svec::SVec;
 
 /// Who is asking whether a filter matches: the spell or ability's
 /// controller ("you") and source ("this", "another").
@@ -13,6 +14,37 @@ use crate::pay::PayMana;
 pub(crate) struct Ctx {
     pub controller: PlayerId,
     pub source: Option<ObjRef>,
+}
+
+/// `ChooseRoute`'s codes (`NUMBER`): the ways a card in its owner's
+/// graveyard may be cast when several permissions allow it (CR 601.2a-b).
+pub(crate) mod route {
+    /// Its flashback (printed or granted, CR 702.34).
+    pub const FLASHBACK: u8 = 0;
+    /// "You may play lands and cast spells from your graveyard" (Yawgmoth's
+    /// Will): for its mana cost.
+    pub const WILL: u8 = 1;
+    /// Escape (printed, or granted by Underworld Breach, CR 702.138).
+    pub const ESCAPE: u8 = 2;
+    /// Granted retrace (CR 702.81).
+    pub const RETRACE: u8 = 3;
+    /// Mayhem (CR 702.187).
+    pub const MAYHEM: u8 = 4;
+    /// A permanent's once-each-turn permission whose permanent gains a
+    /// trigger (Serra Paragon).
+    pub const PARAGON: u8 = 5;
+    /// One that grants nothing (Lurrus of the Dream-Den).
+    pub const LURRUS: u8 = 6;
+    /// An effect's permission for this card (its only route).
+    pub const EFFECT: u8 = 7;
+}
+
+/// A way to cast a graveyard card (`route::*`), with the permanent whose
+/// permission it uses, if one.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub(crate) struct Route {
+    pub code: u8,
+    pub granter: Option<CardIdx>,
 }
 
 impl Game {
@@ -367,59 +399,11 @@ impl Game {
             Zone::Library if self.top_play_ok(p, card) => Some(CastFrom::LibraryTop),
             Zone::Hand if self.miracle_cast == Some(card) => Some(CastFrom::Miracle),
             Zone::Hand => Some(CastFrom::Hand),
+            // (The first of its routes; the player chooses among those that
+            // can be completed as it is cast, `begin_cast_face`.)
             Zone::Graveyard => {
-                if self.objs[card.i()].owner != p {
-                    return None;
-                }
-                let r = self.obj_ref(card);
-                let granted = self.permissions.iter().any(|pm| {
-                    pm.card == r && pm.kind == crate::game::PermKind::Flashback && self.permission_ok(pm, p)
-                });
-                // (A "without paying its mana cost" permission: Malcolm's
-                // free cast of the discarded card, ENGINE.md 28.)
-                let permitted = self.permissions.iter().find_map(|pm| {
-                    if pm.card != r || !self.permission_ok(pm, p) {
-                        return None;
-                    }
-                    match pm.kind {
-                        crate::game::PermKind::Play { free, any_mana, .. } => Some((free, any_mana)),
-                        crate::game::PermKind::CastThenExile => Some((false, false)),
-                        _ => None,
-                    }
-                });
-                // (A permission for this card, an effect's "you may cast it
-                // now" (Bilbo, Malcolm), comes before its flashback: the
-                // effect offered it for its mana cost, `can_cast_now`.)
-                if let Some((free, any_mana)) = permitted {
-                    Some(CastFrom::Permission { free, any_mana })
-                } else if def.flashback.is_some() || granted {
-                    Some(CastFrom::Flashback)
-                } else if self.gy_play_now(p) {
-                    // Yawgmoth's Will: for its mana cost (CR 601.2a).
-                    Some(CastFrom::Permission { free: false, any_mana: false })
-                } else if def.escape.is_some()
-                    // (Granted escape with the card's own additional costs:
-                    // both paid as one cost, `CardDb::merged_cost`.)
-                    || (!def.is(types::LAND) && *esc.get_or_insert_with(|| self.escape_granter(p).is_some()) && self.granted_options_ok(card, None))
-                {
-                    Some(CastFrom::Escape)
-                } else if self.retrace_granted(p, card) && self.granted_options_ok(card, Some(crate::db::RETRACE_ROUTE)) {
-                    Some(CastFrom::Retrace)
-                } else if self.mayhem_ok(p, card) {
-                    Some(CastFrom::Mayhem)
-                } else if !def.is(types::LAND)
-                    && def.is_permanent_card()
-                    && def.other_face().is_none()
-                    && def.halves.is_none()
-                    && { let m = *para.get_or_insert_with(|| self.paragon_mv(p)); m > 0 && def.mana_value() <= m }
-                {
-                    // (A route the card has of its own comes first: one
-                    // route per card; a card with another face isn't cast
-                    // this way, ENGINE.md 28.)
-                    Some(CastFrom::Paragon)
-                } else {
-                    None
-                }
+                let _ = def;
+                self.gy_routes_esc(p, card, None, esc, para).first().map(|r| self.route_from(card, p, *r))
             }
             Zone::Exile | Zone::FaceDown => match self.exile_permission(p, card)? {
                 crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
@@ -432,6 +416,156 @@ impl Game {
                 crate::game::PermKind::Flashback | crate::game::PermKind::CastThenExile => None,
             },
             _ => None,
+        }
+    }
+
+    /// Every way `p` may cast `card` from their graveyard with face `face`
+    /// up (`None`: as it is there), in `route::*` order: flashback (printed
+    /// or granted), Yawgmoth's Will's permission, escape (printed or
+    /// granted), granted retrace, mayhem, and each kind of once-each-turn
+    /// permission of a permanent for a nonland permanent spell whose mana
+    /// value it allows (Serra Paragon, whose permanent gains a trigger;
+    /// Lurrus). CR 601.2a-b: the player chooses which (`Task::ChooseRoute`).
+    /// An effect's permission for this card ("you may cast it" now, free or
+    /// for its mana cost: Bilbo, Malcolm) is then its only route: the effect
+    /// offered it that way (`can_cast_now`; a cheaper or free cast is never
+    /// worse). `esc` and `para` remember `p`'s granters for a whole
+    /// graveyard.
+    pub(crate) fn gy_routes_esc(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        face: Option<crate::ids::DefId>,
+        esc: &mut Option<bool>,
+        para: &mut Option<u8>,
+    ) -> SVec<Route, 8> {
+        let mut out: SVec<Route, 8> = SVec::new();
+        if self.objs[card.i()].owner != p || self.objs[card.i()].zone != Zone::Graveyard {
+            return out;
+        }
+        let def = self.def_of(card);
+        let r = self.obj_ref(card);
+        let mut granted = false;
+        let mut effect = false;
+        for pm in &self.permissions {
+            if pm.card != r || !self.permission_ok(pm, p) {
+                continue;
+            }
+            match pm.kind {
+                crate::game::PermKind::Flashback => granted = true,
+                crate::game::PermKind::Play { .. } | crate::game::PermKind::CastThenExile => effect = true,
+                _ => {}
+            }
+        }
+        if effect {
+            out.push(Route { code: route::EFFECT, granter: None });
+            return out;
+        }
+        if def.flashback.is_some() || granted {
+            out.push(Route { code: route::FLASHBACK, granter: None });
+        }
+        if self.gy_play_now(p) {
+            out.push(Route { code: route::WILL, granter: None });
+        }
+        // (Granted escape with the card's own additional costs: both paid
+        // as one cost, `CardDb::merged_cost`.)
+        if def.escape.is_some()
+            || (!def.is(types::LAND) && *esc.get_or_insert_with(|| self.escape_granter(p).is_some()) && self.granted_options_ok(card, None))
+        {
+            out.push(Route { code: route::ESCAPE, granter: None });
+        }
+        if self.retrace_granted(p, card) && self.granted_options_ok(card, Some(crate::db::RETRACE_ROUTE)) {
+            out.push(Route { code: route::RETRACE, granter: None });
+        }
+        if self.mayhem_ok(p, card) {
+            out.push(Route { code: route::MAYHEM, granter: None });
+        }
+        // The face that would be cast (a card with another face too: its
+        // front, or `face`).
+        let fd = face.map_or(def, |f| self.db.def(f));
+        if !fd.is(types::LAND) && fd.is_permanent_card() && { let m = *para.get_or_insert_with(|| self.paragon_mv(p)); m > 0 && fd.mana_value() <= m } {
+            for g in self.paragons(p, fd.mana_value(), false) {
+                let code = if self.abilities(g).gy_play_k != crate::db::NO_GRANT { route::PARAGON } else { route::LURRUS };
+                if !out.iter().any(|x| x.code == code) {
+                    out.push(Route { code, granter: Some(g) });
+                }
+            }
+        }
+        out
+    }
+
+    /// [`gy_routes_esc`](Self::gy_routes_esc) without remembering.
+    pub(crate) fn gy_routes(&self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) -> SVec<Route, 8> {
+        self.gy_routes_esc(p, card, face, &mut None, &mut None)
+    }
+
+    /// The cast a route means.
+    pub(crate) fn route_from(&self, card: CardIdx, p: PlayerId, r: Route) -> crate::game::CastFrom {
+        use crate::game::CastFrom;
+        match r.code {
+            route::FLASHBACK => CastFrom::Flashback,
+            route::WILL => CastFrom::Permission { free: false, any_mana: false },
+            route::ESCAPE => CastFrom::Escape,
+            route::RETRACE => CastFrom::Retrace,
+            route::MAYHEM => CastFrom::Mayhem,
+            route::PARAGON | route::LURRUS => CastFrom::Paragon,
+            _ => {
+                let o = self.obj_ref(card);
+                self.permissions
+                    .iter()
+                    .find_map(|pm| match pm.kind {
+                        crate::game::PermKind::Play { free, any_mana, .. } if pm.card == o && self.permission_ok(pm, p) => {
+                            Some(CastFrom::Permission { free, any_mana })
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(CastFrom::Permission { free: false, any_mana: false })
+            }
+        }
+    }
+
+    /// The routes of graveyard card `card` (face `face`) whose cast `p` can
+    /// complete now (CR 601.2a-b).
+    pub(crate) fn castable_gy_routes(&self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) -> SVec<Route, 8> {
+        let routes = self.gy_routes(p, card, face);
+        if routes.len() <= 1 {
+            return routes;
+        }
+        let classes = self.mana_classes(p, None);
+        let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
+        let mut g = None;
+        let view: &Game = match face {
+            Some(f) if f != self.objs[card.i()].def => {
+                let mut c = self.clone();
+                c.objs[card.i()].def = f;
+                g = Some(c);
+                g.as_ref().unwrap()
+            }
+            _ => self,
+        };
+        let out = routes.iter().copied().filter(|r| view.castable_via(p, card, self.route_from(card, p, *r), &classes, sorcery_ok)).collect();
+        drop(g);
+        out
+    }
+
+    /// CR 601.2a-b: which permission `p` casts graveyard card `card` (face
+    /// `face`) with (`NUMBER` = `route::*` code), when several can.
+    pub(crate) fn choose_route(&mut self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) {
+        match self.answer.take() {
+            Some(Choice::Number(code)) => {
+                let r = self.gy_routes(p, card, face).iter().copied().find(|r| r.code == code).expect("a route offered");
+                self.route_choice = Some(r);
+                self.begin_cast_face(p, card, face);
+            }
+            Some(other) => unreachable!("route answer {other:?}"),
+            None => {
+                let opts: Vec<Opt> = self
+                    .castable_gy_routes(p, card, face)
+                    .iter()
+                    .map(|r| Opt { action: act::NUMBER + r.code as u16, choice: Choice::Number(r.code) })
+                    .collect();
+                self.ask(Task::ChooseRoute { p, card, face }, p, DecisionKind::ChooseRoute, opts);
+            }
         }
     }
 
@@ -896,13 +1030,16 @@ impl Game {
     /// turns" is unused this turn and that allows mana value `mv` (a land
     /// with `land`; CR 601.2a, 305.1).
     pub(crate) fn paragon(&self, p: PlayerId, mv: u8, land: bool) -> Option<CardIdx> {
-        if self.turn.active != p {
-            return None;
-        }
+        self.paragons(p, mv, land).next()
+    }
+
+    /// Every such permanent (Serra Paragons and Lurruses alike).
+    pub(crate) fn paragons(&self, p: PlayerId, mv: u8, land: bool) -> impl Iterator<Item = CardIdx> + '_ {
         let turn = self.turn.number as u16;
-        self.permanents_of(p).find(|&c| {
+        let mine = self.turn.active == p;
+        self.permanents_of(p).filter(move |&c| {
             let d = self.abilities(c);
-            d.gy_play_mv > 0 && mv <= d.gy_play_mv && (!land || d.gy_play_land) && {
+            mine && d.gy_play_mv > 0 && mv <= d.gy_play_mv && (!land || d.gy_play_land) && {
                 let r = self.obj_ref(c);
                 !self.marks.iter().any(|&(o, m)| o == r && m == crate::game::Mark::UsedTurn(turn))
             }
@@ -1007,7 +1144,7 @@ impl Game {
                 } else {
                     0
                 }
-            } else if self.cast_route_esc(p, c, &mut esc, &mut para).is_some_and(|from| self.castable_via(p, c, from, classes, sorcery_ok)) {
+            } else if self.gy_routes_esc(p, c, None, &mut esc, &mut para).iter().any(|r| self.castable_via(p, c, self.route_from(c, p, *r), classes, sorcery_ok)) {
                 FACE_CAST
             } else {
                 0
@@ -1531,11 +1668,28 @@ impl Game {
     /// the card goes on the stack, and only that face's characteristics
     /// exist there (712.8f, 715.3b).
     pub(crate) fn begin_cast_face(&mut self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) {
-        let from = self.cast_route(p, card).expect("a castable card");
+        // From a graveyard, the player chooses among the permissions that
+        // allow the cast (CR 601.2a-b; `Task::ChooseRoute`).
+        let (from, granter) = match self.route_choice.take() {
+            Some(r) => (self.route_from(card, p, r), r.granter),
+            None if self.objs[card.i()].zone == Zone::Graveyard => {
+                let routes = self.castable_gy_routes(p, card, face);
+                match routes.first() {
+                    Some(&r) if routes.len() == 1 => (self.route_from(card, p, r), r.granter),
+                    Some(_) => {
+                        self.agenda.push(Task::ChooseRoute { p, card, face });
+                        return;
+                    }
+                    None => panic!("a castable card"),
+                }
+            }
+            None => (self.cast_route(p, card).expect("a castable card"), None),
+        };
         self.miracle_cast = None;
-        // Serra Paragon's permission, found while the card is in the
-        // graveyard (used as it is cast).
-        let paragon = if from == crate::game::CastFrom::Paragon { self.paragon(p, self.def_of(card).mana_value(), false) } else { None };
+        // Serra Paragon's (or Lurrus's) permission, found while the card is
+        // in the graveyard (used as it is cast).
+        let mv = face.map_or(self.def_of(card).mana_value(), |f| self.db.def(f).mana_value());
+        let paragon = if from == crate::game::CastFrom::Paragon { granter.or_else(|| self.paragon(p, mv, false)) } else { None };
         // "If that spell would be put into your graveyard, exile it
         // instead": a permission from a graveyard that says so (unless
         // flashback, which exiles it anyway, is how it is cast).

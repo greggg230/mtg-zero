@@ -575,6 +575,8 @@ pub struct Game {
     /// The replacement effects of the next move's destination are already
     /// applied (a choice among them was made, CR 616.1).
     pub(crate) repl_decided: bool,
+    /// The route chosen for the cast about to begin (`Task::ChooseRoute`).
+    pub(crate) route_choice: Option<crate::cast::Route>,
     pub(crate) entering_dash: Option<u8>,
     /// The entering permanent's spell was warped (CR 702.185): `entering_dash`
     /// is warp's delayed ability (no haste).
@@ -906,6 +908,7 @@ impl Game {
             entering_tapped: false,
             discard_entered: false,
             repl_decided: false,
+            route_choice: None,
             entering_dash: None,
             entering_warp: false,
             miracle_cast: None,

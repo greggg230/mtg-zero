@@ -689,3 +689,92 @@ fn cr_601_2b_breach_escape_with_the_cards_own_additional_cost() {
     assert_eq!(g.life(0), 17, "3 life");
     assert_eq!(g.exile_zone().len(), 3, "three other cards exiled\n{}", log(&g));
 }
+
+/// Serra Paragon and Lurrus both allow casting a 2-mana creature card from
+/// the graveyard: the player chooses whose permission (CR 601.2a-b); with
+/// Lurrus's, the creature doesn't gain Paragon's trigger and Paragon's
+/// permission stays unused this turn.
+#[test]
+fn cr_601_2a_paragon_or_lurrus_the_player_chooses() {
+    let mut g = scen()
+        .battlefield(0, &["Serra Paragon", "Lurrus of the Dream-Den", "Forest", "Forest"])
+        .graveyard(0, &["Test Bear", "Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    let forest = g.card(0, "Forest", Zone::Graveyard);
+    g.choose(Choice::Cast(bear));
+    g.drive_until(|g| !at_priority(g));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseRoute), "{}", log(&g));
+    assert_eq!(options(&g), vec![Choice::Number(5), Choice::Number(6)]);
+    g.choose(Choice::Number(6));
+    finish(&mut g, |_| None);
+    resolve_with(&mut g, |_| None);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    // Paragon's permission is unused: a land from the graveyard.
+    assert!(g.has_option(Choice::Play(forest)), "{:?}", g.options_desc());
+}
+
+/// Yawgmoth's Will and flashback both allow casting Lingering Souls from
+/// the graveyard: either may be chosen (CR 601.2a-b): its mana cost or its
+/// flashback cost.
+#[test]
+fn cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses() {
+    // (Yawgmoth's Will first; then black and white mana are left.)
+    let mut g0 = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp", "Swamp", "Plains", "Plains", "Plains"])
+        .hand(0, &["Yawgmoth's Will"])
+        .graveyard(0, &["Lingering Souls"])
+        .at(Step::Main1, 0)
+        .start();
+    let w = g0.card(0, "Yawgmoth's Will", Zone::Hand);
+    g0.choose(Choice::Cast(w));
+    finish(&mut g0, |_| None);
+    resolve_with(&mut g0, |_| None);
+    let ls = g0.card(0, "Lingering Souls", Zone::Graveyard);
+    g0.choose(Choice::Cast(ls));
+    g0.drive_until(|g| !at_priority(g));
+    assert_eq!(g0.kind(), Some(DecisionKind::ChooseRoute), "{}", log(&g0));
+    assert_eq!(options(&g0), vec![Choice::Number(0), Choice::Number(1)]);
+    g0.choose(Choice::Number(1));
+    finish(&mut g0, |_| None);
+    resolve_with(&mut g0, |_| None);
+    assert_eq!(tokens_named(&g0, "Spirit"), 2);
+}
+
+/// Serra Paragon allows a permanent spell from the graveyard, a card with
+/// another face too: Brazen Borrower (its creature face; Petty Theft, an
+/// instant, isn't a permanent spell).
+#[test]
+fn cr_601_2a_paragon_casts_a_card_with_another_face() {
+    let g = scen()
+        .battlefield(0, &["Serra Paragon", "Island", "Island", "Island"])
+        .graveyard(0, &["Brazen Borrower // Petty Theft"])
+        .at(Step::Main1, 0)
+        .start();
+    let bb = g.card(0, "Brazen Borrower // Petty Theft", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(bb)), "{:?}", g.options_desc());
+}
+
+/// Bolas's Citadel: a split card on top of the library can be cast (either
+/// half, CR 709.3) for life equal to that half's mana value.
+#[test]
+fn cr_709_3_citadel_casts_either_half_of_a_split_card() {
+    let mut g = scen()
+        .library(0, &["Life // Death"])
+        .battlefield(0, &["Bolas's Citadel"])
+        .graveyard(0, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let top = *g.player(0).library.last().unwrap();
+    assert_eq!(g.name(top), "Life // Death");
+    let faces = options(&g).into_iter().find(|c| matches!(c, Choice::Faces(x, _) if *x == top));
+    assert!(faces.is_some(), "both halves: {:?}", g.options_desc());
+    g.choose(faces.unwrap());
+    g.choose(Choice::Number(1)); // Death
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    finish(&mut g, |g| tgt_if(g, bear));
+    resolve_with(&mut g, |_| None);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    assert_eq!(g.life(0), 16, "2 life for Death's mana value and 2 from Death\n{}", log(&g));
+}

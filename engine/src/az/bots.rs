@@ -26,6 +26,27 @@ use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::program::{Amount, CopyOf, Ext, On, Op, PileDest, SearchDest, Who};
 use crate::rng::Rng;
 
+/// CR 601.2a-b, which permission casts a graveyard card (`ChooseRoute`): a
+/// permanent escapes if it can (it stays), else a permission that costs it
+/// nothing later (Lurrus, Yawgmoth's Will); a spell takes the cheapest-
+/// looking permission first.
+fn route_choice(g: &Game, d: &Decision) -> u16 {
+    use crate::cast::route as r;
+    let permanent = match g.agenda.last() {
+        Some(&Task::ChooseRoute { card, .. }) => g.def_of(card).is_permanent_card(),
+        _ => false,
+    };
+    let order: [u8; 7] = if permanent {
+        [r::ESCAPE, r::LURRUS, r::WILL, r::FLASHBACK, r::PARAGON, r::MAYHEM, r::RETRACE]
+    } else {
+        [r::WILL, r::FLASHBACK, r::ESCAPE, r::MAYHEM, r::RETRACE, r::LURRUS, r::PARAGON]
+    };
+    order
+        .iter()
+        .find_map(|&k| d.options.iter().find(|o| o.choice == Choice::Number(k)).map(|o| o.action))
+        .unwrap_or(d.options[0].action)
+}
+
 /// CR 616.1, the order of replacement effects (`ChooseReplacement`): for a
 /// card its chooser owns, back into the library rather than exiled, and no
 /// void counter (an opponent's Dauthi Voidwalker would play it); for an
@@ -634,6 +655,7 @@ impl Heuristic {
             }
             K::PutInHand | K::ChooseDiscard | K::PutOntoBattlefield => Some(Self::best_card(g, d)),
             K::ChooseReplacement => Some(replacement_choice(g, d)),
+            K::ChooseRoute => Some(route_choice(g, d)),
             // Enter as a copy of the most valuable permanent, or of the
             // costliest card (CR 707.5).
             K::ChoosePermanent | K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(Task::EnterAsCopy { .. })) => d
@@ -1701,6 +1723,7 @@ pub mod v1 {
                 }
                 K::PutInHand | K::ChooseDiscard | K::PutOntoBattlefield => Some(Self::best_card(g, d)),
                 K::ChooseReplacement => Some(super::replacement_choice(g, d)),
+                K::ChooseRoute => Some(super::route_choice(g, d)),
                 K::ChoosePermanent | K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(Task::EnterAsCopy { .. })) => d
                     .options
                     .iter()

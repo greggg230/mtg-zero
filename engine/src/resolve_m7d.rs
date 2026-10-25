@@ -757,19 +757,31 @@ impl Game {
     }
 
     /// Priority: play or cast the top card of `p`'s library (`LIBRARY` + 0),
-    /// its front face (a split card's halves are not offered).
+    /// any of its faces (a split card's halves, CR 709.3; an MDFC's or an
+    /// Adventure's other face, 712.11b, 715.3; `ChooseFace` follows when two
+    /// can).
     pub(crate) fn top_options(&self, p: PlayerId, classes: &[crate::pay::Class], sorcery_ok: bool, land_ok: bool, opts: &mut Vec<crate::decision::Opt>) {
-        use crate::decision::{act, Choice, Opt};
+        use crate::decision::{act, Opt, FACE_CAST, FACE_PLAY};
         let Some(&top) = self.players[p as usize].library.last() else { return };
-        if !self.top_play_ok(p, top) || self.def_of(top).halves.is_some() {
+        if !self.top_play_ok(p, top) {
             return;
         }
-        let choice = if self.def_of(top).is(crate::db::types::LAND) {
-            land_ok.then_some(Choice::Play(top))
+        let def = self.def_of(top);
+        let front = if def.halves.is_some() {
+            self.split_left_options(p, top, sorcery_ok, classes)
+        } else if def.is(crate::db::types::LAND) {
+            if land_ok {
+                FACE_PLAY
+            } else {
+                0
+            }
+        } else if self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok) {
+            FACE_CAST
         } else {
-            self.castable_via(p, top, crate::game::CastFrom::LibraryTop, classes, sorcery_ok).then_some(Choice::Cast(top))
+            0
         };
-        if let Some(choice) = choice {
+        let other = if def.other_face().is_some() { self.other_face_options(p, top, sorcery_ok, land_ok, classes) } else { 0 };
+        if let Some(choice) = crate::faces::face_choice(top, front | other) {
             opts.push(Opt { action: act::LIBRARY, choice });
         }
     }

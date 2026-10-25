@@ -82,6 +82,9 @@ pub(crate) enum Task {
     /// Which face of a card to cast or play (CR 712.11b, 712.12, 715.3;
     /// `mask`: `decision::FACE_*` bits).
     ChooseFace { p: PlayerId, card: CardIdx, mask: u8 },
+    /// CR 601.2a-b: which permission casts graveyard card `card` (face
+    /// `face`; `cast::route`).
+    ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
     /// What a permanent that may enter as a copy copies (CR 707.5), then
     /// it enters (`note`: its `Enters` event's).
     EnterAsCopy { card: CardIdx, note: u16 },
@@ -258,6 +261,7 @@ impl Game {
             Task::Escalate { id } => self.escalate(id),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
+            Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
             Task::EnterAsCopy { card, note } => self.enter_as_copy(card, note),
             Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
             Task::ChooseTimes { id } => self.choose_times(id),

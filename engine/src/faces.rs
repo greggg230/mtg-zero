@@ -390,8 +390,13 @@ impl Game {
         // it is there (its front: "instant and sorcery cards in your
         // graveyard have retrace" doesn't reach an adventurer creature card,
         // CR 715.4); whether that face can be cast, from the face alone.
-        let route = if zone == Zone::Hand { None } else { self.cast_route(p, c) };
-        if zone != Zone::Hand && route.is_none() {
+        // (From a graveyard: any of its routes for that face, CR 601.2a-b.)
+        let routes: Vec<crate::game::CastFrom> = match zone {
+            Zone::Hand => Vec::new(),
+            Zone::Graveyard => self.gy_routes(p, c, Some(face)).iter().map(|r| self.route_from(c, p, *r)).collect(),
+            _ => self.cast_route(p, c).into_iter().collect(),
+        };
+        if zone != Zone::Hand && routes.is_empty() {
             return false;
         }
         // (Timing first, from the face alone: it saves the copy below.)
@@ -400,10 +405,10 @@ impl Game {
         }
         let mut g = self.clone();
         g.objs[c.i()].def = face;
-        match route {
-            None => g.hand_castable(p, c, sorcery_ok, classes, &mut None),
-            Some(from) => g.castable_via(p, c, from, classes, sorcery_ok),
+        if zone == Zone::Hand {
+            return g.hand_castable(p, c, sorcery_ok, classes, &mut None);
         }
+        routes.into_iter().any(|from| g.castable_via(p, c, from, classes, sorcery_ok))
     }
 
     /// CR 712.11b, 712.12, 715.3: which face of `card` `p` casts or plays

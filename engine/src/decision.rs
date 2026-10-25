@@ -168,6 +168,11 @@ pub enum DecisionKind {
     /// exiled with a void counter), chosen by its controller or owner (CR
     /// 616.1). M7e.
     ChooseReplacement,
+    /// Which permission casts the card chosen at priority from its owner's
+    /// graveyard (`NUMBER` = `cast::route` code: flashback, Yawgmoth's
+    /// Will, escape, retrace, mayhem, Serra Paragon, Lurrus), when several
+    /// can (CR 601.2a-b). M7e.
+    ChooseRoute,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
