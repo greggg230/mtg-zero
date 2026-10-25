@@ -1275,7 +1275,8 @@ for the 467-card pool of the tail's part 1, 7216a12287fefeaa, and for the 491-ca
 with its four token kinds registered, 7b815998fc563509, and for the 524-card pool of part 3 before
 its three new token kinds are registered, 023fa8874a183eae, and for M7d's 537-card pool with Test
 Manifester, 5cbbaf9280a01797, and for the whole cube with M7d's IR fixes, 1f210100db7b442e: the pool deals
-other decks, every game differs), and names the games that differ. `DIGEST_WRITE=1` records
+other decks, every game differs; and for M7e part 1's rules fixes and its three custom cards,
+161108b935c03d14), and names the games that differ. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
 are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every
@@ -4579,3 +4580,5 @@ option-completion check on): no failure, 143 s, 5,664,330 options completed; one
 the way and fixed (section 15). The search smoke (`python tools/search_smoke.py`, seeds 0-3,
 random and eval specs): 0 failed of 8 configurations (3,200 games, 1.31 million decisions, 33.8
 million simulations, 466 s). Speed: section 17 (+1.6% to +3.7% per decision on main's pool).
+Behaviour digests re-recorded (`DIGEST_WRITE=1 cargo test --release -p engine --test digest --
+--ignored`, the branch's last commit): combined digest 161108b935c03d14 (section 15).
