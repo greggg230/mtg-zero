@@ -79,7 +79,7 @@ impl Game {
                 // An Aura spell (CR 608.3a): with an illegal target it doesn't
                 // resolve (to its owner's graveyard); else it enters attached
                 // to it (608.3c, below).
-                let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)), spell: false };
+                let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)) };
                 let legal = match (self.item_ability(&item), item.targets.first()) {
                     (Some(ar), Some(&(req, t))) => self.target_legal(self.db.ability(ar).reqs(&item.modes)[req as usize], t, &ctx),
                     _ => false,
@@ -98,7 +98,7 @@ impl Game {
                 // A bestowed Aura spell (CR 702.103e, 608.3b): with an illegal
                 // target it ceases to be bestowed and resolves as a creature
                 // spell; else it enters attached to its target (608.3c).
-                let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)), spell: false };
+                let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)) };
                 let legal = match (self.item_ability(&item), item.targets.first()) {
                     (Some(ar), Some(&(req, t))) => self.target_legal(self.db.ability(ar).reqs(&item.modes)[req as usize], t, &ctx),
                     _ => false,
@@ -124,7 +124,7 @@ impl Game {
         };
         let ab = self.db.ability(ar);
         let reqs = crate::resolve_tail3::item_reqs(self.db, &item, ar);
-        let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.item_source(&item)), spell: false };
+        let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.item_source(&item)) };
         let mut legal = 0u64;
         for (i, &(req, t)) in item.targets.iter().enumerate() {
             if self.target_legal(reqs[req as usize], t, &ctx) {
@@ -525,7 +525,7 @@ impl Game {
             Op::DamageAll { amount, ref filter } => {
                 let n = self.amount(f, amount);
                 let src = self.frame_damage_source(f);
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                 let all: Vec<CardIdx> =
                     self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
                 for c in all {
@@ -716,7 +716,7 @@ impl Game {
                 Flow::Next
             }
             Op::DestroyAll { ref filter } => {
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                 let all: Vec<crate::ids::CardIdx> =
                     self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
                 self.begin_batch();
@@ -763,7 +763,7 @@ impl Game {
                 }
             }
             Op::JumpUnlessTarget { tgt, ref filter, to } => {
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
                 let ts = self.targets_of(f, tgt);
                 if !ts.is_empty() && ts.iter().all(|&t| self.filter_ok(filter, t, &ctx)) {
                     Flow::Next
@@ -782,7 +782,7 @@ impl Game {
                     Some(other) => unreachable!("search answer {other:?}"),
                     None => {
                         // "You" in the filter is the searcher.
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                         let opts = self.search_options(p, filter, may_fail, &ctx);
                         self.ask(Task::Run(f.clone()), p, DecisionKind::SearchLibrary, opts);
                         return Flow::Suspend;
@@ -830,7 +830,7 @@ impl Game {
                     }
                     return Flow::Next;
                 }
-                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
+                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                 let mut sorted = f.pile.clone();
                 sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
                 // The cards that may be picked now (a set is picked in
@@ -901,7 +901,7 @@ impl Game {
                     }
                     Some(other) => unreachable!("sacrifice answer {other:?}"),
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                         let opts: Vec<Opt> = self
                             .permanents_of(p)
                             .filter(|&c| self.card_matches(filter, c, &ctx))
@@ -949,7 +949,7 @@ impl Game {
                     }
                     Some(other) => unreachable!("put-from-hand answer {other:?}"),
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                         let mut opts: Vec<Opt> = self
                             .hand_options(p)
                             .into_iter()
@@ -1003,7 +1003,7 @@ impl Game {
                     Some(Choice::Pass) => Flow::Next,
                     Some(other) => unreachable!("discard choice {other:?}"),
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                         let hand = self.hand_sorted(owner);
                         let mut opts = Vec::new();
                         for (k, &c) in hand.iter().enumerate() {

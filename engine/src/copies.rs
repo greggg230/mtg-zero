@@ -551,7 +551,7 @@ impl Game {
         let (req, cur) = item.targets[k as usize];
         let tr = reqs[req as usize];
         let p = item.controller;
-        let ctx = crate::cast::Ctx { controller: p, source: Some(self.item_source(item)), spell: false };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.item_source(item)) };
         // The other targets of the same "target" word (CR 115.3), and those
         // it must differ from ("another target").
         let exclude: Vec<Target> = item
@@ -615,7 +615,7 @@ impl Game {
             Some(Choice::Pass) => {}
             Some(other) => unreachable!("enter-as-copy answer {other:?}"),
             None => {
-                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)), spell: false };
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
                 let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
                 if eac.from_graveyard {
                     for q in [p, opp(p)] {

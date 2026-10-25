@@ -13,10 +13,6 @@ use crate::pay::PayMana;
 pub(crate) struct Ctx {
     pub controller: PlayerId,
     pub source: Option<ObjRef>,
-    /// The source is a spell: a card about to be cast, still in the zone it
-    /// is cast from, whose targets are those of the spell it will be
-    /// ("protection from ... spells", CR 702.16b). On the stack it is one.
-    pub spell: bool,
 }
 
 impl Game {
@@ -31,7 +27,7 @@ impl Game {
     /// increases and reductions that apply (CR 601.2f).
     pub(crate) fn cost_with(&self, card: CardIdx, p: PlayerId, base: crate::mana::ManaCost) -> crate::mana::ManaCost {
         let mut cost = base;
-        let ctx = Ctx { controller: p, source: None, spell: false };
+        let ctx = Ctx { controller: p, source: None };
         for &c in &self.battlefield {
             for (f, n) in &self.abilities(c).spell_tax {
                 if self.card_matches(f, card, &ctx) {
@@ -92,7 +88,7 @@ impl Game {
 
     /// How much a cost reduction takes off for `p` now (generic mana).
     pub(crate) fn discount(&self, d: &crate::db::Discount, p: PlayerId) -> u8 {
-        let ctx = Ctx { controller: p, source: None, spell: false };
+        let ctx = Ctx { controller: p, source: None };
         match d {
             crate::db::Discount::PerBasicLandType(n) => self.basic_land_types(p).saturating_mul(*n),
             crate::db::Discount::PerControlled(f, n) => {
@@ -267,13 +263,13 @@ impl Game {
             return false;
         }
         if let Some(ab) = &def.spell {
-            if !self.spell_targets_available(ab, p, Some(self.obj_ref(c))) {
+            if !self.targets_available(ab, p, Some(self.obj_ref(c))) {
                 return false;
             }
             // Not overloaded: its own target is needed.
             if def.overload && !alt_ok {
                 let plain = ab.modes.as_ref().map(|m| &m.list[0]);
-                if !plain.is_some_and(|x| self.spell_targets_available(x, p, Some(self.obj_ref(c)))) {
+                if !plain.is_some_and(|x| self.targets_available(x, p, Some(self.obj_ref(c)))) {
                     return false;
                 }
             }
@@ -492,7 +488,7 @@ impl Game {
     /// An emblem of `p` gives `card` (in `p`'s graveyard) retrace (Wrenn and
     /// Six: "instant and sorcery cards in your graveyard have retrace").
     pub(crate) fn retrace_granted(&self, p: PlayerId, card: CardIdx) -> bool {
-        let ctx = Ctx { controller: p, source: None, spell: false };
+        let ctx = Ctx { controller: p, source: None };
         self.command.iter().any(|&e| {
             self.objs[e.i()].controller == p
                 && self.def_of(e).grants_retrace.as_ref().is_some_and(|f| self.card_matches(f, card, &ctx))
@@ -574,9 +570,9 @@ impl Game {
             Some(ab) if self.objs[card.i()].zone == Zone::Graveyard => {
                 let mut g = self.clone();
                 let r = g.move_card_to_stack(card, p);
-                g.spell_targets_available(ab, p, Some(r))
+                g.targets_available(ab, p, Some(r))
             }
-            Some(ab) => self.spell_targets_available(ab, p, Some(self.obj_ref(card))),
+            Some(ab) => self.targets_available(ab, p, Some(self.obj_ref(card))),
         }
     }
 
@@ -599,7 +595,7 @@ impl Game {
                 None => {}
             }
             let ad = self.db.def(ability.def).activated_def(ability.slot);
-            let ctx = Ctx { controller: p, source: Some(source), spell: false };
+            let ctx = Ctx { controller: p, source: Some(source) };
             let mut most = (act::NUMBER_N - 1) as u8;
             if let crate::db::ActEffect::Stack(ab) = &ad.effect {
                 for tr in ab.targets.iter().filter(|t| t.max == crate::db::X_TARGETS) {
@@ -717,7 +713,7 @@ impl Game {
                     .spell
                     .as_ref()
                     .and_then(|ab| ab.modes.as_ref())
-                    .is_some_and(|m| self.spell_targets_available(&m.list[k], p, src)))
+                    .is_some_and(|m| self.targets_available(&m.list[k], p, src)))
                 && {
                     let cost = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep);
                     self.cost_payable(p, card, o, &cost, classes, exclude)
@@ -824,7 +820,7 @@ impl Game {
             Some(Choice::Pass) => {}
             Some(other) => unreachable!("discard answer {other:?}"),
             None => {
-                let ctx = Ctx { controller: p, source: None, spell: false };
+                let ctx = Ctx { controller: p, source: None };
                 let land = Filter::Type(types::LAND);
                 let mut opts: Vec<Opt> = self
                     .hand_options(p)
@@ -976,20 +972,9 @@ impl Game {
     /// modal ability, enough modes can be chosen (a mode whose targets
     /// cannot be chosen cannot be, CR 700.2, 601.2c).
     pub(crate) fn targets_available(&self, ab: &AbilityDef, controller: PlayerId, source: Option<ObjRef>) -> bool {
-        self.targets_available_in(ab, &Ctx { controller, source, spell: false })
-    }
-
-    /// [`targets_available`](Self::targets_available) for card `source`'s
-    /// spell, about to be cast (CR 601.2c: the targets of the spell it will
-    /// be).
-    pub(crate) fn spell_targets_available(&self, ab: &AbilityDef, controller: PlayerId, source: Option<ObjRef>) -> bool {
-        self.targets_available_in(ab, &Ctx { controller, source, spell: true })
-    }
-
-    fn targets_available_in(&self, ab: &AbilityDef, ctx: &Ctx) -> bool {
         match &ab.modes {
             None => {
-                let ctx = *ctx;
+                let ctx = Ctx { controller, source };
                 if let Some(r) = ab.targets.iter().position(|tr| tr.pair != 0) {
                     // (Goblin Welder: an artifact whose controller has an
                     // artifact card in their graveyard.)
@@ -1005,7 +990,7 @@ impl Game {
                 ab.targets.iter().all(|tr| tr.min == 0 || self.has_candidates(tr, &ctx, tr.min as usize))
             }
             Some(m) => {
-                let avail = m.list.iter().filter(|x| self.targets_available_in(x, ctx)).count();
+                let avail = m.list.iter().filter(|x| self.targets_available(x, controller, source)).count();
                 m.min == 0 || if m.repeat { avail > 0 } else { avail >= m.min as usize }
             }
         }
@@ -1215,7 +1200,7 @@ impl Game {
             m.list
                 .iter()
                 .zip(m.costs.iter())
-                .filter(|(ab, _)| self.spell_targets_available(ab, p, src))
+                .filter(|(ab, _)| self.targets_available(ab, p, src))
                 .map(|(_, c)| *c)
                 .collect(),
         )
@@ -1329,7 +1314,7 @@ impl Game {
             let Some(face) = self.def_of(card).bestow else { return false };
             let mut g = self.clone();
             g.objs[card.i()].def = face;
-            if !g.db.def(face).spell.as_ref().is_some_and(|ab| g.spell_targets_available(ab, p, Some(g.obj_ref(card)))) {
+            if !g.db.def(face).spell.as_ref().is_some_and(|ab| g.targets_available(ab, p, Some(g.obj_ref(card)))) {
                 return false;
             }
             return g.alt_payable(p, card, k, classes);
@@ -1400,7 +1385,7 @@ impl Game {
                 let def = self.def_of(card);
                 let plain_targets = !def.overload
                     || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| {
-                        self.spell_targets_available(&m.list[0], p, Some(self.obj_ref(card)))
+                        self.targets_available(&m.list[0], p, Some(self.obj_ref(card)))
                     });
                 if plain_targets && self.normal_payable(p, card, &classes) {
                     opts.push(Opt { action: act::NUMBER, choice: Choice::Number(0) });
@@ -1562,7 +1547,7 @@ impl Game {
                 let src = Some(self.obj_ref(card));
                 let kicker_ok = |k: usize| {
                     !def.kicker
-                        || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| self.spell_targets_available(&m.list[k], p, src))
+                        || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| self.targets_available(&m.list[k], p, src))
                 };
                 // CR 601.2f: the option's mana is added before reductions.
                 let mut base = item.clone();
@@ -1617,7 +1602,7 @@ impl Game {
         let Some(ar) = self.item_ability(item) else { return };
         let reqs = crate::resolve_tail3::item_reqs(self.db, item, ar);
         let Some(&tr) = reqs.get(req as usize) else { return };
-        let ctx = Ctx { controller: item.controller, source: Some(self.item_source(item)), spell: false };
+        let ctx = Ctx { controller: item.controller, source: Some(self.item_source(item)) };
         let already: Vec<Target> =
             item.targets.iter().filter(|(r, _)| *r == req).map(|&(_, t)| t).collect();
         // "Another target" (CR 115.3): not one chosen for a requirement it
@@ -1887,8 +1872,7 @@ impl Game {
         if self.live(r)
             && matches!(self.objs[r.idx.i()].zone, Zone::Battlefield | Zone::Stack | Zone::Hand | Zone::Graveyard | Zone::Exile)
         {
-            let d = self.damage_source_of(r.idx);
-            return Some(crate::game::DamageSource { controller: ctx.controller, spell: d.spell || ctx.spell, ..d });
+            return Some(crate::game::DamageSource { controller: ctx.controller, ..self.damage_source_of(r.idx) });
         }
         let def = self
             .stack

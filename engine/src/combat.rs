@@ -122,7 +122,7 @@ impl Game {
             }
         }
         if let Some(f) = &self.abilities(a).unblockable_by {
-            let ctx = crate::cast::Ctx { controller: self.objs[a.i()].controller, source: Some(self.obj_ref(a)), spell: false };
+            let ctx = crate::cast::Ctx { controller: self.objs[a.i()].controller, source: Some(self.obj_ref(a)) };
             if self.card_matches(f, b, &ctx) {
                 return false;
             }

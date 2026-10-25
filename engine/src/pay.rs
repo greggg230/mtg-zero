@@ -275,12 +275,12 @@ impl Game {
 
     /// Colours among permanents `p` controls matching `f` (Mox Amber).
     pub(crate) fn colors_among(&self, p: PlayerId, f: &Filter) -> ManaMask {
-        let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
+        let ctx = crate::cast::Ctx { controller: p, source: None };
         self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).fold(0, |m, c| m | self.def_of(c).colors)
     }
 
     pub(crate) fn count_controlled(&self, p: PlayerId, f: &Filter) -> u32 {
-        let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
+        let ctx = crate::cast::Ctx { controller: p, source: None };
         self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u32
     }
 
@@ -456,7 +456,7 @@ impl Game {
         // The permanents another's mana ability taps (`TAP_FOR`), one class
         // per definition, after the permanents' own abilities.
         if let Some((mask, filter)) = tap_for {
-            let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
+            let ctx = crate::cast::Ctx { controller: p, source: None };
             for x in self.permanents_of(p) {
                 if Some(x) == exclude || self.objs[x.i()].tapped || !self.card_matches(filter, x, &ctx) {
                     continue;
@@ -631,7 +631,7 @@ impl Game {
                 pl.hand.len() as i32 - in_hand as i32 - n as i32
             }
             (None, None, Some((f, card))) => {
-                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)), spell: false };
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
                 let n = pl.hand.iter().filter(|&&c| c != *card && self.card_matches(f, c, &ctx)).count();
                 n as i32 - 1
             }
@@ -645,14 +645,14 @@ impl Game {
     fn reserved(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> bool {
         match &keep.sac {
             Some((sc, card)) if cl.sac_self => {
-                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)), spell: false };
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
                 !(sc.another && s.card == *card) && self.card_matches(&sc.filter, s.card, &ctx)
             }
             _ => {
                 matches!(s.slot, AbilitySlot::Hand(_))
                     && (keep.discard.is_some()
                         || keep.exile.as_ref().is_some_and(|(f, card)| {
-                            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)), spell: false };
+                            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
                             self.card_matches(f, s.card, &ctx)
                         }))
             }

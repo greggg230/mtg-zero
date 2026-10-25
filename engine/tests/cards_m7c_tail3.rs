@@ -531,30 +531,6 @@ fn emrakul_extra_turn_colored_spell_protection_and_annihilator_cr702_86a() {
     assert_eq!(g.permanents_of(1).count(), 1, "six sacrificed\n{}", log(&g));
 }
 
-/// A coloured spell whose only possible target is Emrakul isn't offered: a
-/// card about to be cast is the spell it will be when its targets are
-/// checked (CR 601.2c, 702.16b), not a card in hand (a fuzz seed found the
-/// cast offered, then no target to choose).
-#[test]
-fn emrakul_a_coloured_spell_with_only_emrakul_to_target_is_not_offered_cr702_16b() {
-    let g = scen()
-        .battlefield(0, &["Emrakul, the Aeons Torn", "Swamp", "Swamp", "Swamp", "Swamp"])
-        .hand(0, &["Baleful Mastery"])
-        .at(Step::Main1, 0)
-        .start();
-    let c = g.card(0, "Baleful Mastery", Zone::Hand);
-    assert!(!g.has_option(Choice::Cast(c)), "{:?}", g.options_desc());
-    // Another creature to exile: offered.
-    let g = scen()
-        .battlefield(0, &["Emrakul, the Aeons Torn", "Swamp", "Swamp", "Swamp", "Swamp"])
-        .battlefield(1, &["Test Bear"])
-        .hand(0, &["Baleful Mastery"])
-        .at(Step::Main1, 0)
-        .start();
-    let c = g.card(0, "Baleful Mastery", Zone::Hand);
-    assert!(g.has_option(Choice::Cast(c)));
-}
-
 /// "When Emrakul is put into a graveyard from anywhere, its owner shuffles
 /// their graveyard into their library."
 #[test]

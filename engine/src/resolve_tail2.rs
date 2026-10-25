@@ -302,7 +302,7 @@ impl Game {
                     }
                     Some(_) => Flow::Next,
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                         let cands: Vec<CardIdx> = self
                             .graveyard_cards(p)
                             .filter(|&c| self.card_matches(filter, c, &ctx) && self.can_cast_now(p, c))
@@ -476,7 +476,7 @@ impl Game {
             Some(other) => unreachable!("sacrifice answer {other:?}"),
             None => {}
         }
-        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
         let all: Vec<CardIdx> = self.permanents_of(p).filter(|&c| self.card_matches(filter, c, &ctx)).collect();
         let done = if all.len() <= n as usize {
             // No choice: all of them.
