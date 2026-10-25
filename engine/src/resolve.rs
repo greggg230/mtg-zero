@@ -147,7 +147,7 @@ impl Game {
             return;
         }
         self.agenda.push(Task::FinishResolve { id: item.id });
-        if !self.intervening_holds(ar, item.controller) {
+        if !self.intervening_holds(ar, item.controller, self.item_source(&item)) {
             self.note(|_| "intervening if: does nothing".to_string());
             return; // CR 603.4
         }

@@ -514,17 +514,18 @@ fn yawgmoths_will_exiles_dying_cards_but_not_tokens() {
 // ---- Green Sun's Zenith ----------------------------------------------------
 
 /// "Search your library for a green creature card with mana value X or
-/// less, put it onto the battlefield, then shuffle" (the test card: Green
-/// Sun's Zenith's IR misstates its last sentence and keeps it blocked).
+/// less, put it onto the battlefield, then shuffle. Shuffle Green Sun's
+/// Zenith into its owner's library." (CR 107.3; the last instruction moves
+/// the spell itself, 608.2c, so it isn't put into a graveyard, 608.2n.)
 #[test]
-fn green_suns_zenith_search_finds_a_green_creature_of_mana_value_x_or_less_cr107_3() {
+fn green_suns_zenith_finds_a_green_creature_then_shuffles_itself_in_cr608_2n() {
     let mut g = scen()
         .battlefield(0, &["Forest", "Forest", "Forest"])
-        .hand(0, &["Test Green Sun"])
+        .hand(0, &["Green Sun's Zenith"])
         .library(0, &["Test Giant", "Test Bear", "Test Flyer", "Test Reacher"])
         .at(Step::Main1, 0)
         .start();
-    let c = g.card(0, "Test Green Sun", Zone::Hand);
+    let c = g.card(0, "Green Sun's Zenith", Zone::Hand);
     g.choose(Choice::Cast(c));
     g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
     g.choose(Choice::Number(2));
@@ -537,18 +538,97 @@ fn green_suns_zenith_search_finds_a_green_creature_of_mana_value_x_or_less_cr107
     g.choose(Choice::Def(d("Test Bear")));
     settle(&mut g);
     assert!(g.find_card(0, "Test Bear", Zone::Battlefield).is_some());
+    assert_eq!(g.obj(c).zone, Zone::Library, "shuffled into its owner's library
+{}", log(&g));
+    assert!(g.player(0).library.contains(&c));
+    assert_eq!(g.count_in(0, "Green Sun's Zenith", Zone::Graveyard), 0);
 }
 
+/// Countered, Green Sun's Zenith goes to its owner's graveyard (CR 701.6a):
+/// its self-shuffle is an instruction of its effect, not a replacement "from
+/// anywhere" (docs/ir_defects.md 17).
 #[test]
-fn green_suns_zenith_is_blocked_by_its_ir_replacement() {
-    let err = engine::db::CardDb::cube().expect_id("Green Sun's Zenith").unwrap_err();
-    assert!(err.contains("IR:StaticAbility.replacement_effect"), "{err}");
+fn green_suns_zenith_countered_goes_to_the_graveyard_cr701_6a() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest"])
+        .hand(0, &["Green Sun's Zenith"])
+        .battlefield(1, &["Island", "Island"])
+        .hand(1, &["Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Green Sun's Zenith", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    g.drive_until(at_priority);
+    g.pass();
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 1);
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    g.choose(g.tgt(c));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(c).zone, Zone::Graveyard, "{}", log(&g));
 }
 
+// ---- Forth Eorlingas! ------------------------------------------------------
+
+/// "Create X 2/2 red Human Knight creature tokens with trample and haste.
+/// Whenever one or more creatures you control deal combat damage to one or
+/// more players this turn, you become the monarch." The second sentence is a
+/// delayed triggered ability with a duration (CR 603.7b), "one or more":
+/// it triggers once per combat damage step however many creatures connect
+/// (the first-strike step and the regular one each, 510.4), and the next
+/// turn it is gone.
 #[test]
-fn forth_eorlingas_is_blocked_by_its_ir_once_per_turn() {
-    let err = engine::db::CardDb::cube().expect_id("Forth Eorlingas!").unwrap_err();
-    assert!(err.contains("IR:TriggeredAbility.once_per_turn"), "{err}");
+fn forth_eorlingas_knights_and_a_monarch_trigger_each_damage_step_this_turn_cr603_7b() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Plains", "Mountain", "Plains", "Test Striker"])
+        .hand(0, &["Forth Eorlingas!"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Forth Eorlingas!", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(2));
+    pay(&mut g);
+    settle(&mut g);
+    let knights: Vec<CardIdx> = g.permanents_of(0).filter(|&k| g.name(k) == "Human Knight").collect();
+    assert_eq!(knights.len(), 2, "X = 2");
+    assert_eq!(g.colors_of(knights[0]), 1 << 3, "red");
+    assert!(g.has_kw(knights[0], engine::db::Kw::Haste) && g.has_kw(knights[0], engine::db::Kw::Trample));
+    assert_eq!(g.pt(knights[0]), (2, 2));
+    // Attack with the Knights (haste) and the first striker.
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    let striker = bf(&g, 0, "Test Striker");
+    // (Attackers are declared in battlefield order.)
+    for k in [striker].into_iter().chain(knights.iter().copied()) {
+        g.choose(Choice::Card(k));
+        g.drive_until(|g| g.kind() != Some(DecisionKind::AttackTarget));
+    }
+    g.choose(Choice::Pass);
+    // The first-strike damage step: one trigger.
+    g.drive_until(|g| !g.stack().is_empty());
+    assert_eq!((g.turn().step, g.stack().len()), (Step::FirstStrikeDamage, 1));
+    settle(&mut g);
+    assert_eq!(log(&g).matches("P0 becomes the monarch").count(), 1);
+    // The regular step: two Knights connect at once, one trigger.
+    g.drive_until(|g| !g.stack().is_empty());
+    assert_eq!((g.turn().step, g.stack().len()), (Step::CombatDamage, 1), "one or more: one trigger");
+    settle(&mut g);
+    assert_eq!(g.life(1), 20 - 6);
+    // The next turn it doesn't trigger any more.
+    quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().number > 1 && g.kind() == Some(DecisionKind::DeclareAttackers));
+    for &k in &knights {
+        g.choose(Choice::Card(k));
+        g.drive_until(|g| g.kind() != Some(DecisionKind::AttackTarget));
+    }
+    g.choose(Choice::Pass);
+    g.drive_until(|g| !g.stack().is_empty() || g.turn().step == Step::EndCombat);
+    assert!(g.stack().is_empty(), "this turn only");
+    assert_eq!(g.turn().step, Step::EndCombat);
+    assert_eq!(g.life(1), 20 - 6 - 4);
 }
 
 // ---- Bloodbraid Challenger -------------------------------------------------

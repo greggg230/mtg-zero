@@ -860,6 +860,13 @@ impl Game {
             }
             Ext::Reflexive { k } => {
                 let base = self.db.def(f.source_def).delayed_base;
+                // An intervening "if" (CR 603.4): it triggers only if the
+                // condition holds now (and is checked again as it resolves).
+                let t = &self.db.def(f.source_def).triggers[(base + k) as usize];
+                if !t.pred.intervening().into_iter().all(|c| self.cond_holds_from(c, f.controller, Some(f.source))) {
+                    self.note(|_| "reflexive trigger: its condition doesn't hold".to_string());
+                    return Flow::Next;
+                }
                 self.waiting.push(crate::triggers::PendingTrigger {
                     controller: f.controller,
                     source: f.source,

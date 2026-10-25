@@ -163,54 +163,15 @@ fn karn_minus_two_makes_a_construct_that_counts_artifacts() {
 
 // ---- Minsc & Boo, Timeless Heroes ----------------------------------------------
 //
-// The cube card stays blocked: its IR's Boo has no colour (Boo is red;
-// ENGINE.md 24.8). Its effects are tested on a copy of its IR with the
-// colour fixed, under a test name.
+// "When Minsc & Boo enters and at the beginning of your upkeep, you may
+// create Boo, a legendary 1/1 red Hamster creature token with trample and
+// haste." Boo is red in the IR since mtg-bot 8ea9fcca (docs/ir_defects.md
+// 12; it was tested on a corrected copy of the IR before).
 
-const MINSC: &str = "Test Minsc & Boo";
-
-/// The cube, the custom cards and the fixed Minsc & Boo.
-fn minsc_db() -> &'static engine::db::CardDb {
-    static DB: std::sync::OnceLock<&'static engine::db::CardDb> = std::sync::OnceLock::new();
-    DB.get_or_init(|| {
-        let doc: serde_json::Value = serde_json::from_str(engine::db::CUBE_IR).unwrap();
-        let mut v = doc["cards"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|c| c["name"] == "Minsc & Boo, Timeless Heroes")
-            .unwrap()
-            .clone();
-        v["name"] = serde_json::json!(MINSC);
-        v["printing"]["name"] = serde_json::json!(MINSC);
-        fn fix(v: &mut serde_json::Value) {
-            match v {
-                serde_json::Value::Object(m) => {
-                    if m.get("name") == Some(&serde_json::json!("Boo")) {
-                        m.insert("color_indicator".into(), serde_json::json!(["R"]));
-                    }
-                    m.values_mut().for_each(fix);
-                }
-                serde_json::Value::Array(a) => a.iter_mut().for_each(fix),
-                _ => {}
-            }
-        }
-        fix(&mut v["printing"]);
-        let mut cards = engine::db::load_cube_document().cards;
-        cards.extend(common::custom_cards());
-        cards.push(serde_json::from_value(v).unwrap());
-        engine::db::CardDb::from_cards(&cards).leak()
-    })
-}
+const MINSC: &str = "Minsc & Boo, Timeless Heroes";
 
 fn minsc_scen() -> Scenario {
-    Scenario::new(minsc_db()).spec(|s| s.auto_single = false).library(0, &["Island"; 10]).library(1, &["Forest"; 10])
-}
-
-#[test]
-fn minsc_and_boo_is_blocked_by_its_ir() {
-    let err = engine::db::CardDb::cube().expect_id("Minsc & Boo, Timeless Heroes").unwrap_err();
-    assert!(err.contains("IR:CreateToken.token_printing.color_indicator"), "{err}");
+    scen()
 }
 
 #[test]

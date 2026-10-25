@@ -162,7 +162,25 @@ fn wasteland_and_karakas() {
 }
 
 #[test]
-fn strip_mine_is_blocked_by_its_missing_mana_ability() {
-    let err = db().expect_id("Strip Mine").unwrap_err();
-    assert!(err.contains("mana_only_from_produces"), "{err}");
+fn strip_mine_taps_for_colorless_and_destroys_any_land() {
+    // "{T}: Add {C}. / {T}, Sacrifice this land: Destroy target land." (the
+    // IR's `produces: [C]` with `mana_only_from_produces`, mtg-bot 8ea9fcca.)
+    let g = manual().battlefield(0, &["Strip Mine"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &ManaCost::parse("{C}").unwrap()));
+    assert!(g.can_pay(0, &ManaCost::parse("{1}").unwrap()));
+    assert!(!g.can_pay(0, &ManaCost::parse("{G}").unwrap()));
+    assert!(!g.can_pay(0, &ManaCost::parse("{2}").unwrap()));
+    let mut g = manual().battlefield(0, &["Strip Mine"]).battlefield(1, &["Forest", "Tropical Island"]).at(Step::Main1, 0).start();
+    let sm = g.card(0, "Strip Mine", Zone::Battlefield);
+    let forest = g.card(1, "Forest", Zone::Battlefield);
+    // Ability 0 is the {C} mana ability; ability 1 destroys any land, a
+    // basic one too (unlike Wasteland).
+    g.choose(act(sm, 1));
+    assert!(g.has_option(g.tgt(forest)));
+    g.choose(g.tgt(forest));
+    g.drive_until(at_priority);
+    settle(&mut g);
+    assert_eq!(g.count_in(1, "Forest", Zone::Graveyard), 1);
+    assert_eq!(g.count_in(0, "Strip Mine", Zone::Graveyard), 1);
+    assert_eq!(g.count_in(1, "Tropical Island", Zone::Battlefield), 1);
 }

@@ -58,7 +58,7 @@ pub(crate) enum Task {
     ManaNow { src: Src },
     ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
     /// The rest of a priority mana ability's cost (ENGINE.md 28).
-    ManaNowCosts { src: Src, sac: Option<CardIdx> },
+    ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u8 },
     // entering the battlefield (CR 614.12)
     AsEnters { card: CardIdx },
     /// Exile graveyard cards for delve (CR 702.66).
@@ -241,7 +241,7 @@ impl Game {
             Task::ChooseModes { id } => self.choose_modes(id),
             Task::ManaNow { src } => self.mana_now(src),
             Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
-            Task::ManaNowCosts { src, sac } => self.mana_now_costs(src, sac),
+            Task::ManaNowCosts { src, sac, x } => self.mana_now_costs(src, sac, x),
             Task::AsEnters { card } => self.as_enters(card),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
@@ -404,8 +404,9 @@ impl Game {
         // "Until your next turn" ends as that turn begins (CR 611.2b).
         self.players[next as usize].flash_sorceries = false;
         self.end_until_next_turn(next);
+        // ("Whenever ... this turn" ended with the turn, CR 603.7b.)
         if !self.temp_triggers.is_empty() {
-            self.temp_triggers.retain(|t| t.controller != next);
+            self.temp_triggers.retain(|t| t.controller != next && !t.this_turn);
         }
         self.resolved.clear();
         self.done_once.clear();

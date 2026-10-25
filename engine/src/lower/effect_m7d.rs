@@ -112,9 +112,84 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             }
             b.op(Op::Ext(Ext::M7d(M7d::ManifestDread)));
         }
+        // "<first>. When you do, <then>" (Ajani, Nacatl Avenger's 0): `first`
+        // happens, then a reflexive triggered ability triggers (CR 603.12);
+        // its targets are chosen as it is put on the stack. An `IfCondition`
+        // at the head of `then` is the reflexive ability's intervening "if"
+        // (603.4: "When you do, if you control a red permanent other than
+        // Ajani, ..."), checked as it triggers and as it resolves.
+        E::DoThenReflexive(nodes::DoThenReflexive { first, then }) => {
+            let (Some(first), Some(then)) = (first.as_deref(), then.as_deref()) else {
+                l.unsupported("DoThenReflexive(missing a part)");
+                return true;
+            };
+            let n = b.targets.len();
+            super::effect::lower_effect(l, b, first);
+            if b.targets.len() != n {
+                l.unsupported("DoThenReflexive.first(with targets)");
+            }
+            let (cond, effect) = match then {
+                E::IfCondition(nodes::IfCondition { condition, then }) => match super::filter::lower_condition(l, condition) {
+                    Some(c) => (Some(c), &**then),
+                    None => return true,
+                },
+                other => (None, other),
+            };
+            let mut d = Builder::default();
+            super::effect::lower_effect(l, &mut d, effect);
+            let k = match cond {
+                Some(c) => l.delayed_ability_if(d.finish(), c),
+                None => l.delayed_ability(d.finish()),
+            };
+            b.op(Op::Ext(Ext::Reflexive { k }));
+        }
+        // "Shuffle <this spell> into its owner's library" as the last
+        // instruction of its effect (Green Sun's Zenith, CR 608.2c; only as
+        // it resolves: countered, it goes to the graveyard). Checked to be
+        // the spell's last instruction (`check_self_shuffle`).
+        E::ShuffleThisSpellIntoOwnersLibrary(nodes::ShuffleThisSpellIntoOwnersLibrary {}) => {
+            b.op(Op::Ext(Ext::M7d(M7d::ShuffleThisSpellIntoLibrary)));
+        }
+        // "Whenever <event> this turn, <effect>" (Forth Eorlingas!): a
+        // delayed triggered ability with a duration (CR 603.7b), the
+        // controller's until the turn ends; each is a delayed-style ability
+        // of the card, as "until your next turn, whenever ..." (25.6).
+        E::CreateThisTurnTriggeredAbility(nodes::CreateThisTurnTriggeredAbility { triggered_abilities }) => {
+            for t in triggered_abilities {
+                if let Some(td) = super::trigger::lower_trigger(l, t, 0) {
+                    if td.event == crate::db::EventKind::Delayed || !td.pred.intervening().is_empty() {
+                        l.unsupported("CreateThisTurnTriggeredAbility(trigger shape)");
+                    }
+                    l.delayed.push(td);
+                    let k = (l.delayed.len() - 1) as u8;
+                    b.op(Op::Ext(Ext::M7d(M7d::TriggerThisTurn { k })));
+                }
+            }
+            if triggered_abilities.is_empty() {
+                l.unsupported("CreateThisTurnTriggeredAbility(none)");
+            }
+        }
         _ => return false,
     }
     true
+}
+
+/// "Shuffle this spell into its owner's library" (`ShuffleThisSpellIntoLibrary`)
+/// is the last instruction of a spell's own effect (CR 608.2c, 608.2n): in a
+/// spell ability, last (in each mode); in no other ability.
+pub(crate) fn check_self_shuffle(l: &mut Lowerer, def: &crate::db::CardDef) {
+    let is = |o: &Op| matches!(o, Op::Ext(Ext::M7d(M7d::ShuffleThisSpellIntoLibrary)));
+    let last_only = |ab: &crate::db::AbilityDef| {
+        let ok = |p: &[Op]| p.iter().position(is).is_none_or(|i| i + 1 == p.len());
+        ok(&ab.program) && ab.modes.as_ref().is_none_or(|m| m.list.iter().all(|x| ok(&x.program)))
+    };
+    let anywhere = |ab: &crate::db::AbilityDef| ab.program.iter().any(is) || ab.modes.as_ref().is_some_and(|m| m.list.iter().any(|x| x.program.iter().any(is)));
+    let spell_ok = def.spell.as_ref().is_none_or(|s| last_only(s) && (def.is(crate::db::types::INSTANT) || def.is(crate::db::types::SORCERY) || !anywhere(s)));
+    let other = def.triggers.iter().any(|t| anywhere(&t.ability))
+        || def.activated.iter().chain(&def.hand_abilities).chain(&def.gy_abilities).any(|a| matches!(&a.effect, ActEffect::Stack(ab) if anywhere(ab)));
+    if !spell_ok || other {
+        l.unsupported("ShuffleThisSpellIntoOwnersLibrary(not the last instruction of an instant or sorcery)");
+    }
 }
 
 /// Reconfigure (CR 702.151a): the printing's `reconfigure_cost` must be the

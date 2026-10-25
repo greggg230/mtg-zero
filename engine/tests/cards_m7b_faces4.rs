@@ -1,8 +1,8 @@
 //! M7b part 2 (ENGINE.md 25): cards with more than one face, part 4: Norman
 //! Osborn // Green Goblin (an MDFC that transforms; connive, mayhem), Life //
-//! Death (a split card, CR 709), Ajani, Nacatl Pariah on a copy of its IR
-//! (the cube card is blocked by its IR, ENGINE.md 25), and the encoding of
-//! faces under determinize.
+//! Death (a split card, CR 709), Ajani, Nacatl Pariah (its back face's
+//! reflexive trigger, CR 603.12), and the encoding of faces under
+//! determinize.
 
 mod common;
 
@@ -268,38 +268,13 @@ fn life_makes_your_lands_one_one_creatures_until_end_of_turn() {
     assert!(!g.is_creature(forest));
 }
 
-// ---- Ajani, Nacatl Pariah (on a copy of its IR) --------------------------------------
-//
-// The cube card is blocked by its IR (Ajani, Nacatl Avenger's 0 flattens a
-// reflexive trigger, ENGINE.md 25); the rest of the card is tested on a copy
-// of its IR under another name, where the 0 keeps the IR's shape (its target
-// chosen on activation).
+// ---- Ajani, Nacatl Pariah -------------------------------------------------------
 
-const AJANI: &str = "Test Ajani";
+const AJANI: &str = "Ajani, Nacatl Pariah // Ajani, Nacatl Avenger";
 const AVENGER: &str = "Ajani, Nacatl Avenger";
 
-fn ajani_db() -> &'static engine::db::CardDb {
-    static DB: std::sync::OnceLock<&'static engine::db::CardDb> = std::sync::OnceLock::new();
-    DB.get_or_init(|| {
-        let doc: serde_json::Value = serde_json::from_str(engine::db::CUBE_IR).unwrap();
-        let mut v = doc["cards"].as_array().unwrap().iter().find(|c| c["name"] == "Ajani, Nacatl Pariah // Ajani, Nacatl Avenger").unwrap().clone();
-        v["name"] = serde_json::json!(AJANI);
-        v["printing"]["name"] = serde_json::json!(AJANI);
-        let mut cards = engine::db::load_cube_document().cards;
-        cards.extend(common::custom_cards());
-        cards.push(serde_json::from_value(v).unwrap());
-        engine::db::CardDb::from_cards(&cards).leak()
-    })
-}
-
 fn ajani_scen() -> Scenario {
-    Scenario::new(ajani_db()).spec(|s| s.auto_single = false).library(0, &["Island"; 10]).library(1, &["Forest"; 10])
-}
-
-#[test]
-fn ajani_is_blocked_by_its_ir() {
-    let err = engine::db::CardDb::cube().expect_id("Ajani, Nacatl Pariah // Ajani, Nacatl Avenger").unwrap_err();
-    assert!(err.ends_with("is not supported: IR:IfCondition(a reflexive trigger flattened: Ajani's 0)"), "{err}");
+    scen()
 }
 
 #[test]
@@ -381,12 +356,14 @@ fn ajani_nacatl_avenger_loyalty_abilities() {
         .start();
     let av = bf(&g, 0, AVENGER);
     assert_eq!(g.counters_on(av, Counter::Loyalty), 3);
-    // 0: a Cat Warrior; with a red permanent other than Ajani (none: the
-    // Mountain is colourless) no damage.
+    // 0: a Cat Warrior. "When you do, if you control a red permanent other
+    // than Ajani" (none: the Mountain is colourless, Ajani himself doesn't
+    // count): the reflexive ability doesn't trigger, and nothing asks for a
+    // target (CR 603.4, 603.12).
     g.choose(act(av, 1));
-    resolve_with(&mut g, |g| match g.kind() {
-        Some(DecisionKind::Target) => Some(player(1)),
-        _ => None,
+    resolve_with(&mut g, |g| {
+        assert_ne!(g.kind(), Some(DecisionKind::Target), "no target without the reflexive trigger");
+        None
     });
     assert_eq!(g.count_in(0, "Cat Warrior", Zone::Battlefield), 1);
     assert_eq!(g.life(1), 20);
@@ -419,6 +396,72 @@ fn ajani_nacatl_avenger_loyalty_abilities() {
     assert_eq!(g.count_in(1, "Mind Stone", Zone::Graveyard), 1);
     assert_eq!(g.count_in(1, "Test Bear", Zone::Battlefield), 1);
     assert_eq!(g.count_in(1, "Forest", Zone::Battlefield), 1, "lands stay");
+}
+
+/// Ajani, Nacatl Avenger's 0: "Create a 2/1 white Cat Warrior creature token.
+/// When you do, if you control a red permanent other than Ajani, he deals
+/// damage equal to the number of creatures you control to any target." The
+/// token first, then a reflexive triggered ability (CR 603.12) whose target
+/// is chosen as it is put on the stack (603.3d), with an intervening "if"
+/// (603.4) checked as it triggers and again as it resolves.
+#[test]
+fn ajani_nacatl_avenger_zero_is_a_reflexive_trigger_cr603_12() {
+    let mut g = ajani_scen()
+        .battlefield(0, &[AJANI])
+        .transformed(0, AJANI)
+        .battlefield(0, &["Test Bear", "Test Hasty"])
+        .at(Step::Main1, 0)
+        .start();
+    let av = bf(&g, 0, AVENGER);
+    // No target is asked as the loyalty ability is activated.
+    g.choose(act(av, 1));
+    g.drive_until(|g| !at_priority(g) || g.stack().len() == 1);
+    assert_eq!(g.stack().len(), 1, "the loyalty ability, no target");
+    assert!(g.stack()[0].targets.is_empty());
+    // It resolves: the Cat, then the reflexive trigger asks its target.
+    g.pass();
+    g.drive_until(|g| !at_priority(g) || g.stack().is_empty());
+    assert_eq!(g.count_in(0, "Cat Warrior", Zone::Battlefield), 1);
+    assert_eq!(g.kind(), Some(DecisionKind::Target), "its target as it goes on the stack");
+    g.choose(player(1));
+    settle(&mut g);
+    // Test Bear, Test Hasty (red) and the Cat: 3 damage.
+    assert_eq!(g.life(1), 17);
+}
+
+/// The reflexive trigger's intervening "if" is checked again as it resolves
+/// (CR 603.4): the red permanent gone in response, it does nothing.
+#[test]
+fn ajani_nacatl_avenger_reflexive_trigger_checks_its_if_again_cr603_4() {
+    let mut g = ajani_scen()
+        .battlefield(0, &[AJANI])
+        .transformed(0, AJANI)
+        .battlefield(0, &["Test Hasty"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let av = bf(&g, 0, AVENGER);
+    let hasty = bf(&g, 0, "Test Hasty");
+    g.choose(act(av, 1));
+    // Both pass: the loyalty ability resolves; the trigger targets P1.
+    g.drive_until(|g| !at_priority(g) || g.stack().len() == 1);
+    g.pass();
+    g.drive_until(|g| !at_priority(g) || g.stack().is_empty());
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    g.choose(player(1));
+    g.drive_until(at_priority);
+    assert_eq!(g.stack().len(), 1, "the reflexive trigger");
+    // P0 passes; P1 bolts Test Hasty in response.
+    g.pass();
+    g.drive_until(|g| at_priority(g) && g.to_move() == Some(1));
+    let bolt = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.choose(g.tgt(hasty));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(hasty).zone, Zone::Graveyard);
+    assert_eq!(g.life(1), 20, "no red permanent other than Ajani: nothing (603.4)");
 }
 
 // ---- encoding ---------------------------------------------------------------------

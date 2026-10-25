@@ -19,6 +19,7 @@ const SUPPORTED: &[&str] = &[
     "Adeline, Resplendent Cathar",
     "Aether Spellbomb",
     "Agent Bishop, Man in Black",
+    "Ajani, Nacatl Pariah // Ajani, Nacatl Avenger",
     "Alpha Deathclaw",
     "Ancestral Recall",
     "Ancient Tomb",
@@ -77,10 +78,12 @@ const SUPPORTED: &[&str] = &[
     "Caustic Bronco",
     "Caves of Chaos Adventurer",
     "Cecil, Dark Knight // Cecil, Redeemed Paladin",
+    "Celestial Colonnade",
     "Chain Lightning",
     "Chain of Smog",
     "Chandra, Torch of Defiance",
     "Chaos Defiler",
+    "Chromatic Star",
     "Chrome Mox",
     "City of Traitors",
     "Clarion Conqueror",
@@ -102,6 +105,7 @@ const SUPPORTED: &[&str] = &[
     "Counterspell",
     "Coveted Jewel",
     "Crabomination",
+    "Creeping Tar Pit",
     "Crop Rotation",
     "Crucible of Worlds",
     "Cryogen Relic",
@@ -175,6 +179,7 @@ const SUPPORTED: &[&str] = &[
     "Forensic Gadgeteer",
     "Forest",
     "Formidable Speaker",
+    "Forth Eorlingas!",
     "Fractured Identity",
     "Frantic Search",
     "From the Catacombs",
@@ -198,6 +203,7 @@ const SUPPORTED: &[&str] = &[
     "Gollum, Riddle Master",
     "Golos, Tireless Pilgrim",
     "Goryo's Vengeance",
+    "Green Sun's Zenith",
     "Grief",
     "Grim Monolith",
     "Grindstone",
@@ -285,6 +291,7 @@ const SUPPORTED: &[&str] = &[
     "Mind Stone",
     "Mind Twist",
     "Mine Collapse",
+    "Minsc & Boo, Timeless Heroes",
     "Mishra's Bauble",
     "Mishra's Workshop",
     "Misty Rainforest",
@@ -429,6 +436,7 @@ const SUPPORTED: &[&str] = &[
     "Stock Up",
     "Stomping Ground",
     "Stoneforge Mystic",
+    "Strip Mine",
     "Subtlety",
     "Sunbaked Canyon",
     "Sunfall",
@@ -534,6 +542,7 @@ const SUPPORTED: &[&str] = &[
     "Wishclaw Talisman",
     "Witch Enchanter // Witch-Blessed Meadow",
     "Witherbloom Apprentice",
+    "Wizard's Rockets",
     "Wolverine, Fierce Fighter",
     "Wooded Foothills",
     "Woodfall Primus",
@@ -624,17 +633,60 @@ fn threat_report() {
     for (f, n, cards) in r.threat_greedy(&kinds, 40) {
         println!("  {f:<62} {n:>3}  {}", cards.join(", "));
     }
-    assert!(sup_creatures > 0 && blk_threats > 0);
+    // (Every card of the cube is supported since M7d's IR fixes.)
+    assert!(sup_creatures > 0 && sup_threats > 0 && blk_threats == 0);
 }
 
 #[test]
 fn unsupported_cards_fail_loudly() {
-    let db = CardDb::cube();
+    // A land whose IR relies on the Python engine's "any land pays one
+    // generic" fallback (no mana ability, no `mana_only_from_produces`: Strip
+    // Mine's IR before mtg-bot 8ea9fcca) is not supported, and says why.
+    let mut cards = engine::db::load_cube_document().cards;
+    let mine = cards.iter_mut().find(|c| c.name == "Strip Mine").unwrap();
+    let card_ir::cats::CardPrinting::CardPrinting(p) = &mut mine.printing;
+    p.produces.clear();
+    p.mana_only_from_produces = false;
+    let db = CardDb::from_cards(&cards);
     let err = db.expect_id("Strip Mine").unwrap_err();
     assert!(err.contains("CardPrinting.mana_only_from_produces"), "{err}");
-    let err = db.expect_id("Chromatic Star").unwrap_err();
-    assert!(err.contains("IR:TriggeredAbility.event"), "{err}");
-    assert!(db.expect_id("No Such Card").is_err());
+    assert!(CardDb::cube().expect_id("No Such Card").is_err());
+}
+
+/// The cube document with `edit` applied to card `name`'s JSON, lowered.
+fn db_with_edit(name: &str, edit: impl Fn(&mut serde_json::Value)) -> CardDb {
+    let mut doc: serde_json::Value = serde_json::from_str(engine::db::CUBE_IR).unwrap();
+    let card = doc["cards"].as_array_mut().unwrap().iter_mut().find(|c| c["name"] == name).unwrap();
+    edit(&mut card["printing"]);
+    let cards: Vec<card_ir::Card> = serde_json::from_value(doc["cards"].clone()).unwrap();
+    CardDb::from_cards(&cards)
+}
+
+#[test]
+fn ir_values_that_disagree_with_the_oracle_shape_are_blockers() {
+    // Robber of the Rich: "during any turn you attacked with a Rogue" with a
+    // this-turn duration (the IR before mtg-bot 8ea9fcca said so; the
+    // permission lasts while the card is exiled).
+    let db = db_with_edit("Robber of the Rich", |p| {
+        p["triggered_abilities"][0]["effect"]["duration"] = serde_json::json!("this_turn");
+    });
+    let err = db.expect_id("Robber of the Rich").unwrap_err();
+    assert!(err.contains("ExileTopCardsWithPlayPermission.duration(this_turn with requires_attacked_with_subtype)"), "{err}");
+    // Green Sun's Zenith: shuffling itself into its library is the last
+    // instruction of a spell, nowhere else.
+    let db = db_with_edit("Green Sun's Zenith", |p| {
+        let e = p["spell_effect"]["effects"].as_array_mut().unwrap();
+        e.reverse();
+    });
+    let err = db.expect_id("Green Sun's Zenith").unwrap_err();
+    assert!(err.contains("ShuffleThisSpellIntoOwnersLibrary(not the last instruction"), "{err}");
+    // Wizard's Rockets: "add X mana" without an {X} in the cost.
+    let db = db_with_edit("Wizard's Rockets", |p| {
+        p["activated_abilities"][0]["cost"]["mana"] = serde_json::json!({"$t": "ManaCost", "generic": 1});
+        p["activated_abilities"][0]["cost"]["mana_str"] = serde_json::json!("{1}");
+    });
+    let err = db.expect_id("Wizard's Rockets").unwrap_err();
+    assert!(err.contains("AddManaInAnyCombination.amount_is_x(no {X} in the cost)"), "{err}");
 }
 
 #[test]

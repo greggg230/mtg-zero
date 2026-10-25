@@ -806,8 +806,36 @@ impl Game {
     pub(crate) fn mana_now(&mut self, src: Src) {
         let p = self.objs[src.card.i()].controller;
         let ad = self.def_of(src.card).activated_def(src.slot);
-        let mana = self.act_mana(p, src.card, ad);
-        self.agenda.push(Task::ManaNowCosts { src, sac: None });
+        // "{X}, {T}, ...: Add X mana" (CR 107.3, 602.2b: X is announced as
+        // the ability is activated): as much as can be paid, not with the
+        // source's own mana. Choice: `ChooseMode`, `NUMBER` + X.
+        let x = if ad.x {
+            match self.answer.take() {
+                Some(Choice::Number(x)) => {
+                    self.note(|_| format!("X = {x}"));
+                    x
+                }
+                Some(other) => unreachable!("X answer {other:?}"),
+                None => {
+                    let exclude = Self::mana_exclude(src.card, ad);
+                    let classes = self.mana_classes(p, exclude);
+                    let keep = Self::keep_for(src.card, &ad.cost, exclude);
+                    let mut x = 0u8;
+                    while x < (act::NUMBER_N - 1) as u8
+                        && self.can_pay_without(p, &self.act_mana_x(p, src.card, ad, x + 1), &classes, &keep, exclude)
+                    {
+                        x += 1;
+                    }
+                    let opts = (0..=x).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k) }).collect();
+                    self.ask(Task::ManaNow { src }, p, DecisionKind::ChooseMode, opts);
+                    return;
+                }
+            }
+        } else {
+            0
+        };
+        let mana = self.act_mana_x(p, src.card, ad, x);
+        self.agenda.push(Task::ManaNowCosts { src, sac: None, x });
         if !mana.is_zero() {
             let mut pm = PayMana::new(p, mana);
             pm.keep = Self::keep_for(src.card, &ad.cost, Self::mana_exclude(src.card, ad));
@@ -817,7 +845,7 @@ impl Game {
 
     /// The rest of a priority mana ability's cost: the permanent to
     /// sacrifice (a decision), then {T}, life, the source's own costs.
-    pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>) {
+    pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>, x: u8) {
         let p = self.objs[src.card.i()].controller;
         let ad = self.def_of(src.card).activated_def(src.slot);
         if let Some(s) = &ad.cost.sacrifice {
@@ -831,7 +859,7 @@ impl Game {
                             .into_iter()
                             .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                             .collect();
-                        self.ask(Task::ManaNowCosts { src, sac }, p, DecisionKind::Sacrifice, opts);
+                        self.ask(Task::ManaNowCosts { src, sac, x }, p, DecisionKind::Sacrifice, opts);
                         return;
                     }
                 }
@@ -874,7 +902,11 @@ impl Game {
             return;
         }
         if !prods.is_empty() {
-            self.agenda.push(Task::ManaNowPick { p, prods });
+            // X mana in any combination: one mana, one choice, X times.
+            let picks = if matches!(prod, crate::db::ManaProd::ComboX { .. }) { x } else { 1 };
+            for _ in 0..picks {
+                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone() });
+            }
         }
     }
 

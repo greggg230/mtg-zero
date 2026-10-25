@@ -694,15 +694,55 @@ fn malcolm_casts_a_discarded_flashback_card_free_not_for_its_flashback_cost_cr11
     }
 }
 
-// ---- IR defects ------------------------------------------------------------
+// ---- Chromatic Star --------------------------------------------------------
 
-/// Chromatic Star's IR triggers on leaving the battlefield (it would draw when
-/// exiled or bounced); its Oracle text on being put into a graveyard (CR
-/// 700.4-style): blocked (docs/ir_defects.md 15).
+/// "{1}, {T}, Sacrifice this artifact: Add one mana of any color" (a mana
+/// ability with a mana cost: with priority, CR 605.3a) and "When this artifact
+/// is put into a graveyard from the battlefield, draw a card" (the IR's `dies`
+/// event since mtg-bot 8ea9fcca, docs/ir_defects.md 15; a leaves-the-
+/// battlefield trigger looks back, CR 603.10a): sacrificed, it draws;
+/// exiled, it doesn't.
 #[test]
-fn chromatic_star_is_blocked_by_its_ir_event() {
-    let err = engine::db::CardDb::cube().expect_id("Chromatic Star").unwrap_err();
-    assert!(err.contains("IR:TriggeredAbility.event"), "{err}");
+fn chromatic_star_draws_when_put_into_a_graveyard_not_when_exiled_cr603_10a() {
+    let mut g = scen().battlefield(0, &["Chromatic Star", "Island"]).at(Step::Main1, 0).start();
+    let s = bf(&g, 0, "Chromatic Star");
+    let hand = g.player(0).hand.len();
+    assert!(!g.can_pay(0, &cost("{R}")), "not a source while paying");
+    g.choose(act(s, 0));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{{1}} first");
+    let c = opts(&g)[0];
+    g.choose(c);
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Priority));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMana));
+    assert_eq!(opts(&g).len(), 5, "any colour");
+    g.choose(Choice::Number(3));
+    g.drive_until(at_priority);
+    assert_eq!(pool(&g, 0), [0, 0, 0, 1, 0, 0], "{{R}}");
+    assert_eq!(g.obj(s).zone, Zone::Graveyard);
+    assert_eq!(g.stack().len(), 1, "its draw trigger");
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), hand + 1);
+    // Exiled (Prismatic Ending, X = 1): no draw for its controller.
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Island"])
+        .battlefield(1, &["Chromatic Star"])
+        .hand(0, &["Prismatic Ending"])
+        .at(Step::Main1, 0)
+        .start();
+    let s = bf(&g, 1, "Chromatic Star");
+    let hand = g.player(1).hand.len();
+    let pe = g.card(0, "Prismatic Ending", Zone::Hand);
+    g.choose(Choice::Cast(pe));
+    g.drive_until(|g| !at_priority(g));
+    if g.kind() == Some(DecisionKind::ChooseMode) {
+        g.choose(Choice::Number(1));
+    }
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(s));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(s).zone, Zone::Exile);
+    assert_eq!(g.player(1).hand.len(), hand, "exiled: not put into a graveyard");
 }
 
 // ---- Time Vault ------------------------------------------------------------

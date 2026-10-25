@@ -76,6 +76,8 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         // only, like Lion's Eye Diamond (ENGINE.md 28; CR 605.3a lets a
         // player activate it then).
         if !cost.mana.is_zero()
+            // ("{X}": announced, a choice.)
+            || l.act_x
             || cost.sacrifice.is_some()
             || *exhaust
             || matches!(m.prod, ManaProd::SacrificedLand)
@@ -161,8 +163,14 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         ActEffect::Stack(ab)
     };
     let x = std::mem::take(&mut l.act_x);
-    if x && matches!(effect, ActEffect::Mana(_)) {
+    // A mana ability's {X} is the amount of mana it makes ("add X mana in any
+    // combination"); its production says X exactly when its cost has it.
+    let x_prod = matches!(&effect, ActEffect::Mana(m) if matches!(m.prod, ManaProd::ComboX { .. }));
+    if x && matches!(effect, ActEffect::Mana(_)) && !x_prod {
         l.unsupported("ActivationCost.mana.x_pips(mana ability)");
+    }
+    if x_prod && !x {
+        l.unsupported("AddManaInAnyCombination.amount_is_x(no {X} in the cost)");
     }
     if only_if.len() > 1 {
         l.unsupported("ActivatedAbility.only_if(more than one condition)");
@@ -609,13 +617,22 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             }
         }
         E::AddManaInAnyCombination(nodes::AddManaInAnyCombination { amount, options, amount_is_x }) => {
-            l.deny("AddManaInAnyCombination.amount_is_x", amount_is_x);
-            let n = l.int("AddManaInAnyCombination.amount", *amount, 1, 20) as u8;
             let mask = mask_of(l, "AddManaInAnyCombination.options", options);
-            if n == 1 {
-                ManaProd::One(mask)
+            if *amount_is_x {
+                // "Add X mana in any combination of colors" (Wizard's Rockets):
+                // X is the cost's {X}; the IR writes `amount: 0` beside the
+                // flag (docs/ir_defects.md 10), any other number disagrees.
+                if *amount != 0 {
+                    l.unsupported("AddManaInAnyCombination.amount(with amount_is_x)");
+                }
+                ManaProd::ComboX { mask }
             } else {
-                ManaProd::Combo { mask, n }
+                let n = l.int("AddManaInAnyCombination.amount", *amount, 1, 20) as u8;
+                if n == 1 {
+                    ManaProd::One(mask)
+                } else {
+                    ManaProd::Combo { mask, n }
+                }
             }
         }
         E::AddManaOfColorPerCount(nodes::AddManaOfColorPerCount { color, amount }) => {
@@ -771,7 +788,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
 /// The types a production can make (which `produces` colours it covers).
 pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
     match p {
-        ManaProd::One(m) | ManaProd::SameType { mask: m, .. } | ManaProd::Combo { mask: m, .. } => *m,
+        ManaProd::One(m) | ManaProd::SameType { mask: m, .. } | ManaProd::Combo { mask: m, .. } | ManaProd::ComboX { mask: m } => *m,
         ManaProd::Fixed(v) => (0..6).filter(|&i| v[i] > 0).fold(0, |m, i| m | (1 << i)),
         ManaProd::PerPermanent { ty, .. } => 1 << ty,
         ManaProd::ColorAmong(_) => COLORS,

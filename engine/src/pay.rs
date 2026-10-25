@@ -189,6 +189,9 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
         }
         ManaProd::OneOf(v) => v.clone(),
+        // One mana of a type in the mask per X (`activate::mana_now_costs`
+        // asks X times); also the types it could make (CR 106.7).
+        ManaProd::ComboX { mask } => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, 1)).collect(),
         ManaProd::Chosen => {
             let m = src.map_or(0, |c| g.chosen_land_color(c));
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
@@ -577,6 +580,8 @@ impl Game {
     fn yield_of(&self, p: PlayerId, prod: &ManaProd, life: u8, src: Option<CardIdx>) -> Option<Yield> {
         match prod {
             ManaProd::One(m) => Some(Yield::One(Unit { life, ..Unit::free(*m) })),
+            // (Its {X} is announced with priority only, never while paying.)
+            ManaProd::ComboX { .. } => None,
             ManaProd::Linked => {
                 let m = src.map_or(0, |c| self.linked_colors(c));
                 (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))

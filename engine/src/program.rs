@@ -131,6 +131,16 @@ pub enum M7d {
     OppExilesThreeMayCastOne { tgt: u8 },
     /// Manifest dread (CR 701.62a). Choice: `PutOntoBattlefield`.
     ManifestDread,
+    /// The resolving spell (the source, still on the stack) is shuffled into
+    /// its owner's library as an instruction of its own effect (Green Sun's
+    /// Zenith; then it isn't put into a graveyard, CR 608.2n). A spell cast
+    /// with flashback is exiled instead (702.34a, `move_card`).
+    ShuffleThisSpellIntoLibrary,
+    /// The controller gets triggered ability `k` (a delayed one of the
+    /// source definition, `delayed_base + k`) for the rest of the turn:
+    /// "whenever <event> this turn, <effect>" (a delayed triggered ability
+    /// with a duration, CR 603.7b; Forth Eorlingas!).
+    TriggerThisTurn { k: u8 },
 }
 
 /// Which objects an `Ext` op acts on.

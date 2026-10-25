@@ -313,6 +313,12 @@ impl Game {
                 && (!copied || has_or_copy(&t.pred))
                 && self.pred_matches(&t.pred, &ev, o)
                 && !self.done_once.contains(&(tt.source, tt.slot))
+                // "Whenever one or more ...": once per simultaneous batch.
+                && !(self.batching
+                    && has_batch(&t.pred)
+                    && self.waiting[self.batch_start.min(self.waiting.len())..]
+                        .iter()
+                        .any(|w| w.source == tt.source && w.slot == tt.slot))
             {
                 self.waiting.push(PendingTrigger {
                     controller: tt.controller,
@@ -358,7 +364,7 @@ impl Game {
                 };
                 (who == src.controller) == *you
             }
-            TrigPred::If(c) | TrigPred::State(c) => self.cond_holds(c, src.controller),
+            TrigPred::If(c) | TrigPred::State(c) => self.cond_holds_from(c, src.controller, Some(src.r)),
             TrigPred::Source(f) => {
                 let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r), spell: false };
                 self.live(src.r) && self.subject_matches(f, src.r.idx, &ctx)
@@ -578,11 +584,12 @@ impl Game {
     }
 
     /// CR 603.4: a triggered ability with an intervening "if" does nothing
-    /// on resolution unless the condition still holds.
-    pub(crate) fn intervening_holds(&self, ability: AbilityRef, controller: PlayerId) -> bool {
+    /// on resolution unless the condition still holds (for its source: "a
+    /// red permanent other than Ajani").
+    pub(crate) fn intervening_holds(&self, ability: AbilityRef, controller: PlayerId, source: crate::ids::ObjRef) -> bool {
         let AbilitySlot::Trigger(i) = ability.slot else { return true };
         let t = &self.db.def(ability.def).triggers[i as usize];
-        t.pred.intervening().into_iter().all(|c| self.cond_holds(c, controller))
+        t.pred.intervening().into_iter().all(|c| self.cond_holds_from(c, controller, Some(source)))
     }
 
     /// `t` became the target of the spell or ability of stack item `id`

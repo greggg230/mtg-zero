@@ -517,7 +517,7 @@ fn spec_parsing() {
         DeckMode::Lists(a, b) => assert_eq!((a.len(), b.len()), (2, 1)),
         other => panic!("{other:?}"),
     }
-    assert!(MtgSpec::parse(r#"{"decks": {"p0": ["Strip Mine"], "p1": []}}"#).unwrap_err().contains("not supported"));
+    assert!(MtgSpec::parse(r#"{"decks": {"p0": ["No Such Card"], "p1": []}}"#).unwrap_err().contains("unknown card"));
     assert!(MtgSpec::parse(r#"{"nope": 1}"#).is_err());
     assert!(MtgSpec::parse(r#"{"max_turns": 0}"#).is_err());
     assert_eq!(MtgSpec::parse(r#"{"decks": "eval"}"#).unwrap().decks, DeckMode::Eval);

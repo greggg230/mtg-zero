@@ -856,6 +856,10 @@ pub enum ManaProd {
     SameType { mask: ManaMask, n: u8 },
     /// n mana in any combination of types in the mask (Relic of Sauron).
     Combo { mask: ManaMask, n: u8 },
+    /// X mana in any combination of types in the mask, X announced as the
+    /// ability is activated (its cost's {X}, CR 107.3; Wizard's Rockets).
+    /// With priority only (ENGINE.md 28.1): one `ChooseMana` per mana.
+    ComboX { mask: ManaMask },
     /// One mana of type `ty` per permanent you control matching the filter
     /// (Gaea's Cradle).
     PerPermanent { ty: u8, filter: Filter },

@@ -19,7 +19,6 @@ fn at_priority(g: &Game) -> bool {
     g.kind() == Some(DecisionKind::Priority)
 }
 
-#[allow(dead_code)]
 fn act(c: CardIdx, i: u8) -> Choice {
     Choice::Ability(c, AbilitySlot::Activated(i))
 }
@@ -226,13 +225,58 @@ fn pest_infestation_up_to_x_targets_and_twice_x_pests_cr601_2c() {
     assert_eq!(g.pt(pests[0]), (1, 1));
 }
 
-/// "When this artifact is put into a graveyard from the battlefield, draw a
-/// card": the IR's event is `leaves_battlefield` (as Chromatic Star's);
-/// blocked (docs/ir_defects.md 15).
+// ---- Wizard's Rockets --------------------------------------------------------
+
+/// "This artifact enters tapped. {X}, {T}, Sacrifice this artifact: Add X
+/// mana in any combination of colors. When this artifact is put into a
+/// graveyard from the battlefield, draw a card." X is announced as the mana
+/// ability is activated (CR 107.3, 602.2b; with priority, 605.3a): as much
+/// as the controller can pay without the Rockets; then one colour per mana.
+/// The draw is the `dies` event (docs/ir_defects.md 18).
 #[test]
-fn wizards_rockets_is_blocked_by_its_ir_event() {
-    let err = engine::db::CardDb::cube().expect_id("Wizard's Rockets").unwrap_err();
-    assert!(err.contains("IR:TriggeredAbility.event"), "{err}");
+fn wizards_rockets_x_mana_in_any_combination_cr107_3_and_draws_when_sacrificed() {
+    // Cast: it enters tapped.
+    let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Wizard's Rockets"]).at(Step::Main1, 0).start();
+    let r = g.card(0, "Wizard's Rockets", Zone::Hand);
+    g.choose(Choice::Cast(r));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(g.obj(r).tapped, "enters tapped");
+    // X = 2 from two lands: {G} and {R}; it is sacrificed and draws.
+    let mut g = scen().battlefield(0, &["Wizard's Rockets", "Island", "Island"]).at(Step::Main1, 0).start();
+    let r = bf(&g, 0, "Wizard's Rockets");
+    let hand = g.player(0).hand.len();
+    assert!(!g.can_pay(0, &engine::mana::ManaCost::parse("{3}").unwrap()), "not a source while paying");
+    g.choose(act(r, 0));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "X first");
+    let xs: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(xs, vec![Choice::Number(0), Choice::Number(1), Choice::Number(2)], "the two Islands pay up to 2");
+    g.choose(Choice::Number(2));
+    while g.kind() == Some(DecisionKind::PayMana) {
+        let c = g.pending_decision().unwrap().options[0].choice;
+        g.choose(c);
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMana));
+    assert_eq!(g.pending_decision().unwrap().options.len(), 5, "one mana of any colour");
+    g.choose(Choice::Number(4));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMana), "the second mana");
+    g.choose(Choice::Number(3));
+    g.drive_until(at_priority);
+    assert_eq!(g.player(0).pool.amt, [0, 0, 0, 1, 1, 0], "{{R}}{{G}}");
+    assert_eq!(g.obj(r).zone, Zone::Graveyard);
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), hand + 1, "put into a graveyard: draw");
+    // X = 0: no mana, still sacrificed, still a draw.
+    let mut g = scen().battlefield(0, &["Wizard's Rockets"]).at(Step::Main1, 0).start();
+    let r = bf(&g, 0, "Wizard's Rockets");
+    g.choose(act(r, 0));
+    let xs = g.pending_decision().unwrap().options.len();
+    assert_eq!(xs, 1, "X = 0 only");
+    g.choose(Choice::Number(0));
+    g.drive_until(at_priority);
+    assert_eq!(g.player(0).pool.amt, [0; 6]);
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), 1);
 }
 
 /// Pass, decline attacks and blocks, first option otherwise, until `stop`.

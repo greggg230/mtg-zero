@@ -495,6 +495,9 @@ impl Game {
         }
         for t in &self.temp_triggers {
             v.extend([t.controller as u64, t.source_def as u64, t.slot as u64]);
+            if t.this_turn {
+                v.push(1 << 40);
+            }
         }
         for &c in &self.gy_exile {
             v.push(place(c));

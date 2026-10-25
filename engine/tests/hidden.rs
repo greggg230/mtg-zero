@@ -32,9 +32,17 @@ fn public_view(g: &Game) -> Vec<u64> {
     v
 }
 
+/// The cards `owner` owns, by identity: a face-down permanent counts as the
+/// card it is (`Game::ident`; determinize may give that identity to another
+/// of the owner's hidden cards, ENGINE.md 31.2).
 fn defs_of(g: &Game, owner: PlayerId) -> Vec<u16> {
-    let mut d: Vec<u16> =
-        g.objs().iter().filter(|o| o.owner == owner).map(|o| o.def).collect();
+    let mut d: Vec<u16> = g
+        .objs()
+        .iter()
+        .enumerate()
+        .filter(|(_, o)| o.owner == owner)
+        .map(|(i, _)| g.ident(CardIdx(i as u16)))
+        .collect();
     d.sort();
     d
 }

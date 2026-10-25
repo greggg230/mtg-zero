@@ -430,6 +430,63 @@ fn manland_layer_4_type_and_7b_base_pt_until_end_of_turn() {
     assert!(!g.is_creature(v));
 }
 
+/// "{3}{W}{U}: Until end of turn, this land becomes a 4/4 white and blue
+/// Elemental creature with flying and vigilance. It's still a land." (layer
+/// 4 type and subtype, 5 colour, 6 abilities, 7b base P/T; CR 205.1b, 611.)
+/// The IR has the colours and the Elemental since mtg-bot 8ea9fcca
+/// (docs/ir_defects.md 2).
+#[test]
+fn celestial_colonnade_becomes_a_white_and_blue_elemental_until_end_of_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Celestial Colonnade", "Plains", "Plains", "Island", "Island", "Island"])
+        .hand(0, &["Celestial Colonnade"])
+        .at(Step::Main1, 0)
+        .start();
+    // "This land enters tapped."
+    let h = g.card(0, "Celestial Colonnade", Zone::Hand);
+    g.choose(Choice::Play(h));
+    assert!(g.obj(h).tapped);
+    let c = bf(&g, 0, "Celestial Colonnade");
+    assert!(!g.is_creature(c) && g.colors_of(c) == 0);
+    g.choose(act(c, 1));
+    settle(&mut g);
+    let elemental = db().subtype_id("Elemental").unwrap();
+    assert!(g.is_creature(c) && g.is_type(c, engine::db::types::LAND));
+    assert_eq!(g.pt(c), (4, 4));
+    assert!(g.has_kw(c, Kw::Flying) && g.has_kw(c, Kw::Vigilance));
+    assert_eq!(g.colors_of(c), 0b00011, "white and blue");
+    assert!(g.has_subtype(c, elemental));
+    quiet_until(&mut g, |g| g.turn().active == 1);
+    assert!(!g.is_creature(c) && g.colors_of(c) == 0 && !g.has_subtype(c, elemental));
+}
+
+/// "{1}{U}{B}: Until end of turn, this land becomes a 3/2 blue and black
+/// Elemental creature. It's still a land. It can't be blocked this turn."
+#[test]
+fn creeping_tar_pit_becomes_an_unblockable_blue_and_black_elemental() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Swamp", "Swamp", "Creeping Tar Pit"])
+        .battlefield(1, &["Test Wall"])
+        .at(Step::Main1, 0)
+        .start();
+    let t = bf(&g, 0, "Creeping Tar Pit");
+    g.choose(act(t, 1));
+    settle(&mut g);
+    assert!(!g.obj(t).tapped, "paid with the other lands");
+    assert_eq!(g.pt(t), (3, 2));
+    assert_eq!(g.colors_of(t), 0b00110, "blue and black");
+    assert!(g.has_subtype(t, db().subtype_id("Elemental").unwrap()));
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Card(t));
+    g.choose(Choice::Pass);
+    // The Wall can't block it (CR 509.1b): no block is offered.
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers) || g.turn().step == Step::EndCombat);
+    // (A blocker's options are the attackers it may block.)
+    assert!(g.kind() != Some(DecisionKind::DeclareBlockers) || !g.has_option(Choice::Card(t)), "{:?}", g.options_desc());
+    quiet_until(&mut g, |g| g.turn().step == Step::EndCombat);
+    assert_eq!(g.life(1), 17);
+}
+
 #[test]
 fn cr_122_1d_stun_counters_and_502_3_doesnt_untap() {
     let mut g = scen().battlefield(0, &["Grim Monolith", "Forest"]).hand(0, &["Baloth Prime"]).at(Step::Main1, 0).start();

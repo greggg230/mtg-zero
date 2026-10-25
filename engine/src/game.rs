@@ -391,14 +391,16 @@ pub struct Link {
     pub until_monarch: Option<PlayerId>,
 }
 
-/// A triggered ability a player has for a while (until their next turn):
-/// trigger `slot` of definition `source_def`, created by `source`.
+/// A triggered ability a player has for a while (until their next turn, or
+/// `this_turn`: until the turn ends): trigger `slot` of definition
+/// `source_def`, created by `source`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TempTrigger {
     pub controller: PlayerId,
     pub source: ObjRef,
     pub source_def: DefId,
     pub slot: u8,
+    pub this_turn: bool,
 }
 
 /// A delayed triggered ability (CR 603.7): it triggers once, at `when`.

@@ -145,6 +145,15 @@ impl Lowerer<'_> {
         });
         (self.delayed.len() - 1) as u8
     }
+
+    /// [`delayed_ability`](Self::delayed_ability) with an intervening "if"
+    /// (CR 603.4): a reflexive ability that triggers only if `cond` holds,
+    /// checked again as it resolves (`TrigPred::If`).
+    pub fn delayed_ability_if(&mut self, ability: crate::db::AbilityDef, cond: crate::db::Cond) -> u8 {
+        let k = self.delayed_ability(ability);
+        self.delayed[k as usize].pred = crate::db::TrigPred::If(cond);
+        k
+    }
 }
 
 impl Lowerer<'_> {
@@ -200,39 +209,9 @@ impl Lowerer<'_> {
 
 /// IR defects found by reading cards' IR against their Oracle text (ENGINE.md
 /// 20, 24.8): what the IR lost cannot be lowered from it, so the card stays
-/// blocked, with this blocker, until the IR is fixed in mtg-bot.
-const IR_DEFECTS: &[(&str, &str)] = &[
-    // "Boo, a legendary 1/1 red Hamster creature token": the IR's token
-    // printing has no colour indicator (it would be colourless).
-    ("Minsc & Boo, Timeless Heroes", "IR:CreateToken.token_printing.color_indicator(Boo is red)"),
-    // Ajani, Nacatl Avenger's 0: "Create a 2/1 white Cat Warrior creature
-    // token. When you do, if you control a red permanent other than Ajani,
-    // he deals damage ... to any target": the IR flattens the reflexive
-    // triggered ability (CR 603.12) into an IfCondition of the loyalty
-    // ability, whose target would be chosen on activation.
-    ("Ajani, Nacatl Pariah // Ajani, Nacatl Avenger", "IR:IfCondition(a reflexive trigger flattened: Ajani's 0)"),
-    // "When this artifact is put into a graveyard from the battlefield, draw
-    // a card": the IR's event is `leaves_battlefield` (it would draw when
-    // the Star is exiled or bounced too); the IR's `dies` event is "put
-    // into a graveyard from the battlefield" (Titania's lands).
-    ("Chromatic Star", "IR:TriggeredAbility.event(leaves_battlefield for \"put into a graveyard\")"),
-    // "Whenever one or more creatures you control deal combat damage to one
-    // or more players this turn, you become the monarch": the IR writes
-    // "one or more" as `once_per_turn` (one combat per turn in the Python
-    // model), which is "this ability triggers only once each turn"; the
-    // Oracle text triggers once per combat damage step (first strike,
-    // extra combats).
-    ("Forth Eorlingas!", "IR:TriggeredAbility.once_per_turn(\"one or more\" written as once each turn)"),
-    // "Shuffle Green Sun's Zenith into its owner's library" (the last
-    // instruction of its effect): the IR writes it as Nexus of Fate's
-    // replacement "if it would be put into a graveyard from anywhere"
-    // (countered, discarded or milled, it would go to the library too).
-    ("Green Sun's Zenith", "IR:StaticAbility.replacement_effect(\"shuffle it into its library\" as a replacement from anywhere)"),
-    // "When this artifact is put into a graveyard from the battlefield, draw
-    // a card" (Wizard's Rockets): `leaves_battlefield` in the IR, as
-    // Chromatic Star's (it would draw when exiled or bounced too).
-    ("Wizard's Rockets", "IR:TriggeredAbility.event(leaves_battlefield for \"put into a graveyard\")"),
-];
+/// blocked, with this blocker, until the IR is fixed in mtg-bot. Empty since
+/// the IR of mtg-bot feature/ir-fixes-mtgzero 8ea9fcca (docs/ir_defects.md).
+const IR_DEFECTS: &[(&str, &str)] = &[];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.
 pub fn lower_card(

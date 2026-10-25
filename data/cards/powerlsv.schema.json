@@ -149,6 +149,7 @@
    "DiscardThenDrawTokensPerNonland",
    "DiscardUpToNThenDrawThatMany",
    "DiscardYourHand",
+   "DoThenReflexive",
    "DoublePlusOneCountersOnEach",
    "DrawCards",
    "DrawCardsPerCounterOnSource",
@@ -357,6 +358,7 @@
    "SetBasePTUntilEOT",
    "ShuffleSourceIntoOwnersLibrary",
    "ShuffleThenExileTopMayPlayFree",
+   "ShuffleThisSpellIntoOwnersLibrary",
    "ShuffleYourLibrary",
    "SourceBecomesCopyOfTargetGraveyardCardUEOT",
    "SourceBecomesIfSubtype",
@@ -7586,6 +7588,46 @@
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "DiscardYourHand"
   },
+  "DoThenReflexive": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "object",
+     "default": null,
+     "name": "first",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "object",
+     "default": null,
+     "name": "then",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.cube_creatures_rmc",
+   "qualname": "DoThenReflexive"
+  },
   "DomainPT": {
    "category": "PTFormula",
    "fields": [],
@@ -14769,6 +14811,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_ub",
    "qualname": "ShuffleThenExileTopMayPlayFree"
+  },
+  "ShuffleThisSpellIntoOwnersLibrary": {
+   "category": "Effect",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.card_flow",
+   "qualname": "ShuffleThisSpellIntoOwnersLibrary"
   },
   "ShuffleYourLibrary": {
    "category": "Effect",

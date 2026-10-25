@@ -480,7 +480,13 @@ impl Game {
             }
         }
         // CR 510.3a: "deals combat damage to a player [or planeswalker]"
-        // triggers (their predicates say which recipients count).
+        // triggers (their predicates say which recipients count). The damage
+        // of one step is dealt at once: "whenever one or more creatures deal
+        // combat damage" triggers once for it (a batch, `TrigPred::Batch`).
+        let batch = !self.batching;
+        if batch {
+            self.begin_batch();
+        }
         for (r, p, n) in to_players {
             self.event(Event {
                 kind: EventKind::DealsCombatDamage,
@@ -496,6 +502,9 @@ impl Game {
                 b: Subj::Obj(o),
                 amount: n.min(u16::MAX as i32) as u16,
             });
+        }
+        if batch {
+            self.end_batch();
         }
     }
 

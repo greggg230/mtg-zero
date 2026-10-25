@@ -468,6 +468,31 @@ impl Game {
                 Flow::Suspend
             }
             M7d::ManifestDread => self.manifest_dread(f),
+            M7d::ShuffleThisSpellIntoLibrary => {
+                // (Only the spell itself, still on the stack: CR 608.2n then
+                // has nothing to put into a graveyard.)
+                let c = f.source.idx;
+                if self.live(f.source) && self.objs[c.i()].zone == Zone::Stack {
+                    let owner = self.objs[c.i()].owner;
+                    self.move_card(c, Zone::Library, crate::game::Pos::Top);
+                    if self.objs[c.i()].zone == Zone::Library {
+                        self.shuffle_library(owner);
+                        self.note(|g| format!("{} is shuffled into P{owner}'s library", g.name(c)));
+                    }
+                }
+                Flow::Next
+            }
+            M7d::TriggerThisTurn { k } => {
+                let slot = self.db.def(f.source_def).delayed_base + k;
+                self.temp_triggers.push(crate::game::TempTrigger {
+                    controller: f.controller,
+                    source: f.source,
+                    source_def: f.source_def,
+                    slot,
+                    this_turn: true,
+                });
+                Flow::Next
+            }
             M7d::UnattachSource => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     let c = f.source.idx;

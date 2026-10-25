@@ -206,17 +206,6 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         // "You take the initiative." (An instant: the initiative at instant
         // speed, CR 701.49c.)
         spell("Test Initiative", "Instant", cost("{U}"), json!({"$t": "TakeInitiative"}), none.clone()),
-        // "Search your library for a green creature card with mana value X
-        // or less, put it onto the battlefield, then shuffle." (Green Sun's
-        // Zenith without its last sentence, which its IR misstates:
-        // docs/ir_defects.md 17.)
-        spell(
-            "Test Green Sun",
-            "Sorcery",
-            json!({"$t": "ManaCost", "colored": [["G", 1]], "x_pips": 1}),
-            json!({"$t": "SearchLibraryForGreenCreatureWithMVAtMostX"}),
-            none.clone(),
-        ),
         // "This spell costs {1} less to cast for each artifact you control.
         // You may pay {2}{U} rather than pay this spell's mana cost. Draw a
         // card." (A reduction applies to an alternative cost, CR 601.2f.)

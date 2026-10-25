@@ -1309,9 +1309,14 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let attacked_subtype =
                 (!requires_attacked_with_subtype.is_empty()).then(|| l.subtype(requires_attacked_with_subtype));
             // "During any turn you attacked with a Rogue": while it stays
-            // exiled (the IR keeps the default duration).
+            // exiled (`while_exiled`), not this turn only.
             let this_turn = match duration {
-                enums::ExilePlayDuration::ThisTurn => attacked_subtype.is_none(),
+                enums::ExilePlayDuration::ThisTurn => {
+                    if attacked_subtype.is_some() {
+                        l.unsupported("ExileTopCardsWithPlayPermission.duration(this_turn with requires_attacked_with_subtype)");
+                    }
+                    true
+                }
                 enums::ExilePlayDuration::WhileExiled => false,
                 // "You may play that card until your next end step" (Inti).
                 enums::ExilePlayDuration::UntilYourNextEndStep if free_if.is_none() && attacked_subtype.is_none() => {
