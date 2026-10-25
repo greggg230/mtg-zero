@@ -353,6 +353,8 @@ fn encoding_slots_name_the_action_slots() {
                 let want = match o.choice {
                     engine::Choice::Def(d) => ident(d),
                     engine::Choice::Card(c) => ident(g.g.obj(c).def),
+                    // Bolas's Citadel: cast or play the top card (LIBRARY + 0)
+                    engine::Choice::Cast(c) | engine::Choice::Play(c) => ident(g.g.obj(c).def),
                     _ => unreachable!(),
                 };
                 assert_eq!(decode_id(&x[off..off + CODE]), want);
@@ -427,7 +429,7 @@ fn token_registry_and_stable_identities() {
         let d = db.def(i as engine::ids::DefId);
         let id = ids[i] as usize;
         assert!(id != identity::UNKNOWN as usize, "{} has no identity", d.name);
-        if d.token || d.rules {
+        if d.token || d.rules || i as engine::ids::DefId == db.face_down_def() {
             assert!((identity::CUBE_CAP..identity::D - 1).contains(&id));
         } else if d.emblem {
             // an emblem (CR 114) has the identity of the card that makes it

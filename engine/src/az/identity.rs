@@ -123,6 +123,11 @@ fn compute(db: &CardDb) -> Vec<u16> {
             // token (Sunfall's Incubator, ENGINE.md 28).
             match d.front {
                 Some(f) => of(db.def(f)),
+                // A face-down permanent's characteristics (CR 708.2a, ENGINE.md
+                // 31): no name, so a registry key like a token's.
+                None if i as DefId == db.face_down_def() => {
+                    reg.get(token_key(db, d).as_str()).map_or(UNKNOWN, |&k| CUBE_CAP as u16 + k)
+                }
                 None => of(d),
             }
         })

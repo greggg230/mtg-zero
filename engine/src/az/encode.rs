@@ -909,6 +909,19 @@ impl Game {
                     .unwrap_or(opp(p));
                 self.hand_sorted(owner)
             }
+            // Bolas's Citadel (ENGINE.md 31): the top card of the decider's
+            // library, which they may look at any time, cast or played at
+            // `LIBRARY` + 0.
+            K::Priority => d
+                .options
+                .iter()
+                .find_map(|o| match o.choice {
+                    crate::decision::Choice::Cast(c) | crate::decision::Choice::Play(c) if o.action == act::LIBRARY => {
+                        Some(vec![c])
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default(),
             _ => Vec::new(),
         };
         cards.iter().map(|c| self.objs[c.i()].def).collect()
