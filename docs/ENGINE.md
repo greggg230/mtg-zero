@@ -1,6 +1,9 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7d (the last cards that needed subsystems: face-down permanents and manifest dread, plot,
+Status: M7d's IR fixes (the IR of mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: the last 9 cards; 546 supported cube cards, all of
+the cube; reflexive triggers with an intervening "if", "this turn" triggered abilities, a spell
+shuffling itself into its library, mana abilities with {X}; section 32), 2026-10-25; M7d (the last
+cards that needed subsystems: face-down permanents and manifest dread, plot,
 an opening-hand action, shadow and void counters, reconfigure, Class levels, a granted target
 trigger with a limit, a card name chosen as it enters, a mana ability that taps another
 permanent, exert and haste mana, emerge, the top card looked at and cast for life, a granted
@@ -721,6 +724,12 @@ Infestation; Quantum Riddler; Shelldock Isle; Sowing Mycospawn; Sword of the Mee
 Thieving Skydiver; Through the Breach; Toxic Deluge; Vicious Rivalry; Wan Shi Tong, All-Knowing;
 Winds of Abandon; Worldspine Wurm.
 
+Implemented with M7d's IR fixes (section 32): reflexive triggered abilities after an action
+that isn't optional, with an intervening "if" (603.12, 603.4); "whenever ... this turn"
+(603.7b); a combat damage step as one batch for "one or more" triggers; a spell's instruction
+shuffling the spell into its owner's library (608.2c); mana abilities with {X} making X mana in
+any combination (107.3, 605.3a).
+
 Implemented (M7d, section 31): face-down permanents (CR 708: a 2/2 with no text in every rule and
 layer, a hidden identity, turning face up as a special action, revealed as it leaves) and manifest
 dread (701.62), special actions (116.2: plot 702.170, turning face up), an opening-hand action
@@ -734,9 +743,12 @@ exile on a permanent spell. New in M7d (13): Abhorrent Oculus; Anointed Peacekee
 Glory; Bolas's Citadel; Crabomination; Dauthi Voidwalker; Does Machines; Gemstone Caverns; Lion
 Sash; Nadu, Winged Wisdom; Pillage the Bog; Rain of Filth; Urza, Lord High Artificer.
 
-Supported cube cards: 537 (M7c tail part 3: 524, M7c tail part 2: 491, M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
-191, M4b-1: 133, M4a: 31); creatures 208 by their front faces (M7c tail part 3: 201, M7c tail part 2: 184, M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
-M7b part 1: 113, M4b-2: 20); planeswalkers 19 (Jace's and Tamiyo's back faces not counted). New in
+Supported cube cards: 546, the whole cube (M7d: 537, M7c tail part 3: 524, M7c tail part 2: 491, M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
+191, M4b-1: 133, M4a: 31); creatures 209 by their front faces (M7d: 208, M7c tail part 3: 201, M7c tail part 2: 184, M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
+M7b part 1: 113, M4b-2: 20); planeswalkers 20 (Jace's, Tamiyo's and Ajani's back faces not counted). New with M7d's IR
+fixes (9, section 32): Ajani, Nacatl Pariah; Celestial Colonnade; Chromatic Star; Creeping Tar
+Pit; Forth Eorlingas!; Green Sun's Zenith; Minsc & Boo, Timeless Heroes; Strip Mine; Wizard's
+Rockets. New in
 M7b part 3b (28): Boseiju, Who Endures; Brain Freeze; Caves of Chaos Adventurer; Ertai
 Resurrected; Fallen Shinobi; Fanatic of Rhonas; Feywild Caretaker; Forensic Gadgeteer; From the
 Catacombs; Hexing Squelcher; Invert Polarity; Kappa Cannoneer; Leovold, Emissary of Trest; Occult
@@ -814,7 +826,7 @@ Caryatid, the six Talismans, Time Warp, Unholy Heat, Vindicate, Voltaic Key, Whe
 Fortune, Wrath of God, Zuran Orb. The exact list is `tests/support.rs::SUPPORTED`.
 
 Not yet (later milestones; each is a blocker in the support report, never a silent no-op; no
-cube card is blocked by them since M7d: the 9 cube cards still blocked are IR defects, 31.9):
+cube card is blocked by them: since M7d's IR fixes every cube card is supported, section 32):
 face-down permanents other than manifested ones (morph, disguise, cloak; face-down spells),
 battles, meld, flip cards, convert, "cast transformed", read ahead, fuse, dungeons other than
 Undercity ("venture into the dungeon"), ward that discards at random or that an Aura or Equipment
@@ -866,9 +878,9 @@ Deliberate simplifications and limits (each is small and local to change):
   mana sources) is a player decision, not "first legal" or "always yes".
 * The Python engine's "any land pays one generic" fallback has no counterpart: lands pay only
   through their mana abilities. A land with no mana ability in the IR and without
-  `mana_only_from_produces` relies on that fallback; the only one is Strip Mine (its IR lacks
-  "{T}: Add {C}", an IR defect to fix in mtg-bot), which is therefore blocked
-  (`CardPrinting.mana_only_from_produces(land without a mana ability)`).
+  `mana_only_from_produces` relies on that fallback and is blocked
+  (`CardPrinting.mana_only_from_produces(land without a mana ability)`); the only one was Strip
+  Mine, whose IR has its "{T}: Add {C}" since mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (section 32).
 * Paying life (CR 119.4): a player may pay life equal to their life total (Griselbrand at 7,
   a shock land at 2, Mana Confluence at 1). Python requires strictly more.
 * Mana abilities: Python offers explicit mana abilities as actions in sorcery windows and pays
@@ -922,8 +934,8 @@ Deliberate simplifications and limits (each is small and local to change):
   resolution.
 * M7a: Leatherhead's "that player controls": the player dealt combat damage (the opponent
   in two-player games).
-* M7a: Robber of the Rich lasts while the card is exiled (the Oracle text; the IR's default
-  "this turn", 23.10), as in Python.
+* M7a: Robber of the Rich lasts while the card is exiled (the Oracle text; since M7d's IR fixes
+  the IR's `while_exiled`, 32), as in Python.
 * M7b: attacking planeswalkers. Python attacks only players ("attacking a planeswalker isn't
   modeled"); here each attacking creature attacks the player or a planeswalker its
   controller chooses (508.1b), and combat damage, trample and "deals combat damage to a
@@ -1041,6 +1053,12 @@ Deliberate simplifications and limits (each is small and local to change):
   Oracle text).
 * M7b part 3b: improvise (702.126). Python taps artifacts automatically to pay; here each
   artifact tapped is a payment decision.
+* M7d's IR fixes (32): Ajani, Nacatl Avenger's reflexive trigger chooses its target as it is put
+  on the stack and checks its "if" as it triggers (603.12, 603.3d, 603.4); Python chooses the
+  target with the loyalty ability and checks the condition on resolution only. Forth Eorlingas!
+  triggers once per combat damage step (a first-strike step and the regular one each, 510.4);
+  Python resolves both steps without a priority pass between them, so one trigger covers both.
+  Wizard's Rockets: one `ChooseMana` decision per mana of its X.
 
 ## 15. Tests
 
@@ -1057,16 +1075,16 @@ they isolate one keyword or trigger each.
 | `tests/rules_combat.rs` | 302.6 / 702.10, 508.1f / 702.3b, 509.1b, 702.110b, 510.1c, 702.19c, 702.4, 702.7, 702.15, 508.8, 506.4 / 702.19e |
 | `tests/rules_triggers.rs` | 603.3, 603.3b (APNAP, ordering decision), 603.3d (targets; removal without target), 603.10a |
 | `tests/rules_activated.rs` | 602.2a (on the stack before targets and costs), 602.2 (targets before a sacrifice cost; the source gone while its ability waits), 605 (mana abilities while paying, not at priority), 302.6 (tap abilities and summoning sickness, haste; non-tap and noncreature abilities), 602.5d, 602.5b, 106 (excess mana stays; Black Lotus's colour), 601.2g (activation order: Mox Opal before Black Lotus), a card's mana abilities are alternatives (Talisman damage), 119.4, 107.4f (Phyrexian), 107.4e (hybrid) and a mana choice on resolution, 601.2b (additional-cost options), sacrifice reservations, Lion's Eye Diamond, cycling, "you may", indestructible, hexproof; 605.3a (a Spirit Guide while paying, also an "unless pays" cost during resolution; revealed when picked), a hand mana source leaves the cards a discard cost needs |
-| `tests/rules_lands.rs` | 614.1c (enters tapped; fast lands), 614.12 (shock lands, 119.4 at 1 and 2 life), Starting Town, horizon lands, Gaea's Cradle, Ancient Tomb, Wasteland, Karakas, Strip Mine blocked |
+| `tests/rules_lands.rs` | 614.1c (enters tapped; fast lands), 614.12 (shock lands, 119.4 at 1 and 2 life), Starting Town, horizon lands, Gaea's Cradle, Ancient Tomb, Wasteland, Karakas, Strip Mine ({C}; destroys a basic land too) |
 | `tests/cards.rs` | the cube cards: Mana Leak (pay / decline / cannot pay), Memory Lapse, Counterspell, Spell Pierce, Brainstorm (mid-resolution choices, a clone taken mid-resolution), Ancestral Recall, Dark Ritual + Hymn (pool, keyed random discard), Time Walk, Cut Down / Flame Slash filters, Cogwork Librarian, mana-source classes |
 | `tests/cards_m4b1.rs` | Swords to Plowshares (last known power), Fatal Push (resolution check; revolt from a Lotus Petal sacrificed for mana), Unholy Heat (delirium), Cabal Ritual (threshold counted while on the stack), Abrupt Decay vs Counterspell, Oust, Remand / No More Lies, Time Warp on the opponent (500.7), Wheel of Fortune, Relic of Sauron, Zuran Orb, Voltaic Key, Aether Spellbomb, Mox Amber, Loran of the Third Path |
 | `tests/rules_library.rs` | 701.19c (must find "a card"; nothing in an empty library), 701.19b (may fail; revealed on top), Vampiric Tutor (known to its owner only), Entomb, fetch lands (land types, a shock land's choice first), Path to Exile (the creature's controller may search; no search, no shuffle), typecycling, a search decision unchanged under its searcher's determinize, 701.20 (a shuffle keeps "in the library", not where), 701.18 scry (looks keyed and masked; bottom and top order), 701.42 surveil (and a surveil land), Ponder, Stock Up (sets in canonical order, no impossible pick), Sensei's Divining Top, a scry of a revealed card (a cloud over the scried cards) |
 | `tests/cards_m4b2.rs` | Duress (revealed hand, keys, filter, known until it changes), Thoughtseize, Inquisition, Gitaxian Probe (private look, masked keys), a seen hand partly put back (cloud), 700.2a (modes before targets), a mode without targets, Fiery Confluence (repeats, non-decreasing), Mystic Confluence (a target per instance), 608.2b for modal spells, Pyroblast, 603.3c / 700.2b (modal triggers; no mode chosen), 111 / 704.5d tokens (Clue; a token put into a library), Malevolent Rumble, Thopter Foundry (nontoken), Sheoldred's Edict, Generous Ent, Timetwister |
 | `tests/hidden.rs` | determinize keeps the viewer's view and actions; known cards stay; observer masking of keys; refreshed decisions of the other player; an ability activated from hand reveals its card (602.2a); a payment in progress completes in every determinized world (pinned hand sources, then revealed); a pending shock-land choice survives determinize; a Brainstorm after a hand reveal leaves partial knowledge; a card leaving the hand is not told apart from a known twin |
-| `tests/rules_layers.rs` | M7a: 613 layers (types, colours, keywords, set P/T in timestamp order, pumps, counters), 611.2c, statics and their conditions, 704.5q, protection 702.16, "can't block" groups, equipment 301.5 / 704.5n, exalted, battle cry, prowess |
+| `tests/rules_layers.rs` | M7a: 613 layers (types, colours, keywords, set P/T in timestamp order, pumps, counters), 611.2c, statics and their conditions, 704.5q, protection 702.16, "can't block" groups, equipment 301.5 / 704.5n, exalted, battle cry, prowess; the manlands Celestial Colonnade and Creeping Tar Pit (colours, Elemental, can't be blocked) |
 | `tests/cards_m7a.rs`, `cards_m7a_costs.rs`, `cards_m7a_zones.rs`, `cards_m7a_zones2.rs`, `cards_m7a_threats.rs`, `cards_m7a_threats2.rs`, `cards_m7a_misc.rs`, `cards_m7a_x.rs`, `cards_m7a_more.rs` | M7a cards and rules: equipment triggers, taxes and locks, replacement of uncast creatures, flicker, coin flips, explore, alternative costs and evoke (118.9, 702.74), divided damage (601.2d), linked exile (610.3), delayed triggers (603.7), reflexive triggers (603.12), random bottom order, tokens attacking (508.4), flashback (702.34), escape (702.138), exile permissions, dash (702.109), backup, amass, persist, monstrosity, living weapon, chosen player (614.12), devotion and winning (104.2b), delve, kicker, energy, X (107.3), crew (702.122), extra land drops |
 | `tests/rules_walkers.rs` | M7b: 306.5b, 606.3 / 606.4, 606.6 / 704.5i, 115.4 / 120.3c, 704.5j for planeswalkers, 508.1b / 510.1b (attacking a planeswalker; no decision without one), 702.19b (trample over a planeswalker), 506.4c (its planeswalker gone), 510.3a (combat damage to a planeswalker isn't to a player), 508.4 (put onto the battlefield attacking), 114 (an emblem), The Wandering Emperor at instant speed (606.3), 120.3 (a planeswalker creature) |
-| `tests/cards_m7b_walkers.rs`, `cards_m7b_walkers2.rs` | M7b: every ability of the 18 planeswalkers (Minsc & Boo on a corrected copy of its IR, while the card stays blocked, 24.8); Oko's Elk losing a static ability |
+| `tests/cards_m7b_walkers.rs`, `cards_m7b_walkers2.rs` | M7b: every ability of the 18 planeswalkers (Minsc & Boo on the cube card since M7d's IR fixes); Oko's Elk losing a static ability |
 | `tests/cards_m7b_walkers3.rs` | M7b hidden information: the decisions of Tamiyo's naming, Jace's look, a search for any number of cards, Chandra's cast from exile and Karn's opponent choice survive determinize; a retrace cast in progress keeps its land card |
 | `tests/cards_m7b_walkers_audit.rs` | the any-target audit (24.9): removal and damage that can hit planeswalkers, "each creature" effects that can't, voting, edicts, Psychic Frog and Questing Beast, Clarion Conqueror, Mox Amber, Subtlety |
 | `tests/cards_m7b_tests_lands.rs`, `cards_m7b_tests_mana.rs`, `cards_m7b_tests_creatures.rs`, `cards_m7b_tests_creatures2.rs`, `cards_m7b_tests_spells.rs`, `cards_m7b_tests_edges.rs` | M7b: a test for each of the 118 supported cards no earlier test named (`python tools/untested_cards.py` lists the supported cards no card test names; 0 left), each against its Oracle text: the land cycles table-driven (fetch lands, surveil lands, fast lands, horizon lands, shock lands, duals, Triomes and tri-lands with cycling, Verges), Tolarian Academy, Abandoned Air Temple, Talismans, Moxen, mana creatures, artifacts, creatures and spells; rules edges: 611.2c (Harvester of Misery, Spectacular Spider-Man, Ravenous Robots), 610.3c (Touch the Spirit Realm), 601.2g-h (Crop Rotation, Natural Order, Goblin Engineer sacrificing the permanent that paid), 605.3a (Basalt Monolith paying its own untap), 502.3, 122.1d (stun), 701.16a, 702.34 (granted flashback ends; 702.34a, Reprieve on a flashed-back spell exiles it), 608.2n (Echo of Eons isn't shuffled into its own library), 614.1c (lands put onto the battlefield by Crop Rotation), 111.7 (a flickered token) |
@@ -1074,7 +1092,7 @@ they isolate one keyword or trigger each.
 | `tests/cards_m7b_faces.rs` | M7b part 2, the transforming double-faced cards: Ulvenwald Oddity, Concealing Curtains, Cecil, Jace, Vryn's Prodigy (712.14a; every loyalty ability), Tamiyo, Inquisitive Student (every loyalty ability), Etali (608.2g in any order; 704.5c poison), Outland Liberator (731.2, 702.145b), Jennifer Walters |
 | `tests/cards_m7b_faces2.rs` | M7b part 2, MDFCs and Adventures: Shatterskull Smashing (712.12, divided X damage), Sink into Stupor, Witch Enchanter, The Sensational She-Hulk (712.11b, 603.2h), Brazen Borrower (715.3d; countered and fizzled Adventures), Embereth Shieldbreaker; hidden information (a face choice survives determinize, a card on an adventure is public, no face up in a hidden zone) |
 | `tests/cards_m7b_faces3.rs` | M7b part 2, Sagas: Urza's Saga (714.2b, 714.3a, 714.3c, latent abilities), 704.5s (not while the last chapter waits), Fable of the Mirror-Breaker (the real card since part 3) |
-| `tests/cards_m7b_faces4.rs` | M7b part 2: Norman Osborn // Green Goblin (701.50 connive, mayhem, graveyard discount), Life // Death (709.3), Ajani on a renamed copy of its IR (batch triggers, the -4), the encoding of faces in every world of the viewer |
+| `tests/cards_m7b_faces4.rs` | M7b part 2: Norman Osborn // Green Goblin (701.50 connive, mayhem, graveyard discount), Life // Death (709.3), Ajani, Nacatl Pariah (batch triggers, the -4; the 0's reflexive trigger and its intervening "if", 603.12, 603.4), the encoding of faces in every world of the viewer |
 | `tests/rules_copies.rs` | M7b part 3, the rules of copies with cube cards: 707.2 (no counters or effects copied), 613.2 (counters after layer 1), 707.4 (no enter trigger), 707.3, 707.8a (a token copy of a transformed permanent), 704.5j (a token copy of a legend), 707.9b (a copy of a copy keeps the exceptions), 608.2h (a token copy of an exiled permanent), 707.10 / 707.12 (a copy of a spell isn't cast; X copied; 707.10a ceases to exist, countered too), 608.3f / 111.13 (a copy of a permanent spell becomes a token, not created); hidden information (a pending copy choice and a copy's new targets survive determinize; the same encoding in every world) |
 | `tests/cards_m7b_copies.rs` | M7b part 3: Phyrexian Metamorph (707.5, 707.9b, a legend of the opponent's, copying nothing: 704.5f), Superior Spider-Man (a graveyard card, his name, 704.5j), Saheeli's -2 (until end of turn, "another target" 115.3, 704.5p: a copy of an Equipment that reverts, an Equipment made a copy of a creature), Shifting Woodland (delirium), Reflection of Kiki-Jiki (haste, sacrificed at the end step), Fractured Identity (608.2h, the other player's copy), Springheart Nantuko (bestow 702.103b, e, f; landfall copy or Insect) |
 | `tests/cards_m7b_copies2.rs` | M7b part 3: Three Steps Ahead (spree 702.172a, 700.2h payable modes), Sicarian Infiltrator (squad 702.157a), Thundertrap Trainer (offspring 702.175a; 601.2f, a reduction reduces the offspring cost), Chain Lightning (707.10c, a creature's controller is asked), Chain of Smog (the 31-copy limit, 732.2a, 732.3; with Witherbloom Apprentice), Lose Focus (replicate 702.56a), Lutri (cast or not, 603.4), Sage of the Skies (707.10f), Emeritus of Abundance (prepare 722.3: enters prepared, attacking with eight lands, leaving takes the copy; a Metamorph copying it enters prepared, 722.2b) |
@@ -1082,13 +1100,13 @@ they isolate one keyword or trigger each.
 | `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
 | `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
 | `tests/cards_m7d.rs` | M7d: the 13 cards against their Oracle text (26 tests, the CR cited in each name: 702.170, 103.6, 106.1, 702.28, 614.1a, 702.151, 716, 603.2e, 601.2f, 605.1a, 302.6, 601.2a, 701.39, 106.6, 702.119, 118.9, 701.21, 601.2g, 601.2b, 701.62, 708.2, 708.5, 701.40b, 708.9); face-down permanents and the Citadel's top card hidden from the opponent in every world it samples, never for their controller; the encoding of a face-down permanent the same in every world of each viewer |
-| `tests/cards_m7c_tail3.rs` | M7c tail part 3: the 33 cards against their Oracle text (48 tests, the CR cited in each name: 107.3, 702.96, 701.14, 305.2, 601.2c, 603.12, 702.16j, 603.4, 702.44a, 603.6a, 702.86a, 702.16b, 702.90, 614.1a, 702.33c, 702.33d, 107.4c, 603.7, 702.47, 706, 702.32a, 607.2a, 702.171, 301.5, 700.2, 701.46a, 509.1b, 509.1h, 406.3, 702.75a, 303.4a, 608.3a, 514.3a); face-down cards hidden from the other player in every world it samples, never for their owner; Wizard's Rockets's IR defect |
-| `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (38 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), the search of Green Sun's Zenith on a custom card, the two IR defects; Bilbo's cast of a flashback card for the cost its offer was checked for |
-| `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (31 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4, 118.9a), Chromatic Star's IR defect; the state the run mtg3 crashed in (Malcolm's free cast of Echo of Eons, section 15) |
+| `tests/cards_m7c_tail3.rs` | M7c tail part 3: the 33 cards against their Oracle text (49 tests, the CR cited in each name: 107.3, 702.96, 701.14, 305.2, 601.2c, 603.12, 702.16j, 603.4, 702.44a, 603.6a, 702.86a, 702.16b, 702.90, 614.1a, 702.33c, 702.33d, 107.4c, 603.7, 702.47, 706, 702.32a, 607.2a, 702.171, 301.5, 700.2, 701.46a, 509.1b, 509.1h, 406.3, 702.75a, 303.4a, 608.3a, 514.3a); face-down cards hidden from the other player in every world it samples, never for their owner; Wizard's Rockets (X mana in any combination, 107.3; the draw as it is put into a graveyard) |
+| `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (38 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), Green Sun's Zenith (608.2n: shuffled in as it resolves, to the graveyard when countered) and Forth Eorlingas! (603.7b: a trigger per combat damage step, gone the next turn); Bilbo's cast of a flashback card for the cost its offer was checked for |
+| `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (31 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4, 118.9a), Chromatic Star (603.10a: draws when put into a graveyard, not when exiled); the state the run mtg3 crashed in (Malcolm's free cast of Echo of Eons, section 15) |
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
 | `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
 | `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
-| `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures |
+| `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism |
@@ -1127,7 +1145,8 @@ The fuzzer's view, known-card and information-set checks cover the face-down car
 lists them per owner, by identity only where the viewer knows them). M7d: 20,000 games over the
 537 cards and the custom cards (Test Manifester puts face-down permanents into many games), no
 failure (131 s; 5.6 million options completed); four faults found on the way, all fixed (31.8). The known-card check also compares
-a face-down permanent's card (`ident`).
+a face-down permanent's card (`ident`). M7d's IR fixes: 20,000 games over the 546 cards and the custom
+cards, no failure (141 s; 5.6 million options completed); one fault found on the way, fixed (32.6).
 
 **Option completion** (M7c, branch `m7c-payfix`). Sections 6 and 18 promise that a cast, an
 activation or an alternative cost is offered only if it can be completed; the fuzzer checks it
@@ -1179,8 +1198,8 @@ the number of decisions. `cargo test --release -p engine --test digest -- --igno
 for the 467-card pool of the tail's part 1, 7216a12287fefeaa, and for the 491-card pool of part 2
 with its four token kinds registered, 7b815998fc563509, and for the 524-card pool of part 3 before
 its three new token kinds are registered, 023fa8874a183eae, and for M7d's 537-card pool with Test
-Manifester, 5cbbaf9280a01797: the pool deals other decks, every game differs), and names the games that
-differ. `DIGEST_WRITE=1` records
+Manifester, 5cbbaf9280a01797, and for the whole cube with M7d's IR fixes, 53a9548b176ec879: the pool deals
+other decks, every game differs), and names the games that differ. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
 are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every
@@ -1538,7 +1557,7 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
 ## 20. Findings for the IR and the next milestone
 
 * IR defect: Strip Mine has no "{T}: Add {C}" (it relied on the Python fallback); blocked
-  until mtg-bot exports it.
+  until mtg-bot exports it (fixed: mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca, section 32).
 * M7a IR findings (section 23.10): Celestial Colonnade and Creeping Tar Pit lack the colours
   their animation sets; Robber of the Rich's permission duration; Get Lost's Map token (the
   engine now builds Map from the printing other cards carry).
@@ -1546,7 +1565,7 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
   ("a legendary 1/1 red Hamster creature token"; no `color_indicator`, so Boo would be
   colourless). The card stays blocked (`IR:CreateToken.token_printing.color_indicator(Boo is
   red)`, from `lower::IR_DEFECTS`) until mtg-bot fixes the IR; its tests run on a corrected
-  copy.
+  copy. (Fixed by mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca, section 32.)
 * IR gap: Get Lost's rider (`ControllerCreatesTokens { token_name: "Map" }`) names a token
   the IR does not describe (Python looks it up in `TOKEN_PRINTINGS`); the IR should carry the
   printing, as `CreateToken.token_printing` does (Map also needs explore).
@@ -1564,7 +1583,7 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
   methods. The 118 cards first tested in M7b showed no IR defect and no engine bug.
 * M7b part 2 IR findings (25.11, docs/ir_defects.md 9, 13, 14): Ajani, Nacatl Avenger's 0
   flattens a reflexive trigger into an `IfCondition` (confirmed; the card is blocked by
-  `lower::IR_DEFECTS` and tested on a copy); transforming back faces repeat the front's mana
+  `lower::IR_DEFECTS` and tested on a copy; fixed by mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca, section 32); transforming back faces repeat the front's mana
   cost (suspected; the lowering reads it as none); `TriggeredAbility.once_per_turn` stands for
   both "do this only once each turn" (603.2h, She-Hulk) and "this ability triggers only once
   each turn" (Enduring Innocence), told apart here by the shape of the effect (suspected).
@@ -1583,6 +1602,11 @@ activation). Phyrexian splits and "n of one chosen type" productions are tried o
   "that player" is the damaged player). Left with one blocker near this part: Tersa Lightshatter
   (a random graveyard card), Celestial Colonnade and Creeping Tar Pit (IR), the mana abilities
   with a mana cost (Chromatic Star, Loot), spend restrictions (Mishra's Workshop), Balance.
+* M7d's IR fixes (section 32): the IR of mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca fixes docs/ir_defects.md 1, 2, 4,
+  12, 13 and 15-18; every cube card is supported and `lower::IR_DEFECTS` is empty. Still in the
+  IR, read as before: entries 3, 5-11 and 14 (Get Lost's Map, the {C} kicker, the targets set in
+  `__post_init__`, Animate Dead's bonus, Necromancy's flash, transform back faces' mana cost, the
+  sentinels: Wizard's Rockets' `amount: 0` too, targets only in code, `once_per_turn`).
 * Lowering: the `*_str` cost twins (`mana_cost_str`, `kicker_cost_str`, `mana_str`, ...) are
   ignored as display forms; checking them against the structured cost (rule 4a, section 3) would
   have caught the lost `{C}`.
@@ -2456,6 +2480,9 @@ At the end of M7a: threats 139 supported (113 creatures), 107 blocked (96 creatu
 * Robber of the Rich's permission keeps the default duration ("this turn") in the IR; the
   Oracle text ("during any turn you attacked with a Rogue") makes it last while the card is
   exiled, as Python does; the lowering follows the Oracle text.
+* All three fixed by mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (section 32): the manlands' colours and Elemental, Strip
+  Mine's `produces: [C]`, Robber's `while_exiled` (now read: a `this_turn` duration with the
+  Rogue requirement is a blocker).
 
 ### 23.11 Simplifications
 
@@ -2487,7 +2514,8 @@ M7b part 1 grew the supported cube from 360 to 378 cards: 18 of the cube's 20 pl
 and the rules they need, which also reach cards already supported (damage to "any target",
 "creature or planeswalker" removal, "combat damage to a player"). Saheeli, Sublime Artificer
 needed copy effects (`Effect:TargetBecomesCopyOfAnotherTargetUEOT`; supported in M7b part 3,
-section 26); Minsc & Boo, Timeless Heroes is blocked by its IR (24.8). Every card's IR was read against its Oracle text.
+section 26); Minsc & Boo, Timeless Heroes is blocked by its IR (24.8; supported since M7d's IR
+fixes, 32). Every card's IR was read against its Oracle text.
 
 ### 24.1 Loyalty and loyalty abilities (CR 306, 606)
 
@@ -2679,7 +2707,7 @@ can be paid, a minus that removes a worthwhile opposing permanent, else a plus; 
   the card's tests run on a corrected copy of its IR built in the test
   (`cards_m7b_walkers2.rs::minsc_db`), which exercises everything else of the card (Boo's
   creation on entering and each upkeep, the +1, the -2's reflexive damage and the Hamster
-  draw).
+  draw). Fixed by mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (Boo is red): the tests now play the cube card (section 32).
 * Not a defect but a convention the lowering relies on: loyalty costs are written as the
   loyalty removed, and [0] as no cost (24.1).
 
@@ -2879,8 +2907,8 @@ for the same rules; tests and comments cite the current numbers.
   (`TrigPred::Batch`) triggers once per simultaneous event. **"Each opponent chooses an
   artifact, a creature, an enchantment and a planeswalker from among the nonland permanents
   they control, then sacrifices the rest"** (Ajani's -4, `Ext::KeepOneOfEachType`). **"If you
-  control a red permanent other than Ajani"** (`Cond::ControlOtherOfColor`). Ajani is blocked by
-  its IR (25.11); these are tested on a copy.
+  control a red permanent other than Ajani"** (`Cond::ControlOtherOfColor`). Ajani was blocked
+  by its IR (25.11) and tested on a copy; supported since M7d's IR fixes (section 32).
 * Also: "draw cards equal to half the number of cards in your library, rounded up"
   (`Amount::HalfLibraryUp`), an emblem "you have no maximum hand size" (402.2;
   `CardDef.no_max_hand`), "discard up to N cards, then draw that many" (`Ext::DiscardUpToThenDraw`),
@@ -2972,7 +3000,8 @@ Every new field uses spare floats of layout v3; no width changed.
   target", 603.12) into an `IfCondition` of the loyalty ability, whose target would be chosen
   on activation. Blocked by `lower::IR_DEFECTS`
   (`IR:IfCondition(a reflexive trigger flattened: Ajani's 0)`, docs/ir_defects.md 13); every
-  ability is tested on a renamed copy of its IR (`cards_m7b_faces4.rs`).
+  ability is tested on a renamed copy of its IR (`cards_m7b_faces4.rs`). Supported since M7d's
+  IR fixes (`DoThenReflexive`, section 32); the tests play the cube card.
 * Aang, Swift Savior // Aang and La, Ocean's Fury: waterbend (`ActivationCost.waterbend`, a
   cost that taps artifacts and creatures for mana) and airbend (`Effect:Airbend`).
 * Emeritus of Abundance // Regrowth: prepare (`CardPrinting.enters_prepared`,
@@ -3679,7 +3708,7 @@ castable from a graveyard with no Serra Paragon (same games on main's pool after
 
 * **Chromatic Star**: an IR defect (docs/ir_defects.md 15): its "put into a graveyard from the
   battlefield" trigger is `leaves_battlefield` in the IR (it would draw when exiled or bounced).
-  Its mana ability ({1}, {T}, sacrifice) lowers.
+  Its mana ability ({1}, {T}, sacrifice) lowers. Supported since M7d's IR fixes (`dies`, 32).
 * **Memory Jar** (`Effect:EachPlayerExilesHandDrawsNReturnsLater`) and **Headliner Scarlett**
   (`ExileTopCardsWithPlayPermission.face_down`): face-down exile is a hidden zone the engine
   doesn't have (section 10's knowledge, `determinize`, the view and the encoding all treat exile
@@ -3796,12 +3825,14 @@ as `once_per_turn`, which is "this ability triggers only once each turn" (it wou
 a second combat damage step); Green Sun's Zenith writes "shuffle it into its owner's library" as
 a replacement from anywhere (countered, discarded or milled it would go to the library). Both are
 blocked (`lower::IR_DEFECTS`). Green Sun's Zenith's search is built and tested on a custom card
-(`Test Green Sun`). The other 24 cards' IR matches their Oracle text; Laelia's placeholder event
+(`Test Green Sun`). Both fixed by mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca and supported (section 32; the custom card is
+gone). The other 24 cards' IR matches their Oracle text; Laelia's placeholder event
 and the doubled cascade are noted under "Checked and not defects".
 
 ### 29.8 Still blocked
 
-* **Forth Eorlingas!**, **Green Sun's Zenith**: their IR (29.7).
+* **Forth Eorlingas!**, **Green Sun's Zenith**: their IR (29.7; supported since M7d's IR fixes,
+  32).
 * **Abhorrent Oculus** (`Effect:ManifestDread`): manifest dread puts a card onto the battlefield
   face down as a 2/2 (708): face-down permanents need hidden identities on the battlefield (the
   determinization would resample permanents), characteristics overridden in every layer and
@@ -4009,6 +4040,7 @@ toughness together for divided damage (Fire Covenant), at most half its life.
 * **Wizard's Rockets**: an IR defect (30.9).
 * Not in scope: Ajani, Celestial Colonnade, Creeping Tar Pit, Minsc & Boo, Strip Mine, Chromatic
   Star, Forth Eorlingas!, Green Sun's Zenith (IR defects), Rain of Filth (28.9).
+* (All supported since: M7d, section 31; the IR defects, section 32.)
 
 ### 30.9 IR
 
@@ -4223,7 +4255,8 @@ triggers (31.5). Behaviour digests re-recorded for the new pool (section 15: 5cb
 No new defect. All 13 cards' IR matches their Oracle text; representational notes in
 docs/ir_defects.md ("Checked and not defects"). Still blocked, all by IR defects (`lower::IR_DEFECTS`,
 not in scope): Ajani, Nacatl Pariah; Celestial Colonnade; Creeping Tar Pit; Minsc & Boo; Strip
-Mine; Chromatic Star; Forth Eorlingas!; Green Sun's Zenith; Wizard's Rockets.
+Mine; Chromatic Star; Forth Eorlingas!; Green Sun's Zenith; Wizard's Rockets. All nine supported
+with the IR of mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (section 32).
 
 ### 31.10 Measurements
 
@@ -4236,3 +4269,108 @@ face-down identities); clone + determinize 1.77-1.96 us against 1.66-1.72. On th
 5.56-5.70 us per decision (838,909 decisions), 836-857 games/s; `Game::clone` 1.28-1.31 us; clone +
 determinize 1.65-1.79 us. The new rules are looked at only in games with such a card (31.5's
 `SEEN_*` bits); the knowledge accessors check the face-down list's emptiness first.
+
+## 32. The IR fixes: the last nine cards (M7d)
+
+Branch `m7d-ir`, from main at 6d6760c (537 cards). The cube's IR is now the export of mtg-bot
+`feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`; two new classes, `DoThenReflexive`
+and `ShuffleThisSpellIntoOwnersLibrary`; docs/card_ir.md), which fixes docs/ir_defects.md 1, 2,
+4, 12, 13 and 15-18. All 546 cube cards are supported (209 creatures by their front faces, 20
+planeswalkers); `lower::IR_DEFECTS` is empty. Code: `lower/effect_m7d.rs` (the new effect classes,
+`check_self_shuffle`), `lower/activated.rs` (X mana), `resolve_m7d.rs`, `activate.rs`
+(`mana_now`), `combat.rs`, `triggers.rs`.
+
+### 32.1 The cards
+
+| Card | What it needed | Decisions |
+|---|---|---|
+| Strip Mine | "{T}: Add {C}" is the IR's `produces: [C]` with `mana_only_from_produces` (19); its "destroy target land" a basic one too | `Target` |
+| Celestial Colonnade, Creeping Tar Pit | the animation's colours and Elemental (`set_colors`, `granted_subtype`, already lowered for Restless Vinestalk: layers 4 and 5); Tar Pit's "can't be blocked this turn" | - |
+| Minsc & Boo, Timeless Heroes | Boo is red (its colour indicator, CR 204): a new token definition | as before (24) |
+| Ajani, Nacatl Pariah // Ajani, Nacatl Avenger | the 0's `DoThenReflexive`: the Cat, then a reflexive triggered ability (603.12) whose intervening "if" (603.4) is checked as it triggers and as it resolves, for its source ("other than Ajani") | `Target` as it is put on the stack |
+| Chromatic Star | "put into a graveyard from the battlefield" is the `dies` event of an artifact (603.10a: it looks back) | `PayMana`, `ChooseMana` |
+| Wizard's Rockets | the same event; "{X}, {T}, Sacrifice this artifact: Add X mana in any combination of colors" (107.3, 605.3a) | `ChooseMode` (X), `PayMana`, a `ChooseMana` per mana |
+| Forth Eorlingas! | "whenever ... this turn" (`CreateThisTurnTriggeredAbility`): a delayed triggered ability with a duration (603.7b); "one or more creatures ... deal combat damage" once per combat damage step | `ChooseMode` (X) |
+| Green Sun's Zenith | its last instruction moves the resolving spell into its owner's library and shuffles it (608.2c; then 608.2n has nothing to put into a graveyard); countered, it goes to the graveyard (701.6a) | `ChooseMode` (X), `SearchLibrary` |
+| Robber of the Rich (supported since M7a) | reads the IR's `while_exiled` (a `this_turn` duration with the Rogue requirement is a blocker); its lowered definition is unchanged | - |
+
+### 32.2 Rules added on the way
+
+* **Reflexive triggered abilities with an intervening "if"** (603.12, 603.4):
+  `Lowerer::delayed_ability_if` gives the delayed ability a `TrigPred::If`; `Ext::Reflexive`
+  puts it among the waiting triggers only if the condition holds (for the ability's source), and
+  on resolution `Game::intervening_holds` checks it again, now also for the source (`ControlOtherOfColor`
+  needs it: "other than Ajani"). A printed trigger's `TrigPred::If` is evaluated for its source
+  too. No other card's intervening "if" reads its source (32.4: no other definition and no other
+  game changed by it).
+* **"Whenever ... this turn"** (603.7b): `M7d::TriggerThisTurn` gives the controller a
+  `TempTrigger` with `this_turn` (the "until your next turn" list of 25.6); it is removed as the
+  next turn begins. Its source is the spell card, which has left the stack: the ability is the
+  definition's (113.7a).
+* **"One or more creatures deal combat damage"**: the `DealsCombatDamage` events of one combat
+  damage step form a batch (`begin_batch` / `end_batch` in `combat.rs`, 510.2), so a
+  `TrigPred::Batch` ability triggers once per step; a first-strike step and the regular one each
+  (510.4). Temporary abilities are batched like printed ones. No other supported card has a batch
+  trigger on combat damage.
+* **A spell's own instruction moving it** (608.2c): `M7d::ShuffleThisSpellIntoLibrary` moves the
+  resolving spell from the stack into its owner's library and shuffles (a flashback spell would
+  be exiled instead, 702.34a, `move_card`); the lowering requires it to be the last instruction of
+  an instant or sorcery (`check_self_shuffle`).
+* **Mana abilities with {X}** (107.3, 602.2b, 605.3a): `ManaProd::ComboX`, with priority only
+  (28.1): X is announced first (`Task::ManaNow` asks `ChooseMode`: as much as the player can pay
+  without the source, like an activated ability's X, 29), then the {X} is paid, the source tapped
+  and sacrificed, and each of the X mana is a `ChooseMana` among the five colours. The lowering
+  requires the cost's {X} and the production's X together, and reads the IR's `amount: 0` beside
+  `amount_is_x` (ir_defects 10) only in that shape. Never a source while paying another cost.
+
+### 32.3 Decisions, tasks, encoding, the bot
+
+No new decision kind. `Task::ManaNow` now asks X (task code 18 of the context block, "other");
+`Task::ManaNowCosts` carries X. Layout v3 is unchanged (29,860 floats): the new instructions are
+`Ext` ops (one op kind), the "this turn" abilities count among a player's temporary triggers
+(`o[32]`), no width or identity changed. The red Boo is a new token definition (the colourless
+one is gone): its registry line is needed (Boo, red). The heuristic bots: a mana ability's X is the
+first option (X = 0: Wizard's Rockets sacrificed for its draw), a reflexive trigger's target as any
+trigger's.
+
+### 32.4 The lowered definitions
+
+`SUPPORT_DEFS=<file> cargo test --release -p engine --test support cube_support_report` writes
+every definition (cards, tokens, faces) with the interned subtypes; `python tools/diff_defs.py
+old new [--show]` compares two dumps by name (token, face and subtype ids move when another card
+becomes supported). Main (6d6760c: its IR and lowering) against this branch: 10 definitions added
+(the 9 cards and Ajani, Nacatl Avenger's face), 1 changed (the Boo token: colourless to red), 618
+unchanged, among them Robber of the Rich's.
+
+### 32.5 Simplifications (differences from the CR)
+
+* Wizard's Rockets' X mana: one `ChooseMana` decision per mana (the combinations are not offered
+  as one choice); the bot announces X = 0.
+* A "this turn" triggered ability is removed when the next turn begins (nothing can trigger it
+  between the end of the cleanup step and then).
+
+### 32.6 Tests, fuzzing, digests
+
+Card tests for the nine cards on the cube IR (the copies and the custom card they replaced are
+gone): `rules_lands.rs` (Strip Mine), `rules_layers.rs` (the manlands), `cards_m7b_walkers2.rs`
+(Minsc & Boo), `cards_m7b_faces4.rs` (Ajani: the 0 asks no target on activation, its reflexive
+trigger asks one as it goes on the stack, does nothing without another red permanent and when
+that permanent is gone before it resolves), `cards_m7c_tail.rs` (Chromatic Star: draws when
+sacrificed, not when exiled), `cards_m7c_tail2.rs` (Green Sun's Zenith shuffled in, to the
+graveyard when countered; Forth Eorlingas!: a trigger in the first-strike step and one in the
+regular step for two Knights at once, none the next turn), `cards_m7c_tail3.rs` (Wizard's Rockets:
+enters tapped, X = 0..2 with two lands, one colour per mana, the draw). `support.rs`: the exact
+supported list (546), loud failures on an edited IR (Strip Mine without its mana), the IR checks
+of this section (Robber's `this_turn`, Green Sun's Zenith's shuffle not last, "add X mana" without
+{X}). `tools/untested_cards.py`: 0 untested.
+
+`cargo test --release -p engine --no-fail-fast --lib --test 'cards*' --test 'rules*' --test hidden
+--test support --test smoke --test 'bots*'`: 835 tests pass. Fuzzing (20,000 games over the 546
+cards and the custom cards): no failure (141 s; 5,630,719 options completed, 6.2 million decisions
+after them); one fault found on the way, outside these cards and fixed: a coloured spell was
+offered when Emrakul, with protection from coloured spells, was its only possible target (the
+cast check took the card in hand for its source, not a spell; `cast::Ctx::spell`, seed 7209).
+`hidden.rs` compares a player's cards by identity (a face-down permanent's card, 31.2, may move to
+another of the player's hidden cards in a determinized world; the new pool's random decks put
+Test Manifester's face-down cards into its games). Behaviour digests re-recorded for the 546-card
+pool (section 15: 53a9548b176ec879), before the red Boo's token kind is registered.

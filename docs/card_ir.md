@@ -11,7 +11,7 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 
 | Path | What |
 |---|---|
-| `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1 |
+| `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b...`; the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
 | `data/cards/powerlsv.schema.json` | The schema that IR was encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
 | `card_ir/src/generated.rs` | Generated types (do not edit) |
@@ -81,10 +81,18 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/card-ir-v1`)
+## Current numbers (mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca)
 
-546 cards; 506 classes in 32 categories; 29 enums; 5,472 tagged objects
-(1,119 effects, 757 object predicates, 519 trigger predicates, 50
+The IR in use since M7d's IR fixes (ENGINE.md 32): exported from mtg-bot
+branch `feature/ir-fixes-mtgzero` at 8ea9fcca (from main 3073a633, the
+commit of the first export); schema sha256
+`66ba3e33fe5ba01a6f255a1ddb1a6234cb34e331574b9f2ee6699d39859c0fd0` (before:
+`dcc39f8f...`, mtg-bot 3073a633). Two classes more than that schema:
+`DoThenReflexive { first, then }` and `ShuffleThisSpellIntoOwnersLibrary {}`
+(category Effect); no other class, field or enum changed.
+
+546 cards; 508 classes in 32 categories; 29 enums; 5,471 tagged objects
+(1,121 effects, 757 object predicates, 521 trigger predicates, 50
 conditions, 24 formulas, 5 P/T formulas, 5 cost atoms, 231 keywords,
 641 printings including faces and tokens). The IR is 402 KB (62 KB
-gzipped); `generated.rs` is about 8,200 lines and builds in about 30 s.
+gzipped); `generated.rs` is about 9,100 lines and builds in about 30 s.

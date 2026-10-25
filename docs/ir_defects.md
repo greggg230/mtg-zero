@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -36,10 +36,10 @@ permission) and a consumer can go wrong with it.
 
 | # | Card(s) | Kind | IR says | Should say | mtg-bot source | Engine status | |
 |---|---|---|---|---|---|---|---|
-| 1 | Strip Mine | ability dropped | only `{T}, sac: DestroyTargetLand`; no mana ability, no `produces` | also `{T}: Add {C}` (as Wasteland) | `cards/parser/land_builder.py::_try_build_tap_sac_utility_land` | blocked | confirmed |
-| 2 | Celestial Colonnade, Creeping Tar Pit | fields dropped | `BecomeLandCreatureUEOT` without `set_colors`, `granted_subtype` | `set_colors: [W, U]` / `[U, B]`, `granted_subtype: "Elemental"` | `cards/parser/land_builder.py::_try_build_manland` | blocked | confirmed |
+| 1 | Strip Mine | ability dropped | only `{T}, sac: DestroyTargetLand`; no mana ability, no `produces` | also `{T}: Add {C}` (as Wasteland) | `cards/parser/land_builder.py::_try_build_tap_sac_utility_land` | fixed (8ea9fcca), supported | confirmed |
+| 2 | Celestial Colonnade, Creeping Tar Pit | fields dropped | `BecomeLandCreatureUEOT` without `set_colors`, `granted_subtype` | `set_colors: [W, U]` / `[U, B]`, `granted_subtype: "Elemental"` | `cards/parser/land_builder.py::_try_build_manland` | fixed (8ea9fcca), supported | confirmed |
 | 3 | Get Lost | value resolved late | `ControllerCreatesTokens { token_name: "Map", count: 2 }` | the Map token's `CardPrinting` inline | `effects/generic/targeted_removal.py::ControllerCreatesTokens`, `cards/parser/removal_phrases.py` | worked around | confirmed |
-| 4 | Robber of the Rich | default left in | `ExileTopCardsWithPlayPermission.duration` = default `this_turn` | `while_exiled` | `cards/parser/creature_rmc_grammar.py::_permission_kwargs` | worked around | confirmed |
+| 4 | Robber of the Rich | default left in | `ExileTopCardsWithPlayPermission.duration` = default `this_turn` | `while_exiled` | `cards/parser/creature_rmc_grammar.py::_permission_kwargs` | fixed (8ea9fcca), supported | confirmed |
 | 5 | Sowing Mycospawn | lossy schema | `kicker_cost: { generic: 2 }` for "Kicker {1}{C}" | a colorless-only pip | `cards/base.py::parse_mana_cost`, `ManaCost` | not detected (card blocked elsewhere) | confirmed |
 | 6 | Thieving Skydiver (and 6 more effect classes, 7 more cards) | target spec not exported | `GainControlOfTargetThenAttachIfEquipment {}` | its `TargetSpec` (artifact with mana value X or less) | `effects/generic/cube_creatures_ub.py` (`targets` set in `__post_init__`) | blocked / re-derived in the lowering | confirmed |
 | 7 | Animate Dead | misnamed field | Aura bonus "-1/-0" in `equipment_bonuses` | an Aura (or attachment) bonus field | `cards/base.py::make_aura` | blocked | suspected |
@@ -47,13 +47,13 @@ permission) and a consumer can go wrong with it.
 | 9 | transform DFCs (Aang, Ajani, Cecil, Concealing Curtains, Etali, Fable, Jace VP, Outland Liberator, Tamiyo IS, Ulvenwald Oddity) | value copied | back face `mana_cost` = the front face's | no mana cost (mana value from the front, CR 712.8e) | `cards/parser/dfc_builder.py::transform_back` | worked around (read as no mana cost) | suspected |
 | 10 | Fastbond, Pest Infestation, Wizard's Rockets | sentinel values | `1000000`; `count_max: 0` + `count_from_x`; `amount: 0` + `amount_is_x` | explicit "any number" / "X" | `cards/parser/cube_enchantments.py`, `cards/parser/removal_phrases.py`, `effects/generic/artifact_mechanics.py` | blocked | suspected |
 | 11 | many (Agent Bishop, Cryogen Relic, Kolaghan's Command, ...) | targets only in code | effect classes with no `targets` | target requirements as data | effect classes' `requires_target` / `legal_targets` | re-derived per class in the lowering | suspected (systemic) |
-| 12 | Minsc & Boo, Timeless Heroes | colour dropped | Boo's token printing with no `color_indicator` (a colourless Boo) | `color_indicator: [R]` | `cards/parser/effects_ext.py::_CREATE_NAMED_TOKEN`, `_token_printing` | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 13 | Ajani, Nacatl Pariah // Ajani, Nacatl Avenger | reflexive trigger flattened | the 0: `Sequence [CreateToken, IfCondition(ControlOtherPermanentOfColor, DealDamageFromEvent → any target)]` | a reflexive triggered ability (CR 603.12) after the token, its target chosen when it triggers | `cards/parser/layout_face_grammar.py` (`_WHEN_YOU_DO`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 12 | Minsc & Boo, Timeless Heroes | colour dropped | Boo's token printing with no `color_indicator` (a colourless Boo) | `color_indicator: [R]` | `cards/parser/effects_ext.py::_CREATE_NAMED_TOKEN`, `_token_printing` | fixed (8ea9fcca), supported | confirmed |
+| 13 | Ajani, Nacatl Pariah // Ajani, Nacatl Avenger | reflexive trigger flattened | the 0: `Sequence [CreateToken, IfCondition(ControlOtherPermanentOfColor, DealDamageFromEvent → any target)]` | a reflexive triggered ability (CR 603.12) after the token, its target chosen when it triggers | `cards/parser/layout_face_grammar.py` (`_WHEN_YOU_DO`) | fixed (8ea9fcca), supported | confirmed |
 | 14 | The Sensational She-Hulk; Enduring Innocence | one flag, two rules | `TriggeredAbility.once_per_turn: true` for both | "do this only once each turn" (603.2h) apart from "this ability triggers only once each turn" | `TriggeredAbility.once_per_turn` (`turn.py::should_fire_trigger`) | told apart by the effect's shape | suspected |
-| 15 | Chromatic Star | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (the IR's "put into a graveyard from the battlefield", as Titania's) | `cards/parser/triggers.py` (the "this artifact is put into a graveyard from the battlefield" entry, ~line 744) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 16 | Forth Eorlingas! | "one or more" as once per turn | the this-turn trigger "whenever one or more creatures you control deal combat damage to one or more players" with `once_per_turn: true` | a trigger per combat damage step ("one or more": `OneOrMoreBatch`), no once-per-turn limit | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to one or more players" entry, ~line 1050) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 17 | Green Sun's Zenith | instruction as a replacement | "Shuffle Green Sun's Zenith into its owner's library" as a self static `ReplacementEffect(would_go_to_graveyard, Replace(library))` (from anywhere) | the last instruction of the spell's effect (only as it resolves) | `cards/parser/spell_builder.py` (`_SELF_SHUFFLE_GSZ_RE`, `_detect_shuffle_self_statics`, ~line 430) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 15 | Chromatic Star | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (the IR's "put into a graveyard from the battlefield", as Titania's) | `cards/parser/triggers.py` (the "this artifact is put into a graveyard from the battlefield" entry, ~line 744) | fixed (8ea9fcca), supported | confirmed |
+| 16 | Forth Eorlingas! | "one or more" as once per turn | the this-turn trigger "whenever one or more creatures you control deal combat damage to one or more players" with `once_per_turn: true` | a trigger per combat damage step ("one or more": `OneOrMoreBatch`), no once-per-turn limit | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to one or more players" entry, ~line 1050) | fixed (8ea9fcca), supported | confirmed |
+| 17 | Green Sun's Zenith | instruction as a replacement | "Shuffle Green Sun's Zenith into its owner's library" as a self static `ReplacementEffect(would_go_to_graveyard, Replace(library))` (from anywhere) | the last instruction of the spell's effect (only as it resolves) | `cards/parser/spell_builder.py` (`_SELF_SHUFFLE_GSZ_RE`, `_detect_shuffle_self_statics`, ~line 430) | fixed (8ea9fcca), supported | confirmed |
+| 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | fixed (8ea9fcca), supported | confirmed |
 
 ## Confirmed defects
 
@@ -80,6 +80,7 @@ permission) and a consumer can go wrong with it.
 * Engine: blocked, `CardPrinting.mana_only_from_produces(land without a mana ability)`
   (`engine/src/lower/printing.rs::lower_printing`); `tests/rules_lands.rs::
   strip_mine_is_blocked_by_its_missing_mana_ability`.
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: the tap-and-sacrifice builder folds "{T}: Add {C}" into `produces: [C]` with `mana_only_from_produces` in every branch (Dust Bowl, Petrified Field, High Market, Scavenger Grounds outside the cube too). Strip Mine is supported (`tests/rules_lands.rs::strip_mine_taps_for_colorless_and_destroys_any_land`).
 
 **2. Celestial Colonnade, Creeping Tar Pit.** Oracle: "{3}{W}{U}: Until end of turn, this land
 becomes a 4/4 white and blue Elemental creature with flying and vigilance. It's still a land." /
@@ -104,6 +105,7 @@ still a land. It can't be blocked this turn."
   (`engine/src/lower/effect_ext.rs::lower_effect_ext`, the `BecomeLandCreatureUEOT` arm: a land
   that makes coloured mana and animates without colours is refused rather than made colourless).
   The missing `granted_subtype` is not detected by the engine.
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `_try_build_manland` passes `set_colors` (the two colour words) and `granted_subtype: "Elemental"` (every manland of that shape, the Stellar Sights ones too). Both cards are supported (`tests/rules_layers.rs`).
 
 ### B. Values the IR leaves to Python
 
@@ -172,6 +174,7 @@ that spell."
 * Engine: worked around in `engine/src/lower/effect_ext.rs::lower_effect_ext`
   (`ExileTopCardsWithPlayPermission` arm: `this_turn` is false when `requires_attacked_with_subtype`
   is set); `tests/cards_m7a_zones2.rs::robber_of_the_rich_cast_with_any_mana_during_a_turn_you_attacked_with_a_rogue`.
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `duration: "while_exiled"`. The lowering now reads it (a `this_turn` duration with `requires_attacked_with_subtype` is a blocker, `tests/support.rs`); the lowered card is unchanged.
 
 ### D. A schema that can't say it
 
@@ -214,6 +217,7 @@ haste."
   red)`, ENGINE.md 24.8); the card's tests run on a corrected copy of its IR
   (`engine/tests/cards_m7b_walkers2.rs::minsc_db`), so it becomes supported once the IR is fixed
   (and the registry gets a red Boo line).
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: the token phrases capture the colour (`color_indicator: [R]` on both of Boo's printings; Dark Depths' Marit Lage outside the cube is black too). Minsc & Boo is supported; its tests run on the cube card (`tests/cards_m7b_walkers2.rs`). The red Boo is a new token definition for the network's token registry.
 
 ### F. A reflexive trigger flattened into the ability (M7b part 2)
 
@@ -243,6 +247,7 @@ Ajani, he deals damage equal to the number of creatures you control to any targe
   (`engine/tests/cards_m7b_faces4.rs`, "Test Ajani"), so it becomes supported once the IR is
   fixed and the lowering reads the reflexive form (the engine has reflexive triggers, ENGINE.md
   23.2).
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: the 0 is `DoThenReflexive { first: CreateToken, then: IfCondition(...) }` (a new class, the non-optional twin of `MayDoThenReflexive`); the lowering makes `then` a reflexive triggered ability with the `IfCondition` as its intervening "if" (ENGINE.md 32). Ajani is supported (`tests/cards_m7b_faces4.rs`, the real card).
 
 ### G. A trigger event widened (M7c tail part 1)
 
@@ -261,6 +266,7 @@ When this artifact is put into a graveyard from the battlefield, draw a card."
 * Engine: blocked, `IR:TriggeredAbility.event(leaves_battlefield for "put into a graveyard")`
   (`lower::IR_DEFECTS`); `tests/cards_m7c_tail.rs::chromatic_star_is_blocked_by_its_ir_event`.
   The other 29 cards of the batch: their IR matches their Oracle text.
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `event: dies`. Chromatic Star is supported (`tests/cards_m7c_tail.rs`).
 
 ### H. "One or more" and a resolution instruction rewritten (M7c tail part 2)
 
@@ -285,6 +291,7 @@ turn, you become the monarch."
   ability triggers only once each turn" (entry 14), which this is not;
   `tests/cards_m7c_tail2.rs::forth_eorlingas_is_blocked_by_its_ir_once_per_turn`. Its two effect
   classes (`CreateTokensScaledByX`, `CreateThisTurnTriggeredAbility`) are not lowered yet either.
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `OneOrMoreBatch` in the predicate and no `once_per_turn`. Forth Eorlingas! is supported (`CreateThisTurnTriggeredAbility` lowered, ENGINE.md 32; `tests/cards_m7c_tail2.rs`).
 
 **17. Green Sun's Zenith.** Oracle: "Search your library for a green creature card with mana value
 X or less, put it onto the battlefield, then shuffle. Shuffle Green Sun's Zenith into its owner's
@@ -308,6 +315,7 @@ library."
   replacement from anywhere)` (`lower::IR_DEFECTS`); also `ReplacementEffect(WouldGoToGraveyard,
   Replace)` (not built). Its search is built (`Filter::MvAtMostX`) and tested on a custom card
   without the last sentence (`Test Green Sun`, `tests/cards_m7c_tail2.rs`).
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `spell_effect: Sequence [SearchLibraryForGreenCreatureWithMVAtMostX, ShuffleThisSpellIntoOwnersLibrary]` (a new class) and no static; Nexus of Fate's form keeps the replacement. Green Sun's Zenith is supported (`tests/cards_m7c_tail2.rs`; the custom `Test Green Sun` is gone).
 
 ### I. The same widened event (M7c tail part 3)
 
@@ -325,6 +333,7 @@ battlefield, draw a card."
   (`lower::IR_DEFECTS`); `tests/cards_m7c_tail3.rs::wizards_rockets_is_blocked_by_its_ir_event`.
   Its mana ability's `amount: 0` with `amount_is_x` (entry 10) and the {X} in a mana ability's
   cost are not lowered either.
+* Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `event: dies` (entry 15's fix). Wizard's Rockets is supported: its {X} mana ability is lowered too, reading entry 10's `amount: 0` beside `amount_is_x` (ENGINE.md 32; `tests/cards_m7c_tail3.rs`).
 
 ## Suspected defects (representational)
 
@@ -404,7 +413,9 @@ Jace, Vryn's Prodigy; Outland Liberator; Tamiyo, Inquisitive Student; Ulvenwald 
   (`effects/generic/artifact_mechanics.py:109-111`; built at `cards/parser/artifact_effects.py:137`).
   Fix: omit `amount` (or export it as null) when `amount_is_x`. Engine: blocked,
   `AddManaInAnyCombination.amount(out of range 0)`, `AddManaInAnyCombination.amount_is_x`,
-  `ActivationCost.mana.x_pips`.
+  `ActivationCost.mana.x_pips`. Since the IR fixes of M7d (ENGINE.md 32): read in exactly that
+  shape (`amount: 0` beside `amount_is_x`, with an {X} in the mana ability's cost) as X mana;
+  Wizard's Rockets supported (entry 18). The sentinel is still in the IR.
 
 **11. Target requirements that live only in code (systemic).** Many effect classes carry no
 `targets` in the IR because Python computes them in methods (`requires_target`,
