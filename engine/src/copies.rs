@@ -626,8 +626,12 @@ impl Game {
                         }
                     }
                 } else {
+                    // Not a permanent entering at the same time (it isn't on
+                    // the battlefield yet as this one enters; CR 614.12a,
+                    // 707.5 ruling: Exhume).
+                    let seq = self.objs[card.i()].enter_seq;
                     for &x in &self.battlefield {
-                        if x != card && self.card_matches(&eac.filter, x, &ctx) {
+                        if x != card && self.objs[x.i()].enter_seq != seq && self.card_matches(&eac.filter, x, &ctx) {
                             opts.push(Opt { action: self.perm_action(p, x), choice: Choice::Card(x) });
                         }
                     }
@@ -638,8 +642,8 @@ impl Game {
             }
         }
         let r = self.obj_ref(card);
-        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note });
         let tapped = self.enters_tapped(card, p);
         self.entering(card, tapped, 0);
+        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note });
     }
 }

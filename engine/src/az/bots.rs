@@ -1005,7 +1005,7 @@ impl Heuristic {
                     .crew_eligible(p, c)
                     .into_iter()
                     .filter(|&x| g.is_sick(x) || g.power(x) <= 0 || self.eaten(g, x, q))
-                    .map(|x| g.crew_power_of(x).max(0))
+                    .map(|x| g.crew_power_of(x, !cost.saddle).max(0))
                     .sum();
                 if free < cost.crew as i32 {
                     return None;

@@ -1805,9 +1805,16 @@ impl Game {
             let r = self.obj_ref(card);
             self.marks.push((r, crate::game::Mark::ConvergePending(0)));
         }
+        // Teamwork (a crew-like additional cost): its taps are paid before
+        // the mana (CR 601.2h: any order), leaving the mana payable.
+        let mut taps_first = false;
         if let Some(extra) = self.route_extra(card, item.from, item.cost_option) {
             pm.keep = Self::keep_for(card, extra, None);
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            if extra.crew > 0 {
+                taps_first = true;
+            } else {
+                self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            }
         }
         pm.keep.allow = self.spend_allow(card);
         pm.keep.spell = Some(card);
@@ -1817,6 +1824,9 @@ impl Game {
         }
         let _ = def;
         self.agenda.push(Task::PayMana(pm));
+        if taps_first {
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+        }
     }
 
     /// 601.2i: the spell becomes cast; "whenever you cast" abilities

@@ -296,6 +296,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         } else {
             l.int("ActivationCost.crew", *crew, 0, 20) as u8
         },
+        saddle: saddle_n > 0,
         tap_untapped: None,
         // "Waterbend {n}" (Avatar: tap artifacts and creatures to help pay).
         waterbend: *waterbend,

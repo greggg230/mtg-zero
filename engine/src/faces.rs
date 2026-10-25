@@ -109,6 +109,7 @@ impl Game {
                     source_def: f.source_def,
                     slot,
                     this_turn: false,
+                    obj: None,
                 });
                 Flow::Next
             }

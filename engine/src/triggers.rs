@@ -258,23 +258,13 @@ impl Game {
                     && (!copied || has_or_copy(&t.pred))
                     && self.pred_matches(&t.pred, &ev, o)
                 {
-                    // "Whenever one or more ...": once per simultaneous batch.
-                    if self.batching
-                        && has_batch(&t.pred)
-                        && self.waiting[self.batch_start.min(self.waiting.len())..]
-                            .iter()
-                            .any(|w| w.source == o.r && w.slot == i as u8)
-                    {
-                        continue;
-                    }
-                    // "One or more cards are put into exile from your library
-                    // and/or your graveyard": once among the triggers waiting
-                    // to be put on the stack (one instruction's or one cost's
-                    // exiles; ENGINE.md 29).
-                    if (ev.kind == crate::db::EventKind::ExiledFromLibGy && has_batch(&t.pred)
-                        || ev.kind == crate::db::EventKind::CardsPutIntoLibrary)
-                        && self.waiting.iter().any(|w| w.source == o.r && w.slot == i as u8)
-                    {
+                    // "Whenever one or more ...": once per event (CR 603.2c:
+                    // one instruction, one cost, one simultaneous move is one
+                    // event; separate events of one resolution trigger it
+                    // separately). "Whenever one or more cards are put into a
+                    // library" says so too.
+                    let batch = has_batch(&t.pred) || ev.kind == crate::db::EventKind::CardsPutIntoLibrary;
+                    if batch && !self.batch_once(o.r, i as u8) {
                         continue;
                     }
                     // CR 603.2h: "Do this only once each turn": it triggers
@@ -310,15 +300,12 @@ impl Game {
             let t = &self.db.def(tt.source_def).triggers[tt.slot as usize];
             let o = Observer { r: tt.source, def: tt.source_def, controller: tt.controller, spell: false, gy: false };
             if t.event == ev.kind
+                && tt.obj.is_none_or(|b| ev.a == Subj::Obj(b))
                 && (!copied || has_or_copy(&t.pred))
                 && self.pred_matches(&t.pred, &ev, o)
                 && !self.done_once.contains(&(tt.source, tt.slot))
-                // "Whenever one or more ...": once per simultaneous batch.
-                && !(self.batching
-                    && has_batch(&t.pred)
-                    && self.waiting[self.batch_start.min(self.waiting.len())..]
-                        .iter()
-                        .any(|w| w.source == tt.source && w.slot == tt.slot))
+                // "Whenever one or more ...": once per event.
+                && (!has_batch(&t.pred) || self.batch_once(tt.source, tt.slot))
             {
                 self.waiting.push(PendingTrigger {
                     controller: tt.controller,
@@ -400,6 +387,14 @@ impl Game {
             },
             TrigPred::OrCopy => true,
             TrigPred::Once => true,
+            // CR 724, 508.1b: it attacks the player who is the monarch.
+            TrigPred::AttacksMonarch => match ev.a {
+                Subj::Obj(r) => {
+                    let o = &self.objs[r.idx.i()];
+                    o.attacks.is_none() && self.monarch == Some(opp(o.controller))
+                }
+                _ => false,
+            },
             TrigPred::FirstAttack => match ev.a {
                 Subj::Obj(r) => self.players.iter().map(|pl| pl.attacked_with.iter().filter(|&&x| x == r).count()).sum::<usize>() == 1,
                 _ => false,
@@ -630,11 +625,32 @@ impl Game {
     pub(crate) fn begin_batch(&mut self) {
         self.leaving.clear();
         self.batching = true;
-        self.batch_start = self.waiting.len();
+        self.new_event();
     }
 
     pub(crate) fn end_batch(&mut self) {
         self.leaving.clear();
         self.batching = false;
+        self.new_event();
+    }
+
+    /// A new event group begins (CR 603.2c: an instruction ended, a
+    /// resolution or a simultaneous move began).
+    #[inline]
+    pub(crate) fn new_event(&mut self) {
+        self.ev_seq = self.ev_seq.wrapping_add(1);
+    }
+
+    /// A "whenever one or more ..." ability of `source` (slot `slot`)
+    /// triggers once per event group: true the first time in the current
+    /// group (recorded), false after.
+    fn batch_once(&mut self, source: ObjRef, slot: u8) -> bool {
+        let q = self.ev_seq;
+        if self.batch_fired.iter().any(|&(s, k, g)| s == source && k == slot && g == q) {
+            return false;
+        }
+        self.batch_fired.retain(|&(_, _, g)| g == q);
+        self.batch_fired.push((source, slot, q));
+        true
     }
 }

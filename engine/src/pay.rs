@@ -49,6 +49,23 @@ impl Default for Src {
 /// The members of a class, inline up to eight (ENGINE.md 17).
 pub(crate) type Members = SVec<Src, 8>;
 
+/// `classes` without the sources of the cards in `cards` (permanents a cost
+/// taps before the mana is paid: teamwork).
+pub(crate) fn classes_without(classes: &[Class], cards: &[CardIdx]) -> Vec<Class> {
+    classes
+        .iter()
+        .filter_map(|cl| {
+            let mut m = Members::new();
+            for s in cl.members.iter() {
+                if !cards.contains(&s.card) {
+                    m.push(*s);
+                }
+            }
+            (!m.is_empty()).then(|| Class { members: m, ..cl.clone() })
+        })
+        .collect()
+}
+
 fn one_member(src: Src) -> Members {
     let mut m = Members::new();
     m.push(src);

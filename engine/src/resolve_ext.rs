@@ -385,7 +385,7 @@ impl Game {
                 self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
                 Flow::Suspend
             }
-            Ext::FromGraveyard { tgt, to_battlefield, yours, tapped } => {
+            Ext::FromGraveyard { tgt, to_battlefield, yours, tapped, counter } => {
                 f.made = None;
                 for t in self.targets_of(f, *tgt) {
                     let Target::Obj(o) = t else { continue };
@@ -395,10 +395,13 @@ impl Game {
                     f.x = self.def_of(o.idx).mana_value() as i32;
                     if *to_battlefield {
                         let ctl = if *yours { f.controller } else { self.objs[o.idx.i()].owner };
+                        // "Tapped", "with a <kind> counter on it": as it
+                        // enters (CR 614.1c).
+                        self.entering_tapped = *tapped;
+                        self.entering_counters = counter.map(|k| vec![(k, 1)]).unwrap_or_default();
                         self.put_onto_battlefield(o.idx, ctl);
-                        if *tapped {
-                            self.tap(o.idx);
-                        }
+                        self.entering_tapped = false;
+                        self.entering_counters.clear();
                         // (It becomes the made object: "with a counter on it".)
                         if self.objs[o.idx.i()].zone == Zone::Battlefield {
                             f.made = Some(o.idx);
@@ -769,9 +772,12 @@ impl Game {
                         Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => {
                             self.damage_source_of(r.idx)
                         }
-                        // Gone: its characteristics as a card, last controlled
-                        // by the ability's controller (CR 608.2h, simplified).
-                        Some(r) => crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) },
+                        // Gone: as it last existed on the battlefield (CR
+                        // 608.2h, 113.7a).
+                        Some(r) => match self.lki_damage.iter().rev().find(|x| x.0 == r) {
+                            Some(&(_, d)) => d,
+                            None => crate::game::DamageSource { controller: f.controller, ..self.damage_source_of(r.idx) },
+                        },
                         None => return Flow::Next,
                     }
                 } else {
@@ -961,10 +967,10 @@ impl Game {
                 // The card it became in the graveyard (one move later).
                 if o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1) && !self.is_token(r.idx) {
                     let owner = o.owner;
+                    // (It enters with the counter, CR 614.1c.)
+                    self.entering_counters = vec![(*counter, 1)];
                     self.put_onto_battlefield(r.idx, owner);
-                    if self.objs[r.idx.i()].zone == Zone::Battlefield {
-                        self.add_counters(r.idx, *counter, 1);
-                    }
+                    self.entering_counters.clear();
                 }
                 Flow::Next
             }
@@ -1444,6 +1450,18 @@ impl Game {
             }
             Ext::BecomeMonarch => {
                 self.set_monarch(f.controller);
+                Flow::Next
+            }
+            Ext::EventControllerBecomesMonarch => {
+                // "Its controller": the creature's controller now, or as it
+                // last existed on the battlefield (CR 608.2h).
+                let p = match f.ev.obj {
+                    Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => Some(self.objs[r.idx.i()].controller),
+                    _ => f.ev.player,
+                };
+                if let Some(p) = p {
+                    self.set_monarch(p);
+                }
                 Flow::Next
             }
             Ext::ExileUntilMonarch { tgt } => {

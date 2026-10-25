@@ -418,6 +418,7 @@ impl Game {
         self.discarded.clear();
         self.lki_counters.clear();
         self.lki_copy.clear();
+        self.lki_damage.clear();
         self.spell_lki.clear();
         self.may_copies = 0;
         self.activations.clear();
@@ -539,10 +540,12 @@ impl Game {
                     let ev = crate::triggers::EvCtx { player: Some(ap), ..Default::default() };
                     self.initiative_trigger(ap, crate::dungeon::UPKEEP, ev);
                 }
-                // CR 724.2: at the beginning of the monarch's end step, they
-                // draw a card (here as the step begins, not on the stack).
+                // CR 724.2: "at the beginning of the monarch's end step, that
+                // player draws a card" (the monarch's inherent triggered
+                // ability).
                 if self.turn.step == Step::End && self.monarch == Some(ap) {
-                    self.draw_cards(ap, 1);
+                    let ev = crate::triggers::EvCtx { player: Some(ap), ..Default::default() };
+                    self.monarch_trigger(ap, crate::dungeon::MONARCH_END_STEP, ev);
                 }
                 // Delayed triggered abilities whose moment it is (603.7).
                 if !self.delayed.is_empty() {

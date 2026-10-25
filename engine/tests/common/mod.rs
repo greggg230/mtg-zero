@@ -95,6 +95,8 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("Test Tapper", "{1}{R}", 1, 1, &[], false, tap_ping()),
         creature("Test Hasty Tapper", "{1}{R}", 1, 1, &["haste"], false, tap_ping()),
         creature("Test Indestructible", "{2}{W}", 2, 2, &["indestructible"], false, none.clone()),
+        // "This creature crews Vehicles as though its power were 2 greater."
+        creature("Test Pilot", "{1}", 0, 1, &[], false, json!({"crew_power_bonus": 2})),
         // When this enters, you may draw a card.
         creature(
             "Test May Draw",
@@ -217,6 +219,25 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
             json!({"cost_reductions": [{"$t": "CostReduction", "amount": 1,
                     "condition": {"$t": "PerControlled", "filter": {"$t": "IsArtifact"}}}],
                 "alternative_costs": [{"$t": "AlternativeCost", "mana": "{2}{U}"}]}),
+        ),
+        // "Exile target card from a graveyard. Exile target card from a
+        // graveyard." Two instructions: two events (CR 603.2c; "one or
+        // more" triggers, ENGINE.md shortcuts).
+        spell(
+            "Test Twice Exile",
+            "Sorcery",
+            cost("{B}"),
+            json!({"$t": "Sequence", "effects": [{"$t": "ExileTargetCardFromGraveyard"}, {"$t": "ExileTargetCardFromGraveyard"}]}),
+            none.clone(),
+        ),
+        // "Put target permanent on top of its owner's library. Put target
+        // permanent on top of its owner's library." (Two events.)
+        spell(
+            "Test Twice Oust",
+            "Sorcery",
+            cost("{W}"),
+            json!({"$t": "Sequence", "effects": [{"$t": "PutTargetPermanentIntoOwnersLibrary"}, {"$t": "PutTargetPermanentIntoOwnersLibrary"}]}),
+            none.clone(),
         ),
     ];
     cards.into_iter().map(|v| serde_json::from_value(v).expect("custom card IR")).collect()

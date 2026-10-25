@@ -50,3 +50,4 @@ Rabbit 1/1 W c Rabbit
 Human Knight 2/2 R c Human Knight trample haste
  2/2 C c
 Boo 1/1 R c Hamster trample haste
+The monarch rules

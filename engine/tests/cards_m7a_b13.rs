@@ -84,9 +84,11 @@ fn cr_724_palace_jailer_exiles_until_an_opponent_becomes_the_monarch() {
     cast(&mut g, 0, "Palace Jailer");
     resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(g.tgt(bear))).then(|| g.tgt(bear)));
     assert_eq!(g.obj(bear).zone, Zone::Exile);
-    // The monarch draws at the beginning of their end step.
+    // The monarch draws at the beginning of their end step (a triggered
+    // ability, CR 724.2).
     let hand = g.player(0).hand.len();
     quiet_until(&mut g, |g| g.turn().step == Step::End && at_priority(g));
+    resolve_with(&mut g, |_| None);
     assert_eq!(g.player(0).hand.len(), hand + 1);
     // P1 attacks with the hasty creature: combat damage to the monarch.
     quiet_until(&mut g, |g| g.turn().active == 1 && g.kind() == Some(DecisionKind::DeclareAttackers));

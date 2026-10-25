@@ -4,7 +4,7 @@
 //! The initiative is a designation (`Game::initiative`). Its three inherent
 //! triggered abilities have no source (725.2): they are the triggers of a
 //! rules definition named [`INITIATIVE`] and name a slot in no zone as their
-//! source (`Game::rules_src`). A player's dungeon is an object in the command
+//! source (`Game::rules_srcs`). A player's dungeon is an object in the command
 //! zone (309.3) whose definition is [`UNDERCITY`]; its venture marker's room
 //! is `Game::dungeons[p].room`. Moving the marker into a room makes that
 //! room's ability trigger (309.4c: a triggered ability on the stack whose
@@ -25,6 +25,7 @@ use crate::triggers::{EvCtx, PendingTrigger};
 /// The rules definitions' names.
 pub(crate) const UNDERCITY: &str = "Undercity";
 pub(crate) const INITIATIVE: &str = "The initiative";
+pub(crate) const MONARCH: &str = "The monarch";
 
 /// Undercity's rooms, top to bottom; a room's ability is the dungeon
 /// definition's trigger of the same index.
@@ -42,6 +43,11 @@ pub(crate) const BOTTOM: u8 = 8;
 pub(crate) const TAKEN: u8 = 0;
 pub(crate) const UPKEEP: u8 = 1;
 pub(crate) const DAMAGED: u8 = 2;
+
+/// The monarch's inherent triggered abilities (CR 724.2; indices of its
+/// definition's triggers).
+pub(crate) const MONARCH_END_STEP: u8 = 0;
+pub(crate) const MONARCH_DAMAGED: u8 = 1;
 
 impl Game {
     fn rules_def(&self, name: &str) -> DefId {
@@ -69,11 +75,25 @@ impl Game {
     /// 725.2: no source; controlled by the player named), about `ev`.
     pub(crate) fn initiative_trigger(&mut self, p: PlayerId, slot: u8, ev: EvCtx) {
         let def = self.rules_def(INITIATIVE);
-        let src = match self.rules_src {
+        self.rules_trigger(def, p, slot, ev);
+    }
+
+    /// One of the monarch's triggered abilities triggers (CR 724.2: no
+    /// source; controlled by the player who is the monarch as it triggers).
+    pub(crate) fn monarch_trigger(&mut self, p: PlayerId, slot: u8, ev: EvCtx) {
+        let def = self.db.token_by_name(MONARCH).expect("a monarch without the monarch's rules definition");
+        self.rules_trigger(def, p, slot, ev);
+    }
+
+    /// A sourceless triggered ability of rules definition `def` triggers for
+    /// `p`: its source is a slot in no zone with that definition (one per
+    /// definition, made the first time).
+    fn rules_trigger(&mut self, def: DefId, p: PlayerId, slot: u8, ev: EvCtx) {
+        let src = match self.rules_srcs.iter().copied().find(|&c| self.objs[c.i()].def == def) {
             Some(c) => c,
             None => {
                 let c = self.add_card(def, p, Zone::Nowhere);
-                self.rules_src = Some(c);
+                self.rules_srcs.push(c);
                 c
             }
         };

@@ -94,6 +94,9 @@ pub struct Obj {
     /// The turn it entered the battlefield (0 = never; turn numbers as
     /// u16, which the turn cap keeps far from).
     pub entered: u16,
+    /// The event group it entered the battlefield in (`Game::ev_seq`):
+    /// permanents that entered at the same time share it (CR 614.12a).
+    pub enter_seq: u32,
     /// Loyalty abilities activated this turn (CR 606.3): in turn `pw_turn`,
     /// `pw_used` of them, `pw_extra` more allowed than one (Comet).
     pub pw_turn: u16,
@@ -401,6 +404,9 @@ pub struct TempTrigger {
     pub source_def: DefId,
     pub slot: u8,
     pub this_turn: bool,
+    /// The object it is about ("whenever that creature ..."): only events
+    /// whose first subject is that object trigger it.
+    pub obj: Option<ObjRef>,
 }
 
 /// A delayed triggered ability (CR 603.7): it triggers once, at `when`.
@@ -474,9 +480,14 @@ pub struct Game {
     pub(crate) first_token: u16,
     /// A simultaneous move off the battlefield is in progress (`leaving`).
     pub(crate) batching: bool,
-    /// `waiting` as the current batch began ("whenever one or more ...":
-    /// one trigger per batch).
-    pub(crate) batch_start: usize,
+    /// The current event group (CR 603.2c, 700.1: one instruction of a
+    /// resolving spell or ability, one simultaneous move, one cost is one
+    /// event however many objects it touches): bumped as an instruction ends,
+    /// a resolution begins and a batch begins or ends.
+    pub(crate) ev_seq: u32,
+    /// "Whenever one or more ..." abilities that triggered in event group
+    /// `ev_seq`: (source, ability slot, group); one trigger per group.
+    pub(crate) batch_fired: Vec<(ObjRef, u8, u32)>,
     /// The permanent being put onto the battlefield is a resolving spell
     /// (it was cast).
     pub(crate) entering_cast: bool,
@@ -539,6 +550,13 @@ pub struct Game {
     /// it enters ("it's an enchantment", "it's a Phyrexian in addition";
     /// CR 614.1c-like; set and cleared around one move).
     pub(crate) entering_mods: Vec<crate::db::Mod>,
+    /// Counters the permanent being put onto the battlefield enters with
+    /// because of the effect that puts it there ("with a corpse counter on
+    /// it", persist; CR 614.1c, 122.6): on it before its `Enters` event.
+    pub(crate) entering_counters: Vec<(crate::db::Counter, u16)>,
+    /// The effect putting it onto the battlefield says "tapped" (CR 614.1c:
+    /// it enters tapped; it doesn't become tapped).
+    pub(crate) entering_tapped: bool,
     pub(crate) entering_dash: Option<u8>,
     /// The entering permanent's spell was warped (CR 702.185): `entering_dash`
     /// is warp's delayed ability (no haste).
@@ -577,6 +595,10 @@ pub struct Game {
     /// Copiable values of permanents that left the battlefield this turn,
     /// as they last existed there (CR 608.2h).
     pub(crate) lki_copy: Vec<(ObjRef, crate::copies::CopyVals)>,
+    /// Permanents that left the battlefield this turn as damage sources, as
+    /// they last existed there (CR 608.2h, 113.7a; kept when
+    /// `SEEN_LKI_DAMAGE`).
+    pub(crate) lki_damage: Vec<(ObjRef, DamageSource)>,
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it").
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
@@ -610,10 +632,11 @@ pub struct Game {
     pub(crate) initiative: Option<PlayerId>,
     /// Each player's dungeon (CR 309).
     pub(crate) dungeons: [Dungeon; 2],
-    /// The object the initiative's inherent triggered abilities name as
-    /// their source (CR 725.2: they have none): a slot in no zone, made the
-    /// first time one triggers.
-    pub(crate) rules_src: Option<CardIdx>,
+    /// The objects the inherent triggered abilities of the initiative and
+    /// the monarch name as their source (CR 725.2, 724.2: they have none):
+    /// a slot in no zone per rules definition, made the first time one
+    /// triggers.
+    pub(crate) rules_srcs: Vec<CardIdx>,
     /// While the modes of a stack item are chosen, its id: it can't target
     /// itself (CR 115.5). 0 otherwise (always between tasks).
     pub(crate) choosing_for: u32,
@@ -653,6 +676,10 @@ pub(crate) const SEEN_NAMED_TAX: u16 = 2048;
 pub(crate) const SEEN_TOP: u16 = 4096;
 /// A granted "sacrifice this: add <mana>" (Rain of Filth; M7d).
 pub(crate) const SEEN_SAC_MANA: u16 = 8192;
+/// "That creature deals damage" of a triggered ability, which uses the
+/// creature as it last existed on the battlefield if it left (Pyrogoyf;
+/// `Game::lki_damage`).
+pub(crate) const SEEN_LKI_DAMAGE: u16 = 16384;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -857,6 +884,8 @@ impl Game {
             entering_x: 0,
             entering_sunburst: 0,
             entering_mods: Vec::new(),
+            entering_counters: Vec::new(),
+            entering_tapped: false,
             entering_dash: None,
             entering_warp: false,
             miracle_cast: None,
@@ -870,6 +899,7 @@ impl Game {
             copies: Vec::new(),
             copy_objs: Vec::new(),
             lki_copy: Vec::new(),
+            lki_damage: Vec::new(),
             spell_lki: Vec::new(),
             entering_copy: None,
             entering_times: 0,
@@ -881,11 +911,12 @@ impl Game {
             seen: 0,
             initiative: None,
             dungeons: [Dungeon::default(); 2],
-            rules_src: None,
+            rules_srcs: Vec::new(),
             choosing_for: 0,
             marks: Vec::new(),
             batching: false,
-            batch_start: 0,
+            ev_seq: 0,
+            batch_fired: Vec::new(),
             entering_cast: false,
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
@@ -935,6 +966,7 @@ impl Game {
             monstrous: false,
             attacks: None,
             entered: 0,
+            enter_seq: 0,
             pw_turn: 0,
             pw_used: 0,
             pw_extra: 0,
@@ -1149,6 +1181,8 @@ impl Game {
         // "You may have this enter as a copy of ..." (CR 707.5): the choice
         // comes first (`Task::EnterAsCopy`), then what it entered as enters.
         let copy_choice = self.def_of(idx).enters_as_copy.is_some();
+        let fx_tapped = std::mem::take(&mut self.entering_tapped);
+        let fx_counters = std::mem::take(&mut self.entering_counters);
         let tapped = !copy_choice && self.enters_tapped(idx, controller);
         self.entering_evoked = evoked; // read as it moves (its ETB sees it)
         let escaped = std::mem::take(&mut self.entering_escaped);
@@ -1163,8 +1197,16 @@ impl Game {
         let from_gy_exile = matches!(self.objs[idx.i()].zone, Zone::Graveyard | Zone::Exile);
         let note = (cast && !self.is_copy_obj(idx)) as u16 | (times as u16) << 1 | (x.min(63) as u16) << 9 | (from_gy_exile as u16) << 15;
         self.enter_note = note;
-        self.defer_enters = copy_choice;
+        // (Its `Enters` event comes after what applies as it enters: "enters
+        // tapped", "enters with counters", CR 614.1c, 122.6.)
+        self.defer_enters = true;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
+        if fx_tapped {
+            self.objs[idx.i()].tapped = true;
+        }
+        for (k, n) in fx_counters {
+            self.add_counters(idx, k, n);
+        }
         let warp = std::mem::take(&mut self.entering_warp);
         if let (Some(k), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand
@@ -1204,6 +1246,9 @@ impl Game {
             if self.def_of(idx).times_cost.as_ref().is_some_and(|t| t.x) {
                 self.marks.push((r, Mark::KickerX(x)));
             }
+        }
+        if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
+            self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note });
         }
         r
     }
@@ -1303,10 +1348,8 @@ impl Game {
         let idx = self.add_card(def, controller, Zone::Nowhere);
         self.token_slot_made(idx);
         self.note(|g| format!("P{controller} creates a {} token", g.name(idx)));
+        self.entering_tapped = tapped;
         self.put_onto_battlefield(idx, controller);
-        if tapped {
-            self.tap(idx);
-        }
         idx
     }
 
@@ -1437,6 +1480,10 @@ impl Game {
         if from == Zone::Battlefield {
             let v = self.copiable(idx);
             self.lki_copy.push((old, v));
+            if self.seen & SEEN_LKI_DAMAGE != 0 {
+                let d = self.damage_source_of(idx);
+                self.lki_damage.push((old, d));
+            }
         }
         // CR 707.10a, 704.5e: a copy of a spell (or of a card) leaving the
         // stack ceases to exist, unless it becomes a permanent (608.3f);
@@ -1476,6 +1523,7 @@ impl Game {
             0
         };
         let turn = self.turn.number;
+        let ev_seq = self.ev_seq;
         let known_before = if from.is_hidden() { self.objs[idx.i()].known } else { 0b11 };
         {
             let o = &mut self.objs[idx.i()];
@@ -1505,6 +1553,7 @@ impl Game {
             o.monstrous = false;
             o.attacks = None;
             o.entered = if to == Zone::Battlefield { turn as u16 } else { 0 };
+            o.enter_seq = if to == Zone::Battlefield { ev_seq } else { 0 };
             o.pw_turn = 0;
             o.pw_used = 0;
             o.pw_extra = 0;
@@ -2032,7 +2081,7 @@ pub(crate) fn blank_def() -> &'static CardDef {
 }
 
 /// The characteristics of a damage source that change damage results.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct DamageSource {
     pub controller: PlayerId,
     pub deathtouch: bool,

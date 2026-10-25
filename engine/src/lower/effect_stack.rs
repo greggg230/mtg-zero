@@ -382,6 +382,26 @@ fn initiative_defs(l: &mut Lowerer) {
     l.token(initiative_def());
 }
 
+/// The monarch's rules definition (CR 724.2), for the cards that make a
+/// player the monarch.
+pub(crate) fn monarch_defs(l: &mut Lowerer) {
+    l.token(monarch_def());
+}
+
+/// "The monarch": (0) "at the beginning of the monarch's end step, that
+/// player draws a card"; (1) "whenever a creature deals combat damage to the
+/// monarch, its controller becomes the monarch" (the creature is the
+/// event's).
+pub(crate) fn monarch_def() -> CardDef {
+    let mut b = Builder::default();
+    b.op(Op::Draw { who: Who::You, n: Amount::Fixed(1) });
+    let mut triggers = vec![fired(b)];
+    let mut b = Builder::default();
+    b.op(Op::Ext(Ext::EventControllerBecomesMonarch));
+    triggers.push(fired(b));
+    CardDef { name: crate::dungeon::MONARCH.to_string(), rules: true, triggers, ..CardDef::default() }
+}
+
 /// A triggered ability that only the engine fires (never an event's).
 fn fired(program: Builder) -> TriggerDef {
     let ability = program.finish();
@@ -461,8 +481,7 @@ fn undercity_def(treasure: u16, skeleton: u16) -> CardDef {
     // shuffle."
     let mut b = Builder::default();
     b.op(Op::LookTop { who: Who::You, n: 10, reveal: true });
-    b.op(Op::Ext(Ext::PileToBattlefield { filter: creature }));
-    b.op(Op::Ext(Ext::PutCounters { on: On::Made, counter: Counter::P1P1, n: Amount::Fixed(3) }));
+    b.op(Op::Ext(Ext::PileToBattlefield { filter: creature, counters: Some((Counter::P1P1, 3)) }));
     let mut hexproof = KwSet::default();
     hexproof.insert(Kw::Hexproof);
     b.op(Op::Ext(Ext::Apply { on: On::Made, mods: vec![Mod::Keywords(hexproof)], until: Until::YourNextTurn }));

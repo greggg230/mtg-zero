@@ -728,7 +728,9 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
             };
             let t = b.target(Filter::InGraveyard(Box::new(inner)), if *up_to_one { 0 } else { 1 }, 1);
-            b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: true, yours, tapped: false }));
+            // "With a <kind> counter on it": as it enters (CR 614.1c).
+            let counter = with_counter.as_ref().map(|name| counter_by_name(l, name));
+            b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: true, yours, tapped: false, counter }));
             // "That creature gains haste. Exile it at the beginning of the
             // next end step" (Goryo's Vengeance).
             if let Some(h) = haste {
@@ -745,11 +747,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 d.op(Op::Ext(Ext::ExileEventObj));
                 let k = l.delayed_ability(d.finish());
                 b.op(Op::Ext(Ext::Delay { k, when: DelayedWhen::NextEndStep, about: About::Made }));
-            }
-            if let Some(name) = with_counter {
-                // (Put on it as it enters; ENGINE.md 27.8.)
-                let counter = counter_by_name(l, name);
-                b.op(Op::Ext(Ext::PutCounters { on: On::Made, counter, n: Amount::Fixed(1) }));
             }
             if *exile_if_it_would_leave {
                 // A replacement effect on that permanent (CR 614.1a).
@@ -853,7 +850,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let hi = l.int("ReturnFromGraveyard.max_n", *max_n, 1, 8) as u8;
             let tgt = b.target(Filter::InGraveyard(Box::new(f)), lo, hi);
             let to_battlefield = *destination == enums::GraveyardReturnDestination::Battlefield;
-            b.op(Op::Ext(Ext::FromGraveyard { tgt, to_battlefield, yours: true, tapped: false }));
+            b.op(Op::Ext(Ext::FromGraveyard { tgt, to_battlefield, yours: true, tapped: false, counter: None }));
         }
         E::ExileUpToOneTargetCardFromGraveyard(nodes::ExileUpToOneTargetCardFromGraveyard {}) => {
             let t = b.target(Filter::InGraveyard(Box::new(Filter::Any)), 0, 1);
@@ -1498,7 +1495,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::CounterThenWhenItAttacksMonarch(nodes::CounterThenWhenItAttacksMonarch { targets, keywords }) => {
             // "Put a +1/+1 counter on target creature. Whenever that
             // creature attacks the monarch this turn, it gains <kws> until
-            // end of turn" (applied as it attacks: ENGINE.md 23.11).
+            // end of turn": a delayed triggered ability about that creature
+            // (CR 603.7b-c), on the stack as it attacks.
             let Some(t) = lower_targets(l, b, targets, "CounterThenWhenItAttacksMonarch") else { return true };
             b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::P1P1, n: Amount::Fixed(1) }));
             let mut set = KwSet::default();
@@ -1508,9 +1506,21 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     _ => l.unsupported("CounterThenWhenItAttacksMonarch.keywords(protection)"),
                 }
             }
-            apply(b, On::Target(t), vec![Mod::IfAttacksMonarch(set)], Until::EndOfTurn);
+            let mut d = Builder::default();
+            apply(&mut d, On::EventObj, vec![Mod::Keywords(set)], Until::EndOfTurn);
+            let ability = d.finish();
+            let uses_event = ability.uses_event();
+            l.delayed.push(crate::db::TriggerDef {
+                event: crate::db::EventKind::Attacks,
+                pred: crate::db::TrigPred::AttacksMonarch,
+                ability,
+                uses_event,
+            });
+            let k = (l.delayed.len() - 1) as u8;
+            b.op(Op::Ext(Ext::M7d(crate::program::M7d::TriggerThisTurnFor { k, on: On::Target(t) })));
         }
         E::BecomeMonarch(nodes::BecomeMonarch {}) => {
+            super::effect_stack::monarch_defs(l);
             b.op(Op::Ext(Ext::BecomeMonarch));
         }
         E::ExileUntilOpponentBecomesMonarch(nodes::ExileUntilOpponentBecomesMonarch { targets }) => {

@@ -109,13 +109,16 @@ impl Game {
                     }
                 }
             }
-            Ext::PileToBattlefield { filter } => {
+            Ext::PileToBattlefield { filter, counters } => {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         f.pile.retain(|&x| x != c);
                         if self.objs[c.i()].zone == Zone::Library {
+                            // (With its counters as it enters, CR 614.1c.)
+                            self.entering_counters = counters.map(|(k, n)| vec![(k, n as u16)]).unwrap_or_default();
                             self.put_onto_battlefield(c, p);
+                            self.entering_counters.clear();
                             f.made = (self.objs[c.i()].zone == Zone::Battlefield).then_some(c);
                         }
                         return Flow::Next;

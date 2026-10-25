@@ -269,7 +269,8 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::Once
         | TrigPred::EnteredNotFromGyExile
         | TrigPred::InGraveyard
-        | TrigPred::SpellMvParity => Vec::new(),
+        | TrigPred::SpellMvParity
+        | TrigPred::AttacksMonarch => Vec::new(),
     }
 }
 

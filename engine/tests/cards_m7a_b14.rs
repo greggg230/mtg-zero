@@ -147,12 +147,14 @@ fn okoye_the_countered_creature_gains_double_strike_attacking_the_monarch() {
     });
     assert_eq!(g.obj(bear).zone, Zone::Exile);
     // P0's turn: Okoye's counter on the hasty creature, which attacks the
-    // monarch: double strike and trample.
+    // monarch: double strike and trample (a delayed triggered ability on
+    // the stack as it attacks, CR 603.7).
     quiet_until(&mut g, |g| g.turn().active == 0 && g.kind() == Some(DecisionKind::Target));
     g.choose(g.tgt(hasty));
     quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
     g.choose(Choice::Card(hasty));
     g.choose(Choice::Pass);
+    resolve_with(&mut g, |_| None);
     assert!(g.has_kw(hasty, Kw::DoubleStrike) && g.has_kw(hasty, Kw::Trample));
     quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
     assert_eq!(g.life(1), 14, "3 first-strike and 3 regular damage");

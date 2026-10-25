@@ -169,19 +169,6 @@ impl Game {
                 for &c in &attackers {
                     let r = self.obj_ref(c);
                     self.players[ap as usize].attacked_with.push(r);
-                    // "Whenever it attacks the monarch this turn" (applied
-                    // as it attacks; not when it attacks a planeswalker).
-                    if self.monarch == Some(opp(ap)) && self.objs[c.i()].attacks.is_none() {
-                        let k = self.attack_monarch_kws(c);
-                        if !k.is_empty() {
-                            self.add_effect(
-                                crate::layers::Affected::Obj(r),
-                                crate::db::Mod::Keywords(k),
-                                crate::layers::Until::EndOfTurn,
-                                ap,
-                            );
-                        }
-                    }
                 }
                 // CR 508.1m: abilities that trigger on attacking.
                 for &c in &attackers {
@@ -452,13 +439,15 @@ impl Game {
                 amount: n.min(u16::MAX as i32) as u16,
             });
         }
-        // CR 724.2: a creature dealing combat damage to the monarch makes
-        // its controller the monarch (here at once, not on the stack).
-        for &(r, p, _) in &to_players {
-            if self.monarch == Some(p) {
-                let c = self.objs[r.idx.i()].controller;
-                if c != p {
-                    self.set_monarch(c);
+        // CR 724.2: "whenever a creature deals combat damage to the monarch,
+        // its controller becomes the monarch" (the monarch's inherent
+        // triggered ability, controlled by the monarch; one per creature).
+        if let Some(m) = self.monarch {
+            for &(r, p, _) in &to_players {
+                if p == m {
+                    let c = self.objs[r.idx.i()].controller;
+                    let ev = crate::triggers::EvCtx { player: Some(c), obj: Some(r), ..Default::default() };
+                    self.monarch_trigger(m, crate::dungeon::MONARCH_DAMAGED, ev);
                 }
             }
         }

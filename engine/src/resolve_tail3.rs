@@ -294,10 +294,11 @@ impl Game {
                         return Flow::Suspend;
                     }
                 };
-                let r = self.put_onto_battlefield(pick, p);
+                // (With the counter as it enters, CR 614.1c.)
+                self.entering_counters = vec![(*counter, 1)];
+                self.put_onto_battlefield(pick, p);
+                self.entering_counters.clear();
                 if self.objs[pick.i()].zone == Zone::Battlefield {
-                    let _ = r;
-                    self.add_counters(pick, *counter, 1);
                     f.made = Some(pick);
                 }
                 Flow::Next

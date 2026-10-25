@@ -180,9 +180,6 @@ pub enum Mod {
     MustAttack,
     /// "If it would die this turn, exile it instead" (CR 614).
     ExileIfDies,
-    /// "Whenever it attacks the monarch this turn, it gains these keywords
-    /// until end of turn."
-    IfAttacksMonarch(KwSet),
     /// Layer 7c: +p/+t for each permanent matching the filter (relative to
     /// the static ability's controller; a static ability only).
     PtPer { filter: Filter, p: i32, t: i32 },
@@ -734,6 +731,9 @@ pub enum TrigPred {
     /// The event's spell's mana value has the parity chosen as the source
     /// entered (`Mark::Parity`).
     SpellMvParity,
+    /// The attacker attacks the monarch (the player, not a planeswalker;
+    /// CR 724, 508.1b).
+    AttacksMonarch,
 }
 
 impl TrigPred {
@@ -991,6 +991,9 @@ pub struct Cost {
     /// Crew n (CR 702.122): tap untapped creatures you control (not the
     /// source) with total power n or more.
     pub crew: u8,
+    /// `crew` is saddle's (CR 702.171a): "crews Vehicles as though its
+    /// power were greater" doesn't apply.
+    pub saddle: bool,
     /// Tap n untapped permanents you control matching the filter ("tap an
     /// untapped Rebel you control"; not {T}: summoning sickness doesn't
     /// matter, CR 302.6).
@@ -1148,6 +1151,11 @@ impl CardDef {
                 ab.program.iter().any(|op| matches!(op, Op::Ext(crate::program::Ext::Apply { mods, .. }) if mods.iter().any(|m| matches!(m, Mod::GainSacMana(_)))))
             }) {
                 crate::game::SEEN_SAC_MANA
+            } else {
+                0
+            })
+            | (if self.triggers.iter().any(|t| t.ability.program.iter().any(|op| matches!(op, Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })))) {
+                crate::game::SEEN_LKI_DAMAGE
             } else {
                 0
             })

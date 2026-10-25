@@ -141,6 +141,10 @@ pub enum M7d {
     /// "whenever <event> this turn, <effect>" (a delayed triggered ability
     /// with a duration, CR 603.7b; Forth Eorlingas!).
     TriggerThisTurn { k: u8 },
+    /// "Whenever that creature <event> this turn, <effect>": the delayed
+    /// triggered ability `k` (CR 603.7b, 603.7c), bound to each object of
+    /// `on` (Okoye: "whenever that creature attacks the monarch this turn").
+    TriggerThisTurnFor { k: u8, on: On },
 }
 
 /// Which objects an `Ext` op acts on.
@@ -233,7 +237,7 @@ pub enum Ext {
     /// ability's controller with `yours`, else its owner's), tapped if
     /// `tapped`. Remembers the mana value of the last one
     /// (`Amount::LkiManaValue`).
-    FromGraveyard { tgt: u8, to_battlefield: bool, yours: bool, tapped: bool },
+    FromGraveyard { tgt: u8, to_battlefield: bool, yours: bool, tapped: bool, counter: Option<crate::db::Counter> },
     /// Each player in APNAP order chooses a card matching `filter` in
     /// their graveyard (if any); then those cards are put onto the
     /// battlefield at once (CR 101.4). Choice: a `GRAVEYARD` slot.
@@ -423,6 +427,10 @@ pub enum Ext {
     ExileEventObj2,
     /// The controller becomes the monarch (CR 724).
     BecomeMonarch,
+    /// "Its controller becomes the monarch": the controller of the event's
+    /// creature (its last known information if it left), the monarch's
+    /// inherent triggered ability (CR 724.2).
+    EventControllerBecomesMonarch,
     /// Exile each legal target of `tgt` until an opponent of the controller
     /// becomes the monarch (Palace Jailer).
     ExileUntilMonarch { tgt: u8 },
@@ -612,7 +620,7 @@ pub enum Ext {
     /// The controller puts a card matching `filter` from among the pile
     /// onto the battlefield (their choice; nothing if none); it becomes the
     /// made object. Choice: a `LIBRARY` slot of the pile.
-    PileToBattlefield { filter: Filter },
+    PileToBattlefield { filter: Filter, counters: Option<(crate::db::Counter, u8)> },
     /// The controller gets n experience counters (CR 122.1).
     GetExperience { n: u8 },
     /// The controller creates n tokens (an amount) [tapped] [and attacking,
@@ -1074,6 +1082,7 @@ impl Op {
             Op::Ext(Ext::CopySpell { of, n, who: w, .. }) => *of == SpellOf::EventSpell || who(w) || amt(n),
             Op::Ext(Ext::ExileEventCard) => true,
             Op::Ext(Ext::CounterEventItem) => true,
+            Op::Ext(Ext::EventControllerBecomesMonarch) => true,
             Op::Ext(Ext::OfferPayOther { who: w, .. }) => who(w),
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::Poison { who: w, n }) => who(w) || amt(n),

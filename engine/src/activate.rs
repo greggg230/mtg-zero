@@ -461,8 +461,17 @@ impl Game {
                 return false;
             }
         }
-        if cost.crew > 0 && self.crew_power(p, card) < cost.crew as i32 {
-            return false;
+        if cost.crew > 0 {
+            if self.is_spell_card(card) {
+                // Teamwork: the taps (paid first) and the mana compete.
+                let cands = self.crew_eligible(p, card);
+                let keep = Self::keep_for(card, cost, exclude);
+                if !self.crew_mana_ok(p, cost.crew as i32, &[], &cands, mana, classes, &keep) {
+                    return false;
+                }
+            } else if self.crew_power(p, card, !cost.saddle) < cost.crew as i32 {
+                return false;
+            }
         }
         // (Not counting permanents that could be tapped for mana first: the
         // mana is paid before, 601.2g-h.)
@@ -508,27 +517,70 @@ impl Game {
     }
 
     /// Creatures that can crew `vehicle` for `p`: untapped creatures they
-    /// control other than it.
+    /// control other than it. (Teamwork, a spell's crew-like cost: a
+    /// creature with a mana ability too; the spell's taps are paid before
+    /// its mana and leave the mana payable, `crew_mana_ok`.)
     pub(crate) fn crew_eligible(&self, p: PlayerId, vehicle: CardIdx) -> Vec<CardIdx> {
-        // Teamwork (a spell's crew-like cost, ENGINE.md 29): not a creature
-        // with a mana ability, so the mana payment and the taps never compete
-        // (a simplification: such a creature could help in the CR).
-        let spell = matches!(self.objs[vehicle.i()].zone, Zone::Hand | Zone::Stack | Zone::Graveyard | Zone::Exile);
-        self.creatures_of(p)
-            .filter(|&c| c != vehicle && !self.objs[c.i()].tapped)
-            .filter(|&c| !spell || !self.has_mana_ability(c))
-            .collect()
+        self.creatures_of(p).filter(|&c| c != vehicle && !self.objs[c.i()].tapped).collect()
     }
 
-    /// The most power `p` can tap to crew `vehicle`.
-    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx) -> i32 {
-        self.crew_eligible(p, vehicle).into_iter().map(|c| self.crew_power_of(c).max(0)).sum()
+    /// Is `card` a spell or a card that may become one (teamwork's cost is a
+    /// spell's; crew and saddle are abilities of permanents)?
+    pub(crate) fn is_spell_card(&self, card: CardIdx) -> bool {
+        matches!(self.objs[card.i()].zone, Zone::Hand | Zone::Stack | Zone::Graveyard | Zone::Exile | Zone::Library)
+    }
+
+    /// The most power `p` can tap to crew `vehicle` (`bonus`: crew itself,
+    /// where "crews Vehicles as though its power were greater" applies).
+    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx, bonus: bool) -> i32 {
+        self.crew_eligible(p, vehicle).into_iter().map(|c| self.crew_power_of(c, bonus).max(0)).sum()
     }
 
     /// A creature's power for crewing (a Pilot crews as though its power
-    /// were greater).
-    pub(crate) fn crew_power_of(&self, c: CardIdx) -> i32 {
-        self.power(c) + self.abilities(c).crew_bonus
+    /// were greater: crew only, not saddle or teamwork, CR 702.122,
+    /// 702.171a).
+    pub(crate) fn crew_power_of(&self, c: CardIdx, bonus: bool) -> i32 {
+        self.power(c) + if bonus { self.abilities(c).crew_bonus } else { 0 }
+    }
+
+    /// Teamwork (a spell's "tap any number of untapped creatures you control
+    /// with total power n or more", paid before its mana, CR 601.2h): can
+    /// `p` tap creatures of `cands`, with the ones already chosen
+    /// (`tapped_in`), for total power `need` and still pay `mana` from
+    /// `classes` without the mana abilities of the creatures tapped? (The
+    /// taps and the mana compete for creatures with mana abilities: every
+    /// set of those is tried.)
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn crew_mana_ok(
+        &self,
+        p: PlayerId,
+        need: i32,
+        tapped_in: &[CardIdx],
+        cands: &[CardIdx],
+        mana: &crate::mana::ManaCost,
+        classes: &[crate::pay::Class],
+        keep: &Keep,
+    ) -> bool {
+        let have: i32 = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
+        let (with_mana, plain): (Vec<CardIdx>, Vec<CardIdx>) = cands.iter().copied().partition(|&c| self.has_mana_ability(c));
+        let plain_power: i32 = plain.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
+        let k = with_mana.len().min(10);
+        for mask in 0u32..(1 << k) {
+            let extra: i32 = (0..k).filter(|i| mask >> i & 1 != 0).map(|i| self.crew_power_of(with_mana[i], false).max(0)).sum();
+            if have + plain_power + extra < need {
+                continue;
+            }
+            if mana.is_zero() {
+                return true;
+            }
+            let tapped: Vec<CardIdx> =
+                tapped_in.iter().copied().chain((0..k).filter(|i| mask >> i & 1 != 0).map(|i| with_mana[i])).collect();
+            let left = crate::pay::classes_without(classes, &tapped);
+            if self.can_pay_with(p, mana, &left, keep) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Cards in `p`'s hand matching `f` other than `card`, one per
@@ -594,6 +646,11 @@ impl Game {
         let n_gy = n_bounce + cost.exile_graveyard as usize;
         let n_tap = n_gy + cost.tap_untapped.as_ref().map_or(0, |t| t.n) as usize;
         let mut crew_done = false;
+        // The cost is one event (CR 603.2c; its discards, exiles): a group of
+        // its own.
+        if picked.is_empty() && self.answer.is_none() {
+            self.new_event();
+        }
         if let Some(ch) = self.answer.take() {
             let c = match ch {
                 Choice::Card(c) => c,
@@ -695,25 +752,51 @@ impl Game {
             // one decision each in increasing slot order; PASS once their
             // total power is enough. A pick must leave the total reachable.
             let need = cost.crew as i32;
+            let bonus = !cost.saddle && !self.is_spell_card(card);
             let tapped_in: Vec<CardIdx> = picked[n_tap..].to_vec();
-            let have: i32 = tapped_in.iter().map(|&c| self.crew_power_of(c)).sum();
+            let have: i32 = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
             let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
             let cands: Vec<CardIdx> = self
                 .crew_eligible(p, card)
                 .into_iter()
                 .filter(|c| !tapped_in.contains(c) && floor.is_none_or(|f| self.perm_action(p, *c) > f))
                 .collect();
+            // Teamwork: the spell's mana is paid next (`cast.rs`); every
+            // choice leaves it payable without the creatures tapped.
+            let spell_mana = if self.is_spell_card(card) {
+                self.agenda.iter().rev().find_map(|t| match t {
+                    Task::PayMana(pm) => Some((pm.cost, pm.keep.clone())),
+                    _ => None,
+                })
+            } else {
+                None
+            };
+            let classes = if spell_mana.is_some() { self.mana_classes(p, None) } else { Vec::new() };
             let mut opts: Vec<Opt> = Vec::new();
             for (k, &c) in cands.iter().enumerate() {
-                let rest: i32 = cands[k + 1..].iter().map(|&x| self.crew_power_of(x).max(0)).sum();
-                if have + self.crew_power_of(c) + rest >= need {
+                let ok = match &spell_mana {
+                    Some((mana, keep)) => {
+                        let mut t = tapped_in.clone();
+                        t.push(c);
+                        self.crew_mana_ok(p, need, &t, &cands[k + 1..], mana, &classes, keep)
+                    }
+                    None => {
+                        let rest: i32 = cands[k + 1..].iter().map(|&x| self.crew_power_of(x, bonus).max(0)).sum();
+                        have + self.crew_power_of(c, bonus) + rest >= need
+                    }
+                };
+                if ok {
                     opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
                 }
             }
-            if have >= need {
+            let done = match &spell_mana {
+                Some((mana, keep)) => self.crew_mana_ok(p, need, &tapped_in, &[], mana, &classes, keep),
+                None => have >= need,
+            };
+            if done {
                 opts.push(Opt { action: act::PASS, choice: Choice::Pass });
             }
-            if !(opts.len() == 1 && have >= need) {
+            if !(opts.len() == 1 && done) {
                 self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
                 return;
             }

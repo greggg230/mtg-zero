@@ -74,6 +74,7 @@ impl Game {
     /// Resolve the top object of the stack (CR 608.1).
     pub(crate) fn resolve_top(&mut self) {
         let item = self.stack.last().expect("resolve with an empty stack").clone();
+        self.new_event();
         if let StackKind::Spell { card } = item.kind {
             if self.def_of(card).aura_spell {
                 // An Aura spell (CR 608.3a): with an illegal target it doesn't
@@ -362,11 +363,13 @@ impl Game {
                     f.pc += 1;
                     f.i = 0;
                     f.floor = 0;
+                    self.new_event();
                 }
                 Flow::Jump(pc) => {
                     f.pc = pc;
                     f.i = 0;
                     f.floor = 0;
+                    self.new_event();
                 }
                 Flow::Suspend => return,
             }

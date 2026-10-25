@@ -152,6 +152,12 @@ impl Scenario {
         self
     }
 
+    /// `p` is the monarch (CR 724).
+    pub fn monarch(mut self, p: PlayerId) -> Self {
+        self.g.monarch = Some(p);
+        self
+    }
+
     /// `p` has the initiative (CR 725).
     pub fn initiative(mut self, p: PlayerId) -> Self {
         self.g.initiative = Some(p);
@@ -617,16 +623,18 @@ impl Game {
         self.discarded.hash(&mut h);
         self.temp_triggers.hash(&mut h);
         self.gy_exile.hash(&mut h);
-        self.batch_start.hash(&mut h);
+        self.ev_seq.hash(&mut h);
+        self.batch_fired.hash(&mut h);
         self.copies.hash(&mut h);
         self.copy_objs.hash(&mut h);
         self.prepared.hash(&mut h);
         self.lki_copy.hash(&mut h);
+        self.lki_damage.hash(&mut h);
         self.spell_lki.hash(&mut h);
         self.may_copies.hash(&mut h);
         self.initiative.hash(&mut h);
         self.dungeons.hash(&mut h);
-        self.rules_src.hash(&mut h);
+        self.rules_srcs.hash(&mut h);
         self.activations.hash(&mut h);
         self.miracle_check.hash(&mut h);
         self.marks.hash(&mut h);

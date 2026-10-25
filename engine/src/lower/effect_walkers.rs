@@ -405,7 +405,7 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
         }) => {
             let Some(cf) = super::filter::lower_card_filter(l, card_filter) else { return true };
             let t = b.target(Filter::InGraveyard(Box::new(and(cf, Filter::Owner(true)))), 1, 1);
-            let back = Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: false, yours: true, tapped: false });
+            let back = Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: false, yours: true, tapped: false, counter: None });
             match (bonus_color, bonus) {
                 (None, None) => {
                     b.op(back);
@@ -434,7 +434,7 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             // your hand."
             let Some(cf) = opt_card_filter(l, card_filter) else { return true };
             let t = b.target(Filter::InGraveyard(Box::new(and(cf, Filter::Owner(true)))), if *optional { 0 } else { 1 }, 1);
-            b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: false, yours: true, tapped: false }));
+            b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: false, yours: true, tapped: false, counter: None }));
         }
         E::AtBeginningOfNextEndStep(nodes::AtBeginningOfNextEndStep { inner }) => {
             // A delayed triggered ability (CR 603.7).
