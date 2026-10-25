@@ -663,3 +663,29 @@ fn cr_616_1_flashback_and_dauthi_voidwalker_the_controller_chooses() {
     }
     assert_eq!(asked, vec![0], "exiled by flashback, no void counter\n{}", log(&g));
 }
+
+// ---- casting routes (CR 601.2a-b, 601.2f-h) ---------------------------------------------------
+
+/// Underworld Breach grants escape ("escape cost equal to its mana cost plus
+/// exile three other cards from your graveyard") to Bitter Triumph, which
+/// has an additional cost of its own ("discard a card or pay 3 life"): it is
+/// cast paying both (CR 601.2b, 601.2f-h).
+#[test]
+fn cr_601_2b_breach_escape_with_the_cards_own_additional_cost() {
+    let mut g = scen()
+        .battlefield(0, &["Underworld Breach", "Swamp", "Swamp"])
+        .graveyard(0, &["Bitter Triumph", "Island", "Island", "Lightning Bolt"])
+        .battlefield(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let bt = g.card(0, "Bitter Triumph", Zone::Graveyard);
+    let bear = bf(&g, 1, "Test Bear");
+    assert!(g.has_option(Choice::Cast(bt)), "escape offered: {:?}", g.options_desc());
+    g.choose(Choice::Cast(bt));
+    // (No card in hand: the 3 life.)
+    finish(&mut g, |g| tgt_if(g, bear));
+    resolve_with(&mut g, |_| None);
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "{}", log(&g));
+    assert_eq!(g.life(0), 17, "3 life");
+    assert_eq!(g.exile_zone().len(), 3, "three other cards exiled\n{}", log(&g));
+}

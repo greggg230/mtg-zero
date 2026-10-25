@@ -398,14 +398,12 @@ impl Game {
                     // Yawgmoth's Will: for its mana cost (CR 601.2a).
                     Some(CastFrom::Permission { free: false, any_mana: false })
                 } else if def.escape.is_some()
-                    // (Granted escape with the card's own additional costs is
-                    // not offered: one combined cost isn't built; ENGINE.md
-                    // 23.11.)
-                    || (!def.is(types::LAND) && def.additional.is_empty() && *esc.get_or_insert_with(|| self.escape_granter(p).is_some()))
+                    // (Granted escape with the card's own additional costs:
+                    // both paid as one cost, `CardDb::merged_cost`.)
+                    || (!def.is(types::LAND) && *esc.get_or_insert_with(|| self.escape_granter(p).is_some()) && self.granted_options_ok(card, None))
                 {
                     Some(CastFrom::Escape)
-                } else if def.additional.is_empty() && self.retrace_granted(p, card) {
-                    // (Likewise not with the card's own additional costs.)
+                } else if self.retrace_granted(p, card) && self.granted_options_ok(card, Some(crate::db::RETRACE_ROUTE)) {
                     Some(CastFrom::Retrace)
                 } else if self.mayhem_ok(p, card) {
                     Some(CastFrom::Mayhem)
@@ -502,20 +500,47 @@ impl Game {
     }
 
     /// The non-mana part of the cost for a cast `from` (escape's exiled
-    /// cards; the additional cost chosen).
+    /// cards; the additional cost chosen; a granted escape or retrace and
+    /// the card's own additional cost option as one cost, CR 601.2b).
     pub(crate) fn route_extra(&self, card: CardIdx, from: crate::game::CastFrom, option: u8) -> Option<&'static crate::db::Cost> {
         let def = self.def_of(card);
+        let db: &'static crate::db::CardDb = self.db;
         match from {
-            crate::game::CastFrom::Retrace => Some(retrace_cost()),
+            crate::game::CastFrom::Retrace if def.additional.is_empty() => Some(retrace_cost()),
+            crate::game::CastFrom::Retrace => db.merged_cost(self.objs[card.i()].def, crate::db::RETRACE_ROUTE, option),
             crate::game::CastFrom::Escape => match &def.escape {
                 Some(e) => Some(&e.1),
                 None => {
                     let p = self.objs[card.i()].owner;
-                    self.escape_granter(p).and_then(|g| self.abilities(g).grants_escape.as_ref())
+                    let g = self.escape_granter(p)?;
+                    if def.additional.is_empty() {
+                        self.abilities(g).grants_escape.as_ref()
+                    } else {
+                        db.merged_cost(self.objs[card.i()].def, self.objs[g.i()].def, option)
+                    }
                 }
             },
             _ => def.additional.get(option as usize),
         }
+    }
+
+    /// A granted route (escape from `escape_granter`, or retrace with
+    /// `Some(RETRACE_ROUTE)`) for `card` with its own additional costs: can
+    /// some option be paid together with it (`CardDb::merged_cost`)?
+    fn granted_options_ok(&self, card: CardIdx, retrace: Option<crate::ids::DefId>) -> bool {
+        let def = self.def_of(card);
+        if def.additional.is_empty() {
+            return true;
+        }
+        let route = match retrace {
+            Some(r) => r,
+            None => match self.escape_granter(self.objs[card.i()].owner) {
+                Some(g) => self.objs[g.i()].def,
+                None => return false,
+            },
+        };
+        let me = self.objs[card.i()].def;
+        (0..def.additional.len()).any(|k| self.db.merged_cost(me, route, k as u8).is_some())
     }
 
     /// Can `p` cast `card` (not in hand) the way `from` says now?
@@ -543,10 +568,10 @@ impl Game {
         let paid = |extra: &crate::mana::ManaCost| {
             let mana = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, extra), keep);
             match from {
+                _ if !def.additional.is_empty() => self.options_payable(p, card, from, extra, keep, classes, None),
                 crate::game::CastFrom::Escape | crate::game::CastFrom::Retrace => {
                     self.cost_payable(p, card, self.route_extra(card, from, 0).expect("an escape or retrace cost"), &mana, classes, None)
                 }
-                _ if !def.additional.is_empty() => self.options_payable(p, card, from, extra, keep, classes, None),
                 _ => self.can_pay_with(p, &mana, classes, &crate::pay::Keep { allow: self.spend_allow(card), life: top_life, ..Default::default() }),
             }
         };
@@ -700,7 +725,8 @@ impl Game {
         exclude: Option<CardIdx>,
     ) -> bool {
         let def = self.def_of(card);
-        def.additional.iter().enumerate().any(|(k, o)| {
+        // (A granted escape or retrace with the option: their one cost.)
+        def.additional.iter().enumerate().filter_map(|(k, _)| self.route_extra(card, from, k as u8).map(|o| (k, o))).any(|(k, o)| {
             (!def.kicker
                 || def
                     .spell
@@ -1649,7 +1675,7 @@ impl Game {
                     .filter(|&k| {
                         base.cost_option = k as u8;
                         let cost = self.delve_reduced(card, p, self.total_mana(card, &base), keep);
-                        kicker_ok(k) && self.cost_payable(p, card, &def.additional[k], &cost, &classes, None)
+                        kicker_ok(k) && self.route_extra(card, item.from, k as u8).is_some_and(|o| self.cost_payable(p, card, o, &cost, &classes, None))
                     })
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();

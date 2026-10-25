@@ -697,7 +697,13 @@ impl Game {
             }
             // (A completed dungeon and the source of the initiative's
             // abilities are rules objects in no zone, ENGINE.md 27.4.)
-            if self.objs[i].zone == Zone::Nowhere && !self.is_token(CardIdx(i as u16)) && !self.def_of(CardIdx(i as u16)).rules {
+            // (Nor is a Mox Diamond whose "discard a land card instead" is
+            // being decided, `Task::EnterByDiscardAny`.)
+            if self.objs[i].zone == Zone::Nowhere
+                && !self.is_token(CardIdx(i as u16))
+                && !self.def_of(CardIdx(i as u16)).rules
+                && !self.agenda.iter().any(|t| matches!(t, Task::EnterByDiscardAny { card, .. } if card.0 == i as u16))
+            {
                 return Err(format!("card {i} is nowhere"));
             }
             // CR 712.8a, 715.4: only a permanent or a spell has a face up

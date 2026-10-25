@@ -1645,9 +1645,69 @@ pub struct CardDb {
     /// "ability" is the special action that turns it face up (708.7). The
     /// card it is waits in `Game::face_down_ids`.
     pub(crate) face_down: DefId,
+    /// A route's cost and a card's own additional-cost option paid
+    /// together (CR 601.2b, 601.2f-h): (card, route, option, the one cost).
+    /// The route is the definition granting escape (Underworld Breach) or
+    /// `RETRACE_ROUTE` (granted retrace).
+    merged: Vec<(DefId, DefId, u8, Cost)>,
+}
+
+/// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
+pub(crate) const RETRACE_ROUTE: DefId = DefId::MAX;
+
+/// Two costs paid as one (a granted escape or retrace with a card's own
+/// additional cost, CR 601.2b): `None` when the engine's single cost can't
+/// say both (two different discards, two sacrifices; at most one of the
+/// reservations `Game::keep_for` makes).
+pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
+    fn one<T: Clone>(x: &Option<T>, y: &Option<T>) -> Option<Option<T>> {
+        match (x, y) {
+            (Some(_), Some(_)) => None,
+            _ => Some(x.clone().or_else(|| y.clone())),
+        }
+    }
+    let discard_filter = match (a.discard > 0, b.discard > 0) {
+        (true, true) if a.discard_filter != b.discard_filter => return None,
+        (true, _) => a.discard_filter.clone(),
+        (_, true) => b.discard_filter.clone(),
+        _ => None,
+    };
+    let c = Cost {
+        mana: a.mana.plus(&b.mana),
+        tap: a.tap || b.tap,
+        life: a.life.checked_add(b.life)?,
+        sac_self: a.sac_self || b.sac_self,
+        exile_self: a.exile_self || b.exile_self,
+        discard_self: a.discard_self || b.discard_self,
+        discard_hand: a.discard_hand || b.discard_hand,
+        sacrifice: one(&a.sacrifice, &b.sacrifice)?,
+        discard: a.discard + b.discard,
+        discard_filter,
+        exile_from_hand: one(&a.exile_from_hand, &b.exile_from_hand)?,
+        bounce: one(&a.bounce, &b.bounce)?,
+        exile_graveyard: a.exile_graveyard.checked_add(b.exile_graveyard)?,
+        remove_counters: one(&a.remove_counters, &b.remove_counters)?,
+        crew: if a.crew > 0 && b.crew > 0 { return None } else { a.crew + b.crew },
+        saddle: a.saddle || b.saddle,
+        tap_untapped: one(&a.tap_untapped, &b.tap_untapped)?,
+        waterbend: a.waterbend || b.waterbend,
+        exert: a.exert || b.exert,
+    };
+    let reservations = [c.sacrifice.is_some() || c.bounce.is_some(), c.discard > 0, c.exile_from_hand.is_some()];
+    if reservations.iter().filter(|&&x| x).count() > 1 || c.sacrifice.is_some() && c.bounce.is_some() {
+        return None;
+    }
+    Some(c)
 }
 
 impl CardDb {
+    /// The cost of casting card `card` by `route` (a granter of escape, or
+    /// `RETRACE_ROUTE`) with its additional-cost option `option`, if both
+    /// can be paid as one cost.
+    pub(crate) fn merged_cost(&self, card: DefId, route: DefId, option: u8) -> Option<&Cost> {
+        self.merged.iter().find(|m| m.0 == card && m.1 == route && m.2 == option).map(|m| &m.3)
+    }
+
     /// Lower every card; supported ones become definitions, the others are
     /// recorded with every feature that blocks them.
     pub fn from_cards(cards: &[card_ir::Card]) -> CardDb {
@@ -1730,6 +1790,29 @@ impl CardDb {
         }
         db.face_down = db.defs.len() as DefId;
         db.defs.push(face_down_def());
+        // A granted escape (Underworld Breach) or retrace (Wrenn and Six,
+        // Six) with the card's own additional costs: each option and the
+        // route's cost as one cost (CR 601.2b, 601.2f-h; Bitter Triumph).
+        let granters: Vec<(DefId, Cost)> =
+            db.defs.iter().enumerate().filter_map(|(i, d)| d.grants_escape.clone().map(|c| (i as DefId, c))).collect();
+        let retrace = Cost { discard: 1, discard_filter: Some(Filter::Type(types::LAND)), ..Default::default() };
+        let mut merged = Vec::new();
+        for (i, d) in db.defs.iter().enumerate() {
+            if d.additional.is_empty() || d.is(types::LAND) {
+                continue;
+            }
+            for (k, o) in d.additional.iter().enumerate() {
+                for (g, gc) in &granters {
+                    if let Some(c) = merge_costs(gc, o) {
+                        merged.push((i as DefId, *g, k as u8, c));
+                    }
+                }
+                if let Some(c) = merge_costs(&retrace, o) {
+                    merged.push((i as DefId, RETRACE_ROUTE, k as u8, c));
+                }
+            }
+        }
+        db.merged = merged;
         db
     }
 
