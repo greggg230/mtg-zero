@@ -1178,7 +1178,8 @@ the number of decisions. `cargo test --release -p engine --test digest -- --igno
 79ddaf9, combined digest f9b5d7c9db1b2931; re-recorded for the new heuristic, 25d09a0a57ab2d12,
 for the 467-card pool of the tail's part 1, 7216a12287fefeaa, and for the 491-card pool of part 2
 with its four token kinds registered, 7b815998fc563509, and for the 524-card pool of part 3 before
-its three new token kinds are registered, 023fa8874a183eae), and names the games that
+its three new token kinds are registered, 023fa8874a183eae, and for M7d's 537-card pool with Test
+Manifester, 5cbbaf9280a01797: the pool deals other decks, every game differs), and names the games that
 differ. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
@@ -4215,7 +4216,7 @@ Fuzzing (20,000 games over the 537 cards and the custom cards with Test Manifest
 (131-137 s; 5,624,843 options completed, 6.3 million decisions after them). Faults found on the way, all fixed: the face-down knowledge bits read after the move
 (a cloud lost its card; seed 2150); an activated ability's X counting its source (seed 1012);
 Rain of Filth's exponential feasibility (one game took 31 s: seed 1784); seventeen waiting
-triggers (31.5).
+triggers (31.5). Behaviour digests re-recorded for the new pool (section 15: 5cbbaf9280a01797).
 
 ### 31.9 IR
 
