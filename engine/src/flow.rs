@@ -87,7 +87,7 @@ pub(crate) enum Task {
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
     /// What a permanent that may enter as a copy copies (CR 707.5), then
     /// it enters (`note`: its `Enters` event's).
-    EnterAsCopy { card: CardIdx, note: u16 },
+    EnterAsCopy { card: CardIdx, note: u16, since: u32 },
     /// New targets for a copy of a spell (`copy`, CR 707.10c) or a spell
     /// whose controller may choose new targets (115.7), from its target `k`
     /// on.
@@ -262,7 +262,7 @@ impl Game {
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
-            Task::EnterAsCopy { card, note } => self.enter_as_copy(card, note),
+            Task::EnterAsCopy { card, note, since } => self.enter_as_copy(card, note, since),
             Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
             Task::ChooseTimes { id } => self.choose_times(id),
             Task::Splice { id } => self.choose_splice(id),

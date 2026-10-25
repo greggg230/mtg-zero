@@ -361,6 +361,10 @@ suspends the frame below that task.
   generic over `(event kind, trigger filter)` and later kinds plug into the same place.
 * A matching trigger becomes a `PendingTrigger { controller, source, source_def, slot }` in
   `Game.waiting`. Nothing is put on the stack until a player would receive priority (603.3).
+* **Events and "one or more"** (603.2c, M7e): one instruction of a resolving spell or ability,
+  one cost, one simultaneous move (a batch: SBAs, "destroy all", a combat damage step) is one
+  event however many objects it touches; `Game::ev_seq` names the current group and a "whenever
+  one or more ..." ability triggers once per group (section 33).
 * `PutTriggers` (run by the `Priority` loop): **APNAP** (603.3b): the active player puts all
   their waiting triggers on the stack in the order they choose (one "which next" decision
   while two or more distinct triggers remain), then the other player; so the non-active
@@ -580,8 +584,11 @@ hideaway's face-down pick a `PutInHand`, "odd or even" a `ChooseMode`. M7d (sect
 none either: the opening-hand action is a `ChooseHandCard` with `PASS` and an `ExileCost`,
 emerge's artifact a `Sacrifice`, manifest dread's pick a `PutOntoBattlefield`, the chosen name a
 `NameCard`; special actions (plot, turning a face-down permanent face up) use activated-ability
-ids, the Citadel's top card `LIBRARY` + 0 at priority. There are 39 decision kinds; the context
-block holds 64 since layout v3 (section 22.6).
+ids, the Citadel's top card `LIBRARY` + 0 at priority. M7e part 1 (section 33) adds two:
+`ChooseReplacement` (`NUMBER` 1 = shuffled into its owner's library, 2 = exiled, 3 = exiled with a
+void counter: the order of replacement effects, 616.1) and `ChooseRoute` (`NUMBER` = a
+`cast::route` code: which permission casts a graveyard card, 601.2a-b). There are 41 decision
+kinds; the context block holds 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
@@ -750,6 +757,18 @@ exile on a permanent spell. New in M7d (13): Abhorrent Oculus; Anointed Peacekee
 Glory; Bolas's Citadel; Crabomination; Dauthi Voidwalker; Does Machines; Gemstone Caverns; Lion
 Sash; Nadu, Winged Wisdom; Pillage the Bog; Rain of Filth; Urza, Lord High Artificer.
 
+Implemented (M7e part 1, section 33): the documented rules shortcuts removed (docs/shortcuts.md
+tracks every one): the monarch's triggered abilities on the stack (724.2) and Okoye's delayed
+trigger, "one or more" triggers once per event (603.2c), the order of replacement effects chosen
+by the affected object's controller (616.1), Mox Diamond however it would enter, permanents
+entering with the counters an effect gives them (614.1c), "enter as a copy" not of a permanent
+entering at the same time, a granted escape or retrace with a card's own additional costs, the
+permission a graveyard card is cast with chosen by its caster (601.2a-b), Bolas's Citadel casting
+any face of the top card, last known information of a damage source (608.2h), saddle without crew
+bonuses and teamwork with mana creatures, turning face up after losing all abilities (116.2b),
+Necromancy's flash permission, exact converge, attached Equipment timestamps (613.7e), granted
+triggered abilities lost with all abilities and sourced at the permanent that has them (113.7).
+
 Supported cube cards: 546, the whole cube (M7d: 537, M7c tail part 3: 524, M7c tail part 2: 491, M7c tail part 1: 467, M7b part 3b: 438, M7b part 3: 410, M7b part 2: 394, M7b part 1: 378, M7a: 360, M4b-2:
 191, M4b-1: 133, M4a: 31); creatures 209 by their front faces (M7d: 208, M7c tail part 3: 201, M7c tail part 2: 184, M7c tail part 1: 168, M7b part 3b: 155, M7b part 3: 133, M7b part 2: 125,
 M7b part 1: 113, M4b-2: 20); planeswalkers 20 (Jace's, Tamiyo's and Ajani's back faces not counted). New with M7d's IR
@@ -842,7 +861,8 @@ reanimating ones (enchant creature, land, artifact), granted triggered abilities
 Equipment's and the "becomes the target" one of 31.1, abilities granted to permanents other than
 Rain of Filth's mana ability, the play/draw choice.
 
-Deliberate simplifications and limits (each is small and local to change):
+Deliberate simplifications and limits (each is small and local to change; every shortcut the
+engine documents is tracked in docs/shortcuts.md with its class and status):
 
 * Mana already in a pool is spent first and automatically: coloured pips from their colour,
   hybrid pips from the more plentiful of their colours, generic pips colourless first, then
@@ -863,7 +883,9 @@ Deliberate simplifications and limits (each is small and local to change):
   with repeats offers each multiset of modes once.
 * Events are recorded only for the kinds some permanent listens for (`trig_mask`); section
   23.2 lists the kinds.
-* M7a's own simplifications are in section 23.11; M7b's in sections 24.7, 25.10, 26.11 and 27.13.
+* M7a's own simplifications are in section 23.11; M7b's in sections 24.7, 25.10, 26.11 and 27.13;
+  M7c's and M7d's in 28.8, 29.6, 30.7, 31.7 and 32.5 (what still applies; docs/shortcuts.md has
+  them all, fixed ones included).
 * Waiting triggers with the same definition and ability are offered once in the ordering
   decision (their order cannot matter while effects ignore their source's per-object state).
 * Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide offers the
@@ -933,7 +955,8 @@ Deliberate simplifications and limits (each is small and local to change):
   every such search names a quality, which may always be missed (701.19b). No cube card sets
   it.
 * M7a: "that creature deals damage equal to its power" (Pyrogoyf): the entering creature is
-  the source (its colours, deathtouch, lifelink); Python deals the damage from Pyrogoyf.
+  the source (its colours, deathtouch, lifelink; as it last existed on the battlefield if it left,
+  608.2h, since M7e); Python deals the damage from Pyrogoyf.
 * M7a: "nonland permanent" filters: Python's predicate admits instant and sorcery cards
   (in a graveyard, on the stack); here a permanent card type is required.
 * M7a: "whenever you cast your second spell each turn" is a condition of the event, not an
@@ -1045,7 +1068,8 @@ Deliberate simplifications and limits (each is small and local to change):
   engine's model is known to differ: it has one combat per turn (Fear of Missing Out's additional
   combat phase is 500.8 here), it reads `once_per_turn` as "triggers only once each turn" for
   every card (here only for an effect that isn't "you may", ir_defects 14), it sweeps Laelia's
-  exiles once per state-based-action pass (here once among the waiting triggers), and it fires
+  exiles once per state-based-action pass (here once per event since M7e: one instruction, cost
+  or simultaneous move, 603.2c, section 33), and it fires
   "dies" for a creature an "exile it instead" replacement exiles (fixed here, 29.2). The other
   cards' Python handling was not compared; the simplifications are listed in 29.6.
 * M7b part 3b: ward (702.21). Python checks ward only for a spell, as it is cast, and pays it
@@ -2456,9 +2480,13 @@ alternative cost; flashback, escape and permissions don't combine with another o
 
 ### 23.5a The monarch, level up, token copies
 
-* **The monarch** (724): `Game.monarch`; becoming it, the end-step draw, combat damage to the
-  monarch taking it, "until an opponent becomes the monarch" exile (Palace Jailer), "if you're
-  the monarch".
+* **The monarch** (724): `Game.monarch`; becoming it, "until an opponent becomes the monarch"
+  exile (Palace Jailer), "if you're the monarch". The end-step draw and "whenever a creature deals
+  combat damage to the monarch, its controller becomes the monarch" are the monarch's inherent
+  triggered abilities (724.2, since M7e): sourceless, controlled by the player who is the monarch
+  as they trigger, on the stack (Tishana's Tidebinder can counter them): the triggers of a rules
+  definition "The monarch" (as the initiative's, 27.4; `dungeon.rs::monarch_trigger`), one per
+  creature that dealt the damage.
 * **Level up** (711): level counters pick the base P/T (`PtCda::Leveler`) and the statics
   (`Cond::SourceCountersIn`, read against the static's own source).
 * **Token copies**: of a token (its definition, 707.2); of the card itself ("except it's an
@@ -2529,20 +2557,13 @@ At the end of M7a: threats 139 supported (113 creatures), 107 blocked (96 creatu
 
 ### 23.11 Simplifications
 
-* A Pyrogoyf-like "that creature deals damage" whose creature left uses its last known
-  power and its characteristics as a card (not as it last existed on the battlefield).
+What still applies (docs/shortcuts.md tracks them all; M7e fixed a Pyrogoyf-like damage source's
+last known information, an attached Equipment's timestamp, Mox Diamond however it enters, a
+granted escape with a card's own additional costs and the monarch's triggered abilities):
+
 * Untap-up-to effects offer only tapped permanents (choosing an untapped one does nothing).
 * Combat damage to divide among blockers above 31 offers the first 30 amounts, lethal and
   all (the `NUMBER` range).
-* An Equipment's timestamp is not refreshed when it is re-attached (no layer-dependent
-  interaction in the pool).
-* Mox Diamond's "if this would enter" replacement applies as the spell resolves (no other
-  supported effect puts it onto the battlefield).
-* Escape granted by Underworld Breach isn't offered for a card with its own additional
-  costs (Bitter Triumph): the two costs would have to be paid as one.
-* The monarch's end-step draw and "combat damage to the monarch" happen at once, not as
-  triggered abilities on the stack; so does Okoye's "whenever that creature attacks the
-  monarch this turn" (as the attack is declared).
 * A graveyard card's castability is checked on a clone with the card on the stack (leaving
   the graveyard can change a goyf's power and so what is targetable).
 * "True-Name Nemesis": choosing yourself is offered (a `Target` decision with `PLAYER` ids;
@@ -2604,8 +2625,9 @@ fixes, 32). Every card's IR was read against its Oracle text.
 * Triggers: "deals combat damage to a player" fires for players only (510.3a: Ragavan; combat
   damage to the monarch); "to a player or planeswalker" (Psychic Frog) fires for both
   (`DealsCombatDamage` events carry the planeswalker as their second subject); "whenever ...
-  attacks" fires whatever it attacks. Okoye's "attacks the monarch" applies only to creatures
-  attacking the player.
+  attacks" fires whatever it attacks. Okoye's "whenever that creature attacks the monarch this
+  turn" (a delayed triggered ability bound to the creature since M7e, `TrigPred::AttacksMonarch`)
+  fires only for a creature attacking the player.
 
 ### 24.3 Emblems and the command zone (CR 114, 408)
 
@@ -2737,8 +2759,8 @@ can be paid, a minus that removes a worthwhile opposing permanent, else a plus; 
 * Nissa's extra mana is part of the Forest's mana ability, not a separate triggered mana
   ability (payments never float mana, so nothing can be done between the two).
 * A token creation makes at most 64 tokens after doubling.
-* Retrace isn't offered for a card with its own additional costs (as escape granted by
-  Underworld Breach, 23.11); no supported instant or sorcery has both.
+* (Retrace with a card's own additional costs is offered since M7e: one cost of both,
+  `CardDb::merged_cost`; docs/shortcuts.md.)
 * Until M7c the heuristic bot activated no abilities at priority (it played lands and cast
   spells), so it never used a loyalty ability and its planeswalkers only drew attacks; since
   M7c it uses them (21.4).
@@ -3020,6 +3042,8 @@ Every new field uses spare floats of layout v3; no width changed.
 
 ### 25.10 Simplifications
 
+(All still apply; docs/shortcuts.md.)
+
 * `face_castable` evaluates a face on a clone of the game (its timing first, without one): the
   cast checks read the card's definition throughout. Correct, and only for cards with another
   face.
@@ -3274,8 +3298,8 @@ IR (26.12). The code is `copies.rs`, its lowering `lower/effect_copies.rs`.
 * A copy of a spell leaving the stack ceases to exist at once, not at the next state-based check
   (nothing can see it in the other zone first).
 * The "enter as a copy" choice is made right after the card moves (its `Enters` event and enter
-  replacements wait for it, so nothing can see the difference), except that a permanent entering
-  at the same time (Exhume) can be chosen (the Metamorph ruling says it can't).
+  replacements wait for it, so nothing can see the difference). (A permanent entering at the same
+  time, Exhume's other creature, can't be chosen since M7e: `Obj::enter_seq`.)
 * A double-faced card that is copying something doesn't transform.
 * "Another target" requirements choose at most one target each (the lowering checks).
 * A copy effect's exceptions hold at most four subtypes.
@@ -3369,9 +3393,11 @@ failing test (27.6). Every card's IR was read against its Oracle text; none is b
 * Each instance triggers separately: a Hexing Squelcher with its own ward and another
   Squelcher's has two triggers.
 * Granted ward (Hexing Squelcher: "other creatures you control have 'Ward—Pay 2 life'",
-  `CardDef.grants_ward`): the trigger is the granting card's own, about a target that is
+  `CardDef.grants_ward`): the trigger is the granting card's definition's, about a target that is
   another creature its controller controls (`TrigPred::Granted(Slot::Target)`: one that didn't
-  lose all abilities later than the grant's timestamp, 613.7; Oko's Elk has no ward).
+  lose all abilities later than the grant's timestamp, 613.7; Oko's Elk has no ward). Its source
+  is that creature (113.7, since M7e: the object that has the ability), so Tishana's Tidebinder
+  countering it makes the creature lose its abilities.
 * Improvise (702.126, Kappa Cannoneer): `CardDef.improvise`; while its cost is paid, each
   untapped artifact the payer controls may be tapped for {1} of generic mana (`PayMana.
   improvise`; the artifact's `MY_PERM` id with `Choice::Card`, marked by the `IMPROVISE` slot;
@@ -3384,8 +3410,9 @@ failing test (27.6). Every card's IR was read against its Oracle text; none is b
   initiative's first inherent ability; the others trigger at the upkeep of the player who has it
   and when one or more creatures a player controls deal combat damage to that player (once per
   attacking player). They have no source (725.2): they are the triggers of a rules definition
-  named "The initiative" (`CardDef.rules`), put on the stack with `Game.rules_src`, a slot in no
-  zone, as their source, controlled by the player they name.
+  named "The initiative" (`CardDef.rules`), put on the stack with a slot in no zone as their
+  source (`Game.rules_srcs`, one per rules definition: the monarch's too since M7e), controlled by
+  the player they name.
 * A player's dungeon is an object in the command zone whose definition is "Undercity"
   (`Game.dungeons[p] = Dungeon { obj, room, completed }`). Venturing into Undercity
   (`Ext::Venture`, 701.49a-c): with no dungeon, Undercity is put into the command zone with the
@@ -3559,11 +3586,9 @@ sacrifice (`tests/cards_m7b_stack3.rs::ninjutsu_cant_pay_its_mana_with_the_attac
 
 ### 27.13 Simplifications
 
-* Granted ward is the granting permanent's triggered ability (its source is the granting
-  permanent, not the warded creature); nothing in the cube looks at a ward ability's source.
-* "With a counter on it" (From the Catacombs' corpse counter, Throne of the Dead Three's three
-  +1/+1 counters) puts the counters right after the permanent enters, not as it enters (614.1c);
-  no supported card reads counters as a creature enters.
+What still applies (docs/shortcuts.md; M7e fixed granted ward's source and "with a counter on
+it" as the permanent enters):
+
 * White Plume Adventurer's "untap a creature you control" offers only tapped creatures.
 * A "tap an untapped Rebel you control" cost counts, for castability, only Rebels with no mana
   ability (one could tap for mana first); no Rebel in the cube has one.
@@ -3728,22 +3753,21 @@ castable from a graveyard with no Serra Paragon (same games on main's pool after
 
 ### 28.8 Simplifications (differences from the CR)
 
+What still applies (docs/shortcuts.md; M7e fixed converge's upper bound, Serra Paragon's routes
+and faces and the granted leave trigger after "loses all abilities"):
+
 * Mana abilities with a mana cost or a choice in their cost are activated only with priority
   (28.1), never in the middle of a payment: their mana can't pay an "unless pays" cost or a
-  cost paid while no player has priority unless it was made before.
+  cost paid while no player has priority unless it was made before (the payment rework's).
 * Converge counts the colours the payment could show: the pool's mana as the engine spent it,
   several-mana sources' spent mana by type, and for single-mana sources the most colours an exact
-  payment by them can have (a player who taps a dual land chooses its colour, 106.1b; for
-  Prismatic Ending more is never worse). With more than seven such sources, an upper bound.
+  payment by them can have, exactly for any number of sources (a player who taps a dual land
+  chooses its colour, 106.1b; for Prismatic Ending and Pentad Prism more is never worse).
 * Lim-Dul's Vault puts each looked-at five on the bottom in the order looked at (an order the
   player could choose; the library is shuffled at the end, so only a loop through the whole
   library could tell).
 * Painter's Servant's colour is added before any "becomes [colour]" effect regardless of
   timestamps (the cube has no such effect).
-* Serra Paragon: a card with a route of its own from the graveyard (escape, flashback, ...) is
-  cast that way, and a card with another face isn't cast with the Paragon (one route per card).
-* A permanent's granted leave trigger survives "loses all abilities" (no such interaction in the
-  cube's cards).
 * Goblin Welder: if "that player" is shielded from the controller's effects, the artifact isn't
   sacrificed but the card still returns.
 
@@ -3785,13 +3809,13 @@ tests `tests/cards_m7c_tail2.rs` (37 tests, the CR cited in each name).
 | Broadside Bombardiers | boast (702.142a: `ActivatedDef::boast`, `Mark::Boasted`, "attacked this turn" from `attacked_with`); `Amount::CostMvPlus` (the sacrificed permanent's mana value, kept on the stack item as it is paid) | `Target`, `Sacrifice` |
 | Yawgmoth's Will | `Player::gy_play_turn` (lands and spells from the graveyard this turn, a cast route for its mana cost); `Player::gy_exile_turn` (614.1a: a card, not a token, put into that player's graveyard goes to exile; it exiles the Will itself) | - |
 | Bloodbraid Challenger | cascade (702.85a; keyword and trigger checked to agree): exiled cards revealed one at a time, the hit cast free (608.2g), the rest on the bottom in a random order after the cast | `YesNo` |
-| Laelia, the Blade Reforged | `EventKind::ExiledFromLibGy` (a card into exile from its owner's library or graveyard), "one or more": once among the triggers waiting to be put on the stack | - |
+| Laelia, the Blade Reforged | `EventKind::ExiledFromLibGy` (a card into exile from its owner's library or graveyard), "one or more": once per event (since M7e, 603.2c) | - |
 | Ocelot Pride | ascend (702.131: `Player::city_blessing`, set by the SBA check once a player with an ascend permanent controls ten permanents; `Cond::CityBlessing`); `CopyTokensEnteredThisTurn` | `Target` |
 | Six | `MillThenLandToHand`; a permanent's retrace grant (`CardDef::grants_retrace` on a permanent: during its controller's turn) | `ChooseGraveyardCard`, `Discard` |
 | Bilbo, Thief in the Night | `CardDef::outside_hand_discount` (601.2f: a card not in hand, or a spell cast from elsewhere); `MayCastFromGraveyardNow` (cast during the resolution paying its costs, 608.2g; an instant or sorcery with `CastThenExile`) | `ChooseGraveyardCard` |
 | Multiversal Passage | "as this land enters, choose a basic land type" (`ChooseColor`: W U B R G = Plains ... Forest, `Mark::ChosenColor`), then the shock-land life question; the type as a forever effect on the object, its mana ability `ManaProd::Chosen` (305.6) | `ChooseColor`, `YesNo` |
 | Fire Covenant | `CardDef::x_life`: X announced (601.2b, at most the life the mana payment leaves, 119.4), paid as life with the mana; X damage divided among any number of target creatures (at most X targets) | X, `Target`, divide |
-| We Say Thee Nay! | teamwork n as kicker's modes (the cost option picks "if cast using teamwork"): crew's cost (702.122a), here by creatures without mana abilities (29.6) | `ChooseCost`, `ChoosePermanent` |
+| We Say Thee Nay! | teamwork n as kicker's modes (the cost option picks "if cast using teamwork"): crew's cost (702.122a), paid before the mana since M7e so creatures with mana abilities can be tapped (`crew_mana_ok`) | `ChooseCost`, `ChoosePermanent` |
 | Fear of Missing Out | `Turn::extra_combats` (500.8: after this combat phase another one); `TrigPred::FirstAttack` (declared as an attacker once this turn) | `Target` |
 | Pinnacle Emissary | warp (702.185a): an alternative cost from hand whose delayed ability (dash's plumbing, no haste) exiles the permanent at the next end step with a permission from a later turn on (`PERM_LATER`) | `ChooseAltCost` |
 | Metamorphosis Fanatic | miracle (702.94a): on every first draw of a turn by a player whose deck has a miracle card, `Task::MiracleReveal` before the next priority (only "no" when the card has no miracle, so the question says nothing); revealed, its trigger (`MiracleCast`) may cast it for its miracle cost (`CastFrom::Miracle`) | `YesNo` x2 |
@@ -3847,12 +3871,9 @@ random game (29.2).
 
 ### 29.6 Simplifications (differences from the CR)
 
-* Laelia triggers at most once among the triggers waiting to be put on the stack (one
-  instruction's or one cost's exiles at once), not once per separate exile event within one
-  resolution.
-* Lurrus and Serra Paragon: when both allow a spell, the first permanent found grants it.
-* Teamwork's creatures exclude creatures with a mana ability (so the mana and the taps never
-  compete; 29.1), and a creature's crew bonus counts.
+What still applies (docs/shortcuts.md; M7e fixed Laelia's "one or more", the choice between
+Lurrus and Serra Paragon, and teamwork's creatures and crew bonus):
+
 * "After this phase, there is an additional combat phase" works during a combat phase (the only
   place the cube's card makes it).
 * Miracle's reveal is asked before the next priority after the draw, not at the instant of the
@@ -3914,7 +3935,7 @@ the reanimating Auras.
 | The One Ring | "if you cast it" (the IR's `ConditionalIfCastFromHand`, read as its docstring's "if you cast it": `TrigPred::EnteredCast`); a player's protection from everything until their next turn (702.16j: `Player::prot_until`; not targetable, damage prevented); burden counters | - |
 | Pentad Prism | sunburst (702.44a: the converge record, `CardDef::sunburst`, charge counters or +1/+1 on a creature); a mana ability that removes a counter and doesn't tap: activated with priority (28.1's route: it could be activated again within one payment) | `ChooseMana` |
 | Worldspine Wurm, Emrakul, the Aeons Torn | "when this is put into a graveyard from anywhere" (`EventKind::ToGraveyard`: the card's own ability from the graveyard, its owner controls it, 603.6a); shuffling the source or the owner's graveyard in; Emrakul's annihilator (keyword and trigger checked to agree), protection from coloured spells (`Prot::colored_spells`, `DamageSource::spell`), the cast trigger's extra turn | `Sacrifice` (annihilator) |
-| Blightsteel Colossus | infect (702.90b-c: poison counters, -1/-1 counters; `Kw::Infect`); "if it would be put into a graveyard from anywhere, reveal it and shuffle it into its owner's library instead" (`CardDef::gy_to_library`, applied in `move_card`; from a library it stays there) | - |
+| Blightsteel Colossus | infect (702.90b-c: poison counters, -1/-1 counters; `Kw::Infect`); "if it would be put into a graveyard from anywhere, reveal it and shuffle it into its owner's library instead" (`CardDef::gy_to_library`, applied in `move_card`; from a library it stays there; with other replacements in the order its controller chooses, 616.1, since M7e) | - |
 | Hullbreacher | "if an opponent would draw a card except the first one they draw in each of their draw steps, instead you create a Treasure" (`CardDef::opp_draw_token`) | - |
 | Quantum Riddler | "as long as you have one or fewer cards in hand, if you would draw one or more cards, you draw that many plus one" (`CardDef::draw_plus`, per draw instruction: `Game::draw_cards`); warp (29.1) | - |
 | Batroc the Leaper | multikicker (702.33c: the repeatable cost, `TimesCost`); counters per kick; "up to X targets, X the times kicked" (`KICKS_UP_TO`, read from the enter note) | `ChooseMode`, `Target` |
@@ -3927,7 +3948,7 @@ the reanimating Auras.
 | Sword of the Meek | a triggered ability that functions in the graveyard (`TrigPred::InGraveyard`, `CardDef::gy_triggers`, `SEEN_GY_TRIGGER`; its owner controls it); "a 1/1 creature" (`Filter::PtIs`) | `YesNo` |
 | Gollum, Riddle Master | odd or even chosen as it enters (`Mark::Parity`); "a spell with mana value of the chosen quality"; "choose one that hasn't been chosen" (`Modes::once_each`, `Mark::ModesUsed`; with none left the trigger is removed, 700.2b) | `ChooseMode` |
 | Emperor of Bones | adapt (701.46a); "whenever one or more +1/+1 counters are put on this" (`EventKind::CountersAdded`); a finality counter (122.1i: exiled instead of put into a graveyard, `CardDb::finality`); a linked creature card reanimated with haste and an end-step sacrifice | `Target`, `ChooseExiled` |
-| Wan Shi Tong, All-Knowing | "its owner puts it second from the top or on the bottom" (the owner's `YesNo`); "whenever one or more cards are put into a library from anywhere" (`EventKind::CardsPutIntoLibrary`, once among the waiting triggers); Spirits that block and are blocked only by Spirits (`CardDef::blocks_only_subtype`) | `Target`, `YesNo` |
+| Wan Shi Tong, All-Knowing | "its owner puts it second from the top or on the bottom" (the owner's `YesNo`); "whenever one or more cards are put into a library from anywhere" (`EventKind::CardsPutIntoLibrary`, once per event since M7e); Spirits that block and are blocked only by Spirits (`CardDef::blocks_only_subtype`) | `Target`, `YesNo` |
 | Coveted Jewel | "whenever one or more creatures an opponent controls attack you and aren't blocked" (`EventKind::AttackersUnblocked`, `Slot::Defender`); that player draws three, gains control of it, untaps it | - |
 | Headliner Scarlett, Memory Jar, Shelldock Isle | cards exiled face down (30.2) | `PutInHand` (hideaway), `YesNo` (Shelldock) |
 | Animate Dead, Necromancy | reanimating Auras (30.4) | `Target` |
@@ -3988,8 +4009,8 @@ Aura that is an Aura is legal attached to the creature card it entered on (in a 
 the creature it put onto the battlefield; anything else, or nothing, puts it into its owner's
 graveyard (704.5m, `sba.rs::bad_reanimating_aura`). Leaving, it makes that creature's controller
 sacrifice it. Animate Dead's -1/-0 is the IR's `equipment_bonuses` on an Aura (ir_defects 7: the
-same `attached` applies it). Necromancy's flash is the IR's keyword (ir_defects 8: no card in the
-cube asks whether a card has flash); cast when a sorcery couldn't have been (not its controller's
+same `attached` applies it). Necromancy's "as though it had flash" is a permission since M7e
+(`CardDef::flash_permission`; the IR writes the flash keyword, ir_defects 8); cast when a sorcery couldn't have been (not its controller's
 main phase with an empty stack, `Mark::NotSorceryTiming`), it is sacrificed at the beginning of
 the next cleanup step (`DelayedWhen::NextCleanup`, fired as the cleanup step begins: 514.3a gives
 priority and another cleanup).
@@ -4039,14 +4060,9 @@ toughness together for divided damage (Fire Covenant), at most half its life.
 
 ### 30.7 Simplifications (differences from the CR)
 
-* Blightsteel Colossus's replacement applies before the other replacements of a graveyard
-  destination (Yawgmoth's Will's exile, "exile it instead"): its controller would choose that
-  order (616.1).
-* "Whenever one or more cards are put into a library" triggers at most once among the triggers
-  waiting to be put on the stack (as Laelia's, 29.6), and "whenever you discard one or more
-  cards" once per batch of discards (one instruction's).
-* Saddle counts a creature's crew bonus ("crews Vehicles as though ...", which doesn't apply to
-  saddle).
+What still applies (docs/shortcuts.md; M7e fixed Blightsteel's replacement order, the "one or
+more" library and discard triggers, saddle's crew bonus and Necromancy's flash):
+
 * Pentad Prism's mana is made with priority only (28.8).
 * Shelldock Isle plays a land only on its controller's turn with a land play left.
 * "Until your next end step" ends as that end step begins, and "you may play that card" is
@@ -4055,7 +4071,6 @@ toughness together for divided damage (Fire Covenant), at most half its life.
   with a "distinct targets" requirement is not modelled (none in the cube).
 * A reanimating Aura's attachment legality doesn't model "enchant creature put onto the
   battlefield with this Aura" beyond the one creature it reanimated.
-* Necromancy's flash is the flash keyword (ir_defects 8).
 
 ### 30.8 Still blocked
 
@@ -4128,10 +4143,10 @@ name, Urza, exert, emerge, the Citadel, Rain of Filth, face-down permanents.
 |---|---|---|
 | Pillage the Bog | plot (702.170a): a special action from hand (116.2k), offered as the card's hand ability (`ActivatedDef::special`, `HAND_ABILITY` id; no stack: `Task::Special` after its mana); exiled with a permission to cast it without paying its mana cost on a later turn (`PERM_LATER`; a sorcery's timing, the lowering checks it is one); "twice the number of lands you control" (`Formula:Scaled`, `Amount::CountTypesTimes`) | `PayMana`, `PutInHand` |
 | Gemstone Caverns | an opening-hand action (103.6): `Task::Opening` after the mulligans, the starting player first; asked whenever the player's deck has such a card (open decklists), `ChooseHandCard` with `PASS`; then the luck counter and `ExileCost` for the card exiled from hand; `ManaProd::IfCounter` ({C}, or any colour with a luck counter, as the ability resolves; `produces_with_counter` checked against it) | `ChooseHandCard`, `ExileCost` |
-| Dauthi Voidwalker | shadow (702.28b, `Kw::Shadow`); "if a card would be put into an opponent's graveyard from anywhere, instead exile it with a void counter on it" (614.1a in `move_card`: a card, not a token or a copy of a spell; decided before the events, so it doesn't die; after Yawgmoth's Will's; a Voidwalker leaving in the same simultaneous move still applies; `SEEN_VOID`); `M7d::ExiledWithCounterPlayFree` (a free play permission this turn) | `ChooseExiled` |
+| Dauthi Voidwalker | shadow (702.28b, `Kw::Shadow`); "if a card would be put into an opponent's graveyard from anywhere, instead exile it with a void counter on it" (614.1a in `move_card`: a card, not a token or a copy of a spell; decided before the events, so it doesn't die; with Yawgmoth's Will's or flashback's in the order the card's controller chooses since M7e, 616.1; a Voidwalker leaving in the same simultaneous move still applies; `SEEN_VOID`); `M7d::ExiledWithCounterPlayFree` (a free play permission this turn) | `ChooseExiled` |
 | Lion Sash | reconfigure (702.151): `CardDef::reconfigure` (attached, not a creature: `types_of`, 702.151b; it may equip while a creature, 301.5c), the two abilities checked against `reconfigure_cost`, unattach only while attached (`Cond::SourceAttached`; `activation_ready` now gives "activate only if" its source); `Mod::PtPerSourceCounter`; `M7d::ExileTargetCounterIfPermanent` | `Target` |
 | Does Machines | Class levels (716): each level's printing is a face (`Face::Level`, `CardDef::levels`, `class_level`) with the Class's abilities at that level; gaining a level turns that face up (`set_face`: the same object, as a transform); `EventKind::ClassLevel`, `TrigPred::Level`; `M7d::BecomeCreatureIfNot` (a 0/0 Robot creature in addition, forever, if it isn't one) | `Target` |
-| Nadu, Winged Wisdom | a granted "whenever this creature becomes the target of a spell or ability" triggered ability: the granter's own trigger for its controller's creatures that have the granted abilities (`TrigPred::Granted`, as granted ward, 27.3); "this ability triggers only twice each turn", per creature (`TrigPred::TimesPerSubject`, `Mark::Triggered`); `M7d::RevealTopLandElseHand` | - |
+| Nadu, Winged Wisdom | a granted "whenever this creature becomes the target of a spell or ability" triggered ability: the granter's definition's trigger (its source the creature since M7e, 113.7) for its controller's creatures that have the granted abilities (`TrigPred::Granted`, as granted ward, 27.3); "this ability triggers only twice each turn", per creature (`TrigPred::TimesPerSubject`, `Mark::Triggered`); `M7d::RevealTopLandElseHand` | - |
 | Anointed Peacekeeper | "as this enters, look at an opponent's hand, then choose any card name" (`AsEnters`: the look once, `Mark::LookedHand`, then `NameCard` over the names of the opponent's cards, open decklists: the same in every world; `PASS` = a name of no such card; `Mark::ChosenName`); "spells your opponents cast with the chosen name cost {2} more" (`cost_with`, 601.2f) and "activated abilities of sources with the chosen name cost {2} more to activate unless they're mana abilities" (`act_mana_x`, anyone's, with the increases; a special action isn't an ability); `SEEN_NAMED_TAX` | `NameCard` |
 | Urza, Lord High Artificer | a mana ability whose cost taps another permanent ("tap an untapped artifact you control: add {U}"; the IR's `tap_permanent_you_control`): each untapped artifact is a source of {U} while paying (`pay::TAP_FOR`, its `MY_PERM` id; 31.4); `M7d::ShuffleExileTopPlayFree` (a free play permission this turn); the Construct token (registered) | `PayMana` |
 | Arena of Glory | exert as a cost (701.39: `Cost::exert`, `Mark::Exerted`; its controller's next untap step skips it); mana that gives haste (`ManaAbility::haste`, `ManaPool::haste`: its {R}{R}, made with priority (28.1), is spent first on a creature spell and last on anything else; `Mark::HasteMana` gives the permanent haste until end of turn) | - |
@@ -4256,6 +4271,9 @@ random 94.8% +- 0.5, vs `HeuristicV1` 61.6% +- 0.8.
 
 ### 31.7 Simplifications (differences from the CR)
 
+What still applies (docs/shortcuts.md; M7e fixed the Citadel's faces, turning face up after a
+loss of all abilities and Dauthi Voidwalker's replacement order):
+
 * Arena of Glory's mana is made with priority only (28.8) and spent by the pool's rule: its haste
   mana first on a creature spell, last on anything else (the player chooses which mana pays, 106.4;
   that order is never worse for them).
@@ -4264,18 +4282,14 @@ random 94.8% +- 0.5, vs `HeuristicV1` 61.6% +- 0.8.
   sacrifice alone); a land with four abilities of its own doesn't get the id (none in the cube).
 * Emerge's artifact is chosen right after the alternative cost, before modes, X and targets (the CR
   determines it with the total cost, 601.2f; the cube's emerge card has no spell targets).
-* Bolas's Citadel offers the top card's front face only (a split card is not offered); the top
-  card is known before every decision, not between two of them.
+* Bolas's Citadel's top card is known before every decision, not between two of them.
 * Anointed Peacekeeper names among its opponent's cards (any card name in the CR: a name of its
   controller's own cards would tax only that player's own abilities).
 * Nadu's limit is counted per creature and granting definition (two Nadus would share one count;
   each grants its own ability in the CR; Nadu is legendary).
-* "Loses all abilities" also takes the face-down definition's turn-face-up action (a special
-  action in the CR); a copy of a Class doesn't gain levels; morph, disguise and cloak are not
-  built; a face-down spell can't be cast.
+* A copy of a Class doesn't gain levels; morph, disguise and cloak are not built; a face-down
+  spell can't be cast.
 * More distinct waiting triggers than 16 offer the first 16 for the next (31.5).
-* Dauthi Voidwalker's replacement applies after Yawgmoth's Will's (the card's owner chooses the
-  order, 616.1; the Will's denies the void counter).
 
 ### 31.8 Hidden information and fuzzing
 
@@ -4386,6 +4400,8 @@ becomes supported). Main (6d6760c: its IR and lowering) against this branch: 10 
 unchanged, among them Robber of the Rich's.
 
 ### 32.5 Simplifications (differences from the CR)
+
+(Both still apply; docs/shortcuts.md.)
 
 * Wizard's Rockets' X mana: one `ChooseMana` decision per mana (the combinations are not offered
   as one choice); the bot announces X = 0.

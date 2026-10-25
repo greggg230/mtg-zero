@@ -94,9 +94,6 @@ pub struct Obj {
     /// The turn it entered the battlefield (0 = never; turn numbers as
     /// u16, which the turn cap keeps far from).
     pub entered: u16,
-    /// The event group it entered the battlefield in (`Game::ev_seq`):
-    /// permanents that entered at the same time share it (CR 614.12a).
-    pub enter_seq: u32,
     /// Loyalty abilities activated this turn (CR 606.3): in turn `pw_turn`,
     /// `pw_used` of them, `pw_extra` more allowed than one (Comet).
     pub pw_turn: u16,
@@ -500,6 +497,9 @@ pub struct Game {
     /// "Whenever one or more ..." abilities that triggered in event group
     /// `ev_seq`: (source, ability slot, group); one trigger per group.
     pub(crate) batch_fired: Vec<(ObjRef, u8, u32)>,
+    /// (event group, the first timestamp a permanent got in it): the
+    /// permanents that entered at the same time as one (`EnterAsCopy`).
+    pub(crate) group_ts: (u32, u32),
     /// The permanent being put onto the battlefield is a resolving spell
     /// (it was cast).
     pub(crate) entering_cast: bool,
@@ -940,6 +940,7 @@ impl Game {
             batching: false,
             ev_seq: 0,
             batch_fired: Vec::new(),
+            group_ts: (0, 0),
             entering_cast: false,
             entering_evoked: false,
             log: if spec.log { Some(Vec::new()) } else { None },
@@ -989,7 +990,6 @@ impl Game {
             monstrous: false,
             attacks: None,
             entered: 0,
-            enter_seq: 0,
             pw_turn: 0,
             pw_used: 0,
             pw_extra: 0,
@@ -1282,7 +1282,7 @@ impl Game {
             });
         }
         if copy_choice {
-            self.agenda.push(Task::EnterAsCopy { card: idx, note });
+            self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1 });
             return r;
         }
         self.entering(idx, tapped, x);
@@ -1540,12 +1540,16 @@ impl Game {
         let owner = self.objs[idx.i()].owner;
         let ts = if to == Zone::Battlefield {
             self.next_ts += 1;
+            // (The first timestamp of the current event's entries: what
+            // enters at the same time, CR 614.12a.)
+            if self.group_ts.0 != self.ev_seq {
+                self.group_ts = (self.ev_seq, self.next_ts);
+            }
             self.next_ts
         } else {
             0
         };
         let turn = self.turn.number;
-        let ev_seq = self.ev_seq;
         let known_before = if from.is_hidden() { self.objs[idx.i()].known } else { 0b11 };
         {
             let o = &mut self.objs[idx.i()];
@@ -1575,7 +1579,6 @@ impl Game {
             o.monstrous = false;
             o.attacks = None;
             o.entered = if to == Zone::Battlefield { turn as u16 } else { 0 };
-            o.enter_seq = if to == Zone::Battlefield { ev_seq } else { 0 };
             o.pw_turn = 0;
             o.pw_used = 0;
             o.pw_extra = 0;
@@ -1740,6 +1743,9 @@ impl Game {
         if from == Zone::Nowhere && to != Zone::Graveyard {
             return Dest::To(to);
         }
+        // (From no zone: a card set aside, Mox Diamond not given a land;
+        // a token or a rules object never goes to a graveyard from there.)
+        let from_known = from != Zone::Nowhere || !self.is_token(idx) && !self.def_of(idx).rules;
         let owner = self.objs[idx.i()].owner;
         let card = !self.is_token(idx) && !(from == Zone::Stack && self.is_copy_obj(idx));
         let gy = to == Zone::Graveyard;
@@ -1748,13 +1754,13 @@ impl Game {
         // 4 leaves-exile, 5 flashback, 6 the spell's exile.
         let mut can = 0u8;
         let mut void = None;
-        if gy && from != Zone::Nowhere && self.def_of(idx).gy_to_library {
+        if gy && from_known && self.def_of(idx).gy_to_library {
             can |= 1;
         }
         if gy && card && self.players[owner as usize].gy_exile_turn == self.turn.number && self.turn.number > 0 {
             can |= 2;
         }
-        if gy && card && self.seen & SEEN_VOID != 0 && from != Zone::Nowhere {
+        if gy && card && self.seen & SEEN_VOID != 0 && from_known {
             void = self.void_counter_for(owner);
             if void.is_some() {
                 can |= 4;
