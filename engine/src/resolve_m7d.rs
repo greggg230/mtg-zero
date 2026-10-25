@@ -270,6 +270,24 @@ impl Game {
                 }
                 Flow::Next
             }
+            M7d::ShuffleExileTopPlayFree => {
+                let p = f.controller;
+                self.shuffle_library(p);
+                if let Some(&top) = self.players[p as usize].library.last() {
+                    self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
+                    let r = self.move_card(top, Zone::Exile, Pos::Top);
+                    if self.objs[top.i()].zone == Zone::Exile {
+                        self.note(|g| format!("P{p} may play {} this turn without paying its mana cost", g.name(top)));
+                        self.permissions.push(crate::game::Permission {
+                            card: r,
+                            player: p,
+                            turn: Some(self.turn.number),
+                            kind: crate::game::PermKind::Play { free: true, cast_only: false, any_mana: false, attacked_subtype: None },
+                        });
+                    }
+                }
+                Flow::Next
+            }
             M7d::UnattachSource => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     let c = f.source.idx;
@@ -399,5 +417,29 @@ impl Game {
             }
         }
         tax
+    }
+}
+
+// ---- mana that gives haste (Arena of Glory) --------------------------------
+
+impl Game {
+    /// The pool paid part of `pm`'s cost (from `before`): the haste mana
+    /// spent goes first on a creature spell (the player's best choice: it
+    /// gains haste), last on anything else; a creature spell it was spent
+    /// on is marked (`Mark::HasteMana`).
+    pub(crate) fn spend_haste_mana(&mut self, pm: &crate::pay::PayMana, before: crate::mana::ManaPool) {
+        use crate::mana::R;
+        let p = pm.payer;
+        let after = self.players[p as usize].pool;
+        let spent = before.amt[R].saturating_sub(after.amt[R]);
+        let creature = pm.keep.spell.is_some_and(|c| self.is_type(c, crate::db::types::CREATURE));
+        let plain = before.amt[R] - before.haste;
+        let used = if creature { spent.min(before.haste) } else { spent.saturating_sub(plain) };
+        self.players[p as usize].pool.haste = before.haste - used;
+        if creature && used > 0 {
+            let c = pm.keep.spell.unwrap();
+            let r = self.obj_ref(c);
+            self.marks.push((r, crate::game::Mark::HasteMana));
+        }
     }
 }

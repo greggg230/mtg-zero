@@ -455,6 +455,15 @@ impl Game {
                 // of untapping (122.1d).
                 let mine: Vec<CardIdx> = self.permanents_of(ap).collect();
                 for c in mine {
+                    // CR 701.39b: an exerted permanent doesn't untap during
+                    // its controller's next untap step.
+                    if !self.marks.is_empty() {
+                        let r = self.obj_ref(c);
+                        if let Some(i) = self.marks.iter().position(|&m| m == (r, crate::game::Mark::Exerted)) {
+                            self.marks.remove(i);
+                            continue;
+                        }
+                    }
                     if self.objs[c.i()].tapped && !self.abilities(c).no_untap {
                         self.untap(c);
                     }

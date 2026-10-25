@@ -290,7 +290,18 @@ impl Game {
                             let r = self.obj_ref(card);
                             self.marks.contains(&(r, crate::game::Mark::NotSorceryTiming))
                         });
+                        // Mana that gives haste was spent on it (Arena of
+                        // Glory): haste until end of turn.
+                        let haste = !self.marks.is_empty() && {
+                            let r = self.obj_ref(card);
+                            self.marks.contains(&(r, crate::game::Mark::HasteMana))
+                        };
                         let entered = self.put_onto_battlefield(card, item.controller);
+                        if haste && self.objs[card.i()].zone == Zone::Battlefield {
+                            let mut k = crate::db::KwSet::default();
+                            k.insert(crate::db::Kw::Haste);
+                            self.add_effect(crate::layers::Affected::Obj(entered), crate::db::Mod::Keywords(k), crate::layers::Until::EndOfTurn, item.controller);
+                        }
                         if let (Some(k), true) = (cleanup_sac, self.objs[card.i()].zone == Zone::Battlefield) {
                             let def = self.objs[card.i()].def;
                             self.delayed.push(crate::game::Delayed {

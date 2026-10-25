@@ -893,6 +893,9 @@ pub struct ManaAbility {
     pub only: u8,
     /// "... and that spell can't be countered" (Delighted Halfling).
     pub uncounterable: bool,
+    /// "If any of that mana is spent on a creature spell, it gains haste
+    /// until end of turn" (Arena of Glory; the pool's `haste` mana).
+    pub haste: bool,
 }
 
 /// `ManaAbility::only`: the mana may be spent only to cast an artifact
@@ -951,6 +954,9 @@ pub struct Cost {
     /// Waterbend: untapped artifacts and creatures may each pay {1} of the
     /// mana (`PayMana::waterbend`).
     pub waterbend: bool,
+    /// Exert this permanent (CR 701.39: it won't untap during its
+    /// controller's next untap step; `Mark::Exerted`).
+    pub exert: bool,
 }
 
 /// An alternative cost (CR 118.9): paid instead of the mana cost.

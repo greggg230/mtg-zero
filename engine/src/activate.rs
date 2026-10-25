@@ -485,7 +485,21 @@ impl Game {
 
     /// Does permanent `c` have a mana ability?
     pub(crate) fn has_mana_ability(&self, c: CardIdx) -> bool {
-        self.abilities(c).activated.iter().any(|a| a.mana().is_some())
+        self.abilities(c).activated.iter().any(|a| a.mana().is_some()) || self.tapped_for_mana(c)
+    }
+
+    /// Could `c` be tapped while paying for another permanent's mana ability
+    /// ("tap an untapped artifact you control: add {U}", Urza)? Then it
+    /// counts as a mana source for the costs that tap creatures besides the
+    /// mana (ENGINE.md 29: they and the payment never compete).
+    pub(crate) fn tapped_for_mana(&self, c: CardIdx) -> bool {
+        let p = self.objs[c.i()].controller;
+        let ctx = crate::cast::Ctx { controller: p, source: None };
+        self.permanents_of(p).any(|x| {
+            self.abilities(x).activated.iter().any(|a| {
+                a.mana().is_some() && a.cost.tap_untapped.as_ref().is_some_and(|t| self.card_matches(&t.filter, c, &ctx))
+            })
+        })
     }
 
     /// Creatures that can crew `vehicle` for `p`: untapped creatures they
@@ -497,7 +511,7 @@ impl Game {
         let spell = matches!(self.objs[vehicle.i()].zone, Zone::Hand | Zone::Stack | Zone::Graveyard | Zone::Exile);
         self.creatures_of(p)
             .filter(|&c| c != vehicle && !self.objs[c.i()].tapped)
-            .filter(|&c| !spell || !self.abilities(c).activated.iter().any(|a| a.mana().is_some()))
+            .filter(|&c| !spell || !self.has_mana_ability(c))
             .collect()
     }
 
@@ -845,6 +859,15 @@ impl Game {
             self.sacrifice(c);
         }
         self.activate_mana_costs(src);
+        // Mana that gives haste to the creature spell it is spent on (Arena
+        // of Glory: one fixed production, the lowering checks).
+        if ad.mana().is_some_and(|m| m.haste) && prods.len() == 1 {
+            let v = prods[0];
+            self.add_mana(p, &v);
+            let pool = &mut self.players[p as usize].pool;
+            pool.haste = pool.haste.saturating_add(v[crate::mana::R]).min(pool.amt[crate::mana::R]);
+            return;
+        }
         if !prods.is_empty() {
             self.agenda.push(Task::ManaNowPick { p, prods });
         }

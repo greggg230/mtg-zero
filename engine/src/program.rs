@@ -121,6 +121,9 @@ pub enum M7d {
     /// The controller reveals the top card of their library: a land card is
     /// put onto the battlefield, anything else into their hand (Nadu).
     RevealTopLandElseHand,
+    /// The controller shuffles their library, then exiles its top card; they
+    /// may play it this turn without paying its mana cost (Urza).
+    ShuffleExileTopPlayFree,
 }
 
 /// Which objects an `Ext` op acts on.

@@ -592,3 +592,133 @@ fn anointed_peacekeeper_names_a_card_and_taxes_it_cr601_2f() {
     g.pass();
     assert!(!g.has_option(act(tapper, 0)), "{{2}} more with one land: {:?}", g.options_desc());
 }
+
+// ---- Urza, Lord High Artificer (a mana ability that taps another permanent) -----
+
+/// "Tap an untapped artifact you control: Add {U}." A mana ability (CR
+/// 605.1a) whose cost taps another permanent: each untapped artifact is a
+/// source of {U} while paying (an artifact with its own mana ability has
+/// both as alternatives); a summoning-sick artifact creature can pay (CR
+/// 302.6 is about {T}).
+#[test]
+fn urza_taps_artifacts_for_blue_while_paying_cr605_1a() {
+    let mut g = scen()
+        .battlefield(0, &["Urza, Lord High Artificer", "Sol Ring"])
+        .hand(0, &["Brainstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    let bs = g.card(0, "Brainstorm", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(bs)), "{{U}} from Sol Ring tapped for Urza: {:?}", g.options_desc());
+    g.choose(Choice::Cast(bs));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::PayMana) || at_priority(g));
+    let ring = bf(&g, 0, "Sol Ring");
+    if g.kind() == Some(DecisionKind::PayMana) {
+        assert!(g.has_option(Choice::Card(ring)), "{:?}", g.options_desc());
+        assert!(!g.has_option(act(ring, 0)), "its own {{C}}{{C}} can't pay {{U}}");
+        g.choose(Choice::Card(ring));
+    }
+    resolve_with(&mut g, |_| None);
+    assert!(g.obj(ring).tapped, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Brainstorm", Zone::Graveyard), 1, "{}", log(&g));
+    assert!(log(&g).contains("taps Sol Ring for a mana ability"));
+}
+
+/// Urza's Construct (0/0, "+1/+1 for each artifact you control") enters
+/// summoning sick and still pays for Urza's ability.
+#[test]
+fn urza_construct_token_and_a_sick_artifact_creature_pay_cr302_6() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Island", "Mox Jet"])
+        .hand(0, &["Urza, Lord High Artificer", "Brainstorm"])
+        .at(Step::Main1, 0)
+        .start();
+    let urza = g.card(0, "Urza, Lord High Artificer", Zone::Hand);
+    g.choose(Choice::Cast(urza));
+    pay(&mut g);
+    settle(&mut g);
+    let construct = g.permanents_of(0).find(|&c| g.name(c) == "Construct").expect("a Construct token");
+    assert_eq!(g.pt(construct), (2, 2), "two artifacts: the Mox and itself");
+    let bs = g.card(0, "Brainstorm", Zone::Hand);
+    g.choose(Choice::Cast(bs));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::PayMana) || at_priority(g));
+    assert!(g.has_option(Choice::Card(construct)), "the sick Construct: {:?}", g.options_desc());
+    g.choose(Choice::Card(construct));
+    resolve_with(&mut g, |_| None);
+    assert!(g.obj(construct).tapped);
+}
+
+/// "{5}: Shuffle your library, then exile the top card. Until end of turn,
+/// you may play that card without paying its mana cost."
+#[test]
+fn urza_exiles_the_top_card_and_plays_it_free_this_turn_cr601_2a() {
+    let mut g = scen()
+        .battlefield(0, &["Urza, Lord High Artificer", "Island", "Island", "Island", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let urza = bf(&g, 0, "Urza, Lord High Artificer");
+    g.choose(act(urza, 1));
+    pay(&mut g);
+    settle(&mut g);
+    let ex = g.card(0, "Island", Zone::Exile);
+    assert!(g.has_option(Choice::Play(ex)), "play it (a land: the land drop) {:?}\n{}", g.options_desc(), log(&g));
+    g.choose(Choice::Play(ex));
+    assert_eq!(g.count_in(0, "Island", Zone::Battlefield), 6);
+}
+
+// ---- Arena of Glory (exert as a cost, mana that gives haste) ------------------
+
+/// "{R}, {T}, Exert this land: Add {R}{R}. If any of that mana is spent on a
+/// creature spell, it gains haste until end of turn. (An exerted permanent
+/// won't untap during your next untap step.)" (CR 701.39, 605.3a: made with
+/// priority, it waits in the pool.)
+#[test]
+fn arena_of_glory_exerts_for_mana_that_gives_haste_cr701_39() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Arena of Glory"])
+        .hand(0, &["Test Dwarf"])
+        .at(Step::Main1, 0)
+        .start();
+    let arena = bf(&g, 0, "Arena of Glory");
+    assert!(g.has_option(act(arena, 1)), "the exert ability at priority: {:?}", g.options_desc());
+    g.choose(act(arena, 1));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g));
+    assert_eq!(g.player(0).pool.amt[3], 2, "{{R}}{{R}} in the pool\n{}", log(&g));
+    assert!(g.obj(arena).tapped);
+    let dwarf = g.card(0, "Test Dwarf", Zone::Hand);
+    g.choose(Choice::Cast(dwarf));
+    pay(&mut g);
+    settle(&mut g);
+    let dwarf = bf(&g, 0, "Test Dwarf");
+    assert!(g.has_kw(dwarf, engine::db::Kw::Haste), "the creature spell gained haste\n{}", log(&g));
+    attack_with(&mut g, &["Test Dwarf"]);
+    // The exerted Arena stays tapped through its controller's next untap step.
+    next_main(&mut g, 0);
+    assert!(g.obj(arena).tapped, "exerted: not untapped\n{}", log(&g));
+    assert!(!g.has_kw(dwarf, engine::db::Kw::Haste), "until end of turn");
+    next_main(&mut g, 0);
+    assert!(!g.obj(arena).tapped, "only the next untap step");
+}
+
+/// Its mana spent on a noncreature spell gives nothing (and is spent last).
+#[test]
+fn arena_of_glory_haste_mana_on_a_noncreature_spell_cr106_6() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Arena of Glory"])
+        .hand(0, &["Lightning Bolt", "Test Dwarf"])
+        .at(Step::Main1, 0)
+        .start();
+    let arena = bf(&g, 0, "Arena of Glory");
+    g.choose(act(arena, 1));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g));
+    assert_eq!(g.player(0).pool.haste, 2);
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(Choice::Target(engine::Target::Player(1)));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.player(0).pool.amt[3], 1);
+    assert_eq!(g.player(0).pool.haste, 1, "{}", log(&g));
+}

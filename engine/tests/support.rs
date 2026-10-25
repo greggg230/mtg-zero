@@ -26,6 +26,7 @@ const SUPPORTED: &[&str] = &[
     "Aragorn, King of Gondor",
     "Archon of Cruelty",
     "Archon of Emeria",
+    "Arena of Glory",
     "Arid Mesa",
     "Arwen, Mortal Queen",
     "Atraxa, Grand Unifier",
@@ -507,6 +508,7 @@ const SUPPORTED: &[&str] = &[
     "Ursine Monstrosity",
     "Urza's Bauble",
     "Urza's Saga",
+    "Urza, Lord High Artificer",
     "Vampiric Tutor",
     "Vaultborn Tyrant",
     "Verdant Catacombs",
@@ -607,10 +609,10 @@ fn threat_report() {
 #[test]
 fn unsupported_cards_fail_loudly() {
     let db = CardDb::cube();
-    let err = db.expect_id("Abhorrent Oculus").unwrap_err();
-    assert!(err.contains("Effect:ManifestDread"), "{err}");
-    let err = db.expect_id("Urza, Lord High Artificer").unwrap_err();
-    assert!(err.contains("ActivationCost.tap_permanent_type"), "{err}");
+    let err = db.expect_id("Strip Mine").unwrap_err();
+    assert!(err.contains("CardPrinting.mana_only_from_produces"), "{err}");
+    let err = db.expect_id("Chromatic Star").unwrap_err();
+    assert!(err.contains("IR:TriggeredAbility.event"), "{err}");
     assert!(db.expect_id("No Such Card").is_err());
 }
 

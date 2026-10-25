@@ -19,6 +19,11 @@ use crate::svec::SVec;
 /// mana ability; it pays for {1} of the generic mana).
 pub(crate) const IMPROVISE: AbilitySlot = AbilitySlot::Spell;
 
+/// The `Src` slot of a permanent tapped for another permanent's mana
+/// ability whose cost taps it ("tap an untapped artifact you control: add
+/// {U}", Urza; ENGINE.md 31): a source of that mana while paying.
+pub(crate) const TAP_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX);
+
 /// A mana ability that can help pay a cost: of a permanent, or of a card in
 /// hand (the Spirit Guides, CR 605.3a; ENGINE.md 18); or an artifact tapped
 /// for improvise (`IMPROVISE`).
@@ -346,6 +351,10 @@ impl Game {
                 }
             }
         }
+        // "Tap an untapped artifact you control: Add {U}" (Urza): the mask of
+        // the mana and the filter, once per payment (several such abilities
+        // make the same mana from the same permanents).
+        let mut tap_for: Option<(ManaMask, &Filter)> = None;
         for c in self.permanents_of(p) {
             if Some(c) == exclude {
                 continue;
@@ -355,6 +364,14 @@ impl Game {
             for (i, ad) in d.activated.iter().enumerate() {
                 let Some(m) = ad.mana() else { continue };
                 if ad.instant_only || !self.activation_ready(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
+                    continue;
+                }
+                if let Some(t) = &ad.cost.tap_untapped {
+                    if let ManaProd::One(mask) = m.prod {
+                        if tap_for.is_none() {
+                            tap_for = Some((mask, &t.filter));
+                        }
+                    }
                     continue;
                 }
                 // "Remove a counter from this" (Gemstone Mine): it needs
@@ -410,6 +427,22 @@ impl Game {
                 }
             }
         }
+        // The permanents another's mana ability taps (`TAP_FOR`), one class
+        // per definition, after the permanents' own abilities.
+        if let Some((mask, filter)) = tap_for {
+            let ctx = crate::cast::Ctx { controller: p, source: None };
+            for x in self.permanents_of(p) {
+                if Some(x) == exclude || self.objs[x.i()].tapped || !self.card_matches(filter, x, &ctx) {
+                    continue;
+                }
+                let def = self.objs[x.i()].def;
+                let src = Src { card: x, slot: TAP_FOR };
+                match out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == TAP_FOR) {
+                    Some(cl) => cl.members.push(src),
+                    None => out.push(Class { def, members: one_member(src), yld: Yield::One(Unit::free(mask)), dmg: 0, sac_self: false, only: 0 }),
+                }
+            }
+        }
         // Mana abilities of cards in hand (CR 605.3a: activated while
         // paying like any other; a Spirit Guide exiles itself). One mana
         // each (the lowering checks), after the permanents.
@@ -462,7 +495,20 @@ impl Game {
     pub(crate) fn pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: u16) -> Vec<Class> {
         let mut classes = self.mana_classes(p, exclude);
         if improvise != 0 {
-            classes.extend(self.improvise_classes(p, exclude, improvise));
+            // (A permanent another's mana ability taps for mana isn't also
+            // offered for improvise: the same tap, whose mana pays for {1}
+            // as well, ENGINE.md 31.)
+            let tapped_for: Vec<CardIdx> =
+                classes.iter().filter(|cl| cl.members[0].slot == TAP_FOR).flat_map(|cl| cl.members.iter().map(|s| s.card)).collect();
+            for mut cl in self.improvise_classes(p, exclude, improvise) {
+                if !tapped_for.is_empty() {
+                    cl.members.retain(|s| !tapped_for.contains(&s.card));
+                    if cl.members.is_empty() {
+                        continue;
+                    }
+                }
+                classes.push(cl);
+            }
         }
         classes
     }
@@ -731,6 +777,15 @@ impl Game {
         if let Some((k, n)) = cost.remove_counters {
             self.remove_counters(c, k, n as u16);
         }
+        if cost.exert {
+            // CR 701.39a: it won't untap during its controller's next untap
+            // step.
+            let r = self.obj_ref(c);
+            if !self.marks.contains(&(r, crate::game::Mark::Exerted)) {
+                self.marks.push((r, crate::game::Mark::Exerted));
+            }
+            self.note(|g| format!("P{p} exerts {}", g.name(c)));
+        }
         if cost.life > 0 {
             self.lose_life(p, cost.life as i32);
         }
@@ -776,7 +831,7 @@ impl Game {
             .copied()
             .filter(|prod| {
                 let mut cost = pm.cost;
-                let mut pool = ManaPool { amt: pm.extra, art: 0 };
+                let mut pool = ManaPool { amt: pm.extra, art: 0, haste: 0 };
                 pool.add(prod);
                 pool.pay_into_for(&mut cost, true);
                 cost.total() < pm.cost.total() && (cost.is_zero() || cands_payable(&cost, &[], &rest, budget))
@@ -852,6 +907,9 @@ impl Game {
             let before = self.players[payer as usize].pool;
             self.players[payer as usize].pool.pay_into_for(&mut pm.cost, pm.keep.allow & crate::db::SPEND_ARTIFACT != 0);
             pm.pooled = true;
+            if before.haste > 0 {
+                self.spend_haste_mana(&pm, before);
+            }
             if !self.marks.is_empty() {
                 let after = self.players[payer as usize].pool;
                 let spent = (0..5).filter(|&t| before.amt[t] > after.amt[t]).fold(0u8, |m, t| m | (1 << t));
@@ -884,8 +942,12 @@ impl Game {
         if let Some(ch) = self.answer.take() {
             let (card, slot) = match ch {
                 Choice::Ability(card, slot) => (card, slot),
-                // An artifact tapped for improvise.
-                Choice::Card(card) => (card, IMPROVISE),
+                // A permanent tapped for another's mana ability, or an
+                // artifact tapped for improvise.
+                Choice::Card(card) => {
+                    let tap_for = Src { card, slot: TAP_FOR };
+                    (card, if classes.iter().any(|cl| cl.members.contains(&tap_for)) { TAP_FOR } else { IMPROVISE })
+                }
                 other => unreachable!("pay answer {other:?}"),
             };
             let src = Src { card, slot };
@@ -950,8 +1012,9 @@ impl Game {
                 }
             };
             if ok {
-                opts.push(if rep.slot == IMPROVISE {
-                    // Improvise: the artifact's own slot (`MY_PERM`).
+                opts.push(if rep.slot == IMPROVISE || rep.slot == TAP_FOR {
+                    // Improvise, or a permanent tapped for another's mana
+                    // ability: the permanent's own slot (`MY_PERM`).
                     Opt { action: self.perm_action(payer, rep.card), choice: Choice::Card(rep.card) }
                 } else {
                     Opt { action: self.ability_action(payer, rep.card, rep.slot), choice: Choice::Ability(rep.card, rep.slot) }
@@ -974,7 +1037,7 @@ impl Game {
         // (Artifact-only mana is spent first; what is left stays
         // artifact-only in the pool.)
         let only = self.def_of(src.card).activated_def(src.slot).mana().map_or(0, |m| m.only);
-        let mut pool = ManaPool { amt: pm.extra, art: pm.extra_art };
+        let mut pool = ManaPool { amt: pm.extra, art: pm.extra_art, haste: 0 };
         pool.add(&prod);
         if only & crate::db::SPEND_ARTIFACT != 0 {
             pool.art += prod[crate::mana::C];
@@ -1001,7 +1064,7 @@ impl Game {
                 .chosen
                 .iter()
                 .chain(pm.multi.iter().map(|m| &m.0))
-                .any(|s| s.slot != IMPROVISE && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
+                .any(|s| s.slot != IMPROVISE && s.slot != TAP_FOR && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
             if uncounterable {
                 let r = self.obj_ref(card);
                 self.marks.push((r, crate::game::Mark::Uncounterable));
@@ -1017,6 +1080,9 @@ impl Game {
             if s.slot == IMPROVISE {
                 return (true, false, false, false);
             }
+            if s.slot == TAP_FOR {
+                return (false, false, false, false);
+            }
             let ad = self.def_of(s.card).activated_def(s.slot);
             let dmg = ad.mana().map_or(0, |m| m.damage_to_you);
             let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
@@ -1025,6 +1091,11 @@ impl Game {
         for src in order {
             if src.slot == IMPROVISE {
                 self.note(|g| format!("P{payer} taps {} for improvise", g.name(src.card)));
+                self.tap(src.card);
+            } else if src.slot == TAP_FOR {
+                // (A cost of another permanent's mana ability: not "tapped
+                // for mana", CR 106.12a.)
+                self.note(|g| format!("P{payer} taps {} for a mana ability", g.name(src.card)));
                 self.tap(src.card);
             } else {
                 self.activate_mana_costs(src);

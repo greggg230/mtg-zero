@@ -100,6 +100,13 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         if *sorcery_speed {
             l.unsupported("ManaAbility.sorcery_speed");
         }
+        // (Haste mana is made with priority only: its pool tag.)
+        if m.haste && !instant_only {
+            l.unsupported("AddManaToPool.grants_haste_to_creature_spell(paid while paying)");
+        }
+        if cost.exert && !(cost.tap && !cost.mana.is_zero()) {
+            l.unsupported("ActivationCost.exert_self(not with {T} and mana)");
+        }
         // "Remove a counter from this": paid like {T} (no choice).
         if cost.remove_counters.is_some_and(|(_, n)| n != 1) {
             l.unsupported("ManaAbility.cost(more than one counter)");
@@ -107,9 +114,19 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         if m.sac_if_no.is_some() && cost.remove_counters.map(|(k, _)| k) != m.sac_if_no {
             l.unsupported("ManaAbility:SacrificeSelfIfNoNamedCounters(not the counter its cost removes)");
         }
+        // "Tap an untapped artifact you control: Add {U}" (Urza): the whole
+        // cost, one mana: each such permanent is a source while paying
+        // (`pay::TAP_FOR`, ENGINE.md 31).
+        let tap_other = cost.tap_untapped.as_ref().is_some_and(|t| t.n == 1)
+            && Cost { tap_untapped: None, ..cost.clone() } == Cost::default()
+            && matches!(m.prod, ManaProd::One(_))
+            && m.damage_to_you == 0
+            && m.sac_if_no.is_none();
+        if cost.tap_untapped.is_some() && !tap_other {
+            l.unsupported("ManaAbility.cost(tapping another permanent, with more)");
+        }
         // (The mana-ability payment path pays none of these.)
-        if cost.tap_untapped.is_some()
-            || cost.crew > 0
+        if cost.crew > 0
             || cost.exile_graveyard > 0
             || cost.bounce.is_some()
             || cost.exile_from_hand.is_some()
@@ -118,7 +135,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         }
         // Payment treats a card's mana abilities as exclusive alternatives,
         // true when each one taps, sacrifices or exiles its source.
-        if !instant_only && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
+        if !instant_only && !tap_other && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
             l.unsupported("ManaAbility.cost(no tap or sacrifice of the source)");
         }
         if from == From::Hand && !matches!(m.prod, ManaProd::One(_)) {
@@ -128,6 +145,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     } else {
         if *activate_only_as_instant {
             l.unsupported("ActivatedAbility.activate_only_as_instant(non-mana)");
+        }
+        if cost.exert {
+            l.unsupported("ActivationCost.exert_self(non-mana)");
         }
         if *exhaust && from != From::Battlefield {
             l.unsupported("ActivatedAbility.exhaust(not on the battlefield)");
@@ -221,8 +241,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     }) = c;
     let _ = mana_str; // display form of `mana`
     l.deny("ActivationCost.pay_energy", pay_energy);
-    l.deny("ActivationCost.tap_permanent_you_control", tap_permanent_you_control);
-    l.deny("ActivationCost.tap_permanent_type", tap_permanent_type);
     l.deny("ActivationCost.exile_artifact_from_graveyard", exile_artifact_from_graveyard);
     l.deny("ActivationCost.remove_plus_one_counter_from_your_creature", remove_plus_one_counter_from_your_creature);
     l.deny("ActivationCost.sacrifice_food", sacrifice_food);
@@ -233,7 +251,6 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     // total power n or more), as a sorcery (the IR's `sorcery_speed`).
     let saddle_n = l.int("ActivationCost.saddle", *saddle, 0, 20) as u8;
     *loyalty_out = (*loyalty, *loyalty_x);
-    l.deny("ActivationCost.exert_self", exert_self);
 
     // "{X}" (CR 107.3, 602.2b): announced as the ability is activated; the
     // effect must use it (`X_TARGETS`).
@@ -274,6 +291,8 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         tap_untapped: None,
         // "Waterbend {n}" (Avatar: tap artifacts and creatures to help pay).
         waterbend: *waterbend,
+        // "Exert this" (CR 701.39; a mana ability's cost, Arena of Glory).
+        exert: *exert_self,
     };
     if *waterbend && (cost.mana.generic == 0 || from != From::Battlefield) {
         l.unsupported("ActivationCost.waterbend(no generic mana)");
@@ -409,6 +428,27 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
             }
         }
     }
+    // "Tap an untapped artifact you control" (Urza, Lord High Artificer; not
+    // {T}: summoning sickness doesn't matter, CR 302.6).
+    if *tap_permanent_you_control {
+        let filter = if tap_permanent_type.is_empty() {
+            Filter::Type(types::PERMANENT)
+        } else {
+            match types::from_name(tap_permanent_type) {
+                Some(b) => Filter::Type(b),
+                None => {
+                    l.unsupported(format!("ActivationCost.tap_permanent_type({tap_permanent_type})"));
+                    Filter::Type(types::PERMANENT)
+                }
+            }
+        };
+        if cost.tap_untapped.is_some() {
+            l.unsupported("ActivationCost.tap_permanent_you_control(with another tap cost)");
+        }
+        cost.tap_untapped = Some(SacCost { filter, n: 1, another: false });
+    } else {
+        l.deny("ActivationCost.tap_permanent_type", tap_permanent_type);
+    }
     if sacs.len() > 1 {
         l.unsupported("ActivationCost.sacrifice(more than one kind)");
     }
@@ -495,6 +535,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
     let mut damage_to_you = 0u8;
     let mut sac_if_no = None;
     let (mut only, mut uncounterable) = (0u8, false);
+    let mut haste = false;
     let main = match e {
         E::Sequence(nodes::Sequence { effects }) => {
             let [first, rest @ ..] = &effects[..] else {
@@ -526,8 +567,14 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             grants_haste_to_creature_spell,
             makes_spell_uncounterable,
         }) => {
-            l.deny("AddManaToPool.grants_haste_to_creature_spell", grants_haste_to_creature_spell);
             let prod = lower_produces(l, "AddManaToPool.produces", produces)?;
+            // "If any of that mana is spent on a creature spell, it gains
+            // haste until end of turn": red mana the pool tags (fixed amounts
+            // of {R} only).
+            haste = *grants_haste_to_creature_spell;
+            if haste && !matches!(&prod, ManaProd::Fixed(v) if v.iter().enumerate().all(|(i, &n)| (i == crate::mana::R) == (n > 0))) {
+                l.unsupported("AddManaToPool.grants_haste_to_creature_spell(not red mana)");
+            }
             // "Spend this mana only to cast artifact spells" (CR 106.6): what
             // the pool can hold is colorless artifact-only mana (several
             // mana, the rest stays), or one mana spent at once.
@@ -718,7 +765,7 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             return None;
         }
     };
-    Some(ManaAbility { prod, damage_to_you, sac_if_no, only, uncounterable })
+    Some(ManaAbility { prod, damage_to_you, sac_if_no, only, uncounterable, haste })
 }
 
 /// The types a production can make (which `produces` colours it covers).

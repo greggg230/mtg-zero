@@ -69,6 +69,11 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
         E::RevealTopLandToBattlefieldElseHand(nodes::RevealTopLandToBattlefieldElseHand {}) => {
             b.op(Op::Ext(Ext::M7d(M7d::RevealTopLandElseHand)));
         }
+        // "Shuffle your library, then exile the top card. Until end of turn,
+        // you may play that card without paying its mana cost." (Urza.)
+        E::ShuffleThenExileTopMayPlayFree(nodes::ShuffleThenExileTopMayPlayFree {}) => {
+            b.op(Op::Ext(Ext::M7d(M7d::ShuffleExileTopPlayFree)));
+        }
         _ => return false,
     }
     true

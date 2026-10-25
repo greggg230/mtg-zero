@@ -686,6 +686,12 @@ pub enum Mark {
     /// The card name chosen as it entered (a definition; `NO_NAME`: a name
     /// of no card in the game).
     ChosenName(DefId),
+    /// It was exerted (CR 701.39): it won't untap during its controller's
+    /// next untap step.
+    Exerted,
+    /// Mana that gives haste was spent on this creature spell (Arena of
+    /// Glory): the permanent it becomes gains haste until end of turn.
+    HasteMana,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.

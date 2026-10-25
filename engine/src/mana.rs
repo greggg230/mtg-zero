@@ -170,6 +170,9 @@ pub struct ManaPool {
     /// The part of `amt[C]` that may be spent only to cast artifact spells
     /// (Mishra's Workshop's mana left over, CR 106.6; ENGINE.md 28).
     pub art: u8,
+    /// The part of `amt[R]` that gives haste to the creature spell it is
+    /// spent on (Arena of Glory; ENGINE.md 31).
+    pub haste: u8,
 }
 
 impl ManaPool {
@@ -180,6 +183,7 @@ impl ManaPool {
     pub fn clear(&mut self) {
         self.amt = [0; 6];
         self.art = 0;
+        self.haste = 0;
     }
 
     /// [`pay_into`](Self::pay_into) for a cost that artifact-only mana may
@@ -469,7 +473,7 @@ mod tests {
         assert!(payable(&h, &[], &[MR, MW]));
         assert!(!payable(&h, &[], &[MR, MU]));
         assert!(payable(&h, &[MR], &[MR]));
-        let mut pool = ManaPool { amt: [1, 0, 0, 1, 0, 0], art: 0 };
+        let mut pool = ManaPool { amt: [1, 0, 0, 1, 0, 0], art: 0, haste: 0 };
         let mut c = h;
         pool.pay_into(&mut c);
         assert!(c.is_zero());
@@ -490,7 +494,7 @@ mod tests {
 
     #[test]
     fn pool_pays_first() {
-        let mut pool = ManaPool { amt: [0, 1, 2, 0, 0, 0], art: 0 };
+        let mut pool = ManaPool { amt: [0, 1, 2, 0, 0, 0], art: 0, haste: 0 };
         let mut cost = ManaCost::parse("{1}{U}").unwrap();
         pool.pay_into(&mut cost);
         assert!(cost.is_zero());
