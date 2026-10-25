@@ -174,6 +174,7 @@ impl Game {
                     if (!self.is_creature(e) || self.def_of(e).reconfigure) && self.is_creature(h) && e != h && !self.protected_from(h, &q) {
                         let hr = self.obj_ref(h);
                         self.objs[e.i()].attached = Some(hr);
+                        self.attached_timestamp(e);
                         self.note(|g| format!("{} attached to {}", g.name(e), g.name(h)));
                     }
                 }
@@ -326,6 +327,7 @@ impl Game {
                         let tr = self.obj_ref(t);
                         if !self.protected_from(t, &self.damage_source_of(e)) {
                             self.objs[e.i()].attached = Some(tr);
+                            self.attached_timestamp(e);
                         }
                         Flow::Next
                     }
@@ -1009,6 +1011,7 @@ impl Game {
                     if self.objs[t.i()].zone == Zone::Battlefield {
                         let host = self.obj_ref(t);
                         self.objs[eq.i()].attached = Some(host);
+                        self.attached_timestamp(eq);
                     }
                 }
                 Flow::Next

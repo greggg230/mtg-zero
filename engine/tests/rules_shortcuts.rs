@@ -778,3 +778,107 @@ fn cr_709_3_citadel_casts_either_half_of_a_split_card() {
     assert_eq!(g.obj(bear).zone, Zone::Battlefield);
     assert_eq!(g.life(0), 16, "2 life for Death's mana value and 2 from Death\n{}", log(&g));
 }
+
+// ---- timestamps and lost abilities (CR 613.7e, 613.1f) ----------------------------------------
+
+/// An Equipment gets a new timestamp as it becomes attached (CR 613.7e):
+/// a creature that lost all its abilities (Tishana's Tidebinder countered
+/// its ability) gets Lightning Greaves' haste and shroud again when the
+/// Greaves are moved away and back.
+#[test]
+fn cr_613_7e_equipment_reattached_gets_a_new_timestamp() {
+    let mut g = scen()
+        .battlefield(0, &["Test Tapper", "Test Bear", "Lightning Greaves"])
+        .battlefield(1, &["Island", "Island", "Island"])
+        .hand(1, &[TIDEBINDER])
+        .at(Step::Main1, 0)
+        .start();
+    let t = bf(&g, 0, "Test Tapper");
+    let b = bf(&g, 0, "Test Bear");
+    let lg = bf(&g, 0, "Lightning Greaves");
+    let equip = |g: &mut Game, to: CardIdx| {
+        g.choose(Choice::Ability(lg, AbilitySlot::Activated(0)));
+        finish(g, |g| tgt_if(g, to));
+        resolve_with(g, |_| None);
+    };
+    equip(&mut g, t);
+    assert!(g.has_kw(t, Kw::Shroud));
+    // The Tapper pings; Tidebinder counters it: the Tapper loses all
+    // abilities, Greaves' too.
+    g.choose(Choice::Ability(t, AbilitySlot::Activated(0)));
+    finish(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(Choice::Target(Target::Player(1))));
+    g.pass();
+    let tb = g.card(1, TIDEBINDER, Zone::Hand);
+    g.choose(Choice::Cast(tb));
+    finish(&mut g, |_| None);
+    resolve_with(&mut g, stack_target);
+    assert!(!g.has_kw(t, Kw::Shroud), "lost all abilities\n{}", log(&g));
+    equip(&mut g, b);
+    equip(&mut g, t);
+    assert!(g.has_kw(t, Kw::Shroud) && g.has_kw(t, Kw::Haste), "the Greaves are newer than the loss\n{}", log(&g));
+}
+
+/// Serra Paragon's "it gains 'When this permanent is put into a graveyard
+/// from the battlefield, exile it and you gain 2 life'" is an ability: a
+/// permanent that then lost all abilities (Oko's +1) doesn't have it.
+#[test]
+fn cr_613_1f_a_granted_trigger_is_lost_with_all_abilities() {
+    let mut g = scen()
+        .battlefield(0, &["Serra Paragon", "Oko, Thief of Crowns", "Forest", "Forest", "Mountain"])
+        .graveyard(0, &["Test Bear"])
+        .hand(0, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Graveyard);
+    let oko = bf(&g, 0, "Oko, Thief of Crowns");
+    g.choose(Choice::Cast(bear));
+    finish(&mut g, |_| None);
+    resolve_with(&mut g, |_| None);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    g.choose(Choice::Ability(oko, AbilitySlot::Activated(1)));
+    finish(&mut g, |g| tgt_if(g, bear));
+    resolve_with(&mut g, |g| tgt_if(g, bear));
+    assert_eq!(g.pt(bear), (3, 3), "an Elk");
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    finish(&mut g, |g| tgt_if(g, bear));
+    resolve_with(&mut g, |_| None);
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "not exiled\n{}", log(&g));
+    assert_eq!(g.life(0), 20, "no life gained");
+}
+
+/// A granted triggered ability's source is the permanent that has it (CR
+/// 113.7): Tishana's Tidebinder countering the ward trigger Hexing Squelcher
+/// gives the Bear makes the Bear lose all abilities, not the Squelcher,
+/// whose other creatures keep their ward.
+#[test]
+fn cr_113_7_a_granted_wards_source_is_the_warded_creature() {
+    let mut g = scen()
+        .battlefield(0, &["Hexing Squelcher", "Test Bear", "Test Hasty"])
+        .battlefield(1, &["Island", "Island", "Island", "Mountain", "Mountain"])
+        .hand(1, &["Lightning Bolt", "Lightning Bolt", TIDEBINDER])
+        .at(Step::Main1, 1)
+        .start();
+    let bear = bf(&g, 0, "Test Bear");
+    let hasty = bf(&g, 0, "Test Hasty");
+    let bolts: Vec<CardIdx> = g.player(1).hand.iter().copied().filter(|&c| g.name(c) == "Lightning Bolt").collect();
+    g.choose(Choice::Cast(bolts[0]));
+    finish(&mut g, |g| tgt_if(g, bear));
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 1);
+    assert_eq!(g.stack().len(), 2, "the ward trigger\n{}", log(&g));
+    assert_eq!(g.stack().last().unwrap().controller, 0);
+    let tb = g.card(1, TIDEBINDER, Zone::Hand);
+    g.choose(Choice::Cast(tb));
+    finish(&mut g, |_| None);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => stack_target(g),
+        Some(DecisionKind::YesNo) => Some(Choice::Pass),
+        _ => None,
+    });
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "the ward trigger countered, the Bolt resolved\n{}", log(&g));
+    // The Squelcher kept its abilities: the Hasty still has ward.
+    g.choose(Choice::Cast(bolts[1]));
+    finish(&mut g, |g| tgt_if(g, hasty));
+    g.drive_until(|g| at_priority(g));
+    assert_eq!(g.stack().len(), 2, "ward triggers for the Hasty\n{}", log(&g));
+}

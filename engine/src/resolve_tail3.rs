@@ -224,6 +224,7 @@ impl Game {
                     if equipment && !self.is_creature(e) && self.is_creature(h) && e != h && !self.protected_from(h, &q) {
                         let hr = self.obj_ref(h);
                         self.objs[e.i()].attached = Some(hr);
+                        self.attached_timestamp(e);
                         self.note(|g| format!("{} attached to {}", g.name(e), g.name(h)));
                     }
                 }
@@ -267,6 +268,7 @@ impl Game {
                     let q = self.damage_source_of(e);
                     if !self.is_creature(e) && self.is_creature(h.idx) && !self.protected_from(h.idx, &q) {
                         self.objs[e.i()].attached = Some(h);
+                        self.attached_timestamp(e);
                         self.note(|g| format!("{} attached to {}", g.name(e), g.name(h.idx)));
                     }
                 }

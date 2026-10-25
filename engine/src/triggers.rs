@@ -110,6 +110,17 @@ pub(crate) fn in_graveyard(p: &TrigPred) -> bool {
     }
 }
 
+/// The subject slot of an ability that permanents have because an effect
+/// grants it ("other creatures you control have ward", `Granted`): that
+/// permanent is the ability's source (CR 113.7: the object that has it).
+fn granted_slot(p: &TrigPred) -> Option<Slot> {
+    match p {
+        TrigPred::Granted(s) => Some(*s),
+        TrigPred::And(a, b) => granted_slot(a).or_else(|| granted_slot(b)),
+        _ => None,
+    }
+}
+
 fn has_batch(p: &TrigPred) -> bool {
     match p {
         TrigPred::Batch => true,
@@ -272,9 +283,15 @@ impl Game {
                     if !self.done_once.is_empty() && self.done_once.contains(&(o.r, i as u8)) {
                         continue;
                     }
+                    // (A granted ability's source is the permanent that has
+                    // it; the ability is the granting card's definition's.)
+                    let source = match granted_slot(&t.pred).map(|s| ev.subject(s)) {
+                        Some(Subj::Obj(r)) => r,
+                        _ => o.r,
+                    };
                     self.waiting.push(PendingTrigger {
                         controller: o.controller,
-                        source: o.r,
+                        source,
                         source_def: o.def,
                         slot: i as u8,
                         ev: ctx,

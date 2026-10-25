@@ -1402,6 +1402,21 @@ impl Game {
         idx
     }
 
+    /// An Aura or Equipment becomes attached: it gets a new timestamp (CR
+    /// 613.7e), and moves to the end of the battlefield (kept in timestamp
+    /// order).
+    pub(crate) fn attached_timestamp(&mut self, c: CardIdx) {
+        if self.objs[c.i()].zone != Zone::Battlefield {
+            return;
+        }
+        self.next_ts += 1;
+        self.objs[c.i()].timestamp = self.next_ts;
+        if let Some(i) = self.battlefield.iter().position(|&x| x == c) {
+            self.battlefield.remove(i);
+            self.battlefield.push(c);
+        }
+    }
+
     /// Lose life (CR 119.3; paying life is losing it, 119.4).
     pub(crate) fn lose_life(&mut self, p: PlayerId, n: i32) {
         if n > 0 {
@@ -1488,6 +1503,7 @@ impl Game {
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
+        let lost_granted = from == Zone::Battlefield && !self.marks.is_empty() && self.lost_abilities(idx);
         // Its copiable values as it last existed on the battlefield (CR
         // 608.2h: "create a token that's a copy of it").
         if from == Zone::Battlefield {
@@ -1684,9 +1700,11 @@ impl Game {
         if let Some((results, k, chooser)) = choose {
             self.agenda.push(crate::flow::Task::ChooseReplacement { card: new, from, results, void: k, chooser });
         }
-        if from == Zone::Battlefield && !self.marks.is_empty() {
+        if from == Zone::Battlefield && !self.marks.is_empty() && !lost_granted {
             // Triggered abilities an effect gave it (CR 603.10a: they look
-            // back): "when it dies [or is exiled]", about the card now.
+            // back): "when it dies [or is exiled]", about the card now. (Not
+            // if it had lost all abilities: those grants came first, as it
+            // entered or before the loss, CR 613.1f, 613.7.)
             let fired: Vec<(DefId, u8)> = self
                 .marks
                 .iter()
