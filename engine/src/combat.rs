@@ -100,6 +100,10 @@ impl Game {
         if ka.has(Kw::Flying) && !kb.has(Kw::Flying) && !kb.has(Kw::Reach) {
             return false;
         }
+        // CR 702.28b: shadow blocks and is blocked only by shadow.
+        if ka.has(Kw::Shadow) != kb.has(Kw::Shadow) {
+            return false;
+        }
         if self.flags_of(a).cant_be_blocked || self.protected_from(a, &self.damage_source_of(b)) {
             return false;
         }

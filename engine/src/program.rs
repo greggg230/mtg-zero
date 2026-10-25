@@ -93,6 +93,24 @@ pub enum Amount {
     /// The number of permanents of these card types the controller's
     /// opponent controls ("the number of artifacts they control").
     CountTypesOpp(u16),
+    /// k times [`CountTypes`](Amount::CountTypes) ("twice the number of
+    /// lands you control").
+    CountTypesTimes(u16, u8),
+}
+
+/// The instructions M7d added (ENGINE.md 31), inside `Ext::M7d`. Same rules
+/// as `Op`: named after rules actions, never cards.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum M7d {
+    /// Choose a card in exile an opponent owns with a counter of this kind;
+    /// the controller may play it this turn without paying its mana cost.
+    /// Choice: `EXILE` + k (Dauthi Voidwalker).
+    ExiledWithCounterPlayFree { counter: Counter },
+    /// Exile target card `tgt` (in a graveyard); if it was a permanent card,
+    /// put a +1/+1 counter on the source (Lion Sash).
+    ExileTargetCounterIfPermanent { tgt: u8 },
+    /// The source becomes unattached (reconfigure, CR 702.151a).
+    UnattachSource,
 }
 
 /// Which objects an `Ext` op acts on.
@@ -447,6 +465,8 @@ pub enum Ext {
     /// The controller puts a card they own in exile with a counter of this
     /// kind into their hand. Choice: `EXILE` + k.
     ExiledWithCounterToHand { counter: Counter },
+    /// The M7d instructions (ENGINE.md 31).
+    M7d(M7d),
     /// The controller sacrifices a permanent matching `filter` (their
     /// choice; nothing if none). When they do (CR 603.12), delayed ability
     /// `k` of the source's card triggers, about the sacrificed object and

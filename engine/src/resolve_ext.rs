@@ -170,7 +170,8 @@ impl Game {
                 // can't equip; nothing happens if either is gone.
                 if let (Some(&e), Some(&h)) = (eq.first(), host.first()) {
                     let q = self.damage_source_of(e);
-                    if !self.is_creature(e) && self.is_creature(h) && e != h && !self.protected_from(h, &q) {
+                    // (An Equipment with reconfigure may, CR 301.5c.)
+                    if (!self.is_creature(e) || self.def_of(e).reconfigure) && self.is_creature(h) && e != h && !self.protected_from(h, &q) {
                         let hr = self.obj_ref(h);
                         self.objs[e.i()].attached = Some(hr);
                         self.note(|g| format!("{} attached to {}", g.name(e), g.name(h)));
@@ -1594,6 +1595,7 @@ impl Game {
             | Ext::PlayLinkedFaceDownFree { .. }
             | Ext::ReanimateAttach { .. }
             | Ext::SacrificeReanimated => self.exec_tail3(f, op),
+            Ext::M7d(x) => self.exec_m7d(f, x),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

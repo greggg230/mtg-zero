@@ -300,8 +300,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_play_from_top_paying_life", grants_play_from_top_paying_life);
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
         l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
-        l.deny("CardPrinting.produces_with_counter", produces_with_counter);
-        l.deny("CardPrinting.opening_hand_action", opening_hand_action);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_artifact", additional_cost_sacrifice_creature_or_artifact);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
@@ -362,8 +360,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // `daybound`, `nightbound`, `adventure_face`): below.
         l.deny("CardPrinting.class_level", class_level);
         l.deny("CardPrinting.class_levels", class_levels);
-        l.deny("CardPrinting.plot_cost", plot_cost);
-        l.deny("CardPrinting.plot_cost_str", plot_cost_str);
         let _ = escape_cost_str; // display form of `escape_cost`
         let _ = dash_cost_str; // display form of `dash_cost`
         l.deny("CardPrinting.evoke_cost", evoke_cost);
@@ -373,10 +369,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.chooses_card_name_as_enters", chooses_card_name_as_enters);
         l.deny("CardPrinting.named_spell_cost_increase", named_spell_cost_increase);
         l.deny("CardPrinting.named_ability_cost_increase", named_ability_cost_increase);
-        l.deny("CardPrinting.reconfigure_cost", reconfigure_cost);
-        l.deny("CardPrinting.reconfigure_cost_str", reconfigure_cost_str);
-        l.deny("CardPrinting.equipment_bonus_per_own_counter", equipment_bonus_per_own_counter);
-        l.deny("CardPrinting.void_exile_replacement", void_exile_replacement);
         l.deny("CardPrinting.zone_abilities", zone_abilities);
         l.deny("CardPrinting.emerge_cost", emerge_cost);
         l.deny("CardPrinting.emerge_cost_str", emerge_cost_str);
@@ -573,6 +565,22 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             activated.push(ad);
         }
     }
+    // Reconfigure (CR 702.151; Lion Sash): its two abilities are in the
+    // IR's list; the cost agrees with them.
+    let reconfigure = match reconfigure_cost.as_deref() {
+        Some(m) => {
+            let mana = super::effect_copies::checked_cost(l, "CardPrinting.reconfigure_cost", m, reconfigure_cost_str);
+            super::effect_m7d::reconfigure_abilities(l, &mut activated, mana);
+            if !(subs.contains(&l.subtype("Equipment")) && is_creature) {
+                l.unsupported("CardPrinting.reconfigure_cost(not an Equipment creature)");
+            }
+            true
+        }
+        None => {
+            l.deny("CardPrinting.reconfigure_cost_str", reconfigure_cost_str);
+            false
+        }
+    };
     let covered = activated
         .iter()
         .filter(|a| a.cost == Cost { tap: true, ..Cost::default() })
@@ -595,6 +603,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 discounts: Vec::new(),
                 boast: false,
                 x: false,
+                special: None,
             },
         );
     } else if life > 0 {
@@ -622,6 +631,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 discounts: Vec::new(),
                 boast: false,
                 x: false,
+                special: None,
             },
         );
     }
@@ -638,6 +648,34 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         if let Some(ad) = lower_activated(l, a, From::Hand, false) {
             hand_abilities.push(ad);
         }
+    }
+    // Plot (CR 702.170a): a special action from hand (116.2k), offered as
+    // the card's hand ability: "any time you have priority during your main
+    // phase while the stack is empty, you may exile this card from your hand
+    // and pay [cost]". Cast later "as a sorcery": a sorcery's own timing
+    // (an instant with plot would need its own; none in the cube).
+    match plot_cost.as_deref() {
+        Some(m) => {
+            let mana = super::effect_copies::checked_cost(l, "CardPrinting.plot_cost", m, plot_cost_str);
+            if ty & types::SORCERY == 0 {
+                l.unsupported("CardPrinting.plot_cost(not a sorcery)");
+            }
+            hand_abilities.push(ActivatedDef {
+                cost: Cost { mana, ..Cost::default() },
+                effect: ActEffect::Stack(crate::db::AbilityDef::default()),
+                sorcery: true,
+                instant_only: false,
+                exhaust: false,
+                only_if: None,
+                your_turn: false,
+                loyalty: None,
+                discounts: Vec::new(),
+                boast: false,
+                x: false,
+                special: Some(crate::db::Special::Plot),
+            });
+        }
+        None => l.deny("CardPrinting.plot_cost_str", plot_cost_str),
     }
     if hand_abilities.len() > 1 {
         l.unsupported("CardPrinting.hand_activated_abilities(more than 1)");
@@ -1219,6 +1257,19 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let (p, t) = (l.int("equipment_bonus_per_controlled.p", *p, -9, 9), l.int("equipment_bonus_per_controlled.t", *t, -9, 9));
         statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::PtPer { filter, p, t }] });
     }
+    // "Equipped creature gets +1/+1 for each +1/+1 counter on this
+    // Equipment" (Lion Sash): [counter, p, t].
+    if !equipment_bonus_per_own_counter.is_empty() {
+        use card_ir::unions::IntOrStr as V;
+        match &equipment_bonus_per_own_counter[..] {
+            [V::Str(k), V::Int(p), V::Int(t)] if subs.contains(&l.subtype("Equipment")) => {
+                let counter = super::effect_ext::counter_by_name(l, k);
+                let (p, t) = (l.int("equipment_bonus_per_own_counter.p", *p, -9, 9), l.int("equipment_bonus_per_own_counter.t", *t, -9, 9));
+                statics.push(StaticDef { scope: Scope::Equipped, cond: None, mods: vec![Mod::PtPerSourceCounter { counter, p, t }] });
+            }
+            _ => l.unsupported("CardPrinting.equipment_bonus_per_own_counter(shape)"),
+        }
+    }
     if let Some((p, t, names)) = equipment_bonuses {
         // (An Aura's "enchanted creature gets ...": the IR reuses the
         // Equipment field, docs/ir_defects.md 7; the Aura's attachment is
@@ -1469,7 +1520,49 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.deny("CardPrinting.nightbound(on a modal face)", nightbound);
         }
     }
+    // Gemstone Caverns (M7d): "if it has a luck counter on it, instead add
+    // one mana of any color" summarises its mana ability (`IfCounter`).
+    if let Some((kind, colors)) = produces_with_counter {
+        let counter = super::effect_ext::counter_by_name(l, kind);
+        let mut mask = 0;
+        for c in colors {
+            match letter_index(c) {
+                Some(i) => mask |= 1 << i,
+                None => l.unsupported(format!("CardPrinting.produces_with_counter({c})")),
+            }
+        }
+        let ok = activated.iter().any(|a| {
+            matches!(a.mana().map(|m| &m.prod), Some(ManaProd::IfCounter { counter: k, then, .. }) if *k == counter && *then == mask)
+        });
+        if !ok {
+            l.unsupported("CardPrinting.produces_with_counter(without its mana ability)");
+        }
+    }
+    // An opening-hand action (CR 103.6; Gemstone Caverns).
+    let opening = opening_hand_action.as_deref().map(|o| {
+        let cats::BeginGameOnBattlefield::BeginGameOnBattlefield(nodes::BeginGameOnBattlefield {
+            only_if_not_starting_player,
+            counters,
+            exile_from_hand,
+        }) = o;
+        if ty & types::PERMANENT == 0 {
+            l.unsupported("CardPrinting.opening_hand_action(not a permanent card)");
+        }
+        let counters = counters
+            .iter()
+            .map(|(k, n)| (super::effect_ext::counter_by_name(l, k), l.int("BeginGameOnBattlefield.counters", *n, 1, 9) as u8))
+            .collect();
+        crate::db::Opening {
+            not_starting: *only_if_not_starting_player,
+            counters,
+            exile: l.int("BeginGameOnBattlefield.exile_from_hand", *exile_from_hand, 0, 1) as u8,
+        }
+    });
+    let void_exile = void_exile_replacement.then(|| super::effect_ext::counter_by_name(l, "void"));
     let mut def = CardDef {
+        reconfigure,
+        void_exile,
+        opening,
         name: name.clone(),
         types: ty,
         supertypes: sup,
@@ -2123,6 +2216,7 @@ fn lower_keyword(l: &mut Lowerer, k: &cats::Keyword) -> Option<Kw> {
         K::Shroud => Kw::Shroud,
         K::Indestructible => Kw::Indestructible,
         K::Infect => Kw::Infect,
+        K::Shadow => Kw::Shadow,
         other => {
             l.unsupported(format!("Keyword:{other:?}"));
             return None;

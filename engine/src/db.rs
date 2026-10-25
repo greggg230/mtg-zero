@@ -79,6 +79,9 @@ pub enum Kw {
     /// which layout v3 fixes: a card's printed keywords come with its
     /// identity.)
     Infect,
+    /// Shadow (CR 702.28): blocks and is blocked only by creatures with
+    /// shadow. (Not in the encoding's keyword list either.)
+    Shadow,
 }
 
 impl Kw {
@@ -183,6 +186,10 @@ pub enum Mod {
     /// Layer 7c: +p/+t for each permanent matching the filter (relative to
     /// the static ability's controller; a static ability only).
     PtPer { filter: Filter, p: i32, t: i32 },
+    /// Layer 7c: +p/+t for each counter of this kind on the static
+    /// ability's source ("equipped creature gets +1/+1 for each +1/+1
+    /// counter on this Equipment").
+    PtPerSourceCounter { counter: Counter, p: i32, t: i32 },
     /// Layer 6: it loses all abilities (CR 613.1f).
     LoseAllAbilities,
     /// Layer 4: its card types become exactly `types` and its creature
@@ -760,6 +767,9 @@ pub enum AbilitySlot {
 /// "activate only if", "enters tapped unless".
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Cond {
+    /// The ability's source is attached to a creature (reconfigure's
+    /// unattach, CR 702.151a).
+    SourceAttached,
     /// You control at least n permanents matching the filter.
     ControlAtLeast(Filter, u8),
     /// You control at most n permanents matching the filter.
@@ -854,6 +864,10 @@ pub enum ManaProd {
     /// One mana of the colour of the basic land type chosen as the source
     /// entered (CR 305.6: "this land is the chosen type").
     Chosen,
+    /// One mana of a type in `then` if the source has a counter of this
+    /// kind, else in `els` (Gemstone Caverns: "add {C}. If it has a luck
+    /// counter on it, instead add one mana of any color").
+    IfCounter { counter: Counter, then: ManaMask, els: ManaMask },
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -1026,6 +1040,20 @@ pub struct ActivatedDef {
     /// Its mana cost has {X} (CR 107.3, 602.2b: X announced as it is
     /// activated; the stack item's `x`).
     pub x: bool,
+    /// Not an activated ability but a special action (CR 116.2) offered the
+    /// same way: no stack; it happens as soon as its cost is paid (M7d,
+    /// ENGINE.md 31).
+    pub special: Option<Special>,
+}
+
+/// A special action (CR 116.2) a card offers like an activated ability.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Special {
+    /// Plot (CR 702.170a, 116.2k): exile the card from hand; its owner may
+    /// cast it on a later turn without paying its mana cost.
+    Plot,
+    /// Turn a face-down permanent face up (CR 116.2b, 701.40b, 708.7).
+    TurnFaceUp,
 }
 
 /// `TargetReq::max` meaning "X targets": exactly the announced X (CR
@@ -1050,6 +1078,7 @@ impl CardDef {
             | (if self.trig_mask & (1u64 << EventKind::ExiledFromLibGy as u32) != 0 { crate::game::SEEN_EXILE_WATCH } else { 0 })
             | (if self.opp_draw_token.is_some() || self.draw_plus.is_some() { crate::game::SEEN_DRAW_REPL } else { 0 })
             | (if self.gy_triggers { crate::game::SEEN_GY_TRIGGER } else { 0 })
+            | (if self.void_exile.is_some() { crate::game::SEEN_VOID } else { 0 })
             | (if self.trig_mask & (1u64 << EventKind::CountersAdded as u32 | 1u64 << EventKind::CardsPutIntoLibrary as u32 | 1u64 << EventKind::AttackersUnblocked as u32) != 0 {
                 crate::game::SEEN_RARE_EVENTS
             } else {
@@ -1403,6 +1432,27 @@ pub struct CardDef {
     /// trigger `delayed_base + k`) "when you reveal this card this way, you
     /// may cast it by paying [cost]".
     pub miracle: Option<(ManaCost, u8)>,
+    // ---- M7d (ENGINE.md 31) ----
+    /// An opening-hand action (CR 103.6): "you may begin the game with it on
+    /// the battlefield" (Gemstone Caverns).
+    pub opening: Option<Opening>,
+    /// "If a card would be put into an opponent's graveyard from anywhere,
+    /// instead exile it with a <counter> on it" (Dauthi Voidwalker; CR
+    /// 614.1a).
+    pub void_exile: Option<Counter>,
+    /// Reconfigure (CR 702.151): while attached to a creature, it isn't a
+    /// creature (702.151b); it may equip while a creature (301.5c).
+    pub reconfigure: bool,
+}
+
+/// "If this card is in your opening hand [and you're not the starting
+/// player], you may begin the game with it on the battlefield [with these
+/// counters on it]. If you do, exile n cards from your hand." (CR 103.6)
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Opening {
+    pub not_starting: bool,
+    pub counters: Vec<(Counter, u8)>,
+    pub exile: u8,
 }
 
 /// `CardDef::gy_play_k` when the permission grants nothing.

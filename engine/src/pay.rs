@@ -182,6 +182,10 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
             let m = src.map_or(0, |c| g.chosen_land_color(c));
             (0..5).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
         }
+        ManaProd::IfCounter { counter, then, els } => {
+            let m = if src.is_some_and(|c| g.counters_on(c, *counter) > 0) { *then } else { *els };
+            (0..6).filter(|&t| m & (1 << t) != 0).map(|t| one(t, 1)).collect()
+        }
         // (Read from the sacrificed land as the ability is activated.)
         ManaProd::SacrificedLand => Vec::new(),
         ManaProd::ColorAmong(f) => {
@@ -294,7 +298,7 @@ impl Game {
             }
         }
         if let Some(c) = &ad.only_if {
-            if !self.cond_holds(c, p) {
+            if !self.cond_holds_from(c, p, Some(self.obj_ref(card))) {
                 return false;
             }
         }
@@ -391,7 +395,8 @@ impl Game {
                 let same = |cl: &&mut Class| {
                     cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self && (!bonuses || extra_of(cl.members[0].card) == extra)
                 };
-                if let Some(cl) = out.iter_mut().find(same).filter(|_| m.prod != ManaProd::Linked && m.prod != ManaProd::Chosen) {
+                let per_source = matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::IfCounter { .. });
+                if let Some(cl) = out.iter_mut().find(same).filter(|_| !per_source) {
                     cl.members.push(src);
                     continue;
                 }
@@ -509,6 +514,10 @@ impl Game {
             }
             ManaProd::Chosen => {
                 let m = src.map_or(0, |c| self.chosen_land_color(c));
+                (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
+            }
+            ManaProd::IfCounter { counter, then, els } => {
+                let m = if src.is_some_and(|c| self.counters_on(c, *counter) > 0) { *then } else { *els };
                 (m != 0).then_some(Yield::One(Unit { life, ..Unit::free(m) }))
             }
             ManaProd::ColorAmong(f) => {

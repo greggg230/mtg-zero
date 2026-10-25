@@ -495,6 +495,8 @@ impl Heuristic {
                     if matches!(g.db.ability(f.ability).program.get(f.pc as usize), Some(Op::PutFromHandOnTop { .. })));
                 Some(if put_back { Self::worst_hand_card(g, d, p) } else { Self::best_card(g, d) })
             }
+            // The card an opening-hand action exiles (Gemstone Caverns).
+            K::ExileCost if matches!(g.agenda.last(), Some(Task::Opening { .. })) => Some(Self::worst_hand_card(g, d, p)),
             K::Target => self.target(g, d, p),
             K::DeclareAttackers => Some(self.attack(g, d, p)),
             // A planeswalker its damage kills, else the player.
@@ -831,6 +833,17 @@ impl Heuristic {
         ad: &ActivatedDef,
         w: When,
     ) -> Option<(u8, i32, bool)> {
+        // Special actions (ENGINE.md 31): plot a card it doesn't cast in its
+        // second main phase; turn a face-down creature face up when its card
+        // is better than a 2/2, in its own main phase.
+        match ad.special {
+            Some(crate::db::Special::Plot) => return (w == When::Main2).then_some((1, 60, false)),
+            Some(crate::db::Special::TurnFaceUp) => {
+                let better = g.face_down_def(c).is_some_and(|d| d.power.unwrap_or(0) + d.toughness.unwrap_or(0) > 4);
+                return (better && matches!(w, When::Main1 | When::Main2)).then_some((1, 320, false));
+            }
+            None => {}
+        }
         let ActEffect::Stack(ab) = &ad.effect else { return None };
         let kind = classify(g, ad, slot);
         if let Some(d) = ad.loyalty {
@@ -952,6 +965,11 @@ impl Heuristic {
             }
             Kind::Equip => {
                 if !main {
+                    return None;
+                }
+                // Reconfigure (Lion Sash): only once its counters give more
+                // than its own body.
+                if g.def_of(c).reconfigure && g.counters_on(c, Counter::P1P1) < 2 {
                     return None;
                 }
                 let host = g.obj(c).attached.filter(|r| {

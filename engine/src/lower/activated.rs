@@ -168,6 +168,7 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         discounts,
         boast: *boast && from == From::Battlefield && !walker,
         x,
+        special: None,
     })
 }
 
@@ -637,6 +638,43 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             damage_to_you += l.int("DealDamageToControllerAndAddMana.damage", *damage, 0, 20) as u8;
             lower_produces(l, "DealDamageToControllerAndAddMana.produces", produces)?
         }
+        // "Add {C}. If this has a luck counter on it, instead add one mana of
+        // any color" (Gemstone Caverns; the source's counters as the ability
+        // resolves, CR 605.3b).
+        E::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(else_effect) })
+            if matches!(&**condition, cats::ConditionOrStatePredicate::SourceHasCounter(_)) =>
+        {
+            let cats::ConditionOrStatePredicate::SourceHasCounter(nodes::SourceHasCounter { kind }) = &**condition else { unreachable!() };
+            let counter = super::effect_ext::counter_by_name(l, kind);
+            let one = |l: &mut Lowerer, e: &cats::Effect| -> Option<ManaMask> {
+                match e {
+                    E::AddManaToPool(nodes::AddManaToPool {
+                        produces,
+                        spend_restriction,
+                        grants_haste_to_creature_spell,
+                        makes_spell_uncounterable,
+                    }) => {
+                        l.deny("AddManaToPool.spend_restriction", spend_restriction);
+                        l.deny("AddManaToPool.grants_haste_to_creature_spell", grants_haste_to_creature_spell);
+                        l.deny("AddManaToPool.makes_spell_uncounterable", makes_spell_uncounterable);
+                        match lower_produces(l, "AddManaToPool.produces", produces)? {
+                            ManaProd::One(m) => Some(m),
+                            _ => {
+                                l.unsupported("ManaAbility:IfConditionElse(SourceHasCounter, more than one mana)");
+                                None
+                            }
+                        }
+                    }
+                    other => {
+                        l.unsupported(format!("ManaAbility:IfConditionElse({})", other.tag()));
+                        None
+                    }
+                }
+            };
+            let then = one(l, then_effect)?;
+            let els = one(l, else_effect)?;
+            ManaProd::IfCounter { counter, then, els }
+        }
         // "Add <mana>. If <condition>, add <other mana> instead" (the
         // condition as the ability resolves, at once: CR 605.3b).
         E::IfConditionElse(nodes::IfConditionElse { condition, then_effect, else_effect: Some(else_effect) }) => {
@@ -693,6 +731,7 @@ pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
         ManaProd::IfElse { then, els, .. } => (0..6).filter(|&i| then[i] + els[i] > 0).fold(0, |m, i| m | (1 << i)),
         ManaProd::OneOf(v) => v.iter().flat_map(|f| (0..6).filter(move |&i| f[i] > 0)).fold(0, |m, i| m | (1 << i)),
         ManaProd::Linked | ManaProd::Chosen => COLORS,
+        ManaProd::IfCounter { then, els, .. } => then | els,
         ManaProd::SacrificedLand => 0b11_1111,
     }
 }

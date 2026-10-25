@@ -733,6 +733,28 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                         }
                         b.op(Op::Ext(crate::program::Ext::LookTopN { who: Who::You, n: Amount::CountTypes(bits) }));
                     }
+                    // "Where X is twice the number of lands you control"
+                    // (Pillage the Bog).
+                    cats::Formula::Scaled(nodes::Scaled { inner, factor }) => {
+                        let k = l.int("Scaled.factor", *factor, 1, 4) as u8;
+                        let bits = match &**inner {
+                            cats::Formula::CountControlledMatching(nodes::CountControlledMatching { predicate }) => match lower_pred(l, predicate) {
+                                Some(Filter::Type(bits)) => bits,
+                                _ => {
+                                    l.unsupported("Formula:Scaled(not a count of a card type)");
+                                    return;
+                                }
+                            },
+                            other => {
+                                l.unsupported(format!("Formula:Scaled({})", other.tag()));
+                                return;
+                            }
+                        };
+                        if *reveal {
+                            l.unsupported("LookAtTopCardsPutIntoHand.reveal(with a count formula)");
+                        }
+                        b.op(Op::Ext(crate::program::Ext::LookTopN { who: Who::You, n: Amount::CountTypesTimes(bits, k) }));
+                    }
                     other => {
                         l.unsupported(format!("Formula:{}", other.tag()));
                         return;
@@ -890,6 +912,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::effect_tail::lower_effect_tail(l, b, other)
                 && !super::effect_tail2::lower_effect_tail2(l, b, other)
                 && !super::effect_tail3::lower_effect_tail3(l, b, other)
+                && !super::effect_m7d::lower_effect_m7d(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

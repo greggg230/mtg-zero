@@ -88,6 +88,11 @@ pub(crate) enum Task {
     /// Splice cards from hand onto the spell (CR 702.47a, 601.2b): one card
     /// per decision, `PASS` = no more.
     Splice { id: u32 },
+    /// A special action whose cost was just paid (CR 116.2; M7d).
+    Special { p: PlayerId, card: CardIdx, sp: crate::db::Special },
+    /// Opening-hand actions (CR 103.6): `p` may begin the game with a card
+    /// on the battlefield; `exile` cards still to exile from hand for it.
+    Opening { p: PlayerId, exile: u8 },
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -240,6 +245,8 @@ impl Game {
             Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
             Task::ChooseTimes { id } => self.choose_times(id),
             Task::Splice { id } => self.choose_splice(id),
+            Task::Special { p, card, sp } => self.special_action(p, card, sp),
+            Task::Opening { p, exile } => self.opening_actions(p, exile),
         }
     }
 

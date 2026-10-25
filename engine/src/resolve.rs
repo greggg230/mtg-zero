@@ -439,6 +439,9 @@ impl Game {
             Amount::CountTypes(bits) => {
                 self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
             }
+            Amount::CountTypesTimes(bits, k) => {
+                k as i32 * self.permanents_of(f.controller).filter(|&c| self.types_of(c) & bits != 0).count() as i32
+            }
             Amount::EventObjPower => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield => self.power(r.idx),
                 Some(r) => match self.objs[r.idx.i()].lki_power {

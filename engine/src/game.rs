@@ -628,6 +628,9 @@ pub(crate) const SEEN_GY_TRIGGER: u16 = 256;
 /// Triggers on +1/+1 counters put on, cards put into a library, attackers
 /// unblocked (Emperor of Bones, Wan Shi Tong, Coveted Jewel).
 pub(crate) const SEEN_RARE_EVENTS: u16 = 512;
+/// "If a card would be put into an opponent's graveyard from anywhere,
+/// instead exile it with a void counter on it" (Dauthi Voidwalker; M7d).
+pub(crate) const SEEN_VOID: u16 = 1024;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -707,6 +710,8 @@ impl Game {
             }
         }
         g.agenda.push(Task::BeginTurn);
+        // CR 103.6: after the mulligans, opening-hand actions in turn order.
+        g.agenda.push(Task::Opening { p: g.turn.starting, exile: 0 });
         if spec.mulligans {
             g.agenda.push(Task::MulliganDeclare { p: g.turn.starting });
         }
@@ -1326,6 +1331,21 @@ impl Game {
         } else {
             to
         };
+        // "If a card would be put into an opponent's graveyard from anywhere,
+        // instead exile it with a void counter on it" (Dauthi Voidwalker; CR
+        // 614.1a: a card, not a token or a copy of a spell). After Yawgmoth's
+        // Will's: the card's owner would choose that order (616.1).
+        let void = if to == Zone::Graveyard
+            && self.seen & SEEN_VOID != 0
+            && from != Zone::Nowhere
+            && !self.is_token(idx)
+            && !(from == Zone::Stack && self.is_copy_obj(idx))
+        {
+            self.void_counter_for(self.objs[idx.i()].owner)
+        } else {
+            None
+        };
+        let to = if void.is_some() { Zone::Exile } else { to };
         // Leave-the-battlefield abilities look back in time (CR 603.10a):
         // the events are recorded before the object moves.
         if from == Zone::Battlefield {
@@ -1480,6 +1500,11 @@ impl Game {
         }
         let new = self.obj_ref(idx);
         self.note(|g| format!("{} {:?} -> {:?}", g.name(idx), from, to));
+        if let Some(k) = void {
+            if self.objs[idx.i()].zone == Zone::Exile {
+                self.add_counters(idx, k, 1);
+            }
+        }
         if to == Zone::Battlefield && !self.entering_mods.is_empty() {
             let ctl = self.objs[idx.i()].controller;
             for m in std::mem::take(&mut self.entering_mods) {

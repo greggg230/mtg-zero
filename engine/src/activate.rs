@@ -60,6 +60,7 @@ impl Game {
             Cond::LinkedTypesAtLeast(n) => source.is_some_and(|s| self.linked_types(s).count_ones() >= *n as u32),
             Cond::CityBlessing => pl.city_blessing || self.ascends(p),
             Cond::LandsPlayedAtLeast(n) => pl.lands_played >= *n,
+            Cond::SourceAttached => source.is_some_and(|s| self.live(s) && self.objs[s.idx.i()].attached.is_some()),
         }
     }
 
@@ -198,7 +199,7 @@ impl Game {
         }
         // "Abilities you activate that aren't mana abilities cost {2} less"
         // (Zirda; at least one mana stays).
-        if self.seen & crate::game::SEEN_ABILITY_DISCOUNT != 0 && ad.mana().is_none() && m.generic > 0 && m.total() > 1 {
+        if self.seen & crate::game::SEEN_ABILITY_DISCOUNT != 0 && ad.mana().is_none() && ad.special.is_none() && m.generic > 0 && m.total() > 1 {
             for c in self.permanents_of(p) {
                 let n = self.abilities(c).ability_discount;
                 if n > 0 {
@@ -318,6 +319,17 @@ impl Game {
         }
         if ad.mana().is_some() {
             self.agenda.push(Task::ManaNow { src: Src { card, slot } });
+            return;
+        }
+        // A special action (CR 116.2): its cost, then it happens; no stack.
+        if let Some(sp) = ad.special {
+            self.agenda.push(Task::Special { p, card, sp });
+            let mana = self.special_mana(p, card, ad);
+            if !mana.is_zero() {
+                let mut pm = PayMana::new(p, mana);
+                pm.keep = Self::keep_for(card, &ad.cost, Some(card));
+                self.agenda.push(Task::PayMana(pm));
+            }
             return;
         }
         if ad.loyalty.is_some() {

@@ -211,7 +211,12 @@ impl Game {
 
     /// Card types (layer 4).
     pub fn types_of(&self, c: CardIdx) -> u16 {
-        let mut base = self.def_of(c).types;
+        let d = self.def_of(c);
+        let mut base = d.types;
+        // Reconfigure (CR 702.151b): attached, it isn't a creature.
+        if d.reconfigure && self.objs[c.i()].attached.is_some() {
+            base &= !crate::db::types::CREATURE;
+        }
         // Layer 1: a copy's "in addition to its other types" (CR 707.9b).
         if let Some(e) = self.exc(c) {
             base |= e.types;
@@ -478,6 +483,11 @@ impl Game {
                     Mod::PtPer { filter, p: a, t: b } => {
                         let ctl = self.objs[s.i()].controller;
                         let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as i32;
+                        dp += a * n;
+                        dt += b * n;
+                    }
+                    Mod::PtPerSourceCounter { counter, p: a, t: b } => {
+                        let n = self.counters_on(s, *counter) as i32;
                         dp += a * n;
                         dt += b * n;
                     }
