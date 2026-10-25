@@ -205,13 +205,17 @@ internally instead of being exposed. zero-core would auto-step it anyway; doing 
   * A pass gives priority to the next player (117.3d). When all players have passed in
     succession (117.4): stack empty -> the step ends; otherwise the top object resolves and
     the **active player** then receives priority (117.3b).
-* Mana abilities (of permanents and of cards in hand) are activated only while paying a cost
+* Mana abilities (of permanents and of cards in hand) are activated while paying a cost
   (601.2g / 605.3a: also a payment during resolution, "counter unless its controller pays"),
-  never as a free-standing priority action: floating mana with nothing to spend it on cannot
-  matter. The exception is abilities that may be activated "only as an instant" (Lion's Eye
-  Diamond: never while paying). Mana already in a pool (Dark Ritual) is spent automatically
-  and first when a cost is paid (it empties at the end of the step anyway). Recorded
-  simplification, section 13.
+  those with a mana cost or a sacrifice of their own included (section 18), and not as
+  free-standing priority actions: floating mana with nothing to spend it on is activating the
+  ability later in the step (the pool empties between steps). With priority: abilities that may
+  be activated "only as an instant" (Lion's Eye Diamond: never while paying) and those that
+  sacrifice a source with a triggered ability of its own (Chromatic Star, Wizard's Rockets: also
+  while paying; `Game::mana_with_priority`). Mana already in a pool (Dark Ritual) joins the
+  payment's virtual pool: the payment spends as much of it as it can, and the player chooses
+  which mana stays when that matters (`PayPool`, 106.4, 601.2h). docs/shortcuts.md 13.1, 13.2,
+  13.12.
 * Game-length caps: `GameSpec.max_turns` (default 60) ends the game as a draw with reason
   `TurnLimit`; an internal step budget turns an engine loop into a panic, not a hang.
 * Extra turns (CR 500.7): a stack of players; the most recently created extra turn is taken
@@ -247,16 +251,16 @@ internally instead of being exposed. zero-core would auto-step it anyway; doing 
   with the card where it was, except from a graveyard: a coloured spell whose only candidate
   was Emrakul was offered and the target choice panicked (section 15, the search smoke).
 * **`PayMana`** (601.2g-h; full description in section 18). Phyrexian pips first (how many
-  of each colour are paid with life), then the pool (coloured pips by colour, hybrid pips,
-  then generic). The rest is paid by choosing which mana abilities to activate, one decision
-  per source: options are one representative per class of equivalent sources (same
-  definition and ability), restricted to classes whose addition keeps the cost payable, and
-  in non-decreasing class order so each *set* of sources is reachable exactly once (no
-  permutation branching). Single-mana sources are matched to the pips (which colour each
-  pays for cannot matter: all of it is spent); several-mana sources (Sol Ring, Black Lotus)
-  pick their production, and the excess stays in the pool. Feasibility is a matching over
-  the pips' acceptable types (`mana::payable`), with budgets for life and for permanents a
-  later sacrifice needs.
+  of each colour are paid with life). Then the sources, one decision per source: options are
+  one representative per class of equivalent sources (same definition and ability), restricted
+  to classes whose addition keeps the cost payable, and in non-decreasing class order so each
+  *set* of sources is reachable exactly once (no permutation branching). Several-mana sources
+  (Sol Ring, Black Lotus) pick their production; their mana and the pool's form a virtual pool,
+  spent as far as it can be; single-mana sources are matched to the rest of the pips (which
+  colour each pays for cannot matter: all of it is spent). Last, which mana of the virtual pool
+  stays when the pools differ (`PayPool`). Feasibility is a matching over the pips' acceptable
+  types (`mana::payable`, the pool's units among the candidates), with budgets for life and for
+  permanents a later sacrifice needs.
 * Targets are re-checked on resolution (608.2b): a target is legal if its object still exists
   (same `ObjRef` incarnation, expected zone) and still matches the `TargetReq` filter. If
   every target of a targeted spell or ability is illegal, it does not resolve and leaves the
@@ -861,17 +865,26 @@ reanimating ones (enchant creature, land, artifact), granted triggered abilities
 Equipment's and the "becomes the target" one of 31.1, abilities granted to permanents other than
 Rain of Filth's mana ability, the play/draw choice.
 
+Implemented (M7e part 2, section 34): the payment model's shortcuts removed (docs/shortcuts.md):
+the player chooses which pool mana pays (106.4, 601.2h; `PayPool`), mana abilities with a mana
+cost or a sacrifice of another permanent while paying any cost (605.3a), Pentad Prism once per
+counter, a tap and a sacrifice of one land in one payment whatever the tap's condition (601.2g),
+mana abilities activated before the costs are paid (a Lotus Petal delved or exiled for escape,
+X life after a painland's damage).
+
 Deliberate simplifications and limits (each is small and local to change; every shortcut the
 engine documents is tracked in docs/shortcuts.md with its class and status):
 
-* Mana already in a pool is spent first and automatically: coloured pips from their colour,
-  hybrid pips from the more plentiful of their colours, generic pips colourless first, then
-  the most plentiful colour (section 5). Which pool mana pays a generic pip can matter for
-  what is left later in the step; a hybrid pip paid greedily can, in rare pools, make the
-  rest look unpayable (the payment then just offers fewer options; nothing illegal happens).
-* Mana abilities are not free-standing priority actions (section 5), and a payment
-  activates a minimal set of sources: every pick must pay part of the cost, so extra mana
-  is never floated during a payment (the excess of a several-mana source stays).
+* A payment spends as much of the pool's (and several-mana sources') mana as it can; the
+  player chooses which (section 5, `PayPool`). Keeping pool mana of a type no untapped source
+  makes by tapping a land instead is not offered (docs/shortcuts.md 13.13).
+* Mana abilities are not free-standing priority actions (section 5; with priority only Lion's
+  Eye Diamond, Chromatic Star and Wizard's Rockets), and a payment activates a minimal set of
+  sources: every pick must pay part of the cost, so extra mana is never floated during a payment
+  (the excess of a several-mana source stays). Floating mana in response to the loss of its
+  source is not modelled (docs/shortcuts.md 13.12).
+* The mana of a mana ability with a mana cost never pays another such ability's cost in one
+  payment (13.15); Wizard's Rockets helps a payment only when nothing else pays (13.14).
 * A cost's source is never one of its own mana sources when the cost taps, sacrifices,
   exiles or discards it (CR would allow "tap this for mana, then sacrifice it" for a cost
   without {T}; no supported card has such a pair).
@@ -1144,6 +1157,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
 | `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
 | `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
+| `tests/rules_payment.rs` | M7e part 2 (section 34): the payment model, 14 tests, the CR in each name: 106.4 and 601.2h (the pool's mana chosen; a source's mana and the pool's together; converge counting the chosen colours; which {R} pays a creature spell), 605.3a (Loot paying Mana Leak's {3} during resolution; Pentad Prism, Arena of Glory, Wizard's Rockets while paying), 602.2b (no mana ability pays its own cost), 601.2g (Rain of Filth after Ancient Tomb's damaging tap; Squandered Resources after Mana Confluence's life; a Lotus Petal delved and exiled for Uro's escape), 601.2h (X life after the mana abilities) |
 | `tests/rules_shortcuts.rs` | M7e part 1 (section 33): the rules shortcuts removed, 27 tests, the CR in each name: 724.2 (the monarch's triggers on the stack, countered by Tidebinder, one per creature), 603.7 (Okoye's delayed trigger), 603.2c ("one or more" once per event: Laelia, Wan Shi Tong, Inti), 614.1c (entering with an effect's counters), 614.12a (Metamorph and Exhume), 608.2h (Pyrogoyf's damage as the creature last existed), 702.171a (saddle without a crew bonus), 601.2h (teamwork tapping mana creatures), 116.2b (turning face up after losing abilities), 702.8a (Necromancy's flash permission), 106.1b (exact converge), 614.1a (Mox Diamond put onto the battlefield), 616.1 (Blightsteel and Yawgmoth's Will, flashback and Dauthi Voidwalker), 601.2b (Breach's escape with Bitter Triumph's own cost), 601.2a (Paragon or Lurrus, flashback or Will, Paragon and a card with another face), 709.3 (the Citadel's split card), 613.7e (an Equipment re-attached), 613.1f (Paragon's granted trigger lost), 113.7 (a granted ward's source) |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
@@ -1403,6 +1417,18 @@ objects per definition, the entering counters and flags, the chosen route); clon
 not a field per object). On the full pool: 5.81-5.86 us per decision (842,993 decisions), 809-817
 games/s. Fuzzer 20,000 games: 143 s (with the option-completion check).
 
+**M7e part 2** (546 cards, branch `m7e-pay`, the payment model of section 34): pinned the same way,
+interleaved with main's code (f89ada4) in five rounds, with a game running on the machine (the
+rounds varied by up to 20%). On the same pool (no card added: 834,407 decisions against main's
+842,993, the games differing by the payment's choices) 5.94-6.76 us per decision, median 6.18,
+against main's 5.50-6.13, median 5.78: +6.9% at the medians (pairs +1% to +12%). The reason is the
+payment's new work: each `PayMana` step costs about 1.0 us against 0.84 (measured with timers in
+both builds: the virtual pool's spends, the card uses, the needs; 12% of the time in random play),
+and every feasibility check carries the pool's units and the converters' ways. The first build was
++9%: `PayMana` grew the task enum to 280 bytes (boxed now), and an empty virtual pool and an
+already finished payment took the full path (fast paths now). `Game::clone` 1.27-1.46 us (main
+1.27-1.40), `size_of::<Game>()` 1,496 B (unchanged). Fuzzer 20,000 games: 181 s.
+
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
 unpinned runs on this hybrid CPU varied by up to 50% with other work running (the earlier
@@ -1575,10 +1601,12 @@ triggered one, with its source's last known information if the source is gone (1
 damage_to_you })`. Productions (`ManaProd`): one mana of a mask (a land, Birds), fixed amounts
 (Sol Ring), n of one chosen type (Black Lotus), n in any combination (Relic of Sauron), one per
 permanent you control matching a filter (Gaea's Cradle), one of the colours among your
-permanents matching a filter (Mox Amber). Costs a mana ability may have while paying: {T},
-life, sacrifice or exile itself (no choices, no mana part: those are blockers). Every mana
-ability taps, sacrifices or exiles its source, so a card's mana abilities are exclusive
-alternatives (the lowering checks). Where they are activated:
+permanents matching a filter (Mox Amber). Costs a mana ability may have while paying: {T}, life, sacrifice or exile itself, a counter
+removed (Pentad Prism without {T}: once per counter), one mana or {X} of its own (a need of the
+same payment), a permanent sacrificed (Squandered Resources, Orcish Lumberjack: a source on each
+permanent it may sacrifice). A source's use of its card is recorded (`Class::res`: tap,
+sacrifice); a card's sources are exclusive alternatives unless one taps and the other sacrifices
+it (tap it for mana, then sacrifice it, 601.2g). Where they are activated:
 
 * mana abilities of permanents and of cards in hand (Spirit Guides): only while paying a
   cost (`PayMana`), whenever a cost is paid (casting, activating, "unless pays" during
@@ -1590,6 +1618,8 @@ alternatives (the lowering checks). Where they are activated:
   later discard cost needs, so it counts against that reservation (`Keep.discard`);
 * "activate only as an instant" ones (Lion's Eye Diamond): only with priority, never while
   paying (its ruling); costs, then a `ChooseMana` decision, mana to the pool, priority stays.
+  Chromatic Star and Wizard's Rockets (a triggered ability as they go) are offered with priority
+  as well (`Game::mana_with_priority`); every other mana ability only while paying.
 
 **`PayMana` in detail.** State: the remaining cost, the picks so far, `Keep` (what later parts
 of the cost need: the excluded source, life, a sacrifice or discard reservation; at most one
@@ -1598,19 +1628,31 @@ of the two per cost, the lowering checks). Stages:
 1. Phyrexian pips: per colour, one `PayPhyrexian` decision "how many of these k pips are
    paid with 2 life" (0..k, only feasible counts; one decision per colour, not per pip, so
    no permutation branching). The life is paid at the end (601.2h comes after 601.2g).
-2. The pool pays what it can (section 5).
+2. Forced sources (`PayMana::forced`: a Lotus Petal delve exiles, sources an "exile n cards
+   from your graveyard" cost needs) are picked first, their mana's type chosen.
 3. Sources, one decision per pick, classes in non-decreasing order: several-mana classes
-   first, then single-mana ones (canonical battlefield order within each). Picking a
-   several-mana source asks for its production (`ChooseMana`, only productions that pay part
-   of the cost and leave the rest payable); its mana pays what it can at once and the rest
-   is remembered to stay in the pool. Single-mana sources are picked as a set; when they
-   cover the rest exactly, the payment ends.
-4. Nothing has been activated yet: every pick is checked against the state at the start of
+   first (Wizard's Rockets among them, offered when nothing else pays), then single-mana ones
+   (canonical battlefield order within each). Picking a several-mana source asks for its
+   production (`ChooseMana`, only productions the payment spends some of, leaving the rest
+   payable); its mana joins the virtual pool (the player's pool and the several-mana sources'
+   mana). A source with a mana cost of its own adds that cost to the payment as a `NOT_MADE`
+   need; its mana is `MADE` and never pays such a need. `PayMana::vm` is the most of the
+   virtual pool the payment can spend with single-mana sources paying the rest (`most_spent`,
+   every spend of that size tried; `None` while several-mana sources must still be picked).
+   Single-mana sources are picked as a set (a tap and a sacrifice of one card both, the tap
+   first); when they and `vm` mana cover the cost and needs exactly, the sources are done.
+4. `PayPool` (CR 106.4, 601.2h): the distinct pools the payment can leave (`pool_rems`: two
+   units of one type and tag are one; artifact-only {C} spent before other {C}, haste {R}
+   after other {R} except on a creature spell); asked when there are several, `NUMBER` = the
+   k-th (the first keeps the most types).
+5. Nothing has been activated yet: every pick is checked against the state at the start of
    the payment. At the end everything is activated in an order the rules allow (601.2g lets
    the player choose): sources that keep their permanent first (so "activate only if you
    control three artifacts" still holds for Mox Opal when Black Lotus is sacrificed), life
-   payments before damage (Mana Confluence before Ancient Tomb), sacrifices last; then the
-   Phyrexian life.
+   payments before damage (Mana Confluence before Ancient Tomb), sacrifices last; the pool
+   is left as chosen; delve's forced sources are exiled from the graveyard; then the
+   Phyrexian life and the cost's life after the mana (X life, the Citadel's,
+   `PayMana::life_after`).
 
 Feasibility (`can_pay_with`, `coverable`) is exact: a matching of the pips' acceptable types
 (`payable`, with the chosen units forced in), with budgets (`payable_within`): life (CR
@@ -1618,9 +1660,15 @@ Feasibility (`can_pay_with`, `coverable`) is exact: a matching of the pips' acce
 abilities deal are counted, since that damage comes first), and permanents a later sacrifice
 needs (a Lotus Petal cannot pay for Tinker's mana if it is the only artifact to sacrifice), or
 hand cards a later discard needs (a Spirit Guide cannot pay if it is the card to discard).
-Each card contributes at most one way (its mana abilities are alternatives); a way whose
-activation takes budget is all of its mana or none (Black Lotus's three mana come from one
-activation). Phyrexian splits and "n of one chosen type" productions are tried one by one.
+Each card contributes at most one way (its mana abilities are alternatives; a tap way and a
+sacrifice way also together); a way whose activation takes budget is all of its mana or none
+(Black Lotus's three mana come from one activation); an ability with a mana cost adds its need
+with its way. Phyrexian splits and "n of one chosen type" productions are tried one by one.
+The pool's mana is among the candidates (any of it may pay); with Wizard's Rockets usable, a
+cost unpayable otherwise is tried with every unit of any colour (`Cands::convert`). Delve
+spells count each mana source that sacrifices itself and is a card as its mana and one more
+generic mana (`Game::delve_classes`), and "exile n cards from your graveyard" counts such
+sources toward n (`exile_short`).
 
 ## 19. Lands (CR 305, 614)
 
@@ -3642,6 +3690,10 @@ the payment changes in `pay.rs` / `activate.rs` / `mana.rs`; tests `tests/cards_
 
 ### 28.1 Mana abilities with a mana cost or a choice (CR 605.3a)
 
+(M7e part 2, section 34: these are payment sources now, a need of the same payment for their
+mana cost and a source on each permanent for a sacrifice of another; the priority path below
+remains for Lion's Eye Diamond, Chromatic Star and Wizard's Rockets.)
+
 Section 18's payment activates mana abilities while paying, and only those whose cost has no
 choice and no mana part (a payment inside a payment). A mana ability whose cost has a mana part
 (Chromatic Star, Sunken Ruins' {U/B}, Loot's {G}), a permanent to choose (Orcish Lumberjack's
@@ -3780,13 +3832,12 @@ castable from a graveyard with no Serra Paragon (same games on main's pool after
 What still applies (docs/shortcuts.md; M7e fixed converge's upper bound, Serra Paragon's routes
 and faces and the granted leave trigger after "loses all abilities"):
 
-* Mana abilities with a mana cost or a choice in their cost are activated only with priority
-  (28.1), never in the middle of a payment: their mana can't pay an "unless pays" cost or a
-  cost paid while no player has priority unless it was made before (the payment rework's).
-* Converge counts the colours the payment could show: the pool's mana as the engine spent it,
-  several-mana sources' spent mana by type, and for single-mana sources the most colours an exact
-  payment by them can have, exactly for any number of sources (a player who taps a dual land
-  chooses its colour, 106.1b; for Prismatic Ending and Pentad Prism more is never worse).
+* (Mana abilities with a mana cost or a choice in their cost: while paying since M7e part 2,
+  section 34.)
+* Converge counts the colours the payment could show: the pool's and several-mana sources' mana
+  as the player chose to spend it (`PayPool`), and for single-mana sources the most colours an
+  exact payment by them can have, exactly for any number of sources (a player who taps a dual
+  land chooses its colour, 106.1b; for Prismatic Ending and Pentad Prism more is never worse).
 * Lim-Dul's Vault puts each looked-at five on the bottom in the order looked at (an order the
   player could choose; the library is shuffled at the end, so only a loop through the whole
   library could tell).
@@ -4087,7 +4138,6 @@ toughness together for divided damage (Fire Covenant), at most half its life.
 What still applies (docs/shortcuts.md; M7e fixed Blightsteel's replacement order, the "one or
 more" library and discard triggers, saddle's crew bonus and Necromancy's flash):
 
-* Pentad Prism's mana is made with priority only (28.8).
 * Shelldock Isle plays a land only on its controller's turn with a land play left.
 * "Until your next end step" ends as that end step begins, and "you may play that card" is
   checked by the controller's turn count, extra turns included.
@@ -4243,7 +4293,10 @@ exile it, so they are alternatives). Two kinds of sources join it:
   excess stays in the pool as for any several-mana source), or for a tapped land a one-mana class;
   its id is `ACTIVATE` + slot * 4 + the land's own number of abilities. Activating it activates the
   {T} ability first, then sacrifices the land. Only the land's {T} abilities of one mana without a
-  life, damage or spending restriction are combined (31.7).
+  life, damage or spending restriction are combined (31.7). (M7e part 2, section 34: the granted
+  sacrifice is a one-mana source of its own, `Class::res` = sacrifice, combined with any tap
+  ability of the land, conditioned ones too; Squandered Resources and Orcish Lumberjack the same
+  way.)
 
 The feasibility search (`cands`) branched on every card with several ways; a board of Rain lands
 made it exponential (seconds per decision, found by the fuzzer's timing). A card whose ways use no
@@ -4298,12 +4351,10 @@ random 94.8% +- 0.5, vs `HeuristicV1` 61.6% +- 0.8.
 What still applies (docs/shortcuts.md; M7e fixed the Citadel's faces, turning face up after a
 loss of all abilities and Dauthi Voidwalker's replacement order):
 
-* Arena of Glory's mana is made with priority only (28.8) and spent by the pool's rule: its haste
-  mana first on a creature spell, last on anything else (the player chooses which mana pays, 106.4;
-  that order is never worse for them).
-* Rain of Filth's granted ability is used while paying only (as every mana ability, 13); a land's
-  {T} ability with a life, damage or spending condition is not combined with it (only the
-  sacrifice alone); a land with four abilities of its own doesn't get the id (none in the cube).
+* (Arena of Glory's mana while paying, the player choosing which {R} pays a creature spell, and
+  Rain of Filth with a land's conditioned {T} abilities: M7e part 2, section 34.) Rain of
+  Filth's granted ability is used while paying only (docs/shortcuts.md 13.12); a land with four
+  abilities of its own doesn't get its id (none in the cube).
 * Emerge's artifact is chosen right after the alternative cost, before modes, X and targets (the CR
   determines it with the total cost, 601.2f; the cube's emerge card has no spell targets).
 * Bolas's Citadel's top card is known before every decision, not between two of them.
@@ -4427,8 +4478,9 @@ unchanged, among them Robber of the Rich's.
 
 (Both still apply; docs/shortcuts.md.)
 
-* Wizard's Rockets' X mana: one `ChooseMana` decision per mana (the combinations are not offered
-  as one choice); the bot announces X = 0.
+* Wizard's Rockets' X mana with priority: one `ChooseMana` decision per mana (the combinations are
+  not offered as one choice); the bot announces X = 0. While paying (M7e part 2) its X is the
+  mana it turns into colours, never asked.
 * A "this turn" triggered ability is removed when the next turn begins (nothing can trigger it
   between the end of the cleanup step and then).
 
@@ -4582,3 +4634,107 @@ random and eval specs): 0 failed of 8 configurations (3,200 games, 1.31 million 
 million simulations, 466 s). Speed: section 17 (+1.6% to +3.7% per decision on main's pool).
 Behaviour digests re-recorded (`DIGEST_WRITE=1 cargo test --release -p engine --test digest --
 --ignored`, the branch's last commit): combined digest 161108b935c03d14 (section 15).
+
+## 34. The payment model (M7e part 2)
+
+Branch `m7e-pay` (from main at f89ada4): the places where paying mana departed from the CR (106,
+117, 601.2f-h, 605), made rules-correct where the difference shows in play, without options that
+are equivalent or dominated (docs/shortcuts.md 13.1, 13.2, 28.8.1, 30.7.4, 31.7.1, 31.7.2 and the
+converge note of 28.8.2 fixed; 13.12-13.17 what stays, with reasons). The action-id layout,
+`NUM_ACTIONS` and layout v3 are unchanged.
+
+### 34.1 The virtual pool and the pool's choice (106.4, 601.2h)
+
+The player's pool and the mana of the several-mana sources picked so far form the payment's
+virtual pool (`Game::vgroups`; artifact-only {C} only for an artifact spell). `PayMana::vm` is the
+most of it the payment can spend with single-mana sources paying the rest (`most_spent`: every
+spend of that size tried with the forced units in the matching; `None` while several-mana sources
+must still be picked); the single-mana picks stop when they and `vm` mana cover the cost exactly.
+Then `pool_rems` lists the pools the payment can leave, each once (two units of one type and tag
+are the same), artifact-only {C} spent before other {C} and haste {R} after other {R} except on a
+creature spell (never worse for the player); `PayPool` asks when there are several (`NUMBER` + k;
+the first keeps the most types). The pool's mana is a candidate unit in every feasibility check
+(no greedy assignment: a hybrid pip can no longer hide a payable cost). Converge reads the colours
+of the pool's mana chosen. Kept: the payment spends as much of the virtual pool as it can
+(13.13), and no mana is floated with priority (13.12: the reasons).
+
+### 34.2 Mana abilities with a cost, while paying (605.3a)
+
+* **A one-mana cost** (Sunken Ruins' {U/B}, Loot's {G}, Arena of Glory's {R}, Chromatic Star's
+  {1}): the ability is a several-mana source whose cost is one more need of the same payment
+  (`Class::need`, `PayMana::marked`), `NOT_MADE`; its own mana is `MADE` (`mana.rs::fits`: such
+  mana never pays such a need, so nothing pays for itself; it never pays another such ability's
+  cost either, 13.15). The matching handles the needs with the pips; the fast path (no needs) is
+  unchanged (`best_chosen::<false>`).
+* **Pentad Prism** (a counter, no {T}): one-mana source usable once per counter in one payment
+  (`Class::reuse`).
+* **Wizard's Rockets** ({X}, {T}, sacrifice: X mana in any combination of colours): picked, every
+  unit of the payment may be of any colour (`PayMana::convert`, `Cands::convert`): its X is the
+  mana it turns into colours, never asked. Offered only when nothing else pays (13.14); with
+  priority too, for its draw.
+* **Squandered Resources, Orcish Lumberjack** (sacrifice another permanent): sources on each
+  permanent they may sacrifice (`SQ_FOR`: one mana of a type the land could produce, 106.7;
+  `LJ_FOR`: three of red and/or green, the Lumberjack tapped, `Class::share` and `Budget::tap`
+  limiting them to the Lumberjacks there are). Ids: the permanent's `ACTIVATE` slots after its own
+  abilities, with Rain of Filth's (`Class::slot_id`; none past the fourth).
+* **Where**: any payment, an "unless pays" cost during resolution included. With priority only
+  Lion's Eye Diamond; Chromatic Star and Wizard's Rockets (a triggered ability as their source
+  goes) also with priority (`Game::mana_with_priority`). Exhaust (Loot) is marked as the payment
+  activates it.
+
+### 34.3 A tap and a sacrifice of one card (601.2g)
+
+A source's use of its card is recorded (`Class::res`: tap, sacrifice; both for most mana
+abilities, none for Pentad Prism's counters). A card's sources are alternatives unless one taps
+and the other sacrifices it: in `cands` each card's tap way, sacrifice way and both together are
+its alternatives; in the payment both may be picked (the tap is activated first). Rain of Filth's
+granted sacrifice (`SAC_FOR`) is now a one-mana source of its own, combined with any tap ability
+of the land: a painland's damage, Mana Confluence's life, Mishra's Workshop's restricted mana.
+
+### 34.4 Activation before the costs are paid (601.2g-h)
+
+* **Delve**: a mana source that sacrifices itself and is a card (Lotus Petal) may be chosen in
+  the delve decision (`ChooseGraveyardCard`, its `MY_PERM` id; before the graveyard cards, in
+  canonical order): it counts as one card delved (`Mark::DelveLate`), the payment activates it
+  first (`PayMana::forced`, its mana's type chosen, `ChooseMana`), and the card is exiled from the
+  graveyard at the end of the payment. Castability counts each such source as its mana and one
+  more generic mana (`Game::delve_classes`).
+* **"Exile n cards from your graveyard"** (escape, Abhorrent Oculus): such sources count toward n
+  when the graveyard is short (`exile_short`, `exile_sources`); the payment activates them first,
+  and the cost's exile (after the mana) can take them.
+* **Life after the mana**: "pay X life" and Bolas's Citadel's life are paid at the end of the
+  payment (`PayMana::life_after`, reserved in `keep.life`), after the mana abilities' damage.
+* Kept: a several-mana source that sacrifices itself (Black Lotus) is not one of those cards in
+  the payment it helps (13.16).
+
+### 34.5 Decisions, tasks, the bot, encoding
+
+One decision kind: `PayPool` (41; 42 of 64), a minor decision like `PayMana` (`mtg` game's
+`minor_decision`). New action meanings: a mana source's `MY_PERM` id in a delve decision; the
+sacrifice sources' `ACTIVATE` ids after a permanent's own abilities. `Task::PayMana` holds a
+`Box<PayMana>` (the task enum stays small: `PayMana` grew to 280 bytes). `Mark::DelveLate`. The
+heuristic bots answer `PayPool` with its first option (the pool keeping the most types) and are
+legal for the rest (the first option elsewhere). Layout v3 unchanged: no width, offset or identity
+change (`az/encode.rs` untouched); the payment context shows the whole cost being paid.
+
+### 34.6 Tests, fuzzing, smoke, digests, speed
+
+`tests/rules_payment.rs`: 14 tests, each naming the CR rule it checks; all 14 failed on main's
+engine (f89ada4, with only the test kit's `pool` builder and the `PayPool` kind added to compile
+them). Earlier card tests rewritten for the new model: Sunken Ruins, Loot, Orcish Lumberjack,
+Squandered Resources, Chromatic Star (`cards_m7c_tail.rs`), Pentad Prism (`cards_m7c_tail3.rs`),
+Arena of Glory and Rain of Filth (`cards_m7d.rs`).
+
+`cargo test --release -p engine --no-fail-fast --lib --test 'cards*' --test 'rules*' --test hidden
+--test support --test smoke --test 'bots*'`: 877 tests pass. Fuzzing (`FUZZ_GAMES=20000`, the
+option-completion check on): no failure, 181 s. Faults found on the way, all fixed: Wizard's
+Rockets' colours counted in the pool's spend without Rockets picked (a payment ended unpayable);
+an unpicked converter's need counted in the pool's spend; the `PayPool` answer lost when the task
+was asked again; a second delve source left for later in the payment. The search smoke
+(`python tools/search_smoke.py`, seeds 0-3, random and eval specs): 0 failed of 8 configurations
+(3,200 games, 1.29 million decisions, 33.0 million simulations, 601 s on a machine with other
+load). Payment decisions per game in random play (4,000 games, main's pool): `PayMana` 31.90 ->
+32.16, `PayPool` 0 -> 0.11, `ChooseMana` 1.91 -> 0.97 (the priority mana abilities and Rain's
+productions gone), `PayPhyrexian` 0.08 -> 0.09; 33.9 -> 33.3 in all. Speed: section 17. Behaviour
+digests re-recorded (`DIGEST_WRITE=1 cargo test --release -p engine --test digest -- --ignored`,
+the branch's last commit): section 15.
