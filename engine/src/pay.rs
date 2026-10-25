@@ -66,6 +66,53 @@ pub(crate) fn classes_without(classes: &[Class], cards: &[CardIdx]) -> Vec<Class
         .collect()
 }
 
+/// Converge with many single-mana sources (exact, any number): the most
+/// colours (with `fixed`, already spent) an exact payment of `cost` by one
+/// mana from each of `units` (the types each can make) can show. A colour
+/// set S is reachable iff the sources can be matched to the coloured pips
+/// and to one mana of each colour of S not yet shown (the rest pay the
+/// generic part): a bipartite matching per S. `None` with hybrid or
+/// Phyrexian pips (not modelled here).
+fn most_colors_matching(units: &[ManaMask], cost: &ManaCost, fixed: u8) -> Option<u32> {
+    if cost.hybrid.iter().any(|&n| n > 0) || cost.phyrexian.iter().any(|&n| n > 0) {
+        return None;
+    }
+    if cost.pips.iter().map(|&n| n as usize).sum::<usize>() + cost.generic as usize != units.len() {
+        return None; // (not an exact payment by these sources)
+    }
+    fn augment(slot: usize, slots: &[u8], units: &[ManaMask], seen: &mut [bool], owner: &mut [usize]) -> bool {
+        for (u, &m) in units.iter().enumerate() {
+            if m & (1 << slots[slot]) != 0 && !seen[u] {
+                seen[u] = true;
+                if owner[u] == usize::MAX || augment(owner[u], slots, units, seen, owner) {
+                    owner[u] = slot;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    let mut best = None;
+    for s in 0u8..32 {
+        let mut slots: Vec<u8> = Vec::new();
+        for t in 0..6u8 {
+            let show = t < 5 && s & (1 << t) != 0 && fixed & (1 << t) == 0;
+            let need = cost.pips[t as usize].max(show as u8);
+            slots.extend(std::iter::repeat_n(t, need as usize));
+        }
+        if slots.len() > units.len() {
+            continue;
+        }
+        let mut owner = vec![usize::MAX; units.len()];
+        let ok = (0..slots.len()).all(|k| augment(k, &slots, units, &mut vec![false; units.len()], &mut owner));
+        if ok {
+            let n = ((s | fixed) & COLORS).count_ones();
+            best = Some(best.map_or(n, |b: u32| b.max(n)));
+        }
+    }
+    best.or(Some(0))
+}
+
 fn one_member(src: Src) -> Members {
     let mut m = Members::new();
     m.push(src);
@@ -1215,10 +1262,15 @@ impl Game {
         let n = if units.len() <= 7 {
             best(0, &units, &pm.cost, &mut Vec::new(), fixed)
         } else {
-            // (Many sources: each colour any of them could make, at most
-            // one per source.)
-            let all = units.iter().fold(fixed, |m, &x| m | x) & COLORS;
-            all.count_ones().min(fixed.count_ones() + units.len() as u32)
+            match most_colors_matching(&units, &pm.cost, fixed) {
+                Some(n) => n,
+                // (Hybrid or Phyrexian pips left with many sources: no
+                // converge spell in the cube has them; an upper bound.)
+                None => {
+                    let all = units.iter().fold(fixed, |m, &x| m | x) & COLORS;
+                    all.count_ones().min(fixed.count_ones() + units.len() as u32)
+                }
+            }
         };
         self.marks[k].1 = crate::game::Mark::Converge(n as u8);
     }

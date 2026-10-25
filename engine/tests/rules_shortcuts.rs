@@ -449,3 +449,106 @@ fn cr_601_2h_teamwork_can_tap_creatures_with_mana_abilities() {
     assert_eq!(g.obj(bolt).zone, Zone::Graveyard);
     assert_eq!(g.life(1), 20, "countered unless {{4}}\n{}", log(&g));
 }
+
+// ---- special actions (CR 116.2b, 708.7) -------------------------------------------------------
+
+fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
+    for _ in 0..10_000 {
+        if stop(g) {
+            return;
+        }
+        let d = g.pending_decision().expect("game running");
+        let c = match d.kind {
+            DecisionKind::Priority | DecisionKind::DeclareAttackers | DecisionKind::DeclareBlockers => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    panic!("quiet_until: no progress");
+}
+
+/// Turning a face-down permanent face up is a special action, not an
+/// ability: a face-down permanent that lost all abilities (Oko's +1) can
+/// still be turned face up.
+#[test]
+fn cr_116_2b_a_face_down_permanent_that_lost_its_abilities_can_turn_face_up() {
+    let mut g = scen()
+        .library(0, &["Test Giant", "Lightning Bolt"])
+        .battlefield(0, &["Abhorrent Oculus", "Forest", "Forest", "Forest", "Forest", "Forest"])
+        .battlefield(1, &["Oko, Thief of Crowns"])
+        .at(Step::End, 0)
+        .start();
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::PutOntoBattlefield));
+    let giant = g.card(0, "Test Giant", Zone::Library);
+    g.choose(Choice::Card(giant));
+    let oko = bf(&g, 1, "Oko, Thief of Crowns");
+    quiet_until(&mut g, |g| g.turn().step == Step::Main1 && at_priority(g) && g.pending_decision().unwrap().player == 1);
+    g.choose(Choice::Ability(oko, AbilitySlot::Activated(1)));
+    finish(&mut g, |g| tgt_if(g, giant));
+    resolve_with(&mut g, |g| tgt_if(g, giant));
+    assert!(g.is_face_down(giant));
+    assert_eq!(g.pt(giant), (3, 3), "an Elk\n{}", log(&g));
+    g.pass();
+    assert_eq!(g.pending_decision().unwrap().player, 0);
+    assert!(g.has_option(Choice::Ability(giant, AbilitySlot::Activated(0))), "{:?}", g.options_desc());
+}
+
+// ---- Necromancy's flash permission (CR 702.8a) ------------------------------------------------
+
+/// "You may cast this spell as though it had flash" is a permission, not
+/// the flash keyword: Necromancy is cast at instant speed, and has no flash
+/// (as a card or as the permanent it becomes).
+#[test]
+fn cr_702_8a_necromancy_may_be_cast_as_though_it_had_flash_without_having_it() {
+    let def = db().def(db().id("Necromancy").unwrap());
+    assert!(!def.keywords.has(Kw::Flash), "no flash keyword");
+    let mut g = scen()
+        .battlefield(0, &["Swamp"; 3])
+        .hand(0, &["Necromancy"])
+        .graveyard(0, &["Griselbrand"])
+        .at(Step::Main1, 1)
+        .start();
+    g.pass();
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let c = g.card(0, "Necromancy", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(c)), "cast on the opponent's turn");
+    g.choose(Choice::Cast(c));
+    let gris = g.card(0, "Griselbrand", Zone::Graveyard);
+    finish(&mut g, |g| tgt_if(g, gris));
+    resolve_with(&mut g, |g| tgt_if(g, gris));
+    let nec = bf(&g, 0, "Necromancy");
+    assert!(!g.has_kw(nec, Kw::Flash));
+}
+
+// ---- converge (CR 702.?/106.1b: the colours of mana spent) -------------------------------------
+
+/// Pay with the first source offered until the payment is over.
+fn pay_first(g: &mut Game) {
+    g.drive_until(|g| at_priority(g) || g.kind() != Some(DecisionKind::PayMana));
+    while matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)) {
+        let c = g.pending_decision().unwrap().options[0].choice;
+        g.choose(c);
+        g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+    }
+}
+
+/// Prismatic Ending with X = 7 paid by seven Plains and an Underground Sea:
+/// at most two colours can be spent (white, and blue or black), exactly,
+/// however many sources pay (no upper bound with more than seven).
+#[test]
+fn cr_106_1b_converge_counts_exactly_with_many_sources() {
+    let lands = ["Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Plains", "Underground Sea"];
+    let mut g = scen().battlefield(0, &lands).battlefield(1, &["Coalition Relic"]).hand(0, &["Prismatic Ending"]).at(Step::Main1, 0).start();
+    let pe = g.card(0, "Prismatic Ending", Zone::Hand);
+    let relic = bf(&g, 1, "Coalition Relic");
+    g.choose(Choice::Cast(pe));
+    g.drive_until(|g| !at_priority(g));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(7));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(relic));
+    pay_first(&mut g);
+    resolve_with(&mut g, |_| None);
+    assert!(g.lands_of(0).all(|l| g.obj(l).tapped));
+    assert_eq!(g.obj(relic).zone, Zone::Battlefield, "two colours: mana value 3 stays\n{}", log(&g));
+}

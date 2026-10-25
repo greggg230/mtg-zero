@@ -506,6 +506,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // Necromancy: "if you cast it any time a sorcery couldn't have been
     // cast, the controller of the permanent it becomes sacrifices it at the
     // beginning of the next cleanup step" (a delayed ability of the card).
+    // "You may cast this spell as though it had flash": the IR writes the
+    // flash keyword beside the cleanup sacrifice (ir_defects 8); it is a
+    // permission (CR 702.8a: Necromancy has no flash).
+    let flash_permission = *sacrifice_at_cleanup_if_cast_without_sorcery_timing && kws.has(Kw::Flash);
+    if flash_permission {
+        kws.remove(Kw::Flash);
+    } else if *sacrifice_at_cleanup_if_cast_without_sorcery_timing {
+        l.unsupported("CardPrinting.sacrifice_at_cleanup_if_cast_without_sorcery_timing(without \"as though it had flash\")");
+    }
     let cleanup_sac = sacrifice_at_cleanup_if_cast_without_sorcery_timing.then(|| {
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::SacrificeEventObj));
@@ -1753,6 +1762,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         aura_spell: aura_gy,
         reanimates: l.reanimates,
         cleanup_sac,
+        flash_permission,
         x_min: x_least,
         gy_triggers,
         chooses_parity: *chooses_parity_as_enters,

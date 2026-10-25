@@ -139,6 +139,16 @@ impl Game {
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
+            // A special action isn't an ability (CR 116.2b, 708.7): turning a
+            // face-down permanent face up survives "loses all abilities".
+            if self.lost_abilities(c) {
+                for (i, ad) in self.db.def(self.objs[c.i()].def).activated.iter().enumerate() {
+                    let slot = AbilitySlot::Activated(i as u8);
+                    if ad.special.is_some() && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                        out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+                    }
+                }
+            }
         }
         for &(a, c) in slots {
             for (i, ad) in self.def_of(c).hand_abilities.iter().enumerate() {

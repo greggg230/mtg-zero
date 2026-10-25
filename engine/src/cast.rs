@@ -291,7 +291,10 @@ impl Game {
     /// Could `p` cast a spell with definition `def` any time they could cast
     /// an instant (an instant, flash, a sorcery with Teferi's +1)?
     pub(crate) fn instant_speed(&self, p: PlayerId, def: &crate::db::CardDef) -> bool {
-        def.is(types::INSTANT) || def.keywords.has(Kw::Flash) || (def.is(types::SORCERY) && self.players[p as usize].flash_sorceries)
+        def.is(types::INSTANT)
+            || def.keywords.has(Kw::Flash)
+            || def.flash_permission
+            || (def.is(types::SORCERY) && self.players[p as usize].flash_sorceries)
     }
 
     /// Does permission `pm` let `p` play its card now?

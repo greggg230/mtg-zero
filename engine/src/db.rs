@@ -113,6 +113,9 @@ impl KwSet {
     pub fn has(self, k: Kw) -> bool {
         self.0 & (1 << k as u32) != 0
     }
+    pub fn remove(&mut self, k: Kw) {
+        self.0 &= !(1 << k as u32);
+    }
     pub fn insert(&mut self, k: Kw) {
         self.0 |= 1 << k as u32;
     }
@@ -1471,6 +1474,9 @@ pub struct CardDef {
     /// sacrifices it at the beginning of the next cleanup step" (Necromancy):
     /// that delayed ability's index.
     pub cleanup_sac: Option<u8>,
+    /// "You may cast this spell as though it had flash" (Necromancy): a
+    /// permission, not the flash keyword (CR 702.8a; ir_defects 8).
+    pub flash_permission: bool,
     /// Splice onto <subtype> <cost> (CR 702.47): the subtype, the cost.
     pub splice: Option<(u16, ManaCost)>,
     /// "As this enters, choose a color. All cards that aren't on the
