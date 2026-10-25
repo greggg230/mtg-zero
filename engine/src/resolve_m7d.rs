@@ -776,86 +776,125 @@ impl Game {
         })
     }
 
-    /// The own mana abilities of `c` its granted sacrifice may follow in one
-    /// payment: {T} only, one mana, no life or damage, ready now (CR 601.2g:
-    /// tap it for mana, then sacrifice it); their masks.
-    fn sac_for_taps(&self, p: PlayerId, c: CardIdx, locks: u16) -> Vec<(u8, crate::mana::ManaMask)> {
-        let d = self.abilities(c);
-        d.activated
-            .iter()
-            .enumerate()
-            .filter_map(|(i, ad)| {
-                let m = ad.mana()?;
-                let plain = ad.cost == crate::db::Cost { tap: true, ..crate::db::Cost::default() } && m.damage_to_you == 0 && m.sac_if_no.is_none() && m.only == 0;
-                if !plain || ad.instant_only || !self.activation_ready(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
-                    return None;
-                }
-                let crate::db::ManaProd::One(mask) = m.prod else { return None };
-                Some((i as u8, mask))
-            })
-            .collect()
-    }
-
-    /// The class of `c`'s granted sacrifice ability (Rain of Filth): one
-    /// mana of its type, or that and one of its own tap productions.
-    pub(crate) fn sac_for_class(&self, p: PlayerId, c: CardIdx, locks: u16) -> Option<crate::pay::Class> {
-        let mask = self.sac_mana_of(c);
-        // (Its action id comes after its own abilities: room for one more.)
-        if mask == 0 || self.abilities(c).activated.len() >= 4 || self.activation_locks_hit(c, locks) {
-            return None;
-        }
-        let one = |t: usize| -> [u8; 6] { std::array::from_fn(|i| (i == t) as u8) };
-        let mut prods: Vec<[u8; 6]> = (0..6).filter(|&t| mask & (1 << t) != 0).map(one).collect();
-        let base = prods.clone();
-        let tap = self.sac_for_taps(p, c, locks).iter().fold(0, |m, &(_, k)| m | k);
-        for t in (0..6).filter(|&t| tap & (1 << t) != 0) {
-            for b in &base {
-                let mut w = one(t);
-                for i in 0..6 {
-                    w[i] += b[i];
-                }
-                if !prods.contains(&w) {
-                    prods.push(w);
-                }
+    /// The sources sacrificing permanent `c` (ENGINE.md 18, 31): Rain of
+    /// Filth's granted "sacrifice this: add {B}" (`SAC_FOR`), and the mana
+    /// abilities in `sac_by` (permanent, ability) that sacrifice another
+    /// permanent: Squandered Resources' "one mana of any type that land
+    /// could produce" (`SQ_FOR`, CR 106.7), Orcish Lumberjack's three
+    /// (`LJ_FOR`, the Lumberjack tapped too). Each is one more `ACTIVATE` slot
+    /// after `c`'s own abilities (none past the fourth: the slots, B). The
+    /// card's own tap abilities combine with them (tap it for mana, then
+    /// sacrifice it: CR 601.2g).
+    pub(crate) fn sac_classes(
+        &self,
+        p: PlayerId,
+        c: CardIdx,
+        locks: u16,
+        rain: bool,
+        sac_by: &[(CardIdx, u8)],
+        creature_bonus: [u8; 6],
+    ) -> Vec<crate::pay::Class> {
+        use crate::pay::{Class, Src, Yield, LJ_FOR, SAC, SAC_FOR, SQ_FOR};
+        let mut out = Vec::new();
+        let def = self.objs[c.i()].def;
+        let mut k = self.abilities(c).activated.len();
+        let mut add = |out: &mut Vec<Class>, slot, yld, share: u8| {
+            if k < 4 {
+                let cl = Class { sac_self: true, res: SAC, slot_id: k as u8, share, ..Class::of(def, Src { card: c, slot }, yld) };
+                out.push(cl);
+                k += 1;
+            }
+        };
+        if rain && !self.activation_locks_hit(c, locks) {
+            let mask = self.sac_mana_of(c);
+            if mask != 0 {
+                add(&mut out, SAC_FOR, Yield::One(crate::mana::Unit::free(mask)), 0);
             }
         }
-        let def = self.objs[c.i()].def;
-        let src = crate::pay::Src { card: c, slot: crate::pay::SAC_FOR };
-        let mut members = crate::pay::Members::new();
-        members.push(src);
-        // (Its mana as independent units, its tap ability's and the
-        // sacrifice's: any of them may be spent, the rest stays in the pool.)
-        let yld = if tap == 0 {
-            crate::pay::Yield::One(crate::mana::Unit::free(mask))
-        } else {
-            crate::pay::Yield::Multi { prods, units: Some(vec![crate::mana::Unit::free(tap), crate::mana::Unit::free(mask)]) }
-        };
-        Some(crate::pay::Class { members, sac_self: true, ..crate::pay::Class::of(def, src, yld) })
+        // (One source per kind: the first able; Lumberjacks share the
+        // Forests, `Class::share` of them.)
+        let mut squandered = false;
+        let mut lumber: Option<(CardIdx, u8, u8)> = None;
+        for &(by, i) in sac_by {
+            if by == c {
+                continue;
+            }
+            let ad = &self.abilities(by).activated[i as usize];
+            let Some(s) = &ad.cost.sacrifice else { continue };
+            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(by)) };
+            if !self.card_matches(&s.filter, c, &ctx) {
+                continue;
+            }
+            match ad.mana().map(|m| &m.prod) {
+                Some(crate::db::ManaProd::SacrificedLand) => squandered = true,
+                Some(_) => match &mut lumber {
+                    Some((_, _, n)) => *n += 1,
+                    None => lumber = Some((by, i, 1)),
+                },
+                None => {}
+            }
+        }
+        if squandered {
+            let mask = self.could_produce(c);
+            if mask != 0 {
+                add(&mut out, SQ_FOR, Yield::One(crate::mana::Unit::free(mask)), 0);
+            }
+        }
+        if let Some((by, i, n)) = lumber {
+            let ad = &self.abilities(by).activated[i as usize];
+            let m = ad.mana().expect("a mana ability");
+            // ("Whenever you tap a creature for mana": the Lumberjack's.)
+            let extra = if ad.cost.tap && self.is_creature(by) { creature_bonus } else { [0; 6] };
+            let mut prods = crate::pay::productions(self, p, &m.prod, Some(by));
+            for v in prods.iter_mut() {
+                for t in 0..6 {
+                    v[t] += extra[t];
+                }
+            }
+            if !prods.is_empty() {
+                add(&mut out, LJ_FOR, Yield::Multi { prods, units: None }, n);
+            }
+        }
+        out
     }
 
     fn activation_locks_hit(&self, c: CardIdx, locks: u16) -> bool {
         locks != 0 && self.types_of(c) & locks != 0
     }
 
-    /// Activate `c`'s granted sacrifice for production `prod` (its mana is
-    /// the payment's): first the own tap ability whose mana makes the rest,
-    /// if any, then the sacrifice (CR 601.2g).
-    pub(crate) fn activate_sac_for(&mut self, c: CardIdx, prod: [u8; 6]) {
+    /// Activate the source `src` sacrificing its permanent (`SAC_FOR`,
+    /// `SQ_FOR`, `LJ_FOR`): its mana is the payment's.
+    pub(crate) fn activate_sac_for(&mut self, src: crate::pay::Src) {
+        let c = src.card;
         let p = self.objs[c.i()].controller;
-        let mask = self.sac_mana_of(c);
-        let mut rest = prod;
-        if let Some(t) = (0..6).find(|&t| mask & (1 << t) != 0 && rest[t] > 0) {
-            rest[t] -= 1;
-        }
-        if rest != [0; 6] {
+        if src.slot == crate::pay::SAC_FOR {
+            self.note(|g| format!("P{p} sacrifices {} for mana", g.name(c)));
+        } else {
+            // The ability sacrificing it (Squandered Resources, Orcish
+            // Lumberjack): one able now (a Lumberjack untapped).
             let locks = self.activation_locks();
-            let t = rest.iter().position(|&n| n > 0).unwrap_or(0);
-            if let Some((i, _)) = self.sac_for_taps(p, c, locks).into_iter().find(|&(_, k)| k & (1 << t) != 0) {
-                self.activate_mana_costs(crate::pay::Src { card: c, slot: crate::db::AbilitySlot::Activated(i) });
+            let squandered = src.slot == crate::pay::SQ_FOR;
+            let by = self.permanents_of(p).find_map(|x| {
+                self.abilities(x).activated.iter().enumerate().find_map(|(i, ad)| {
+                    let ok = ad.cost.sacrifice.is_some()
+                        && ad.mana().is_some_and(|m| matches!(m.prod, crate::db::ManaProd::SacrificedLand) == squandered)
+                        && x != c
+                        && self.activation_ready(p, x, ad, locks);
+                    ok.then_some((x, i as u8))
+                })
+            });
+            match by {
+                Some((x, i)) => {
+                    self.note(|g| format!("P{p} activates {} sacrificing {} for mana", g.name(x), g.name(c)));
+                    let ad = self.def_of(x).activated_def(crate::db::AbilitySlot::Activated(i));
+                    if ad.cost.tap {
+                        self.tap(x);
+                    }
+                }
+                None => debug_assert!(false, "no source to sacrifice {c:?}"),
             }
         }
         if self.objs[c.i()].zone == Zone::Battlefield {
-            self.note(|g| format!("P{p} sacrifices {} for mana", g.name(c)));
             self.sacrifice(c);
         }
     }

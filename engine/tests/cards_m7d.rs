@@ -853,16 +853,13 @@ fn rain_of_filth_lands_tap_then_sacrifice_in_one_payment_cr601_2g() {
         g.choose(Choice::Target(engine::Target::Player(1)));
         g.drive_until(|g| g.kind() == Some(DecisionKind::PayMana));
     }
-    assert!(g.has_option(Choice::Ability(untapped, sac_for)), "{:?}", g.options_desc());
-    // (The other way: the untapped Swamp's own {B}, then the tapped one
-    // sacrificed: a tapped land can be sacrificed.)
-    let mut h = g.clone();
-    h.choose(act(untapped, 0));
-    assert!(h.has_option(Choice::Ability(tapped, sac_for)), "a tapped land can be sacrificed: {:?}", h.options_desc());
+    // (A tapped land can be sacrificed; the untapped one's {T} and its
+    // sacrifice are two sources of one card, the tap first.)
+    assert!(g.has_option(Choice::Ability(tapped, sac_for)), "a tapped land can be sacrificed: {:?}", g.options_desc());
+    assert!(g.has_option(act(untapped, 0)), "{:?}", g.options_desc());
+    g.choose(act(untapped, 0));
+    assert!(g.has_option(Choice::Ability(untapped, sac_for)), "tapped, then sacrificed: {:?}", g.options_desc());
     g.choose(Choice::Ability(untapped, sac_for));
-    assert_eq!(g.kind(), Some(DecisionKind::ChooseMana), "{{B}} or {{B}}{{B}}: {:?}", g.options_desc());
-    let bb = g.pending_decision().unwrap().options.last().unwrap().choice;
-    g.choose(bb);
     settle(&mut g);
     assert_eq!(g.count_in(0, "Swamp", Zone::Graveyard), 1, "{}", log(&g));
     assert_eq!(g.count_in(0, "Hymn to Tourach", Zone::Graveyard), 1, "Hymn cast and resolved\n{}", log(&g));

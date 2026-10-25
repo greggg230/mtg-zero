@@ -426,14 +426,17 @@ impl Unit {
 pub struct Budget {
     pub life: i32,
     pub sac: i32,
+    /// Activations of a shared source (Orcish Lumberjack, tapped for each
+    /// Forest it sacrifices).
+    pub tap: i32,
 }
 
 impl Budget {
     /// No limits that matter.
-    pub const FREE: Budget = Budget { life: i32::MAX, sac: i32::MAX };
+    pub const FREE: Budget = Budget { life: i32::MAX, sac: i32::MAX, tap: i32::MAX };
 
     fn take(&self, u: &Unit, n: i32) -> Option<Budget> {
-        let b = Budget { life: self.life - u.life as i32 * n, sac: self.sac - if u.sac { n } else { 0 } };
+        let b = Budget { life: self.life - u.life as i32 * n, sac: self.sac - if u.sac { n } else { 0 }, tap: self.tap };
         (b.life >= 0 && b.sac >= 0).then_some(b)
     }
 }
@@ -536,7 +539,7 @@ mod tests {
     #[test]
     fn budgets_limit_life_and_hand_units() {
         let two = ManaCost::parse("{2}").unwrap();
-        let b = |life, sac| Budget { life, sac };
+        let b = |life, sac| Budget { life, sac, tap: i32::MAX };
         let conf = Unit { life: 1, ..Unit::free(COLORS) };
         assert!(payable_within(&two, &[], &[conf, conf], b(2, 0)));
         assert!(!payable_within(&two, &[], &[conf, conf], b(1, 0)));

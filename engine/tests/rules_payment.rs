@@ -297,3 +297,35 @@ fn cr_605_3a_wizards_rockets_turns_mana_into_colours_while_paying() {
     settle(&mut g);
     assert_eq!(g.player(1).life, 17, "{}", log(&g));
 }
+
+// ---- 31.7.2: Rain of Filth's granted sacrifice after any tap ability ----------
+
+/// CR 601.2g: a land may be tapped for mana and then sacrificed for mana in
+/// one payment; Rain of Filth's granted "sacrifice this land: add {B}"
+/// follows its tap ability whatever that ability's condition (Ancient Tomb:
+/// {C}{C} and 2 damage). The engine combined only plain one-mana taps.
+#[test]
+fn cr_601_2g_rain_of_filth_after_a_tap_ability_with_damage() {
+    let mut g = scen().battlefield(0, &["Swamp", "Ancient Tomb"]).hand(0, &["Rain of Filth"]).at(Step::Main1, 0).start();
+    let rain = g.card(0, "Rain of Filth", Zone::Hand);
+    g.choose(Choice::Cast(rain));
+    let swamp = bf(&g, 0, "Swamp");
+    finish(&mut g, |g| options(g).into_iter().find(|&c| c == act(swamp, 0)));
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Rain of Filth", Zone::Graveyard), 1, "{}", log(&g));
+    // The Tomb's {C}{C}, its {B} sacrificed, the tapped Swamp's {B}.
+    assert!(g.can_pay(0, &cost("{2}{B}{B}")), "{}", log(&g));
+    assert!(!g.can_pay(0, &cost("{2}{B}{B}{B}")));
+}
+
+/// Squandered Resources' sacrifice and a land's own conditioned tap: Mana
+/// Confluence ("{T}, pay 1 life: add one mana of any color") tapped, then
+/// sacrificed for one mana of a type it could produce (CR 601.2g, 106.7).
+#[test]
+fn cr_601_2g_squandered_resources_after_a_tap_ability_with_life() {
+    let g = scen().battlefield(0, &["Squandered Resources", "Mana Confluence"]).life(0, 1).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{U}{R}")));
+    let g = scen().battlefield(0, &["Squandered Resources", "Mana Confluence"]).life(0, 0).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{U}")), "sacrificed without its life: {}", log(&g));
+    assert!(!g.can_pay(0, &cost("{U}{R}")), "no life to pay (CR 119.4)");
+}

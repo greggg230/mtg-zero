@@ -310,45 +310,51 @@ fn loot_exhaust_mana_ability_only_once_cr702_177a() {
 /// and/or {G}" (a choice in the cost: activated with priority).
 #[test]
 fn orcish_lumberjack_sacrifices_a_forest_for_three_cr605_3a() {
-    let mut g = scen().battlefield(0, &["Orcish Lumberjack", "Forest", "Island"]).at(Step::Main1, 0).start();
+    let mut g = scen().battlefield(0, &["Orcish Lumberjack", "Forest", "Island"]).hand(0, &["Lightning Bolt"]).at(Step::Main1, 0).start();
     let l = bf(&g, 0, "Orcish Lumberjack");
     let f = bf(&g, 0, "Forest");
-    g.choose(act(l, 0));
-    assert_eq!(g.kind(), Some(DecisionKind::Sacrifice));
-    assert_eq!(opts(&g), vec![Choice::Card(f)], "a Forest");
-    g.choose(Choice::Card(f));
-    assert_eq!(opts(&g).len(), 4, "RRR, RRG, RGG, GGG");
+    // While paying (CR 605.3a), the Forest tapped first if need be (601.2g).
+    assert!(!g.has_option(act(l, 0)), "not with priority");
+    assert!(g.can_pay(0, &cost("{R}{R}{G}{G}{U}")));
+    assert!(!g.can_pay(0, &cost("{R}{R}{G}{G}{U}{U}")));
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(Choice::Target(Target::Player(1)));
+    g.drive_until(|g| !at_priority(g));
+    let lj = Choice::Ability(f, AbilitySlot::Trigger(u8::MAX - 3));
+    assert!(g.has_option(lj), "{:?}", g.options_desc());
+    g.choose(lj);
+    assert_eq!(opts(&g).len(), 3, "RRR, RRG, RGG: GGG pays nothing");
     g.choose(Choice::Number(1));
-    g.drive_until(at_priority);
-    let p = pool(&g, 0);
-    assert_eq!(p[3] + p[4], 3);
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(pool(&g, 0), [0, 0, 0, 1, 1, 0], "{}", g.log_lines().join("\n"));
     assert_eq!(g.obj(f).zone, Zone::Graveyard);
-    // No Forest: not offered.
+    assert!(g.obj(l).tapped);
+    // No Forest: nothing.
     let g = scen().battlefield(0, &["Orcish Lumberjack", "Island"]).at(Step::Main1, 0).start();
-    assert!(!g.has_option(act(bf(&g, 0, "Orcish Lumberjack"), 0)));
+    assert!(!g.can_pay(0, &cost("{R}")));
 }
 
 /// "Sacrifice a land: Add one mana of any type the sacrificed land could
 /// produce" (CR 106.7).
 #[test]
 fn squandered_resources_mana_the_sacrificed_land_could_make_cr106_7() {
-    let mut g = scen().battlefield(0, &["Squandered Resources", "Volcanic Island", "Wasteland"]).at(Step::Main1, 0).start();
+    let g = scen().battlefield(0, &["Squandered Resources", "Volcanic Island", "Wasteland"]).at(Step::Main1, 0).start();
     let s = bf(&g, 0, "Squandered Resources");
+    assert!(!g.has_option(act(s, 0)), "while paying (CR 605.3a), not with priority");
+    // Each land tapped, then sacrificed (601.2g): the Volcanic's U or R,
+    // the Wasteland's {C} only.
+    assert!(g.can_pay(0, &cost("{U}{R}{C}{C}")));
+    assert!(!g.can_pay(0, &cost("{U}{R}{R}{C}")));
+    let mut g = scen().battlefield(0, &["Squandered Resources", "Volcanic Island"]).hand(0, &["Expressive Iteration"]).at(Step::Main1, 0).start();
     let v = bf(&g, 0, "Volcanic Island");
-    g.choose(act(s, 0));
-    assert_eq!(g.kind(), Some(DecisionKind::Sacrifice));
-    assert_eq!(opts(&g).len(), 2);
-    g.choose(Choice::Card(v));
-    assert_eq!(opts(&g).len(), 2, "U or R");
-    g.choose(Choice::Number(1));
-    g.drive_until(at_priority);
-    assert_eq!(pool(&g, 0), [0, 0, 0, 1, 0, 0]);
-    assert_eq!(g.obj(v).zone, Zone::Graveyard);
-    let w = bf(&g, 0, "Wasteland");
-    g.choose(act(s, 0));
-    g.choose(Choice::Card(w));
-    g.drive_until(at_priority);
-    assert_eq!(pool(&g, 0), [0, 0, 0, 1, 0, 1], "Wasteland: colorless only, no choice");
+    let ei = g.card(0, "Expressive Iteration", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(ei)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(ei));
+    pay(&mut g);
+    assert_eq!(g.obj(v).zone, Zone::Graveyard, "{}", g.log_lines().join("\n"));
 }
 
 // ---- Palantir of Orthanc ---------------------------------------------------

@@ -25,10 +25,31 @@ pub(crate) const IMPROVISE: AbilitySlot = AbilitySlot::Spell;
 pub(crate) const TAP_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX);
 
 /// The `Src` slot of a granted "sacrifice this: add <mana>" ability (Rain of
-/// Filth, `Mod::GainSacMana`), whose productions include tapping the
-/// permanent for one of its own mana abilities first (CR 601.2g: both in
-/// one payment; ENGINE.md 31).
+/// Filth, `Mod::GainSacMana`). It may follow the permanent's own tap ability
+/// in one payment (CR 601.2g: tap it for mana, then sacrifice it; ENGINE.md
+/// 18, 31): a sacrifice and a tap of one card combine.
 pub(crate) const SAC_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 1);
+
+/// The `Src` slot of a permanent sacrificed for Squandered Resources'
+/// "sacrifice a land: add one mana of any type that land could produce"
+/// (CR 106.7), a source on each land (as `SAC_FOR`).
+pub(crate) const SQ_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 2);
+
+/// The `Src` slot of a Forest sacrificed for Orcish Lumberjack's "{T},
+/// sacrifice a Forest: add three mana in any combination of {R} and/or
+/// {G}" (the Lumberjack tapped as well: `Class::share`).
+pub(crate) const LJ_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 3);
+
+/// A source's use of its card (`Class::res`): tapped, sacrificed (or
+/// exiled). Two sources of one card combine when they use different ones.
+pub(crate) const TAP: u8 = 1;
+pub(crate) const SAC: u8 = 2;
+
+/// The slots of a permanent sacrificed for another's or a granted mana
+/// ability.
+fn sac_slot(slot: AbilitySlot) -> bool {
+    slot == SAC_FOR || slot == SQ_FOR || slot == LJ_FOR
+}
 
 /// A mana ability that can help pay a cost: of a permanent, or of a card in
 /// hand (the Spirit Guides, CR 605.3a; ENGINE.md 18); or an artifact tapped
@@ -54,6 +75,9 @@ pub(crate) type Members = SVec<Src, 8>;
 pub(crate) fn classes_without(classes: &[Class], cards: &[CardIdx]) -> Vec<Class> {
     classes
         .iter()
+        // (A Lumberjack may be among the tapped creatures: none of its
+        // sacrifices then.)
+        .filter(|cl| cl.share == 0 || cards.is_empty())
         .filter_map(|cl| {
             let mut m = Members::new();
             for s in cl.members.iter() {
@@ -165,12 +189,36 @@ pub(crate) struct Class {
     /// Its mana gives haste to the creature spell it is spent on (Arena of
     /// Glory, `ManaPool::haste`).
     pub haste: bool,
+    /// What its activation uses of its card (`TAP`, `SAC`; both by default,
+    /// 0 for Pentad Prism's counters): a card's sources that use different
+    /// ones combine (CR 601.2g).
+    pub res: u8,
+    /// The `ACTIVATE` slot of a sacrifice for another's or a granted
+    /// ability (`SAC_FOR`, `SQ_FOR`, `LJ_FOR`): after the card's own.
+    pub slot_id: u8,
+    /// Orcish Lumberjack (`LJ_FOR`): how many Lumberjacks can be tapped
+    /// (each activation taps one); 0 otherwise.
+    pub share: u8,
 }
 
 impl Class {
     /// A class of one source with nothing special.
     pub(crate) fn of(def: DefId, src: Src, yld: Yield) -> Class {
-        Class { def, members: one_member(src), yld, dmg: 0, sac_self: false, only: 0, need: 0, reuse: 1, convert: false, haste: false }
+        Class {
+            def,
+            members: one_member(src),
+            yld,
+            dmg: 0,
+            sac_self: false,
+            only: 0,
+            need: 0,
+            reuse: 1,
+            convert: false,
+            haste: false,
+            res: TAP | SAC,
+            slot_id: 0,
+            share: 0,
+        }
     }
 }
 
@@ -304,6 +352,24 @@ impl PayMana {
     /// counters).
     fn uses(&self, c: CardIdx) -> u8 {
         (self.chosen.iter().filter(|s| s.card == c).count() + self.multi.iter().filter(|(s, _)| s.card == c).count()) as u8
+    }
+
+    /// What the picks so far use of card `c` (`Class::res`).
+    fn used_res(&self, classes: &[Class], c: CardIdx) -> u8 {
+        self.chosen
+            .iter()
+            .chain(self.multi.iter().map(|m| &m.0))
+            .filter(|s| s.card == c)
+            .fold(0, |m, s| m | classes.iter().find(|cl| cl.members.contains(s)).map_or(TAP | SAC, |cl| cl.res))
+    }
+
+    /// Is member `s` of class `cl` still available?
+    fn free(&self, classes: &[Class], cl: &Class, s: &Src) -> bool {
+        if cl.res == 0 {
+            self.uses(s.card) < cl.reuse
+        } else {
+            self.used_res(classes, s.card) & cl.res == 0
+        }
     }
 
     /// The mana the payment needs: the cost and the picked abilities' own.
@@ -503,6 +569,10 @@ impl Game {
         // the mana and the filter, once per payment (several such abilities
         // make the same mana from the same permanents).
         let mut tap_for: Option<(ManaMask, &Filter)> = None;
+        // Mana abilities that sacrifice another permanent (Squandered
+        // Resources, Orcish Lumberjack): a source on each permanent they
+        // may sacrifice, below.
+        let mut sac_by: SVec<(CardIdx, u8), 4> = SVec::new();
         for c in self.permanents_of(p) {
             if Some(c) == exclude {
                 continue;
@@ -516,6 +586,10 @@ impl Game {
                 }
                 if ad.exhaust && self.exhausted(c, i as u8) {
                     continue; // CR 702.177a: once
+                }
+                if ad.cost.sacrifice.is_some() {
+                    sac_by.push((c, i as u8));
+                    continue;
                 }
                 if let Some(t) = &ad.cost.tap_untapped {
                     if let ManaProd::One(mask) = m.prod {
@@ -591,6 +665,11 @@ impl Game {
                         None => continue,
                     }
                 };
+                let res = if reuse > 1 {
+                    0
+                } else {
+                    (if ad.cost.tap { TAP } else { 0 }) | (if sac_self || ad.cost.exile_self || ad.cost.discard_self { SAC } else { 0 })
+                };
                 let cl = Class {
                     dmg: m.damage_to_you,
                     sac_self,
@@ -599,6 +678,7 @@ impl Game {
                     reuse,
                     convert: ad.x,
                     haste: m.haste,
+                    res: if res == 0 && reuse == 1 { TAP | SAC } else { res },
                     ..Class::of(def, src, yld)
                 };
                 if matches!(cl.yld, Yield::Multi { .. }) {
@@ -609,20 +689,22 @@ impl Game {
                 }
             }
         }
-        // Granted "sacrifice this: add <mana>" abilities (Rain of Filth):
-        // several-mana classes (the sacrifice alone, or its own tap ability
-        // first), one per permanent.
-        if self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
+        // Granted "sacrifice this: add <mana>" abilities (Rain of Filth) and
+        // the permanents another's mana ability sacrifices (Squandered
+        // Resources, Orcish Lumberjack): sources on each permanent.
+        let rain = self.seen & crate::game::SEEN_SAC_MANA != 0 && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_)));
+        if rain || !sac_by.is_empty() {
             for c in self.permanents_of(p) {
                 if Some(c) == exclude {
                     continue;
                 }
-                let Some(cl) = self.sac_for_class(p, c, locks) else { continue };
-                if matches!(cl.yld, Yield::Multi { .. }) {
-                    out.insert(n_multi, cl);
-                    n_multi += 1;
-                } else {
-                    out.push(cl);
+                for cl in self.sac_classes(p, c, locks, rain, &sac_by, creature_bonus) {
+                    if matches!(cl.yld, Yield::Multi { .. }) {
+                        out.insert(n_multi, cl);
+                        n_multi += 1;
+                    } else {
+                        out.push(cl);
+                    }
                 }
             }
         }
@@ -638,7 +720,7 @@ impl Game {
                 let src = Src { card: x, slot: TAP_FOR };
                 match out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == TAP_FOR) {
                     Some(cl) => cl.members.push(src),
-                    None => out.push(Class::of(def, src, Yield::One(Unit::free(mask)))),
+                    None => out.push(Class { res: TAP, ..Class::of(def, src, Yield::One(Unit::free(mask))) }),
                 }
             }
         }
@@ -683,7 +765,7 @@ impl Game {
             let src = Src { card: c, slot: IMPROVISE };
             match out.iter_mut().find(|cl| cl.def == def) {
                 Some(cl) => cl.members.push(src),
-                None => out.push(Class::of(def, src, Yield::One(Unit::free(0)))),
+                None => out.push(Class { res: TAP, ..Class::of(def, src, Yield::One(Unit::free(0))) }),
             }
         }
         out
@@ -810,7 +892,7 @@ impl Game {
             }
             (None, None, None) => i32::MAX,
         };
-        (Budget { life: (pl.life - later as i32).max(0), sac: sac.max(0) }, later > 0)
+        (Budget { life: (pl.life - later as i32).max(0), sac: sac.max(0), tap: i32::MAX }, later > 0)
     }
 
     /// Mana sources whose use takes a permanent a later sacrifice needs, or
@@ -833,15 +915,19 @@ impl Game {
     }
 
     fn cands(&self, p: PlayerId, keep: &Keep, classes: &[Class], use_src: &dyn Fn(&Src) -> bool, dmg: bool) -> Cands {
-        cands(classes, use_src, &|_| 0, dmg, &|cl, s| self.reserved(p, keep, cl, s), keep.allow)
+        cands(classes, use_src, &|_| (0, 0), dmg, &|cl, s| self.reserved(p, keep, cl, s), keep.allow)
     }
 
     /// The candidates of the rest of payment `pm`: the sources of
     /// `classes[from..]` not picked yet (Pentad Prism: its counters left),
     /// `plus` counted as picked once more.
     fn pay_cands(&self, pm: &PayMana, classes: &[Class], from: usize, plus: Option<Src>, dmg: bool) -> Cands {
-        let uses = |s: &Src| pm.uses(s.card) + plus.is_some_and(|x| x.card == s.card) as u8;
-        let mut c = cands(&classes[from..], &|_| true, &uses, dmg, &|cl, s| self.reserved(pm.payer, &pm.keep, cl, s), pm.keep.allow);
+        let plus_res = plus.map_or(0, |x| classes.iter().find(|cl| cl.members.contains(&x)).map_or(TAP | SAC, |cl| cl.res));
+        let used = |s: &Src| {
+            let more = plus.is_some_and(|x| x.card == s.card);
+            (pm.used_res(classes, s.card) | if more { plus_res } else { 0 }, pm.uses(s.card) + more as u8)
+        };
+        let mut c = cands(&classes[from..], &|_| true, &used, dmg, &|cl, s| self.reserved(pm.payer, &pm.keep, cl, s), pm.keep.allow);
         c.converted = pm.convert;
         c
     }
@@ -1033,7 +1119,7 @@ impl Game {
             return self.can_pay_with(p, cost, classes, &Keep::default());
         }
         let life = self.players[p as usize].life.max(0);
-        cost.is_zero() || cands_payable(cost, &[], &[], plain, Budget { life, sac: i32::MAX })
+        cost.is_zero() || cands_payable(cost, &[], &[], plain, Budget { life, sac: i32::MAX, tap: i32::MAX })
     }
 
     /// [`can_pay`](Self::can_pay) for a payment that satisfies the spending
@@ -1213,8 +1299,9 @@ impl Game {
                 life += u.life as i32;
             }
             let sac = self.reserved(pm.payer, &pm.keep, cl, &s) as i32;
-            b = Budget { life: b.life - life, sac: b.sac - sac };
-            if b.life < 0 || b.sac < 0 {
+            let tap = if cl.share > 0 { b.tap.min(cl.share as i32) - 1 } else { b.tap };
+            b = Budget { life: b.life - life, sac: b.sac - sac, tap };
+            if b.life < 0 || b.sac < 0 || b.tap < 0 {
                 return None;
             }
         }
@@ -1377,7 +1464,7 @@ impl Game {
                 continue; // its mana can't be spent on this (CR 106.6)
             }
             // A card already picked for one of its abilities is spent.
-            let Some(&rep) = cl.members.iter().find(|s| pm.uses(s.card) < cl.reuse) else { continue };
+            let Some(&rep) = cl.members.iter().find(|s| pm.free(&classes, cl, s)) else { continue };
             let ok = if cl.convert {
                 !pm.convert && pm.chosen.is_empty() && self.convert_ok(&pm, &classes, ci, rep)
             } else {
@@ -1410,12 +1497,12 @@ impl Game {
                 }
             };
             if ok {
-                opts.push(if rep.slot == SAC_FOR {
-                    // A granted ability: after its own (`ACTIVATE` + its
-                    // number of abilities; `sac_for_class` checks there is
-                    // room).
-                    let n = self.abilities(rep.card).activated.len() as u16;
-                    Opt { action: act::ACTIVATE + (self.perm_action(payer, rep.card) - act::MY_PERM) * 4 + n, choice: Choice::Ability(rep.card, rep.slot) }
+                opts.push(if sac_slot(rep.slot) {
+                    // A granted ability or another's sacrificing it: after
+                    // its own (`ACTIVATE` + `slot_id`; `sac_classes` checks
+                    // there is room).
+                    let k = cl.slot_id as u16;
+                    Opt { action: act::ACTIVATE + (self.perm_action(payer, rep.card) - act::MY_PERM) * 4 + k, choice: Choice::Ability(rep.card, rep.slot) }
                 } else if rep.slot == IMPROVISE || rep.slot == TAP_FOR {
                     // Improvise, or a permanent tapped for another's mana
                     // ability: the permanent's own slot (`MY_PERM`).
@@ -1554,7 +1641,7 @@ impl Game {
         // "That spell can't be countered" (Delighted Halfling): its mana
         // was spent on the spell (read before the sources are activated).
         if let Some(card) = pm.keep.spell {
-            let special = |s: &Src| s.slot == IMPROVISE || s.slot == TAP_FOR || s.slot == SAC_FOR;
+            let special = |s: &Src| s.slot == IMPROVISE || s.slot == TAP_FOR || sac_slot(s.slot);
             let uncounterable = pm
                 .chosen
                 .iter()
@@ -1578,7 +1665,7 @@ impl Game {
             if s.slot == TAP_FOR {
                 return (false, false, false, false);
             }
-            if s.slot == SAC_FOR {
+            if sac_slot(s.slot) {
                 return (false, true, false, true);
             }
             let ad = self.def_of(s.card).activated_def(s.slot);
@@ -1595,9 +1682,8 @@ impl Game {
                 // for mana", CR 106.12a.)
                 self.note(|g| format!("P{payer} taps {} for a mana ability", g.name(src.card)));
                 self.tap(src.card);
-            } else if src.slot == SAC_FOR {
-                let prod = pm.multi.iter().find(|m| m.0 == src).map(|m| m.1).unwrap_or([0; 6]);
-                self.activate_sac_for(src.card, prod);
+            } else if sac_slot(src.slot) {
+                self.activate_sac_for(src);
             } else {
                 if let AbilitySlot::Activated(i) = src.slot {
                     if self.def_of(src.card).activated_def(src.slot).exhaust {
@@ -1770,6 +1856,8 @@ pub(crate) struct Cands {
     convert: Option<Way>,
     /// It was picked: every unit is of any colour.
     converted: bool,
+    /// How many Lumberjacks there are to tap (`Budget::tap`).
+    tap_limit: i32,
 }
 
 /// Candidate units, inline up to 32 (ENGINE.md 17).
@@ -1782,14 +1870,17 @@ struct Way {
     sac: i32,
     /// The ability's own mana cost (`Class::need`), 0 for none.
     need: ManaMask,
+    /// It taps a Lumberjack (`Budget::tap`).
+    tap: i32,
 }
 
-/// `uses`: how many times a source was picked already (a source picked
-/// once more than its class allows is out).
+/// `used`: what the payment's picks use of a source's card already
+/// (`Class::res`) and how many times it was picked (a source whose card
+/// use is taken, or picked as often as its class allows, is out).
 fn cands(
     classes: &[Class],
     use_src: &dyn Fn(&Src) -> bool,
-    uses: &dyn Fn(&Src) -> u8,
+    used: &dyn Fn(&Src) -> (u8, u8),
     dmg: bool,
     reserved: &dyn Fn(&Class, &Src) -> bool,
     allow: u8,
@@ -1811,10 +1902,13 @@ fn cands(
         for s in cl.members.iter() {
             let n = if !use_src(s) {
                 0
-            } else if cl.reuse == 1 {
-                (uses(s) == 0) as u8
             } else {
-                cl.reuse.saturating_sub(uses(s))
+                let (res, k) = used(s);
+                if cl.res == 0 {
+                    cl.reuse.saturating_sub(k)
+                } else {
+                    (res & cl.res == 0) as u8
+                }
             };
             lefts.push(n);
             if n > 0 {
@@ -1827,8 +1921,8 @@ fn cands(
     }
     let mut li = 0;
     let alone = |c: CardIdx| count.iter().any(|&(x, n)| x == c && n == 1);
-    let mut out = Cands { fixed: Units::new(), alts: Vec::new(), convert: None, converted: false };
-    let mut per_card: Vec<(CardIdx, Vec<Way>)> = Vec::new();
+    let mut out = Cands { fixed: Units::new(), alts: Vec::new(), convert: None, converted: false, tap_limit: i32::MAX };
+    let mut per_card: Vec<(CardIdx, Vec<(Way, u8)>)> = Vec::new();
     for cl in classes {
         let extra = if dmg { cl.dmg as i32 } else { 0 };
         let made = if cl.need != 0 { MADE } else { 0 };
@@ -1841,9 +1935,13 @@ fn cands(
             let sac = reserved(cl, s) as i32;
             if cl.convert {
                 if out.convert.as_ref().map_or(true, |w| (w.life, w.sac) > (extra, sac)) {
-                    out.convert = Some(Way { units: SVec::new(), life: extra, sac, need: 0 });
+                    out.convert = Some(Way { units: SVec::new(), life: extra, sac, need: 0, tap: 0 });
                 }
                 continue;
+            }
+            let tap = (cl.share > 0) as i32;
+            if tap > 0 {
+                out.tap_limit = out.tap_limit.min(cl.share as i32);
             }
             match &cl.yld {
                 Yield::One(u) if alone(s.card) => {
@@ -1852,17 +1950,17 @@ fn cands(
                     }
                     continue;
                 }
-                Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 && cl.need == 0 => {
+                Yield::Multi { units: Some(us), .. } if alone(s.card) && extra == 0 && sac == 0 && cl.need == 0 && tap == 0 => {
                     out.fixed.extend(us.iter().map(|u| Unit::free(u.mask)));
                     continue;
                 }
                 _ => {}
             }
-            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac, need: cl.need };
+            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac, need: cl.need, tap };
             let ways: Vec<Way> = match &cl.yld {
                 Yield::One(u) => {
                     let units = std::iter::repeat_n(Unit::free(u.mask), n as usize).collect();
-                    vec![Way { units, life: u.life as i32 + extra, sac, need: 0 }]
+                    vec![Way { units, life: u.life as i32 + extra, sac, need: 0, tap }]
                 }
                 Yield::Multi { units: Some(us), .. } => {
                     vec![multi(us.iter().map(|u| Unit::free(u.mask | made)).collect())]
@@ -1871,20 +1969,35 @@ fn cands(
                     prods.iter().map(|p| multi(units_of(p).map(|u| Unit::free(u.mask | made)).collect())).collect()
                 }
             };
+            let ways = ways.into_iter().map(|w| (w, cl.res));
             match per_card.iter_mut().find(|(c, _)| *c == s.card) {
                 Some((_, w)) => w.extend(ways),
-                None => per_card.push((s.card, ways)),
+                None => per_card.push((s.card, ways.collect())),
             }
         }
     }
     // A single unit carries its budget use itself.
     let as_unit = |w: &Way| Unit { life: w.life as u8, sac: w.sac > 0, ..w.units[0] };
-    for (_, mut ways) in per_card {
+    for (_, tagged) in per_card {
+        // A tap way and a sacrifice way of one card combine (tap it for
+        // mana, then sacrifice it: CR 601.2g; Rain of Filth, Squandered
+        // Resources, Orcish Lumberjack).
+        let mut ways: Vec<Way> = tagged.iter().map(|(w, _)| w.clone()).collect();
+        for (t, _) in tagged.iter().filter(|(_, r)| *r == TAP) {
+            for (s, _) in tagged.iter().filter(|(_, r)| *r == SAC) {
+                if t.need != 0 && s.need != 0 {
+                    continue; // (one need per way; no such pair in the cube)
+                }
+                let mut units = t.units.clone();
+                units.extend(s.units.iter().copied());
+                ways.push(Way { units, life: t.life + s.life, sac: t.sac + s.sac, need: t.need | s.need, tap: t.tap + s.tap });
+            }
+        }
         // A card whose ways take no budget and one of which makes every
-        // other's units (Rain of Filth's tap-then-sacrifice, ENGINE.md 31):
-        // that way stands for the card (more units never make a cost
-        // unpayable), so the search doesn't branch on it.
-        if ways.len() > 1 && ways.iter().all(|w| w.life == 0 && w.sac == 0 && w.need == 0) {
+        // other's units (a tap-then-sacrifice): that way stands for the card
+        // (more units never make a cost unpayable), so the search doesn't
+        // branch on it.
+        if ways.len() > 1 && ways.iter().all(|w| w.life == 0 && w.sac == 0 && w.need == 0 && w.tap == 0) {
             if let Some(k) = (0..ways.len()).find(|&k| ways.iter().all(|w| covers(&ways[k].units, &w.units))) {
                 out.fixed.extend(ways[k].units.iter().map(|u| Unit::free(u.mask)));
                 continue;
@@ -1892,7 +2005,7 @@ fn cands(
         }
         let ways = std::mem::take(&mut ways);
         let same_use = |a: &Way, b: &Way| (a.life, a.sac, a.need) == (b.life, b.sac, b.need);
-        if ways.iter().all(|w| w.units.len() == 1 && w.need == 0 && same_use(w, &ways[0])) {
+        if ways.iter().all(|w| w.units.len() == 1 && w.need == 0 && w.tap == 0 && same_use(w, &ways[0])) {
             let mask = ways.iter().fold(0, |m, w| m | w.units[0].mask);
             out.fixed.push(Unit { mask, ..as_unit(&ways[0]) });
         } else {
@@ -1921,6 +2034,7 @@ fn cands_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c: &
 
 /// [`cands_payable`], Wizard's Rockets' colours only with `convert`.
 fn cands_payable_c(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c: &Cands, budget: Budget, convert: bool) -> bool {
+    let budget = Budget { tap: budget.tap.min(c.tap_limit), ..budget };
     if c.converted {
         return payable_converted(cost, marked, chosen, c, budget);
     }
@@ -1929,7 +2043,7 @@ fn cands_payable_c(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c:
     }
     match &c.convert {
         Some(w) if convert => {
-            let left = Budget { life: budget.life - w.life, sac: budget.sac - w.sac };
+            let left = Budget { life: budget.life - w.life, sac: budget.sac - w.sac, tap: budget.tap };
             left.life >= 0 && left.sac >= 0 && payable_converted(cost, marked, chosen, c, left)
         }
         _ => false,
@@ -1954,8 +2068,8 @@ fn ways_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], fixed
             return payable_within_n(cost, needs, chosen, units, b);
         };
         for w in first {
-            let left = Budget { life: b.life - w.life, sac: b.sac - w.sac };
-            if left.life < 0 || left.sac < 0 {
+            let left = Budget { life: b.life - w.life, sac: b.sac - w.sac, tap: b.tap - w.tap };
+            if left.life < 0 || left.sac < 0 || left.tap < 0 {
                 continue;
             }
             let (len, nl) = (units.len(), needs.len());

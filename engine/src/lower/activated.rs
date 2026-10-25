@@ -65,18 +65,18 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
             only_if.push(c);
         }
     }
-    let mut instant_only = *activate_only_as_instant;
+    let instant_only = *activate_only_as_instant;
     let effect = if *is_mana_ability {
         let m = lower_mana_ability(l, effect)?;
         // Mana abilities are activated while paying a cost (ENGINE.md 18,
         // CR 605.3a), those with a mana cost of their own too (one mana paid
         // within the payment: Sunken Ruins, Loot, Arena of Glory, Chromatic
-        // Star; {X}: Wizard's Rockets), an exhaust one (Loot) and one without
-        // {T} (Pentad Prism: once per counter). One whose cost sacrifices a
-        // permanent of the player's choice is activated with priority only
-        // (ENGINE.md 28).
-        if cost.sacrifice.is_some() || matches!(m.prod, ManaProd::SacrificedLand) {
-            instant_only = true;
+        // Star; {X}: Wizard's Rockets), an exhaust one (Loot), one without
+        // {T} (Pentad Prism: once per counter) and one that sacrifices
+        // another permanent (Squandered Resources, Orcish Lumberjack: a
+        // source on each permanent it may sacrifice, `pay::SQ_FOR`).
+        if cost.sacrifice.as_ref().is_some_and(|s| s.another || cost.sac_self || !cost.mana.is_zero() || cost.life > 0) {
+            l.unsupported("ManaAbility.cost.sacrifice(with more)");
         }
         let pips = cost.mana.pips.iter().sum::<u8>() + cost.mana.hybrid.iter().sum::<u8>();
         if !cost.mana.is_zero() && !(pips + cost.mana.generic == 1 && !cost.mana.has_phyrexian()) {
@@ -131,7 +131,12 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         }
         // Payment treats a card's mana abilities as exclusive alternatives,
         // true when each one taps, sacrifices or exiles its source.
-        if !instant_only && !tap_other && cost.remove_counters.is_none() && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self) {
+        if !instant_only
+            && !tap_other
+            && cost.remove_counters.is_none()
+            && cost.sacrifice.is_none()
+            && !(cost.tap || cost.sac_self || cost.exile_self || cost.discard_self)
+        {
             l.unsupported("ManaAbility.cost(no tap or sacrifice of the source)");
         }
         if from == From::Hand && !matches!(m.prod, ManaProd::One(_)) {
