@@ -1290,7 +1290,8 @@ with its four token kinds registered, 7b815998fc563509, and for the 524-card poo
 its three new token kinds are registered, 023fa8874a183eae, and for M7d's 537-card pool with Test
 Manifester, 5cbbaf9280a01797, and for the whole cube with M7d's IR fixes, 1f210100db7b442e: the pool deals
 other decks, every game differs; and for M7e part 1's rules fixes and its three custom cards,
-161108b935c03d14), and names the games that differ. `DIGEST_WRITE=1` records
+161108b935c03d14, and for M7e part 2's payment model, b3a102f4d67c5e97), and names the games
+that differ. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
 are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every
@@ -4737,4 +4738,4 @@ load). Payment decisions per game in random play (4,000 games, main's pool): `Pa
 32.16, `PayPool` 0 -> 0.11, `ChooseMana` 1.91 -> 0.97 (the priority mana abilities and Rain's
 productions gone), `PayPhyrexian` 0.08 -> 0.09; 33.9 -> 33.3 in all. Speed: section 17. Behaviour
 digests re-recorded (`DIGEST_WRITE=1 cargo test --release -p engine --test digest -- --ignored`,
-the branch's last commit): section 15.
+the branch's last commit): combined digest b3a102f4d67c5e97 (section 15).
