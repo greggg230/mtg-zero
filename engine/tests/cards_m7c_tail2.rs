@@ -770,6 +770,32 @@ fn bilbo_reduces_spells_cast_from_outside_the_hand_cr601_2f() {
     assert_eq!(g.obj(m).zone, Zone::Battlefield, "{}", log(&g));
 }
 
+/// A card with flashback offered by Bilbo's trigger is cast the way the offer
+/// was checked, for its mana cost ({2}{W}, less Bilbo's {1}: two Plains pay
+/// it), not for its flashback cost ({1}{B}, less {1}: no black source). At
+/// 4613d0f the cast took the flashback route and the payment had no option
+/// (found by the fuzzer's option-completion check, ENGINE.md 15).
+#[test]
+fn bilbo_casts_a_flashback_card_for_the_cost_its_offer_was_checked_for_cr601_2f() {
+    let mut g = scen()
+        .battlefield(0, &["Bilbo, Thief in the Night", "Plains", "Plains"])
+        .graveyard(0, &["Lingering Souls"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let bilbo = bf(&g, 0, "Bilbo, Thief in the Night");
+    g.choose(Choice::Card(bilbo));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseGraveyardCard));
+    let souls = g.card(0, "Lingering Souls", Zone::Graveyard);
+    g.choose(Choice::Card(souls));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(g.battlefield().iter().filter(|&&c| g.def_of(c).name == "Plains").all(|&c| g.obj(c).tapped), "{{1}}{{W}} paid");
+    assert_eq!(g.battlefield().iter().filter(|&&c| g.def_of(c).token).count(), 2, "two Spirits: {}", log(&g));
+    assert_eq!(g.obj(souls).zone, Zone::Exile, "exiled instead (Bilbo)");
+}
+
 // ---- Multiversal Passage ---------------------------------------------------
 
 /// "As this land enters, choose a basic land type. Then you may pay 2

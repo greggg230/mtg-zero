@@ -659,6 +659,41 @@ fn malcolm_loots_and_casts_the_discard_free_at_four_chorus_counters_cr608_2g() {
     assert_eq!(g.obj(bolt).zone, Zone::Graveyard);
 }
 
+/// Malcolm's free cast of a discarded card with flashback (Echo of Eons:
+/// flashback {2}{U}): the card is cast the way the effect says, without paying
+/// its mana cost (CR 608.2g; an alternative cost, 118.9), not for its
+/// flashback cost (118.9a: one alternative cost; 702.34a: only a spell cast
+/// with flashback is exiled as it leaves the stack). The run mtg3 crashed
+/// here (4613d0f): the offer was checked for the free cast, the cast took the
+/// flashback route, and two one-mana sources couldn't pay {2}{U} ("PayMana: no
+/// way to pay").
+#[test]
+fn malcolm_casts_a_discarded_flashback_card_free_not_for_its_flashback_cost_cr118_9a() {
+    for lands in [&["Breeding Pool"][..], &["Breeding Pool", "Island", "Island"][..]] {
+        let mut g = scen()
+            .battlefield(0, &["Malcolm, Alluring Scoundrel", "Sylvan Caryatid"])
+            .battlefield(0, lands)
+            .counters(0, "Malcolm, Alluring Scoundrel", named("chorus"), 3)
+            .hand(0, &["Echo of Eons"])
+            .at(Step::DeclareAttackers, 0)
+            .start();
+        let m = bf(&g, 0, "Malcolm, Alluring Scoundrel");
+        g.choose(Choice::Card(m));
+        g.choose(Choice::Pass);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Discard));
+        let echo = g.card(0, "Echo of Eons", Zone::Hand);
+        g.choose(Choice::Card(echo));
+        assert_eq!(g.kind(), Some(DecisionKind::YesNo), "four counters: may cast it");
+        assert!(g.has_option(Choice::Yes), "castable without paying its mana cost");
+        g.choose(Choice::Yes);
+        assert_ne!(g.kind(), Some(DecisionKind::PayMana), "no mana to pay ({} lands)", lands.len());
+        g.drive_until(|g| g.stack().is_empty() && at_priority(g));
+        assert!(g.player(0).graveyard.contains(&echo), "not cast with flashback: not exiled (702.34a)");
+        assert!(g.battlefield().iter().all(|&c| !g.obj(c).tapped || c == m), "no mana source was tapped");
+        assert_eq!((g.player(0).hand.len(), g.player(1).hand.len()), (7, 7), "Echo of Eons resolved");
+    }
+}
+
 // ---- IR defects ------------------------------------------------------------
 
 /// Chromatic Star's IR triggers on leaving the battlefield (it would draw when
