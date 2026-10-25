@@ -1171,6 +1171,40 @@ Pool; it panics on 4613d0f) and `cards_m7c_tail2.rs` (Bilbo, Lingering Souls).
 earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
 `n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).
 
+**The search smoke** (`tools/search_smoke.py`, branch `m7d-targetfix`): the gate before pinning
+an engine for a run (21.5). Self-play search reaches states random play doesn't: it tries every
+legal option of a decision, in determinized worlds and deep lines, where the fuzzer follows one
+random path per option. The smoke plays games with zero-core's Rust driver and search (the
+self-play code) with a uniform evaluator (no network, no GPU) and the self-play seat of a run
+preset (`--preset mtg-3`: 64 simulations, 16 in three decisions of four, minor decisions 4,
+determinized roots, Dirichlet noise, completed-Q records), 400 games per configuration, 8 search
+threads, 256 games at a time, over driver seeds and specs (`--specs random,eval,nomull`: the
+self-play spec's random decks, the 16 evaluation deck pairs, no mulligans with 18-20 lands). A
+configuration plays the same games every time (the driver's streams come from its seed and the
+game id). Every game must end; a panic fails it. Each configuration runs in a process of its own:
+with zero-core pinned at 71a1718 a search worker's panic can leave the driver waiting for ever
+(the panic poisons its chunk's mutex, the thread that lays out the group's batches dies on it, and
+a caller already waiting for that group is never woken), so a configuration with no batch for 60
+s is reported as `HANG (stalled)` with the panic messages. `python tools/search_smoke.py` (seeds
+0-3, specs random and eval: 3,200 games, 1.26 million decisions, 32 million simulations) takes
+7.5 minutes on the desktop (52-59 s per configuration; 90-135 s with other work running), the
+time to budget before a launch; `python -m mtgz.az.bench search --game mtg --threads 8 --games 400
+--sims 64` is one configuration with a plainer seat (driver seed 0, the default spec, no minor
+decisions; 65 s; the bench has no seed option and no hang watchdog).
+It came after the self-play run mtg3 (preset `mtg-3`, engine 0577e06, 524 cards) panicked in
+iteration 15 with "no legal target for a required target" and its process hung. On 0577e06 the
+smoke finds that panic in 1 of 23 configurations (9,200 random-deck games; seed 2, every time, in
+97 s with the stall): Exorcise cast with Emrakul, the Aeons Torn its only candidate, in a world
+determinized for the caster (not a cause: everything involved was public). The cast was checked
+with the card in hand, not yet a spell, so Emrakul's protection from spells that are one or more
+colors (702.16b) didn't apply; on the stack it did, and no target was left (section 6: a spell's
+targets are now checked with it on the stack, `as_cast`). Whether mtg3's own panic was this card
+is not known: its message named nothing (it names the spell, the requirement, the turn and the
+world now) and its state was not reproduced (36 minutes of self-play like iteration 15's from
+iteration 14's network, 3,000 games, found nothing). On the fix (main's 537 cards): 48
+configurations (seeds 0-23 random, 0-11 eval, 0-11 nomull: 19,200 games, 7.5 million decisions,
+193 million simulations), no failure.
+
 **Behaviour digests** (`tests/digest.rs`, M7c). For a change that must not change behaviour (a
 performance change): 2,000 games of uniform random play (seeds 0..2000, random decks of every
 supported card as in the fuzzer) and 500 games of `az::bots::Heuristic` against random play
@@ -1850,7 +1884,9 @@ python -m mtgz.az.dashboard --host 0.0.0.0                       # port 5340 (hu
 
 Live runs go in `~/mtg-zero/runs/<run>` and run from a pinned worktree (zero-core docs/az.md 1):
 `git -C ~/mtg-zero worktree add --detach ~/mtg-zero-wt/run-<sha> <sha>`, then
-`CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<sha> bash tools/build_py.sh` there, then
+`CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<sha> bash tools/build_py.sh` there, then the
+search smoke there as the gate (`python tools/search_smoke.py`, section 15: no failure; 7.5
+minutes), then
 `python tools/launch_hidden.py <run>/supervisor_console.txt python tools/supervise.py <run>
 --preset mtg-1`. While the pinned core commit is not on GitHub, the submodule clone of a new
 worktree cannot fetch it: `git -C third_party/zero-core fetch ~/zero-core main && git -C
