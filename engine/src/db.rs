@@ -845,6 +845,42 @@ pub enum Cond {
     LandsPlayedAtLeast(u8),
 }
 
+impl Cond {
+    /// Does it read the cards in `zone` (their number or kinds)? A spell
+    /// leaving that zone for the stack can change it as its targets are
+    /// chosen (CR 601.2a before 601.2c; `Game::as_cast`). Exhaustive: a new
+    /// condition says.
+    pub(crate) fn reads_zone(&self, zone: crate::ids::Zone) -> bool {
+        use crate::ids::Zone;
+        match self {
+            Cond::HandExactly(_) | Cond::HandAtMost(_) | Cond::OpponentHasMoreCards => zone == Zone::Hand,
+            Cond::GraveyardAtLeast(_) | Cond::Delirium(_) => zone == Zone::Graveyard,
+            Cond::DevotionCoversLibrary(_) | Cond::LibraryEmpty => zone == Zone::Library,
+            // (The cards exiled with the static ability's source.)
+            Cond::LinkedTypesAtLeast(_) => zone == Zone::Exile,
+            Cond::All(v) => v.iter().any(|c| c.reads_zone(zone)),
+            Cond::SourceAttached
+            | Cond::ControlAtLeast(..)
+            | Cond::ControlAtMost(..)
+            | Cond::Revolt
+            | Cond::YourTurnAtMost(_)
+            | Cond::FirstSpellThisGame
+            | Cond::IsMonarch
+            | Cond::SourceCountersIn(..)
+            | Cond::GainedLifeThisTurn
+            | Cond::SpellsCastThisTurn { .. }
+            | Cond::YourTurn
+            | Cond::LifeAtMostHalfStart
+            | Cond::ControlOtherOfColor(_)
+            | Cond::SpellsCastAtLeast(_)
+            | Cond::HasInitiative
+            | Cond::CompletedDungeon
+            | Cond::CityBlessing
+            | Cond::LandsPlayedAtLeast(_) => false,
+        }
+    }
+}
+
 /// What a mana ability makes (CR 106.1, 605.1a).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ManaProd {
