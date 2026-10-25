@@ -339,7 +339,7 @@ impl Game {
                 Subj::None | Subj::Item(_) => false,
             },
             TrigPred::Subject(s, f) => {
-                let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
+                let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r), spell: false };
                 match ev.subject(*s) {
                     Subj::Obj(r) => self.live(r) && self.subject_matches(f, r.idx, &ctx),
                     Subj::Player(q) => self.filter_ok(f, Target::Player(q), &ctx),
@@ -360,7 +360,7 @@ impl Game {
             }
             TrigPred::If(c) | TrigPred::State(c) => self.cond_holds(c, src.controller),
             TrigPred::Source(f) => {
-                let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
+                let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r), spell: false };
                 self.live(src.r) && self.subject_matches(f, src.r.idx, &ctx)
             }
             TrigPred::IsHost(s) => match ev.subject(*s) {

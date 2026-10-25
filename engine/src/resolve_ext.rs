@@ -41,7 +41,7 @@ impl Game {
             },
             On::MadeAll => f.made_all.iter().copied().filter(|&c| self.objs[c.i()].zone == Zone::Battlefield).collect(),
             On::Each(filter) => {
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect()
             }
         }
@@ -207,7 +207,7 @@ impl Game {
                 Flow::Next
             }
             Ext::JumpUnlessSource { filter, to } => {
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 let ok = self.live(f.source)
                     && self.objs[f.source.idx.i()].zone == Zone::Battlefield
                     && self.card_matches(filter, f.source.idx, &ctx);
@@ -250,7 +250,7 @@ impl Game {
                 }
                 // The next pick comes after the last one in canonical order
                 // (each set of permanents is reachable once).
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 let floor = f.picked.last().map(|&c| self.objs[c.i()].timestamp);
                 let cands: Vec<CardIdx> = self
                     .battlefield
@@ -422,7 +422,7 @@ impl Game {
                 }
                 while f.i < 2 {
                     let p = order[f.i as usize];
-                    let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                    let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                     let mut opts: Vec<Opt> = Vec::new();
                     for c in self.graveyard_cards(p) {
                         if self.card_matches(filter, c, &ctx) {
@@ -543,7 +543,7 @@ impl Game {
                     Some(Choice::Pass) => Flow::Next,
                     Some(other) => unreachable!("hand choice {other:?}"),
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                         let hand = self.hand_sorted(owner);
                         let mut opts = Vec::new();
                         for (k, &c) in hand.iter().enumerate() {
@@ -673,7 +673,7 @@ impl Game {
             }
             Ext::TopOfGraveyardToBattlefield { filter } => {
                 f.made = None;
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 let top = self
                     .graveyard_cards(f.controller)
                     .collect::<Vec<_>>()
@@ -688,7 +688,7 @@ impl Game {
                 Flow::Next
             }
             Ext::ApplyPtPerCount { on, filter, p, t } => {
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 let n = self.battlefield.iter().filter(|&&c| self.card_matches(filter, c, &ctx)).count() as i32;
                 let (dp, dt) = ((*p as i32 * n).clamp(-999, 999), (*t as i32 * n).clamp(-999, 999));
                 for c in self.objs_on(f, on) {
@@ -818,7 +818,7 @@ impl Game {
                     Some(Choice::Pass) => Flow::Jump(*skip),
                     Some(other) => unreachable!("sacrifice answer {other:?}"),
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                         let mut opts: Vec<Opt> = self
                             .permanents_of(p)
                             .filter(|&c| self.card_matches(filter, c, &ctx))
@@ -1039,7 +1039,7 @@ impl Game {
                     Some(other) => unreachable!("vote answer {other:?}"),
                     None => {}
                 }
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 while f.i < 2 {
                     let voter = order[f.i as usize];
                     let opts: Vec<Opt> = self

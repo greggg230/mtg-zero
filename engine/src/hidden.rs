@@ -669,7 +669,7 @@ impl Game {
             let Some(i) = self.item_index(*id) else { continue };
             let item = &self.stack[i];
             let crate::game::StackKind::Spell { card } = item.kind else { continue };
-            let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)) };
+            let ctx = crate::cast::Ctx { controller: item.controller, source: Some(self.obj_ref(card)), spell: false };
             for a in &self.def_of(card).alt_costs {
                 if let Some(f) = &a.cost.exile_from_hand {
                     out.push((f.clone(), ctx));

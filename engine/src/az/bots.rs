@@ -1129,7 +1129,7 @@ impl Heuristic {
     /// harmful target requirements' candidates; 0 if none).
     fn removal_value(&self, g: &Game, p: PlayerId, src: CardIdx, ab: &AbilityDef) -> i32 {
         let q = opp(p);
-        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(src)) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(src)), spell: false };
         let mut best = 0;
         for (r, tr) in ab.targets.iter().enumerate() {
             if aim_in(&ab.program, r as u8) != Some(true) {
@@ -1150,7 +1150,7 @@ impl Heuristic {
     /// The damage one activation deals to the opponent, if it can target them.
     fn face_damage(&self, g: &Game, p: PlayerId, src: CardIdx, ab: &AbilityDef) -> i32 {
         let q = opp(p);
-        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(src)) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(src)), spell: false };
         let mut best = 0;
         for op in &ab.program {
             if let Op::DealDamage { amount, to } = op {
@@ -1241,7 +1241,7 @@ impl Heuristic {
     /// Would this upgrade change anything ("becomes a 4/4" on a 4/4, an
     /// ability that only works on a Spirit, a second monstrosity)?
     fn grows(&self, g: &Game, p: PlayerId, c: CardIdx, ab: &AbilityDef) -> bool {
-        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(c)) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(c)), spell: false };
         for op in &ab.program {
             match op {
                 Op::Ext(Ext::JumpUnlessSource { filter, .. }) if !g.card_matches(filter, c, &ctx) => return false,
@@ -1264,7 +1264,7 @@ impl Heuristic {
     /// A hand card the ability could put onto the battlefield (for one
     /// sacrificed at end of turn, a creature it could not cast as well).
     fn has_put_in_card(&self, g: &Game, p: PlayerId, c: CardIdx, ab: &AbilityDef, delayed: bool) -> bool {
-        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(c)) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(g.obj_ref(c)), spell: false };
         let lands = g.lands_of(p).count();
         ab.program.iter().any(|op| match op {
             Op::PutFromHand { filter, .. } => g.player(p).hand.iter().any(|&h| {
@@ -1280,7 +1280,7 @@ impl Heuristic {
     }
 
     fn can_target_player(g: &Game, ab: &AbilityDef, p: PlayerId, q: PlayerId) -> bool {
-        let ctx = crate::cast::Ctx { controller: p, source: None };
+        let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
         ab.targets.iter().any(|tr| g.target_candidates(tr, &ctx, &[]).contains(&Target::Player(q)))
     }
 
@@ -1296,7 +1296,7 @@ impl Heuristic {
             return true;
         }
         let bad = harmful(ab);
-        let ctx = crate::cast::Ctx { controller: p, source: None };
+        let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
         ab.targets.iter().enumerate().all(|(r, tr)| {
             let theirs = aim_in(&ab.program, r as u8).unwrap_or(bad);
             tr.min == 0
@@ -1785,7 +1785,7 @@ pub mod v1 {
         }
 
         fn can_target_player(g: &Game, ab: &AbilityDef, p: PlayerId, q: PlayerId) -> bool {
-            let ctx = crate::cast::Ctx { controller: p, source: None };
+            let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
             ab.targets.iter().any(|tr| g.target_candidates(tr, &ctx, &[]).contains(&Target::Player(q)))
         }
 
@@ -1797,7 +1797,7 @@ pub mod v1 {
             if ab.targets.is_empty() || !harmful(ab) {
                 return true;
             }
-            let ctx = crate::cast::Ctx { controller: p, source: None };
+            let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
             ab.targets.iter().all(|tr| {
                 tr.min == 0
                     || g.target_candidates(tr, &ctx, &[]).iter().any(|&t| Self::target_player(g, t) == Some(q))

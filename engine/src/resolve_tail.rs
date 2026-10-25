@@ -337,7 +337,7 @@ impl Game {
                     let opts: Vec<Opt> = match &filter {
                         Some(fl) => {
                             // A set: increasing slot order, leaving enough.
-                            let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                            let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                             let floor = f
                                 .picked
                                 .iter()
@@ -401,7 +401,7 @@ impl Game {
                 }
                 Some(other) => unreachable!("sacrifice answer {other:?}"),
                 None => {
-                    let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                    let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                     let opts: Vec<Opt> = self
                         .permanents_of(p)
                         .filter(|&c| self.card_matches(&artifact, c, &ctx))
@@ -443,7 +443,7 @@ impl Game {
                 }
                 Some(other) => unreachable!("search answer {other:?}"),
                 None => {
-                    let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                    let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                     let opts = self.search_options(p, &artifact, true, &ctx);
                     self.ask(Task::Run(f.clone()), p, DecisionKind::SearchLibrary, opts);
                     return Flow::Suspend;
@@ -581,7 +581,7 @@ impl Game {
     /// definition, one per definition.
     fn seen_hand_options(&self, f: &Frame, owner: PlayerId, filter: &Filter) -> Vec<Opt> {
         let p = f.controller;
-        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
         let hand = self.hand_sorted(owner);
         let mut opts = Vec::new();
         for (k, &c) in hand.iter().enumerate() {

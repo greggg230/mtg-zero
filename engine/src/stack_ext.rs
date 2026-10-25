@@ -124,7 +124,7 @@ impl Game {
                     None => {}
                 }
                 f.made = None;
-                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                 let mut sorted = f.pile.clone();
                 sorted.sort_by_key(|c| (self.objs[c.i()].def, c.0));
                 let mut opts = Vec::new();

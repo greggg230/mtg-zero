@@ -102,7 +102,7 @@ impl Game {
                 // the other player. `f.x`: how many permanents each player
                 // controlled (bits 0-7 and 8-15).
                 if f.i == 0 {
-                    let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                    let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                     let all: Vec<_> = self.battlefield.iter().copied().filter(|&c| self.card_matches(filter, c, &ctx)).collect();
                     let mut n = [0i32; 2];
                     for &c in &all {

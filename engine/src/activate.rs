@@ -295,7 +295,7 @@ impl Game {
 
     /// Permanents `p` could sacrifice for `s` (canonical order).
     pub(crate) fn sacrifice_candidates(&self, p: PlayerId, source: CardIdx, s: &crate::db::SacCost) -> Vec<CardIdx> {
-        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(source)) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(source)), spell: false };
         self.permanents_of(p)
             .filter(|&c| !(s.another && c == source) && self.card_matches(&s.filter, c, &ctx))
             .collect()
@@ -440,7 +440,7 @@ impl Game {
             return false;
         }
         if let Some(f) = &cost.discard_filter {
-            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)), spell: false };
             let n = pl.hand.iter().filter(|&&c| c != card && self.card_matches(f, c, &ctx)).count();
             if (cost.discard as usize) > n {
                 return false;
@@ -483,7 +483,7 @@ impl Game {
     /// Untapped permanents `p` controls that a "tap n untapped <filter> you
     /// control" cost of `card` may tap (not `card` itself).
     pub(crate) fn tap_candidates<'a>(&'a self, p: PlayerId, card: CardIdx, t: &'a crate::db::SacCost) -> impl Iterator<Item = CardIdx> + 'a {
-        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)), spell: false };
         self.permanents_of(p)
             .filter(move |&c| c != card && !self.objs[c.i()].tapped && self.card_matches(&t.filter, c, &ctx))
     }
@@ -499,7 +499,7 @@ impl Game {
     /// mana (ENGINE.md 29: they and the payment never compete).
     pub(crate) fn tapped_for_mana(&self, c: CardIdx) -> bool {
         let p = self.objs[c.i()].controller;
-        let ctx = crate::cast::Ctx { controller: p, source: None };
+        let ctx = crate::cast::Ctx { controller: p, source: None, spell: false };
         self.permanents_of(p).any(|x| {
             self.abilities(x).activated.iter().any(|a| {
                 a.mana().is_some() && a.cost.tap_untapped.as_ref().is_some_and(|t| self.card_matches(&t.filter, c, &ctx))
@@ -534,7 +534,7 @@ impl Game {
     /// Cards in `p`'s hand matching `f` other than `card`, one per
     /// definition (canonical slots).
     pub(crate) fn exile_candidates(&self, p: PlayerId, card: CardIdx, f: &crate::db::Filter) -> Vec<crate::decision::Opt> {
-        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)), spell: false };
         self.hand_options_except(p, Some(card))
             .into_iter()
             .filter(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)))
@@ -634,7 +634,7 @@ impl Game {
         if picked.len() < n_disc {
             let mut opts = self.hand_options_except(p, Some(card));
             if let Some(f) = &cost.discard_filter {
-                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)), spell: false };
                 opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
             }
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::DiscardCost, opts);

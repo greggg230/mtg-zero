@@ -49,7 +49,7 @@ impl Game {
                 // The permanents the spell targeted as this triggered
                 // (`StackItem::noted`), whether or not that spell is still
                 // on the stack.
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 let won: Vec<CardIdx> = f
                     .noted
                     .iter()
@@ -102,7 +102,7 @@ impl Game {
                     }
                     Some(other) => unreachable!("graveyard choice {other:?}"),
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                         let opts: Vec<Opt> = self
                             .graveyard_cards(p)
                             .filter(|&c| self.card_matches(filter, c, &ctx))
@@ -357,7 +357,7 @@ impl Game {
                     }
                     Some(other) => unreachable!("sacrifice answer {other:?}"),
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                         let opts: Vec<Opt> = self
                             .permanents_of(p)
                             .filter(|&c| self.card_matches(filter, c, &ctx))
@@ -372,7 +372,7 @@ impl Game {
                 }
             }
             Ext::JumpUnlessEventObj { filter, to } => {
-                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source), spell: false };
                 if f.ev.obj.is_some_and(|r| self.card_matches(filter, r.idx, &ctx)) {
                     Flow::Next
                 } else {
@@ -396,7 +396,7 @@ impl Game {
                 }
                 // One definition per decision, in non-decreasing order (each
                 // set of cards once); a definition again while a copy is left.
-                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source), spell: false };
                 let lib = self.library_sorted(p);
                 let mut opts = Vec::new();
                 for (i, &c) in lib.iter().enumerate() {
