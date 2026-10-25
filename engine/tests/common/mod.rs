@@ -95,8 +95,8 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("Test Tapper", "{1}{R}", 1, 1, &[], false, tap_ping()),
         creature("Test Hasty Tapper", "{1}{R}", 1, 1, &["haste"], false, tap_ping()),
         creature("Test Indestructible", "{2}{W}", 2, 2, &["indestructible"], false, none.clone()),
-        // "This creature crews Vehicles as though its power were 2 greater."
-        creature("Test Pilot", "{1}", 0, 1, &[], false, json!({"crew_power_bonus": 2})),
+        // "This creature crews Vehicles as though its power were 3 greater."
+        creature("Test Pilot", "{1}", 0, 1, &[], false, json!({"crew_power_bonus": 3})),
         // When this enters, you may draw a card.
         creature(
             "Test May Draw",

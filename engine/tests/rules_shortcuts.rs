@@ -401,9 +401,9 @@ fn cr_608_2h_pyrogoyfs_creature_deals_damage_as_it_last_existed() {
 
 // ---- saddle and teamwork (CR 702.171a, 702.122) -----------------------------------------------
 
-/// "Crews Vehicles as though its power were 2 greater" counts for crew,
+/// "Crews Vehicles as though its power were 3 greater" counts for crew,
 /// not for saddle: a 0-power Pilot alone can crew Smuggler's Copter but
-/// can't saddle Caustic Bronco (saddle 1).
+/// can't saddle Caustic Bronco (saddle 3); two 2-power creatures can.
 #[test]
 fn cr_702_171a_saddle_doesnt_count_a_crew_bonus() {
     let g = scen().battlefield(0, &["Caustic Bronco", "Smuggler's Copter", "Test Pilot"]).at(Step::Main1, 0).start();
@@ -413,6 +413,9 @@ fn cr_702_171a_saddle_doesnt_count_a_crew_bonus() {
     assert!(crew_ok, "crew counts the bonus: {:?}", g.options_desc());
     let saddle_ok = (0..4).any(|i| g.has_option(Choice::Ability(bronco, AbilitySlot::Activated(i))));
     assert!(!saddle_ok, "saddle doesn't: {:?}", g.options_desc());
+    let g = scen().battlefield(0, &["Caustic Bronco", "Test Bear", "Test Hasty"]).at(Step::Main1, 0).start();
+    let bronco = bf(&g, 0, "Caustic Bronco");
+    assert!((0..4).any(|i| g.has_option(Choice::Ability(bronco, AbilitySlot::Activated(i)))), "power 4: {:?}", g.options_desc());
 }
 
 /// Teamwork (We Say Thee Nay!): creatures with mana abilities can be
