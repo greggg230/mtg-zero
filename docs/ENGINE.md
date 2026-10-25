@@ -1090,6 +1090,13 @@ engine documents is tracked in docs/shortcuts.md with its class and status):
   triggers once per combat damage step (a first-strike step and the regular one each, 510.4);
   Python resolves both steps without a priority pass between them, so one trigger covers both.
   Wizard's Rockets: one `ChooseMana` decision per mana of its X.
+* M7e part 1 (33): the monarch's end-step draw and "combat damage to the monarch" are
+  triggered abilities on the stack (724.2), Okoye's attack trigger a delayed one (603.7); "one or
+  more" triggers fire once per event (603.2c: one instruction, one cost, one simultaneous move);
+  the controller orders replacement effects (616.1: Blightsteel, Yawgmoth's Will, Dauthi
+  Voidwalker, flashback); Mox Diamond's replacement applies however it would enter; the caster
+  chooses among graveyard permissions (601.2a-b); Necromancy has no flash keyword. Python's
+  handling of these was not compared.
 
 ## 15. Tests
 
@@ -1137,8 +1144,9 @@ they isolate one keyword or trigger each.
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |
 | `tests/cards_m7b_stack.rs`, `cards_m7b_stack2.rs` | M7b part 3b: the 20 cards against their Oracle text (Tidebinder, Ertai, Invert Polarity, Leovold, Surrak, the ward cards, improvise; the initiative cards; Fanatic of Rhonas, Otharri, Seasoned Pyromancer, the graveyard-ability slots) |
 | `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
+| `tests/rules_shortcuts.rs` | M7e part 1 (section 33): the rules shortcuts removed, 27 tests, the CR in each name: 724.2 (the monarch's triggers on the stack, countered by Tidebinder, one per creature), 603.7 (Okoye's delayed trigger), 603.2c ("one or more" once per event: Laelia, Wan Shi Tong, Inti), 614.1c (entering with an effect's counters), 614.12a (Metamorph and Exhume), 608.2h (Pyrogoyf's damage as the creature last existed), 702.171a (saddle without a crew bonus), 601.2h (teamwork tapping mana creatures), 116.2b (turning face up after losing abilities), 702.8a (Necromancy's flash permission), 106.1b (exact converge), 614.1a (Mox Diamond put onto the battlefield), 616.1 (Blightsteel and Yawgmoth's Will, flashback and Dauthi Voidwalker), 601.2b (Breach's escape with Bitter Triumph's own cost), 601.2a (Paragon or Lurrus, flashback or Will, Paragon and a card with another face), 709.3 (the Citadel's split card), 613.7e (an Equipment re-attached), 613.1f (Paragon's granted trigger lost), 113.7 (a granted ward's source) |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
-| `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
+| `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
@@ -1177,7 +1185,10 @@ lists them per owner, by identity only where the viewer knows them). M7d: 20,000
 537 cards and the custom cards (Test Manifester puts face-down permanents into many games), no
 failure (131 s; 5.6 million options completed); four faults found on the way, all fixed (31.8). The known-card check also compares
 a face-down permanent's card (`ident`). M7d's IR fixes: 20,000 games over the 546 cards and the custom
-cards, no failure (141 s; 5.6 million options completed); one fault found on the way, fixed (32.6).
+cards, no failure (141 s; 5.6 million options completed); one fault found on the way, fixed (32.6). M7e part 1: 20,000 games over the 546 cards and
+the custom cards (three new ones), no failure (143 s; 5,664,330 options completed); one fault
+found on the way, fixed: a Mox Diamond set aside while its controller decides (33.2) failed the
+zone invariant ("card is nowhere"); the invariant now allows it with its pending task.
 
 **Option completion** (M7c, branch `m7c-payfix`). Sections 6 and 18 promise that a cast, an
 activation or an alternative cost is offered only if it can be completed; the fuzzer checks it
@@ -1378,6 +1389,18 @@ new rules are looked at only in games with such a card (`SEEN_VOID`, `SEEN_NAMED
 first). On the full pool: 5.56-5.70 us per decision (838,909 decisions), 836-857 games/s;
 `Game::clone` 1.28-1.31 us; clone + determinize 1.65-1.79 us. Fuzzer 20,000 games: 131-137 s (with
 the option-completion check; 125-137 s on main, section 15).
+
+**M7e part 1** (546 cards, branch `m7e-rules`, the rules shortcuts of section 33): pinned the
+same way, interleaved with main's code (7d2ad02) in three rounds, nothing else running. On main's
+pool (`POOL_EXCLUDE` leaves the three new custom cards out: 840,190 decisions against main's
+842,021, the games differing by the rules fixes) 5.76-5.85 us per decision against main's
+5.64-5.69, pairs +1.6% to +3.7% (813-826 games/s against 835-843); `Game::clone` 1.33-1.47 us
+(main 1.29-1.36), `size_of::<Game>()` 1,496 B (+104: the event group and its "one or more"
+record, the entry group's timestamp, the damage sources' last known information, the rules
+objects per definition, the entering counters and flags, the chosen route); clone + determinize
+1.70-1.94 us (main 1.71-1.78). `Obj` stays 64 bytes (the entry group is a timestamp on `Game`,
+not a field per object). On the full pool: 5.81-5.86 us per decision (842,993 decisions), 809-817
+games/s. Fuzzer 20,000 games: 143 s (with the option-completion check).
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -3299,7 +3322,7 @@ IR (26.12). The code is `copies.rs`, its lowering `lower/effect_copies.rs`.
   (nothing can see it in the other zone first).
 * The "enter as a copy" choice is made right after the card moves (its `Enters` event and enter
   replacements wait for it, so nothing can see the difference). (A permanent entering at the same
-  time, Exhume's other creature, can't be chosen since M7e: `Obj::enter_seq`.)
+  time, Exhume's other creature, can't be chosen since M7e: `Game::group_ts`.)
 * A double-faced card that is copying something doesn't transform.
 * "Another target" requirements choose at most one target each (the lowering checks).
 * A copy effect's exceptions hold at most four subtypes.
@@ -4433,3 +4456,126 @@ cast check took the card in hand for its source, not a spell; `cast::Ctx::spell`
 another of the player's hidden cards in a determinized world; the new pool's random decks put
 Test Manifester's face-down cards into its games). Behaviour digests re-recorded for the 546-card
 pool (section 15: 1f210100db7b442e), before the red Boo's token kind is registered.
+
+## 33. The rules shortcuts removed (M7e part 1)
+
+Branch `m7e-rules` (from main at 7d2ad02): every place the engine knowingly departed from the CR
+in triggers, replacement effects, casting routes and a few small rules, made rules-correct; the
+whole tracking table is `docs/shortcuts.md` (every item of section 13's list and of 23.11, 24.7,
+25.10, 26.11, 27.13, 28.8, 29.6, 30.7, 31.7 and 32.5, with its class and status). The payment
+model (the pool's mana choice, mana abilities with a cost during a payment) is the next part's
+and was left alone. The action-id layout, `NUM_ACTIONS` and layout v3 are unchanged; the token
+registry gained "The monarch rules" (appended).
+
+### 33.1 Triggers on the stack
+
+* **The monarch** (724.2): its two inherent triggered abilities ("at the beginning of the
+  monarch's end step, that player draws a card"; "whenever a creature deals combat damage to the
+  monarch, its controller becomes the monarch") are the triggers of a rules definition "The
+  monarch" (`lower/effect_stack.rs::monarch_def`, built for the cards that make a monarch),
+  sourceless (a slot in no zone, `Game::rules_srcs`, as the initiative's, 27.4), controlled by the
+  player who is the monarch as they trigger, one per creature dealing the damage
+  (`dungeon.rs::monarch_trigger`); "its controller" is read as it resolves (its last known
+  information if the creature left: `Ext::EventControllerBecomesMonarch`). Tishana's Tidebinder
+  can counter them.
+* **Okoye's** "whenever that creature attacks the monarch this turn, it gains double strike and
+  trample until end of turn" is a delayed triggered ability with a duration (603.7b) about that
+  creature (603.7c): `M7d::TriggerThisTurnFor` gives the controller a temporary trigger bound to
+  the object (`TempTrigger::obj`), event `Attacks`, `TrigPred::AttacksMonarch`.
+* **Event groups** (603.2c, "one or more"): `Game::ev_seq` is bumped as an instruction of a
+  resolving spell or ability ends (`run_frame`), as a resolution begins, as a batch (SBAs,
+  "destroy all", a sacrifice cost, a combat damage step) begins or ends and as a cost starts
+  being paid. A "whenever one or more ..." ability (Laelia's exiles, Wan Shi Tong's "cards put
+  into a library", Inti's discards, Ajani's Cats, Forth Eorlingas!'s combat damage) triggers once
+  per group (`Game::batch_once`); one instruction's decisions (Brainstorm's put-backs, a discard
+  one card at a time) stay one event, two instructions of one resolution are two.
+
+### 33.2 Replacement effects
+
+* **616.1**: the replacement effects of where a card goes (Blightsteel's "shuffle it into its
+  owner's library", Yawgmoth's Will's "exile that card instead", Dauthi Voidwalker's "exile it with
+  a void counter", "if it would die / leave the battlefield, exile it instead", a finality counter,
+  flashback's exile, a permission's "exile it instead") are applied in the order the affected
+  object's controller (its owner if it has none) chooses, each at most once, until none applies
+  (616.1f: Blightsteel's library then meets "exile it instead of putting it anywhere else").
+  `Game::replaced_dest` walks every order; one result applies at once; several make the card go
+  to exile for now (its arrival events held back) and `Task::ChooseReplacement` asks right after
+  the move (`ChooseReplacement`: `NUMBER` 1 library, 2 exile, 3 exile with a void counter). None
+  of them is a self-replacement effect (616.1a).
+* **Mox Diamond** however it would enter (614.1a): put onto the battlefield by an effect, the card
+  waits revealed in no zone (`Zone::Nowhere`, the invariants allow it only with its task) while
+  its would-be controller answers a `Discard` (a land card, or `PASS`:
+  `Task::EnterByDiscardAny`); then it enters, or goes to its owner's graveyard with that
+  destination's replacements. Cast, the choice is still made as it resolves.
+* **Entering with counters and tapped** (614.1c, 122.6): the counters the effect gives (From the
+  Catacombs, Throne of the Dead Three, persist, the opening-hand luck counter:
+  `Game::entering_counters`), "tapped" (`entering_tapped`: tokens created tapped, a reanimation
+  put tapped) and the card's own "enters with" counters, loyalty and lore counter are on it before
+  its `Enters` event (`put_onto_battlefield` holds the event back for every permanent now).
+* **Entering as a copy** (707.5, 614.12a): not of a permanent entering at the same time (Exhume's
+  other creature) or since: `Game::group_ts` keeps the first timestamp of the current event's
+  entries.
+
+### 33.3 Casting routes
+
+* **A granted escape or retrace with a card's own additional costs** (601.2b, 601.2f-h): the
+  route's cost and each option are one cost, built when the database is (`CardDb::merged_cost`,
+  `db.rs::merge_costs`: `None` for costs one `Cost` can't say, two different discards).
+  Underworld Breach casts Bitter Triumph paying "exile three other cards" and "discard a card or
+  pay 3 life".
+* **The permission a graveyard card is cast with** (601.2a-b): `Game::gy_routes_esc` lists the
+  routes (`cast::route`: flashback, Yawgmoth's Will, escape, retrace, mayhem, Serra Paragon,
+  Lurrus; an effect's permission for the card alone); a card is offered at priority if any route
+  can complete, and `Task::ChooseRoute` (`ChooseRoute`, `NUMBER` = route code) asks when several
+  can. Serra Paragon casts a card with another face (its permanent face: an Adventure creature,
+  an MDFC's permanent front). Two permanents of one kind are offered once.
+* **Bolas's Citadel** offers every face of the top card (`top_options`: either half of a split
+  card, an MDFC's or an Adventure's other face, an MDFC's land face to play; `ChooseFace` when two
+  can), for life equal to that face's mana value.
+
+### 33.4 Small rules
+
+* A damage source that left the battlefield deals damage as it last existed there (608.2h,
+  113.7a: `Game::lki_damage`, kept only when `SEEN_LKI_DAMAGE`).
+* Saddle and teamwork don't count "crews Vehicles as though its power were greater"
+  (`Cost::saddle`; crew only). Teamwork's taps are paid before the spell's mana (601.2h: any
+  order) and every choice leaves the mana payable without the creatures tapped (`crew_mana_ok`,
+  every set of creatures with mana abilities tried; `pay::classes_without`), so creatures with
+  mana abilities can be tapped for it.
+* Turning a face-down permanent face up is a special action (116.2b, 708.7): offered after the
+  permanent lost all abilities.
+* Necromancy's "as though it had flash" is a permission (`CardDef::flash_permission`; 702.8a:
+  Necromancy has no flash).
+* Converge is exact for any number of sources (`pay.rs::most_colors_matching`: a matching per
+  colour set beyond seven sources).
+* An Aura or Equipment becoming attached gets a new timestamp (613.7e,
+  `Game::attached_timestamp`; it moves to the end of the battlefield).
+* A trigger an effect gave a permanent (Serra Paragon's, earthbend's) is gone once the permanent
+  lost all abilities (613.1f), and a granted triggered ability's source is the permanent that has
+  it (113.7: granted ward, Nadu's; Tidebinder then affects that permanent).
+
+### 33.5 Decisions, tasks, the bot, encoding
+
+Two decision kinds (section 11): `ChooseReplacement` and `ChooseRoute` (41 of 64). Tasks:
+`EnterByDiscardAny`, `ChooseReplacement`, `ChooseRoute` (the context block's task code "other").
+The heuristic bots answer both new kinds (`az/bots.rs`: a card its chooser owns back into the
+library rather than exiled and without a void counter, the reverse for an opponent's; a permanent
+escapes if it can, else a permission that costs nothing later). Layout v3 is unchanged: no width,
+offset or identity changes (the token registry gained a line, "The monarch rules", for the new
+rules definition's identity).
+
+### 33.6 Tests, fuzzing, smoke, digests
+
+`tests/rules_shortcuts.rs`: 27 tests, each naming the CR rule it checks; 26 failed on main's
+engine (7d2ad02, with only the test kit's `monarch` builder and the two decision kinds added to
+compile them); the other (Okoye's trigger resolving before damage) checks the result is the same.
+Custom cards for them: Test Twice Exile, Test Twice Oust (two events in one resolution), Test
+Pilot (a crew bonus). Two earlier card tests changed with the rules (the monarch's draw and
+Okoye's keywords now resolve first).
+
+`cargo test --release -p engine --no-fail-fast --lib --test 'cards*' --test 'rules*' --test hidden
+--test support --test smoke --test 'bots*'`: 863 tests pass. Fuzzing (`FUZZ_GAMES=20000`, the
+option-completion check on): no failure, 143 s, 5,664,330 options completed; one fault found on
+the way and fixed (section 15). The search smoke (`python tools/search_smoke.py`, seeds 0-3,
+random and eval specs): 0 failed of 8 configurations (3,200 games, 1.31 million decisions, 33.8
+million simulations, 466 s). Speed: section 17 (+1.6% to +3.7% per decision on main's pool).

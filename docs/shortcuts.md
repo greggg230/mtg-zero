@@ -53,7 +53,7 @@ Classes:
 | 25.10.4 | Split cards: only Life // Death; no meld, flip, convert, "cast transformed", read ahead | C | kept: not in the cube | — |
 | 25.10.5 | At most four activated abilities per permanent | B | kept: the `ACTIVATE` slots | `lower` |
 | 26.11.1 | A copy of a spell leaving the stack ceases to exist at once | C | kept: nothing can see it elsewhere | `game.rs` |
-| 26.11.2 | "Enter as a copy" could choose a permanent entering at the same time (Exhume) | A | **fixed**: not one that entered in the same event (`Obj::enter_seq`, 614.12a); the choice right after the move (its `Enters` event held back) stays (C) | `copies.rs` (`enter_as_copy`); `cr_614_12a_metamorph_cant_copy_a_permanent_entering_at_the_same_time` |
+| 26.11.2 | "Enter as a copy" could choose a permanent entering at the same time (Exhume) | A | **fixed**: not one that entered in the same event or since (`Game::group_ts`, 614.12a); the choice right after the move (its `Enters` event held back) stays (C) | `copies.rs` (`enter_as_copy`); `cr_614_12a_metamorph_cant_copy_a_permanent_entering_at_the_same_time` |
 | 26.11.3 | A double-faced card that is copying something doesn't transform | C | kept: reachable only through Saheeli's -2 on a daybound creature over a day/night change | `faces.rs` |
 | 26.11.4 | "Another target" requirements choose at most one target each | C | kept: the lowering checks | `lower` |
 | 26.11.5 | A copy effect's exceptions hold at most four subtypes | B | kept | `copies.rs` |
