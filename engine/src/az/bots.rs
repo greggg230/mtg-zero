@@ -26,6 +26,22 @@ use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::program::{Amount, CopyOf, Ext, On, Op, PileDest, SearchDest, Who};
 use crate::rng::Rng;
 
+/// CR 616.1, the order of replacement effects (`ChooseReplacement`): for a
+/// card its chooser owns, back into the library rather than exiled, and no
+/// void counter (an opponent's Dauthi Voidwalker would play it); for an
+/// opponent's card, the reverse.
+fn replacement_choice(g: &Game, d: &Decision) -> u16 {
+    let own = match g.agenda.last() {
+        Some(&Task::ChooseReplacement { card, chooser, .. }) => g.obj(card.idx).owner == chooser,
+        _ => true,
+    };
+    let order: [u8; 3] = if own { [1, 2, 3] } else { [3, 2, 1] };
+    order
+        .iter()
+        .find_map(|&k| d.options.iter().find(|o| o.choice == Choice::Number(k)).map(|o| o.action))
+        .unwrap_or(d.options[0].action)
+}
+
 pub use v1::HeuristicV1;
 
 pub struct Heuristic {
@@ -617,6 +633,7 @@ impl Heuristic {
                 }
             }
             K::PutInHand | K::ChooseDiscard | K::PutOntoBattlefield => Some(Self::best_card(g, d)),
+            K::ChooseReplacement => Some(replacement_choice(g, d)),
             // Enter as a copy of the most valuable permanent, or of the
             // costliest card (CR 707.5).
             K::ChoosePermanent | K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(Task::EnterAsCopy { .. })) => d
@@ -1683,6 +1700,7 @@ pub mod v1 {
                     }
                 }
                 K::PutInHand | K::ChooseDiscard | K::PutOntoBattlefield => Some(Self::best_card(g, d)),
+                K::ChooseReplacement => Some(super::replacement_choice(g, d)),
                 K::ChoosePermanent | K::ChooseGraveyardCard if matches!(g.agenda.last(), Some(Task::EnterAsCopy { .. })) => d
                     .options
                     .iter()

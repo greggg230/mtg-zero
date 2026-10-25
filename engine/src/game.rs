@@ -423,6 +423,18 @@ pub struct Delayed {
     pub ev: crate::triggers::EvCtx,
 }
 
+/// Where a moving card goes after the replacement effects of its
+/// destination (`Game::replaced_dest`, CR 616.1).
+pub(crate) enum Dest {
+    To(Zone),
+    Library,
+    Exile,
+    Void(crate::db::Counter),
+    /// Several results (bits: 1 library, 2 exile, 3 exile with a void
+    /// counter) and the void counter's kind: the controller chooses.
+    Choose(u8, Option<crate::db::Counter>),
+}
+
 /// Where `move_card` puts a card in an ordered zone.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Pos {
@@ -557,6 +569,12 @@ pub struct Game {
     /// The effect putting it onto the battlefield says "tapped" (CR 614.1c:
     /// it enters tapped; it doesn't become tapped).
     pub(crate) entering_tapped: bool,
+    /// Mox Diamond's "you may discard a land card instead" was answered (a
+    /// land was discarded): it now enters (`Task::EnterByDiscardAny`).
+    pub(crate) discard_entered: bool,
+    /// The replacement effects of the next move's destination are already
+    /// applied (a choice among them was made, CR 616.1).
+    pub(crate) repl_decided: bool,
     pub(crate) entering_dash: Option<u8>,
     /// The entering permanent's spell was warped (CR 702.185): `entering_dash`
     /// is warp's delayed ability (no haste).
@@ -886,6 +904,8 @@ impl Game {
             entering_mods: Vec::new(),
             entering_counters: Vec::new(),
             entering_tapped: false,
+            discard_entered: false,
+            repl_decided: false,
             entering_dash: None,
             entering_warp: false,
             miracle_cast: None,
@@ -1133,6 +1153,32 @@ impl Game {
     /// 614.1c, decided before it moves) and queueing "as this enters"
     /// choices (614.12, a task that runs next).
     pub(crate) fn put_onto_battlefield(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
+        // Mox Diamond: "If this would enter, you may discard a land card
+        // instead. If you do, put it onto the battlefield. If you don't, put
+        // it into its owner's graveyard" (CR 614.1a), however it would enter
+        // (cast, the choice is made as the spell resolves: `EnterByDiscard`).
+        // Decided before it enters: the card waits revealed in no zone and
+        // `Task::EnterByDiscardAny` asks its would-be controller.
+        if self.def_of(idx).discard_land_to_enter
+            && !self.entering_cast
+            && !self.entering_face_down
+            && !std::mem::take(&mut self.discard_entered)
+        {
+            let tapped = std::mem::take(&mut self.entering_tapped);
+            self.entering_counters.clear();
+            let from = self.objs[idx.i()].zone;
+            let owner = self.objs[idx.i()].owner;
+            let def = self.db.def(self.objs[idx.i()].def).card_def(self.objs[idx.i()].def);
+            self.note(|g| format!("{} would enter: a land card may be discarded", g.name(idx)));
+            let r = self.move_card(idx, Zone::Nowhere, Pos::Top);
+            if from.is_hidden() {
+                // (Revealed as it leaves a hidden zone, as for any public
+                // destination.)
+                self.emit_public(KEY_REVEAL, owner, def as u64);
+            }
+            self.agenda.push(Task::EnterByDiscardAny { card: idx, controller, tapped });
+            return r;
+        }
         // Face down (CR 708; manifest): a 2/2 with no text from the moment it
         // enters; the card it is waits in `face_down_ids` (ENGINE.md 31).
         if std::mem::take(&mut self.entering_face_down) {
@@ -1412,60 +1458,24 @@ impl Game {
         // (A face-down permanent's knowledge bits, before the move resets
         // them: who knew the card it is.)
         let fd_known = self.objs[idx.i()].known;
-        // "If this would be put into a graveyard from anywhere, reveal it and
-        // shuffle it into its owner's library instead" (Blightsteel; CR
-        // 614.1a). Applied before the other replacements of a graveyard
-        // destination (the affected object's controller chooses the order,
-        // 616.1: the library).
-        if to == Zone::Graveyard && self.def_of(idx).gy_to_library && from != Zone::Nowhere {
-            return self.shuffle_in_instead(idx, from);
-        }
         let old = self.obj_ref(idx);
         let old_controller = self.objs[idx.i()].controller;
-        // Replacements of where it goes (CR 614.1a), decided before the
-        // events: "if it would die this turn, exile it instead" (Suplex),
-        // "if it would leave the battlefield, exile it instead of putting it
-        // anywhere else" (From the Catacombs); "if a card would be put into
-        // your graveyard from anywhere this turn, exile that card instead"
-        // (Yawgmoth's Will; a card, not a token).
-        let to = if from == Zone::Battlefield && to != Zone::Exile {
-            let fl = self.flags_of(idx);
-            // A finality counter: "if this would be put into a graveyard from
-            // the battlefield, exile it instead" (CR 122.1i).
-            let finality = to == Zone::Graveyard && !self.counters.is_empty() && self.db.finality.is_some_and(|k| self.counters_on(idx, k) > 0);
-            if (to == Zone::Graveyard && fl.exile_if_dies) || fl.exile_if_leaves || finality {
-                Zone::Exile
-            } else {
-                to
+        // Replacement effects of where it goes (CR 614.1a), decided before
+        // the events, in the order the affected object's controller (its
+        // owner if it has none) chooses (616.1): `replaced_dest`.
+        let decided = std::mem::take(&mut self.repl_decided);
+        let (to, void, choose) = match if decided { Dest::To(to) } else { self.replaced_dest(idx, from, to) } {
+            Dest::To(z) => (z, None, None),
+            Dest::Library => return self.shuffle_in_instead(idx, from),
+            Dest::Exile => (Zone::Exile, None, None),
+            Dest::Void(k) => (Zone::Exile, Some(k), None),
+            // Exiled for now; its controller (owner) chooses next, before
+            // anything can see the difference (`Task::ChooseReplacement`).
+            Dest::Choose(results, k) => {
+                let chooser = if matches!(from, Zone::Battlefield | Zone::Stack) { old_controller } else { self.objs[idx.i()].owner };
+                (Zone::Exile, None, Some((results, k, chooser)))
             }
-        } else {
-            to
         };
-        let to = if to == Zone::Graveyard
-            && self.players[self.objs[idx.i()].owner as usize].gy_exile_turn == self.turn.number
-            && self.turn.number > 0
-            && !self.is_token(idx)
-            && !(from == Zone::Stack && self.is_copy_obj(idx))
-        {
-            Zone::Exile
-        } else {
-            to
-        };
-        // "If a card would be put into an opponent's graveyard from anywhere,
-        // instead exile it with a void counter on it" (Dauthi Voidwalker; CR
-        // 614.1a: a card, not a token or a copy of a spell). After Yawgmoth's
-        // Will's: the card's owner would choose that order (616.1).
-        let void = if to == Zone::Graveyard
-            && self.seen & SEEN_VOID != 0
-            && from != Zone::Nowhere
-            && !self.is_token(idx)
-            && !(from == Zone::Stack && self.is_copy_obj(idx))
-        {
-            self.void_counter_for(self.objs[idx.i()].owner)
-        } else {
-            None
-        };
-        let to = if void.is_some() { Zone::Exile } else { to };
         // Leave-the-battlefield abilities look back in time (CR 603.10a):
         // the events are recorded before the object moves.
         if from == Zone::Battlefield {
@@ -1491,17 +1501,10 @@ impl Game {
         let to = if from == Zone::Stack && to != Zone::Battlefield && self.is_copy_obj(idx) { Zone::Nowhere } else { to };
         // CR 702.34a: a flashback spell leaving the stack is exiled instead;
         // "if that spell would be put into your graveyard, exile it instead".
-        let to = if from == Zone::Stack && self.objs[idx.i()].flashback { Zone::Exile } else { to };
-        let to = if from == Zone::Stack && !self.gy_exile.is_empty() && self.gy_exile.contains(&idx) {
+        // (A spell's "exile it instead" leaves with it.)
+        if from == Zone::Stack && !self.gy_exile.is_empty() {
             self.gy_exile.retain(|&c| c != idx);
-            if to == Zone::Graveyard {
-                Zone::Exile
-            } else {
-                to
-            }
-        } else {
-            to
-        };
+        }
         if let Some(list) = self.zone_list(idx, from) {
             let i = list.iter().position(|&c| c == idx).expect("card in its zone list");
             list.remove(i);
@@ -1668,8 +1671,15 @@ impl Game {
         }
         // "Whenever one or more cards are put into exile from your library
         // and/or your graveyard" (Laelia).
-        if matches!(to, Zone::Exile | Zone::FaceDown) && matches!(from, Zone::Library | Zone::Graveyard) && self.seen & SEEN_EXILE_WATCH != 0 {
+        if matches!(to, Zone::Exile | Zone::FaceDown)
+            && matches!(from, Zone::Library | Zone::Graveyard)
+            && self.seen & SEEN_EXILE_WATCH != 0
+            && choose.is_none()
+        {
             self.event(Event::player(EventKind::ExiledFromLibGy, owner));
+        }
+        if let Some((results, k, chooser)) = choose {
+            self.agenda.push(crate::flow::Task::ChooseReplacement { card: new, from, results, void: k, chooser });
         }
         if from == Zone::Battlefield && !self.marks.is_empty() {
             // Triggered abilities an effect gave it (CR 603.10a: they look
@@ -1695,6 +1705,147 @@ impl Game {
     /// Blightsteel's replacement: revealed (from a hidden zone), put into its
     /// owner's library, which is shuffled. A permanent going there doesn't
     /// die (CR 700.4); its leave triggers see it leave.
+    /// Where a card moving from `from` to `to` goes after the replacement
+    /// effects of its destination (CR 614.1a), applied in an order its
+    /// controller (owner) chooses, each at most once, until none applies
+    /// (616.1, 616.1f): "reveal it and shuffle it into its owner's library
+    /// instead" (Blightsteel), "exile that card instead" (Yawgmoth's Will),
+    /// "exile it with a void counter instead" (Dauthi Voidwalker), "if it
+    /// would die / leave the battlefield, exile it instead" (Suplex, From the
+    /// Catacombs, a finality counter), flashback's exile (702.34a) and a
+    /// permission's "exile it instead". None of them is a self-replacement
+    /// effect (616.1a). `Dest::Choose` when orders give different results.
+    fn replaced_dest(&self, idx: CardIdx, from: Zone, to: Zone) -> Dest {
+        if from == Zone::Nowhere && to != Zone::Graveyard {
+            return Dest::To(to);
+        }
+        let owner = self.objs[idx.i()].owner;
+        let card = !self.is_token(idx) && !(from == Zone::Stack && self.is_copy_obj(idx));
+        let gy = to == Zone::Graveyard;
+        // Which effects could apply (to a graveyard destination unless
+        // said), by index: 0 library, 1 Will, 2 void, 3 dies-exile,
+        // 4 leaves-exile, 5 flashback, 6 the spell's exile.
+        let mut can = 0u8;
+        let mut void = None;
+        if gy && from != Zone::Nowhere && self.def_of(idx).gy_to_library {
+            can |= 1;
+        }
+        if gy && card && self.players[owner as usize].gy_exile_turn == self.turn.number && self.turn.number > 0 {
+            can |= 2;
+        }
+        if gy && card && self.seen & SEEN_VOID != 0 && from != Zone::Nowhere {
+            void = self.void_counter_for(owner);
+            if void.is_some() {
+                can |= 4;
+            }
+        }
+        if from == Zone::Battlefield && to != Zone::Exile {
+            let fl = self.flags_of(idx);
+            // A finality counter: "if this would be put into a graveyard from
+            // the battlefield, exile it instead" (CR 122.1i).
+            let finality = gy && !self.counters.is_empty() && self.db.finality.is_some_and(|k| self.counters_on(idx, k) > 0);
+            if gy && (fl.exile_if_dies || finality) {
+                can |= 8;
+            }
+            if fl.exile_if_leaves {
+                can |= 16;
+            }
+        }
+        if from == Zone::Stack {
+            if self.objs[idx.i()].flashback {
+                can |= 32;
+            }
+            if gy && !self.gy_exile.is_empty() && self.gy_exile.contains(&idx) {
+                can |= 64;
+            }
+        }
+        if can == 0 {
+            return Dest::To(to);
+        }
+        // States: 0 = `to`, 1 = the library, 2 = exile, 3 = exile with a
+        // void counter. The results every order reaches (bit per state).
+        fn walk(can: u8, gy: bool, to_exile: bool, state: u8, applied: u8, out: &mut u8) {
+            let mut any = false;
+            for e in 0..7u8 {
+                if can & (1 << e) == 0 || applied & (1 << e) != 0 {
+                    continue;
+                }
+                let at_gy = state == 0 && gy;
+                let exiled = state >= 2 || (state == 0 && to_exile);
+                let next = match e {
+                    0 if at_gy => 1,
+                    1 | 3 | 6 if at_gy => 2,
+                    2 if at_gy => 3,
+                    4 | 5 if !exiled => 2,
+                    _ => continue,
+                };
+                any = true;
+                walk(can, gy, to_exile, next, applied | 1 << e, out);
+            }
+            if !any {
+                *out |= 1 << state;
+            }
+        }
+        let mut out = 0u8;
+        walk(can, gy, to == Zone::Exile, 0, 0, &mut out);
+        match out {
+            0b0001 => Dest::To(to),
+            0b0010 => Dest::Library,
+            0b0100 => Dest::Exile,
+            0b1000 => Dest::Void(void.expect("a void counter")),
+            _ => Dest::Choose(out, void),
+        }
+    }
+
+    /// CR 616.1: the affected object's controller (owner) chooses which
+    /// replacement applies to `card`, exiled for now (`move_card`):
+    /// `NUMBER` 1 = shuffled into its owner's library, 2 = exile, 3 = exile
+    /// with a void counter (the results the orders reach; each offered
+    /// once).
+    pub(crate) fn choose_replacement(&mut self, card: ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId) {
+        if !self.live(card) || self.objs[card.idx.i()].zone != Zone::Exile {
+            return;
+        }
+        let idx = card.idx;
+        let owner = self.objs[idx.i()].owner;
+        match self.answer.take() {
+            Some(Choice::Number(k)) => {
+                self.note(|g| format!("P{chooser} applies {} to {}", ["", "the library", "exile", "a void counter"][k as usize], g.name(idx)));
+                match k {
+                    1 => {
+                        // (Revealed: it is public now.)
+                        self.repl_decided = true;
+                        self.move_card_ctl(idx, Zone::Library, Pos::Top, None);
+                        self.shuffle_library(owner);
+                    }
+                    _ => {
+                        if k == 3 {
+                            if let Some(c) = void {
+                                self.add_counters(idx, c, 1);
+                            }
+                        }
+                        if matches!(from, Zone::Library | Zone::Graveyard) && self.seen & SEEN_EXILE_WATCH != 0 {
+                            self.event(Event::player(EventKind::ExiledFromLibGy, owner));
+                        }
+                    }
+                }
+            }
+            Some(other) => unreachable!("replacement answer {other:?}"),
+            None => {
+                let opts: Vec<crate::decision::Opt> = (1..4u8)
+                    .filter(|&k| results & (1 << k) != 0)
+                    .map(|k| crate::decision::Opt { action: crate::decision::act::NUMBER + k as u16, choice: Choice::Number(k) })
+                    .collect();
+                self.ask(
+                    crate::flow::Task::ChooseReplacement { card, from, results, void, chooser },
+                    chooser,
+                    crate::decision::DecisionKind::ChooseReplacement,
+                    opts,
+                );
+            }
+        }
+    }
+
     fn shuffle_in_instead(&mut self, idx: CardIdx, from: Zone) -> ObjRef {
         if from.is_hidden() {
             self.reveal(idx);

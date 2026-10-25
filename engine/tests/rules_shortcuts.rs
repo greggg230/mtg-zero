@@ -552,3 +552,114 @@ fn cr_106_1b_converge_counts_exactly_with_many_sources() {
     assert!(g.lands_of(0).all(|l| g.obj(l).tapped));
     assert_eq!(g.obj(relic).zone, Zone::Battlefield, "two colours: mana value 3 stays\n{}", log(&g));
 }
+
+// ---- Mox Diamond however it would enter (CR 614.1a) -------------------------------------------
+
+/// Tinker puts Mox Diamond onto the battlefield: "If Mox Diamond would
+/// enter, you may discard a land card instead. If you do, put Mox Diamond
+/// onto the battlefield. If you don't, put it into its owner's graveyard"
+/// applies to that too, not only to the cast Mox.
+#[test]
+fn cr_614_1a_mox_diamond_put_onto_the_battlefield_asks_for_a_land() {
+    for discard in [true, false] {
+        let mut g = scen()
+            .library(0, &["Mox Diamond", "Island", "Island"])
+            .battlefield(0, &["Island", "Island", "Island", "Mind Stone"])
+            .hand(0, &["Tinker", "Forest"])
+            .at(Step::Main1, 0)
+            .start();
+        let relic = bf(&g, 0, "Mind Stone");
+        let forest = g.card(0, "Forest", Zone::Hand);
+        let t = g.card(0, "Tinker", Zone::Hand);
+        g.choose(Choice::Cast(t));
+        finish(&mut g, |g| match g.kind() {
+            Some(DecisionKind::Sacrifice) => Some(Choice::Card(relic)),
+            _ => None,
+        });
+        resolve_with(&mut g, |g| match g.kind() {
+            Some(DecisionKind::SearchLibrary) => options(g).into_iter().find(|c| matches!(c, Choice::Def(d) if *d == db().id("Mox Diamond").unwrap())),
+            Some(DecisionKind::Discard) => Some(if discard { Choice::Card(forest) } else { Choice::Pass }),
+            _ => None,
+        });
+        let mox = g.find_card(0, "Mox Diamond", Zone::Battlefield);
+        if discard {
+            assert!(mox.is_some(), "a land discarded: it enters\n{}", log(&g));
+            assert_eq!(g.obj(forest).zone, Zone::Graveyard);
+        } else {
+            assert!(mox.is_none());
+            assert_eq!(g.count_in(0, "Mox Diamond", Zone::Graveyard), 1, "no land discarded: the graveyard\n{}", log(&g));
+            assert_eq!(g.obj(forest).zone, Zone::Hand);
+        }
+    }
+}
+
+// ---- the order of replacement effects (CR 616.1) ----------------------------------------------
+
+/// Blightsteel Colossus sacrificed while Yawgmoth's Will applies to its
+/// owner: "shuffle it into its owner's library instead" and "exile that card
+/// instead" both apply; its controller chooses which (CR 616.1, 616.1e).
+#[test]
+fn cr_616_1_blightsteel_and_yawgmoths_will_the_controller_chooses() {
+    for (k, zone) in [(1u8, Zone::Library), (2, Zone::Exile)] {
+        let mut g = scen()
+            .battlefield(0, &["Blightsteel Colossus", "Goblin Bombardment", "Swamp", "Swamp", "Swamp"])
+            .hand(0, &["Yawgmoth's Will"])
+            .at(Step::Main1, 0)
+            .start();
+        let bs = bf(&g, 0, "Blightsteel Colossus");
+        let gb = bf(&g, 0, "Goblin Bombardment");
+        let w = g.card(0, "Yawgmoth's Will", Zone::Hand);
+        g.choose(Choice::Cast(w));
+        finish(&mut g, |_| None);
+        resolve_with(&mut g, |_| None);
+        g.choose(Choice::Ability(gb, AbilitySlot::Activated(0)));
+        let mut asked = Vec::new();
+        for _ in 0..20 {
+            if at_priority(&g) {
+                break;
+            }
+            let c = match g.kind() {
+                Some(DecisionKind::Sacrifice) => Choice::Card(bs),
+                Some(DecisionKind::ChooseReplacement) => {
+                    asked = options(&g);
+                    Choice::Number(k)
+                }
+                Some(DecisionKind::Target) => Choice::Target(Target::Player(1)),
+                _ => g.pending_decision().unwrap().options[0].choice,
+            };
+            g.choose(c);
+        }
+        assert_eq!(asked, vec![Choice::Number(1), Choice::Number(2)], "{}", log(&g));
+        assert_eq!(g.obj(bs).zone, zone);
+    }
+}
+
+/// A flashback spell leaving the stack while an opponent controls Dauthi
+/// Voidwalker: flashback's "exile it instead" and Dauthi's "exile it with a
+/// void counter instead" both apply; the spell's controller chooses, and
+/// can keep the void counter off it (CR 616.1).
+#[test]
+fn cr_616_1_flashback_and_dauthi_voidwalker_the_controller_chooses() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain"])
+        .graveyard(0, &["Faithless Looting"])
+        .battlefield(1, &["Dauthi Voidwalker"])
+        .at(Step::Main1, 0)
+        .start();
+    let fl = g.card(0, "Faithless Looting", Zone::Graveyard);
+    g.choose(Choice::Cast(fl));
+    finish(&mut g, |_| None);
+    let mut asked = Vec::new();
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseReplacement) if g.has_option(Choice::Number(2)) && g.has_option(Choice::Number(3)) => {
+            Some(Choice::Number(2))
+        }
+        _ => None,
+    });
+    for c in g.exile_zone().iter() {
+        if g.name(*c) == "Faithless Looting" {
+            asked.push(g.counters_on(*c, Counter::Named(db().subtype_id("counter:void").unwrap())));
+        }
+    }
+    assert_eq!(asked, vec![0], "exiled by flashback, no void counter\n{}", log(&g));
+}

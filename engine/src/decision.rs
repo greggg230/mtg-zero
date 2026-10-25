@@ -163,6 +163,11 @@ pub enum DecisionKind {
     /// (`LIBRARY` = its slot in the pile sorted by definition; Undercity's
     /// Throne of the Dead Three). M7b part 3b.
     PutOntoBattlefield,
+    /// Which replacement effect applies to an object moving (the result:
+    /// `NUMBER` 1 = shuffled into its owner's library, 2 = exiled, 3 =
+    /// exiled with a void counter), chosen by its controller or owner (CR
+    /// 616.1). M7e.
+    ChooseReplacement,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

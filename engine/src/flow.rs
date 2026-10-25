@@ -65,6 +65,13 @@ pub(crate) enum Task {
     Delve { id: u32 },
     /// Discard a land for Mox Diamond to enter, or not.
     EnterByDiscard { id: u32 },
+    /// Mox Diamond put onto the battlefield other than by resolving: discard
+    /// a land card (it enters, under `controller`) or not (its owner's
+    /// graveyard).
+    EnterByDiscardAny { card: CardIdx, controller: PlayerId, tapped: bool },
+    /// CR 616.1: `chooser` orders the replacement effects of `card`'s move
+    /// from `from` (exiled for now): `results` the reachable results.
+    ChooseReplacement { card: crate::ids::ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId },
     /// Announce X (CR 601.2b, 107.3).
     ChooseX { id: u32 },
     /// Discard for escalate (CR 702.120a).
@@ -245,6 +252,8 @@ impl Game {
             Task::AsEnters { card } => self.as_enters(card),
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
+            Task::EnterByDiscardAny { card, controller, tapped } => self.enter_by_discard_any(card, controller, tapped),
+            Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),
             Task::AttackTarget { card } => self.choose_attack_target(card),

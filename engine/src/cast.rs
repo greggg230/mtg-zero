@@ -827,6 +827,38 @@ impl Game {
         }
     }
 
+    /// Mox Diamond put onto the battlefield by an effect (waiting in no
+    /// zone, `put_onto_battlefield`): `p` may discard a land card; then it
+    /// enters, else it goes to its owner's graveyard (CR 614.1a).
+    pub(crate) fn enter_by_discard_any(&mut self, card: CardIdx, p: PlayerId, tapped: bool) {
+        if self.objs[card.i()].zone != Zone::Nowhere {
+            return;
+        }
+        match self.answer.take() {
+            Some(Choice::Card(c)) => {
+                self.discard(c);
+                self.discard_entered = true;
+                self.entering_tapped = tapped;
+                self.put_onto_battlefield(card, p);
+            }
+            Some(Choice::Pass) => {
+                self.move_card(card, Zone::Graveyard, Pos::Top);
+            }
+            Some(other) => unreachable!("discard answer {other:?}"),
+            None => {
+                let ctx = Ctx { controller: p, source: None };
+                let land = Filter::Type(types::LAND);
+                let mut opts: Vec<Opt> = self
+                    .hand_options(p)
+                    .into_iter()
+                    .filter(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(&land, c, &ctx)))
+                    .collect();
+                opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                self.ask(Task::EnterByDiscardAny { card, controller: p, tapped }, p, DecisionKind::Discard, opts);
+            }
+        }
+    }
+
     /// A permanent of `p` giving the nonland cards in their graveyard
     /// escape (Underworld Breach).
     pub(crate) fn escape_granter(&self, p: PlayerId) -> Option<CardIdx> {
