@@ -509,6 +509,82 @@ fn emrakul_put_into_a_graveyard_shuffles_the_graveyard_in_cr603_6a() {
     assert_eq!(g.count_in(0, "Test Bear", Zone::Library), 1);
 }
 
+/// A spell's targets are chosen with it on the stack (CR 601.2a before
+/// 601.2c), where it is a spell: Emrakul's protection from spells that are
+/// one or more colors (702.16b) keeps Exorcise ("exile target artifact,
+/// enchantment, or creature with power 4 or greater") from targeting her, so
+/// with no other candidate Exorcise can't be cast. The engine checked the
+/// cast with the card in hand, not yet a spell, offered it, then found no
+/// target and panicked ("no legal target for a required target"): the search
+/// smoke's find on the engine of the run mtg3's second crash (ENGINE.md 15).
+#[test]
+fn emrakul_is_no_target_of_a_colored_spell_being_cast_cr601_2c_cr702_16b() {
+    for p in [0, 1] {
+        // Emrakul (the caster's, as in the crash, or the opponent's) the only
+        // candidate.
+        let g = scen()
+            .battlefield(0, &["Plains", "Plains"])
+            .battlefield(p, &["Emrakul, the Aeons Torn"])
+            .hand(0, &["Exorcise"])
+            .at(Step::Main1, 0)
+            .start();
+        let ex = g.card(0, "Exorcise", Zone::Hand);
+        assert!(!g.has_option(Choice::Cast(ex)), "Emrakul of P{p}: no legal target, not castable");
+        // With Sol Ring too: castable, Sol Ring the only target.
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Plains"])
+            .battlefield(p, &["Emrakul, the Aeons Torn"])
+            .battlefield(1, &["Sol Ring"])
+            .hand(0, &["Exorcise"])
+            .at(Step::Main1, 0)
+            .start();
+        let (emrakul, ring) = (bf(&g, p, "Emrakul, the Aeons Torn"), bf(&g, 1, "Sol Ring"));
+        let ex = g.card(0, "Exorcise", Zone::Hand);
+        g.choose(Choice::Cast(ex));
+        assert_eq!(g.kind(), Some(DecisionKind::Target));
+        assert!(!g.has_option(g.tgt(emrakul)) && g.has_option(g.tgt(ring)), "{:?}", g.options_desc());
+        g.choose(g.tgt(ring));
+        pay(&mut g);
+        settle(&mut g);
+        assert_eq!(g.obj(ring).zone, Zone::Exile);
+        assert_eq!(g.obj(emrakul).zone, Zone::Battlefield);
+    }
+    // Protection from spells, not from abilities: Mother of Runes's white
+    // ability targets her.
+    let mut g = scen()
+        .battlefield(0, &["Mother of Runes", "Emrakul, the Aeons Torn"])
+        .at(Step::Main1, 0)
+        .start();
+    let (mom, emrakul) = (bf(&g, 0, "Mother of Runes"), bf(&g, 0, "Emrakul, the Aeons Torn"));
+    g.choose(act(mom, 0));
+    assert!(g.has_option(g.tgt(emrakul)), "an ability can target her: {:?}", g.options_desc());
+}
+
+/// Carnage Interpreter: "As long as you have one or fewer cards in hand,
+/// Carnage Interpreter gets +2/+2 and has menace." Cast from a hand of two,
+/// Exorcise leaves one card in hand as it moves to the stack (CR 601.2a), so
+/// its target is chosen (601.2c) with Carnage Interpreter 5/5, a creature
+/// with power 4 or greater: a legal target (the engine checked the cast with
+/// the card in hand, a 3/3, and didn't offer it).
+#[test]
+fn a_spell_cast_from_hand_chooses_targets_with_the_hand_it_left_cr601_2a() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Carnage Interpreter"])
+        .hand(0, &["Exorcise", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let ci = bf(&g, 0, "Carnage Interpreter");
+    assert_eq!(g.power(ci), 3, "two cards in hand");
+    let ex = g.card(0, "Exorcise", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(ex)), "castable: {:?}", g.options_desc());
+    g.choose(Choice::Cast(ex));
+    assert_eq!(g.power(ci), 5, "one card in hand");
+    g.choose(g.tgt(ci));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(ci).zone, Zone::Exile, "{}", log(&g));
+}
+
 /// Blightsteel Colossus: infect (CR 702.90b-c: poison counters for a
 /// player, -1/-1 counters for a creature); "if Blightsteel Colossus would
 /// be put into a graveyard from anywhere, reveal it and shuffle it into its

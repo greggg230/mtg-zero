@@ -235,7 +235,14 @@ internally instead of being exposed. zero-core would auto-step it anyway; doing 
 * A cast is offered only if it can be completed: timing is legal, every required target has
   enough legal candidates, and the cost is payable from the pool plus untapped mana sources.
   So casting never needs to be rewound (601.2 allows rewinding illegal casts; we never start
-  one). The same rule applies to activated abilities later.
+  one). The same rule applies to activated abilities later. The targets are checked the way
+  they are chosen, with the card on the stack (601.2a before 601.2c; `Game::as_cast`, on a
+  copy of the game, for a spell with targets that is otherwise castable): there it is a spell
+  (Emrakul's protection from spells that are one or more colors, 702.16b, keeps it from being
+  a target) and it has left its zone (a graveyard's card types for a goyf's power; the hand's
+  size for Carnage Interpreter's +2/+2). Until the fix (branch `m7d-targetfix`) the check ran
+  with the card where it was, except from a graveyard: a coloured spell whose only candidate
+  was Emrakul was offered and the target choice panicked (section 15, the search smoke).
 * **`PayMana`** (601.2g-h; full description in section 18). Phyrexian pips first (how many
   of each colour are paid with life), then the pool (coloured pips by colour, hybrid pips,
   then generic). The rest is paid by choosing which mana abilities to activate, one decision
@@ -1082,7 +1089,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_stack.rs` | M7b part 3b: 115.1 / 701.5a (an ability targeted and countered), 611.2b (the loss of abilities while Tidebinder remains), 115.5, 605.3b, 608.2b, 603.2e (becoming the target: once per spell, players, spells, copies 707.10c), 101.2, 608.3a, 115.7, Ertai; the stack fields of the encoding |
 | `tests/rules_ward.rs` | M7b part 3b: 702.21a (mana, life, discard, abilities, each instance), 119.4, 101.2, granted ward and 613.7; the ward fields of the encoding |
 | `tests/cards_m7d.rs` | M7d: the 13 cards against their Oracle text (26 tests, the CR cited in each name: 702.170, 103.6, 106.1, 702.28, 614.1a, 702.151, 716, 603.2e, 601.2f, 605.1a, 302.6, 601.2a, 701.39, 106.6, 702.119, 118.9, 701.21, 601.2g, 601.2b, 701.62, 708.2, 708.5, 701.40b, 708.9); face-down permanents and the Citadel's top card hidden from the opponent in every world it samples, never for their controller; the encoding of a face-down permanent the same in every world of each viewer |
-| `tests/cards_m7c_tail3.rs` | M7c tail part 3: the 33 cards against their Oracle text (48 tests, the CR cited in each name: 107.3, 702.96, 701.14, 305.2, 601.2c, 603.12, 702.16j, 603.4, 702.44a, 603.6a, 702.86a, 702.16b, 702.90, 614.1a, 702.33c, 702.33d, 107.4c, 603.7, 702.47, 706, 702.32a, 607.2a, 702.171, 301.5, 700.2, 701.46a, 509.1b, 509.1h, 406.3, 702.75a, 303.4a, 608.3a, 514.3a); face-down cards hidden from the other player in every world it samples, never for their owner; Wizard's Rockets's IR defect |
+| `tests/cards_m7c_tail3.rs` | M7c tail part 3: the 33 cards against their Oracle text (48 tests, the CR cited in each name: 107.3, 702.96, 701.14, 305.2, 601.2c, 603.12, 702.16j, 603.4, 702.44a, 603.6a, 702.86a, 702.16b, 702.90, 614.1a, 702.33c, 702.33d, 107.4c, 603.7, 702.47, 706, 702.32a, 607.2a, 702.171, 301.5, 700.2, 701.46a, 509.1b, 509.1h, 406.3, 702.75a, 303.4a, 608.3a, 514.3a); face-down cards hidden from the other player in every world it samples, never for their owner; Wizard's Rockets's IR defect; a spell's targets checked with it on the stack (601.2a, 601.2c: Exorcise and Emrakul, 702.16b, the search smoke's find on mtg3's engine; Exorcise and Carnage Interpreter, the hand it left) |
 | `tests/cards_m7c_tail2.rs` | M7c tail part 2: the 24 cards against their Oracle text (38 tests, the CR cited in each name: 701.21a, 702.156a, 607.2a, 702.142a, 614.1a, 107.3, 702.85a, 702.131, 702.81a, 601.2f, 305.6, 601.2d, 702.122a, 500.8, 702.185a, 702.94a, 602.2b, 732.2a), the search of Green Sun's Zenith on a custom card, the two IR defects; Bilbo's cast of a flashback card for the cost its offer was checked for |
 | `tests/cards_m7c_tail.rs` | M7c tail part 1: the 29 cards against their Oracle text (31 tests, the CR cited in each name: 605.3a, 702.177a, 106.6, 106.7, 106.1b, 101.2, 101.4, 305.1, 502.3, 603.4, 607.2a, 608.2b, 608.2g, 609.4b, 610.3, 613.1e, 614.10, 601.2f, 701.19, 701.20a, 701.53a, 701.65a, 508.1d, 119.4, 118.9a), Chromatic Star's IR defect; the state the run mtg3 crashed in (Malcolm's free cast of Echo of Eons, section 15) |
 | `tests/rules_initiative.rs` | M7b part 3b: 725.2 (taking it, the upkeep, combat damage), 309.4-309.5 (rooms, the room choice), 309.7 / 704.5t / 701.49c, goad 701.38, a pending room choice survives determinize; the initiative and dungeon globals |

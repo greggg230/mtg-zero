@@ -263,15 +263,14 @@ impl Game {
             return false;
         }
         if let Some(ab) = &def.spell {
-            if !self.targets_available(ab, p, Some(self.obj_ref(c))) {
+            // Its targets, chosen with it on the stack (`as_cast`); not
+            // overloaded, its own target is needed.
+            let ok = |g: &Game, r: ObjRef| {
+                g.targets_available(ab, p, Some(r))
+                    && (!def.overload || alt_ok || ab.modes.as_ref().is_some_and(|m| g.targets_available(&m.list[0], p, Some(r))))
+            };
+            if !(if ab.has_targets() { self.as_cast(c, p, ok) } else { ok(self, self.obj_ref(c)) }) {
                 return false;
-            }
-            // Not overloaded: its own target is needed.
-            if def.overload && !alt_ok {
-                let plain = ab.modes.as_ref().map(|m| &m.list[0]);
-                if !plain.is_some_and(|x| self.targets_available(x, p, Some(self.obj_ref(c)))) {
-                    return false;
-                }
             }
         }
         true
@@ -564,15 +563,7 @@ impl Game {
         };
         match spell {
             None => true,
-            // Leaving the graveyard can change what is targetable (a goyf's
-            // power counts graveyard card types): check with the card on
-            // the stack (CR 601.2a before 601.2c).
-            Some(ab) if self.objs[card.i()].zone == Zone::Graveyard => {
-                let mut g = self.clone();
-                let r = g.move_card_to_stack(card, p);
-                g.targets_available(ab, p, Some(r))
-            }
-            Some(ab) => self.targets_available(ab, p, Some(self.obj_ref(card))),
+            Some(ab) => self.spell_targets_available(ab, p, card),
         }
     }
 
@@ -706,14 +697,13 @@ impl Game {
         exclude: Option<CardIdx>,
     ) -> bool {
         let def = self.def_of(card);
-        let src = Some(self.obj_ref(card));
         def.additional.iter().enumerate().any(|(k, o)| {
             (!def.kicker
                 || def
                     .spell
                     .as_ref()
                     .and_then(|ab| ab.modes.as_ref())
-                    .is_some_and(|m| self.targets_available(&m.list[k], p, src)))
+                    .is_some_and(|m| self.spell_targets_available(&m.list[k], p, card)))
                 && {
                     let cost = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep);
                     self.cost_payable(p, card, o, &cost, classes, exclude)
@@ -968,6 +958,78 @@ impl Game {
         }
     }
 
+    /// Runs `f` on the game as it is once `p` has moved spell `card` to the
+    /// stack to cast it (CR 601.2a), with the card's reference there: its
+    /// targets are chosen then (601.2c), so a cast is offered only if they
+    /// can be (ENGINE.md 6). On the stack the card is a spell (protection
+    /// from spells with a quality, 702.16b: Emrakul's from coloured spells)
+    /// and has left the zone it was in (the card types in a graveyard a
+    /// goyf's power counts; the hand's size Carnage Interpreter's bonus
+    /// reads). On a copy of the game with the card moved when that can
+    /// change a target's legality (`cast_move_matters`), else in place (the
+    /// same answer, without the copy).
+    pub(crate) fn as_cast<R>(&self, card: CardIdx, p: PlayerId, f: impl FnOnce(&Game, ObjRef) -> R) -> R {
+        if !self.cast_move_matters(card) {
+            return f(self, self.obj_ref(card));
+        }
+        let mut g = self.clone();
+        let r = g.move_card_to_stack(card, p);
+        f(&g, r)
+    }
+
+    /// Can moving spell `card` from where it is to the stack (CR 601.2a)
+    /// change which objects are legal targets ([`as_cast`](Self::as_cast))?
+    /// Not for a card on the stack already (an announcement of the cast in
+    /// progress). From a hand or exile only through what reads it: the card
+    /// becomes a spell, so a coloured one where something has protection from
+    /// spells that are one or more colors (702.16b, the only quality a spell
+    /// has and its card hasn't: `protected_from`); a static ability in play
+    /// whose condition reads that zone (`Cond::reads_zone`: the hand's size,
+    /// the cards exiled with its source). From anywhere else, always: a
+    /// graveyard's card types (a goyf's power, delirium), a library's size,
+    /// and a source quality `source_quality` reads only in the zones above.
+    pub(crate) fn cast_move_matters(&self, card: CardIdx) -> bool {
+        let zone = self.objs[card.i()].zone;
+        match zone {
+            Zone::Stack => false,
+            Zone::Hand | Zone::Exile => {
+                (self.colors_of(card) != 0 && self.spell_protection_in_play())
+                    || (self.n_static > 0
+                        && self
+                            .battlefield
+                            .iter()
+                            .chain(self.command.iter())
+                            .any(|&c| self.abilities(c).statics.iter().any(|s| s.cond.as_ref().is_some_and(|k| k.reads_zone(zone)))))
+            }
+            _ => true,
+        }
+    }
+
+    /// Might some permanent have protection from spells that are one or more
+    /// colors (printed, from a static ability or from an effect: the sources
+    /// `protection_of` reads)?
+    fn spell_protection_in_play(&self) -> bool {
+        let spells = |m: &crate::db::Mod| matches!(m, crate::db::Mod::Protection(x) if x.colored_spells);
+        self.battlefield.iter().any(|&c| self.def_of(c).protection.colored_spells)
+            || self.effects.iter().any(|e| spells(&e.m))
+            || (self.n_static > 0
+                && self
+                    .battlefield
+                    .iter()
+                    .chain(self.command.iter())
+                    .any(|&c| self.abilities(c).statics.iter().any(|s| s.mods.iter().any(spells))))
+    }
+
+    /// [`targets_available`](Self::targets_available) for `ab`, spell
+    /// `card`'s effect or one of its modes, as `p` would cast it now
+    /// ([`as_cast`](Self::as_cast); in place when it has no targets).
+    pub(crate) fn spell_targets_available(&self, ab: &AbilityDef, p: PlayerId, card: CardIdx) -> bool {
+        if !ab.has_targets() {
+            return self.targets_available(ab, p, Some(self.obj_ref(card)));
+        }
+        self.as_cast(card, p, |g, r| g.targets_available(ab, p, Some(r)))
+    }
+
     /// Every target requirement has at least `min` legal candidates; for a
     /// modal ability, enough modes can be chosen (a mode whose targets
     /// cannot be chosen cannot be, CR 700.2, 601.2c).
@@ -1191,19 +1253,16 @@ impl Game {
     /// A spree spell's mode costs (CR 702.172a) for the modes whose targets
     /// `p` could choose now; `None` for other spells.
     fn spree_extras(&self, card: CardIdx, p: PlayerId) -> Option<Vec<crate::mana::ManaCost>> {
-        let m = self.def_of(card).spell.as_ref()?.modes.as_ref()?;
+        let ab = self.def_of(card).spell.as_ref()?;
+        let m = ab.modes.as_ref()?;
         if m.costs.is_empty() {
             return None;
         }
-        let src = Some(self.obj_ref(card));
-        Some(
-            m.list
-                .iter()
-                .zip(m.costs.iter())
-                .filter(|(ab, _)| self.targets_available(ab, p, src))
-                .map(|(_, c)| *c)
-                .collect(),
-        )
+        // (Targets chosen with the spell on the stack: `as_cast`.)
+        let pick = |g: &Game, r: ObjRef| -> Vec<crate::mana::ManaCost> {
+            m.list.iter().zip(m.costs.iter()).filter(|(x, _)| g.targets_available(x, p, Some(r))).map(|(_, c)| *c).collect()
+        };
+        Some(if ab.has_targets() { self.as_cast(card, p, pick) } else { pick(self, self.obj_ref(card)) })
     }
 
     /// CR 601.2b: announce how many times an additional cost is paid
@@ -1314,7 +1373,7 @@ impl Game {
             let Some(face) = self.def_of(card).bestow else { return false };
             let mut g = self.clone();
             g.objs[card.i()].def = face;
-            if !g.db.def(face).spell.as_ref().is_some_and(|ab| g.targets_available(ab, p, Some(g.obj_ref(card)))) {
+            if !g.db.def(face).spell.as_ref().is_some_and(|ab| g.spell_targets_available(ab, p, card)) {
                 return false;
             }
             return g.alt_payable(p, card, k, classes);
@@ -1672,9 +1731,17 @@ impl Game {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
         if opts.is_empty() {
-            // Only reachable if legality changed between the cast check and
-            // now, which nothing can do yet.
-            panic!("no legal target for a required target");
+            // Only reachable if the offer's check and this choice disagree
+            // (a cast is offered only if it can be completed: `as_cast`).
+            panic!(
+                "no legal target for a required target: {} requirement {req} ({:?}; {} chosen), turn {} {:?}, world of {:?}",
+                self.describe_target(Target::Stack(id)),
+                tr.filter,
+                already.len(),
+                self.turn.number,
+                self.turn.step,
+                self.observer
+            );
         }
         self.ask(Task::ChooseTargets { id, req }, ctx.controller, DecisionKind::Target, opts);
     }
