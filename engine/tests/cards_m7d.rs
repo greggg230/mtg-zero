@@ -825,3 +825,47 @@ fn bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21() {
     assert_eq!(g.life(1), 10, "{}", log(&g));
     assert_eq!(g.count_in(0, "Test Bear", Zone::Graveyard), 9);
 }
+
+// ---- Rain of Filth (a granted sacrifice mana ability, with the land's own) -------
+
+/// "Until end of turn, lands you control gain 'Sacrifice this land: Add
+/// {B}.'" A land may be tapped for its own mana and then sacrificed for {B}
+/// in one payment (CR 601.2g: mana abilities in any order); a tapped land
+/// can still be sacrificed. Lands that come later don't have it (611.2c).
+#[test]
+fn rain_of_filth_lands_tap_then_sacrifice_in_one_payment_cr601_2g() {
+    let sac_for = AbilitySlot::Trigger(u8::MAX - 1);
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Rain of Filth", "Hymn to Tourach", "Dark Ritual"])
+        .at(Step::Main1, 0)
+        .start();
+    let rain = g.card(0, "Rain of Filth", Zone::Hand);
+    g.choose(Choice::Cast(rain));
+    pay(&mut g);
+    settle(&mut g);
+    let swamps: Vec<CardIdx> = g.lands_of(0).collect();
+    let untapped = *swamps.iter().find(|&&s| !g.obj(s).tapped).unwrap();
+    let tapped = *swamps.iter().find(|&&s| g.obj(s).tapped).unwrap();
+    // Hymn ({B}{B}) from one untapped Swamp: tapped for {B}, then sacrificed.
+    let hymn = g.card(0, "Hymn to Tourach", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(hymn)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(hymn));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::PayMana) || g.kind() == Some(DecisionKind::Target));
+    if g.kind() == Some(DecisionKind::Target) {
+        g.choose(Choice::Target(engine::Target::Player(1)));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::PayMana));
+    }
+    assert!(g.has_option(Choice::Ability(untapped, sac_for)), "{:?}", g.options_desc());
+    assert!(g.has_option(Choice::Ability(tapped, sac_for)), "a tapped land can be sacrificed: {:?}", g.options_desc());
+    g.choose(Choice::Ability(untapped, sac_for));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMana), "{{B}} or {{B}}{{B}}: {:?}", g.options_desc());
+    let bb = g.pending_decision().unwrap().options.last().unwrap().choice;
+    g.choose(bb);
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Swamp", Zone::Graveyard), 1, "{}", log(&g));
+    assert_eq!(g.count_in(0, "Hymn to Tourach", Zone::Graveyard), 1, "Hymn cast and resolved\n{}", log(&g));
+    // The tapped Swamp is left: sacrificed for Dark Ritual.
+    let ritual = g.card(0, "Dark Ritual", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(ritual)), "{:?}", g.options_desc());
+}

@@ -190,6 +190,10 @@ pub enum Mod {
     /// ability's source ("equipped creature gets +1/+1 for each +1/+1
     /// counter on this Equipment").
     PtPerSourceCounter { counter: Counter, p: i32, t: i32 },
+    /// Layer 6: it gains "Sacrifice this permanent: Add one mana of a type in
+    /// the mask" (Rain of Filth; a mana ability used while paying, together
+    /// with its own tap abilities: `pay::SAC_FOR`, ENGINE.md 31).
+    GainSacMana(ManaMask),
     /// Layer 6: it loses all abilities (CR 613.1f).
     LoseAllAbilities,
     /// Layer 4: its card types become exactly `types` and its creature

@@ -613,3 +613,92 @@ impl Game {
         }
     }
 }
+
+// ---- a granted "sacrifice this: add <mana>" (Rain of Filth) -----------------
+
+impl Game {
+    /// The mana a permanent's granted "sacrifice this: add <mana>" makes, if
+    /// it has one (`Mod::GainSacMana`).
+    pub(crate) fn sac_mana_of(&self, c: CardIdx) -> crate::mana::ManaMask {
+        let r = self.obj_ref(c);
+        self.effects.iter().fold(0, |m, e| match e.m {
+            crate::db::Mod::GainSacMana(k) if e.on == crate::layers::Affected::Obj(r) => m | k,
+            _ => m,
+        })
+    }
+
+    /// The own mana abilities of `c` its granted sacrifice may follow in one
+    /// payment: {T} only, no life or damage, ready now (CR 601.2g: tap it
+    /// for mana, then sacrifice it).
+    fn sac_for_taps(&self, p: PlayerId, c: CardIdx, locks: u16) -> Vec<(u8, Vec<[u8; 6]>)> {
+        let d = self.abilities(c);
+        d.activated
+            .iter()
+            .enumerate()
+            .filter_map(|(i, ad)| {
+                let m = ad.mana()?;
+                let plain = ad.cost == crate::db::Cost { tap: true, ..crate::db::Cost::default() } && m.damage_to_you == 0 && m.sac_if_no.is_none() && m.only == 0;
+                if !plain || ad.instant_only || !self.activation_ready(p, c, ad, locks) || (d.latent > 0 && !self.has_activated(c, i)) {
+                    return None;
+                }
+                Some((i as u8, crate::pay::productions(self, p, &m.prod, Some(c))))
+            })
+            .collect()
+    }
+
+    /// The class of `c`'s granted sacrifice ability (Rain of Filth): one
+    /// mana of its type, or that and one of its own tap productions.
+    pub(crate) fn sac_for_class(&self, p: PlayerId, c: CardIdx, locks: u16) -> Option<crate::pay::Class> {
+        let mask = self.sac_mana_of(c);
+        // (Its action id comes after its own abilities: room for one more.)
+        if mask == 0 || self.abilities(c).activated.len() >= 4 || self.activation_locks_hit(c, locks) {
+            return None;
+        }
+        let mut prods: Vec<[u8; 6]> = (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
+        let base = prods.clone();
+        for (_, ps) in self.sac_for_taps(p, c, locks) {
+            for v in ps {
+                for b in &base {
+                    let mut w = v;
+                    for t in 0..6 {
+                        w[t] += b[t];
+                    }
+                    if !prods.contains(&w) {
+                        prods.push(w);
+                    }
+                }
+            }
+        }
+        let def = self.objs[c.i()].def;
+        let src = crate::pay::Src { card: c, slot: crate::pay::SAC_FOR };
+        let mut members = crate::pay::Members::new();
+        members.push(src);
+        Some(crate::pay::Class { def, members, yld: crate::pay::Yield::Multi { prods, units: None }, dmg: 0, sac_self: true, only: 0 })
+    }
+
+    fn activation_locks_hit(&self, c: CardIdx, locks: u16) -> bool {
+        locks != 0 && self.types_of(c) & locks != 0
+    }
+
+    /// Activate `c`'s granted sacrifice for production `prod` (its mana is
+    /// the payment's): first the own tap ability whose mana makes the rest,
+    /// if any, then the sacrifice (CR 601.2g).
+    pub(crate) fn activate_sac_for(&mut self, c: CardIdx, prod: [u8; 6]) {
+        let p = self.objs[c.i()].controller;
+        let mask = self.sac_mana_of(c);
+        let mut rest = prod;
+        if let Some(t) = (0..6).find(|&t| mask & (1 << t) != 0 && rest[t] > 0) {
+            rest[t] -= 1;
+        }
+        if rest != [0; 6] {
+            let locks = self.activation_locks();
+            if let Some((i, _)) = self.sac_for_taps(p, c, locks).into_iter().find(|(_, ps)| ps.contains(&rest)) {
+                self.activate_mana_costs(crate::pay::Src { card: c, slot: crate::db::AbilitySlot::Activated(i) });
+            }
+        }
+        if self.objs[c.i()].zone == Zone::Battlefield {
+            self.note(|g| format!("P{p} sacrifices {} for mana", g.name(c)));
+            self.sacrifice(c);
+        }
+    }
+}

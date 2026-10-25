@@ -24,6 +24,12 @@ pub(crate) const IMPROVISE: AbilitySlot = AbilitySlot::Spell;
 /// {U}", Urza; ENGINE.md 31): a source of that mana while paying.
 pub(crate) const TAP_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX);
 
+/// The `Src` slot of a granted "sacrifice this: add <mana>" ability (Rain of
+/// Filth, `Mod::GainSacMana`), whose productions include tapping the
+/// permanent for one of its own mana abilities first (CR 601.2g: both in
+/// one payment; ENGINE.md 31).
+pub(crate) const SAC_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 1);
+
 /// A mana ability that can help pay a cost: of a permanent, or of a card in
 /// hand (the Spirit Guides, CR 605.3a; ENGINE.md 18); or an artifact tapped
 /// for improvise (`IMPROVISE`).
@@ -425,6 +431,19 @@ impl Game {
                 } else {
                     out.push(cl);
                 }
+            }
+        }
+        // Granted "sacrifice this: add <mana>" abilities (Rain of Filth):
+        // several-mana classes (the sacrifice alone, or its own tap ability
+        // first), one per permanent.
+        if !self.effects.is_empty() && self.effects.iter().any(|e| matches!(e.m, crate::db::Mod::GainSacMana(_))) {
+            for c in self.permanents_of(p) {
+                if Some(c) == exclude {
+                    continue;
+                }
+                let Some(cl) = self.sac_for_class(p, c, locks) else { continue };
+                out.insert(n_multi, cl);
+                n_multi += 1;
             }
         }
         // The permanents another's mana ability taps (`TAP_FOR`), one class
@@ -1012,7 +1031,13 @@ impl Game {
                 }
             };
             if ok {
-                opts.push(if rep.slot == IMPROVISE || rep.slot == TAP_FOR {
+                opts.push(if rep.slot == SAC_FOR {
+                    // A granted ability: after its own (`ACTIVATE` + its
+                    // number of abilities; `sac_for_class` checks there is
+                    // room).
+                    let n = self.abilities(rep.card).activated.len() as u16;
+                    Opt { action: act::ACTIVATE + (self.perm_action(payer, rep.card) - act::MY_PERM) * 4 + n, choice: Choice::Ability(rep.card, rep.slot) }
+                } else if rep.slot == IMPROVISE || rep.slot == TAP_FOR {
                     // Improvise, or a permanent tapped for another's mana
                     // ability: the permanent's own slot (`MY_PERM`).
                     Opt { action: self.perm_action(payer, rep.card), choice: Choice::Card(rep.card) }
@@ -1036,7 +1061,7 @@ impl Game {
     fn pick_multi(&self, pm: &mut PayMana, src: Src, prod: [u8; 6]) {
         // (Artifact-only mana is spent first; what is left stays
         // artifact-only in the pool.)
-        let only = self.def_of(src.card).activated_def(src.slot).mana().map_or(0, |m| m.only);
+        let only = if src.slot == SAC_FOR { 0 } else { self.def_of(src.card).activated_def(src.slot).mana().map_or(0, |m| m.only) };
         let mut pool = ManaPool { amt: pm.extra, art: pm.extra_art, haste: 0 };
         pool.add(&prod);
         if only & crate::db::SPEND_ARTIFACT != 0 {
@@ -1064,7 +1089,7 @@ impl Game {
                 .chosen
                 .iter()
                 .chain(pm.multi.iter().map(|m| &m.0))
-                .any(|s| s.slot != IMPROVISE && s.slot != TAP_FOR && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
+                .any(|s| s.slot != IMPROVISE && s.slot != TAP_FOR && s.slot != SAC_FOR && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
             if uncounterable {
                 let r = self.obj_ref(card);
                 self.marks.push((r, crate::game::Mark::Uncounterable));
@@ -1083,6 +1108,9 @@ impl Game {
             if s.slot == TAP_FOR {
                 return (false, false, false, false);
             }
+            if s.slot == SAC_FOR {
+                return (false, true, false, true);
+            }
             let ad = self.def_of(s.card).activated_def(s.slot);
             let dmg = ad.mana().map_or(0, |m| m.damage_to_you);
             let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
@@ -1097,6 +1125,9 @@ impl Game {
                 // for mana", CR 106.12a.)
                 self.note(|g| format!("P{payer} taps {} for a mana ability", g.name(src.card)));
                 self.tap(src.card);
+            } else if src.slot == SAC_FOR {
+                let prod = pm.multi.iter().find(|m| m.0 == src).map(|m| m.1).unwrap_or([0; 6]);
+                self.activate_sac_for(src.card, prod);
             } else {
                 self.activate_mana_costs(src);
             }

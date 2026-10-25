@@ -82,6 +82,29 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let tgt = b.target(Filter::And(Box::new(Filter::Player), Box::new(Filter::Opponent)), 1, 1);
             b.op(Op::Ext(Ext::M7d(M7d::OppExilesThreeMayCastOne { tgt })));
         }
+        // "Until end of turn, lands you control gain 'Sacrifice this land: Add
+        // {B}.'" (Rain of Filth; the lands locked in, CR 611.2c.)
+        E::GrantAbilityToPermanentsYouControlUEOT(nodes::GrantAbilityToPermanentsYouControlUEOT { card_filter, ability }) => {
+            let (Some(f), Some(a)) = (card_filter.as_deref(), ability.as_deref()) else {
+                l.unsupported("GrantAbilityToPermanentsYouControlUEOT(missing a part)");
+                return true;
+            };
+            let Some(filter) = super::filter::lower_card_filter(l, f) else { return true };
+            let Some(ad) = super::activated::lower_activated(l, a, super::activated::From::Battlefield, false) else { return true };
+            let mask = match (&ad.effect, ad.cost == crate::db::Cost { sac_self: true, ..crate::db::Cost::default() }) {
+                (ActEffect::Mana(m), true) if m.damage_to_you == 0 && m.only == 0 && !m.haste && !m.uncounterable && m.sac_if_no.is_none() => match m.prod {
+                    crate::db::ManaProd::One(k) => Some(k),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(mask) = mask else {
+                l.unsupported("GrantAbilityToPermanentsYouControlUEOT.ability(not \"sacrifice this: add one mana\")");
+                return true;
+            };
+            let on = crate::program::On::Each(Filter::And(Box::new(filter), Box::new(Filter::Controller(true))));
+            b.op(Op::Ext(Ext::Apply { on, mods: vec![crate::db::Mod::GainSacMana(mask)], until: crate::layers::Until::EndOfTurn }));
+        }
         _ => return false,
     }
     true

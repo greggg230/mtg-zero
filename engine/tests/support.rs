@@ -358,6 +358,7 @@ const SUPPORTED: &[&str] = &[
     "Raffine's Tower",
     "Raffine, Scheming Seer",
     "Ragavan, Nimble Pilferer",
+    "Rain of Filth",
     "Raph & Mikey, Troublemakers",
     "Raucous Theater",
     "Raugrin Triome",
