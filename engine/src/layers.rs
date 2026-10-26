@@ -223,8 +223,11 @@ impl Game {
         }
         if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
-                if let Mod::Types { add, .. } = m {
-                    base |= add;
+                // "It's a 3/4 Ninja creature" (Kaito, `replace`): its card
+                // types become exactly these (CR 205.1a); not a planeswalker
+                // then (the card's ruling).
+                if let Mod::Types { add, replace, .. } = m {
+                    base = if *replace { *add } else { base | add };
                 }
             }
         }
@@ -249,8 +252,10 @@ impl Game {
         let mut printed = self.def_of(c).subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(s));
         if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
-                if let Mod::Types { subtypes, .. } = m {
-                    printed |= subtypes.contains(&s);
+                if let Mod::Types { subtypes, replace, .. } = m {
+                    // (CR 205.1a-b: with its card types replaced, only these
+                    // subtypes.)
+                    printed = if *replace { subtypes.contains(&s) } else { printed || subtypes.contains(&s) };
                 }
             }
         }

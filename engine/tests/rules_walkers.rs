@@ -412,22 +412,28 @@ fn cr_606_3_the_wandering_emperor_activates_at_instant_speed_the_turn_she_entere
 }
 
 #[test]
-fn cr_120_3_damage_to_a_planeswalker_creature_removes_loyalty_and_is_marked() {
-    // Kaito is a 3/4 creature during his controller's turn (he keeps being a
-    // planeswalker).
+fn cr_205_1a_kaito_is_a_creature_not_a_planeswalker_on_his_turn_and_damage_is_marked() {
+    // ruling: f0224bc7
+    // "During your turn, ... he's a 3/4 Ninja creature": his card types
+    // become exactly creature (CR 205.1a), so he isn't a planeswalker then
+    // and damage to him is marked (120.3e), no loyalty lost (120.3c). (Until
+    // M8d the engine kept him a planeswalker too: the card's ruling.)
     let mut g = manual()
         .battlefield(0, &["Kaito, Bane of Nightmares", "Mountain"])
         .hand(0, &["Lightning Bolt"])
         .at(Step::Main1, 0)
         .start();
     let k = bf(&g, 0, "Kaito, Bane of Nightmares");
-    assert!(g.is_creature(k) && g.is_type(k, engine::db::types::PLANESWALKER));
+    assert!(g.is_creature(k) && !g.is_type(k, engine::db::types::PLANESWALKER));
     assert_eq!(g.pt(k), (3, 4));
     cast(&mut g, 0, "Lightning Bolt");
     g.choose(g.tgt(k));
     pay(&mut g);
     resolve_with(&mut g, |_| None);
-    assert_eq!(loyalty(&g, k), 1);
+    assert_eq!(loyalty(&g, k), 4);
     assert_eq!(g.obj(k).damage, 3);
     assert_eq!(g.obj(k).zone, Zone::Battlefield);
+    // On the opponent's turn he is a planeswalker again (and not a creature).
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1);
+    assert!(!g.is_creature(k) && g.is_type(k, engine::db::types::PLANESWALKER));
 }

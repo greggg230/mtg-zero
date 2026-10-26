@@ -1233,7 +1233,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         let subtypes = subs.iter().map(|s| l.subtype(s)).collect();
         let mut mods = vec![
-            Mod::Types { add: types::CREATURE, subtypes, replace: false },
+            // "it's a 3/4 Ninja creature": its card types and subtypes
+            // become exactly these (CR 205.1a-b), so it isn't a planeswalker
+            // then: damage to it is marked, not loyalty lost (120.3; Kaito's
+            // ruling). Its loyalty abilities stay (606.3).
+            Mod::Types { add: types::CREATURE, subtypes, replace: true },
             Mod::SetPt(l.int("creature_during_your_turn.p", *p, 0, 99), l.int("creature_during_your_turn.t", *t, 0, 99)),
         ];
         mods.extend(super::effect_ext::keyword_mods(l, kws));
