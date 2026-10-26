@@ -62,6 +62,7 @@ Game (all mutable state, Clone)  <-- reads ------+
 | `resolve.rs` | resolution (CR 608) and the effect VM |
 | `resolve_ext.rs`, `resolve_walkers.rs` | the `Ext` instructions of M7a (section 23.8) and M7b (section 24) |
 | `combat.rs` | CR 506-511 |
+| `companion.rs` | M8a (section 35): the setup after the play-or-draw choice (CR 103), companions (the reveal, the special action), sideboard accessors |
 | `sba.rs` | CR 704 |
 | `triggers.rs` | events, trigger matching, putting triggers on the stack (CR 603) |
 | `hidden.rs` | knowledge (exact bits and partial "clouds"), chance keys, `determinize` (section 10) |
@@ -221,8 +222,10 @@ internally instead of being exposed. zero-core would auto-step it anyway; doing 
 * Extra turns (CR 500.7): a stack of players; the most recently created extra turn is taken
   first. `Turn.normal` remembers whose normal turn came last, so after any extra turn the
   normal order goes on (the opponent of that player).
-* Setup (CR 103): libraries shuffled from the seed, the starting player chosen from the seed
-  (no play/draw choice yet), seven cards each, then the **London mulligan** (103.5):
+* Setup (CR 103; M8a, section 35.1): the chooser (chosen at random from the seed, or
+  `GameSpec.chooser`) chooses who takes the first turn (103.1, `PlayDraw`); companions may be
+  revealed (103.2b); the libraries are shuffled (103.3); seven cards each, then the **London
+  mulligan** (103.5):
   in turn order each player who has not kept declares keep or mulligan; each mulliganing
   player shuffles their hand away, draws seven, then puts one card per mulligan taken on the
   bottom (one decision per card; the pick order is the bottom order). Repeat until all keep.
@@ -471,7 +474,10 @@ at once (704.5e, section 26.4).
   no matching card, a hand without the card a "put from hand" names), so a refresh for that
   player finds the same decision instead of running on.
   Assumption for now: both decklists are known (open decklists); team drafts will need
-  partial pool knowledge (M6).
+  partial pool knowledge (M6; DESIGN.md 0: the opponent's pool but their first picks, M8
+  phase 2). **Sideboards** (M8a, section 35.5) are hidden from the other player but for a
+  revealed companion (public, a card in no zone), and `determinize` keeps them: no card of a
+  sideboard can enter the game but a revealed companion.
 * **Cards exiled face down** (M7c tail part 3, section 30.2): `Zone::FaceDown` is hidden like a
   library. A card moved there keeps its knowledge bits and is known to its owner, who saw it go
   (a look keyed `KEY_LOOK`, private; a hand exiled face down; a hideaway pile); a cloud whose
@@ -591,7 +597,12 @@ emerge's artifact a `Sacrifice`, manifest dread's pick a `PutOntoBattlefield`, t
 ids, the Citadel's top card `LIBRARY` + 0 at priority. M7e part 1 (section 33) adds two:
 `ChooseReplacement` (`NUMBER` 1 = shuffled into its owner's library, 2 = exiled, 3 = exiled with a
 void counter: the order of replacement effects, 616.1) and `ChooseRoute` (`NUMBER` = a
-`cast::route` code: which permission casts a graveyard card, 601.2a-b). There are 41 decision
+`cast::route` code: which permission casts a graveyard card, 601.2a-b). M7e part 2 (section 34)
+adds `PayPool`. M8a (section 35) adds two: `PlayDraw` (`PLAYER` = the decider takes the first
+turn, `PLAYER` + 1 = the opponent does: CR 103.1) and `RevealCompanion` (`LIBRARY` + k = the k-th
+companion of the decider's sideboard its starting deck allows, by definition, `Choice::Def`;
+`PASS` = none: 103.2b); and one priority action: `act::COMPANION` (= `PLAYER` + 0, "the
+decider's" companion, `Choice::Companion`: the special action of 116.2g). There are 44 decision
 kinds; the context block holds 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
@@ -863,7 +874,12 @@ Undercity ("venture into the dungeon"), ward that discards at random or that an 
 grants, replacement and prevention effects beyond the ones above, Auras other than bestowed and
 reanimating ones (enchant creature, land, artifact), granted triggered abilities other than an
 Equipment's and the "becomes the target" one of 31.1, abilities granted to permanents other than
-Rain of Filth's mana ability, the play/draw choice.
+Rain of Filth's mana ability, best-of-three matches and sideboarding between games (M8 phase 2),
+cards brought into the game from outside it other than a companion (wishes; none in the cube).
+
+Implemented (M8a, section 35): sideboards (cards outside the game, hidden), the play-or-draw
+choice (CR 103.1; the chooser a spec parameter), companions (702.139: the reveal before the
+hands, 103.2b; the {3} special action, 116.2g) with their deck conditions.
 
 Implemented (M7e part 2, section 34): the payment model's shortcuts removed (docs/shortcuts.md):
 the player chooses which pool mana pays (106.4, 601.2h; `PayPool`), mana abilities with a mana
@@ -903,13 +919,18 @@ engine documents is tracked in docs/shortcuts.md with its class and status):
   decision (their order cannot matter while effects ignore their source's per-object state).
 * Combat damage amounts use the `NUMBER` range (0..31); a larger amount to divide offers the
   first 30 amounts, lethal and all (M7a).
-* Battles can't be attacked (no battle is supported); the starting player is chosen from the
-  seed; determinize assumes open decklists.
+* Battles can't be attacked (no battle is supported); determinize assumes open decklists and
+  keeps both sideboards (section 35.5). (The starting player is chosen by the chooser since
+  M8a.)
 * Targets are not deduplicated (section 11), nor are activations of identical permanents
   (two untapped Mind Stones offer two `ACTIVATE` ids).
 
 ## 14. Differences from the Python engine (CR followed)
 
+* The starting player (M8a, section 35): Python takes it as a parameter of its game setup
+  (`starting_player_idx`); here the chooser decides (CR 103.1, `PlayDraw`). Companions: Python
+  parses the condition into `CardPrinting.companion` but plays none (no sideboard, reveal or
+  special action; mtg-bot's SEARCH_LIMITATIONS); here 103.2b and 116.2g.
 * Priority after a non-active player casts: Python returns priority to the active player; the
   CR (117.3c) keeps it with the caster.
 * Triggers: Python has no APNAP order and no controller ordering choice; here 603.3b with a
@@ -1120,7 +1141,8 @@ they isolate one keyword or trigger each.
 
 | File | What |
 |---|---|
-| `tests/rules_setup.rs` | 103 setup, 103.5 London mulligan |
+| `tests/rules_setup.rs` | 103 setup (the play-or-draw choice before the hands), 103.5 London mulligan |
+| `tests/rules_m8a.rs` | M8a (section 35): 103.1 (the chooser chooses who plays first before the shuffles and hands; random, or the spec's), 103.2b (companions offered in turn order before the hands, at most one revealed, a public card outside the game), 702.139a's conditions of Lurrus, Lutri and Zirda (met and broken), 116.2g (the special action: main phase of its turn, empty stack, {3}, once, into the hand), 400.11a (a sideboard hidden from the opponent's view and encoding), `determinize` keeping sideboards and the companion, self-play decks with sideboards and companions, the bot (plays first, reveals, uses it) |
 | `tests/rules_priority.rs` | 117.3a-d, 117.4, 405.5 (LIFO), 305.2, 307.1 / 702.8 timing, 115.5, 608.2b fizzle, 500.4, 103.8a |
 | `tests/rules_sba.rs` | 704.5a, b, f, g (+ 514.2), h, j (legend rule choice), 104.4a, turn cap |
 | `tests/rules_combat.rs` | 302.6 / 702.10, 508.1f / 702.3b, 509.1b, 702.110b, 510.1c, 702.19c, 702.4, 702.7, 702.15, 508.8, 506.4 / 702.19e |
@@ -1290,7 +1312,9 @@ with its four token kinds registered, 7b815998fc563509, and for the 524-card poo
 its three new token kinds are registered, 023fa8874a183eae, and for M7d's 537-card pool with Test
 Manifester, 5cbbaf9280a01797, and for the whole cube with M7d's IR fixes, 1f210100db7b442e: the pool deals
 other decks, every game differs; and for M7e part 1's rules fixes and its three custom cards,
-161108b935c03d14, and for M7e part 2's payment model, b3a102f4d67c5e97), and names the games
+161108b935c03d14, and for M7e part 2's payment model, b3a102f4d67c5e97, and for M8a's setup (the
+play-or-draw decision first, the shuffles after it: every game differs; the digest games have
+no sideboards), 076e92a6939c6798), and names the games
 that differ. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
@@ -1429,6 +1453,19 @@ and every feasibility check carries the pool's units and the converters' ways. T
 +9%: `PayMana` grew the task enum to 280 bytes (boxed now), and an empty virtual pool and an
 already finished payment took the full path (fast paths now). `Game::clone` 1.27-1.46 us (main
 1.27-1.40), `size_of::<Game>()` 1,496 B (unchanged). Fuzzer 20,000 games: 181 s.
+
+**M8a** (546 cards, branch `m8a-companion`, section 35): pinned the same way, interleaved with
+main's code (c91f59e) in three rounds, nothing else running. The perf games have no sideboards;
+the branch's setup asks the play-or-draw question first and shuffles after it, so it plays other
+games (841,664 decisions against main's 834,407): 7.49-8.26 us per decision against main's
+6.86-7.19 in that session. To separate code from games, a build of the branch whose setup draws
+the same random numbers as main's (shuffles before the chooser, the chooser playing first) plays
+exactly main's games (834,407 decisions): 6.47-6.68 us per decision against main's 6.60-6.65,
+pairs -2.5% to +1.2%, so the difference is the game set (random play's cost per decision is
+heavy-tailed), not the code. `Game::clone` 1.32-1.65 us (main 1.43-1.49), `size_of::<Game>()`
+1,568 B (+72: each player's sideboard, an `Arc<[DefId]>`, the companion's slot and identity and
+its use); clone + determinize 1.71-2.16 us (main 1.95-2.21). Fuzzer 20,000 games: 160 s with
+other load (a quarter of the games with generated decks, sideboards and companions).
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -1791,7 +1828,7 @@ and the Python tests (`tests/`).
 | `NUM_ACTIONS` | 1024 (section 11: decision-relative ids) |
 | `NUM_FEATURES` | 13,532 (21.2) |
 | players | 2 |
-| `parse_spec` / `new_game(spec, 2, seed)` | `MtgSpec` (below); the game seed draws the decks (21.3), then `Game::new` (shuffles, starting player, mulligans) |
+| `parse_spec` / `new_game(spec, 2, seed)` | `MtgSpec` (below); the game seed draws the decks and sideboards (21.3, 35.7), then `Game::with_sideboards` (the chooser; the first decision is its play-or-draw choice, section 35.1) |
 | `to_move`, `legal_actions`, `step` | the pending decision's player, its ids, `Game::apply` with its chance keys (section 10) |
 | `force_chance` | `Game::force_chance` (section 10) |
 | `determinize(viewer, rng)` | `Game::determinize` with an engine RNG seeded from zero-core's |
@@ -1805,8 +1842,10 @@ The spec (JSON, every key optional): `{"max_turns": 60, "mulligans": true, "deck
 "lands": [16, 17], "eval_decks": 16, "eval_seed": 1}`. `max_turns` counts both players' turns
 (a draw after it; 60 = the engine default: ~3% of heuristic-vs-heuristic games and ~1% of
 heuristic-vs-random games reach it, against ~20% at 40); `decks` is `"random"` (two new decks
-per game), `"eval"` (a pair of the fixed evaluation set) or `{"p0": [names], "p1": [names]}`.
-Unknown keys are errors. The cube IR is compiled into the binary (`db::CUBE_IR`), so the Python
+per game), `"eval"` (a pair of the fixed evaluation set) or `{"p0": [names], "p1": [names]}`
+(M8a: optionally `"p0_sideboard"`, `"p1_sideboard"`; random and evaluation decks come with
+generated sideboards, 35.7); M8a's `"chooser": 0 | 1` fixes the seat that chooses who takes the
+first turn (default: chosen at random each game, CR 103.1). Unknown keys are errors. The cube IR is compiled into the binary (`db::CUBE_IR`), so the Python
 module does not depend on where it was built.
 
 ### 21.2 `encode`: layout v1 (13,532 floats)
@@ -1863,6 +1902,9 @@ Wasteland, Library of Alexandria, Tolarian Academy, Gaea's Cradle), at most 9 of
 basics split by the spells' coloured pips (at least a third each). `decks::check` validates a
 deck (40 cards, supported non-token cards, singleton but basics, 16-17 lands, at most two
 colours of spells). Only the supported cards are used, so the pool grows with the engine.
+M8a (section 35.7): `decks::generate_pool` adds a sideboard of seven cards to each deck and
+builds one deck in four for a companion; `MtgSpec::pools(seed)` gives decks and sideboards
+(`decks(seed)` its decks), `decks::eval_pools` the evaluation set's.
 
 **The evaluation set**: `decks::eval_pair(gen, seed, i)` = two decks generated from a fixed
 seed per pair; spec `"decks": "eval"` picks pair `split64(game seed) % eval_decks`. zero-core
@@ -2146,7 +2188,7 @@ in release 397 s, pytest 18 tests 65 s, smoke run 69 s).
 
 * The runs of 22.4 used layout v1 (21.2) unchanged; layout v2 (22.2) came after them.
   `encode::layout_json` describes the encoding for the token network, checked in as
-  `mtgz/az/layout_v3.json` (22.6; v2 at commit 98b9463, v1: `layout_v1.json` at commit 531070a; `cargo test -p engine
+  `mtgz/az/layout_v4.json` (22.7, M8a; v3 until then, 22.6; v2 at commit 98b9463, v1: `layout_v1.json` at commit 531070a; `cargo test -p engine
   --test az layout_json_is_checked_in`; `MTGZ_WRITE_LAYOUT=1` rewrites it):
 
   | Segment | Slots x floats | Present flag | Identity | Actions scored from the slot's token |
@@ -2439,6 +2481,18 @@ floats, 9 segments, 15 bags, 1024 identities. At every step of the batch no card
 (newly supported cards and new registry keys filled empty identities). From here on a change to
 any width, offset, segment or identity is layout v4; newly supported cards and appended token
 keys keep v3 (22.2).
+
+### 22.7 Layout v4 (M8a)
+
+Started by M8a (section 35.6): 29,972 floats, version 4, `mtgz/az/layout_v4.json` (renamed from
+`layout_v3.json`). v3's blocks keep their offsets and widths; two segments are appended
+(`my_companion`, `opponent_companion`: 56 floats each, the card code plus revealed, action
+available, action legal now, in the hand; `my_companion` scores `act::COMPANION`), and v4's
+globals use v3's spare floats (global 124: the viewer chose who plays first; per player 38-39:
+sideboard cards still outside the game, a companion whose action is available). Two decision
+kinds (44 of 64) and two task codes (24, 25). v4 stays open until phase 2 of M8 ends (the
+best-of-three match adds its own fields); it is frozen at the first run of layout v4.
+Checkpoints of layout v3 do not load into v4.
 
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
@@ -4739,3 +4793,182 @@ load). Payment decisions per game in random play (4,000 games, main's pool): `Pa
 productions gone), `PayPhyrexian` 0.08 -> 0.09; 33.9 -> 33.3 in all. Speed: section 17. Behaviour
 digests re-recorded (`DIGEST_WRITE=1 cargo test --release -p engine --test digest -- --ignored`,
 the branch's last commit): combined digest b3a102f4d67c5e97 (section 15).
+
+## 35. Sideboards, the play-or-draw choice, companions (M8a)
+
+Branch `m8a-companion` (from main at c91f59e): phase 1 of "matches and sideboarding" (DESIGN.md
+0, M8), the foundations inside one game: a sideboard per player, the play-or-draw choice and
+companion. The user's phase-2 decisions (a best-of-three match as the `mtg` episode, sideboarding
+between games, each player knowing the opponent's pool except their first picks) are recorded
+in DESIGN.md; phase 1 keeps one game per episode and open decklists. Layout v4 starts here
+(35.6). `NUM_ACTIONS` and the action ranges are unchanged.
+
+### 35.1 The setup (CR 103)
+
+`Game::with_sideboards(db, spec, decks, sideboards, seed)` (`Game::new`: no sideboards) puts the
+decks in the libraries, sets the sideboards aside (103.2a: what is left is the starting deck),
+determines the chooser and runs to the first decision, the chooser's `PlayDraw` (103.1). The rest
+of the setup follows the answer, in the CR's order:
+
+| Rule | Step | How |
+|---|---|---|
+| 103.1 | the chooser chooses who takes the first turn | `GameSpec.chooser`: `None` = a player chosen at random from the seed (the first game of a match), `Some(p)` = `p` (a later game: the loser of the previous one, phase 2). `Turn::chooser`; `Task::PlayDraw`, `DecisionKind::PlayDraw`: `PLAYER` = the chooser plays first, `PLAYER` + 1 = it draws first |
+| 103.2a, b | sideboards set aside; companions | `Task::RevealCompanion`, the starting player first, then the other (101.4: turn order) |
+| 103.3 | each player shuffles | `Task::DrawHands` |
+| 103.5 | opening hands, then mulligans | `Task::DrawHands` (the starting player first), the London mulligan as before |
+| 103.6 | opening-hand actions | `Task::Opening`, as before (Gemstone Caverns) |
+| 103.8 | the first turn; the starting player skips its draw (103.8a) | as before |
+
+The die roll is part of the initial state (no transition reveals it; `Turn::chooser` is public).
+The opening hands are now drawn by the first `apply` (the chooser's answer) and keyed like every
+draw (`KEY_DRAW`, private to the drawer); before M8a they were drawn in `Game::new` and the
+setup's keys dropped. The heuristic bot plays first (35.4).
+
+### 35.2 Sideboards (CR 100.4, 400.11)
+
+`Player::sideboard` (`Arc<[DefId]>`, sorted; a clone copies a pointer) holds the cards outside
+the game (400.11a; in limited the rest of the player's pool, 100.4b; the generated decks have
+seven, 35.7). They are not objects: nothing in a game reaches a sideboard card except a
+revealed companion. `Game::sideboard_size(p)` counts the cards still outside the game (a
+companion put into the hand is in it, 400.11b). Sideboarding between games is phase 2.
+
+### 35.3 Companion (CR 702.139)
+
+"Companion — [Condition]" (702.139a) is now in the card IR (mtg-bot `feature/companion-ir`,
+docs/card_ir.md): `CardPrinting.companion`, a `Companion` holding a `DeckCondition`:
+`EachCardInStartingDeck { cards, must }` (Lurrus of the Dream-Den: `IsPermanentCard` /
+`HasManaValueAtMost(2)`; Zirda, the Dawnwaker: `IsPermanentCard` / `HasActivatedAbility`) or
+`StartingDeckDifferentNames { cards }` (Lutri, the Spellchaser: `ObjectNot(IsLand)`). The lowering
+(`lower::filter::lower_companion`) makes `CardDef::companion: Option<DeckCond>` (`DeckCond::Each`,
+`DeckCond::DifferentNames`) whose filters must read only a card's own characteristics
+(`db::deck_filter_ok`; anything needing a game, a controller or counters, is unsupported, never
+ignored). Two filters are new: `IsPermanentCard` is `Filter::Type(PERMANENT)` (110.4a: artifact,
+battle, creature, enchantment, land, planeswalker), `Filter::HasActivatedAbility` a card's printed
+activated abilities (`CardDef::has_activated_ability`: mana abilities, the intrinsic ones of basic
+land types included, 305.6; loyalty abilities, 606; equip, reconfigure, Class levels; from hand
+and from a graveyard; not special actions, plot and turning face up, 116.2b/k; not latent
+abilities, which only an effect gives).
+
+**The condition** is checked exactly against the starting deck (702.139b: the deck after the
+sideboard is set aside) when the reveal is asked: the player's library, all of it, before the
+shuffle and the draws (`CardDb::deck_satisfies`, over `CardDb::def_matches`: a card outside the
+battlefield and the stack has its front face's characteristics, 712.8a). Lurrus: every permanent
+card has mana value 2 or less (a land's is 0; instants and sorceries don't count). Lutri: no two
+nonland cards share a name (basic lands may repeat). Zirda: every permanent card has an activated
+ability (a basic land has one).
+
+**The reveal** (103.2b): `Task::RevealCompanion` asks a player who has a candidate (a sideboard
+card with companion whose condition the starting deck fulfills): `PASS` or `LIBRARY` + k (the
+k-th candidate by definition, `Choice::Def`); at most one is revealed. The card becomes an object
+in no zone (`Zone::Nowhere`, as Mox Diamond's waiting card), known to both players,
+`Player::companion`; a public key `KEY_REVEAL(owner, def)`.
+
+**The special action** (116.2g, 702.139a): at priority, during a main phase of the player's turn
+with the stack empty, if they revealed a companion still outside the game, haven't taken the
+action this game and can pay {3}: `act::COMPANION` (= `PLAYER` + 0, `Choice::Companion`). It pays
+{3} (`COMPANION_COST`, a `PayMana`; Zirda's reduction doesn't apply: a special action isn't an
+ability) and `Task::CompanionToHand` puts the card into its owner's hand, known to both (it was
+public); it stays in the game (702.139c); the player keeps priority (116.3). Restrictions on
+casting don't apply (it isn't a spell).
+
+### 35.4 Decisions, tasks, choices, the bot
+
+Two decision kinds: `PlayDraw` (42) and `RevealCompanion` (43): 44 of the context block's 64.
+One choice: `Choice::Companion`. Tasks: `PlayDraw`, `RevealCompanion` (task codes 24, 25),
+`DrawHands`, `CompanionToHand` (never asking). The heuristic bot plays first (in these 40-card
+decks the first land drop and the tempo are worth more than a card), reveals a companion whenever
+it can (the first candidate), and takes the special action in its main phase when it casts
+nothing else (before its tier-1 abilities). `HeuristicV1` (the frozen older policy) answers the
+new kinds with its first legal option (play first, no reveal) and never takes the action.
+
+### 35.5 Hidden information
+
+A sideboard is its owner's: `view_of(viewer)` holds the viewer's sideboard, the other player's
+sideboard size, both revealed companions and whether their action was taken, the chooser and the
+starting player; the encoding shows the opponent's sideboard only as its size (tested: two games
+that differ only in an unrevealed sideboard card look the same to the opponent, view and
+encoding). `determinize` keeps both sideboards: under phase 1's information model (open
+decklists) no card of a sideboard can enter the game but a revealed companion, which is public,
+so no transition depends on the hidden part. The other player's search does see whether a
+player is asked the reveal (whether they could reveal a companion), a moment before they reveal
+or decline; kept, as it says nothing about the game's hidden cards. Phase 2 replaces open
+decklists by the pool knowledge of DESIGN.md 0, and `determinize` will then deal the opponent's
+deck and sideboard from the unseen part of their pool.
+
+### 35.6 Encoding: layout v4 (29,972 floats)
+
+Layout v3 (frozen, 22.6) plus, at the end, two companion segments, and v4's globals in spare
+floats:
+
+| Field | Where | What |
+|---|---|---|
+| `my_companion`, `opponent_companion` | `O_COMP` (29,860), 2 x 56 (`COMP_W`) | the viewer's, then the opponent's revealed companion: card code (the identity), revealed (`comp::PRESENT`, the segment's present flag), its special action still available (`AVAILABLE`: outside the game, not taken), the action is an option of the viewer's decision now (`LEGAL`), put into the hand (`IN_GAME`). `my_companion` scores `act::COMPANION`; `opponent_companion` scores nothing |
+| `glob::CHOOSER` | global 124 | the viewer chose who takes the first turn (global 18: the viewer is the starting player) |
+| `glob::SIDEBOARD` | per player 38 | the cards of the player's sideboard still outside the game / 15 |
+| `glob::COMPANION` | per player 39 | a revealed companion whose special action is available |
+
+The `RevealCompanion` decision lists its candidates in the `list` block (`LIBRARY` slots). The
+layout file is `mtgz/az/layout_v4.json` (`"version": 4`; `layout_v3.json` renamed, references in
+`mtgz/az/__init__.py`, `engine/tests/az.rs`, `tests/test_mtg_az.py`). Layout v4 stays open until
+phase 2 ends (the match unit will add its fields); it is frozen at the first run. No new token
+kind (no token definition changed). On merge: `MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az
+layout` regenerates the file (this branch only bumped its version).
+
+### 35.7 Decks: sideboards and companions
+
+`decks::generate_pool(db, rng, side, gen)` -> (deck, sideboard): the deck is `generate`'s from
+`rng` (the same deck for the same `rng` unless it is built for a companion); `side` decides the
+rest. One deck in four is built for a companion its colours can cast (`castable_with`: every
+coloured pip, a hybrid pip by either colour), chosen at random: the candidate spells and nonbasic
+lands are only those that keep the condition (`fits`), and the companion goes to the sideboard if
+the finished deck passes `check` and fulfills the condition (else the deck is generated as usual).
+Otherwise, half the time, a companion the deck happens to fulfill and can cast (Lutri, for any
+singleton deck with blue or red) goes to the sideboard. The sideboard is then filled to
+`decks::SIDEBOARD` = 7 with random spells of the deck's colours not in it (singleton, sorted).
+`MtgSpec::pools(seed)` uses `generate_pool` for random decks (the `side` generator from the seed
+too: seeded, deterministic) and `decks::eval_pools` for the evaluation set; `MtgSpec::decks` is
+`pools`' decks. In the first 400 seeds' 800 random decks Lurrus is in 82 sideboards, Lutri in
+261, Zirda in 54, each with a deck that fulfills it (tests/rules_m8a.rs). The fuzzer plays one
+game in four with `generate_pool`'s decks and the others with random decks and seven random
+sideboard cards.
+
+### 35.8 Tests, fuzzing, smoke, digests, speed
+
+`tests/rules_m8a.rs`: 11 tests, each naming the CR rule it checks: 103.1 (the chooser decides
+before the shuffles and hands, both players get to choose over seeds, the chooser as a spec
+parameter), 103.2b (candidates offered in turn order before the hands, at most one revealed, a
+declined companion stays in the sideboard), 702.139a's three conditions met and broken (Lurrus:
+a mana value 3 permanent breaks it, a mana value 5 instant doesn't; Lutri: two Lightning Bolts
+break it, forty basics don't; Zirda: Thalia and Ragavan break it, basic lands don't), 116.2g (not
+in the upkeep, not on the opponent's turn, not with a spell on the stack, not without {3}; once;
+into the hand, known to both; no stack), 400.11a (the sideboard hidden from the opponent's view
+and encoding; a revealed companion visible to both), `determinize` keeping sideboards and the
+companion, the generated decks, the heuristic bot (plays first, reveals, takes the action). They
+use the new API, so they cannot run against main's engine. Tests adapted to the new first
+decision: `rules_setup.rs` (2), `rules_priority.rs` (103.8a), `rules_sba.rs` (the turn cap),
+`cards_m7d.rs` (Gemstone Caverns), with `Game::play_first` in the test kit; the kit's
+`Scenario::sideboard` / `companion` build positions; `check_invariants` accepts a revealed
+companion in no zone.
+
+`cargo test --release -p engine --no-fail-fast --lib --test 'cards*' --test 'rules*' --test hidden
+--test support --test smoke --test 'bots*'`: 888 tests pass (main's 877 and the 11 new), 7
+ignored. Fuzzing (`FUZZ_GAMES=20000`, the option-completion check on): no failure, 160 s with other
+load; companions revealed in 2,641 games, put into a hand 2,282 times (the fuzzer asserts at least
+one special action in 200 games or more). Fault found on the way and fixed: the view and the
+encoding read a used companion's identity from its slot, which a shuffle (Timetwister) can hide
+again (`Player::companion_def` keeps the revealed identity). The search smoke (`python
+tools/search_smoke.py`, seeds 0-3, random and eval specs, after `bash tools/build_py.sh`): 0 failed
+of 8 configurations (3,200 games, 1,365,009 decisions, 35.0 million simulations, 548 s). Behaviour
+digests re-recorded (`DIGEST_WRITE=1 cargo test --release -p engine --test digest -- --ignored`,
+the branch's last commit): combined digest 076e92a6939c6798 (section 15). Speed: section 17.
+
+### 35.9 What phase 1 leaves
+
+* One game per episode, no sideboarding, open decklists; `determinize` keeps sideboards, and the
+  other player's search sees whether a player is asked the reveal (35.5). Phase 2 (DESIGN.md 0).
+* The die roll is part of the initial state (setup), not a chance key: no transition reveals it.
+* Companion is the only way into a game from outside it (no wish in the cube); the sideboard has
+  no other use in a game.
+* The heuristic bot always plays first (not deck- or matchup-dependent).
+* Layout v4's file: this branch renamed `layout_v3.json` and set `"version": 4`; the content
+  (offsets, segments) is regenerated on merge with the `az` test (not run here).

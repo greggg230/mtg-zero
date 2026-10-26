@@ -88,7 +88,7 @@ M8a (ENGINE.md 35): exported from mtg-bot branch `feature/companion-ir` at 62210
 `7100f8436556f92a62df96f2ea7f01a22ee0d114ffa5086930b6705373be6026` (before: `66ba3e33...`).
 Five classes more: `CardPrinting.companion` (an optional `Companion { condition }`, category
 `Companion`), the category `DeckCondition` with `EachCardInStartingDeck { cards, must }` and
-`StartingDeckDifferentNames { cards }`, and two object predicates, `IsPermanentCard` (CR 110.4b)
+`StartingDeckDifferentNames { cards }`, and two object predicates, `IsPermanentCard` (CR 110.4a)
 and `HasActivatedAbility`. Only the three companions' printings changed (checked card by card
 against the previous export): Lurrus of the Dream-Den (`EachCardInStartingDeck(IsPermanentCard,
 HasManaValueAtMost(2))`), Lutri, the Spellchaser (`StartingDeckDifferentNames(ObjectNot(IsLand))`),
