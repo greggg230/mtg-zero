@@ -1249,6 +1249,29 @@ impl Game {
             self.agenda.push(Task::EnterByDiscardAny { card: idx, controller, tapped });
             return r;
         }
+        // CR 304.4, 307.4: an instant or sorcery card can't enter the
+        // battlefield; it stays where it is (Flickerwisp returning a
+        // manifested Lightning Bolt; ENGINE.md 38). A manifested one enters
+        // face down (701.40a); a face an effect names may be a land (712.12).
+        if !self.entering_face_down {
+            let d = self.entering_face.unwrap_or(self.objs[idx.i()].def);
+            if self.db.def(d).is(types::INSTANT | types::SORCERY) {
+                self.entering_cast = false;
+                self.entering_copy = None;
+                self.entering_counters.clear();
+                let _ = std::mem::take(&mut self.entering_dash);
+                self.entering_escaped = false;
+                self.entering_evoked = false;
+                self.entering_face = None;
+                let _ = std::mem::take(&mut self.entering_sunburst);
+                self.entering_tapped = false;
+                let _ = std::mem::take(&mut self.entering_times);
+                let _ = std::mem::take(&mut self.entering_warp);
+                let _ = std::mem::take(&mut self.entering_x);
+                self.note(|g| format!("{} can't enter the battlefield", g.name(idx)));
+                return self.obj_ref(idx);
+            }
+        }
         // Face down (CR 708; manifest): a 2/2 with no text from the moment it
         // enters; the card it is waits in `face_down_ids` (ENGINE.md 31).
         if std::mem::take(&mut self.entering_face_down) {
