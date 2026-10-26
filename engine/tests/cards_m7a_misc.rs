@@ -208,6 +208,7 @@ fn flash_sacrifices_the_creature_unless_its_reduced_cost_is_paid() {
 
 #[test]
 fn mox_diamond_enters_only_by_discarding_a_land() {
+    // ruling: 5b78bec7
     let mut g = scen().hand(0, &["Mox Diamond", "Forest"]).at(Step::Main1, 0).start();
     let md = g.card(0, "Mox Diamond", Zone::Hand);
     g.choose(Choice::Cast(md));

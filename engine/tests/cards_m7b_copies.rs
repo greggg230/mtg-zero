@@ -67,6 +67,7 @@ const METAMORPH: &str = "Phyrexian Metamorph";
 
 #[test]
 fn phyrexian_metamorph_enters_as_a_copy_except_its_an_artifact_cr_707_5_707_9b() {
+    // ruling: 08e79b95
     // "You may have this creature enter as a copy of any artifact or creature
     // on the battlefield, except it's an artifact in addition to its other
     // types."
@@ -125,6 +126,7 @@ fn phyrexian_metamorph_copies_a_legend_of_the_opponent_cr_707_2() {
 
 #[test]
 fn phyrexian_metamorph_may_copy_nothing_and_dies_as_a_0_0_cr_704_5f() {
+    // ruling: bb77e87d
     let mut g = scen().battlefield(0, &["Island"; 4]).battlefield(1, &["Questing Beast"]).hand(0, &[METAMORPH]).start();
     let m = g.card(0, METAMORPH, Zone::Hand);
     g.choose(Choice::Cast(m));
@@ -134,6 +136,7 @@ fn phyrexian_metamorph_may_copy_nothing_and_dies_as_a_0_0_cr_704_5f() {
 
 #[test]
 fn a_copy_of_a_copy_has_its_exceptions_cr_707_3_707_9b() {
+    // ruling: b5bd844b
     // A second Metamorph copying the first (a copy of Thraben Inspector, an
     // artifact by the first's exception): an Inspector and an artifact;
     // its own "when this enters" (the Inspector's) triggers.
@@ -316,6 +319,7 @@ fn saheeli_minus_two_needs_two_different_permanents_cr_115_3() {
 
 #[test]
 fn saheeli_copy_of_an_equipment_becomes_unattached_when_it_reverts_cr_704_5p() {
+    // ruling: c5c1fc5f
     // The Sol Ring becomes a copy of Lightning Greaves (Equipment, equip
     // {0}) and is attached to a creature; at end of turn it is a Sol Ring
     // again, no longer an Equipment, and becomes unattached (CR 704.5p).
@@ -380,6 +384,7 @@ const WOODLAND: &str = "Shifting Woodland";
 
 #[test]
 fn shifting_woodland_becomes_a_copy_of_a_permanent_card_in_your_graveyard_cr_707_2() {
+    // ruling: c31a3116
     // "Delirium - {2}{G}{G}: This land becomes a copy of target permanent
     // card in your graveyard until end of turn. Activate only if there are
     // four or more card types among cards in your graveyard."

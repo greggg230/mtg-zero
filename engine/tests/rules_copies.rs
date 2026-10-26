@@ -84,6 +84,7 @@ fn saheeli_copy(g: &mut Game, artifact: CardIdx, other: CardIdx) {
 
 #[test]
 fn copiable_values_have_no_counters_or_other_effects_cr_707_2() {
+    // ruling: d5edcac7
     // Sol Ring becomes a copy of a Test Bear with a +1/+1 counter: a 2/2
     // (the counter isn't copied).
     let mut g = scen().battlefield(0, &[SAHEELI, "Sol Ring", "Test Bear"]).counters(0, "Test Bear", Counter::P1P1, 1).start();
@@ -114,6 +115,7 @@ fn becoming_a_copy_triggers_no_enter_ability_cr_707_4() {
 
 #[test]
 fn a_copy_of_a_copy_copies_its_copiable_values_cr_707_3() {
+    // ruling: d76daa42
     // Saheeli makes the Sol Ring a copy of a Phyrexian Metamorph that is a
     // copy of Thraben Inspector: an Inspector (an artifact by both
     // exceptions), not a Metamorph.

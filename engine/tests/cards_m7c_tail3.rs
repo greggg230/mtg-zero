@@ -1320,6 +1320,7 @@ fn face_down_is_hidden(g: &Game, c: CardIdx, owner: PlayerId) {
 /// down. You may look at and play that card this turn" (CR 406.3).
 #[test]
 fn headliner_scarlett_exiles_face_down_and_may_play_it_this_turn_cr406_3() {
+    // ruling: 3b9a2be5
     let mut g = scen()
         .battlefield(0, &["Headliner Scarlett"])
         .library(0, &["Island", "Forest", "Lightning Bolt", "Mountain", "Test Bear", "Swamp", "Plains"])

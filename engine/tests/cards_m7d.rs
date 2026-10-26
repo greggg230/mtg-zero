@@ -922,6 +922,7 @@ fn manifested() -> (Game, CardIdx) {
 /// doesn't (708.5).
 #[test]
 fn abhorrent_oculus_manifests_dread_face_down_cr701_62_708_2() {
+    // ruling: 9fe0d90e 9aced886
     let (g, giant) = manifested();
     assert_eq!(g.obj(giant).zone, Zone::Battlefield);
     assert!(g.is_face_down(giant));
@@ -969,6 +970,7 @@ fn enc(g: &Game, viewer: PlayerId) -> Vec<f32> {
 /// (CR 701.40b, 708.7: a special action; 708.8: the same permanent.)
 #[test]
 fn a_manifested_creature_turns_face_up_for_its_mana_cost_cr701_40b() {
+    // ruling: 0c11bb22
     let (mut g, giant) = manifested();
     settle(&mut g);
     // P1's turn: P0 gets priority after P1 passes in P1's upkeep.
@@ -991,6 +993,7 @@ fn a_manifested_creature_turns_face_up_for_its_mana_cost_cr701_40b() {
 /// card trigger, 603.10a).
 #[test]
 fn a_face_down_permanent_dies_revealed_cr708_9() {
+    // ruling: fbf56d96
     let mut g3 = scen()
         .library(0, &["Test Dies Draw", "Lightning Bolt"])
         .battlefield(0, &["Abhorrent Oculus"])

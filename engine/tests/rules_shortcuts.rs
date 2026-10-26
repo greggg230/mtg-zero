@@ -319,6 +319,7 @@ fn cr_614_1c_a_creature_enters_with_the_counters_an_effect_gives_it() {
 /// the event).
 #[test]
 fn cr_614_12a_metamorph_cant_copy_a_permanent_entering_at_the_same_time() {
+    // ruling: 9e6f4b11
     let mut g = scen()
         .battlefield(0, &["Swamp", "Swamp", "Test Bear"])
         .hand(0, &["Exhume"])

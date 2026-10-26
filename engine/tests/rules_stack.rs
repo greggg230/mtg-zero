@@ -384,6 +384,7 @@ fn invert_polarity_counters_the_spell_when_the_flip_is_lost() {
 
 #[test]
 fn a_stolen_spell_may_get_new_targets_which_become_targets_cr_115_7() {
+    // ruling: ee4efa4c 7918b317
     // P0's Lightning Bolt at P1; P1 steals it and redirects it at P0's
     // Leovold... at P0: the new target is chosen by P1.
     let mut g = scen()
