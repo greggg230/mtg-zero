@@ -13,7 +13,16 @@ use crate::triggers::Event;
 /// task runs next. Tasks that ask follow ask-or-consume.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Task {
-    // setup (CR 103.5)
+    // setup (CR 103; ENGINE.md 35)
+    /// CR 103.1: `p` chooses who takes the first turn.
+    PlayDraw { p: PlayerId },
+    /// CR 103.2b: `p` may reveal a companion from their sideboard.
+    RevealCompanion { p: PlayerId },
+    /// CR 103.3, 103.5: the libraries are shuffled and the opening hands
+    /// drawn.
+    DrawHands,
+    /// CR 116.2g: `p` paid {3}: their companion is put into their hand.
+    CompanionToHand { p: PlayerId },
     MulliganDeclare { p: PlayerId },
     MulliganRun,
     MulliganBottom { p: PlayerId, left: u8 },
@@ -215,6 +224,10 @@ impl Game {
 
     fn run_task(&mut self, t: Task) {
         match t {
+            Task::PlayDraw { p } => self.play_draw(p),
+            Task::RevealCompanion { p } => self.reveal_companion(p),
+            Task::DrawHands => self.draw_hands(),
+            Task::CompanionToHand { p } => self.companion_to_hand(p),
             Task::MulliganDeclare { p } => self.mulligan_declare(p),
             Task::MulliganRun => self.mulligan_run(),
             Task::MulliganBottom { p, left } => self.mulligan_bottom(p, left),
@@ -688,6 +701,13 @@ impl Game {
                 self.turn.passes = 0;
                 self.agenda.push(Task::Priority);
                 self.begin_activate(p, c, slot);
+            }
+            Some(Choice::Companion) => {
+                // A special action (CR 116.2g); the player keeps priority
+                // (116.3).
+                self.turn.passes = 0;
+                self.agenda.push(Task::Priority);
+                self.begin_companion(p);
             }
             Some(other) => unreachable!("priority answer {other:?}"),
         }

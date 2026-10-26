@@ -134,7 +134,7 @@ def test_evaluation_drivers_use_the_eval_decks():
 
 
 def test_layout_and_token_network_read_the_encoding():
-    """layout_v3.json (encode::layout_json) through zero-core's token network: the identities the
+    """layout_v4.json (encode::layout_json) through zero-core's token network: the identities the
     network decodes are the engine's cards, the pointer actions of the hand and permanent slots
     are their action ids, and a real leaf batch gets a valid answer."""
     import torch

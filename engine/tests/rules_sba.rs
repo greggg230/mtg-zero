@@ -155,6 +155,7 @@ fn turn_limit_is_a_draw() {
     let deck: Vec<u16> = vec![db.id("Island").unwrap(); 40];
     let spec = engine::GameSpec { mulligans: false, max_turns: 6, ..Default::default() };
     let mut g = Game::new(db, spec, [&deck, &deck], 3).unwrap();
+    g.play_first();
     g.pass_until(|g| g.is_over());
     assert_eq!(g.outcome().unwrap().reason, EndReason::TurnLimit);
     assert_eq!(g.outcome().unwrap().winner, None);

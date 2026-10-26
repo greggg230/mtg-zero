@@ -1,6 +1,9 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
-//! f32 vector for a viewer, with no hidden information. Layout v3 (29,860
-//! floats; frozen at the end of the M7b card batch, ENGINE.md 22.6), in order:
+//! f32 vector for a viewer, with no hidden information. Layout v4 (29,972
+//! floats; M8a, ENGINE.md 35: open until the matches of phase 2 are done)
+//! is layout v3 (29,860 floats; frozen at the end of the M7b card batch,
+//! ENGINE.md 22.6) plus the companions block, a global and two per-player
+//! globals; in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
@@ -14,6 +17,13 @@
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 40 x 56 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
+//! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
+//!
+//! v4's globals (ENGINE.md 35): `g[124]` the viewer chose who takes the first
+//! turn (CR 103.1; `g[18]`: the viewer is the starting player); per player
+//! (`g[24 + 40 * side..]`) `glob::SIDEBOARD`: the cards of their sideboard
+//! still outside the game / 15, `glob::COMPANION`: a revealed companion
+//! whose special action is available.
 //!
 //! A card code (52 floats) is the card's stable identity (`identity.rs`: its
 //! position in the cube's IR card list, tokens from a registry; capacity
@@ -64,6 +74,9 @@ pub const LIST: usize = 40;
 pub const LIST_W: usize = CODE + 4;
 pub const GYAS: usize = 4;
 pub const GYA_W: usize = CODE + 4;
+/// Companions (layout v4): the viewer's, then the opponent's.
+pub const COMPS: usize = 2;
+pub const COMP_W: usize = CODE + 4;
 
 pub const O_GLOBALS: usize = 0;
 pub const O_CONTEXT: usize = O_GLOBALS + GLOBALS;
@@ -76,7 +89,20 @@ pub const O_STACK: usize = O_HAND + HANDS * HAND_W;
 pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
 pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
 pub const O_GYA: usize = O_LIST + LIST * LIST_W;
-pub const NUM_FEATURES: usize = O_GYA + GYAS * GYA_W;
+pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
+pub const NUM_FEATURES: usize = O_COMP + COMPS * COMP_W;
+
+/// Offsets inside a companion slot (after its card code; layout v4).
+pub mod comp {
+    /// A revealed companion (CR 103.2b).
+    pub const PRESENT: usize = 0;
+    /// Still outside the game with its special action not taken (116.2g).
+    pub const AVAILABLE: usize = 1;
+    /// The special action is an option of the viewer's pending decision.
+    pub const LEGAL: usize = 2;
+    /// Put into its owner's hand (it is in the game: 702.139c).
+    pub const IN_GAME: usize = 3;
+}
 
 /// Bags (each `D` wide, 0.25 per card).
 pub mod bag {
@@ -213,6 +239,13 @@ pub mod glob {
     /// The venture marker's room (`dungeon::ROOMS` index), one-hot:
     /// `g[ROOM + 9 * side + room]`.
     pub const ROOM: usize = 106;
+    /// Layout v4 (M8a, ENGINE.md 35): the cards of the player's sideboard
+    /// still outside the game / 15 (CR 400.11a), and a revealed companion
+    /// whose special action is available (702.139a, 116.2g).
+    pub const SIDEBOARD: usize = 38;
+    pub const COMPANION: usize = 39;
+    /// `g[CHOOSER]`: the viewer chose who takes the first turn (CR 103.1).
+    pub const CHOOSER: usize = 124;
 }
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
@@ -303,6 +336,9 @@ fn task_code(t: &Task) -> usize {
         Task::EnterAsCopy { .. } => 21,
         Task::CopyTargets { .. } => 22,
         Task::ChooseTimes { .. } | Task::Splice { .. } => 23,
+        // M8a (ENGINE.md 35).
+        Task::PlayDraw { .. } => 24,
+        Task::RevealCompanion { .. } => 25,
         _ => 18,
     }
 }
@@ -679,6 +715,20 @@ impl Game {
             out[o + CODE] = 1.0;
             out[o + CODE + 1] = legal(act::GY_ABILITY + k as u16) as u8 as f32;
         }
+        // Revealed companions (public; layout v4, ENGINE.md 35).
+        for (side, p) in [me, op_].into_iter().enumerate() {
+            let pl = &self.players[p as usize];
+            // (Its identity as revealed: once in the game the card may be
+            // hidden again, a library card.)
+            let Some(def) = pl.companion_def else { continue };
+            let o = O_COMP + side * COMP_W;
+            code(&mut out[o..o + CODE], self.db, ids, def);
+            out[o + CODE + comp::PRESENT] = 1.0;
+            out[o + CODE + comp::AVAILABLE] = self.companion_outside(p).is_some() as u8 as f32;
+            let at_priority = decision.is_some_and(|d| d.kind == crate::decision::DecisionKind::Priority);
+            out[o + CODE + comp::LEGAL] = (p == me && at_priority && legal(act::COMPANION)) as u8 as f32;
+            out[o + CODE + comp::IN_GAME] = pl.companion_used as u8 as f32;
+        }
         self.encode_context(me, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
     }
 
@@ -855,7 +905,11 @@ impl Game {
             o[glob::IN_DUNGEON] = room.is_some() as u8 as f32;
             o[glob::COMPLETED] = completed as f32 / 2.0;
             o[glob::EXPERIENCE] = pl.experience as f32 / 4.0;
+            // Layout v4 (ENGINE.md 35).
+            o[glob::SIDEBOARD] = self.sideboard_size(p) as f32 / 15.0;
+            o[glob::COMPANION] = self.companion_outside(p).is_some() as u8 as f32;
         }
+        g[glob::CHOOSER] = (t.chooser == me) as u8 as f32;
         for (side, p) in [me, opp(me)].into_iter().enumerate() {
             if let (Some(r), _) = self.dungeon(p) {
                 g[glob::ROOM + crate::dungeon::ROOMS.len() * side + r as usize] = 1.0;
@@ -888,6 +942,11 @@ impl Game {
     fn decision_list(&self, p: PlayerId) -> Vec<DefId> {
         use crate::decision::DecisionKind as K;
         let Some(d) = &self.pending else { return Vec::new() };
+        // A companion to reveal (ENGINE.md 35): `LIBRARY` + k is the k-th
+        // candidate, by definition.
+        if d.kind == K::RevealCompanion {
+            return self.companion_candidates(p);
+        }
         let cards: Vec<CardIdx> = match d.kind {
             K::SearchLibrary | K::NameCard => self.library_sorted(p),
             K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield => match self.agenda.last() {
@@ -1054,7 +1113,7 @@ impl Game {
 /// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
 /// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (15 multisets of
 /// 1024 identities). Every other feature (the 128 globals) is the global token's input.
-/// Checked in as `mtgz/az/layout_v3.json` (a test keeps the two equal). `cards` (the name behind
+/// Checked in as `mtgz/az/layout_v4.json` (a test keeps the two equal). `cards` (the name behind
 /// each identity of `db`, for analysis; null where none) is not read by the network.
 pub fn layout_json(db: &'static CardDb) -> String {
     use serde_json::json;
@@ -1074,7 +1133,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
         }
     }
     let v = json!({
-        "version": 3,
+        "version": 4,
         "features": NUM_FEATURES,
         "vocab": D,
         "segments": [
@@ -1091,6 +1150,10 @@ pub fn layout_json(db: &'static CardDb) -> String {
             seg("triggers", O_TRIG, TRIGS, TRIG_W, CODE, json!([a(act::TRIGGER, 1)])),
             seg("list", O_LIST, LIST, LIST_W, CODE, json!([a(act::LIBRARY, 1)])),
             seg("graveyard_abilities", O_GYA, GYAS, GYA_W, CODE, json!([a(act::GY_ABILITY, 1)])),
+            // Layout v4 (ENGINE.md 35): the companion special action is the
+            // viewer's companion's.
+            seg("my_companion", O_COMP, 1, COMP_W, CODE + comp::PRESENT, json!([a(act::COMPANION, 1)])),
+            seg("opponent_companion", O_COMP + COMP_W, 1, COMP_W, CODE + comp::PRESENT, json!([])),
         ],
         "bags": [{"name": "bags", "offset": O_BAGS, "count": BAGS, "width": D}],
         "cards": cards,

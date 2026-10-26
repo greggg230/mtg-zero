@@ -378,9 +378,9 @@ fn encoding_slots_name_the_action_slots() {
 
 #[test]
 fn layout_json_is_checked_in() {
-    // mtgz/az/layout_v3.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it)
+    // mtgz/az/layout_v4.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it)
     let want = encode::layout_json(CardDb::cube());
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v3.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v4.json");
     if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
         std::fs::write(&path, &want).unwrap();
     }

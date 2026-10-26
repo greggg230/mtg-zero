@@ -1,7 +1,7 @@
 //! Object predicates -> [`Filter`]; conditions -> [`Cond`].
 
 use super::Lowerer;
-use crate::db::{supertypes, types, Cond, Filter};
+use crate::db::{supertypes, types, Cond, DeckCond, Filter};
 use card_ir::{cats, nodes};
 
 /// Arms shared by `ObjectPredicate` and `ObjectPredicateOrOneOf` (the
@@ -97,6 +97,10 @@ macro_rules! lower_object_predicate {
                 Some(Filter::ManaValueAtLeast($l.int("HasManaValueAtLeast.n", *n, 0, 30) as u8))
             }
             E::IsTapped(nodes::IsTapped {}) => Some(Filter::Tapped),
+            // "Permanent card" (CR 110.4b), and "has an activated ability"
+            // (companion conditions, ENGINE.md 35).
+            E::IsPermanentCard(nodes::IsPermanentCard {}) => Some(Filter::Type(types::PERMANENT)),
+            E::HasActivatedAbility(nodes::HasActivatedAbility {}) => Some(Filter::HasActivatedAbility),
             E::CubeWalkersIsColorless(nodes::CubeWalkersIsColorless {}) => Some(Filter::Colorless),
             E::HasPrintedCardType(nodes::HasPrintedCardType { card_type }) => match types::from_name(card_type) {
                 // Printed = the card's own types (no type-changing effect
@@ -127,6 +131,30 @@ pub(crate) fn lower_pred_or_oneof(l: &mut Lowerer, p: &cats::ObjectPredicateOrOn
             fs.into_iter().collect::<Option<Vec<_>>>().map(Filter::Or)
         }
     })
+}
+
+/// A companion ability (CR 702.139a): its condition on the starting deck,
+/// whose filters must read only a card's own characteristics
+/// (`CardDb::def_matches`; ENGINE.md 35).
+pub(crate) fn lower_companion(l: &mut Lowerer, c: &cats::Companion) -> Option<DeckCond> {
+    let cats::Companion::Companion(nodes::Companion { condition }) = c;
+    let cond = match &**condition {
+        cats::DeckCondition::EachCardInStartingDeck(nodes::EachCardInStartingDeck { cards, must }) => {
+            DeckCond::Each { cards: lower_pred(l, cards)?, must: lower_pred(l, must)? }
+        }
+        cats::DeckCondition::StartingDeckDifferentNames(nodes::StartingDeckDifferentNames { cards }) => {
+            DeckCond::DifferentNames { cards: lower_pred(l, cards)? }
+        }
+    };
+    let ok = match &cond {
+        DeckCond::Each { cards, must } => crate::db::deck_filter_ok(cards) && crate::db::deck_filter_ok(must),
+        DeckCond::DifferentNames { cards } => crate::db::deck_filter_ok(cards),
+    };
+    if !ok {
+        l.unsupported(format!("Companion({cond:?}: a filter that needs a game)"));
+        return None;
+    }
+    Some(cond)
 }
 
 /// Arms shared by `Condition` and `ConditionOrStatePredicate`.

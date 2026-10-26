@@ -15,6 +15,10 @@ pub mod act {
     pub const YES: u16 = 1;
     /// 2 = the decider, 3 = the opponent.
     pub const PLAYER: u16 = 2;
+    /// At priority: the companion special action (CR 116.2g; the decider's
+    /// companion, ENGINE.md 35). A `PLAYER` id: "the decider's" card
+    /// outside the game.
+    pub const COMPANION: u16 = PLAYER;
     /// n = 0..31.
     pub const NUMBER: u16 = 4;
     pub const NUMBER_N: u16 = 32;
@@ -179,6 +183,15 @@ pub enum DecisionKind {
     /// differ (the pool's mana, or a several-mana source's, beyond what the
     /// cost needs). M7e part 2.
     PayPool,
+    /// Who takes the first turn (CR 103.1): `PLAYER` = the decider (play
+    /// first), `PLAYER` + 1 = the opponent (draw first). M8a.
+    PlayDraw,
+    /// Reveal a companion from the sideboard (CR 103.2b, 702.139a):
+    /// `LIBRARY` + k = the k-th card of the decider's sideboard with a
+    /// companion whose condition their starting deck fulfills, by
+    /// definition (`Choice::Def`); `PASS` = none. Asked only when there is
+    /// one. M8a.
+    RevealCompanion,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }
@@ -214,6 +227,9 @@ pub enum Choice {
     /// Priority: this card, whose two faces can both be cast or played: a
     /// `ChooseFace` decision follows (`FACE_*` bits: what each face does).
     Faces(CardIdx, u8),
+    /// Priority: the companion special action (CR 116.2g): pay {3} and put
+    /// the decider's companion into their hand (`act::COMPANION`).
+    Companion,
 }
 
 /// `Choice::Faces` bits: the front face is cast / played, the other face
@@ -392,6 +408,7 @@ impl Game {
             Choice::CastFace(i) => format!("cast the other face of {}#{}", self.name(i), i.0),
             Choice::PlayFace(i) => format!("play the other face of {}#{}", self.name(i), i.0),
             Choice::Faces(i, m) => format!("{}#{} (choose a face, {m:#b})", self.name(i), i.0),
+            Choice::Companion => "put the companion into hand".into(),
         }
     }
 }

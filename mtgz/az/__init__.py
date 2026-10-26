@@ -2,7 +2,7 @@
 docs/search.md) + what is MTG's, registered here as the process's game package: the game `mtg`
 (engine/src/az, docs/ENGINE.md 21-22: one game of Magic between two random 40-card decks of the
 supported PowerLSV cube cards), its object layout for zero-core's token network (arch 'tokens':
-`layout_v3.json`, written by the engine's `encode::layout_json`), the run presets (mtg-smoke,
+`layout_v4.json`, written by the engine's `encode::layout_json`), the run presets (mtg-smoke,
 mtg-1, mtg-2, mtg-2-mlp), the default spec, the evaluation spec and the dashboard's title / port.
 
 The modules of this package are the core's under the usual names, so every command has the same
@@ -32,8 +32,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SPEC = '{"max_turns": 60, "eval_decks": 16, "eval_seed": 1}'
 EVAL_SPEC = eval_spec(SPEC)
 
-# The objects of encode layout v2 for zero-core's token network (docs/ENGINE.md 22)
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v3.json'), encoding='utf-8') as _f:
+# The objects of encode layout v4 for zero-core's token network (docs/ENGINE.md 22, 35)
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v4.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
 
 PRESETS = {

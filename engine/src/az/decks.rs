@@ -1,6 +1,8 @@
 //! Decks for self-play and evaluation (ENGINE.md 21.3): legal 40-card decks
 //! from the supported cards only, two colours, 16-17 lands with the
-//! supported duals and fetch lands, a sensible curve; seeded.
+//! supported duals and fetch lands, a sensible curve; seeded. M8a (ENGINE.md
+//! 35): each deck comes with a sideboard (`generate_pool`), and some decks
+//! are built for a companion, which is then in their sideboard.
 
 use crate::db::{types, ActEffect, CardDb, CardDef, Filter, ManaProd};
 use crate::ids::DefId;
@@ -160,7 +162,91 @@ pub fn generate(db: &CardDb, rng: &mut Rng, gen: &DeckGen) -> Vec<DefId> {
 
 /// [`generate`] for the colours of `pair` (a `ManaMask` of two colours).
 pub fn generate_colors(db: &CardDb, rng: &mut Rng, gen: &DeckGen, pair: u8) -> Vec<DefId> {
-    let (lands, spells) = card_pool(db);
+    generate_colors_if(db, rng, gen, pair, &|_| true)
+}
+
+/// Cards of a generated deck's sideboard (ENGINE.md 35).
+pub const SIDEBOARD: usize = 7;
+
+/// Can a deck of colours `pair` pay every coloured pip of `d`'s mana cost
+/// (hybrid pips with either colour)?
+pub fn castable_with(d: &CardDef, pair: u8) -> bool {
+    let c = &d.cost;
+    (0..5).all(|i| c.pips[i] + c.phyrexian[i] == 0 || pair & (1 << i) != 0)
+        && c.hybrid.iter().enumerate().all(|(k, &n)| n == 0 || crate::mana::pair_mask(k) & pair != 0)
+}
+
+/// The cube's companions (supported cards with companion, CR 702.139).
+pub fn companions(db: &CardDb) -> Vec<DefId> {
+    (0..db.num_cards() as DefId).filter(|&id| !db.def(id).token && db.def(id).companion.is_some()).collect()
+}
+
+/// May card `id` be in a starting deck that is to fulfill `cond` (each card
+/// on its own: "each <cards> <must>"; a card name once at most is the
+/// singleton generator's anyway)?
+fn fits(db: &CardDb, cond: &crate::db::DeckCond, id: DefId) -> bool {
+    match cond {
+        crate::db::DeckCond::Each { cards, must } => {
+            db.def_matches(cards, id) != Some(true) || db.def_matches(must, id) == Some(true)
+        }
+        crate::db::DeckCond::DifferentNames { .. } => true,
+    }
+}
+
+/// A deck and its sideboard (ENGINE.md 35). The deck is [`generate`]'s,
+/// from `rng` (the same deck for the same `rng` unless the deck is built
+/// for a companion); `side` decides the rest: one deck in four is built
+/// for a random companion its colours can cast (only cards that keep its
+/// condition; it goes to the sideboard if the deck fulfills the condition),
+/// and the sideboard is `SIDEBOARD` cards: that companion, else (half the
+/// time) a companion the deck happens to fulfill (Lutri, for a singleton
+/// deck), then spells of the deck's colours not in the deck.
+pub fn generate_pool(db: &CardDb, rng: &mut Rng, side: &mut Rng, gen: &DeckGen) -> (Vec<DefId>, Vec<DefId>) {
+    let a = rng.below(5) as usize;
+    let b = (a + 1 + rng.below(4) as usize) % 5;
+    let pair = (1 << a) | (1 << b);
+    let comps: Vec<DefId> = companions(db).into_iter().filter(|&c| castable_with(db.def(c), pair)).collect();
+    let mut sideboard: Vec<DefId> = Vec::with_capacity(SIDEBOARD);
+    let mut deck = None;
+    if side.below(4) == 0 && !comps.is_empty() {
+        let c = comps[side.below(comps.len() as u32) as usize];
+        let cond = db.def(c).companion.clone().expect("a companion");
+        let d = generate_colors_if(db, rng, gen, pair, &|id| id != c && fits(db, &cond, id));
+        if check(db, &d, gen).is_ok() && db.deck_satisfies(&cond, &d) {
+            sideboard.push(c);
+            deck = Some(d);
+        }
+    }
+    let deck = deck.unwrap_or_else(|| generate_colors(db, rng, gen, pair));
+    if sideboard.is_empty() && side.below(2) == 0 {
+        let ok: Vec<DefId> = comps
+            .iter()
+            .copied()
+            .filter(|c| !deck.contains(c) && db.deck_satisfies(db.def(*c).companion.as_ref().unwrap(), &deck))
+            .collect();
+        if !ok.is_empty() {
+            sideboard.push(ok[side.below(ok.len() as u32) as usize]);
+        }
+    }
+    let (_, spells) = card_pool(db);
+    let mut rest: Vec<DefId> = spells
+        .into_iter()
+        .filter(|&id| db.def(id).colors & !pair == 0 && db.def(id).companion.is_none() && !deck.contains(&id))
+        .collect();
+    while sideboard.len() < SIDEBOARD && !rest.is_empty() {
+        let i = side.below(rest.len() as u32) as usize;
+        sideboard.push(rest.swap_remove(i));
+    }
+    sideboard.sort_unstable();
+    (deck, sideboard)
+}
+
+/// [`generate_colors`] with the candidate cards (spells and nonbasic lands)
+/// limited to those `ok` accepts.
+fn generate_colors_if(db: &CardDb, rng: &mut Rng, gen: &DeckGen, pair: u8, ok: &dyn Fn(DefId) -> bool) -> Vec<DefId> {
+    let (mut lands, mut spells) = card_pool(db);
+    lands.retain(|&id| ok(id));
+    spells.retain(|&id| ok(id));
     let span = (gen.max_lands - gen.min_lands) as u32 + 1;
     let n_lands = gen.min_lands as usize + rng.below(span) as usize;
     let n_spells = DECK_SIZE - n_lands;
@@ -262,10 +348,17 @@ pub fn generate_colors(db: &CardDb, rng: &mut Rng, gen: &DeckGen, pair: u8) -> V
 
 /// The fixed evaluation deck set: pair `i` of `n` (two decks, colours of
 /// both chosen at random), the same for every run and iteration with the
-/// same `seed`.
+/// same `seed`: the decks of [`eval_pools`].
 pub fn eval_pair(db: &CardDb, gen: &DeckGen, seed: u64, i: u32) -> [Vec<DefId>; 2] {
+    let [(a, _), (b, _)] = eval_pools(db, gen, seed, i);
+    [a, b]
+}
+
+/// Pair `i` of the evaluation set with sideboards ([`generate_pool`]).
+pub fn eval_pools(db: &CardDb, gen: &DeckGen, seed: u64, i: u32) -> [(Vec<DefId>, Vec<DefId>); 2] {
     let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (0xE7A1 + i as u64));
-    [generate(db, &mut rng, gen), generate(db, &mut rng, gen)]
+    let mut side = Rng::new(seed.wrapping_mul(0xD1B5_4A32_D192_ED03) ^ (0x51DE + i as u64));
+    [generate_pool(db, &mut rng, &mut side, gen), generate_pool(db, &mut rng, &mut side, gen)]
 }
 
 /// Check a deck: 40 cards, supported non-token cards only, at most one copy

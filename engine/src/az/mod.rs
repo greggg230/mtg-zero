@@ -36,8 +36,10 @@ pub enum DeckMode {
     /// A pair of the fixed evaluation set (`decks::eval_pair`), chosen by the
     /// game seed.
     Eval,
-    /// The same two decklists every game (seat 0, seat 1).
+    /// The same two decklists every game (seat 0, seat 1), and their
+    /// sideboards (ENGINE.md 35).
     Lists(Vec<DefId>, Vec<DefId>),
+    ListsWithSideboards([(Vec<DefId>, Vec<DefId>); 2]),
 }
 
 /// The spec of the `mtg` game (JSON; every key optional):
@@ -49,8 +51,12 @@ pub enum DeckMode {
 ///
 /// `decks`: `"random"` (new decks per game from the game seed), `"eval"`
 /// (one of the `eval_decks` pairs of the evaluation set `eval_seed`, chosen
-/// by the game seed) or `{"p0": [names], "p1": [names]}`. `max_turns`: the
-/// game is a draw after this many turns (both players' turns count).
+/// by the game seed) or `{"p0": [names], "p1": [names]}`, optionally with
+/// `"p0_sideboard"` / `"p1_sideboard"` lists (ENGINE.md 35; random and
+/// evaluation decks have generated sideboards). `max_turns`: the game is a
+/// draw after this many turns (both players' turns count). `chooser`: the
+/// seat that chooses who takes the first turn (CR 103.1; default: chosen at
+/// random each game).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -59,6 +65,7 @@ pub struct MtgSpec {
     pub gen: DeckGen,
     pub eval_decks: u32,
     pub eval_seed: u64,
+    pub chooser: Option<u8>,
 }
 
 impl Default for MtgSpec {
@@ -70,6 +77,7 @@ impl Default for MtgSpec {
             gen: DeckGen::default(),
             eval_decks: 16,
             eval_seed: 1,
+            chooser: None,
         }
     }
 }
@@ -90,6 +98,13 @@ impl MtgSpec {
                 "mulligans" => s.mulligans = x.as_bool().ok_or("mtg spec: mulligans must be a boolean")?,
                 "eval_decks" => s.eval_decks = (int()? as u32).max(1),
                 "eval_seed" => s.eval_seed = int()?,
+                "chooser" => {
+                    let c = int()?;
+                    if c > 1 {
+                        return Err("mtg spec: chooser must be 0 or 1".into());
+                    }
+                    s.chooser = Some(c as u8);
+                }
                 "lands" => {
                     let a = x.as_array().filter(|a| a.len() == 2).ok_or("mtg spec: lands must be [min, max]")?;
                     let (lo, hi) = (a[0].as_u64().unwrap_or(0), a[1].as_u64().unwrap_or(0));
@@ -120,7 +135,18 @@ impl MtgSpec {
                                     })
                                     .collect()
                             };
-                            DeckMode::Lists(list("p0")?, list("p1")?)
+                            for key in o.keys() {
+                                if !["p0", "p1", "p0_sideboard", "p1_sideboard"].contains(&key.as_str()) {
+                                    return Err(format!("mtg spec: unknown decks key {key:?}"));
+                                }
+                            }
+                            let side = |key: &str| if o.contains_key(key) { list(key) } else { Ok(Vec::new()) };
+                            let (s0, s1) = (side("p0_sideboard")?, side("p1_sideboard")?);
+                            if s0.is_empty() && s1.is_empty() {
+                                DeckMode::Lists(list("p0")?, list("p1")?)
+                            } else {
+                                DeckMode::ListsWithSideboards([(list("p0")?, s0), (list("p1")?, s1)])
+                            }
                         }
                         _ => return Err(format!("mtg spec: unknown decks {x}")),
                     }
@@ -134,19 +160,28 @@ impl MtgSpec {
         Ok(s)
     }
 
-    /// The two decks of a game with this seed.
+    /// The two decks of a game with this seed (the decks of [`pools`](Self::pools)).
     pub fn decks(&self, seed: u64) -> [Vec<DefId>; 2] {
+        let [(a, _), (b, _)] = self.pools(seed);
+        [a, b]
+    }
+
+    /// The two decks of a game with this seed and their sideboards
+    /// (ENGINE.md 35).
+    pub fn pools(&self, seed: u64) -> [(Vec<DefId>, Vec<DefId>); 2] {
         let db = CardDb::cube();
         match &self.decks {
             DeckMode::Random => {
                 let mut rng = Rng::new(seed ^ 0x00DE_C50F_2A11);
-                [decks::generate(db, &mut rng, &self.gen), decks::generate(db, &mut rng, &self.gen)]
+                let mut side = Rng::new(seed ^ 0x51DE_B0A2_D5EE);
+                [decks::generate_pool(db, &mut rng, &mut side, &self.gen), decks::generate_pool(db, &mut rng, &mut side, &self.gen)]
             }
             DeckMode::Eval => {
                 let i = (zero_search::rng::split64(seed) % self.eval_decks as u64) as u32;
-                decks::eval_pair(db, &self.gen, self.eval_seed, i)
+                decks::eval_pools(db, &self.gen, self.eval_seed, i)
             }
-            DeckMode::Lists(a, b) => [a.clone(), b.clone()],
+            DeckMode::Lists(a, b) => [(a.clone(), Vec::new()), (b.clone(), Vec::new())],
+            DeckMode::ListsWithSideboards(p) => p.clone(),
         }
     }
 
@@ -173,9 +208,9 @@ pub struct MtgAz {
 
 impl MtgAz {
     pub fn new(spec: &MtgSpec, seed: u64) -> Result<MtgAz, String> {
-        let [d0, d1] = spec.decks(seed);
-        let gspec = GameSpec { max_turns: spec.max_turns, mulligans: spec.mulligans, ..GameSpec::default() };
-        Ok(MtgAz { g: Game::new(CardDb::cube(), gspec, [&d0, &d1], seed)? })
+        let [(d0, s0), (d1, s1)] = spec.pools(seed);
+        let gspec = GameSpec { max_turns: spec.max_turns, mulligans: spec.mulligans, chooser: spec.chooser, ..GameSpec::default() };
+        Ok(MtgAz { g: Game::with_sideboards(CardDb::cube(), gspec, [&d0, &d1], [&s0, &s1], seed)? })
     }
 }
 

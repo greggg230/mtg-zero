@@ -237,6 +237,7 @@ fn cr_103_8a_starting_player_skips_the_first_draw() {
     let deck: Vec<u16> = vec![db.id("Island").unwrap(); 40];
     let spec = GameSpec { mulligans: false, auto_single: false, ..GameSpec::default() };
     let mut g = Game::new(db, spec, [&deck, &deck], 5).unwrap();
+    g.play_first();
     let start = g.turn().starting;
     assert_eq!(g.turn().number, 1);
     assert_eq!(g.turn().step, Step::Upkeep);

@@ -21,19 +21,38 @@ struct Played {
     fingerprint: u64,
     outcome: Outcome,
     turns: u32,
+    /// Companions revealed, and put into a hand (ENGINE.md 35).
+    companions: u32,
+    companions_used: u32,
 }
 
-fn decks(seed: u64) -> (Vec<u16>, Vec<u16>) {
+/// The decks and sideboards of game `seed` (ENGINE.md 35): one game in four
+/// has the self-play generator's decks (two colours, singleton, a sideboard,
+/// often a companion, a deck built for it); the others random decks with a
+/// sideboard of seven random cards.
+fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     let db = common::db();
     let mut rng = Rng::new(seed ^ 0xDEC5);
-    (common::random_deck(db, &mut rng), common::random_deck(db, &mut rng))
+    let mut side = Rng::new(seed ^ 0x51DE);
+    if seed % 4 == 3 {
+        let gen = engine::az::decks::DeckGen::default();
+        return [
+            engine::az::decks::generate_pool(db, &mut rng, &mut side, &gen),
+            engine::az::decks::generate_pool(db, &mut rng, &mut side, &gen),
+        ];
+    }
+    let (_, spells) = common::fuzz_pool();
+    let mut sideboard = |side: &mut Rng| -> Vec<u16> { (0..7).map(|_| spells[side.below(spells.len() as u32) as usize]).collect() };
+    let d0 = common::random_deck(db, &mut rng);
+    let d1 = common::random_deck(db, &mut rng);
+    [(d0, sideboard(&mut side)), (d1, sideboard(&mut side))]
 }
 
 fn new_game(seed: u64) -> Game {
-    let (d0, d1) = decks(seed);
+    let [(d0, s0), (d1, s1)] = decks(seed);
     // `FUZZ_LOG=1` keeps the game log, so a panic message shows the game.
     let log = std::env::var("FUZZ_LOG").is_ok();
-    Game::new(common::db(), GameSpec { log, ..GameSpec::default() }, [&d0, &d1], seed).unwrap()
+    Game::with_sideboards(common::db(), GameSpec { log, ..GameSpec::default() }, [&d0, &d1], [&s0, &s1], seed).unwrap()
 }
 
 /// Play one game with random actions; run the extra checks along the way.
@@ -70,7 +89,9 @@ fn play(seed: u64, checks: bool) -> Played {
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
 "));
     }
-    Played { actions, keys, fingerprint: g.fingerprint(), outcome: g.outcome().unwrap(), turns: g.turn().number }
+    let companions = (0..2).filter(|&p| g.player(p).companion.is_some()).count() as u32;
+    let companions_used = (0..2).filter(|&p| g.player(p).companion_used).count() as u32;
+    Played { actions, keys, fingerprint: g.fingerprint(), outcome: g.outcome().unwrap(), turns: g.turn().number, companions, companions_used }
 }
 
 /// A clone continues exactly like the original.
@@ -287,6 +308,7 @@ fn fuzz_random_games() {
     // `FUZZ_FIRST=s` starts at seed s (to rerun a failing seed alone).
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     let (mut wins, mut draws, mut turns, mut decisions) = ([0u32; 2], 0u32, 0u64, 0u64);
+    let (mut companions, mut companions_used) = (0u32, 0u32);
     for seed in first..first + n {
         let p = std::panic::catch_unwind(|| play(seed, true)).unwrap_or_else(|e| {
             panic!("seed {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_GAMES=1 FUZZ_LOG=1): {e:?}")
@@ -297,6 +319,8 @@ fn fuzz_random_games() {
         }
         turns += p.turns as u64;
         decisions += p.actions.len() as u64;
+        companions += p.companions;
+        companions_used += p.companions_used;
     }
     println!(
         "{n} games: wins {wins:?}, draws {draws}, mean turns {:.1}, mean decisions {:.1}; {} options completed ({} decisions after them)",
@@ -305,6 +329,10 @@ fn fuzz_random_games() {
         OPTIONS_TRIED.load(Ordering::Relaxed),
         OPTION_STEPS.load(Ordering::Relaxed)
     );
+    println!("companions revealed {companions}, put into a hand {companions_used}");
+    if n >= 200 {
+        assert!(companions_used > 0, "no companion special action in {n} games");
+    }
 }
 
 #[test]

@@ -227,6 +227,10 @@ impl Game {
             self.top_options(p, &classes, sorcery_ok, land_ok, &mut opts);
         }
         self.activation_options(p, &classes, &slots, sorcery_ok, &mut opts);
+        // The companion special action (CR 116.2g; ENGINE.md 35).
+        if let Some(o) = self.companion_option(p, sorcery_ok, &classes) {
+            opts.push(o);
+        }
         opts
     }
 
@@ -2496,6 +2500,10 @@ impl Game {
             Filter::And(a, b) => self.card_matches(a, c, ctx) && self.card_matches(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.card_matches(x, c, ctx)),
             Filter::Not(x) => !self.card_matches(x, c, ctx),
+            // Its printed abilities, or none if it lost them (granted ones
+            // aren't seen: the one use is a companion's deck condition,
+            // ENGINE.md 35).
+            Filter::HasActivatedAbility => self.abilities(c).has_activated_ability(),
         }
     }
 }

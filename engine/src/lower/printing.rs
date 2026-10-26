@@ -257,6 +257,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             escape_exile_card_types,
             conspiracy_rules,
             replacement_statics,
+            companion,
         } = p;
         // Which face this printing is (set by the caller for a face); the
         // printings lowered inside it (tokens, emblems) are cards.
@@ -1628,7 +1629,19 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if *grants_play_from_top_paying_life && !*grants_look_at_top_of_library || (*grants_look_at_top_of_library && ty & types::PERMANENT == 0) {
         l.unsupported("CardPrinting.grants_play_from_top_paying_life(without looking at the top card)");
     }
+    // Companion (CR 702.139): its deck condition (ENGINE.md 35). A face
+    // can't be a companion (the card's own characteristics are its front
+    // face's outside the game).
+    let companion = match companion.as_deref() {
+        Some(c) if face == super::Face::Card => super::filter::lower_companion(l, c),
+        Some(_) => {
+            l.unsupported("CardPrinting.companion(on a face)");
+            None
+        }
+        None => None,
+    };
     let mut def = CardDef {
+        companion,
         look_top: *grants_look_at_top_of_library,
         play_top_life: *grants_play_from_top_paying_life,
         chooses_name: *chooses_card_name_as_enters,

@@ -14,7 +14,12 @@ fn deck() -> Vec<u16> {
 #[test]
 fn cr_103_setup_shuffles_and_deals_seven() {
     let d = deck();
-    let g = Game::new(db(), GameSpec::default(), [&d, &d], 11).unwrap();
+    let mut g = Game::new(db(), GameSpec::default(), [&d, &d], 11).unwrap();
+    // CR 103.1: first the play-or-draw choice, before the hands (35).
+    assert_eq!(g.kind(), Some(DecisionKind::PlayDraw));
+    assert!(g.player(0).hand.is_empty() && g.player(1).hand.is_empty());
+    g.play_first();
+    assert_eq!(g.turn().starting, g.turn().chooser);
     for p in 0..2 {
         assert_eq!(g.player(p).hand.len(), 7);
         assert_eq!(g.player(p).library.len(), 33);
@@ -24,7 +29,8 @@ fn cr_103_setup_shuffles_and_deals_seven() {
     assert_eq!(g.to_move(), Some(g.turn().starting));
     g.check_invariants().unwrap();
     // Different seeds give different shuffles.
-    let h = Game::new(db(), GameSpec::default(), [&d, &d], 12).unwrap();
+    let mut h = Game::new(db(), GameSpec::default(), [&d, &d], 12).unwrap();
+    h.play_first();
     assert_ne!(g.fingerprint(), h.fingerprint());
 }
 
@@ -32,6 +38,7 @@ fn cr_103_setup_shuffles_and_deals_seven() {
 fn cr_103_5_london_mulligan() {
     let d = deck();
     let mut g = Game::new(db(), GameSpec::default(), [&d, &d], 11).unwrap();
+    g.play_first();
     let s = g.turn().starting;
     let o = 1 - s;
     g.choose(Choice::Yes); // the starting player mulligans

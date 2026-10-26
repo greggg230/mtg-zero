@@ -26,6 +26,11 @@ pub struct GameSpec {
     pub auto_single: bool,
     /// Keep a human-readable log (tests and debugging only).
     pub log: bool,
+    /// Who chooses which player takes the first turn (CR 103.1): `None` =
+    /// a player chosen at random (the first game of a match: a die roll in
+    /// the game's setup); `Some(p)` = `p` (in later games of a match, the
+    /// loser of the previous game; ENGINE.md 35).
+    pub chooser: Option<PlayerId>,
 }
 
 impl Default for GameSpec {
@@ -38,6 +43,7 @@ impl Default for GameSpec {
             max_turns: 60,
             auto_single: true,
             log: false,
+            chooser: None,
         }
     }
 }
@@ -243,6 +249,19 @@ pub struct Player {
     /// Protection from everything until this player's turn count reaches
     /// this (CR 702.16j; The One Ring): 0 = none.
     pub prot_until: u32,
+    /// The player's sideboard (CR 100.4, 400.11a: cards outside the game;
+    /// in limited the rest of their pool, 100.4b), sorted by definition.
+    /// Hidden from the other player but a revealed companion (ENGINE.md 35).
+    pub sideboard: std::sync::Arc<[DefId]>,
+    /// The companion this player revealed from their sideboard (CR 103.2b,
+    /// 702.139a): a public card in no zone (`Zone::Nowhere`) until the
+    /// special action puts it into their hand (116.2g). Once in the game
+    /// the slot is a card like any other (hidden in a library, say).
+    pub companion: Option<CardIdx>,
+    /// The revealed companion's identity: public for the rest of the game.
+    pub companion_def: Option<DefId>,
+    /// The companion special action was taken (once per game, 116.2g).
+    pub companion_used: bool,
 }
 
 /// A player's dungeon (CR 309): the dungeon card in the command zone with the
@@ -356,6 +375,8 @@ pub struct Turn {
     pub cleanup_again: bool,
     /// Additional combat phases to follow this one (CR 500.8).
     pub extra_combats: u8,
+    /// The player who chose who takes the first turn (CR 103.1).
+    pub chooser: PlayerId,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -769,17 +790,36 @@ pub enum Mark {
 pub(crate) const NO_NAME: DefId = DefId::MAX;
 
 impl Game {
-    /// A new game: shuffle, pick the starting player, draw opening hands,
-    /// then run to the first decision (the first mulligan, ENGINE.md 5).
-    /// `decks[p]` are player p's cards (40 for limited).
+    /// A new game without sideboards ([`with_sideboards`](Self::with_sideboards)).
     pub fn new(db: &'static CardDb, spec: GameSpec, decks: [&[DefId]; 2], seed: u64) -> Result<Game, String> {
+        Game::with_sideboards(db, spec, decks, [&[], &[]], seed)
+    }
+
+    /// A new game (CR 103; ENGINE.md 5, 35): `decks[p]` are player p's
+    /// cards (40 for limited), `sideboards[p]` the cards outside the game
+    /// (CR 100.4b: the rest of their pool). The chooser (random, or
+    /// `spec.chooser`) is determined and the game runs to the first
+    /// decision: the chooser's play-or-draw choice (103.1). The rest of the
+    /// setup follows it (`Task::PlayDraw`): companions (103.2b), shuffles
+    /// (103.3), opening hands and mulligans (103.5), opening-hand actions
+    /// (103.6).
+    pub fn with_sideboards(
+        db: &'static CardDb,
+        spec: GameSpec,
+        decks: [&[DefId]; 2],
+        sideboards: [&[DefId]; 2],
+        seed: u64,
+    ) -> Result<Game, String> {
         for (p, d) in decks.iter().enumerate() {
             if d.is_empty() {
                 return Err(format!("player {p} has an empty deck"));
             }
-            if let Some(&bad) = d.iter().find(|&&id| id as usize >= db.len()) {
-                return Err(format!("player {p}: unknown definition {bad}"));
+            if let Some(&bad) = d.iter().chain(sideboards[p].iter()).find(|&&id| id as usize >= db.len() || db.def(id).token) {
+                return Err(format!("player {p}: {bad} is not a card"));
             }
+        }
+        if spec.chooser.is_some_and(|p| p > 1) {
+            return Err("chooser must be player 0 or 1".into());
         }
         let mut g = Game::empty(db, spec, seed);
         for p in 0..2u8 {
@@ -787,26 +827,21 @@ impl Game {
                 let idx = g.add_card(def, p, Zone::Library);
                 g.players[p as usize].library.push(idx);
             }
+            // CR 103.2a: the sideboard is set aside; what is left is the
+            // starting deck.
+            let mut sb = sideboards[p as usize].to_vec();
+            sb.sort_unstable();
+            g.players[p as usize].sideboard = std::sync::Arc::from(sb);
         }
-        for p in 0..2 {
-            let mut lib = std::mem::take(&mut g.players[p].library);
-            g.rng.shuffle(&mut lib);
-            g.players[p].library = lib;
-        }
-        g.turn.starting = g.rng.below(2) as PlayerId;
-        g.turn.active = g.turn.starting;
-        g.turn.priority = g.turn.starting;
-        for p in [g.turn.starting, opp(g.turn.starting)] {
-            for _ in 0..spec.hand_size {
-                g.draw(p);
-            }
-        }
-        g.agenda.push(Task::BeginTurn);
-        // CR 103.6: after the mulligans, opening-hand actions in turn order.
-        g.agenda.push(Task::Opening { p: g.turn.starting, exile: 0 });
-        if spec.mulligans {
-            g.agenda.push(Task::MulliganDeclare { p: g.turn.starting });
-        }
+        // CR 103.1: the chooser (the first game of a match: chosen at
+        // random) chooses who takes the first turn. The die roll is part of
+        // the initial state (no transition reveals it; it is public).
+        let chooser = spec.chooser.unwrap_or_else(|| g.rng.below(2) as PlayerId);
+        g.turn.chooser = chooser;
+        g.turn.starting = chooser;
+        g.turn.active = chooser;
+        g.turn.priority = chooser;
+        g.agenda.push(Task::PlayDraw { p: chooser });
         g.advance();
         // Setup is not a mid-game event: its reveals are not chance keys.
         g.keys.clear();
@@ -847,6 +882,10 @@ impl Game {
             gy_exile_turn: 0,
             city_blessing: false,
             prot_until: 0,
+            sideboard: std::sync::Arc::from(Vec::new()),
+            companion: None,
+            companion_def: None,
+            companion_used: false,
         };
         Game {
             db,
@@ -872,6 +911,7 @@ impl Game {
                 normal: 0,
                 cleanup_again: false,
                 extra_combats: 0,
+                chooser: 0,
             },
             agenda: Vec::new(),
             pending: None,

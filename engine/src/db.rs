@@ -377,11 +377,52 @@ pub enum Filter {
     PtIs(i32, i32),
     /// Saddled this turn (CR 702.171b).
     Saddled,
+    /// Has an activated ability (CR 602; mana abilities, loyalty abilities
+    /// and activated keyword abilities included; special actions, CR 116,
+    /// are not abilities). A companion condition (Zirda, the Dawnwaker)
+    /// reads it over the cards of a starting deck (`DeckCond`).
+    HasActivatedAbility,
 }
 
 /// `Filter::Ability` kinds.
 pub const ABILITY_ACTIVATED: u8 = 1;
 pub const ABILITY_TRIGGERED: u8 = 2;
+
+/// Can [`CardDb::def_matches`] answer `f` (a filter on a card's own
+/// characteristics, outside any game)?
+pub fn deck_filter_ok(f: &Filter) -> bool {
+    match f {
+        Filter::Any
+        | Filter::Type(_)
+        | Filter::Supertype(_)
+        | Filter::Color(_)
+        | Filter::Colorless
+        | Filter::ManaValueAtMost(_)
+        | Filter::ManaValueAtLeast(_)
+        | Filter::Named(_)
+        | Filter::HasKeyword(_)
+        | Filter::HasActivatedAbility => true,
+        Filter::And(a, b) => deck_filter_ok(a) && deck_filter_ok(b),
+        Filter::Or(v) => v.iter().all(deck_filter_ok),
+        Filter::Not(x) => deck_filter_ok(x),
+        _ => false,
+    }
+}
+
+/// A companion's condition on its owner's starting deck (CR 702.139a; the
+/// deck after the sideboard is set aside, 103.2a, 702.139b; ENGINE.md 35).
+/// Its filters read a card's own characteristics (`CardDb::def_matches`):
+/// cards outside the battlefield and the stack have their front face's
+/// (712.8a), an adventurer card its normal ones (715.4).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum DeckCond {
+    /// "Each <cards> in your starting deck <must>" (Lurrus of the Dream-Den,
+    /// Zirda, the Dawnwaker).
+    Each { cards: Filter, must: Filter },
+    /// "Each <cards> in your starting deck has a different name" (Lutri, the
+    /// Spellchaser; CR 201.2).
+    DifferentNames { cards: Filter },
+}
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TargetReq {
@@ -1549,6 +1590,11 @@ pub struct CardDef {
     /// you cast a spell this way, pay life equal to its mana value rather
     /// than pay its mana cost" (`CastFrom::LibraryTop`).
     pub play_top_life: bool,
+    // ---- M8a (ENGINE.md 35) ----
+    /// Companion (CR 702.139): its condition on its owner's starting deck.
+    /// The card may be revealed from its owner's sideboard before the game
+    /// (103.2b) and put into their hand once for {3} (116.2g).
+    pub companion: Option<DeckCond>,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1585,6 +1631,19 @@ pub enum Discount {
 impl CardDef {
     pub fn is(&self, t: u16) -> bool {
         self.types & t != 0
+    }
+    /// Does the card have an activated ability (CR 602; `Filter::
+    /// HasActivatedAbility`)? Its printed ones: those of the permanent (mana
+    /// abilities, the intrinsic ones of basic land types included, 305.6;
+    /// loyalty abilities, 606; equip, reconfigure, Class levels), from hand
+    /// (cycling, channel) and from a graveyard. Not special actions (plot,
+    /// turning face up: CR 116.2b, 116.2k) nor latent abilities, which only an
+    /// effect gives (`latent`).
+    pub fn has_activated_ability(&self) -> bool {
+        let own = self.activated.len() - (self.latent as usize).min(self.activated.len());
+        self.activated[..own].iter().any(|a| a.special.is_none())
+            || self.hand_abilities.iter().any(|a| a.special.is_none())
+            || self.gy_abilities.iter().any(|a| a.special.is_none())
     }
     pub fn is_permanent_card(&self) -> bool {
         self.types & types::PERMANENT != 0
@@ -1859,6 +1918,53 @@ impl CardDb {
 
     pub fn id(&self, name: &str) -> Option<DefId> {
         self.by_name.get(name).copied()
+    }
+
+    /// Does card `def`, outside the game or in a library (its own
+    /// characteristics, CR 712.8a, 715.4), match `f`? `None` for a filter
+    /// that needs a game (a controller, combat, counters): the lowering
+    /// accepts only filters this answers in a deck condition
+    /// (`deck_filter_ok`).
+    pub fn def_matches(&self, f: &Filter, def: DefId) -> Option<bool> {
+        let d = self.def(def);
+        Some(match f {
+            Filter::Any => true,
+            Filter::Type(bits) => d.types & bits != 0,
+            Filter::Supertype(bits) => d.supertypes & bits != 0,
+            Filter::Color(m) => d.colors & m != 0,
+            Filter::Colorless => d.colors == 0,
+            Filter::ManaValueAtMost(n) => d.mana_value() <= *n,
+            Filter::ManaValueAtLeast(n) => d.mana_value() >= *n,
+            Filter::Named(n) => d.name == *n,
+            Filter::HasKeyword(k) => d.keywords.has(*k),
+            Filter::HasActivatedAbility => d.has_activated_ability(),
+            Filter::And(a, b) => self.def_matches(a, def)? && self.def_matches(b, def)?,
+            Filter::Or(v) => {
+                let mut any = false;
+                for x in v {
+                    any |= self.def_matches(x, def)?;
+                }
+                any
+            }
+            Filter::Not(x) => !self.def_matches(x, def)?,
+            _ => return None,
+        })
+    }
+
+    /// Does the starting deck `deck` fulfill a companion's condition (CR
+    /// 702.139a-b)? Exact over the deck's cards (`def_matches`).
+    pub fn deck_satisfies(&self, cond: &DeckCond, deck: &[DefId]) -> bool {
+        let m = |f: &Filter, id: DefId| self.def_matches(f, id) == Some(true);
+        match cond {
+            DeckCond::Each { cards, must } => deck.iter().all(|&id| !m(cards, id) || m(must, id)),
+            DeckCond::DifferentNames { cards } => {
+                let mut names: Vec<&str> = deck.iter().filter(|&&id| m(cards, id)).map(|&id| self.def(id).name.as_str()).collect();
+                let n = names.len();
+                names.sort_unstable();
+                names.dedup();
+                names.len() == n
+            }
+        }
     }
 
     /// Like [`id`](Self::id) but explains why a card is missing.

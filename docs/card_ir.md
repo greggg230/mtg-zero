@@ -11,7 +11,7 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 
 | Path | What |
 |---|---|
-| `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b...`; the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
+| `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/companion-ir` 62210e89 (schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
 | `data/cards/powerlsv.schema.json` | The schema that IR was encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
 | `card_ir/src/generated.rs` | Generated types (do not edit) |
@@ -81,7 +81,21 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca)
+## Current numbers (mtg-bot `feature/companion-ir` 62210e89)
+
+M8a (ENGINE.md 35): exported from mtg-bot branch `feature/companion-ir` at 62210e89 (from main
+8ea9fcca); schema sha256
+`7100f8436556f92a62df96f2ea7f01a22ee0d114ffa5086930b6705373be6026` (before: `66ba3e33...`).
+Five classes more: `CardPrinting.companion` (an optional `Companion { condition }`, category
+`Companion`), the category `DeckCondition` with `EachCardInStartingDeck { cards, must }` and
+`StartingDeckDifferentNames { cards }`, and two object predicates, `IsPermanentCard` (CR 110.4b)
+and `HasActivatedAbility`. Only the three companions' printings changed (checked card by card
+against the previous export): Lurrus of the Dream-Den (`EachCardInStartingDeck(IsPermanentCard,
+HasManaValueAtMost(2))`), Lutri, the Spellchaser (`StartingDeckDifferentNames(ObjectNot(IsLand))`),
+Zirda, the Dawnwaker (`EachCardInStartingDeck(IsPermanentCard, HasActivatedAbility)`). 546 cards,
+513 classes, 402,226 bytes (62,375 gzipped).
+
+### Before M8a (mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca)
 
 The IR in use since M7d's IR fixes (ENGINE.md 32): exported from mtg-bot
 branch `feature/ir-fixes-mtgzero` at 8ea9fcca (from main 3073a633, the

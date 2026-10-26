@@ -194,6 +194,25 @@ impl Scenario {
         self
     }
 
+    /// `p`'s sideboard (cards outside the game, ENGINE.md 35).
+    pub fn sideboard(mut self, p: PlayerId, names: &[&str]) -> Self {
+        let mut sb: Vec<_> = names.iter().map(|n| self.g.db.expect_id(n).unwrap_or_else(|e| panic!("{e}"))).collect();
+        sb.extend(self.g.players[p as usize].sideboard.iter().copied());
+        sb.sort_unstable();
+        self.g.players[p as usize].sideboard = std::sync::Arc::from(sb);
+        self
+    }
+
+    /// `p` revealed `name` from their sideboard as their companion (CR
+    /// 103.2b): in the sideboard, and a public card in no zone.
+    pub fn companion(mut self, p: PlayerId, name: &str) -> Self {
+        self = self.sideboard(p, &[name]);
+        let c = self.add(p, name, Zone::Nowhere);
+        self.g.players[p as usize].companion = Some(c);
+        self.g.players[p as usize].companion_def = Some(self.g.objs[c.i()].def);
+        self
+    }
+
     pub fn life(mut self, p: PlayerId, n: i32) -> Self {
         self.g.players[p as usize].life = n;
         self
@@ -313,6 +332,14 @@ impl Game {
 
     pub fn pass(&mut self) -> Vec<u64> {
         self.choose(Choice::Pass)
+    }
+
+    /// Answer the play-or-draw decision of a new game (CR 103.1): the
+    /// chooser plays first. Returns the chance keys (the opening hands').
+    pub fn play_first(&mut self) -> Vec<u64> {
+        assert_eq!(self.kind(), Some(DecisionKind::PlayDraw));
+        let c = self.turn.chooser;
+        self.choose(Choice::Target(Target::Player(c)))
     }
 
     /// Pass while the pending decision is priority and `stop` is false.
@@ -541,6 +568,19 @@ impl Game {
             v.push(d.ev.obj.map_or(u64::MAX, live_place));
         }
         v.push(u64::MAX);
+        // Who chose who takes the first turn (CR 103.1); sideboards (ENGINE.md
+        // 35): the viewer's own, the other's size; revealed companions
+        // (public) and whether their special action was taken.
+        v.extend([t.chooser as u64, t.starting as u64]);
+        for p in 0..2u8 {
+            let pl = &self.players[p as usize];
+            if p == viewer {
+                v.extend(pl.sideboard.iter().map(|&d| d as u64));
+            }
+            v.extend([self.sideboard_size(p) as u64, pl.companion_used as u64]);
+            v.push(pl.companion_def.map_or(u64::MAX, |d| d as u64));
+            v.push(u64::MAX - 5);
+        }
         for p in 0..2u8 {
             let pl = &self.players[p as usize];
             v.extend([pl.life as i64 as u64, pl.hand.len() as u64, pl.library.len() as u64, pl.lands_played as u64]);
@@ -706,11 +746,13 @@ impl Game {
             // (A completed dungeon and the source of the initiative's
             // abilities are rules objects in no zone, ENGINE.md 27.4.)
             // (Nor is a Mox Diamond whose "discard a land card instead" is
-            // being decided, `Task::EnterByDiscardAny`.)
+            // being decided, `Task::EnterByDiscardAny`, nor a revealed
+            // companion outside the game, ENGINE.md 35.)
             if self.objs[i].zone == Zone::Nowhere
                 && !self.is_token(CardIdx(i as u16))
                 && !self.def_of(CardIdx(i as u16)).rules
                 && !self.agenda.iter().any(|t| matches!(t, Task::EnterByDiscardAny { card, .. } if card.0 == i as u16))
+                && !self.players.iter().any(|p| p.companion == Some(CardIdx(i as u16)))
             {
                 return Err(format!("card {i} is nowhere"));
             }

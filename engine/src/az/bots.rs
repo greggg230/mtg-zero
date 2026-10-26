@@ -518,6 +518,12 @@ impl Heuristic {
         let p = d.player;
         let pick = match d.kind {
             K::Priority => self.priority(g, d, p),
+            // CR 103.1: play first (the tempo of the first land drop is
+            // worth more than a card in these decks; ENGINE.md 35).
+            K::PlayDraw => Some(act::PLAYER),
+            // CR 103.2b: reveal a companion whenever it can (it costs
+            // nothing to reveal and is a free extra card for {3}).
+            K::RevealCompanion => d.options.iter().find(|o| o.action != act::PASS).map(|o| o.action),
             K::Mulligan => {
                 let lands = g.player(p).hand.iter().filter(|&&c| g.def_of(c).is(types::LAND)).count();
                 let n = g.player(p).hand.len();
@@ -870,7 +876,10 @@ impl Heuristic {
             }
             return Some(a);
         }
-        Some(best.or(later).map_or(act::PASS, |b| b.1))
+        // The companion special action (CR 116.2g) with spare mana: in its
+        // main phase when it casts nothing else, before tier-1 abilities.
+        let companion = d.options.iter().find(|o| o.choice == Choice::Companion).map(|o| o.action);
+        Some(best.map(|b| b.1).or(companion).or(later.map(|b| b.1)).unwrap_or(act::PASS))
     }
 
     /// Whether and how much to activate ability `slot` of `c` now: (tier,

@@ -189,6 +189,7 @@ fn gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103
     for seed in 0..20u64 {
         let spec = engine::GameSpec { auto_single: false, mulligans: false, log: true, ..Default::default() };
         let mut g = Game::new(d, spec, [&deck, &deck], seed).unwrap();
+        g.play_first();
         let starting = g.turn().starting;
         let other = 1 - starting;
         // The starting player is never asked (it has Caverns in its deck).

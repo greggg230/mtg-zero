@@ -24,6 +24,9 @@
   "CardTypeOrSubtypeFilter": [
    "CardTypeOrSubtypeFilter"
   ],
+  "Companion": [
+   "Companion"
+  ],
   "Condition": [
    "AlternativeCostWasPaid",
    "CardTypesAmongExiledWithSourceAtLeast",
@@ -62,6 +65,10 @@
   ],
   "CostReduction": [
    "CostReduction"
+  ],
+  "DeckCondition": [
+   "EachCardInStartingDeck",
+   "StartingDeckDifferentNames"
   ],
   "Duration": [
    "EndOfTurn",
@@ -459,6 +466,7 @@
    "ControlledByOpponent",
    "ControlledByYou",
    "DrawIsFirstInOwnDrawStep",
+   "HasActivatedAbility",
    "HasColor",
    "HasDrawnNCardsThisTurn",
    "HasKeyword",
@@ -480,6 +488,7 @@
    "IsLand",
    "IsLegendary",
    "IsNontoken",
+   "IsPermanentCard",
    "IsPlaneswalker",
    "IsPlayer",
    "IsSource",
@@ -5245,6 +5254,22 @@
       "t": "list"
      },
      "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "'Companion | None'",
+     "default": null,
+     "name": "companion",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Companion"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
     }
    ],
    "kind": "dataclass",
@@ -5575,6 +5600,26 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.predicates",
    "qualname": "ClassLevelReached"
+  },
+  "Companion": {
+   "category": "Companion",
+   "fields": [
+    {
+     "annotation": "DeckCondition",
+     "name": "condition",
+     "required": true,
+     "type": {
+      "categories": [
+       "DeckCondition"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.deck_conditions",
+   "qualname": "Companion"
   },
   "CompletedADungeon": {
    "category": "StatePredicate",
@@ -7759,6 +7804,38 @@
    "module": "mtg_bot.effects.generic.cube_glue",
    "qualname": "DrawPerOpponentWhoLostLifeThisTurn"
   },
+  "EachCardInStartingDeck": {
+   "category": "DeckCondition",
+   "fields": [
+    {
+     "annotation": "ObjectPredicate",
+     "name": "cards",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "ObjectPredicate",
+     "name": "must",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.deck_conditions",
+   "qualname": "EachCardInStartingDeck"
+  },
   "EachChoosesOneOfEachTypeSacrificesRest": {
    "category": "Effect",
    "fields": [
@@ -9309,6 +9386,13 @@
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "HarnessSelf"
   },
+  "HasActivatedAbility": {
+   "category": "ObjectPredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.value_predicates",
+   "qualname": "HasActivatedAbility"
+  },
   "HasCitysBlessing": {
    "category": "StatePredicate",
    "fields": [],
@@ -9846,6 +9930,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.object_predicates",
    "qualname": "IsNontoken"
+  },
+  "IsPermanentCard": {
+   "category": "ObjectPredicate",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.value_predicates",
+   "qualname": "IsPermanentCard"
   },
   "IsPlaneswalker": {
    "category": "ObjectPredicate",
@@ -15127,6 +15218,26 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.object_predicates",
    "qualname": "SquadCostPaid"
+  },
+  "StartingDeckDifferentNames": {
+   "category": "DeckCondition",
+   "fields": [
+    {
+     "annotation": "ObjectPredicate",
+     "name": "cards",
+     "required": true,
+     "type": {
+      "categories": [
+       "ObjectPredicate"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.deck_conditions",
+   "qualname": "StartingDeckDifferentNames"
   },
   "StateBound": {
    "category": "TriggerPredicate",
