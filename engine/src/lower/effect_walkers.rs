@@ -468,13 +468,15 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
         E::TezzeretEmblemBeginCombat(nodes::TezzeretEmblemBeginCombat { amount }) => {
             // "Put n +1/+1 counters on target artifact you control. If it's
             // not a creature, it becomes a 0/0 Robot artifact creature" (CR
-            // 205.1b: it keeps its types; its creature types become Robot).
+            // 205.1b: "becomes an artifact creature" keeps all its prior card
+            // types and subtypes, a Vehicle's or an Equipment's; Robot is
+            // added; ruling 95070e2f).
             let n = l.int("TezzeretEmblemBeginCombat.amount", *amount, 1, 20);
             let t = b.target(and(Filter::Type(types::ARTIFACT), Filter::Controller(true)), 1, 1);
             b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: Counter::P1P1, n: Amount::Fixed(n) }));
             let at = b.op(Op::JumpUnlessTarget { tgt: t, filter: not(Filter::Type(types::CREATURE)), to: 0 });
             let robot = l.subtype("Robot");
-            let mods = vec![Mod::Types { add: types::CREATURE, subtypes: vec![robot], replace: true }, Mod::SetPt(0, 0)];
+            let mods = vec![Mod::Types { add: types::CREATURE, subtypes: vec![robot], replace: false }, Mod::SetPt(0, 0)];
             apply(b, On::Target(t), mods, Until::Forever);
             b.patch(at);
         }

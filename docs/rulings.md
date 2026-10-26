@@ -16,16 +16,16 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
 | fetched | 1607 | 1260 |
-| class a | 1228 | 979 |
+| class a | 1227 | 978 |
 | class b | 198 | 149 |
-| class c | 181 | 132 |
-| a, tested (passing) | 542 | 416 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 260 | 231 |
-| a, tested only by an earlier test (Oracle or rules) | 282 | 185 |
+| class c | 182 | 133 |
+| a, tested (passing) | 631 | 498 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 343 | 307 |
+| a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
 | a, deferred | 0 | 0 |
-| a, untested | 686 | 563 |
+| a, untested | 596 | 480 |
 
-Class a by area (distinct texts): mana 69/173, triggers 60/140, stack 45/126, zones 44/123, copies 35/97, other 42/95, dfc 25/65, replacement 58/59, combat 11/52, protection 8/27, facedown 13/13, walkers 6/9 (tested/all).
+Class a by area (distinct texts): mana 73/173, triggers 69/140, stack 45/126, zones 46/123, copies 95/96, other 44/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
 
 ## Per card
 
@@ -45,14 +45,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `ff5e14a1` | b | DEF | energy counters are a counter type, not tied to a permanent | a definition, no behaviour of its own |
-| `d8a8c57b` | a | other | energy isn't mana, persists across turns/phases, mana of any type can't make energy | untested |
+| `d8a8c57b` | a | other | energy isn't mana, persists across turns/phases, mana of any type can't make energy | `rulings_copies3::guide_of_souls_angel_lasts_past_the_turn_and_the_guide_energy_stays_cr_611_2a_107_14` |
 | `d0a321ea` | a | stack | if may-pay-E ability's target becomes illegal, it doesn't resolve so E can't be paid | untested |
 | `0b123bc3` | b | DEF | gain/pay-counter effects work the same way for energy as other counters [part 3, was a/other: energy counters are counters a player has and pays; a definition] | a definition, no behaviour of its own |
 | `a85af301` | b | DEF | players may track energy counters by any mutually agreeable method | a definition, no behaviour of its own |
 | `b3258d86` | a | stack | if all targets of an E-granting ability become illegal, it doesn't resolve, no E gained | untested |
 | `aadebd9c` | b | DEF | may-pay-E can't be paid multiple times to multiply a single ability's effect [part 3, was a/other: "may pay {E}{E}{E}" is one choice; the engine asks it once] | a definition, no behaviour of its own |
 | `2aa2b091` | a | triggers | 'may pay. If you do' has no response window; 'when you do' makes a reflexive trigger with its own target | untested |
-| `253ce5ed` | a | copies | a non-EOT type-changing effect persists past cleanup and after its source leaves | untested |
+| `253ce5ed` | a | copies | a non-EOT type-changing effect persists past cleanup and after its source leaves | `rulings_copies3::guide_of_souls_angel_lasts_past_the_turn_and_the_guide_energy_stays_cr_611_2a_107_14` |
 | `d9f993eb` | a | triggers | reflexive trigger's target is chosen when it goes on the stack, not when it triggers | untested |
 | `3ae78179` | b | PRINT | {E} is the energy symbol, representing one energy counter | printing, wording, reminder text |
 
@@ -61,15 +61,15 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3836800c` | b | DEF | a permanent is any object on the battlefield incl tokens/lands; spells/emblems aren't permanents [part 3, was a/other: what a permanent is; a definition] | a definition, no behaviour of its own |
-| `8a378f1a` | a | triggers | ETB triggers and enters-with abilities on tokens work normally | untested |
-| `0cbf6a07` | a | triggers | ascend/city's blessing check is a state-based action, not triggered; can't respond to it | untested |
-| `c8005233` | a | copies | token copies use only copiable values: no counters, taps, auras/equipment, non-copy P/T changes | untested |
-| `94506897` | a | triggers | if the created token is your 10th permanent, you get the blessing before any check happens | untested |
-| `154a043c` | a | copies | copying a token that's copying something uses that thing's copiable values; X=0 if applicable | untested |
-| `f3760b65` | a | other | ascend's 10-permanent check is only at the moment of resolution, not based on history | untested |
-| `63693660` | a | triggers | if your 10th permanent leaves right after arriving, you still get the blessing first | untested |
-| `08ffb162` | a | triggers | the trigger condition (gaining life) can occur before the source is in play that turn | untested |
-| `32a898bd` | a | protection | the ability creating these tokens doesn't target them | untested |
+| `8a378f1a` | a | triggers | ETB triggers and enters-with abilities on tokens work normally | `rulings_copies3::ocelot_pride_copies_a_copying_token_with_its_exceptions_untapped_and_its_enter_ability_cr_707_9b_702_131` |
+| `0cbf6a07` | a | triggers | ascend/city's blessing check is a state-based action, not triggered; can't respond to it | `rulings_copies3::ascend_gives_the_blessing_at_once_even_from_ocelots_own_cat_cr_702_131b` |
+| `c8005233` | a | copies | token copies use only copiable values: no counters, taps, auras/equipment, non-copy P/T changes | `rulings_copies3::ocelot_pride_copies_a_copying_token_with_its_exceptions_untapped_and_its_enter_ability_cr_707_9b_702_131` |
+| `94506897` | a | triggers | if the created token is your 10th permanent, you get the blessing before any check happens | `rulings_copies3::ascend_gives_the_blessing_at_once_even_from_ocelots_own_cat_cr_702_131b` |
+| `154a043c` | a | copies | copying a token that's copying something uses that thing's copiable values; X=0 if applicable | `rulings_copies3::ocelot_pride_copies_a_copying_token_with_its_exceptions_untapped_and_its_enter_ability_cr_707_9b_702_131` |
+| `f3760b65` | a | other | ascend's 10-permanent check is only at the moment of resolution, not based on history | `rulings_copies3::ascend_gives_the_blessing_at_once_even_from_ocelots_own_cat_cr_702_131b` |
+| `63693660` | a | triggers | if your 10th permanent leaves right after arriving, you still get the blessing first | `rulings_copies3::ascend_gives_the_blessing_at_once_even_from_ocelots_own_cat_cr_702_131b` |
+| `08ffb162` | a | triggers | the trigger condition (gaining life) can occur before the source is in play that turn | `rulings_copies3::ascend_gives_the_blessing_at_once_even_from_ocelots_own_cat_cr_702_131b` |
+| `32a898bd` | a | protection | the ability creating these tokens doesn't target them | `rulings_copies3::ocelot_pride_copies_a_copying_token_with_its_exceptions_untapped_and_its_enter_ability_cr_707_9b_702_131` |
 | `dc8411a7` | a | other | city's blessing lasts rest of game, survives losing permanents, can't be removed | `cards_m7c_tail2::ocelot_pride_needs_life_gained_and_keeps_the_blessing_cr702_131b` |
 
 ### Thraben Inspector
@@ -178,7 +178,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `d1f9751e` | a | combat | tokens entering already attacking don't count as declared attackers for other triggers | untested |
 | `ab682fd6` | a | triggers | attacking with any creature triggers the ability, even if the source itself isn't attacking | untested |
-| `c264835f` | a | copies | a power-defining ability works in every zone, and counts its own source while on the battlefield | untested |
+| `c264835f` | a | copies | a power-defining ability works in every zone, and counts its own source while on the battlefield | `rulings_copies3::power_defining_abilities_work_in_every_zone_and_count_types_not_cards_cr_604_3` |
 | `89ee123a` | b | MP | the per-opponent token trigger makes a token for every qualifying opponent, not just attacked ones [part 3, was a/combat: one token per opponent; two-player games have one] | multiplayer |
 | `bdd4c462` | a | combat | you choose whether each created token attacks that opponent directly or a planeswalker they control | untested |
 
@@ -218,10 +218,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `525efd15` | a | zones | a token copy of a dies-trigger permanent can't return to the battlefield, since it ceased to exist as a token | untested |
+| `525efd15` | a | zones | a token copy of a dies-trigger permanent can't return to the battlefield, since it ceased to exist as a token | `rulings_copies3::enduring_innocence_returns_an_enchantment_without_creature_types_and_its_token_copy_doesnt_cr_205_1a_111_7` |
 | `3efcc01c` | a | triggers | an entering-power check for other creatures snapshots power as they enter; later changes don't matter | untested |
-| `56a77c16` | a | copies | a nontoken copy that dies and returns via its own ability comes back with only the stated card types | untested |
-| `0a655fc3` | a | copies | removing creature type by changing types also removes any creature subtypes carried with it | untested |
+| `56a77c16` | a | copies | a nontoken copy that dies and returns via its own ability comes back with only the stated card types | `rulings_copies3::enduring_innocence_returns_an_enchantment_without_creature_types_and_its_token_copy_doesnt_cr_205_1a_111_7` |
+| `0a655fc3` | a | copies | removing creature type by changing types also removes any creature subtypes carried with it | `rulings_copies3::enduring_innocence_returns_an_enchantment_without_creature_types_and_its_token_copy_doesnt_cr_205_1a_111_7` |
 
 ### Flickerwisp
 
@@ -595,10 +595,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `bd583829` | a | replacement | if an equip-attach target is gone at resolution, the Equipment stays wherever it was, or unattached | `rulings_replacement2::thieving_skydiver_gone_before_its_trigger_resolves_leaves_the_equipment_where_it_is_cr_608_2b` |
 | `3a9c110e` | a | other | a continuous control-change effect lasts indefinitely, surviving cleanup and the source leaving the battlefield | untested |
 | `194f57a3` | a | other | a steal-and-equip ability can target an artifact you already control, attaching it to the source if it's an Equipment | untested |
-| `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | untested |
+| `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `e6ad3498` | b | DEF | paying a kicker cost is what makes a spell 'kicked', a term definition | a definition, no behaviour of its own |
-| `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | untested |
-| `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | untested |
+| `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
+| `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `c9b38795` | b | DEF | a kicker cost can't be paid more than once per cast [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
 | `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
 
@@ -612,7 +612,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `965f8740` | c | NR | if the creature somehow lacks the triggering ability when it enters, it won't trigger even if its cost was paid [part 3, was a/triggers: no cube effect removes a creature's abilities as it enters] | not reachable with the cube's cards |
 | `76edf0a6` | c | NR | if the original is itself copying something when this resolves, the token copies that other thing as a 1/1 [part 3, was a/copies: offspring triggers only for a Thundertrap Trainer cast with its offspring cost paid, and no cube card makes a cast creature spell copy something else] | not reachable with the cube's cards |
 | `0b566f81` | b | DEF | some abilities refer to their source as 'this creature' purely for clarity, with no functional difference | a definition, no behaviour of its own |
-| `eab6cd25` | a | copies | the token copies exactly what was printed as a 1/1, with no counters, tap state, attachments, or non-copy changes | untested |
+| `eab6cd25` | a | copies | the token copies exactly what was printed as a 1/1, with no counters, tap state, attachments, or non-copy changes | `rulings_copies3::thundertraps_offspring_copies_none_of_the_trainers_protection_cr_707_2` |
 | `7f1ecc50` | b | DEF | a token made this way isn't 'cast', so cast-triggered abilities don't fire for it [part 3, was a/stack: the offspring token is created, never a spell, so nothing casts it; a definition] | a definition, no behaviour of its own |
 | `42d86493` | b | DEF | an offspring-style cost can only be paid once per cast, not multiple times for extra tokens [part 3, was a/mana: offspring is paid at most once; a definition] | a definition, no behaviour of its own |
 
@@ -851,21 +851,21 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `dcdbba23` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the resulting token | untested |
+| `dcdbba23` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the resulting token | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
 | `6b2a875f` | b | PRINT | the '+' indicator on additional-cost modes is a reminder only, with no rules meaning | printing, wording, reminder text |
 | `4cdbead7` | a | protection | you may only choose a mode requiring a target if a legal target for it exists; unchosen modes' targeting is ignored | untested |
 | `d4f44dfc` | a | stack | a copy of a modal spell may get new targets from the copying effect, but never new modes | `rulings_stack2::three_steps_ahead_copied_keeps_its_modes_and_may_target_anew_cr_702_172_707_10c` |
 | `9dcd9c8e` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | untested |
 | `77eebb68` | a | mana | casting a modal spell free still needs choosing at least one mode and paying its additional cost | untested |
-| `f0054ad7` | a | mana | a copied permanent with X in its mana cost treats X as 0 | untested |
-| `b045bc66` | a | copies | a token copy of a token uses that token's own stated copiable characteristics | untested |
-| `6c18a1f3` | a | copies | if the copied permanent is itself copying something else, the new token becomes that other thing | untested |
+| `f0054ad7` | a | mana | a copied permanent with X in its mana cost treats X as 0 | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
+| `b045bc66` | a | copies | a token copy of a token uses that token's own stated copiable characteristics | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
+| `6c18a1f3` | a | copies | if the copied permanent is itself copying something else, the new token becomes that other thing | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
 | `acbc3ade` | a | stack | a modal spell only has targets if a target-needing mode is chosen; all-illegal targets void the resolve | untested |
 | `1026bb70` | b | DEF | a spell's instructions are always followed in their written order, regardless of which modes are chosen [part 3, was a/other: Three Steps Ahead's modes don't affect each other, so their order changes nothing] | a definition, no behaviour of its own |
 | `e9521273` | a | stack | no responses are allowed between the modes of one resolving spell; any triggers wait until it fully resolves | untested |
 | `c2c62fb3` | b | PRINT | the '+' indicator on modal spell frames is a reminder only, with no rules meaning | printing, wording, reminder text |
 | `fcbbe43e` | a | mana | a modal spell's mana value is only its printed mana cost, regardless of modes or additional costs chosen | untested |
-| `b9b0e621` | a | copies | a token copy copies exactly what's printed, with no tap state, counters, attachments, or non-copy changes | untested |
+| `b9b0e621` | a | copies | a token copy copies exactly what's printed, with no tap state, counters, attachments, or non-copy changes | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
 | `a69ad6a9` | b | DEF | you can't choose the same mode more than once on a modal spell [part 3, was a/other: a mode once; the engine never offers it twice] | a definition, no behaviour of its own |
 | `47fcf447` | b | DEF | modes for a modal spell are locked in as you cast it and can't be changed afterward [part 3, was a/mana: modes are chosen once, while casting; a definition] | a definition, no behaviour of its own |
 | `21f7cabc` | b | DEF | you must choose at least one mode and pay its additional cost to cast a modal spell [part 3, was a/mana: a spree spell needs a mode; the engine never offers none] | a definition, no behaviour of its own |
@@ -885,7 +885,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `e237dd05` | b | DEF | paying a kicker cost is what makes a spell 'kicked' | a definition, no behaviour of its own |
-| `85680b80` | a | copies | a copy of a kicked spell on the stack is also kicked | untested |
+| `85680b80` | a | copies | a copy of a kicked spell on the stack is also kicked | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
 | `017770a9` | b | DEF | a kicker cost can't be paid more than once [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
 | `4580d03c` | a | mana | an X value is calculated only once, as the spell resolves | untested |
 | `5fb37854` | a | mana | total cost = base/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
@@ -1067,14 +1067,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `f1a0fb40` | a | stack | a Class level-up ability is a normal activated ability that uses the stack and can be responded to | untested |
 | `90f6d2b4` | a | other | each section below a Class card's top box is an activated ability with that cost, advancing it to the listed level | `cards_m7d::does_machines_gains_levels_cr716` |
-| `0a86d2b2` | a | copies | this ability doesn't strip any abilities from the artifact it transforms into a creature | untested |
+| `0a86d2b2` | a | copies | this ability doesn't strip any abilities from the artifact it transforms into a creature | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
 | `9327dac0` | a | other | a Class gains the abilities of each level it reaches cumulatively, starting from level 1 | `cards_m7d::does_machines_gains_levels_cr716` |
 | `0d70edc6` | a | other | leveling up a Class never removes abilities it had at an earlier level | `cards_m7d::does_machines_gains_levels_cr716` |
 | `45d23f21` | c | NR | if the targeted artifact has station, this sets its base power/toughness to 0/0, which charge counters won't restore [part 3, was a/copies: no cube card has station] | not reachable with the cube's cards |
-| `a0398e1e` | a | copies | if the targeted artifact is a Vehicle, this sets its base power/toughness to 0/0, which crewing won't restore | untested |
+| `a0398e1e` | a | copies | if the targeted artifact is a Vehicle, this sets its base power/toughness to 0/0, which crewing won't restore | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
 | `006c710e` | a | replacement | if the target was an attached Equipment, it becomes unattached, and can't reattach later unless it has reconfigure | `rulings_replacement2::an_attached_equipment_made_a_creature_by_does_machines_becomes_unattached_cr_301_5c_704_5n` |
-| `ce58981e` | a | copies | the artifact keeps all its existing types, subtypes, and supertypes after becoming a creature | untested |
-| `8733df71` | a | combat | the new creature can attack if controlled since turn start, regardless of how long its been a creature | untested |
+| `ce58981e` | a | copies | the artifact keeps all its existing types, subtypes, and supertypes after becoming a creature | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
+| `8733df71` | a | combat | the new creature can attack if controlled since turn start, regardless of how long its been a creature | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
 | `702ccd9a` | c | NR | you can control any number of Class permanents, each tracking its own level independently [part 3, was a/other: the cube has one Class card] | not reachable with the cube's cards |
 | `b94705dd` | a | other | you can't activate a level-up ability for a level the Class has already reached or passed | `cards_m7d::does_machines_gains_levels_cr716` |
 
@@ -1099,7 +1099,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `96113165` | c | NR | an attacks-while-saddled trigger only fires if the creature was saddled at the moment it attacked [part 3, was a/combat: no cube card has an "attacks while saddled" trigger (Caustic Bronco checks saddled as its trigger resolves)] | not reachable with the cube's cards |
 | `87059541` | a | combat | a saddle creature can attack or block normally even while unsaddled | `cards_m7c_tail3::caustic_bronco_unsaddled_you_lose_cr702_171` |
 | `ed19c884` | a | triggers | if the source leaves before its ability resolves, use its last-known saddled status to decide the effect | untested |
-| `90fe76e8` | a | copies | a copy of a saddled Mount isn't itself saddled | untested |
+| `90fe76e8` | a | copies | a copy of a saddled Mount isn't itself saddled | `rulings_copies3::a_copy_of_a_saddled_bronco_isnt_saddled_cr_702_171b_707_2` |
 | `e63641fa` | a | mana | a revealed card with no mana cost (e.g. a land) has a mana value of 0 | untested |
 | `a56b34fa` | a | mana | a revealed split card's mana value is its two halves' combined mana cost | untested |
 | `63a507fc` | a | mana | a revealed card with X in its mana cost treats X as 0 | untested |
@@ -1173,8 +1173,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `6697634c` | b | DEF | graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only [part 3, was a/other: the list of card types; a definition] | a definition, no behaviour of its own |
-| `fa9b77b4` | a | copies | a type-counting characteristic ability counts distinct card types present, not the number of cards | untested |
-| `754b54cb` | a | copies | a characteristic-defining ability based on graveyard contents works in every zone, not just the battlefield | untested |
+| `fa9b77b4` | a | copies | a type-counting characteristic ability counts distinct card types present, not the number of cards | `rulings_copies3::power_defining_abilities_work_in_every_zone_and_count_types_not_cards_cr_604_3` |
+| `754b54cb` | a | copies | a characteristic-defining ability based on graveyard contents works in every zone, not just the battlefield | `rulings_copies3::power_defining_abilities_work_in_every_zone_and_count_types_not_cards_cr_604_3` |
 
 ### Sedgemoor Witch
 
@@ -1346,7 +1346,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `084701b5` | a | mana | a cost change on a spell applies to its chosen alternative cost, which still counts as paid for other effects | untested |
 | `d283a696` | b | DEF | choosing one alternative cost for a spell means you can't also choose a different alternative cost for it [part 3, was a/mana: one alternative cost at a time; a definition] | a definition, no behaviour of its own |
-| `b0b57c4a` | a | copies | a copy of a spell that had an alternative cost paid resolves as though that cost was paid | untested |
+| `b0b57c4a` | a | copies | a copy of a spell that had an alternative cost paid resolves as though that cost was paid | `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
 | `258d5dd9` | b | MP | multiplayer: you choose which opponent is affected | multiplayer |
 | `0cef3ca5` | a | mana | a spell's mana value on the stack comes from its mana cost, not whatever alternative cost was used to pay for it | untested |
 
@@ -1414,7 +1414,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `b83b7a27` | c | NR | a split card has two names; choosing a card name picks only one of them [part 3, was a/other: the cube's naming cards look at cards outside the stack, where a split card has both names together] | not reachable with the cube's cards |
 | `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | untested |
 | `7a9df48b` | c | NR | a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits)] | not reachable with the cube's cards |
-| `ae909e09` | a | copies | a copy of one half of a split card remains that same half | untested |
+| `ae909e09` | a | copies | a copy of one half of a split card remains that same half | `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
 | `64340627` | a | copies | a land that becomes a creature keeps all its other supertypes, types, subtypes, and abilities | `cards_m7b_faces4::life_makes_your_lands_one_one_creatures_until_end_of_turn` |
 | `9fbd1525` | a | dfc | while a split card spell is on the stack, the characteristics of the half you didn't cast are ignored | `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
 | `c622b600` | a | dfc | casting a split card means choosing and casting only one of its two halves | `cards_m7b_faces4::life_death_is_cast_as_one_half_cr_709_3` |
@@ -1518,7 +1518,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `d7de1c3d` | a | copies | a creature that enters as or becomes a copy of a dashed creature doesn't gain haste and won't bounce to hand later | untested |
+| `d7de1c3d` | a | copies | a creature that enters as or becomes a copy of a dashed creature doesn't gain haste and won't bounce to hand later | `rulings_copies3::a_copy_of_a_dashed_ragavan_has_no_haste_and_isnt_returned_cr_702_109a_707_2` |
 | `4f0780ad` | a | mana | paying a dash-style cost is still a normal cast: responsive, counterable, only when castable anyway | untested |
 | `d96d165d` | a | triggers | a dash-style return-to-hand trigger only works if the creature is still on the battlefield when that trigger resolves | untested |
 | `7929f582` | a | combat | a dash-style effect doesn't force the creature to attack unless something else says so | untested |
@@ -1617,9 +1617,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `5380460f` | a | copies | backup grants only the abilities printed in its own box, never ones the source gained from elsewhere | untested |
+| `5380460f` | a | copies | backup grants only the abilities printed in its own box, never ones the source gained from elsewhere | `rulings_copies3::backup_grants_only_its_printed_ability_and_on_itself_just_the_counter_cr_702_165a` |
 | `0f8febcf` | c | NR | if a backup-granted ability itself grants more abilities, the backup source keeps those granted ones too [part 3, was a/copies: no ability backup grants gives further abilities] | not reachable with the cube's cards |
-| `d189cf68` | a | copies | if a backup ability targets its own source, that creature gets the counters but not any additional abilities | untested |
+| `d189cf68` | a | copies | if a backup ability targets its own source, that creature gets the counters but not any additional abilities | `rulings_copies3::backup_grants_only_its_printed_ability_and_on_itself_just_the_counter_cr_702_165a` |
 | `abd66204` | b | DEF | a copy of a creature with a backup ability keeps its printed abilities in the same order [part 3, was a/copies: the order of printed abilities, nothing for the engine to check] | a definition, no behaviour of its own |
 | `d1e1a1bd` | c | NR | the abilities granted by backup are locked in when the ability triggers, unaffected by the source later losing abilities [part 3, was a/copies: no cube card removes abilities at instant speed while a backup trigger waits] | not reachable with the cube's cards |
 
@@ -1632,7 +1632,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cea0ea66` | c | NR | a 'can't attack' effect only stops declaration as an attacker, not a token entering the battlefield already attacking [part 3, was a/combat: no cube effect says a creature can't attack] | not reachable with the cube's cards |
 | `549fab62` | b | CMD | both commanders start in the command zone, with the rest of a larger deck becoming the library | Commander |
 | `3fd29ee8` | b | CMD | Choose a Background is a Commander-only variant of the partner ability | Commander |
-| `29633b54` | a | copies | power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it | untested |
+| `29633b54` | a | copies | power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
 | `cdd6186e` | a | triggers | the source doesn't need to be among the attacking creatures for its attack-triggered ability to fire | untested |
 | `4af60889` | c | NR | a base power/toughness-setting ability overwrites earlier ones, and is itself overwritten by any later one [part 3, was a/copies: Gut has no P/T-setting ability; the set-order rule is tested with Figure of Destiny and Oko (4af60889's Halsin)] | not reachable with the cube's cards |
 | `06cb2c7b` | a | other | if a creature becomes an artifact, it becomes eligible to be sacrificed to its own artifact-sacrificing ability | untested |
@@ -1723,8 +1723,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `6697634c` | b | DEF | graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only [part 3, was a/other: the list of card types; a definition] | a definition, no behaviour of its own |
 | `abcb7bc2` | a | triggers | if the relevant creature leaves while this damage ability is on the stack, use its last-known power | `rules_shortcuts::cr_608_2h_pyrogoyfs_creature_deals_damage_as_it_last_existed` |
-| `e3872b77` | a | copies | a type-counting characteristic ability counts distinct card types present, not the number of cards | untested |
-| `b2aa1e74` | a | copies | a characteristic-defining ability based on graveyard contents works in every zone, not just the battlefield | untested |
+| `e3872b77` | a | copies | a type-counting characteristic ability counts distinct card types present, not the number of cards | `rulings_copies3::power_defining_abilities_work_in_every_zone_and_count_types_not_cards_cr_604_3` |
+| `b2aa1e74` | a | copies | a characteristic-defining ability based on graveyard contents works in every zone, not just the battlefield | `rulings_copies3::power_defining_abilities_work_in_every_zone_and_count_types_not_cards_cr_604_3` |
 
 ### Fury
 
@@ -1770,10 +1770,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | untested |
+| `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `e6ad3498` | b | DEF | paying a kicker cost is what makes a spell 'kicked', a term definition | a definition, no behaviour of its own |
-| `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | untested |
-| `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | untested |
+| `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
+| `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `c9b38795` | b | DEF | a kicker cost can't be paid more than once per cast [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
 | `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
 
@@ -1797,14 +1797,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `ff5e14a1` | b | DEF | energy counters are a counter type, not tied to a permanent | a definition, no behaviour of its own |
-| `d8a8c57b` | a | other | energy isn't mana, persists across turns/phases, mana of any type can't make energy | untested |
+| `d8a8c57b` | a | other | energy isn't mana, persists across turns/phases, mana of any type can't make energy | `rulings_copies3::guide_of_souls_angel_lasts_past_the_turn_and_the_guide_energy_stays_cr_611_2a_107_14` |
 | `d0a321ea` | a | stack | if may-pay-E ability's target becomes illegal, it doesn't resolve so E can't be paid | untested |
 | `0b123bc3` | b | DEF | gain/pay-counter effects work the same way for energy as other counters [part 3, was a/other: energy counters are counters a player has and pays; a definition] | a definition, no behaviour of its own |
 | `a85af301` | b | DEF | players may track energy counters by any mutually agreeable method | a definition, no behaviour of its own |
 | `b3258d86` | a | stack | if all targets of an E-granting ability become illegal, it doesn't resolve, no E gained | untested |
 | `aadebd9c` | b | DEF | may-pay-E can't be paid multiple times to multiply a single ability's effect [part 3, was a/other: "may pay {E}{E}{E}" is one choice; the engine asks it once] | a definition, no behaviour of its own |
 | `2aa2b091` | a | triggers | 'may pay. If you do' has no response window; 'when you do' makes a reflexive trigger with its own target | untested |
-| `feeffce5` | a | mana | you may pay zero of a cost and still get the resulting counters, just with no additional effect from paying more | untested |
+| `feeffce5` | a | mana | you may pay zero of a cost and still get the resulting counters, just with no additional effect from paying more | `rulings_copies3::guide_of_souls_angel_lasts_past_the_turn_and_the_guide_energy_stays_cr_611_2a_107_14` |
 | `3ae78179` | b | PRINT | {E} is the energy symbol, representing one energy counter | printing, wording, reminder text |
 
 ### Pyroblast
@@ -1954,7 +1954,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a3e958c5` | a | copies | if this creatures power/toughness was set to a value after entering, a later level-up wont override it | untested |
+| `a3e958c5` | c | NR | if this creatures power/toughness was set to a value after entering, a later level-up wont override it [part 3, was a/copies: the cube's only effect that later sets a creature's P/T (Oko's Elk) also removes Hexdrinker's level up] | not reachable with the cube's cards |
 | `0951eeb1` | a | copies | leveling abilities count level counters, with set power/toughness-and-ability thresholds at specific counter ranges | `cards_m7a_b13::cr_711_hexdrinker_levels` |
 | `98b8d4c4` | a | protection | protection from everything blocks targeting, blocking, attaching, and damage, but non-targeting effects still work | untested |
 | `33f1a3d1` | a | protection | protection from instants blocks targeting/damage from instant sources specifically, nothing else | untested |
@@ -1981,11 +1981,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `9ce0a2f9` | a | other | a keyword that animates a land as a 0/0 haste creature with counters, returning it if it dies or is exiled | `cards_m7c_tail::badgermole_cub_earthbends_and_creatures_tap_for_more_cr701_65a` |
 | `3e2199e1` | c | NR | this trigger only fires on a real tap-cost mana ability, not alternate tap wording or another objects ability [part 3, was a/triggers: no cube mana ability taps a creature other than its own source or without {T}] | not reachable with the cube's cards |
 | `4565f55b` | a | mana | this triggered mana ability doesn't use the stack and can't be responded to | `cards_m7c_tail::badgermole_cub_earthbends_and_creatures_tap_for_more_cr701_65a` |
-| `a1b92c37` | a | copies | animating a land this way doesn't give it a color, so most animated lands stay colorless | untested |
+| `a1b92c37` | a | copies | animating a land this way doesn't give it a color, so most animated lands stay colorless | `rulings_copies3::earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_resets_to_0_0_cr_701_65a` |
 | `b4e0984f` | a | triggers | if an animated land leaves to any zone but graveyard or exile, its delayed return trigger wont reclaim it | untested |
 | `8c334374` | a | stack | an illegal land target makes the animate effect fail, voiding the whole spell if it had no other targets | untested |
-| `0decf500` | a | copies | an animated land keeps its other types, subtypes, supertypes, and any mana abilities those grant | untested |
-| `28832e4a` | a | copies | targeting an already-animated land adds more counters and haste, and resets its base power/toughness to 0/0 | untested |
+| `0decf500` | a | copies | an animated land keeps its other types, subtypes, supertypes, and any mana abilities those grant | `rulings_copies3::earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_resets_to_0_0_cr_701_65a` |
+| `28832e4a` | a | copies | targeting an already-animated land adds more counters and haste, and resets its base power/toughness to 0/0 | `rulings_copies3::earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_resets_to_0_0_cr_701_65a` |
 
 ### Bristly Bill, Spine Sower
 
@@ -2001,9 +2001,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `33ad6e92` | a | stack | an eternalize card hitting the GY on your main phase gives you priority to activate it before anyone can exile it | untested |
-| `d971bcd1` | a | zones | activating an eternalize-style ability exiles the card right away, so it cant be stopped by later exiling it | untested |
-| `450b7583` | a | copies | an eternalize-style token copies whats printed plus its own stated changes, with no memory of its GY time | untested |
-| `90ab1f80` | a | copies | an eternalize-style tokens granted type, color, fixed P/T, and lack of mana cost are its copiable values | untested |
+| `d971bcd1` | a | zones | activating an eternalize-style ability exiles the card right away, so it cant be stopped by later exiling it | `cards_m7b_stack2::fanatic_of_rhonas_eternalize_from_the_graveyard_cr_702_129a` |
+| `450b7583` | a | copies | an eternalize-style token copies whats printed plus its own stated changes, with no memory of its GY time | `cards_m7b_stack2::fanatic_of_rhonas_eternalize_from_the_graveyard_cr_702_129a` |
+| `90ab1f80` | a | copies | an eternalize-style tokens granted type, color, fixed P/T, and lack of mana cost are its copiable values | `rulings_copies3::an_eternalized_tokens_changes_are_copiable_cr_707_9b` |
 
 ### Keen-Eyed Curator
 
@@ -2055,7 +2055,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `3786a663` | a | replacement | a bestow permanent that enters by any method other than casting is always an enchantment creature, never becomes an Aura | `rulings_replacement2::springheart_nantuko_put_onto_the_battlefield_is_an_enchantment_creature_cr_702_103_303_4` |
 | `aa3ceeab` | a | mana | declining or being unable to pay an optional bonus cost still lets the rest of the triggered ability's effect happen | `cards_m7b_copies::springheart_nantuko_landfall_copies_its_creature_or_makes_an_insect` |
 | `748a92bb` | a | other | on the stack, a bestow spell is a creature spell or an Aura spell, never both, but always an enchantment spell | `cards_m7b_copies::springheart_nantuko_cast_bestowed_is_an_aura_cr_702_103b` |
-| `4031067f` | a | replacement | a bestow Aura with an illegal target isnt countered; it just stops being an Aura and resolves as a creature | untested |
+| `4031067f` | a | replacement | a bestow Aura with an illegal target isnt countered; it just stops being an Aura and resolves as a creature | `cards_m7b_copies::springheart_nantuko_with_its_target_gone_resolves_as_a_creature_cr_702_103e` |
 | `25014ba1` | a | replacement | an unattached bestow permanent skips the graveyard, just stopping being an Aura and staying a creature | `rulings_replacement2::a_bestowed_nantuko_whose_creature_leaves_stays_untapped_and_can_attack_cr_702_103f` |
 | `7ab9e10f` | c | NR | a landfall-style ability doesn't trigger when an existing permanent merely becomes a land [part 3, was a/triggers: no cube effect makes a permanent on the battlefield become a land] | not reachable with the cube's cards |
 | `0908c190` | a | triggers | a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect | `rules_layers::cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering` |
@@ -2077,7 +2077,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `4afe6989` | a | dfc | becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared | `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
 | `30549a2b` | a | copies | being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics | `rulings_copies2::being_prepared_isnt_copiable_cr_722_2b_707_2` |
 | `a5afe2a8` | c | NR | casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply [part 3, was a/mana: no cube effect offers an alternative cost for a prepare copy cast from exile] | not reachable with the cube's cards |
-| `4d9f48c8` | a | copies | making the exiled alternate-spell copy ignores any copy-exceptions; it keeps its own original characteristics | untested |
+| `4d9f48c8` | a | copies | making the exiled alternate-spell copy ignores any copy-exceptions; it keeps its own original characteristics | `cards_m7b_copies2::a_metamorph_copying_emeritus_enters_prepared_cr_722_2b` |
 | `41772f5d` | a | triggers | a land-count-gated ability checks the count both when it triggers and again at resolution, failing either check | `rulings_copies2::emeritus_the_land_count_is_checked_again_on_resolution_cr_603_4` |
 | `4c9245c3` | a | stack | an alternate spell with no legal targets left at resolution fails, and the creature stays unprepared | untested |
 | `f028f400` | a | copies | losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy | `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
@@ -2168,12 +2168,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `f98c7fa0` | b | CMD | this color-removing ability doesn't affect Commander color identity, which still comes from the printed mana cost | Commander |
 | `747e785b` | a | mana | this color-removing ability applies in every zone, not just on the battlefield | untested |
 | `85aaba03` | c | NR | losing a color-removing ability still leaves it colorless, since the color change applied before the loss [part 3, was a/copies: no cube effect removes devoid without setting a colour (Oko's Elk makes it green)] | not reachable with the cube's cards |
-| `1896f056` | a | copies | another effect granting a color to a colorless card just makes it that color alone, not that color plus colorless | untested |
+| `1896f056` | a | copies | another effect granting a color to a colorless card just makes it that color alone, not that color plus colorless | `rulings_copies3::painters_servant_adds_its_colour_cumulatively_and_a_later_colour_setting_wins_cr_105_3_613_7` |
 | `591acf16` | a | triggers | a permanents own triggers resolve before the spell that made it, even if that spell leaves the stack | untested |
-| `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | untested |
+| `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `e6ad3498` | b | DEF | paying a kicker cost is what makes a spell 'kicked', a term definition | a definition, no behaviour of its own |
-| `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | untested |
-| `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | untested |
+| `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
+| `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `c9b38795` | b | DEF | a kicker cost can't be paid more than once per cast [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
 | `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
 
@@ -2206,11 +2206,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `d02a995d` | a | copies | a token copy of this copies exactly whats printed, skipping tap state, counters, and attachments | untested |
-| `c28e08d7` | a | copies | if the source was itself copying something when last on the battlefield, the token enters as that other thing | untested |
+| `d02a995d` | a | copies | a token copy of this copies exactly whats printed, skipping tap state, counters, and attachments | `rulings_copies3::vaultborn_tyrants_token_has_no_counters_and_a_copys_token_copies_the_copy_cr_707_2_707_9b` |
+| `c28e08d7` | a | copies | if the source was itself copying something when last on the battlefield, the token enters as that other thing | `rulings_copies3::vaultborn_tyrants_token_has_no_counters_and_a_copys_token_copies_the_copy_cr_707_2_707_9b` |
 | `95367116` | a | triggers | both static power effects and replacement effects (counters, copying) count when checking a power-based trigger | untested |
 | `0c836eb3` | a | triggers | once a power-threshold ability has triggered, later lowering that power or removing the creature doesn't stop its effect | untested |
-| `be7d384c` | a | triggers | a token copy of this permanent entering the battlefield also triggers its own power-based ability | untested |
+| `be7d384c` | a | triggers | a token copy of this permanent entering the battlefield also triggers its own power-based ability | `rulings_copies3::vaultborn_tyrants_token_has_no_counters_and_a_copys_token_copies_the_copy_cr_707_2_707_9b` |
 
 ### Woodfall Primus
 
@@ -2287,10 +2287,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `09abdfb0` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the created token | untested |
+| `09abdfb0` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the created token | `rulings_copies3::esikas_chariots_copy_of_an_attacking_token_doesnt_attack_and_copies_its_copy_cr_707_2_508_4` |
 | `fe8c5c0f` | c | NR | a copied Auras token enters uncast and untargeted; controller picks a legal thing to enchant, or it isnt made [part 3, was a/replacement: the cube makes no Aura tokens for Esika's Chariot to copy] | not reachable with the cube's cards |
-| `5a42cc51` | a | copies | copying something that copies another thing uses that things copiable values, with X as 0 | untested |
-| `018fe53e` | a | copies | token copies stated traits only, skipping tap state, counters, attachments, non-copy changes, and attacking status | untested |
+| `5a42cc51` | a | copies | copying something that copies another thing uses that things copiable values, with X as 0 | `rulings_copies3::esikas_chariots_copy_of_an_attacking_token_doesnt_attack_and_copies_its_copy_cr_707_2_508_4` |
+| `018fe53e` | a | copies | token copies stated traits only, skipping tap state, counters, attachments, non-copy changes, and attacking status | `rulings_copies3::esikas_chariots_copy_of_an_attacking_token_doesnt_attack_and_copies_its_copy_cr_707_2_508_4` |
 
 ### Fastbond
 
@@ -2318,11 +2318,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `60a1b604` | c | NR | color-granting effects reapply per zone, timed to still match simultaneous ETB/zone-change triggers on that color [part 3, was a/replacement: no cube replacement or trigger looks at the colour of an entering permanent or a cast spell (Painter's Servant's colour on cards, spells and permanents is tested)] | not reachable with the cube's cards |
-| `0d163622` | a | copies | a color-adding effect on a colorless thing just makes it that color, not colorless plus that color | untested |
-| `1095bb67` | a | copies | multiple copies of the same color-adding static effect are cumulative with each other | untested |
+| `0d163622` | a | copies | a color-adding effect on a colorless thing just makes it that color, not colorless plus that color | `rulings_copies3::painters_servant_adds_its_colour_cumulatively_and_a_later_colour_setting_wins_cr_105_3_613_7` |
+| `1095bb67` | a | copies | multiple copies of the same color-adding static effect are cumulative with each other | `rulings_copies3::painters_servant_adds_its_colour_cumulatively_and_a_later_colour_setting_wins_cr_105_3_613_7` |
 | `3304c432` | a | other | a color-adding effect applies everywhere: every zones cards, battlefield tokens, and stacked spell copies, any owner | `cards_m7c_tail::painters_servant_paints_cards_spells_and_permanents_cr613_1e` |
 | `3a9f7af7` | a | copies | a color-adding effect doesn't remove existing colors, it just adds another one | `cards_m7c_tail::painters_servant_paints_cards_spells_and_permanents_cr613_1e` |
-| `720f8bdd` | a | copies | a later effect that sets an object's colors overwrites an earlier color-adding static effect | untested |
+| `720f8bdd` | a | copies | a later effect that sets an object's colors overwrites an earlier color-adding static effect | `rulings_copies3::painters_servant_adds_its_colour_cumulatively_and_a_later_colour_setting_wins_cr_105_3_613_7` |
 
 ### Cogwork Librarian
 
@@ -2367,9 +2367,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `a6dd6e5a` | a | mana | a card in your library with X in its mana cost treats X as 0 | untested |
 | `f560f0bc` | c | NR | turning a Vehicle into an artifact creature this way doesn't count as 'crewing' it for crew-triggered abilities [part 3, was a/copies: no cube card has an ability that triggers when a Vehicle becomes crewed] | not reachable with the cube's cards |
-| `fc909d02` | a | copies | this sets the affected permanents base power/toughness to 0/0, which crewing or counters wont restore | untested |
-| `95070e2f` | a | copies | this ability doesn't strip any abilities, types, subtypes, or supertypes from the affected artifact | untested |
-| `111530fb` | a | combat | the resulting creature can attack if controlled since turn start, regardless of how long its been a creature | untested |
+| `fc909d02` | a | copies | this sets the affected permanents base power/toughness to 0/0, which crewing or counters wont restore | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
+| `95070e2f` | a | copies | this ability doesn't strip any abilities, types, subtypes, or supertypes from the affected artifact | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
+| `111530fb` | a | combat | the resulting creature can attack if controlled since turn start, regardless of how long its been a creature | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
 
 ### Karn, Scion of Urza
 
@@ -2496,11 +2496,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `e863d618` | b | DEF | creatures that crew a Vehicle aren't attached to it, so effects targeting the Vehicle don't affect them [part 3, was a/other: crew creates no link between the creatures and the Vehicle; a definition] | a definition, no behaviour of its own |
 | `429c5474` | a | copies | a Vehicle has a printed power/toughness but isnt a creature until something makes it one, using that value | `cards_m7a_x::cr_702_122_crew_taps_creatures_with_enough_power_and_the_copter_loots` |
 | `bfeae3be` | a | combat | a Vehicle needs to be a creature by declare attackers/blockers to join combat, capping its crew timing | untested |
-| `1bccbeb4` | a | copies | a copy of a Vehicle is never a creature, even if the Vehicle it's copying currently is one | untested |
-| `ea843c44` | a | copies | an effect that turns a Vehicle into a creature with a specific power/toughness overwrites its printed power/toughness | untested |
+| `1bccbeb4` | a | copies | a copy of a Vehicle is never a creature, even if the Vehicle it's copying currently is one | `rulings_copies3::a_copy_of_a_crewed_copter_isnt_a_creature_and_a_crewed_copter_has_no_creature_type_cr_707_2_301_7` |
+| `ea843c44` | a | copies | an effect that turns a Vehicle into a creature with a specific power/toughness overwrites its printed power/toughness | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
 | `8de9353a` | a | combat | once a Vehicle becomes a creature, it follows all the normal rules for artifact creatures, including summoning sickness | untested |
 | `db2bccf4` | a | stack | once a crew ability is announced, it's atomic; no one can stop it by changing or removing the tapped creatures | untested |
-| `65d7c435` | a | copies | Vehicle is an artifact type, not a creature type, so a crewed Vehicle has no inherent creature type | untested |
+| `65d7c435` | a | copies | Vehicle is an artifact type, not a creature type, so a crewed Vehicle has no inherent creature type | `rulings_copies3::a_copy_of_a_crewed_copter_isnt_a_creature_and_a_crewed_copter_has_no_creature_type_cr_707_2_301_7` |
 | `526a6c5c` | a | triggers | a Vehicle becoming a creature isn't a permanent entering the battlefield, so ETB-creature triggers don't fire for it | untested |
 | `d5ea249a` | b | DEF | you may activate a crew ability on a Vehicle that's already a creature, but doing so has no effect [part 3, was a/mana: crewing a creature Vehicle changes nothing; a definition] | a definition, no behaviour of its own |
 | `15f2809b` | b | DEF | you may tap more creatures than strictly required to pay a crew cost [part 3, was a/mana: tapping more than needed is allowed and changes nothing; a definition] | a definition, no behaviour of its own |
@@ -2611,12 +2611,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `430af403` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the created tokens | untested |
-| `e92fa75a` | a | mana | a copied permanent with X in its mana cost treats X as 0 | untested |
-| `38a3327f` | a | copies | if the copied original is a token, the new tokens use that token's originally stated characteristics | untested |
-| `c556a504` | a | copies | if the copied original was itself copying something else, the new tokens enter as that other thing | untested |
+| `430af403` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the created tokens | `rulings_copies3::fractured_identitys_tokens_copy_whats_copiable_cr_707_2_707_9b` |
+| `e92fa75a` | a | mana | a copied permanent with X in its mana cost treats X as 0 | `rulings_copies3::fractured_identitys_tokens_copy_whats_copiable_cr_707_2_707_9b` |
+| `38a3327f` | a | copies | if the copied original is a token, the new tokens use that token's originally stated characteristics | `rulings_copies3::fractured_identitys_tokens_copy_whats_copiable_cr_707_2_707_9b` |
+| `c556a504` | a | copies | if the copied original was itself copying something else, the new tokens enter as that other thing | `rulings_copies3::fractured_identitys_tokens_copy_whats_copiable_cr_707_2_707_9b` |
 | `60c64532` | b | CMD | a token copy of an exiled commander isn't itself a commander | Commander |
-| `5361d9f5` | a | copies | the tokens copy exactly what was printed, not tap state, counters, attachments, or non-copy changes | untested |
+| `5361d9f5` | a | copies | the tokens copy exactly what was printed, not tap state, counters, attachments, or non-copy changes | `rulings_copies3::fractured_identitys_tokens_copy_whats_copiable_cr_707_2_707_9b` |
 
 ### Teferi, Hero of Dominaria
 
@@ -2790,9 +2790,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `5bbf98e3` | a | copies | this ability's effect overwrites the creature's existing creature types entirely, rather than adding to them | untested |
-| `bfa9cd25` | a | copies | these effects last until the game ends, the source leaves, or a later effect changes the same trait | untested |
-| `3cebd2ad` | a | copies | this overwrites only pre-existing P/T-setting effects, not modifying or later-made ones; switch effects apply last | untested |
+| `5bbf98e3` | a | copies | this ability's effect overwrites the creature's existing creature types entirely, rather than adding to them | `cards_m7b_tests_creatures::figure_of_fable_levels_up_scout_soldier_avatar` |
+| `bfa9cd25` | a | copies | these effects last until the game ends, the source leaves, or a later effect changes the same trait | `cards_m7b_tests_creatures::figure_of_fable_levels_up_scout_soldier_avatar` |
+| `3cebd2ad` | a | copies | this overwrites only pre-existing P/T-setting effects, not modifying or later-made ones; switch effects apply last | `rulings_copies3::a_figures_set_pt_doesnt_override_counters_cr_613_4c` |
 | `bc6af43b` | a | other | these abilities work regardless of current creature type; each checks the type at resolution and fizzles if wrong | untested |
 
 ### Arwen, Mortal Queen
@@ -2995,7 +2995,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `f2c033cf` | a | other | a type-checking ability only cares about the creature's current type, regardless of how it got that type | `rules_layers::cr_613_4b_base_power_and_toughness_in_timestamp_order_and_205_1b_creature_types` |
 | `926f3cd5` | a | copies | these effects last until the game ends, the source leaves, or a later effect changes the same trait | `rules_layers::cr_613_4b_base_power_and_toughness_in_timestamp_order_and_205_1b_creature_types` |
 | `215456ff` | a | other | these abilities work regardless of current creature type; each checks the type at resolution and fizzles if wrong | `rules_layers::cr_613_4b_base_power_and_toughness_in_timestamp_order_and_205_1b_creature_types` |
-| `42771029` | a | copies | this overwrites only pre-existing P/T-setting effects, not modifying or later-made ones; switch effects apply last | untested |
+| `42771029` | a | copies | this overwrites only pre-existing P/T-setting effects, not modifying or later-made ones; switch effects apply last | `rulings_copies3::a_figures_set_pt_doesnt_override_counters_cr_613_4c` |
 
 ### Forth Eorlingas!
 
@@ -3080,16 +3080,16 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `13ea38a2` | a | combat | damage stays marked until cleanup, so nonlethal damage can turn lethal if toughness drops later that turn | untested |
-| `b08d1e13` | a | copies | power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it | untested |
+| `13ea38a2` | a | combat | damage stays marked until cleanup, so nonlethal damage can turn lethal if toughness drops later that turn | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
+| `b08d1e13` | a | copies | power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
 | `565d48d8` | a | other | gaining control of a permanent doesnt give control of its Auras/Equipment, and doesnt unattach a gained Equipment | untested |
 | `22120a2e` | a | stack | if either permanent in a swap effect is an illegal target at resolution, the swap doesn't happen | untested |
-| `31ae0455` | a | copies | if the affected creature gains a new ability after this effect resolves, it keeps that new ability | untested |
-| `32bd2f57` | a | copies | this can target a temporarily-artifact/creature permanent, and the effect outlasts that temporary status ending | untested |
-| `b9f6eb08` | a | copies | this overwrites all colors/types into a plain creature, keeping supertypes but losing other card types | untested |
-| `35a42edc` | a | copies | this effect overwrites earlier base power/toughness-setting effects, and is itself overwritten by any later one | untested |
-| `0714a6b9` | a | copies | this continuous effect lasts indefinitely, surviving cleanup and either player leaving the game | untested |
-| `ecd10cda` | a | copies | this continuous effect lasts indefinitely regardless of later changes to the affected creature's power | untested |
+| `31ae0455` | a | copies | if the affected creature gains a new ability after this effect resolves, it keeps that new ability | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
+| `32bd2f57` | a | copies | this can target a temporarily-artifact/creature permanent, and the effect outlasts that temporary status ending | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
+| `b9f6eb08` | a | copies | this overwrites all colors/types into a plain creature, keeping supertypes but losing other card types | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
+| `35a42edc` | a | copies | this effect overwrites earlier base power/toughness-setting effects, and is itself overwritten by any later one | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
+| `0714a6b9` | a | copies | this continuous effect lasts indefinitely, surviving cleanup and either player leaving the game | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
+| `ecd10cda` | a | copies | this continuous effect lasts indefinitely regardless of later changes to the affected creature's power | `rulings_copies3::okos_exchange_lasts_though_the_creature_grows_later_cr_611_2a` |
 | `67eb98a1` | b | DEF | Food is an artifact type, never a creature type | a definition, no behaviour of its own |
 | `2e85eeae` | b | DEF | flavor-only ruling, no rules content | a definition, no behaviour of its own |
 | `a77ea9ff` | c | NR | needs a second ability requiring sacrifice of a Food token specifically, not in cube | not reachable with the cube's cards |

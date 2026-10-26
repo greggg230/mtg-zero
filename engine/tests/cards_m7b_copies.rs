@@ -627,6 +627,7 @@ fn springheart_nantuko_stays_when_its_creature_dies_cr_702_103f() {
 
 #[test]
 fn springheart_nantuko_with_its_target_gone_resolves_as_a_creature_cr_702_103e() {
+    // ruling: 4031067f
     // The Bear is bolted in response: the bestowed spell ceases to be
     // bestowed and resolves as a creature spell (608.3b), not fizzling.
     let mut g = scen()

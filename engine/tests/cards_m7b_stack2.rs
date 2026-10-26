@@ -335,6 +335,7 @@ const FANATIC: &str = "Fanatic of Rhonas";
 
 #[test]
 fn fanatic_of_rhonas_eternalize_from_the_graveyard_cr_702_129a() {
+    // ruling: 450b7583 d971bcd1
     // "Eternalize {2}{G}{G} ({2}{G}{G}, Exile this card from your graveyard:
     // Create a token that's a copy of it, except it's a 4/4 black Zombie
     // Snake Druid with no mana cost. Eternalize only as a sorcery.)" The

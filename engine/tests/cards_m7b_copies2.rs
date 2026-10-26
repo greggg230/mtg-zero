@@ -524,6 +524,7 @@ fn emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3() 
 
 #[test]
 fn a_metamorph_copying_emeritus_enters_prepared_cr_722_2b() {
+    // ruling: 4d9f48c8
     // The prepare spell is a copiable value (CR 722.2b): Phyrexian Metamorph
     // entering as a copy of Emeritus enters prepared, with its own Regrowth
     // copy in exile.
@@ -546,6 +547,9 @@ fn a_metamorph_copying_emeritus_enters_prepared_cr_722_2b() {
     assert!(g.is_type(m, types::ARTIFACT));
     let copies: Vec<CardIdx> = g.exile_zone().iter().copied().filter(|&c| g.is_copy_obj(c) && g.name(c) == "Regrowth").collect();
     assert_eq!(copies.len(), 1, "the Metamorph's own Regrowth (the scenario's Emeritus wasn't put onto the battlefield prepared)");
+    // The copy of the prepare spell ignores the Metamorph's exception: a
+    // green sorcery, not an artifact (ruling 4d9f48c8).
+    assert!(!g.is_type(copies[0], types::ARTIFACT) && g.is_type(copies[0], types::SORCERY));
 }
 
 #[test]

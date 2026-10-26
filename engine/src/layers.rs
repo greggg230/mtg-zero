@@ -437,7 +437,16 @@ impl Game {
             Some((p, t)) => (p as i32, t as i32),
             None => (d.power.unwrap_or(0), d.toughness.unwrap_or(0)),
         };
-        if self.objs[c.i()].zone != Zone::Battlefield || self.printed_only(c) {
+        if self.objs[c.i()].zone != Zone::Battlefield {
+            // CR 604.3: a characteristic-defining ability works in every
+            // zone (Adeline's power on the stack, for Stern Scolding; a
+            // Lhurgoyf's in hand; rulings c264835f, 754b54cb).
+            return match (&d.pt_cda, exc_pt) {
+                (Some(cda), None) => self.cda_pt(c, cda, printed),
+                _ => printed,
+            };
+        }
+        if self.printed_only(c) {
             return printed;
         }
         // 7a: characteristic-defining abilities.

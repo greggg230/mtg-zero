@@ -406,6 +406,7 @@ fn cathar_commando_has_flash_and_sacrifices_to_destroy_an_artifact_or_enchantmen
 
 #[test]
 fn figure_of_fable_levels_up_scout_soldier_avatar() {
+    // ruling: 5bbf98e3 bfa9cd25
     let mut g = scen()
         .battlefield(0, &["Figure of Fable"])
         .battlefield(0, &["Forest"; 13])

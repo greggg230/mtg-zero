@@ -761,7 +761,7 @@ d1aaefa0	c	NR	putting a non-DFC onto the battlefield 'transformed' fails entirel
 921387ce	a	other	you only sacrifice the creature if you still control it; if it left and returned as a new object, you don't sacrifice it
 a9320e9f	c	NR	if a spell cast this way is copied, the copy can still be countered even though the original couldn't [part 3, was a/stack: Lutri copies only instant and sorcery spells and the cube has no legendary one; nothing else copies a spell cast with Delighted Halfling's mana]
 64b63bdd	a	mana	this spell stays uncounterable as long as this sources mana paid any part of its cost, any cost type
-a3e958c5	a	copies	if this creatures power/toughness was set to a value after entering, a later level-up wont override it
+a3e958c5	c	NR	if this creatures power/toughness was set to a value after entering, a later level-up wont override it [part 3, was a/copies: the cube's only effect that later sets a creature's P/T (Oko's Elk) also removes Hexdrinker's level up]
 0951eeb1	a	copies	leveling abilities count level counters, with set power/toughness-and-ability thresholds at specific counter ranges
 98b8d4c4	a	protection	protection from everything blocks targeting, blocking, attaching, and damage, but non-targeting effects still work
 33f1a3d1	a	protection	protection from instants blocks targeting/damage from instant sources specifically, nothing else
