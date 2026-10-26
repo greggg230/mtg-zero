@@ -5157,7 +5157,11 @@ drawn games (mostly the 12-turn matches), 410.7 decisions per match, 20,563 side
 
 Search smoke: `tools/search_smoke.py` has the specs `match` and `match_eval` (best-of-three on
 random or evaluation pools, three times the step cap) and runs `random,eval,match` by default.
-@@SMOKE@@
+`python tools/search_smoke.py` (seeds 0-3, specs random, eval, match; after `bash tools/build_py.sh`):
+0 failed of 12 configurations, 1,163 s (random and eval 60-71 s each, as before; match 150-159 s):
+1,600 matches with 1,546,770 decisions (967 per match, against 411 per game on the random spec)
+and 41.0 million simulations. `--specs match_eval --seeds 0-1`: 0 failed of 2 (800 matches,
+754,404 decisions: 943 per match), 302 s.
 
 Behaviour digests: the layout grew, and the digest hashes the encoding bit for bit, so every
 game's digest changed; `DIGEST_ENCODING=0` (new) leaves the encodings out: on main's code
@@ -5181,7 +5185,10 @@ its evaluation spec (the evaluation pools, matches) and `max_steps` 60,000 (a ma
 games). Elo matches use the evaluation spec: matches. `tests/test_mtg_az.py`: the feature count,
 a match through the bindings and the driver (the heuristic beats random), the presets. `temp_moves`
 (60) counts the match's searched decisions, so in a match it covers game 1's opening only (kept as
-mtg-3's; to revisit with the run).
+mtg-3's; to revisit with the run). `python -m pytest -q tests` (after `bash tools/build_py.sh`):
+19 pass; `test_layout_and_token_network_read_the_encoding` fails until `layout_v4.json` is
+regenerated (29,972 != 33,652), and passes with `encode::layout_json`'s output (dumped to a
+scratch file, not checked in).
 
 ### 36.10 What part b must change (the hidden pool)
 
