@@ -2543,6 +2543,106 @@ same bags from what the viewer knows). The first run of layout v4 is `runs/mtg4`
 `mtg-4`, best-of-three matches). From here a change to a width, offset, segment or identity is
 layout v5; newly appended token keys keep v4.
 
+### 22.8 The third and fourth runs (`runs/mtg3`, `runs/mtg4`)
+
+**Settings.** Preset `mtg-3` (`runs/mtg3`, seed 1) is the first run on the GPU: tokens 128 x 4
+(4 heads, feed-forward 256), inference and training on CUDA (one inference worker, 2 groups, 8
+search threads), 768 games in flight, 600 finished games per iteration, 64 / 16 simulations
+(`p_full` 0.25), mana payments at 4 simulations (`sims_minor`), completed-Q targets, value_q 0.9
+(warm-up 2), lr 1e-3, batch 512, reuse 2, window 6 (growing), a 12 GB window budget; best-of-one
+games on random decks of the supported cards. Evaluation: 100 games against the heuristic (M7c's,
+which activates abilities, 21.4; about +92 Elo against the bot of mtg1 and mtg2) and 50 against
+random, 32 simulations, the 16 evaluation deck pairs; Elo matches against the 2 previous
+checkpoints in one driver (`elo_together`, 20 games each). Preset `mtg-4` (`runs/mtg4`, seed 1)
+is `mtg-3` with best-of-three matches (section 36: sideboarding, seeded 45-card pools through the
+deckbuilder, the hidden-pool model) as the episode, layout v4 and `max_steps` 60,000; evaluation
+and Elo play matches.
+
+**mtg3's engine changed under it** (pinned worktrees, each time resumed from a checkpoint):
+
+| From | Engine | Cards | Why |
+|---|---|---:|---|
+| iteration 0 (10-24 11:33) | run-32e5225 | 467 | launch |
+| iteration 2's evaluation (14:15) | run-4613d0f | 491 | evaluation games looped on activations (iteration 0's evaluation took 85 minutes) |
+| iteration 3 (18:03) | run-0577e06 | 524 | a self-play panic, Malcolm's free cast of a flashback card (crash loop 14:36-17:04; section 15) |
+| iteration 15 (10-25 02:11) | run-7d2ad02 | 546 | a search thread panicked at 20:53 ("no legal target": targets checked with the card in hand, 601.2a / 601.2c) and the process hung on zero-core's poisoned lock until found |
+
+It finished its 40 iterations (24,002 games) at 07:38 on 10-25: about 11 hours of running in 20
+of wall clock, about 12 minutes per iteration (self-play 3, training 0.4, evaluation 3-5, Elo
+4-7).
+
+**mtg3** (best-of-one games; selected iterations, every one in `runs/mtg3/metrics.jsonl`):
+
+| Iter | Games (cum.) | Samples | Leaves / s | Decisions / game | Minor / game | Turns | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100) | vs random (50) | Elo (final fit) | Minutes (sp / train / eval / elo) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 0 |  |  |  |  |  |  |  | 9.0% +-2.9 | 49% | 564 +-68 | 0.0 / 0.0 / 85.4 / 0.0 |
+| 1 | 600 | 19,022 | 12,241 | 143 | 33 | 22.2 | 0.76 | 1.061 / 0.627 / 0.76 | 16.0% +-3.7 | 50% | 555 +-65 | 6.3 / 0.3 / 4.0 / 6.1 |
+| 2 | 1,200 | 25,315 | 12,317 | 187 | 15 | 25.5 | 0.71 | 1.044 / 0.679 / 0.85 | 11.0% +-3.1 | 74% | 669 +-58 | 3.9 / 0.3 / 4.1 / 14.1 |
+| 3 | 1,800 | 13,909 | 12,917 | 106 | 22 | 18.5 | 0.79 | 1.021 / 0.667 / 0.87 | 28.0% +-4.5 | 72% | 754 +-56 | 4.0 / 0.2 / 3.8 / 6.7 |
+| 4 | 2,400 | 17,932 | 12,744 | 133 | 15 | 20.6 | 0.76 | 1.006 / 0.664 / 0.88 | 13.0% +-3.4 | 78% | 713 +-56 | 2.8 / 0.2 / 3.0 / 3.6 |
+| 5 | 3,000 | 18,730 | 12,734 | 138 | 14 | 20.2 | 0.73 | 0.981 / 0.665 / 0.88 | 22.0% +-4.1 | 74% | 776 +-54 | 2.9 / 0.2 / 4.1 / 7.1 |
+| 10 | 6,002 | 18,811 | 12,733 | 141 | 16 | 19.3 | 0.67 | 0.911 / 0.658 / 0.84 | 29.0% +-4.5 | 88% | 861 +-52 | 3.0 / 0.4 / 3.6 / 4.1 |
+| 15 | 9,002 | 13,086 | 12,466 | 98 | 18 | 15.7 | 0.57 | 0.839 / 0.643 / 0.84 | 38.0% +-4.9 | 90% | 868 +-52 | 3.9 / 0.4 / 3.8 / 5.3 |
+| 20 | 12,002 | 20,148 | 12,388 | 146 | 12 | 18.1 | 0.57 | 0.809 / 0.626 / 0.85 | 38.0% +-4.9 | 96% | 907 +-51 | 3.0 / 0.4 / 3.2 / 5.5 |
+| 25 | 15,002 | 19,889 | 12,368 | 145 | 12 | 17.7 | 0.52 | 0.786 / 0.613 / 0.84 | 52.0% +-5.0 | 100% | 1018 +-51 | 2.9 / 0.4 / 3.1 / 5.9 |
+| 30 | 18,002 | 19,762 | 12,493 | 143 | 11 | 17.3 | 0.50 | 0.754 / 0.605 / 0.84 | 41.0% +-4.9 | 94% | 979 +-51 | 2.8 / 0.4 / 4.0 / 6.0 |
+| 35 | 21,002 | 18,692 | 12,472 | 137 | 12 | 16.9 | 0.47 | 0.727 / 0.589 / 0.84 | 62.0% +-4.9 | 98% | 1058 +-52 | 2.9 / 0.4 / 2.9 / 7.3 |
+| 40 | 24,002 | 18,910 | 12,392 | 139 | 11 | 16.5 | 0.44 | 0.691 / 0.569 / 0.83 | 52.0% +-5.0 | 100% | 1018 +-57 | 2.7 / 0.4 / 4.3 / 4.7 |
+
+Means per ten iterations, against the heuristic / random: 1-10 22.6% / 78.0%, 11-20 33.4% /
+92.4%, 21-30 44.8% / 95.8%, 31-40 51.3% / 97.2%. Random vs the heuristic: 6 / 100. Elo
+(heuristic 1000, +- 1.96 se; win rates +- 1 se): random 484 in mtg3's fit, the best checkpoint
+iteration 36 (1070).
+
+**mtg4** (best-of-three matches; launched 10-26 01:59 from run-f3637c4; stalled in iteration 3
+on a hidden-pool sampler panic, fixed in 4fa92e4 (36.11) and resumed from iteration 2 at 05:14;
+stopped after iteration 6 and resumed at 09:09 on run-2f3c1c0, zero-core c1facf0 (a panicking
+game fails the run) with `MTGZ_SUPERVISE_STALL=3600`):
+
+| Iter | Matches (cum.) | Samples | Leaves / s | Decisions / match | Minor / match | Turns / match | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100 matches) | vs random (50 matches) | Elo (final fit) | Minutes (sp / train / eval / elo) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| 0 | 0 |  |  |  |  |  |  |  | 1.0% +-1.0 | 28% | 217 +-102 | 0.0 / 0.0 / 7.8 / 0.0 |
+| 1 | 600 | 47,721 | 10,996 | 349 | 61 | 44.7 | 0.65 | 1.031 / 0.570 / 0.91 | 2.0% +-1.4 | 10% | 11 +-109 | 15.6 / 0.5 / 7.3 / 15.5 |
+| 2 | 1,200 | 66,966 | 10,844 | 479 | 23 | 58.7 | 0.63 | 1.015 / 0.669 / 0.91 | 3.0% +-1.7 | 10% | 64 +-100 | 15.2 / 0.9 / 9.4 / 25.1 |
+| 3 | 1,800 | 57,342 | 10,829 | 395 | 29 | 47.1 | 0.70 | 1.028 / 0.657 / 0.89 | 2.0% +-1.4 | 23% | 278 +-88 | 20.4 / 0.8 / 10.5 / 25.9 |
+| 4 | 2,400 | 79,053 | 10,691 | 546 | 23 | 58.6 | 0.68 | 1.013 / 0.658 / 0.89 | 4.0% +-2.0 | 50% | 362 +-83 | 14.5 / 1.2 / 11.0 / 28.3 |
+| 5 | 3,000 | 82,413 | 10,858 | 572 | 21 | 60.2 | 0.69 | 0.989 / 0.663 / 0.84 | 2.0% +-1.4 | 55% | 414 +-79 | 13.5 / 1.3 / 9.5 / 37.7 |
+| 6 | 3,600 | 79,331 | 9,418 | 559 | 26 | 59.7 | 0.71 | 0.981 / 0.664 / 0.81 | 4.0% +-2.0 | 70% | 443 +-78 | 14.8 / 1.4 / 17.5 / 26.6 |
+| 7 | 4,200 | 55,286 | 10,781 | 388 | 32 | 47.1 | 0.73 | 0.975 / 0.665 / 0.80 | 3.0% +-1.7 | 54% | 481 +-76 | 19.8 / 1.3 / 11.8 / 30.5 |
+| 8 | 4,800 | 74,578 | 10,971 | 520 | 24 | 56.1 | 0.72 | 0.968 / 0.666 / 0.81 | 4.0% +-2.0 | 66% | 452 +-76 | 11.6 / 2.0 / 8.5 / 19.8 |
+| 9 | 5,400 | 71,295 | 11,145 | 501 | 22 | 56.5 | 0.72 | 0.964 / 0.669 / 0.79 | 7.0% +-2.5 | 64% | 587 +-75 | 12.2 / 1.4 / 10.2 / 23.1 |
+| 10 | 6,000 | 72,302 | 10,979 | 507 | 23 | 55.6 | 0.72 | 0.961 / 0.669 / 0.80 | 8.0% +-2.7 | 81% | 584 +-78 | 11.9 / 2.2 / 18.7 / 24.3 |
+
+(Fit after iteration 10, 10-26 12:39; random 390 in mtg4's fit; random vs the heuristic 1 / 100
+matches. Resumed at 12:40 with `eval_every` 2, below.)
+
+Readout:
+
+* **mtg3 is the first run that improves against the heuristic**: 9% at iteration 0 to 51% over
+  iterations 31-40 (even with M7c's heuristic; Elo 962-1070), and 97% against random. The
+  policy loss falls throughout (1.06 -> 0.69) with sharper targets (H / ln n 0.76 -> 0.44); the
+  gain per ten iterations shrinks (+11, +11, +7 points) but hasn't stopped. Games get shorter
+  (22 -> 16.5 turns at ~140 searched decisions).
+* **What changed from mtg2** (flat at 2-6%): the GPU (12.4k leaves/s against 3-5k, so 40
+  iterations instead of 5), a larger network (128 x 4 against 96 x 3), a pool with real threats
+  (467-546 cards against 191), a stronger yardstick. The runs weren't built as an ablation, so
+  which of these mattered isn't measured.
+* **mtg4 after 10 iterations is at 1-8% against the heuristic in matches.** If the games of a
+  match were independent, a match win rate m = p^2 (3 - 2p) for a game win rate p, so 4-8% of
+  matches is p ~ 12-17% per game: where mtg3 was in iterations 0-2, not 3-9 (13-29%). The two
+  aren't directly comparable: mtg4's decks come from pools through the deckbuilder on both sides,
+  the network sideboards (the heuristic keeps its deck), its layout is v4 and its network fresh.
+* **Against random mtg4 first got worse** (28% at iteration 0, 10% at iterations 1-2) and then
+  better (50-81% from iteration 4). Unmeasured guess: early sideboarding from a near-uniform prior
+  (the 60-card deck of 34 basic lands that stalled iteration 3 came from it, 36.11).
+* **A match costs about 3.6 of mtg3's games** in searched decisions (~500 and ~56 turns per match
+  against ~140 and ~17 per game); 600 matches take 12-20 minutes at ~10.9k leaves/s, each
+  iteration ~3.8x mtg3's samples. **Evaluation took 70% of mtg4's iterations** (heuristic 3-9
+  minutes, random 7-10, Elo 15-38 for its 40 matches on small batches), so from iteration 11 it
+  runs with `eval_every` 2 (the user's decision, 10-26; resumed 12:40): the yardsticks and Elo
+  every second iteration, Elo against checkpoints k-2 and k-4. Iteration 11's Elo phase first
+  plays the pairs this spacing lacks (4-0, 6-2, 8-4, 10-6), once.
+
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
 M7a grew the supported cube from 191 to 360 cards, creatures from 20 to 113 (threats, i.e.
