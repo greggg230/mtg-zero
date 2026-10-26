@@ -1772,6 +1772,11 @@ impl Game {
     /// the card goes on the stack, and only that face's characteristics
     /// exist there (712.8f, 715.3b).
     pub(crate) fn begin_cast_face(&mut self, p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId>) {
+        // A split card is cast as one of its halves (CR 709.3): the left one
+        // unless the right one is chosen. (Before the permissions are
+        // checked: whether a half can be cast from a graveyard is the half's
+        // question, as the offer asked it; ENGINE.md 38.)
+        let face = face.or(self.def_of(card).halves.map(|h| h.0));
         // From a graveyard, the player chooses among the permissions that
         // allow the cast (CR 601.2a-b; `Task::ChooseRoute`).
         let (from, granter) = match self.route_choice.take() {
@@ -1799,9 +1804,6 @@ impl Game {
         // flashback, which exiles it anyway, is how it is cast).
         let r = self.obj_ref(card);
         let origin = self.objs[card.i()].zone;
-        // A split card is cast as one of its halves (CR 709.3): the left one
-        // unless the right one is chosen.
-        let face = face.or(self.def_of(card).halves.map(|h| h.0));
         let exile_after = self.objs[card.i()].zone == Zone::Graveyard
             && from != crate::game::CastFrom::Flashback
             && self.permissions.iter().any(|pm| pm.card == r && pm.kind == crate::game::PermKind::CastThenExile && self.permission_ok(pm, p));
