@@ -513,6 +513,23 @@ impl Game {
         !self.prepared.is_empty() && self.prepared.iter().any(|x| x.0 == r)
     }
 
+    /// Containment Priest's replacement for `card`, entering "as a copy"
+    /// and not cast, after its copy choice (CR 614.12, 616.1; ENGINE.md 38):
+    /// still a nontoken creature, it is exiled instead (it never entered:
+    /// no leave or enter events). True if it was.
+    fn priest_exiles(&mut self, card: CardIdx) -> bool {
+        let Some(i) = self.priest_pending.iter().position(|&c| c == card) else { return false };
+        self.priest_pending.swap_remove(i);
+        if !self.is_creature(card) || self.is_token(card) {
+            return false;
+        }
+        self.note(|g| format!("{} is exiled instead (not cast)", g.name(card)));
+        self.quiet_leave = true;
+        self.move_card(card, Zone::Exile, crate::game::Pos::Top);
+        self.quiet_leave = false;
+        true
+    }
+
     /// CR 707.10c: the controller of copy `id` may choose new targets: for
     /// its target `k` (in order), keep it (`PASS`, even if illegal) or
     /// choose another legal target for that requirement (`NewTarget`). The
@@ -586,6 +603,7 @@ impl Game {
     /// 707.6) and its `Enters` event (with `note`) happens.
     pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u16, since: u32) {
         if self.objs[card.i()].zone != Zone::Battlefield {
+            self.priest_pending.retain(|&c| c != card);
             return;
         }
         let own = self.own_def(card);
@@ -604,6 +622,9 @@ impl Game {
                 }
                 let vals = CopyVals { def: base.def, exc: exc.over(base.exc) };
                 self.add_copy_effect(card, vals, Until::Forever);
+                if self.priest_exiles(card) {
+                    return;
+                }
                 if let Some(k) = eac.exile_k {
                     // "When you do, exile that card" (603.11, 707.9g).
                     let slot = self.db.def(own).delayed_base + k;
@@ -612,7 +633,11 @@ impl Game {
                     self.waiting.push(crate::triggers::PendingTrigger { controller: p, source, source_def: own, slot, ev });
                 }
             }
-            Some(Choice::Pass) => {}
+            Some(Choice::Pass) => {
+                if self.priest_exiles(card) {
+                    return;
+                }
+            }
             Some(other) => unreachable!("enter-as-copy answer {other:?}"),
             None => {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };

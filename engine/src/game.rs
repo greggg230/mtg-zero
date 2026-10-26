@@ -575,6 +575,14 @@ pub struct Game {
     pub(crate) permissions: Vec<Permission>,
     /// Combat damage is being dealt (CR 510.2).
     pub(crate) combat_damage_now: bool,
+    /// Cards entering "as a copy" that Containment Priest's replacement
+    /// would exile: its controller applies the copy first (CR 614.12,
+    /// 616.1), and the Priest exiles it only if it is still a creature
+    /// (`Game::enter_as_copy`; ENGINE.md 38).
+    pub(crate) priest_pending: Vec<CardIdx>,
+    /// A move off the battlefield that isn't a leave (a card exiled
+    /// "instead" of entering, after its copy choice): no leave events.
+    pub(crate) quiet_leave: bool,
     /// The monarch (CR 724).
     pub(crate) monarch: Option<PlayerId>,
     /// Counters on permanents that left the battlefield this turn, as they
@@ -954,6 +962,8 @@ impl Game {
             resolved: Vec::new(),
             permissions: Vec::new(),
             combat_damage_now: false,
+            priest_pending: Vec::new(),
+            quiet_leave: false,
             monarch: None,
             lki_counters: Vec::new(),
             entering_escaped: false,
@@ -1274,7 +1284,15 @@ impl Game {
             let replaced = self.battlefield.iter().any(|&c| {
                 self.abilities(c).exiles_uncast_creatures && !(group.0 == ev && self.objs[c.i()].timestamp >= group.1)
             });
-            if replaced {
+            if replaced && self.def_of(idx).enters_as_copy.is_some() {
+                // "You may have this enter as a copy of ..." is a
+                // replacement effect too: its controller applies it first
+                // (CR 616.1), and the Priest's applies only if what would
+                // enter is still a creature (614.12: Phyrexian Metamorph
+                // reanimated as a copy of Sol Ring enters). Decided after
+                // the copy choice (`Game::enter_as_copy`).
+                self.priest_pending.push(idx);
+            } else if replaced {
                 self.entering_copy = None;
                 // (A card that would have entered face down is exiled face
                 // up: it never was a permanent.)
@@ -1557,7 +1575,7 @@ impl Game {
         };
         // Leave-the-battlefield abilities look back in time (CR 603.10a):
         // the events are recorded before the object moves.
-        if from == Zone::Battlefield {
+        if from == Zone::Battlefield && !self.quiet_leave {
             if to == Zone::Graveyard {
                 self.event(Event::obj(EventKind::Dies, old));
             }
