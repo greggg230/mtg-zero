@@ -802,7 +802,7 @@ impl Game {
             let mut most = lo;
             while most < (act::NUMBER_N - 1) as u8 {
                 tmp.x = most + 1;
-                if !self.can_pay_for(p, &self.total_mana(card, &tmp), self.spend_allow(card)) {
+                if !self.can_pay_spell(card, &tmp, &self.total_mana(card, &tmp)) {
                     break;
                 }
                 most += 1;
@@ -828,7 +828,7 @@ impl Game {
             let mut tmp = item.clone();
             while most < (act::NUMBER_N - 1) as u8 {
                 tmp.x = most + 1;
-                if !self.can_pay_for(p, &self.total_mana(card, &tmp), self.spend_allow(card)) {
+                if !self.can_pay_spell(card, &tmp, &self.total_mana(card, &tmp)) {
                     break;
                 }
                 most += 1;
@@ -1416,7 +1416,7 @@ impl Game {
         if !m.costs.is_empty() {
             if let StackKind::Spell { card } = item.kind {
                 for (k, a) in avail.iter_mut().enumerate() {
-                    *a = *a && self.can_pay_for(p, &self.announced_cost(card, item, &m.costs[k]), self.spend_allow(card));
+                    *a = *a && self.can_pay_spell(card, item, &self.announced_cost(card, item, &m.costs[k]));
                 }
             }
         }
@@ -1523,6 +1523,24 @@ impl Game {
         self.announced_cost(card, item, more)
     }
 
+    /// The life the rest of spell `card`'s cost takes after its mana (CR
+    /// 601.2h after 601.2g): "pay X life" and Bolas's Citadel's life equal
+    /// to its mana value (118.9). A check that a mana cost announced while
+    /// casting can be paid keeps it (ENGINE.md 38: Three Steps Ahead's spree
+    /// costs from the Citadel at low life, Mana Confluence's life).
+    pub(crate) fn life_later(&self, card: CardIdx, item: &StackItem) -> u8 {
+        let x_life = if self.def_of(card).x_life { item.x } else { 0 };
+        x_life.saturating_add(if item.from == crate::game::CastFrom::LibraryTop { self.mana_value_of(card) } else { 0 })
+    }
+
+    /// Can the caster of `item` pay `cost` for spell `card` (its spending
+    /// restrictions, the life its cost takes later kept)?
+    pub(crate) fn can_pay_spell(&self, card: CardIdx, item: &StackItem, cost: &crate::mana::ManaCost) -> bool {
+        let p = item.controller;
+        let keep = crate::pay::Keep { allow: self.spend_allow(card), life: self.life_later(card, item), ..Default::default() };
+        self.can_pay_with(p, cost, &self.mana_classes(p, None), &keep)
+    }
+
     fn announced_cost(&self, card: CardIdx, item: &StackItem, more: &crate::mana::ManaCost) -> crate::mana::ManaCost {
         let p = item.controller;
         let extra = self.extra_costs(item).plus(more);
@@ -1590,7 +1608,7 @@ impl Game {
                 // Kicker {X}: at least the least X.
                 more.generic = more.generic.saturating_add(self.def_of(card).x_min);
             }
-            if !self.can_pay_for(p, &self.announced_cost(card, &self.stack[pos], &more), self.spend_allow(card)) {
+            if !self.can_pay_spell(card, &self.stack[pos], &self.announced_cost(card, &self.stack[pos], &more)) {
                 break;
             }
             most += 1;
@@ -2078,12 +2096,11 @@ impl Game {
         // CR 601.2f: the total cost, then delve's exiled cards pay for some
         // of its generic mana (702.66b).
         let cost = self.total_mana(card, item).less_generic(item.delved);
-        let from_top = item.from == crate::game::CastFrom::LibraryTop;
         // "As an additional cost, pay X life" (CR 601.2h; 119.4), and Bolas's
         // Citadel's life equal to its mana value rather than its mana cost
         // (118.9): paid after the mana abilities are activated (601.2g; a
         // painland's damage first), by the payment (`PayMana::life_after`).
-        let life_later = (if def.x_life { item.x } else { 0 }).saturating_add(if from_top { self.mana_value_of(card) } else { 0 });
+        let life_later = self.life_later(card, item);
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         if item.alt > 0 {

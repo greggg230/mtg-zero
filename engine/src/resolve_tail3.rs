@@ -71,7 +71,6 @@ impl Game {
             None => {}
         }
         let subs = self.def_of(card).subtypes.clone();
-        let allow = self.spend_allow(card);
         let mut opts = Vec::new();
         for (action, c) in self.hand_slots(p) {
             let d = self.objs[c.i()].def;
@@ -81,7 +80,7 @@ impl Game {
             }
             let ok_targets = self.db.def(d).spell.as_ref().is_none_or(|ab| self.targets_available(ab, p, Some(self.obj_ref(card))));
             let item = &self.stack[pos];
-            if ok_targets && self.can_pay_for(p, &self.announced_cost_pub(card, item, &cost), allow) {
+            if ok_targets && self.can_pay_spell(card, item, &self.announced_cost_pub(card, item, &cost)) {
                 opts.push(Opt { action, choice: Choice::Card(c) });
             }
         }
