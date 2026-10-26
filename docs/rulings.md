@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1226 | 977 |
 | class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 834 | 662 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 546 | 471 |
+| a, tested (passing) | 862 | 685 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 574 | 494 |
 | a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
 | a, deferred | 0 | 0 |
-| a, untested | 392 | 315 |
+| a, untested | 364 | 292 |
 
-Class a by area (distinct texts): mana 77/173, triggers 139/139, stack 126/126, zones 53/123, copies 95/96, other 46/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
+Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 53/123, copies 95/96, other 47/95, dfc 25/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -97,7 +97,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | untested |
 | `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
 | `b0b5c8d4` | b | MP | opponents choose sacrifice targets in turn order, each knowing earlier choices, then sac simultaneously [part 3, was a/combat: the order in which several opponents choose] | multiplayer |
-| `e5b123ca` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | untested |
+| `e5b123ca` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | `rulings_walkers2::a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_606_3` |
 | `9e9b6606` | a | triggers | a reflexive trigger's target is chosen when put on the stack, not when the activated ability triggers it | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 
 ### Containment Priest
@@ -138,7 +138,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0770cb81` | a | protection | a permanent can legally target itself with its own ability | untested |
+| `0770cb81` | a | protection | a permanent can legally target itself with its own ability | `rulings_protection2::luminarch_may_target_itself_and_channel_isnt_offered_without_a_target_cr_115_1_602_1` |
 
 ### Phelia, Exuberant Shepherd
 
@@ -410,7 +410,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `408d5ec3` | a | protection | an effect with no targets can still affect permanents that can't be targeted, like shroud/protection | untested |
+| `408d5ec3` | a | protection | an effect with no targets can still affect permanents that can't be targeted, like shroud/protection | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
 | `fe4ee6d9` | a | other | a multi-step spell counts each category after the previous step resolves, so earlier sacrifices don't recount | untested |
 | `476f3637` | b | DEF | a turn-order keep/sacrifice choice reveals each player's choice to later choosers, resolves simultaneously per step [part 3, was a/other: the active player chooses first and both sacrifice at once; with two players nothing else follows] | a definition, no behaviour of its own |
 
@@ -419,9 +419,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `6b60b26f` | b | DEF | a creature exiled this way still counts as such even if it later left exile for elsewhere [part 3, was a/zones: the exiled creatures are counted within Winds of Abandon's own resolution, where nothing can move them; a definition] | a definition, no behaviour of its own |
-| `c1c20030` | a | protection | a non-targeting overload-cast version of a spell can still hit hexproof or protected permanents | untested |
+| `c1c20030` | a | protection | a non-targeting overload-cast version of a spell can still hit hexproof or protected permanents | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
 | `68a438a9` | a | mana | casting a spell 'without paying its mana cost' forbids substituting the overload cost instead | untested |
-| `7297f704` | a | mana | an overload spell has one target if cast normally, but no targets if its overload cost is paid | untested |
+| `7297f704` | a | mana | an overload spell has one target if cast normally, but no targets if its overload cost is paid | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
 | `b7498104` | a | mana | total cost = mana/alt cost (e.g. overload) + increases - reductions; mana value unaffected | untested |
 
 ### Council's Judgment
@@ -432,7 +432,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a85b5f8f` | b | DEF | every player must vote for a candidate; abstaining isn't allowed [part 3, was a/other: every player votes; the engine has no abstain option] | a definition, no behaviour of its own |
 | `89ba7a72` | c | NR | if every candidate somehow ends with zero votes, nothing gets exiled [part 3, was a/other: every player must vote for a candidate, so a candidate always has a vote] | not reachable with the cube's cards |
 | `28672f55` | a | stack | no one votes until the ability resolves; responses must happen without knowing the outcome | `rulings_stack3::no_player_can_act_in_the_middle_of_a_resolution_cr_608_2` |
-| `f5cbaa26` | a | protection | vote candidates aren't targeted, so a permanent with protection from a color is still a valid candidate | untested |
+| `f5cbaa26` | a | protection | vote candidates aren't targeted, so a permanent with protection from a color is still a valid candidate | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
 | `0f0a2aaf` | a | stack | voting and exiling happen as one atomic resolution; no actions can be taken in between | `rulings_stack3::no_player_can_act_in_the_middle_of_a_resolution_cr_608_2` |
 
 ### Sunfall
@@ -466,7 +466,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `9398525c` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease, new object on return | untested |
 | `bca63806` | b | DEF | discarding the required card is itself part of the activation cost [part 3, was a/mana: the discard is part of the channel cost; a definition] | a definition, no behaviour of its own |
 | `8ba35794` | a | triggers | if the source leaves before its exile ability resolves, the target is never exiled | `cards_m7b_tests_edges::cr_610_3c_touch_the_spirit_realm_gone_before_its_trigger_resolves_exiles_nothing` |
-| `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | untested |
+| `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | `rulings_protection2::luminarch_may_target_itself_and_channel_isnt_offered_without_a_target_cr_115_1_602_1` |
 | `d07fb867` | a | dfc | a DFC exiled and later returned to the battlefield by this effect comes back front-face up | untested |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
 
@@ -494,7 +494,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `95347d78` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | untested |
 | `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
-| `fee44c31` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | untested |
+| `fee44c31` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | `rulings_walkers2::a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_606_3` |
 
 ### Bilbo, Thief in the Night
 
@@ -795,7 +795,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `e50427e3` | a | protection | targeting multiple ward permanents triggers each ward; missing any payment counters the whole spell | untested |
+| `e50427e3` | a | protection | targeting multiple ward permanents triggers each ward; missing any payment counters the whole spell | `rulings_protection2::two_wards_each_trigger_and_one_unpaid_counters_and_abrupt_decay_ignores_ward_cr_702_21a` |
 
 ### Narset, Parter of Veils
 
@@ -853,7 +853,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `dcdbba23` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the resulting token | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
 | `6b2a875f` | b | PRINT | the '+' indicator on additional-cost modes is a reminder only, with no rules meaning | printing, wording, reminder text |
-| `4cdbead7` | a | protection | you may only choose a mode requiring a target if a legal target for it exists; unchosen modes' targeting is ignored | untested |
+| `4cdbead7` | a | protection | you may only choose a mode requiring a target if a legal target for it exists; unchosen modes' targeting is ignored | `rulings_protection2::a_mode_needing_a_target_is_offered_only_with_one_and_may_repeat_it_cr_700_2a` |
 | `d4f44dfc` | a | stack | a copy of a modal spell may get new targets from the copying effect, but never new modes | `rulings_stack2::three_steps_ahead_copied_keeps_its_modes_and_may_target_anew_cr_702_172_707_10c` |
 | `9dcd9c8e` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
 | `77eebb68` | a | mana | casting a modal spell free still needs choosing at least one mode and paying its additional cost | untested |
@@ -1182,7 +1182,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `73ddf41c` | a | triggers | magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
 | `f41a9b99` | a | triggers | casting an instant or sorcery triggers every magecraft ability you control | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
-| `e50427e3` | a | protection | targeting multiple ward permanents triggers each ward; missing any payment counters the whole spell | untested |
+| `e50427e3` | a | protection | targeting multiple ward permanents triggers each ward; missing any payment counters the whole spell | `rulings_protection2::two_wards_each_trigger_and_one_unpaid_counters_and_abrupt_decay_ignores_ward_cr_702_21a` |
 | `ee14929e` | a | triggers | an effect that copies an instant or sorcery spell on the stack also triggers magecraft | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
 | `be6a31bb` | a | triggers | making multiple copies of a spell triggers magecraft once per copy | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
 | `e120a54f` | a | triggers | copying an instant/sorcery card in a non-stack zone doesn't trigger magecraft by itself, but casting that copy does | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
@@ -1485,10 +1485,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `2d1b2d97` | a | protection | shroud/protection only work on the battlefield, so a shrouded graveyard card can still be targeted by reanimation | untested |
+| `2d1b2d97` | a | protection | shroud/protection only work on the battlefield, so a shrouded graveyard card can still be targeted by reanimation | `rulings_protection2::a_reanimated_nemesis_with_protection_from_its_controller_cant_hold_the_aura_cr_303_4d_704_5m` |
 | `ed2e62db` | a | replacement | a reanimation Aura attaches to the GY card, returns it, then reattaches to the new object, never itself touching GY | `cards_m7c_tail3::animate_dead_reanimates_and_its_leaving_sacrifices_the_creature_cr303_4a` |
 | `2a2eab5b` | a | triggers | if the source isn't on the battlefield when its own reanimation trigger resolves, nothing happens and the card stays put | `rulings_triggers2::animate_dead_gone_before_its_trigger_resolves_returns_nothing_cr_608_2b` |
-| `e3ce0176` | a | protection | if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac | untested |
+| `e3ce0176` | a | protection | if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac | `rulings_protection2::a_reanimated_nemesis_with_protection_from_its_controller_cant_hold_the_aura_cr_303_4d_704_5m` |
 | `34b9e51a` | c | NR | once attached to the creature it returned, a reanimation Aura can't be moved to attach to a different creature instead [part 3, was a/other: no cube effect moves an Aura] | not reachable with the cube's cards |
 
 ### Necromancy
@@ -1498,7 +1498,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `47a5c145` | a | replacement | returning the creature and attaching the reanimation Aura to it both happen within the same resolution | `cards_m7c_tail3::necromancy_at_sorcery_speed_stays_cr514_3a` |
 | `ced5d68f` | b | DEF | when a permanent entering the battlefield needs a value or choice defined, you make that choice as part of it entering [part 3, was a/other: choices for a permanent entering are made as it enters; a definition] | a definition, no behaviour of its own |
 | `3886f2e5` | a | replacement | this enters as a plain enchantment, then its own ETB trigger makes it an Enchant Creature Aura under Aura rules | `rulings_replacement2::necromancy_is_an_aura_once_its_trigger_resolves_and_goes_when_its_creature_leaves_cr_704_5m` |
-| `9b32972a` | a | protection | if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac | untested |
+| `9b32972a` | a | protection | if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac | `rulings_protection2::a_reanimated_nemesis_with_protection_from_its_controller_cant_hold_the_aura_cr_303_4d_704_5m` |
 | `db4fe052` | c | NR | the forced sacrifice only happens when cast via its own ability, not when another effect enabled the cast [part 3, was a/other: no other cube effect lets Necromancy be cast as though it had flash] | not reachable with the cube's cards |
 
 ### Dragon's Rage Channeler
@@ -1888,7 +1888,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `2e168182` | a | stack | a copy of this modal spell may get new targets from the copying effect, but never new modes | `rulings_stack2::lutris_copy_of_a_modal_spell_has_the_same_modes_cr_707_10` |
-| `ff410448` | a | protection | a mode needing a target is only choosable with a legal target available; repeat selections may reuse or change it | untested |
+| `ff410448` | a | protection | a mode needing a target is only choosable with a legal target available; repeat selections may reuse or change it | `rulings_protection2::a_mode_needing_a_target_is_offered_only_with_one_and_may_repeat_it_cr_700_2a` |
 | `d6bf1964` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
 | `9403db83` | a | combat | choosing the same damage mode repeatedly makes separate damage events, each subject to its own prevention effects | untested |
 | `a01ce385` | a | other | modes always run in written order; a repeated modes relative order is chosen as you cast the spell | `cards_m4b2::fiery_confluence_repeats_modes_in_non_decreasing_order` |
@@ -1956,8 +1956,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `a3e958c5` | c | NR | if this creatures power/toughness was set to a value after entering, a later level-up wont override it [part 3, was a/copies: the cube's only effect that later sets a creature's P/T (Oko's Elk) also removes Hexdrinker's level up] | not reachable with the cube's cards |
 | `0951eeb1` | a | copies | leveling abilities count level counters, with set power/toughness-and-ability thresholds at specific counter ranges | `cards_m7a_b13::cr_711_hexdrinker_levels` |
-| `98b8d4c4` | a | protection | protection from everything blocks targeting, blocking, attaching, and damage, but non-targeting effects still work | untested |
-| `33f1a3d1` | a | protection | protection from instants blocks targeting/damage from instant sources specifically, nothing else | untested |
+| `98b8d4c4` | a | protection | protection from everything blocks targeting, blocking, attaching, and damage, but non-targeting effects still work | `rulings_protection2::protection_from_everything_and_from_instants_stop_only_what_they_name_cr_702_16` |
+| `33f1a3d1` | a | protection | protection from instants blocks targeting/damage from instant sources specifically, nothing else | `rulings_protection2::protection_from_everything_and_from_instants_stop_only_what_they_name_cr_702_16` |
 
 ### Ignoble Hierarch
 
@@ -2358,7 +2358,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `8be24dfb` | a | combat | the attacker still attacks even if its targeted walker is sacrificed, dealing no damage if left unblocked | `rulings_protection::emrakul_annihilator_sacrifices_before_blocks_and_a_sacrificed_planeswalker_leaves_it_attacking_cr_702_86a_506_4` |
 | `50fb7446` | a | protection | protection from colored spells doesnt affect creatures on the battlefield, since they arent spells there | `rulings_protection::emrakul_can_be_blocked_by_colored_creatures_and_targeted_by_their_abilities_cr_702_16`; `rulings_protection::emrakul_a_colored_creature_may_block_it_cr_702_16` |
 | `f0f2746f` | a | protection | targeting a protected permanent with a counter effect still resolves it, just failing the counter part | `rulings_protection::emrakul_on_the_stack_may_be_targeted_by_a_counterspell_which_doesnt_counter_it_cr_101_2` |
-| `075cc040` | a | protection | protection from colored spells stops colored Aura targeting, but a colored Aura can still enter already attached | untested |
+| `075cc040` | a | protection | protection from colored spells stops colored Aura targeting, but a colored Aura can still enter already attached | `rulings_protection2::necromancy_answers_emrakuls_shuffle_and_enchants_it_despite_protection_from_colored_spells_cr_702_16` |
 | `b4e16ada` | a | triggers | a cast-triggered ability resolves before its source spell, even if that spell is removed from the stack | `rulings_faces::sink_into_stupor_returns_a_spell_that_cant_be_countered_cr_101_2` |
 
 ### Tezzeret, Cruel Captain
@@ -2565,8 +2565,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `12531c0e` | c | NR | gaining protection from everything can make you an illegal target, triggering normal full/partial fizzle rules [part 3, was a/protection: The One Ring is cast at sorcery speed, so nothing targeting its controller can wait on the stack under its trigger] | not reachable with the cube's cards |
-| `b0eae858` | a | protection | protection from everything for a player: damage to them prevented, Auras cant attach, cant be targeted | untested |
-| `7b7445e2` | a | protection | protection from everything blocks only the listed events; non-targeting effects and attacks still happen normally | untested |
+| `b0eae858` | a | protection | protection from everything for a player: damage to them prevented, Auras cant attach, cant be targeted | `rulings_protection2::protection_from_everything_and_from_instants_stop_only_what_they_name_cr_702_16` |
+| `7b7445e2` | a | protection | protection from everything blocks only the listed events; non-targeting effects and attacks still happen normally | `rulings_protection2::protection_from_everything_and_from_instants_stop_only_what_they_name_cr_702_16` |
 | `bd58b57f` | c | NR | protection from everything usually prevents damage, but a few damage types bypass it and still cost life [part 3, was a/protection: no cube damage can't be prevented] | not reachable with the cube's cards |
 
 ### Memory Jar
@@ -2713,7 +2713,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `ac9d14f8` | a | other | a modal spell's chosen effects are always carried out in the order printed on the card | untested |
 | `4b30736a` | a | stack | a copy of this modal spell may get new targets from the copying effect, but never new modes | `rulings_stack3::two_modes_of_collective_brutality_may_target_the_same_opponent_and_lutris_kolaghans_copy_keeps_its_modes_cr_700_2d_707_10c` |
 | `61ed8f24` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
-| `0bcfa967` | a | protection | a mode needing a target is only choosable if a legal target exists; unchosen modes ignore targeting | untested |
+| `0bcfa967` | a | protection | a mode needing a target is only choosable if a legal target exists; unchosen modes ignore targeting | `rulings_protection2::a_mode_needing_a_target_is_offered_only_with_one_and_may_repeat_it_cr_700_2a` |
 | `4ba4f68d` | a | mana | you choose exactly two different modes as you cast this spell, locked in once chosen | `cards_m7b_tests_spells::kolaghans_command_chooses_two_different_modes` |
 
 ### Chaos Defiler
@@ -2806,9 +2806,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c1c20030` | a | protection | a non-targeting overload-cast version of a spell can still hit hexproof or protected permanents | untested |
+| `c1c20030` | a | protection | a non-targeting overload-cast version of a spell can still hit hexproof or protected permanents | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
 | `68a438a9` | a | mana | casting a spell 'without paying its mana cost' forbids substituting the overload cost instead | untested |
-| `7297f704` | a | mana | an overload spell has one target if cast normally, but no targets if its overload cost is paid | untested |
+| `7297f704` | a | mana | an overload spell has one target if cast normally, but no targets if its overload cost is paid | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
 | `b7498104` | a | mana | total cost = mana/alt cost (e.g. overload) + increases - reductions; mana value unaffected | untested |
 
 ### Tidehollow Sculler
@@ -2944,7 +2944,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `7c1cc9dc` | a | stack | targeting an uncounterable spell with a counter effect still works, just failing to counter it | `rulings_stack3::reprieve_returns_an_uncounterable_spell_and_mana_drain_still_gives_its_mana_cr_101_2` |
 | `8044d61d` | a | mana | a permanent with X in its mana cost treats X as 0 | untested |
 | `2080ede6` | a | mana | a token that isn't a copy of anything has mana value 0; a token that is a copy shares that object's mana cost | untested |
-| `dbbd77b1` | a | protection | ward still lets you pay its cost when targeting; this spells own cant-be-countered clause holds even if you dont pay | untested |
+| `dbbd77b1` | a | protection | ward still lets you pay its cost when targeting; this spells own cant-be-countered clause holds even if you dont pay | `rulings_protection2::two_wards_each_trigger_and_one_unpaid_counters_and_abrupt_decay_ignores_ward_cr_702_21a` |
 
 ### Pillage the Bog
 
@@ -3051,8 +3051,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `2548ce05` | b | DEF | a die is defined by its face count, rolls must be fair, and digital substitutes are fine unless physical is required [part 3, was a/other: what a die is; a definition] | a definition, no behaviour of its own |
 | `c953527e` | c | NR | a rerolled dies original result never happened, triggering nothing and being ignored by anything that cares [part 3, was a/other: no cube effect rerolls a die] | not reachable with the cube's cards |
 | `57864724` | c | NR | a roll-a-die trigger fires for any die, even non-numerical ones, which just make that part of the effect do nothing [part 3, was a/triggers: the cube has no planar die] | not reachable with the cube's cards |
-| `97f29a80` | a | other | a specific die outcome with no qualifying graveyard card just removes a loyalty counter instead | untested |
-| `23ff8ba2` | a | walkers | a specific die outcome at exactly one loyalty counter deals fixed damage and then removes that counter | untested |
+| `97f29a80` | a | other | a specific die outcome with no qualifying graveyard card just removes a loyalty counter instead | `rulings_walkers2::a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_606_3` |
+| `23ff8ba2` | a | walkers | a specific die outcome at exactly one loyalty counter deals fixed damage and then removes that counter | `rulings_walkers2::a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_606_3` |
 | `13201ca5` | c | NR | if this permanent somehow gains other loyalty abilities, a specific die-roll bonus only applies to its normal ability [part 3, was a/walkers: no cube effect gives Comet other loyalty abilities] | not reachable with the cube's cards |
 | `37a938d4` | b | DEF | none of these abilities require a target; any choices of cards, creatures, or players are made as they resolve [part 3, was a/other: Comet's abilities have no targets; a definition] | a definition, no behaviour of its own |
 | `6fd8cb86` | c | NR | another effect can push a die roll's result outside its normal range, such as to 0 or 7 on a six-sided die [part 3, was a/other: no cube effect modifies a die roll] | not reachable with the cube's cards |
@@ -3434,7 +3434,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `bca63806` | b | DEF | discarding the required card is itself part of the activation cost [part 3, was a/mana: the discard is part of the channel cost; a definition] | a definition, no behaviour of its own |
-| `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | untested |
+| `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | `rulings_protection2::luminarch_may_target_itself_and_channel_isnt_offered_without_a_target_cr_115_1_602_1` |
 
 ### City of Traitors
 
@@ -3476,7 +3476,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `bca63806` | b | DEF | discarding the required card is itself part of the activation cost [part 3, was a/mana: the discard is part of the channel cost; a definition] | a definition, no behaviour of its own |
-| `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | untested |
+| `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | `rulings_protection2::luminarch_may_target_itself_and_channel_isnt_offered_without_a_target_cr_115_1_602_1` |
 
 ### Shelldock Isle
 
