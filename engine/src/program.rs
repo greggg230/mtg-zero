@@ -335,8 +335,11 @@ pub enum Ext {
     /// `PASS`.
     MayRemoveCounterThen { skip: u16 },
     /// A reflexive triggered ability (CR 603.12): delayed ability `k` of
-    /// the source's card triggers now, about the same event.
-    Reflexive { k: u8 },
+    /// the source's card triggers now, about the same event; with
+    /// `per_token`, once for each token the preceding `CreateToken` made
+    /// ("create a token. When you do, ..." doubled by Elspeth: one trigger
+    /// per token, Ajani, Nacatl Avenger's ruling 47eed49e).
+    Reflexive { k: u8, per_token: bool },
     /// Exile the top n cards of `who`'s library (revealed); the
     /// controller may play them (`kind`), this turn if `this_turn`.
     ExileTopWithPermission { who: Who, n: u8, kind: crate::game::PermKind, this_turn: bool },

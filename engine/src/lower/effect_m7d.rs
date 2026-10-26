@@ -141,7 +141,8 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 Some(c) => l.delayed_ability_if(d.finish(), c),
                 None => l.delayed_ability(d.finish()),
             };
-            b.op(Op::Ext(Ext::Reflexive { k }));
+            let per_token = matches!(first, E::CreateToken(_));
+            b.op(Op::Ext(Ext::Reflexive { k, per_token }));
         }
         // "Shuffle <this spell> into its owner's library" as the last
         // instruction of its effect (Green Sun's Zenith, CR 608.2c; only as

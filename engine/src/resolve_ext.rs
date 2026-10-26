@@ -209,9 +209,14 @@ impl Game {
             }
             Ext::JumpUnlessSource { filter, to } => {
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
-                let ok = self.live(f.source)
-                    && self.objs[f.source.idx.i()].zone == Zone::Battlefield
-                    && self.card_matches(filter, f.source.idx, &ctx);
+                let ok = if *filter == crate::db::Filter::Saddled {
+                    // Saddled as it last existed on the battlefield, if it
+                    // has left (CR 608.2h; Caustic Bronco, ruling ed19c884).
+                    let t = self.turn.number as u16;
+                    self.marks.contains(&(f.source, crate::game::Mark::Saddled(t)))
+                } else {
+                    self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield && self.card_matches(filter, f.source.idx, &ctx)
+                };
                 if ok {
                     Flow::Next
                 } else {
@@ -866,7 +871,7 @@ impl Game {
                     }
                 }
             }
-            Ext::Reflexive { k } => {
+            Ext::Reflexive { k, per_token } => {
                 let base = self.db.def(f.source_def).delayed_base;
                 // An intervening "if" (CR 603.4): it triggers only if the
                 // condition holds now (and is checked again as it resolves).
@@ -875,13 +880,16 @@ impl Game {
                     self.note(|_| "reflexive trigger: its condition doesn't hold".to_string());
                     return Flow::Next;
                 }
-                self.waiting.push(crate::triggers::PendingTrigger {
-                    controller: f.controller,
-                    source: f.source,
-                    source_def: f.source_def,
-                    slot: base + k,
-                    ev: f.ev,
-                });
+                let n = if *per_token { f.made_all.len() } else { 1 };
+                for _ in 0..n {
+                    self.waiting.push(crate::triggers::PendingTrigger {
+                        controller: f.controller,
+                        source: f.source,
+                        source_def: f.source_def,
+                        slot: base + k,
+                        ev: f.ev,
+                    });
+                }
                 Flow::Next
             }
             Ext::ExileTopWithPermission { who, n, kind, this_turn } => {

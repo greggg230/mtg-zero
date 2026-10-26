@@ -439,7 +439,13 @@ impl Game {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     self.power(f.source.idx)
                 } else {
-                    self.db.def(f.source_def).power.unwrap_or(0)
+                    // Gone: its power as it last existed on the battlefield
+                    // (CR 608.2h; Jacked Rabbit, Ouroboroid: rulings
+                    // ef3a8866, b3653e3c).
+                    match self.objs[f.source.idx.i()].lki_power {
+                        Some((inc, p)) if inc == f.source.inc => p,
+                        _ => self.db.def(f.source_def).power.unwrap_or(0),
+                    }
                 }
             }
             Amount::LkiManaValue => f.x,

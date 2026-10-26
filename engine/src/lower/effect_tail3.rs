@@ -80,7 +80,7 @@ pub(crate) fn lower_effect_tail3(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let mut d = Builder::default();
             lower_effect(l, &mut d, then);
             let k = l.delayed_ability(d.finish());
-            b.op(Op::Ext(Ext::Reflexive { k }));
+            b.op(Op::Ext(Ext::Reflexive { k, per_token: false }));
             b.patch(skip);
         }
         // "Target opponent creates a tapped Treasure token."

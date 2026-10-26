@@ -1249,7 +1249,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
             }
             let k = l.delayed_ability(d.finish());
-            b.op(Op::Ext(Ext::Reflexive { k }));
+            b.op(Op::Ext(Ext::Reflexive { k, per_token: false }));
             b.patch(skip);
         }
         E::ExileTopCardsWithPlayPermission(nodes::ExileTopCardsWithPlayPermission {

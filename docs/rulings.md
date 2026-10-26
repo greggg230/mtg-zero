@@ -16,16 +16,16 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
 | fetched | 1607 | 1260 |
-| class a | 1227 | 978 |
-| class b | 198 | 149 |
+| class a | 1226 | 977 |
+| class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 749 | 585 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 461 | 394 |
+| a, tested (passing) | 772 | 606 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 484 | 415 |
 | a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
 | a, deferred | 0 | 0 |
-| a, untested | 478 | 393 |
+| a, untested | 454 | 371 |
 
-Class a by area (distinct texts): mana 75/173, triggers 71/140, stack 126/126, zones 48/123, copies 95/96, other 44/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
+Class a by area (distinct texts): mana 76/173, triggers 91/139, stack 126/126, zones 48/123, copies 95/96, other 44/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
 
 ## Per card
 
@@ -51,9 +51,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a85af301` | b | DEF | players may track energy counters by any mutually agreeable method | a definition, no behaviour of its own |
 | `b3258d86` | a | stack | if all targets of an E-granting ability become illegal, it doesn't resolve, no E gained | `rulings_stack3::removal_whose_target_is_gone_does_none_of_its_other_effects_cr_608_2b` |
 | `aadebd9c` | b | DEF | may-pay-E can't be paid multiple times to multiply a single ability's effect [part 3, was a/other: "may pay {E}{E}{E}" is one choice; the engine asks it once] | a definition, no behaviour of its own |
-| `2aa2b091` | a | triggers | 'may pay. If you do' has no response window; 'when you do' makes a reflexive trigger with its own target | untested |
+| `2aa2b091` | a | triggers | 'may pay. If you do' has no response window; 'when you do' makes a reflexive trigger with its own target | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 | `253ce5ed` | a | copies | a non-EOT type-changing effect persists past cleanup and after its source leaves | `rulings_copies3::guide_of_souls_angel_lasts_past_the_turn_and_the_guide_energy_stays_cr_611_2a_107_14` |
-| `d9f993eb` | a | triggers | reflexive trigger's target is chosen when it goes on the stack, not when it triggers | untested |
+| `d9f993eb` | a | triggers | reflexive trigger's target is chosen when it goes on the stack, not when it triggers | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 | `3ae78179` | b | PRINT | {E} is the energy symbol, representing one energy counter | printing, wording, reminder text |
 
 ### Ocelot Pride
@@ -90,7 +90,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | untested |
 | `7d9c06e2` | a | other | if a player has none of a referenced permanent type, they still choose from what they do control | untested |
 | `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | untested |
-| `47eed49e` | a | triggers | if multiple tokens are made at once, a reflexive trigger fires once per token made that way | untested |
+| `47eed49e` | a | triggers | if multiple tokens are made at once, a reflexive trigger fires once per token made that way | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 | `75da186b` | a | dfc | if a DFC creature transforms via another effect, the back face walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `95347d78` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `18fa2a99` | a | zones | lands can't be chosen or sacrificed by a permanent-type-based effect even if they'd qualify | untested |
@@ -98,7 +98,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
 | `b0b5c8d4` | b | MP | opponents choose sacrifice targets in turn order, each knowing earlier choices, then sac simultaneously [part 3, was a/combat: the order in which several opponents choose] | multiplayer |
 | `e5b123ca` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | untested |
-| `9e9b6606` | a | triggers | a reflexive trigger's target is chosen when put on the stack, not when the activated ability triggers it | untested |
+| `9e9b6606` | a | triggers | a reflexive trigger's target is chosen when put on the stack, not when the activated ability triggers it | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 
 ### Containment Priest
 
@@ -114,7 +114,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `4759d007` | a | replacement | ravenous puts its counters on as it enters, not after; entering triggers see the counters | `cards_m7c_tail2::jacked_rabbit_ravenous_draws_at_x_five_cr702_156a_and_makes_rabbits_equal_to_power` |
-| `ef3a8866` | a | triggers | if the source leaves while its ability is on the stack, use its last-known power to size the token | untested |
+| `ef3a8866` | a | triggers | if the source leaves while its ability is on the stack, use its last-known power to size the token | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
 | `def76a42` | c | NR | a copied ravenous permanent spell keeps X and its resulting token enters with X counters [part 3, was a/copies: no cube effect copies a ravenous creature spell (the only creature-spell copy is Sage of the Skies copying itself)] | not reachable with the cube's cards |
 | `5ebd5143` | a | replacement | a permanent entering as a copy of a ravenous creature doesn't get ravenous's counters | `rulings_replacement2::ravenous_counters_come_with_it_and_a_copy_of_it_gets_none_cr_614_1c_707_2` |
 | `7cf36dbe` | c | NR | a trigger referencing X uses the value chosen at cast, which can differ from counters entered with [part 3, was a/mana: no cube replacement effect changes the number of counters a ravenous creature enters with, so X and the counters never differ] | not reachable with the cube's cards |
@@ -146,9 +146,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `35f3a5dc` | a | zones | blink exile: Auras go to graveyard, Equipment unattaches and stays, counters cease; returnee is a new object | untested |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
-| `d29b2c9d` | a | triggers | a returning permanent's beginning-of-end-step triggers don't fire that turn (missed window) | untested |
+| `d29b2c9d` | a | triggers | a returning permanent's beginning-of-end-step triggers don't fire that turn (missed window) | `rulings_triggers3::delayed_returns_happen_without_their_source_and_a_returned_permanent_misses_this_end_step_cr_603_7` |
 | `e0df1cea` | b | DEF | flavor-only ruling, no rules content | a definition, no behaviour of its own |
-| `2237cc62` | a | triggers | the delayed return trigger still fires even if its source has since left the battlefield | untested |
+| `2237cc62` | a | triggers | the delayed return trigger still fires even if its source has since left the battlefield | `rulings_triggers3::delayed_returns_happen_without_their_source_and_a_returned_permanent_misses_this_end_step_cr_603_7` |
 
 ### Stoneforge Mystic
 
@@ -177,7 +177,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `d1f9751e` | a | combat | tokens entering already attacking don't count as declared attackers for other triggers | untested |
-| `ab682fd6` | a | triggers | attacking with any creature triggers the ability, even if the source itself isn't attacking | untested |
+| `ab682fd6` | a | triggers | attacking with any creature triggers the ability, even if the source itself isn't attacking | `rulings_triggers3::whenever_you_attack_triggers_without_its_source_attacking_cr_508_3a` |
 | `c264835f` | a | copies | a power-defining ability works in every zone, and counts its own source while on the battlefield | `rulings_copies3::power_defining_abilities_work_in_every_zone_and_count_types_not_cards_cr_604_3` |
 | `89ee123a` | b | MP | the per-opponent token trigger makes a token for every qualifying opponent, not just attacked ones [part 3, was a/combat: one token per opponent; two-player games have one] | multiplayer |
 | `bdd4c462` | a | combat | you choose whether each created token attacks that opponent directly or a planeswalker they control | untested |
@@ -219,7 +219,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `525efd15` | a | zones | a token copy of a dies-trigger permanent can't return to the battlefield, since it ceased to exist as a token | `rulings_copies3::enduring_innocence_returns_an_enchantment_without_creature_types_and_its_token_copy_doesnt_cr_205_1a_111_7` |
-| `3efcc01c` | a | triggers | an entering-power check for other creatures snapshots power as they enter; later changes don't matter | untested |
+| `3efcc01c` | a | triggers | an entering-power check for other creatures snapshots power as they enter; later changes don't matter | `rulings_triggers3::an_entering_creatures_power_counts_its_counters_and_later_changes_dont_matter_cr_603_6a` |
 | `56a77c16` | a | copies | a nontoken copy that dies and returns via its own ability comes back with only the stated card types | `rulings_copies3::enduring_innocence_returns_an_enchantment_without_creature_types_and_its_token_copy_doesnt_cr_205_1a_111_7` |
 | `0a655fc3` | a | copies | removing creature type by changing types also removes any creature subtypes carried with it | `rulings_copies3::enduring_innocence_returns_an_enchantment_without_creature_types_and_its_token_copy_doesnt_cr_205_1a_111_7` |
 
@@ -229,7 +229,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `35f3a5dc` | a | zones | blink exile: Auras go to graveyard, Equipment unattaches and stays, counters cease; returnee is a new object | untested |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
-| `d29b2c9d` | a | triggers | a returning permanent's beginning-of-end-step triggers don't fire that turn (missed window) | untested |
+| `d29b2c9d` | a | triggers | a returning permanent's beginning-of-end-step triggers don't fire that turn (missed window) | `rulings_triggers3::delayed_returns_happen_without_their_source_and_a_returned_permanent_misses_this_end_step_cr_603_7` |
 | `2cf497b2` | a | triggers | a delayed end-step return trigger still fires even once its source has left the battlefield | `rulings_triggers2::flickerwisp_gone_its_exiled_permanent_still_returns_at_the_end_step_cr_603_7` |
 
 ### Skyclave Apparition
@@ -534,7 +534,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `b9423c74` | a | triggers | if the source is gone at resolution, draw/discard still happens, using last-known counters for any bonus | untested |
+| `b9423c74` | a | triggers | if the source is gone at resolution, draw/discard still happens, using last-known counters for any bonus | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
 | `550a74ab` | a | mana | casting a spell with X without paying its mana cost forces X to be 0 | untested |
 | `ad951704` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `92f52ee7` | a | stack | casting a spell as part of an ability's resolution happens immediately, ignoring normal timing permissions | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
@@ -549,7 +549,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `eea821be` | a | dfc | only the currently-up face's characteristics apply while on the stack or battlefield | untested |
 | `7a46be96` | b | DEF | a cost reducer doesnt grant graveyard-casting permission; it only cuts cost once another effect allows it [part 3, was a/mana: a cost reduction grants no permission to cast; a definition] | a definition, no behaviour of its own |
 | `7536ad72` | a | mana | a cost reduction tied to a specific color only reduces that spell's generic mana component | `cards_m7b_faces4::green_goblin_makes_spells_cast_from_your_graveyard_cheaper` |
-| `8eb07966` | a | triggers | a named creature still connives via its ability even if it has since left the battlefield | untested |
+| `8eb07966` | a | triggers | a named creature still connives via its ability even if it has since left the battlefield | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
 | `b0d988d8` | a | dfc | choosing among a group of cards to play/cast lets you pick either face of a qualifying modal DFC | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
 | `8bd16ad8` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | untested |
 | `6d8a93b1` | c | NR | choosing a card name can be either face's name of a modal DFC; a linked ability then considers only that chosen name [part 3, was a/dfc: the cube's naming cards (Demonic Consultation, Tamiyo, Collector of Tales) look at cards outside the stack, where another face's name never matches; naming it is naming a card that isn't there (tested)] | not reachable with the cube's cards |
@@ -1098,7 +1098,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `96113165` | c | NR | an attacks-while-saddled trigger only fires if the creature was saddled at the moment it attacked [part 3, was a/combat: no cube card has an "attacks while saddled" trigger (Caustic Bronco checks saddled as its trigger resolves)] | not reachable with the cube's cards |
 | `87059541` | a | combat | a saddle creature can attack or block normally even while unsaddled | `cards_m7c_tail3::caustic_bronco_unsaddled_you_lose_cr702_171` |
-| `ed19c884` | a | triggers | if the source leaves before its ability resolves, use its last-known saddled status to decide the effect | untested |
+| `ed19c884` | a | triggers | if the source leaves before its ability resolves, use its last-known saddled status to decide the effect | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
 | `90fe76e8` | a | copies | a copy of a saddled Mount isn't itself saddled | `rulings_copies3::a_copy_of_a_saddled_bronco_isnt_saddled_cr_702_171b_707_2` |
 | `e63641fa` | a | mana | a revealed card with no mana cost (e.g. a land) has a mana value of 0 | untested |
 | `a56b34fa` | a | mana | a revealed split card's mana value is its two halves' combined mana cost | untested |
@@ -1633,7 +1633,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `549fab62` | b | CMD | both commanders start in the command zone, with the rest of a larger deck becoming the library | Commander |
 | `3fd29ee8` | b | CMD | Choose a Background is a Commander-only variant of the partner ability | Commander |
 | `29633b54` | a | copies | power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
-| `cdd6186e` | a | triggers | the source doesn't need to be among the attacking creatures for its attack-triggered ability to fire | untested |
+| `cdd6186e` | a | triggers | the source doesn't need to be among the attacking creatures for its attack-triggered ability to fire | `rulings_triggers3::whenever_you_attack_triggers_without_its_source_attacking_cr_508_3a` |
 | `4af60889` | c | NR | a base power/toughness-setting ability overwrites earlier ones, and is itself overwritten by any later one [part 3, was a/copies: Gut has no P/T-setting ability; the set-order rule is tested with Figure of Destiny and Oko (4af60889's Halsin)] | not reachable with the cube's cards |
 | `06cb2c7b` | a | other | if a creature becomes an artifact, it becomes eligible to be sacrificed to its own artifact-sacrificing ability | untested |
 | `168c1f9f` | b | CMD | Commander rules for how a Background interacts with 'your commander' references | Commander |
@@ -1803,7 +1803,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a85af301` | b | DEF | players may track energy counters by any mutually agreeable method | a definition, no behaviour of its own |
 | `b3258d86` | a | stack | if all targets of an E-granting ability become illegal, it doesn't resolve, no E gained | `rulings_stack3::removal_whose_target_is_gone_does_none_of_its_other_effects_cr_608_2b` |
 | `aadebd9c` | b | DEF | may-pay-E can't be paid multiple times to multiply a single ability's effect [part 3, was a/other: "may pay {E}{E}{E}" is one choice; the engine asks it once] | a definition, no behaviour of its own |
-| `2aa2b091` | a | triggers | 'may pay. If you do' has no response window; 'when you do' makes a reflexive trigger with its own target | untested |
+| `2aa2b091` | a | triggers | 'may pay. If you do' has no response window; 'when you do' makes a reflexive trigger with its own target | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 | `feeffce5` | a | mana | you may pay zero of a cost and still get the resulting counters, just with no additional effect from paying more | `rulings_copies3::guide_of_souls_angel_lasts_past_the_turn_and_the_guide_energy_stays_cr_611_2a_107_14` |
 | `3ae78179` | b | PRINT | {E} is the energy symbol, representing one energy counter | printing, wording, reminder text |
 
@@ -1902,7 +1902,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `81bbe983` | a | replacement | if a doubling effect makes two Monks from this trigger, this Equipment attaches to only one of them | `rulings_replacement2::elspeth_doubles_a_create_and_attach_token_and_the_equipment_attaches_to_one_cr_614_1a_301_5` |
 | `379a1727` | a | stack | no actions are allowed between creating the Monk token and choosing whether to attach the Equipment to it | `rulings_stack3::explore_connive_and_cori_steels_attach_choice_happen_within_one_resolution_cr_608_2` |
 | `110f09f6` | a | other | a flurry-style count includes spells cast before the permanent entered, so an early cast still counts toward later ones | untested |
-| `2bb24717` | a | triggers | the created Monk token enters as a 1/1, so ETB-power triggers see a 1/1 before any static effect changes that | untested |
+| `2bb24717` | a | triggers | the created Monk token enters as a 1/1, so ETB-power triggers see a 1/1 before any static effect changes that | `rulings_triggers3::sword_of_the_meek_sees_static_1_1s_and_is_returned_whatever_changes_after_cr_603_6a` |
 
 ### Underworld Breach
 
@@ -2148,8 +2148,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `b3653e3c` | a | triggers | if the source leaves the battlefield while its ability is on the stack, use its last-known power to determine X | untested |
-| `509660c9` | a | mana | an X value referenced by this ability is calculated only once, as it resolves | untested |
+| `b3653e3c` | a | triggers | if the source leaves the battlefield while its ability is on the stack, use its last-known power to determine X | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
+| `509660c9` | a | mana | an X value referenced by this ability is calculated only once, as it resolves | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
 
 ### Questing Beast
 
@@ -2208,8 +2208,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `d02a995d` | a | copies | a token copy of this copies exactly whats printed, skipping tap state, counters, and attachments | `rulings_copies3::vaultborn_tyrants_token_has_no_counters_and_a_copys_token_copies_the_copy_cr_707_2_707_9b` |
 | `c28e08d7` | a | copies | if the source was itself copying something when last on the battlefield, the token enters as that other thing | `rulings_copies3::vaultborn_tyrants_token_has_no_counters_and_a_copys_token_copies_the_copy_cr_707_2_707_9b` |
-| `95367116` | a | triggers | both static power effects and replacement effects (counters, copying) count when checking a power-based trigger | untested |
-| `0c836eb3` | a | triggers | once a power-threshold ability has triggered, later lowering that power or removing the creature doesn't stop its effect | untested |
+| `95367116` | a | triggers | both static power effects and replacement effects (counters, copying) count when checking a power-based trigger | `rulings_triggers3::an_entering_creatures_power_counts_its_counters_and_later_changes_dont_matter_cr_603_6a` |
+| `0c836eb3` | a | triggers | once a power-threshold ability has triggered, later lowering that power or removing the creature doesn't stop its effect | `rulings_triggers3::an_entering_creatures_power_counts_its_counters_and_later_changes_dont_matter_cr_603_6a` |
 | `be7d384c` | a | triggers | a token copy of this permanent entering the battlefield also triggers its own power-based ability | `rulings_copies3::vaultborn_tyrants_token_has_no_counters_and_a_copys_token_copies_the_copy_cr_707_2_707_9b` |
 
 ### Woodfall Primus
@@ -2511,9 +2511,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `c0a633cc` | b | DEF | an Equipment with a size-based bonus can still be attached to any creature, not just ones matching its bonus condition [part 3, was a/other: equip targets any creature you control; a definition] | a definition, no behaviour of its own |
 | `dee45a6f` | a | replacement | if an Equipment cant reattach to its trigger creature (e.g. it left), it returns to the battlefield unattached instead | `rulings_replacement2::sword_of_the_meek_returns_unattached_when_its_creature_is_gone_cr_608_2b_301_5` |
-| `d80bd9c5` | a | triggers | an ETB power/toughness trigger only sees static abilities at that instant; nothing can react fast enough to change it | untested |
-| `d3c2bdb3` | a | triggers | once a power/toughness-based trigger has fired, later changing that power or toughness doesn't stop its effect | untested |
-| `b1e42bd2` | a | triggers | this trigger only fires if its source is already in your graveyard the instant the relevant creature enters | untested |
+| `d80bd9c5` | a | triggers | an ETB power/toughness trigger only sees static abilities at that instant; nothing can react fast enough to change it | `rulings_triggers3::sword_of_the_meek_sees_static_1_1s_and_is_returned_whatever_changes_after_cr_603_6a` |
+| `d3c2bdb3` | a | triggers | once a power/toughness-based trigger has fired, later changing that power or toughness doesn't stop its effect | `rulings_triggers3::sword_of_the_meek_sees_static_1_1s_and_is_returned_whatever_changes_after_cr_603_6a` |
+| `b1e42bd2` | b | DEF | this trigger only fires if its source is already in your graveyard the instant the relevant creature enters [part 3, was a/triggers: a trigger condition is checked as the event happens (CR 603.2): the Sword must be in the graveyard then, as the engine's events are] | a definition, no behaviour of its own |
 
 ### Time Vault
 
@@ -2755,7 +2755,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a391f90a` | a | triggers | a reflexive trigger with no legal, or a now-illegal, target draws nothing regardless of other factors | untested |
+| `a391f90a` | a | triggers | a reflexive trigger with no legal, or a now-illegal, target draws nothing regardless of other factors | `rulings_triggers3::a_reflexive_trigger_whose_target_is_gone_draws_nothing_cr_603_12_608_2b` |
 | `3f4ecfc4` | b | DEF | flavor-only ruling, no rules content | a definition, no behaviour of its own |
 
 ### Bloodbraid Challenger

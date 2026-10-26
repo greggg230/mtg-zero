@@ -963,7 +963,7 @@ c0a633cc	b	DEF	an Equipment with a size-based bonus can still be attached to any
 dee45a6f	a	replacement	if an Equipment cant reattach to its trigger creature (e.g. it left), it returns to the battlefield unattached instead
 d80bd9c5	a	triggers	an ETB power/toughness trigger only sees static abilities at that instant; nothing can react fast enough to change it
 d3c2bdb3	a	triggers	once a power/toughness-based trigger has fired, later changing that power or toughness doesn't stop its effect
-b1e42bd2	a	triggers	this trigger only fires if its source is already in your graveyard the instant the relevant creature enters
+b1e42bd2	b	DEF	this trigger only fires if its source is already in your graveyard the instant the relevant creature enters [part 3, was a/triggers: a trigger condition is checked as the event happens (CR 603.2): the Sword must be in the graveyard then, as the engine's events are]
 b9d3a261	a	other	a skip-turn choice is made as the turn begins, only if tapped then; a skipped source untaps before next turn starts
 f801fa4a	b	DEF	this ability's wording prevents repeatedly activating it to skip more than one turn at a time [part 3, was a/other: Time Vault's untap needs a turn skipped, one at a time; a definition]
 1efd0607	a	mana	a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation
