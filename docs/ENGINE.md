@@ -602,12 +602,18 @@ adds `PayPool`. M8a (section 35) adds two: `PlayDraw` (`PLAYER` = the decider ta
 turn, `PLAYER` + 1 = the opponent does: CR 103.1) and `RevealCompanion` (`LIBRARY` + k = the k-th
 companion of the decider's sideboard its starting deck allows, by definition, `Choice::Def`;
 `PASS` = none: 103.2b); and one priority action: `act::COMPANION` (= `PLAYER` + 0, "the
-decider's" companion, `Choice::Companion`: the special action of 116.2g). There are 44 decision
-kinds; the context block holds 64 since layout v3 (section 22.6).
+decider's" companion, `Choice::Companion`: the special action of 116.2g). M8b part a (section
+36.2) adds two, asked by a best-of-three match between its games (never by a `Game`):
+`Sideboard` (`LIBRARY` + k = change entry k of the decider's pool list, the pool's cards by
+definition then the five basic lands, k after the last entry changed, `Choice::Def`; `PASS` =
+done, when the deck is legal) and `SideboardCount` (`NUMBER` + n = the new count of the entry just
+chosen: a basic land or a card with several copies). There are 46 decision kinds; the context
+block holds 64 since layout v3 (section 22.6).
 
 Mapping to zero-core's `SearchGame` (M5a, section 21): `to_move` = the pending decision's
 player; `legal_actions` = the ids; `step` = `apply`; `result` from `outcome()`; `determinize`
-as above; `NUM_ACTIONS = 1024`.
+as above; `NUM_ACTIONS = 1024`. (M8b: the episode is a match; between the games of a
+best-of-three the match's sideboarding decision is the pending one, section 36.)
 
 ## 12. Combat (CR 506-511)
 
@@ -1184,7 +1190,8 @@ they isolate one keyword or trigger each.
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
-| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism |
+| `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b); sideboarded decks are legal and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
@@ -1261,6 +1268,11 @@ Pool; it panics on 4613d0f) and `cards_m7c_tail2.rs` (Bilbo, Lingering Souls).
 earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
 `n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).
 
+**Matches** (M8b, section 36.8): `fuzz_random_matches` plays best-of-three matches through
+`MtgAz` with random actions, sideboarding included (`FUZZ_MATCHES=n`, default `FUZZ_GAMES` / 20,
+at least 20; `FUZZ_FIRST` as for games), and `same_seed_and_actions_replay_matches_identically`
+replays 12.
+
 **The search smoke** (`tools/search_smoke.py`, branch `m7d-targetfix`): the gate before pinning
 an engine for a run (21.5). Self-play search reaches states random play doesn't: it tries every
 legal option of a decision, in determinized worlds and deep lines, where the fuzzer follows one
@@ -1280,7 +1292,9 @@ s is reported as `HANG (stalled)` with the panic messages. `python tools/search_
 7.5 minutes on the desktop (52-59 s per configuration; 90-135 s with other work running), the
 time to budget before a launch; `python -m mtgz.az.bench search --game mtg --threads 8 --games 400
 --sims 64` is one configuration with a plainer seat (driver seed 0, the default spec, no minor
-decisions; 65 s; the bench has no seed option and no hang watchdog).
+decisions; 65 s; the bench has no seed option and no hang watchdog). M8b: the specs `match` and
+`match_eval` (best-of-three matches on random or evaluation pools, three times the step cap); the
+default is `--specs random,eval,match` (section 36.8).
 It came after the self-play run mtg3 (preset `mtg-3`, engine 0577e06, 524 cards) panicked in
 iteration 15 with "no legal target for a required target" and its process hung. On 0577e06 the
 smoke finds that panic in 1 of 23 configurations (9,200 random-deck games; seed 2, every time, in
@@ -1314,8 +1328,10 @@ Manifester, 5cbbaf9280a01797, and for the whole cube with M7d's IR fixes, 1f2101
 other decks, every game differs; and for M7e part 1's rules fixes and its three custom cards,
 161108b935c03d14, and for M7e part 2's payment model, b3a102f4d67c5e97, and for M8a's setup (the
 play-or-draw decision first, the shuffles after it: every game differs; the digest games have
-no sideboards), 076e92a6939c6798), and names the games
-that differ. `DIGEST_WRITE=1` records
+no sideboards), 076e92a6939c6798, and for M8b's layout additions, the encodings only:
+63d5bd84a9f7c19b), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
+prints the combined digest alone: compare it before and after a layout change (M8b: 3fb15384404c7428
+on both sides, section 36.8). `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
 are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every
@@ -1845,7 +1861,11 @@ heuristic-vs-random games reach it, against ~20% at 40); `decks` is `"random"` (
 per game), `"eval"` (a pair of the fixed evaluation set) or `{"p0": [names], "p1": [names]}`
 (M8a: optionally `"p0_sideboard"`, `"p1_sideboard"`; random and evaluation decks come with
 generated sideboards, 35.7); M8a's `"chooser": 0 | 1` fixes the seat that chooses who takes the
-first turn (default: chosen at random each game, CR 103.1). Unknown keys are errors. The cube IR is compiled into the binary (`db::CUBE_IR`), so the Python
+first turn (default: chosen at random each game, CR 103.1). M8b (section 36): `"format": "bo1"`
+(the default: one game) or `"bo3"` (the episode is a best-of-three match with sideboarding; its
+result is the match's), `"pools": true | false` (random and evaluation decks built by the
+deckbuilder from generated 45-card pools, the rest of the pool the sideboard; default true for
+`"bo3"`). Unknown keys are errors. The cube IR is compiled into the binary (`db::CUBE_IR`), so the Python
 module does not depend on where it was built.
 
 ### 21.2 `encode`: layout v1 (13,532 floats)
@@ -2493,6 +2513,12 @@ sideboard cards still outside the game, a companion whose action is available). 
 kinds (44 of 64) and two task codes (24, 25). v4 stays open until phase 2 of M8 ends (the
 best-of-three match adds its own fields); it is frozen at the first run of layout v4.
 Checkpoints of layout v3 do not load into v4.
+
+M8b part a (section 36.7): 33,652 floats. The list block grows in place to 64 slots of 60 floats
+(every `LIBRARY` id; sideboarding's pool list), two bags join the bag block (17: the opponent's
+pool, the cards they revealed in earlier games), and the match block (32 globals) is appended; the
+blocks after the list and the bags move. Two decision kinds (46 of 64), one task code (26,
+sideboarding).
 
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
@@ -4972,3 +4998,217 @@ the branch's last commit): combined digest 076e92a6939c6798 (section 15). Speed:
 * The heuristic bot always plays first (not deck- or matchup-dependent).
 * Layout v4's file: this branch renamed `layout_v3.json` and set `"version": 4`; the content
   (offsets, segments) is regenerated on merge with the `az` test (not run here).
+
+## 36. Matches and sideboarding (M8b part a)
+
+Branch `m8b-match` (from main at 536f659): phase 2 part a of "matches and sideboarding" (DESIGN.md
+0, M8). The `mtg` episode becomes a match: best-of-one (exactly the game of M5a-M8a) or
+best-of-three with sideboarding between games, whose result is the match's; seeded card pools and
+a deckbuilder for self-play and evaluation; the encoding's match additions (layout v4, still
+open). The information model stays phase 1's (open decklists); 36.10 lists what part b changes for
+the hidden pool. `NUM_ACTIONS` and the action ranges are unchanged.
+
+### 36.1 The match
+
+`MtgAz` (engine/src/az) is `{ g: Game, m: MatchState }` (`az/matches.rs`): the current (or last)
+game and the rest of the match. The spec's `"format"` is `"bo1"` (the default: one game; the
+existing presets, tests and digests) or `"bo3"`.
+
+| What | Rule | How |
+|---|---|---|
+| who chooses who takes the first turn | CR 103.1: in the first game of a match the players may use any agreed method; in a match of several games the loser of the previous game chooses; if the previous game was a draw, the player who made the choice in it chooses again | game 1: `GameSpec.chooser` = the spec's `chooser` or a player chosen at random (M8a); a later game: `Some(loser)`, after a draw `Some(previous chooser)` |
+| when the match ends | the user's decision (DESIGN.md 0): a player has won two games, or three games have been played; a drawn game counts as a game; a match can be a draw | `MatchState::end_game` after every game; `wins`, `draws`, `results` (per game: 1 + winner, 3 = drawn) |
+| the result | | 1 / 0 to the player with more game wins, 0.5 each on equal wins (1-1-1, 0-0 with three draws, 1-0 with two draws is a win) |
+| between games | CR 100.4 (the sideboard), 100.4b (limited: the rest of the pool), 100.2b (a limited deck has at least 40 cards; any number of basic lands) | sideboarding (36.2), then the next game with the chosen decks and the rest of the pools as sideboards, chooser as above |
+
+The Magic Tournament Rules play on after a drawn game until a player has two wins or the round's
+time runs out (then the player with more game wins wins); stopping after three games is the
+user's choice for self-play (not checked against the current MTR text). Companion reveals (103.2b)
+and the play-or-draw choice happen in every game (M8a); the companion's "once per game" special
+action is per game.
+
+The search sees one episode: the last decision of a game leads straight to the first sideboarding
+decision (or the end of the match), the last sideboarding decision to the next game's play-or-draw
+decision. No chance key marks a game boundary: a game's end follows from public facts, and the
+next game's setup reveals nothing (its shuffles come after the play-or-draw choice; its draws are
+keyed as before). The next game's seed comes from the match's RNG, which `determinize` reseeds (a
+future game's shuffles are not known in the search's worlds).
+
+### 36.2 Sideboarding (`Sideboard`, `SideboardCount`)
+
+Each player's **pool list** (`MatchPool::list`): the pool's cards (deck and sideboard, basic lands
+excluded) as (definition, copies) sorted by definition, then the five basic lands (W U B R G, any
+number). A deck is a count per entry. Players sideboard one after the other, the next game's
+chooser first (36.10: the hiding is nominal in this part); each player's decisions:
+
+* `Sideboard`: `PASS` = done (offered when the deck has `min_deck..=max_deck` cards), or `LIBRARY`
+  + k = change entry k, for k after the last entry changed (increasing list order). A single card
+  (one copy in the pool) goes in or out at once; a basic land or a card with several copies is
+  followed by
+* `SideboardCount`: `NUMBER` + n = its new count (n other than its count now, 0..31).
+
+An option is offered only when a legal deck stays reachable (the entries after it may still keep
+their counts or take any count up to their copies), so no sequence dead-ends. **Every legal deck is
+reachable in exactly one way**: the entries it changes, in list order, with their new counts, then
+`PASS` (an entry is changed at most once, to a different count). Keeping the deck is one decision;
+a swap of two cards three; a basic land count two. A sideboarding is at most 1 + (single entries)
++ 2 x (other entries) decisions (k increases every time), and a random player makes ~7 per
+sideboarding (fuzzing, 36.8). Bounds: a deck has at least 40 cards (100.2b; or the first deck's
+size when that is smaller: spec decklists in tests) and at most `MAX_DECK` = 60 (or the first
+deck's size when larger; no rule caps a deck: an engine bound so the decisions stay finite), a
+count at most 31 (`NUMBER`'s range); a pool list has at most 64 entries (`LIBRARY`'s range: 59
+different cards and the basics; a bigger pool is an error in best-of-three). Test:
+`cr_100_2b_sideboarding_reaches_every_legal_deck_exactly_once` searches every decision sequence
+of a small list (three cards, one with two copies, two basics; decks of 5..7) and finds each of
+the 180 legal decks once, from three starting decks.
+
+Both decks chosen, the next game begins (`Game::with_sideboards`: the decks, the pools' other
+cards as sideboards, `chooser`). The companion is revealed from the new sideboard if the new deck
+fulfills it.
+
+### 36.3 What carries over
+
+`MatchState`: the format, the game spec, the pools (`Arc`), each player's current deck (counts),
+the game number, per game the result, who chose and who started, wins and draws, the turns of
+earlier games (`rounds`), the cards each player **revealed** in the current and the earlier games
+(a bit per identity: every `KEY_REVEAL` key a step emits, i.e. every card made public, from hand,
+library, sideboard or exile face down; `MtgAz::step` reads them in best-of-three), the
+sideboarding in progress and the match's RNG. Clones copy pointers and ~600 bytes.
+
+### 36.4 Pools and the deckbuilder (`az/pools.rs`)
+
+Before team drafting exists, a match's pools are generated (`"pools": true`, the default for
+`"bo3"`; `"pools": false` keeps M8a's generated decks with 7-card sideboards):
+
+* `random_pool` (45 singleton cards of the 546 supported, seeded): two main colours; one pool in
+  four a companion the main colours can cast; 27 spells of the main colours (weighted to creatures
+  3, interaction 2, other 1), 4 colourless spells, 5 nonbasic lands (weighted to the pair's duals,
+  then lands of one colour, triomes and any-colour lands, colourless utility), then off-colour
+  spells, half of them of a splash colour. Three of its main-colour spells are marked as the
+  player's **first picks** (data only in this part: part b hides them from the opponent).
+* `build_deck` (deterministic): the colour pair whose 23 best playable spells (colours within the
+  pair, every pip payable) weigh most; 23 spells by weight then mana value, at most 3 of mana value
+  5+ and 4 of 4 (lifted when fewer fit); companions stay in the sideboard; lands: the pool's
+  nonbasic lands that make or fetch a colour of the pair and at most one colourless utility land
+  (up to 9), then basics split by the coloured pips (at least a third each), 40 cards. The rest of
+  the pool is the sideboard (~22 cards).
+* The evaluation pools: `eval_pools(seed, i)`, fixed per evaluation seed (pair i = the game seed's
+  `split64 % eval_decks`, as the evaluation decks). The evaluation spec keeps the format, so the
+  yardstick, random and Elo games of a best-of-three run are matches.
+
+Measured (tests/rules_m8b.rs, 200 pools): every pool 45 cards, 3 first picks among them; 79
+pools with a companion (one in four by design, the others among the random off-colour or main-colour
+picks); none without 23 playable spells; every deck passes `decks::check` (40 cards, 17 lands, two
+colours of spells, singleton but basics).
+
+### 36.5 Bots
+
+The heuristic keeps its deck (`bots::sideboard`: `PASS`, always legal at a player's first
+sideboarding decision since the last game's deck is legal; the first legal option otherwise),
+plays first and reveals companions as in M8a. zero-core's `random` picks uniformly among the
+options (a random walk over the list, ending since k increases).
+
+### 36.6 The `SearchGame` mapping
+
+| zero-core | best-of-one | best-of-three |
+|---|---|---|
+| `to_move`, `legal_actions`, `step` | the game's | the sideboarding decision's between games, else the game's; a game's end starts sideboarding or ends the match |
+| `result` | the game's (M5a) | the match's (36.1) |
+| `margin(seat)` | the life difference / 20 | 0.75 x (game-win difference / 2) + 0.25 x the current (at the end the last) game's life margin |
+| `score`, `rounds` | life, turns | game wins, the turns of all games |
+| `determinize` | the game's (the match's RNG reseeded from the engine RNG after it: zero-core's stream is unchanged) | the game's, not while sideboarding (the last game is over); the match's RNG |
+| `encode` | the game's + the match block and bags | the same; while sideboarding 36.7 |
+| `minor_decision` | paying mana | the same; sideboarding is not minor |
+
+### 36.7 Encoding: layout v4 additions (33,652 floats)
+
+| Field | Where | What |
+|---|---|---|
+| list block | `O_LIST`, now 64 x 60 (was 40 x 56) | every `LIBRARY` id has a slot; four more floats (`list::*`). A sideboarding decision (the decider only) lists its pool list: card code, present, its `LIBRARY` id an option (`OPTION`), copies in the pool / 4 (`COPIES`; 0 for a basic land), copies in the deck being built / 4 (`IN_DECK`), in the last game's deck / 4 (`AT_START`), a first pick of the viewer's (`FIRST_PICK`), a basic land (`BASIC`), at or before the last entry changed (`DECIDED`). The slot scores `LIBRARY` + k (the list segment) |
+| `bag::OPP_POOL` | bag 15 | the opponent's pool as the viewer knows it (open decklists: all of it; part b: but the first picks) |
+| `bag::OPP_REVEALED` | bag 16 | the identities the opponent revealed in earlier games of the match |
+| match block | `O_MATCH` (33,620), 32 floats, globals (`mtch::*`) | best-of-three; game number / 3; game wins / 2 (mine, the opponent's), draws / 3; sideboarding now, I sideboard first (I choose in the next game), I have chosen my deck; my deck's size / 40 (being built while I sideboard), the opponent's last deck's size / 40; per game played: I won / lost / drawn, I took the first turn, I chose who did; the entry a `SideboardCount` is about and the last entry changed ((k + 1) / 64) |
+| context while sideboarding | context block | the kind (`Sideboard` 44, `SideboardCount` 45), the decider is the viewer, the asking task code 26 (sideboarding), the number of options; `SideboardCount`: the entry's card code |
+
+While sideboarding the game blocks are empty (the last game is over): the encoding is the match
+block, the match bags, the context and, for the decider, the list. The other player's deck being
+built and, for the second player, the first player's chosen deck are not encoded (tested). The
+layout file `mtgz/az/layout_v4.json` is regenerated by the main session (`MTGZ_WRITE_LAYOUT=1
+cargo test -p engine --test az layout`; not run on this branch, so the file is stale here and
+`tests/test_mtg_az.py::test_layout_and_token_network_read_the_encoding` fails until then).
+`op_code` and `task_code` are unchanged (no new task or op).
+
+### 36.8 Tests, fuzzing, smoke, digests, speed
+
+`tests/rules_m8b.rs` (12 tests, section 15's table). `cargo test --release -p engine
+--no-fail-fast --lib --test 'cards*' --test 'rules*' --test hidden --test support --test smoke
+--test 'bots*'`: 900 pass (M8a's 888 and the 12 new), 7 ignored.
+
+Fuzzing: `fuzz_random_matches` plays best-of-three matches with random actions (random pools,
+the evaluation pools, M8a's decks with 7-card sideboards, 12-turn games: one match in four each),
+checking the legal actions, the game invariants after every action, every ~40 actions a clone
+and `determinize` for the decider (actions, encoding, `view_of` in a game), every later game's
+decks (in range, within the pool) and chooser (103.1), and the match's end;
+`same_seed_and_actions_replay_matches_identically` replays 12. `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`: no failure, 146 s. The
+20,000 games as before (companions revealed in 2,641 games, put into a hand 2,282 times: M8a's
+numbers, the games are unchanged) and 1,000 matches: 2,562 games, 562 matches of three games, 748
+drawn games (mostly the 12-turn matches), 410.7 decisions per match, 20,563 sideboarding decisions
+(~7 per player's sideboarding), 3,058 decks changed.
+
+Search smoke: `tools/search_smoke.py` has the specs `match` and `match_eval` (best-of-three on
+random or evaluation pools, three times the step cap) and runs `random,eval,match` by default.
+@@SMOKE@@
+
+Behaviour digests: the layout grew, and the digest hashes the encoding bit for bit, so every
+game's digest changed; `DIGEST_ENCODING=0` (new) leaves the encodings out: on main's code
+(536f659 + the option) and on this branch the 2,500 games give the same combined digest,
+3fb15384404c7428 (decisions, legal actions, keys, determinized worlds and outcomes unchanged: the
+`Game` is untouched). Re-recorded with the encodings (`DIGEST_WRITE=1`, this branch's last code commit): combined digest
+63d5bd84a9f7c19b.
+
+Speed (`cargo test --release -p engine --test perf match_layer -- --ignored --nocapture`, the
+desktop, idle): best-of-one, 93,472 decisions (300 heuristic-against-random games, replayed twice in
+alternating order): 12.64 us per decision for the bare `Game` (legal actions, clone, encode, apply:
+M8a's `MtgAz`) and 12.88 us through `MtgAz` (+1.9%: the match block and the opponent's pool bag in
+every encoding, the match state in every clone); both include the larger vector (33,652 floats,
++12%). Best-of-three: heuristic against heuristic 2.50 games and 379 decisions per match; random
+against random 2.45 games and 457.
+
+### 36.9 Python
+
+`mtgz/az/__init__.py`: `SPEC_BO3` and the preset `mtg-4` = `mtg-3` with the best-of-three spec,
+its evaluation spec (the evaluation pools, matches) and `max_steps` 60,000 (a match is up to three
+games). Elo matches use the evaluation spec: matches. `tests/test_mtg_az.py`: the feature count,
+a match through the bindings and the driver (the heuristic beats random), the presets. `temp_moves`
+(60) counts the match's searched decisions, so in a match it covers game 1's opening only (kept as
+mtg-3's; to revisit with the run).
+
+### 36.10 What part b must change (the hidden pool)
+
+Part b replaces open decklists by DESIGN.md 0's knowledge: each player knows the opponent's pool
+but their first picks, and the opponent's current deck is hidden within it. Every place that
+assumes open decklists:
+
+1. `Game::determinize` deals the owner's hidden cards (hand, library, face-down) from the owner's
+   **actual** deck (the multiset is known). Part b: the viewer's world samples the opponent's
+   first picks (cards the viewer has not seen), then their deck and sideboard from that pool,
+   consistent with what the opponent revealed in this game (in the deck) and the deck's size
+   (public), then deals hand and library from it.
+2. `MtgAz::determinize` while sideboarding keeps the first sideboarder's chosen deck: the second
+   sideboarder's tree is conditioned on it. Part b resamples it from the pool (zero-core's
+   simultaneous-choice pattern, Glass Road Zero docs/search.md 9.3); the encoding already hides it.
+3. The sideboards: `determinize` keeps both (35.5); part b deals the opponent's from their sampled
+   pool. The other player's search sees whether a player is asked to reveal a companion (whether
+   their deck fulfills one, 35.5): with hidden decks that says something about the deck; decide
+   whether to ask every player with a companion in the pool.
+4. The encoding: `bag::OPP_HIDDEN` (the opponent's hand and library cards the viewer doesn't know,
+   by identity) reads the opponent's deck: it must become what the viewer can know (e.g. the pool's
+   candidates, or nothing); `bag::OPP_POOL` must leave out the first picks; `mtch::OPP_DECK` (the
+   deck's size) stays public. The `az` test that features are invariant under `determinize` must
+   then hold with sampled decks.
+5. `MatchPool::first_picks` (3 per generated pool) is the data part b hides; `list::FIRST_PICK`
+   shows the viewer its own. Real first picks come from `team_draft`.
+6. `force_chance`'s draw forcing swaps identities among the library cards "interchangeable for
+   every player": still right within a sampled deck.
+7. The heuristic bot reads the true `Game`: check that none of its choices reads the opponent's
+   hidden cards before the deck is hidden.

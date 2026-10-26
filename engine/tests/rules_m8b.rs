@@ -446,6 +446,7 @@ fn pools_and_the_deckbuilder() {
         // Seeded.
         assert_eq!(pools::random_pool(db(), &mut Rng::new(seed)), p);
     }
+    println!("{with_comp} of 200 pools with a companion, {short} without 23 playable spells");
     assert!(with_comp > 20, "companions in {with_comp} pools");
     assert!(short <= 2, "{short} pools without 23 playable spells");
     // The evaluation pools: fixed per (seed, index), different across indices.

@@ -112,3 +112,109 @@ fn measure() {
     }
     println!("legal_actions: {:.0} ns mean", t.elapsed().as_secs_f64() * 1e9 / n);
 }
+
+/// M8b (ENGINE.md 36.8): the match layer's cost per decision in best-of-one
+/// (`MtgAz`: step, legal actions, clone, encode) against the bare `Game`
+/// (apply, legal actions, clone, `encode_features`: the M8a `MtgAz`), on
+/// the same games (heuristic against random, the spec's decks); and the
+/// decisions of best-of-three matches (heuristic against heuristic, random).
+#[test]
+#[ignore]
+fn match_layer() {
+    use engine::az::{bots::Heuristic, MtgAz, MtgSpec, NUM_FEATURES};
+    use zero_search::game::SearchGame;
+    let sp = MtgSpec::default();
+    let n = 300u64;
+    let mut x = vec![0.0f32; NUM_FEATURES];
+    let (mut t_game, mut t_match, mut decisions) = (0.0f64, 0.0f64, 0u64);
+    for round in 0..2 {
+        for seed in 0..n {
+            // The actions: heuristic (seat seed % 2) against random.
+            let mut g = MtgAz::new_game(&sp, 2, seed).unwrap();
+            let mut h = Heuristic::new(seed);
+            let mut rng = Rng::new(seed);
+            let (mut l, mut k) = (Vec::new(), Vec::new());
+            let mut acts = Vec::new();
+            while let Some(p) = g.to_move() {
+                g.legal_actions(&mut l);
+                let a = if p as u64 == seed % 2 { h.choose(&g.g, &l) } else { l[rng.below(l.len() as u32) as usize] };
+                g.step(a, &mut k).unwrap();
+                acts.push(a);
+            }
+            let replay_game = |x: &mut [f32]| {
+                let [(d0, s0), (d1, s1)] = sp.pools(seed);
+                let mut g = Game::with_sideboards(engine::db::CardDb::cube(), GameSpec::default(), [&d0, &d1], [&s0, &s1], seed).unwrap();
+                let (mut l, mut k) = (Vec::new(), Vec::new());
+                for &a in &acts {
+                    g.legal_actions(&mut l);
+                    let c = g.clone();
+                    black_box(&c);
+                    x.fill(0.0);
+                    g.encode_features(g.to_move().unwrap(), x);
+                    g.apply(a, &mut k).unwrap();
+                }
+            };
+            let replay_match = |x: &mut [f32]| {
+                let mut g = MtgAz::new_game(&sp, 2, seed).unwrap();
+                let (mut l, mut k) = (Vec::new(), Vec::new());
+                for &a in &acts {
+                    g.legal_actions(&mut l);
+                    let c = g.clone();
+                    black_box(&c);
+                    x.fill(0.0);
+                    g.encode(g.to_move().unwrap(), x);
+                    g.step(a, &mut k).unwrap();
+                }
+            };
+            // Alternate the order to even out caches.
+            let t = Instant::now();
+            if round == 0 { replay_game(&mut x) } else { replay_match(&mut x) }
+            let e1 = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            if round == 0 { replay_match(&mut x) } else { replay_game(&mut x) }
+            let e2 = t.elapsed().as_secs_f64();
+            if round == 0 {
+                t_game += e1;
+                t_match += e2;
+            } else {
+                t_match += e1;
+                t_game += e2;
+            }
+            decisions += acts.len() as u64;
+        }
+    }
+    println!(
+        "best-of-one, {decisions} decisions: Game {:.2} us, MtgAz {:.2} us per decision (legal, clone, encode, step)",
+        t_game / decisions as f64 * 1e6,
+        t_match / decisions as f64 * 1e6
+    );
+    // Decisions per best-of-three match.
+    let sp3 = MtgSpec::parse(r#"{"format": "bo3"}"#).unwrap();
+    for (label, bots) in [("heuristic vs heuristic", [true, true]), ("random vs random", [false, false])] {
+        let (mut d, mut games, mut multi) = (0u64, 0u64, 0u64);
+        for seed in 0..200u64 {
+            let mut g = MtgAz::new_game(&sp3, 2, seed).unwrap();
+            let mut hs = [Heuristic::new(seed), Heuristic::new(seed + 1)];
+            let mut rng = Rng::new(seed);
+            let (mut l, mut k) = (Vec::new(), Vec::new());
+            while let Some(p) = g.to_move() {
+                g.legal_actions(&mut l);
+                let a = match g.sideboarding() {
+                    Some(sb) if bots[p] => engine::az::bots::sideboard(sb, &l),
+                    _ if bots[p] => hs[p].choose(&g.g, &l),
+                    _ => l[rng.below(l.len() as u32) as usize],
+                };
+                d += 1;
+                multi += (l.len() > 1) as u64;
+                g.step(a, &mut k).unwrap();
+            }
+            games += g.m.game_no as u64;
+        }
+        println!(
+            "best-of-three, {label}: {:.2} games, {:.0} decisions ({:.0} with two options or more) per match",
+            games as f64 / 200.0,
+            d as f64 / 200.0,
+            multi as f64 / 200.0
+        );
+    }
+}

@@ -14,13 +14,18 @@ from mtgz.az import protocol, run
 from mtgz.az.infer import UniformEvaluator, drive
 
 SPEC = '{"max_turns": 60}'
+MATCH = '{"max_turns": 60, "format": "bo3"}'
+
+
+def nf():
+    return G.info('mtg')['num_features']
 
 
 def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg']
     info = G.info('mtg')
-    assert info['num_actions'] == 1024 and info['num_features'] == 29972
+    assert info['num_actions'] == 1024 and info['num_features'] == 33652
     assert info['min_players'] == info['max_players'] == 2
     assert info['bots'] == ['random', 'heuristic']
 
@@ -35,7 +40,7 @@ def test_game_through_the_bindings():
         assert len(legal) >= 1 and list(legal) == sorted(set(legal)) and max(legal) < 1024
         p = g.to_move
         x = np.asarray(g.encode(p))
-        assert x.shape == (29972,) and np.isfinite(x).all()
+        assert x.shape == (nf(),) and np.isfinite(x).all()
         if steps % 25 == 0:
             d = g.clone()
             d.determinize(p, 99)
@@ -72,14 +77,49 @@ def test_selfplay_records_samples():
     drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: parts.append(drv.take_samples()))
     parts.append(drv.take_samples())
     s = protocol.concat_samples(parts)
-    protocol.validate_samples(s, 29972)
+    protocol.validate_samples(s, nf())
     assert len(s['x']) > 50
     res = drv.take_results()
     assert len(res) == 2 and all(r['over'] for r in res)
 
 
+def test_match_through_the_bindings():
+    """A best-of-three match (docs/ENGINE.md 36) through the bindings: sideboarding decisions
+    between games, the match result, determinize keeping the decider's view; the heuristic beats
+    random in matches through the driver."""
+    E = G.engine()
+    rng = np.random.default_rng(3)
+    for seed in (1, 2):
+        g = E.Game('mtg', MATCH, 2, seed)
+        steps = 0
+        while not g.over:
+            legal = g.legal()
+            p = g.to_move
+            x = np.asarray(g.encode(p))
+            if steps % 40 == 0:
+                d = g.clone()
+                d.determinize(p, 7)
+                assert list(d.legal()) == list(legal) and np.array_equal(np.asarray(d.encode(p)), x)
+            g.step(int(legal[rng.integers(len(legal))]))
+            steps += 1
+            assert steps < 60000
+        r = g.result()
+        assert abs(sum(r) - 1) < 1e-6 and r[0] in (0.0, 0.5, 1.0)
+    h, r = G.seat_dict('heuristic'), G.seat_dict('random')
+    drv = G.Driver('mtg', [[h, r], [r, h]] * 3, spec=MATCH, concurrency=6, threads=2, seed=3, max_steps=60000)
+    drive(drv, {})
+    res = drv.take_results()
+    assert len(res) == 6 and all(x['over'] for x in res)
+    assert sum(x['result'][x['gid'] % 2] for x in res) / len(res) > 0.7
+
+
 def test_presets_and_defaults():
-    assert {'toy-smoke', 'toy-1', 'mtg-smoke', 'mtg-1', 'mtg-2', 'mtg-2-mlp'} <= set(run.PRESETS)
+    assert {'toy-smoke', 'toy-1', 'mtg-smoke', 'mtg-1', 'mtg-2', 'mtg-2-mlp', 'mtg-3', 'mtg-4'} <= set(run.PRESETS)
+    c3 = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-3']), {})
+    c4 = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-4']), {})
+    assert json.loads(c4['spec'])['format'] == 'bo3' and json.loads(c4['eval_spec']) == dict(
+        json.loads(c4['spec']), decks='eval')                           # evaluation and Elo: matches
+    assert {k for k in c3 if c3[k] != c4[k]} == {'spec', 'eval_spec', 'max_steps', 'preset'}
     cfg = run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {})
     assert cfg['game'] == 'mtg' and cfg['yardstick'] == 'heuristic'
     assert json.loads(cfg['spec'])['max_turns'] == 60
@@ -144,6 +184,8 @@ def test_layout_and_token_network_read_the_encoding():
     info = G.info('mtg')
     lay = tokens_layout(A.LAYOUT, info['num_features'], info['num_actions'])
     assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 1024 and A.LAYOUT['version'] == 4
+    segs = {s['name']: s for s in lay['segments']}
+    assert segs['list']['count'] == 64 and [b['count'] for b in lay['bags']] == [17]   # M8b
     names = A.LAYOUT['cards']
     torch.manual_seed(0)
     m = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)

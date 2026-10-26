@@ -1,9 +1,11 @@
 """MTG Zero's AlphaZero stack = zero-core (third_party/zero-core, pinned; its docs/az.md and
 docs/search.md) + what is MTG's, registered here as the process's game package: the game `mtg`
-(engine/src/az, docs/ENGINE.md 21-22: one game of Magic between two random 40-card decks of the
-supported PowerLSV cube cards), its object layout for zero-core's token network (arch 'tokens':
-`layout_v4.json`, written by the engine's `encode::layout_json`), the run presets (mtg-smoke,
-mtg-1, mtg-2, mtg-2-mlp), the default spec, the evaluation spec and the dashboard's title / port.
+(engine/src/az, docs/ENGINE.md 21-22, 36: one game of Magic between two random 40-card decks of the
+supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match with sideboarding
+between games, decks built from random card pools), its object layout for zero-core's token
+network (arch 'tokens': `layout_v4.json`, written by the engine's `encode::layout_json`), the run
+presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4), the default spec, the evaluation spec
+and the dashboard's title / port.
 
 The modules of this package are the core's under the usual names, so every command has the same
 CLI as in the other games: `python -m mtgz.az.run`, `python -m mtgz.az.dashboard --host 0.0.0.0
@@ -77,6 +79,14 @@ PRESETS['mtg-2-mlp'] = dict(_M2, arch='mlp', hidden=256, blocks=3)
 PRESETS['mtg-3'] = dict(_M2, hidden=128, blocks=4, heads=4, ff=256, threads=8, groups=2, infer_workers=1,
                         infer_device='cuda', train_device='cuda', ram_budget_gb=12.0, elo_games=20,
                         elo_opponents=2, elo_together=1)
+
+# the fourth run (M8b, docs/ENGINE.md 36): the episode is a best-of-three match with sideboarding
+# between games (the terminal result is the match's), decks built by the heuristic deckbuilder from
+# random 45-card pools (the rest of the pool the sideboard); evaluation (the yardstick, random, Elo)
+# plays matches on the fixed evaluation pools (the evaluation spec keeps the format). Otherwise
+# mtg-3's settings; a match is ~2.5 games, so three times the step cap.
+SPEC_BO3 = '{"max_turns": 60, "eval_decks": 16, "eval_seed": 1, "format": "bo3"}'
+PRESETS['mtg-4'] = dict(PRESETS['mtg-3'], spec=SPEC_BO3, eval_spec=eval_spec(SPEC_BO3), max_steps=60_000)
 
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',

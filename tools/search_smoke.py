@@ -4,7 +4,7 @@ with a uniform evaluator (no network, no GPU) and self-play seats as a run prese
 specs. Every game must end and nothing may panic. A gate before pinning an engine for a run:
 self-play search reaches states that random play (tests/fuzz.rs) does not.
 
-  python tools/search_smoke.py                                   # seeds 0-3 x specs random,eval
+  python tools/search_smoke.py                                   # seeds 0-3 x specs random,eval,match
   python tools/search_smoke.py --seeds 0-15 --games 400 --threads 8 --sims 64 --preset mtg-3
 
 Each (seed, spec) runs in a process of its own: a search worker's panic can leave zero-core's
@@ -29,6 +29,10 @@ SPECS = {
     'eval': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'decks': 'eval'},
     # no mulligans, more lands (other openings)
     'nomull': {'max_turns': 60, 'mulligans': False, 'lands': [18, 20]},
+    # best-of-three matches with sideboarding, decks from random pools (M8b, docs/ENGINE.md 36)
+    'match': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3'},
+    # ... on the fixed evaluation pools
+    'match_eval': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'decks': 'eval'},
 }
 
 
@@ -44,8 +48,10 @@ def one(seed, spec, games, threads, sims, conc, preset, stall):
     seat = G.nn_seat('m', sims, c['c_puct'], True, c['alpha'], c['eps'], c['temp_moves'], max(1, sims // 4),
                      c['p_full'], c['chance_k'], c['margin_w'], bool(c['redet']), c.get('policy_target', 'visits'),
                      c.get('cq_c_visit', 50.0), c.get('cq_c_scale', 1.0), sims_minor=c.get('sims_minor', 0) or None)
+    # (a match is up to three games: three times the step cap)
+    steps = c['max_steps'] * (3 if SPECS[spec].get('format') == 'bo3' else 1)
     drv = G.Driver('mtg', [[seat, seat]] * games, spec=json.dumps(SPECS[spec]), concurrency=conc, seed=seed,
-                   threads=threads, groups=c['groups'], record=True, max_steps=c['max_steps'])
+                   threads=threads, groups=c['groups'], record=True, max_steps=steps)
     t0 = time.time()
     last = [time.time()]
 
@@ -82,7 +88,7 @@ def parse_seeds(s):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--seeds', default='0-3', help='driver seeds: 0-3 or 0,5,9')
-    ap.add_argument('--specs', default='random,eval', help=f'comma-separated, of {sorted(SPECS)}')
+    ap.add_argument('--specs', default='random,eval,match', help=f'comma-separated, of {sorted(SPECS)}')
     ap.add_argument('--games', type=int, default=400)
     ap.add_argument('--threads', type=int, default=8)
     ap.add_argument('--sims', type=int, default=64)
