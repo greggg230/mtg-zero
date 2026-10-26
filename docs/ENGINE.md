@@ -5705,7 +5705,7 @@ where it checks an official ruling, the ruling in a `// ruling:` comment:
 | `tests/interactions_faces.rs` | 1 | a split card cast from a graveyard with two permissions (709.3, 601.2b) |
 | `tests/interactions_zones.rs` | 10 | Flickerwisp on a manifested creature, a manifested instant, a transformed card, an MDFC's land face (ruling 47775ed7) and a reanimated creature (400.7, 708.9, 712.14, 304.4, 307.4, 704.5m); Leyline Binding flickered (610.3); an exchanged creature's summoning sickness and "its controller" (302.6); Fractured Identity on a planeswalker (306.5b) and on a face-down permanent; trample over a blocker with protection (702.19c) |
 
-Five existing tests now name rulings they already checked (Bolas's Citadel's sacrifice and top
+Four existing tests now name rulings they already checked (Bolas's Citadel's sacrifice and top
 card, Emeritus's copy in exile, Nadu's per-creature limit). Rulings coverage (`docs/rulings.md`):
 218 rulings tested (203 distinct texts; part 1: 130, 126), none deferred; by area (distinct,
 tested/class a): mana 26/213, triggers 42/166, zones 23/142, stack 35/133, copies 23/110, dfc
