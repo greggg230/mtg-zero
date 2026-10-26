@@ -1,6 +1,7 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M8d part 1 (the cube's official rulings as engine tests: 1,607 fetched and triaged, the risky
+Status: M8d part 2 (interaction confidence: the riskiest rulings left and the interaction matrix's cells tested, a combo-dense fuzz mode,
+seven engine fixes; section 38), 2026-10-26; M8d part 1 (the cube's official rulings as engine tests: 1,607 fetched and triaged, the risky
 interaction areas tested, three engine fixes; section 37), 2026-10-26; M7d's IR fixes (the IR of mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: the last 9 cards; 546 supported cube cards, all of
 the cube; reflexive triggers with an intervening "if", "this turn" triggered abilities, a spell
 shuffling itself into its library, mana abilities with {X}; section 32), 2026-10-25; M7d (the last
@@ -1199,8 +1200,9 @@ they isolate one keyword or trigger each.
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b); sideboarded decks are legal and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes holding every card the viewer knows (in games and between games); the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
-| `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/` |
-| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks |
+| `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4) |
+| `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c) |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5) |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
@@ -5678,3 +5680,157 @@ copies (b30727cf, 3f6b90f2), Dauthi and a discarded card (8d9db447), Etali's and
 Citadel's casts, converge on copies and free casts (Prismatic Ending 41553eae, fc8abf83), the
 prepare cards (Emeritus), then triggers, zones and mana by number. Then the interaction matrix
 and combo-dense fuzz decks (the M8d plan).
+Part 2 (section 38) tested this list (everything in it held) and the riskiest rulings about
+triggers, zones and mana; coverage after part 2: 218 rulings (203 distinct texts) tested, none deferred.
+
+## 38. Interaction confidence (M8d part 2)
+
+Part 1 (section 37) turned the cube's official rulings into tests; part 2 tests how cards behave
+together where two subsystems written in different milestones meet: the risky rulings 37.7
+left, more rulings about triggers, zones and mana, a matrix of mechanic pairs
+(`docs/interactions.md`) with tests for its riskiest cells, and a fuzz mode whose decks are
+built from cards that interact. Branch `m8d-interact`.
+
+**38.1 Tests.** 77 new tests in eight files (section 15), every one with the CR in its name and,
+where it checks an official ruling, the ruling in a `// ruling:` comment:
+
+| File | Tests | What |
+|---|---:|---|
+| `tests/rulings_stack2.rs` | 13 | damage divided as a spell is cast or a trigger is put on the stack, a target gone illegal (Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing: 601.2d, 603.3d, 608.2b); Invert Polarity changing the targets of a divided spell but not their number or the division (115.7); Lutri's copies of modal (Fiery and Mystic Confluence), spree (Three Steps Ahead), X and divided (Fire Covenant) spells and of a spell without targets (707.10) |
+| `tests/rulings_casts.rs` | 14 | Etali's free casts in its trigger's resolution (a later spell targeting an earlier one but not the permanent it will be, a sorcery with a spell on the stack, X = 0, no alternative cost but mandatory additional costs, the cards left in exile: 608.2g, 107.3b, 118.9a, 601.2f); Bolas's Citadel (X = 0, no other alternative cost, the land drop, timing); Dauthi Voidwalker and a discard (Inti, Occult Epiphany); converge counting no colours on a copy and on a free cast (Prismatic Ending) |
+| `tests/rulings_copies2.rs` | 9 | Reflection of Kiki-Jiki copying a Metamorph copy (707.9b) and a token (707.2), no counters or attachments, the token's own enter trigger; Emeritus of Abundance prepared once, being prepared not copiable (Saheeli's -2), kept through Oko's Elk, the land count checked again on resolution (603.4), the Regrowth copy cast by its new controller after Oko's exchange (722.3c) |
+| `tests/rulings_triggers2.rs` | 19 | sources gone before their abilities resolve (Palace Jailer's monarch return, Leyline Binding, Animate Dead, Flickerwisp, Shallow Grave: 610.3c, 603.7, 608.2b); Palace Jailer exiling a token (111.7); Uro reanimated; Green Sun's Zenith stolen by Invert Polarity and countered; "exile until" one card at a time (Laelia and cascade); magecraft for copies; Leovold once per target; Screaming Nemesis blocked by two creatures; Coveted Jewel and a planeswalker; City of Traitors and a fetched land; Celestial Colonnade becoming a creature; flashback exile after Counterspell and Remand; Oust and Unexpectedly Absent's library positions |
+| `tests/interactions_copies.rs` | 6 | a copy of Oko's Elk (layer 1 against 4-7), a copy and a token copy of a face-down creature (708.2), of True-Name Nemesis (its own choice, 707.5); Containment Priest and a reanimated Metamorph entering as a copy of an artifact (614.12, 616.1); a spell copy retargeted at a ward creature (707.10c, 702.21a) |
+| `tests/interactions_costs.rs` | 5 | Bolas's Citadel's life kept when a spree mode or a kicker is offered (601.2g-h); Thalia's tax on Etali's free casts and on the Citadel's casts (601.2f); a Lotus Petal exiled by Yawgmoth's Will as a graveyard exile cost (614.1a) |
+| `tests/interactions_faces.rs` | 1 | a split card cast from a graveyard with two permissions (709.3, 601.2b) |
+| `tests/interactions_zones.rs` | 10 | Flickerwisp on a manifested creature, a manifested instant, a transformed card, an MDFC's land face (ruling 47775ed7) and a reanimated creature (400.7, 708.9, 712.14, 304.4, 307.4, 704.5m); Leyline Binding flickered (610.3); an exchanged creature's summoning sickness and "its controller" (302.6); Fractured Identity on a planeswalker (306.5b) and on a face-down permanent; trample over a blocker with protection (702.19c) |
+
+Five existing tests now name rulings they already checked (Bolas's Citadel's sacrifice and top
+card, Emeritus's copy in exile, Nadu's per-creature limit). Rulings coverage (`docs/rulings.md`):
+218 rulings tested (203 distinct texts; part 1: 130, 126), none deferred; by area (distinct,
+tested/class a): mana 26/213, triggers 42/166, zones 23/142, stack 35/133, copies 23/110, dfc
+8/72, replacement 15/70, combat 5/65, protection 6/29, facedown 10/17, walkers 4/10, other 6/166.
+The triage wasn't narrowed (no class-a row was reclassified).
+
+**38.2 What broke, and why** (each fix has a test that failed before it, checked):
+
+1. *"Exile until" exiled its cards as one event.* Cascade (Bloodbraid Challenger), Etali's
+   trigger and the exile-until-nonland effect moved every card to exile within one event
+   group, so Laelia ("whenever one or more cards are put into exile from your library")
+   triggered once. Ruling 1178d637: the cards are exiled one at a time, a trigger each (CR
+   603.2c). Each card is now its own event (`new_event` before each move). Test
+   `rulings_triggers2::laelia_cascade_exiles_one_card_at_a_time_one_trigger_each_cr_702_85a_603_2c`.
+2. *Combat damage from several sources was several "is dealt damage" events.* Screaming
+   Nemesis blocked by two Bears triggered twice (2 and 2). Ruling 66fc62ef: damage dealt at
+   once (CR 510.2) by several sources triggers it once, for the total. The combat damage step
+   now emits one dealt-damage event per recipient with its total (`combat.rs`). Test
+   `rulings_triggers2::screaming_nemesis_dealt_damage_by_two_blockers_triggers_once_cr_603_2c_510_2`.
+3. *A split card cast from a graveyard with two permissions panicked* ("a castable card"):
+   Life // Death with Yawgmoth's Will and Snapcaster Mage's flashback. The permissions were
+   checked against the whole split card (no route castable) while the offer had checked the
+   half; a split card is cast as one of its halves (CR 709.3), now chosen before the
+   permissions. Found by the interaction fuzz (seed 35744). Test
+   `interactions_faces::a_split_card_with_two_graveyard_permissions_casts_its_left_half_cr_709_3_601_2b`.
+4. *Bolas's Citadel's life wasn't kept when an additional mana cost was offered.* A spell cast
+   from the top pays life equal to its mana value after its mana (CR 601.2g-h). The offers of
+   spree modes, squad / offspring / replicate counts, kicker X, X and splice (`can_pay_spell`)
+   and of cost options such as kicker (`cast_option`, `options_payable`, with `with_life`) didn't
+   keep that life, so at low life Three Steps Ahead's +{3} and Burst Lightning's kicker were
+   offered when they needed Mana Confluence's life too, and the payment panicked. A new
+   `Game::life_later` (X life and the Citadel's) is kept by these checks and used by the
+   payment. Found by the interaction fuzz (seeds 40409, 92590). Tests
+   `interactions_costs::citadel_spree_mode_costs_keep_the_life_the_citadel_takes_cr_601_2h_702_172a`,
+   `::citadel_kicker_keeps_the_life_the_citadel_takes_cr_601_2h_702_33a`.
+5. *Containment Priest exiled a Metamorph entering as a copy of a noncreature.* Phyrexian
+   Metamorph returned by Reanimate was exiled before its copy choice. "You may have this enter
+   as a copy" is a replacement effect too: its controller applies it first (616.1) and the
+   Priest's applies only if what would enter is still a creature (614.12). The Priest's check
+   for a card entering as a copy now waits for the copy choice (`Mark::PriestPending`) and
+   exiles it then if it is still a nontoken creature, without leave events (it never entered:
+   `Game::quiet_leave`). No decision for the order: the other order's outcome (exiled) is
+   reached by copying a creature or nothing (`docs/shortcuts.md` 38.1). Test
+   `interactions_copies::containment_priest_and_a_reanimated_metamorph_entering_as_an_artifact_cr_614_12_616_1`.
+6. *An instant or sorcery card could be put onto the battlefield.* Flickerwisp returning a
+   manifested Lightning Bolt made it an instant permanent. CR 304.4, 307.4: it stays in its
+   previous zone (exile). `put_onto_battlefield` now leaves such a card where it is (unless it
+   enters face down, or as a land face an effect names); the same holds for a modal double-faced
+   card returned front face up (ruling 47775ed7: Shatterskull, the Hammer Pass flickered, or
+   returned by Badgermole Cub's earthbend, stays where it was). Tests
+   `interactions_zones::a_flickered_face_down_instant_cant_return_and_stays_exiled_cr_708_9_400_4a`,
+   `::a_flickered_mdfc_land_face_returns_front_face_up_and_a_sorcery_cant_enter_cr_712_14_307_4`.
+7. *A Lotus Petal exiled by Yawgmoth's Will counted toward a graveyard exile cost.* Since M7e a
+   self-sacrificing mana source counts as a graveyard card for delve and "exile n cards from
+   your graveyard" (it is sacrificed while paying, 601.2g, before 601.2h); under Yawgmoth's Will
+   (or an opponent's Dauthi Voidwalker) it is exiled instead (614.1a), so Abhorrent Oculus was
+   offered with five cards and the Petal, and its exile cost had no card to choose (panic). Only
+   sources whose move to the graveyard isn't replaced count now (`delve_sources`). Found by the
+   interaction fuzz (seed 79031). Test
+   `interactions_costs::a_lotus_petal_exiled_by_yawgmoths_will_cant_feed_a_graveyard_exile_cost_cr_614_1a_601_2g`.
+
+**38.3 What held.** Everything else passed on the engine as it was: divided damage keeping its
+division when a target goes (and doesn't resolve when all do), at least 1 per target, X = 0 with
+no target; Invert Polarity's steal keeping the number of targets and the division; copies of
+spells keeping modes, X, the division and the costs paid, with new targets; Etali's casts
+(ordering, timing, X, alternative and additional costs, exile); the Citadel's X, alternative
+costs, land drop and timing; Dauthi's exile still a discard; converge 0 on copies and free casts;
+copies of copies, of tokens, of an Elk, of a face-down creature, of True-Name Nemesis; the
+prepare rulings; sources gone before their abilities resolve; Green Sun's Zenith cast by its
+owner's opponent (searching their library, shuffled into the owner's); magecraft on copies;
+Leovold once per target; Coveted Jewel and planeswalkers; City of Traitors; Colonnade; flashback
+exile; Oust and Unexpectedly Absent; Thalia's tax on free and Citadel casts; flicker of
+face-down, transformed and reanimated creatures and of Leyline Binding; Oko's exchange and
+summoning sickness; Fractured Identity on a planeswalker; trample over protection.
+
+**38.4 The interaction matrix.** `docs/interactions.md`: 16 mechanics (copies, layers,
+replacement effects, protection and ward, face-down, faces, planeswalkers, the stack, sources
+gone and last known information, the new object, costs, mana abilities while paying, combat,
+state-based actions, control changes, day and night), every reachable pair with its tests
+(earlier milestones' and part 2's) or `n/a` with the reason. Left `untested`: a token copy of a
+daybound card at night (whether such a token is double-faced, CR 707.8a and 712.10, wants a
+careful reading first) and True-Name Nemesis's chosen player after a control change.
+
+**38.5 The combo-dense fuzz mode.** `FUZZ_POOL=interactions` (`tests/fuzz.rs`): thirteen groups
+of cube cards (`GROUPS`), one per family of the matrix's cells: copies and enter/leave
+abilities; flicker and linked exile; reanimation and replacement effects; face-down cards;
+double-faced cards, Adventures and split cards; counterspells and copies of spells; control
+changes; taxes, alternative and additional costs and free casts; damage, protection, deathtouch,
+infect and divided damage; planeswalkers; last known information, triggers and state-based
+actions; combat keywords; day and night. A deck takes 17 random lands and 23 spells from two or
+three groups (one in eight from all the groups); a sideboard of seven from its groups. Single
+games use it for every seed, matches (best-of-three on the two lists, open decklists, one in four
+with a 12-turn cap) too; every check of the default mode runs (options completed, clones,
+determinize and information sets, invariants, replays). The decision kinds asked are counted
+(per 1,000 decisions, interaction mode against the default, 20,000 games each):
+NewTarget 0.27 -> 0.35, DivideDamage 0.22 -> 0.79, ChooseExiled 0.35 -> 0.92,
+ChoosePermanent 7.54 -> 15.60, OrderTriggers 4.63 -> 7.74, ChooseAltCost 1.24 -> 1.61, Target
+53.81 -> 59.78 (Sacrifice 3.90 -> 2.78, ChooseGraveyardCard 2.70 -> 2.33, ChooseMode 7.73 ->
+7.35, YesNo 22.06 -> 21.97): copy choices and simultaneous triggers twice as often, divided
+damage and cards cast from exile three times. An unknown `FUZZ_POOL` fails; unset, the default
+mode is unchanged. Three of the seven faults above were found by this mode (3; 4, at two seeds;
+7), each in code the default fuzzer had passed 20,000 games on since it was written. Over the
+session the mode played 132,591 games (seeds 0-132,590: a run stopped at a failing seed, the
+fault was fixed, the run resumed after it, and the four failing seeds pass now) and 12,000
+matches.
+
+**38.6 Checks.** Every engine test binary but `az` (84 binaries: 1,086 passed (part 1's 1,005, the 77 new, fuzz's 4), 11 ignored (part 1's 7, `perf`'s 3 and `digest`'s measurement runs)); `FUZZ_GAMES=20000` in the
+default mode: no failure, 163 s (20,000 games, 214.0 decisions per game, 5.65 million options
+completed; 1,000 matches, 2,574 games, 20,886 sampled worlds); `FUZZ_POOL=interactions
+FUZZ_GAMES=20000 FUZZ_MATCHES=2000`: no failure, 187 s (20,000 games, 206.2 decisions per game,
+5.43 million options completed; 2,000 matches, 5,157 games, 1,157 of three, 41,865 sideboarding
+decisions, 44,630 sampled worlds); `bash tools/build_py.sh` and `python tools/search_smoke.py
+--specs random,match --seeds 0-1`: 0 failed of 4 configurations, 524 s (random 78-82 s; match 169-185 s: 800 games, 747,786 decisions, 19.8 million simulations); `python tools/rulings_doc.py --check` passes,
+`python tools/untested_cards.py`: 0 of 546.
+
+**38.7 Digests and speed.** Re-recorded (`DIGEST_WRITE=1`): 13 of the 2,500 games change, each
+explained by a fix: 11 hold Screaming Nemesis or Jennifer Walters (one dealt-damage event per
+recipient in combat) or Laelia with cascade or Etali (exile-until one card at a time); r 758
+(Badgermole Cub's earthbend returning Shatterskull, the Hammer Pass, whose front face can't enter)
+and r 1243 (Parallax Wave returning a manifested Force of Will) by fix 6. Combined digest
+e80db1ef6fad15cb. Speed: the fixes add work only where they apply (a combat damage step's
+recipients, an exile-until loop's event per card, a type check per card put onto the battlefield,
+the casting choices' life reserve); `Game` grows by one `bool` (`quiet_leave`; the Priest's
+pending check is a `Mark`). `tests/perf.rs` `measure`, this branch against its base 7a65ad8 interleaved
+in two rounds (the desktop, unpinned, the same day): 6.77 and 6.68 us per decision against 6.69
+and 6.72 (702 and 712 games/s against 710 and 707); `Game::clone` 1.34 and 1.24 us against 1.26
+and 1.26; clone + `determinize` 1.83 and 1.74 us against 1.74 and 1.77; `size_of::<Game>()` 1,600
+B both: no change beyond the noise.
