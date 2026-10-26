@@ -243,7 +243,12 @@ impl Game {
             }
             return;
         }
-        let deck = self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx(i as u16)));
+        // (With hidden decks: by the pool the other player knows, ENGINE.md
+        // 36.11.)
+        let deck = match self.deck_question(p, |d| d.opening.is_some()) {
+            Some(known) => known,
+            None => self.objs.iter().enumerate().any(|(i, o)| o.owner == p && self.opening_ok(p, CardIdx(i as u16))),
+        };
         if !deck {
             self.opening_next(p);
             return;
@@ -570,8 +575,9 @@ impl Game {
     /// choose any card name" (CR 614.12): the look first (once: re-running
     /// the asker must ask the same question, ENGINE.md 4), then `NameCard`
     /// over the names of the opponent's cards (decklists are open: the
-    /// names are the same in every world), `PASS` = a name of no card in the
-    /// game.
+    /// names are the same in every world; with hidden decks the names of
+    /// their pool the chooser knows, ENGINE.md 36.11), `PASS` = a name of no
+    /// card in the game.
     pub(crate) fn choose_name_as_enters(&mut self, card: CardIdx) {
         use crate::decision::{act, Choice, DecisionKind, Opt};
         use crate::flow::Task;
@@ -593,11 +599,23 @@ impl Game {
             Some(Choice::Pass) => self.marks.push((r, crate::game::Mark::ChosenName(crate::game::NO_NAME))),
             Some(other) => unreachable!("name answer {other:?}"),
             None => {
+                // With hidden decks (ENGINE.md 36.11) the opponent's deck is
+                // not known: the names are those of their pool the chooser
+                // knows, and of their cards the chooser knows here (the same
+                // in every world of the chooser's).
+                let hidden = self.known_pools[q as usize].is_some();
                 let mut defs: Vec<crate::ids::DefId> = (0..self.objs.len())
                     .map(|i| CardIdx(i as u16))
                     .filter(|&c| self.objs[c.i()].owner == q && !self.is_token(c) && !self.is_copy_obj(c) && self.objs[c.i()].zone != Zone::Nowhere)
+                    .filter(|&c| !hidden || self.knows(p, c))
                     .map(|c| self.ident_card(c))
                     .collect();
+                if let Some(known) = &self.known_pools[q as usize] {
+                    defs.extend(known.iter().copied());
+                    for k in self.clouds.iter().filter(|k| k.viewer == p && k.owner == q) {
+                        defs.extend(k.defs.iter().map(|&d| self.db.def(d).card_def(d)));
+                    }
+                }
                 defs.sort_unstable();
                 defs.dedup();
                 let mut opts: Vec<Opt> = defs

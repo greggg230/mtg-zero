@@ -36,7 +36,10 @@ impl Game {
         if def.subtypes.is_empty() || !def.is(types::INSTANT | types::SORCERY) || self.is_copy_obj(card) {
             return false;
         }
-        self.objs.iter().any(|o| o.owner == p && self.db.def(o.def).splice.is_some_and(|(s, _)| def.subtypes.contains(&s)))
+        let splices = |d: &crate::db::CardDef| d.splice.is_some_and(|(s, _)| def.subtypes.contains(&s));
+        // (With hidden decks: by the pool the other player knows, ENGINE.md
+        // 36.11.)
+        self.deck_question(p, splices).unwrap_or_else(|| self.objs.iter().any(|o| o.owner == p && splices(self.db.def(o.def))))
     }
 
     /// `Task::Splice`: offer each card in hand that splices onto the spell

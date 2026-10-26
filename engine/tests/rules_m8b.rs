@@ -401,10 +401,19 @@ fn match_encoding_scores_wins_and_revealed_cards() {
             assert_eq!(mx[encode::mtch::GAME], s.m.game_no as f32 / 3.0);
             assert_eq!(mx[encode::mtch::MY_WINS], s.m.wins[p] as f32 / 2.0);
             assert_eq!(mx[encode::mtch::OPP_WINS], s.m.wins[1 - p] as f32 / 2.0);
-            // The opponent's pool bag: their whole pool (open decklists).
+            // The opponent's pool bag: their pool but the first picks not
+            // revealed in an earlier game (ENGINE.md 36.11).
             let bag = &x[encode::O_BAGS + encode::bag::OPP_POOL * encode::D..][..encode::D];
             let n: f32 = bag.iter().sum();
-            assert_eq!(n, 0.25 * s.m.pools[1 - p].list[..s.m.pools[1 - p].n_cards].iter().map(|e| e.1 as f32).sum::<f32>());
+            let ids = engine::az::identity::identities(db());
+            let pool = &s.m.pools[1 - p];
+            let known: f32 = pool.list[..pool.n_cards]
+                .iter()
+                .filter(|e| engine::az::sample::known_before(&s.m, 1 - p as u8, ids, e.0))
+                .map(|e| e.1 as f32)
+                .sum();
+            assert_eq!(n, 0.25 * known);
+            assert!(known <= pool.list[..pool.n_cards].iter().map(|e| e.1 as f32).sum::<f32>() - pool.first_picks.len() as f32 + 3.0);
             let rb = &x[encode::O_BAGS + encode::bag::OPP_REVEALED * encode::D..][..encode::D];
             if s.m.game_no == 1 && s.sideboarding().is_none() {
                 assert!(rb.iter().all(|&v| v == 0.0));

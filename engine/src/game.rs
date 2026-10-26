@@ -31,6 +31,12 @@ pub struct GameSpec {
     /// the game's setup); `Some(p)` = `p` (in later games of a match, the
     /// loser of the previous game; ENGINE.md 35).
     pub chooser: Option<PlayerId>,
+    /// The decks are hidden within the pools (a best-of-three match, ENGINE.md
+    /// 36.11): each player knows the other's pool but their first picks, not
+    /// which pool cards are in the deck. Questions whose asking would depend
+    /// on a deck are then asked regardless (the companion reveal), and a
+    /// name is chosen among the names the chooser can know (`known_pools`).
+    pub hidden_decks: bool,
 }
 
 impl Default for GameSpec {
@@ -44,6 +50,7 @@ impl Default for GameSpec {
             auto_single: true,
             log: false,
             chooser: None,
+            hidden_decks: false,
         }
     }
 }
@@ -686,6 +693,11 @@ pub struct Game {
     /// in the common case): exhaust abilities activated, colours chosen
     /// as a permanent entered, ...
     pub(crate) marks: Vec<(ObjRef, Mark)>,
+    /// With hidden decks (`GameSpec::hidden_decks`, ENGINE.md 36.11): per
+    /// player, the card names of their pool the other player knows (the pool
+    /// but the first picks not seen in earlier games, and the basic lands),
+    /// sorted; set by the match. `None`: open decklists.
+    pub(crate) known_pools: [Option<std::sync::Arc<[DefId]>>; 2],
     pub(crate) log: Option<Vec<String>>,
 }
 
@@ -981,6 +993,7 @@ impl Game {
             rules_srcs: Vec::new(),
             choosing_for: 0,
             marks: Vec::new(),
+            known_pools: [None, None],
             batching: false,
             ev_seq: 0,
             batch_fired: Vec::new(),
@@ -2041,10 +2054,22 @@ impl Game {
         // revealed. Asked of a player whose deck has a miracle card at all
         // (both decklists are known, ENGINE.md 10), on every first draw,
         // so that the question says nothing about the card.
-        if self.players[p as usize].drawn == 1 && self.turn.number > 0 && self.has_miracle_card(p) {
+        if self.players[p as usize].drawn == 1
+            && self.turn.number > 0
+            && self.deck_question(p, |d| d.miracle.is_some()).unwrap_or_else(|| self.has_miracle_card(p))
+        {
             self.miracle_check = Some((p, top));
         }
         self.event(Event::player(EventKind::DrawsCard, p));
+    }
+
+    /// With hidden decks (ENGINE.md 36.11), whether a question asked because
+    /// `p`'s deck has a card matching `f` is asked: when the part of `p`'s
+    /// pool the other player knows has one (`known_pools`), whatever the deck
+    /// holds (its asking would tell the deck); `None` with open decklists
+    /// (the deck decides, as before).
+    pub(crate) fn deck_question(&self, p: PlayerId, f: impl Fn(&CardDef) -> bool) -> Option<bool> {
+        self.known_pools[p as usize].as_ref().map(|k| k.iter().any(|&d| f(self.db.def(d))))
     }
 
     /// Does `p` own a card with miracle (ENGINE.md 29)?

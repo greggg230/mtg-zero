@@ -71,8 +71,9 @@ impl Game {
     /// `Task::RevealCompanion`: `p` may reveal one card with companion from
     /// their sideboard whose condition their starting deck fulfills (CR
     /// 103.2b, 702.139a), `LIBRARY` + k by definition; `PASS` = none.
-    /// Asked only when `p` has one (their sideboard is fixed in every world
-    /// `determinize` makes: ENGINE.md 35). Then the other player.
+    /// Asked only when `p` has one (open decklists: their deck and sideboard
+    /// are fixed in every world `determinize` makes, ENGINE.md 35), or
+    /// always with hidden decks (ENGINE.md 36.11). Then the other player.
     pub(crate) fn reveal_companion(&mut self, p: PlayerId) {
         match self.answer.take() {
             Some(Choice::Def(d)) => {
@@ -89,12 +90,21 @@ impl Game {
             Some(other) => unreachable!("companion answer {other:?}"),
             None => {
                 let cands = self.companion_candidates(p);
-                if !cands.is_empty() {
+                // With hidden decks (ENGINE.md 36.11) every player is asked,
+                // with `PASS` only when their deck fulfills no sideboard
+                // companion, and the question is never answered internally:
+                // whether it is asked, and with how many options, depends on
+                // the deck, which the other player does not know.
+                let always = self.spec.hidden_decks;
+                if !cands.is_empty() || always {
                     let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
                     opts.extend(
                         cands.iter().take(act::LIBRARY_N as usize).enumerate().map(|(k, &d)| Opt { action: act::LIBRARY + k as u16, choice: Choice::Def(d) }),
                     );
+                    let no_auto = self.no_auto;
+                    self.no_auto |= always;
                     self.ask(Task::RevealCompanion { p }, p, DecisionKind::RevealCompanion, opts);
+                    self.no_auto = no_auto;
                     return;
                 }
             }

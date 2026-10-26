@@ -177,7 +177,11 @@ pub mod bag {
     pub const OPP_EXILE: usize = 6;
     pub const MY_LIBRARY: usize = 7;
     /// The opponent's hand and library cards the viewer does not know
-    /// exactly (open decklists: their identities as a multiset).
+    /// exactly (open decklists: their identities as a multiset). With hidden
+    /// decks (a best-of-three match, ENGINE.md 36.11): the candidates, the
+    /// cards of their pool the viewer knows of (but basic lands) less those
+    /// the viewer knows are elsewhere (their cards it knows in the game,
+    /// its clouds' identities, a revealed companion).
     pub const OPP_HIDDEN: usize = 8;
     pub const OPP_HAND_KNOWN: usize = 9;
     /// Identities the viewer's clouds place in the opponent's hand.
@@ -189,8 +193,9 @@ pub mod bag {
     /// Emblems (CR 114), by the identity of the card that made them.
     pub const MY_EMBLEMS: usize = 13;
     pub const OPP_EMBLEMS: usize = 14;
-    /// M8b (ENGINE.md 36.7): the opponent's pool as the viewer knows it (this
-    /// part's open decklists: all of it; part b: but their first picks).
+    /// M8b (ENGINE.md 36.7): the opponent's pool as the viewer knows it
+    /// (best-of-one, open decklists: all of it; best-of-three: but their
+    /// first picks not revealed in an earlier game, ENGINE.md 36.11).
     pub const OPP_POOL: usize = 15;
     /// The identities the opponent revealed (made public) in earlier games
     /// of the match.
@@ -874,10 +879,16 @@ impl Game {
         // (Their face-down permanents the viewer doesn't know: in the
         // hidden pool; ENGINE.md 31.)
         let opp_fd_perms = self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].owner == op_ && !self.knows(me, c));
+        // (With hidden decks the opponent's unknown cards are not read: the
+        // match writes `OPP_HIDDEN` from what the viewer knows of their
+        // pool, ENGINE.md 36.11.)
+        let open = !self.spec.hidden_decks;
         for c in opl.hand.iter().copied().chain(opl.library.iter().copied()).chain(opp_face_down).chain(opp_fd_perms) {
             let d = self.ident(c);
             if !self.knows(me, c) {
-                bag_add(out, ids, bag::OPP_HIDDEN, d);
+                if open {
+                    bag_add(out, ids, bag::OPP_HIDDEN, d);
+                }
             } else if self.objs[c.i()].zone == Zone::Hand {
                 bag_add(out, ids, bag::OPP_HAND_KNOWN, d);
             } else {
@@ -1224,11 +1235,18 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
             x[mtch::MY_DECK] = size(d);
         }
     }
-    // The opponent's pool (open decklists: all of it; part b, ENGINE.md
-    // 36.10: but their first picks) and what they revealed before.
+    // The opponent's pool as the viewer knows it (best-of-one, open
+    // decklists: all of it; best-of-three: but the first picks not revealed
+    // in an earlier game, ENGINE.md 36.11) and what they revealed before.
     let pool = &m.pools[op_ as usize];
+    let hidden = m.format == super::Format::Bo3;
     for &(def, n) in &pool.list[..pool.n_cards] {
-        out[O_BAGS + bag::OPP_POOL * D + ids[def as usize] as usize] += 0.25 * n as f32;
+        if !hidden || super::sample::known_before(m, op_, ids, def) {
+            out[O_BAGS + bag::OPP_POOL * D + ids[def as usize] as usize] += 0.25 * n as f32;
+        }
+    }
+    if hidden && m.sb.is_none() {
+        opp_candidates(a, me, ids, out);
     }
     for (w, &bits) in m.earlier[op_ as usize].iter().enumerate() {
         let mut b = bits;
@@ -1236,6 +1254,50 @@ pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
             let i = w * 64 + b.trailing_zeros() as usize;
             out[O_BAGS + bag::OPP_REVEALED * D + i] += 0.25;
             b &= b - 1;
+        }
+    }
+}
+
+/// `bag::OPP_HIDDEN` with hidden decks (ENGINE.md 36.11): the cards of the
+/// opponent's pool the viewer knows of (`OPP_POOL`), less those of their
+/// cards it knows are in the game (exactly, or by its clouds) and a revealed
+/// companion; basic lands are left out. What the viewer knows only: the same
+/// in every world of its.
+fn opp_candidates(a: &super::MtgAz, me: PlayerId, ids: &[u16], out: &mut [f32]) {
+    let g = &a.g;
+    let m = &a.m;
+    let op_ = opp(me);
+    let pool = &m.pools[op_ as usize];
+    let mut left: Vec<(DefId, i32)> = pool.list[..pool.n_cards]
+        .iter()
+        .filter(|e| super::sample::known_before(m, op_, ids, e.0))
+        .map(|e| (e.0, e.1 as i32))
+        .collect();
+    let mut drop = |d: DefId| {
+        if let Ok(i) = left.binary_search_by_key(&d, |e| e.0) {
+            left[i].1 -= 1;
+        }
+    };
+    for i in 0..g.objs.len() {
+        let c = crate::ids::CardIdx(i as u16);
+        let o = &g.objs[i];
+        if o.owner == op_ && o.zone != Zone::Nowhere && !g.is_token(c) && !g.is_copy_obj(c) && g.knows(me, c) {
+            drop(super::sample::card_of(g, c));
+        }
+    }
+    for k in g.clouds.iter().filter(|k| k.viewer == me && k.owner == op_) {
+        for &d in &k.defs {
+            drop(g.db().def(d).card_def(d));
+        }
+    }
+    if let Some(d) = g.players[op_ as usize].companion_def {
+        if g.players[op_ as usize].companion.is_some_and(|c| g.objs[c.i()].zone == Zone::Nowhere) {
+            drop(d);
+        }
+    }
+    for (d, n) in left {
+        if n > 0 {
+            out[O_BAGS + bag::OPP_HIDDEN * D + ids[d as usize] as usize] += 0.25 * n as f32;
         }
     }
 }
@@ -1254,7 +1316,11 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
     let d = &sb.decision;
     let mine = d.player == viewer;
     let x = &mut out[O_CONTEXT..O_CONTEXT + CONTEXT];
-    x[ctx::KIND + d.kind as usize] = 1.0;
+    // (The other player sees that sideboarding goes on, not which of its
+    // decisions: a count says a basic land or a card with copies was
+    // chosen, ENGINE.md 36.11.)
+    let kind = if mine { d.kind } else { crate::decision::DecisionKind::Sideboard };
+    x[ctx::KIND + kind as usize] = 1.0;
     x[ctx::DECIDER_IS_VIEWER] = mine as u8 as f32;
     x[ctx::PENDING] = 1.0;
     x[ctx::TASK + TASK_SIDEBOARD] = 1.0;

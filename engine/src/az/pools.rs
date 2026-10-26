@@ -38,7 +38,7 @@ pub fn basic_ids(db: &CardDb) -> [DefId; 5] {
 /// The deckbuilder's and generator's weight of a spell: creatures 3,
 /// interaction 2 (damage, removal, counters, discard, edicts, token
 /// makers), other coloured cards 1, colourless ones 0.5 (as `decks`).
-fn weight(d: &CardDef) -> f64 {
+pub(crate) fn weight(d: &CardDef) -> f64 {
     match () {
         _ if d.is(types::CREATURE) => 3.0,
         _ if decks::interacts(d) => 2.0,
@@ -49,7 +49,7 @@ fn weight(d: &CardDef) -> f64 {
 
 /// Can a deck of colours `pair` play spell `d`: its colours within the
 /// pair and every coloured pip payable?
-fn playable(d: &CardDef, pair: u8) -> bool {
+pub(crate) fn playable(d: &CardDef, pair: u8) -> bool {
     d.colors & !pair == 0 && decks::castable_with(d, pair)
 }
 
@@ -76,7 +76,16 @@ fn take(rng: &mut Rng, cands: &[DefId], mut w: Vec<f64>, n: usize, out: &mut Vec
 /// and the splash), half of any colour outside the pair. The first picks
 /// are three of its main-colour spells (weighted as the spells).
 pub fn random_pool(db: &CardDb, rng: &mut Rng) -> Pool {
-    let (lands, spells) = decks::card_pool(db);
+    random_pool_without(db, rng, &[])
+}
+
+/// [`random_pool`] from the supported cards but `taken` (sorted): the cube
+/// is singleton, so a match's second pool has none of the first's cards
+/// (ENGINE.md 36.11).
+pub fn random_pool_without(db: &CardDb, rng: &mut Rng, taken: &[DefId]) -> Pool {
+    let (mut lands, mut spells) = decks::card_pool(db);
+    lands.retain(|d| taken.binary_search(d).is_err());
+    spells.retain(|d| taken.binary_search(d).is_err());
     let basics = basic_ids(db);
     let a = rng.below(5) as usize;
     let b = (a + 1 + rng.below(4) as usize) % 5;
@@ -84,7 +93,10 @@ pub fn random_pool(db: &CardDb, rng: &mut Rng) -> Pool {
     let others: Vec<usize> = (0..5).filter(|&c| pair & (1 << c) == 0).collect();
     let splash = 1u8 << others[rng.below(others.len() as u32) as usize];
     let mut cards: Vec<DefId> = Vec::with_capacity(POOL_SIZE);
-    let comps: Vec<DefId> = decks::companions(db).into_iter().filter(|&c| decks::castable_with(db.def(c), pair)).collect();
+    let comps: Vec<DefId> = decks::companions(db)
+        .into_iter()
+        .filter(|&c| decks::castable_with(db.def(c), pair) && taken.binary_search(&c).is_err())
+        .collect();
     if rng.below(4) == 0 && !comps.is_empty() {
         cards.push(comps[rng.below(comps.len() as u32) as usize]);
     }
@@ -145,31 +157,8 @@ pub fn random_pool(db: &CardDb, rng: &mut Rng) -> Pool {
 ///   in all (more lands when fewer than 23 spells are playable).
 pub fn build_deck(db: &CardDb, pool: &[DefId], gen: &DeckGen) -> (Vec<DefId>, Vec<DefId>) {
     let basics = basic_ids(db);
-    let spells: Vec<DefId> = pool
-        .iter()
-        .copied()
-        .filter(|&id| !db.def(id).is(types::LAND) && db.def(id).companion.is_none())
-        .collect();
-    let ranked = |pair: u8| -> Vec<DefId> {
-        let mut v: Vec<DefId> = spells.iter().copied().filter(|&id| playable(db.def(id), pair)).collect();
-        v.sort_by(|&x, &y| {
-            let (dx, dy) = (db.def(x), db.def(y));
-            weight(dy).total_cmp(&weight(dx)).then(dx.mana_value().cmp(&dy.mana_value())).then(x.cmp(&y))
-        });
-        v
-    };
-    let mut best = (f64::MIN, 0u8);
-    for a in 0..5 {
-        for b in a + 1..5 {
-            let pair = (1u8 << a) | (1u8 << b);
-            let score: f64 = ranked(pair).iter().take(SPELLS).map(|&id| weight(db.def(id))).sum();
-            if score > best.0 {
-                best = (score, pair);
-            }
-        }
-    }
-    let pair = best.1;
-    let cands = ranked(pair);
+    let pair = best_pair(db, pool);
+    let cands = ranked(db, pool, pair);
     let mut deck: Vec<DefId> = Vec::with_capacity(DECK_SIZE);
     let (mut mv5, mut mv4) = (0u8, 0u8);
     for &id in &cands {
@@ -271,9 +260,44 @@ pub fn build_deck(db: &CardDb, pool: &[DefId], gen: &DeckGen) -> (Vec<DefId>, Ve
     (deck, side)
 }
 
-/// Two random pools from `rng` (self-play: a match's, from its seed).
+/// The pool's spells (not lands, not companions) playable in `pair`, by
+/// weight, then mana value, then definition.
+fn ranked(db: &CardDb, pool: &[DefId], pair: u8) -> Vec<DefId> {
+    let mut v: Vec<DefId> = pool
+        .iter()
+        .copied()
+        .filter(|&id| !db.def(id).is(types::LAND) && db.def(id).companion.is_none() && playable(db.def(id), pair))
+        .collect();
+    v.sort_by(|&x, &y| {
+        let (dx, dy) = (db.def(x), db.def(y));
+        weight(dy).total_cmp(&weight(dx)).then(dx.mana_value().cmp(&dy.mana_value())).then(x.cmp(&y))
+    });
+    v
+}
+
+/// The deckbuilder's colours for `pool`: the pair whose 23 best playable
+/// spells weigh most (the first pair on a tie).
+pub fn best_pair(db: &CardDb, pool: &[DefId]) -> u8 {
+    let mut best = (f64::MIN, 0u8);
+    for a in 0..5 {
+        for b in a + 1..5 {
+            let pair = (1u8 << a) | (1u8 << b);
+            let score: f64 = ranked(db, pool, pair).iter().take(SPELLS).map(|&id| weight(db.def(id))).sum();
+            if score > best.0 {
+                best = (score, pair);
+            }
+        }
+    }
+    best.1
+}
+
+/// Two random pools from `rng` (self-play: a match's, from its seed). The
+/// cube is singleton: the second has none of the first's cards (ENGINE.md
+/// 36.11).
 pub fn random_pools(db: &CardDb, rng: &mut Rng) -> [Pool; 2] {
-    [random_pool(db, rng), random_pool(db, rng)]
+    let a = random_pool(db, rng);
+    let b = random_pool_without(db, rng, &a.cards);
+    [a, b]
 }
 
 /// The fixed evaluation pools: pair `i` of the set `seed` (the same for

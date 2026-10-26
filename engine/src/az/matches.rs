@@ -14,8 +14,8 @@
 //! * Sideboarding (`Sideboard`, `SideboardCount` decisions): the next
 //!   game's chooser first, then the other player, one after the other (a
 //!   simultaneous choice made sequential: the first player's committed deck
-//!   is not shown to the second, zero-core's pattern; with this part's open
-//!   decklists the hiding is nominal, ENGINE.md 36.10). Each player's list
+//!   is not shown to the second, and the second's `determinize` resamples
+//!   it, zero-core's pattern, ENGINE.md 36.11). Each player's list
 //!   is their pool's cards by definition, then the five basic lands; the
 //!   player changes entries in increasing list order (one decision per
 //!   single card, two for a basic land or a card with several copies: the
@@ -31,7 +31,7 @@ use std::sync::Arc;
 use crate::db::CardDb;
 use crate::decision::{act, Choice, Decision, DecisionKind, Opt};
 use crate::game::{Game, GameSpec};
-use crate::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_REVEAL};
+use crate::hidden::{key, key_kind, key_payload, key_player, HIDDEN, KEY_GAME, KEY_REVEAL};
 use crate::ids::{opp, DefId, PlayerId};
 use crate::rng::Rng;
 
@@ -68,7 +68,8 @@ pub struct MatchPool {
     pub list: Vec<(DefId, u8)>,
     /// Entries before the basics.
     pub n_cards: usize,
-    /// The first picks (data only in this part; ENGINE.md 36.10).
+    /// The first picks (sorted): the pool cards the other player does not
+    /// know of until they see them (ENGINE.md 36.11).
     pub first_picks: Vec<DefId>,
     /// Deck sizes sideboarding may build: 40 (or the first deck's size if
     /// smaller: spec decklists of tests) to `MAX_DECK` (or the first
@@ -265,13 +266,16 @@ pub struct MatchState {
     /// Turns of the games before the current one.
     pub turns_before: u32,
     pub over: bool,
-    /// Identities (bits) each player revealed in the current game, and in
-    /// the earlier games of the match.
+    /// Identities (bits) each player revealed in the current (between
+    /// games: the last) game, and in the earlier games of the match.
     pub seen: [[u64; 16]; 2],
     pub earlier: [[u64; 16]; 2],
     pub sb: Option<Box<Sideboarding>>,
     /// Seeds the later games (reseeded by `determinize`).
     pub rng: Rng,
+    /// Best-of-three (hidden decks, ENGINE.md 36.11): the prior of each
+    /// player's unknown first picks, as the other player samples them.
+    pub priors: Option<Arc<[super::sample::FirstPickPrior; 2]>>,
 }
 
 /// The first game's setup of one player: deck, sideboard, first picks.
@@ -297,10 +301,14 @@ impl MatchState {
                 }
             }
         }
+        let pools = [p0, p1];
+        let priors = (format == Format::Bo3).then(|| {
+            Arc::new([super::sample::FirstPickPrior::new(db, &pools, 0), super::sample::FirstPickPrior::new(db, &pools, 1)])
+        });
         Ok(MatchState {
             format,
             gspec,
-            pools: Arc::new([p0, p1]),
+            pools: Arc::new(pools),
             decks: [Arc::from(c0), Arc::from(c1)],
             game_no: 1,
             results: [0; 3],
@@ -314,6 +322,7 @@ impl MatchState {
             earlier: [[0; 16]; 2],
             sb: None,
             rng: Rng::new(seed ^ 0x3A7C_4B0B_D1CE_5EED),
+            priors,
         })
     }
 
@@ -364,7 +373,7 @@ impl super::MtgAz {
     /// match's next step: its end or sideboarding) or sideboarding's.
     pub(crate) fn match_step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
         if self.m.sb.is_some() {
-            return self.sideboard_step(a);
+            return self.sideboard_step(a, chance);
         }
         let k0 = chance.len();
         self.g.apply(a, chance)?;
@@ -404,11 +413,13 @@ impl super::MtgAz {
                 m.results[i] = 3;
             }
         }
+        // (`seen` keeps the last game's reveals until the next game begins:
+        // between games `determinize` samples the last deck, ENGINE.md
+        // 36.11.)
         for p in 0..2 {
             for w in 0..16 {
                 m.earlier[p][w] |= m.seen[p][w];
             }
-            m.seen[p] = [0; 16];
         }
         if m.wins.iter().any(|&w| w >= BO3_WINS) || m.game_no >= BO3_GAMES {
             m.over = true;
@@ -424,7 +435,7 @@ impl super::MtgAz {
         m.sb = Some(Box::new(sb));
     }
 
-    fn sideboard_step(&mut self, a: u16) -> Result<(), String> {
+    fn sideboard_step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
         let m = &mut self.m;
         let sb = m.sb.as_mut().expect("sideboarding");
         let p = sb.decider();
@@ -433,7 +444,7 @@ impl super::MtgAz {
         }
         sb.done[p as usize] = Some(Arc::from(std::mem::take(&mut sb.counts)));
         if sb.turn == 1 {
-            return self.next_game();
+            return self.next_game(chance);
         }
         sb.turn = 1;
         let q = sb.decider();
@@ -446,18 +457,48 @@ impl super::MtgAz {
 
     /// Both players have sideboarded: the next game, its chooser the first
     /// to sideboard (CR 103.1).
-    fn next_game(&mut self) -> Result<(), String> {
+    fn next_game(&mut self, chance: &mut Vec<u64>) -> Result<(), String> {
         let m = &mut self.m;
         let sb = m.sb.take().expect("sideboarding");
         for p in 0..2 {
             m.decks[p] = sb.done[p].clone().expect("both decks chosen");
         }
         m.game_no += 1;
+        m.seen = [[0; 16]; 2];
         let decks = [m.deck(0), m.deck(1)];
         let sides = [m.pools[0].sideboard(&m.decks[0]), m.pools[1].sideboard(&m.decks[1])];
         let gspec = GameSpec { chooser: Some(sb.order[0]), ..m.gspec };
         let seed = m.rng.next_u64();
         self.g = Game::with_sideboards(self.g.db(), gspec, [&decks[0], &decks[1]], [&sides[0], &sides[1]], seed)?;
+        self.set_known_pools();
+        // The new game shows each deck's and sideboard's size, which the
+        // (hidden) sideboarding decided: a public key, so worlds of a viewer
+        // that differ there are told apart (ENGINE.md 36.11).
+        let n = |v: &Vec<DefId>| v.len().min(255) as u64;
+        chance.push(key(KEY_GAME, 0, n(&decks[0]) | n(&decks[1]) << 8 | n(&sides[0]) << 16 | n(&sides[1]) << 24));
         Ok(())
+    }
+
+    /// Hidden decks (ENGINE.md 36.11): the card names of each player's pool
+    /// the other player knows (the pool but the first picks not revealed in
+    /// an earlier game, and the basic lands), for the game's questions that
+    /// name a card of theirs.
+    pub(crate) fn set_known_pools(&mut self) {
+        if !self.g.spec().hidden_decks {
+            return;
+        }
+        let ids = identity::identities(self.g.db());
+        for q in 0..2u8 {
+            let pool = &self.m.pools[q as usize];
+            let mut v: Vec<DefId> = pool.list[..pool.n_cards]
+                .iter()
+                .map(|e| e.0)
+                .filter(|&d| super::sample::known_before(&self.m, q, ids, d))
+                .chain(pool.list[pool.n_cards..].iter().map(|e| e.0))
+                .collect();
+            v.sort_unstable();
+            v.dedup();
+            self.g.known_pools[q as usize] = Some(Arc::from(v));
+        }
     }
 }

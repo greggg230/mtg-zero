@@ -22,6 +22,7 @@ pub mod encode;
 pub mod identity;
 pub mod matches;
 pub mod pools;
+pub mod sample;
 
 use crate::db::CardDb;
 use crate::game::{Game, GameSpec};
@@ -261,11 +262,21 @@ pub struct MtgAz {
 impl MtgAz {
     pub fn new(spec: &MtgSpec, seed: u64) -> Result<MtgAz, String> {
         let seats = spec.seats(seed);
-        let gspec = GameSpec { max_turns: spec.max_turns, mulligans: spec.mulligans, chooser: spec.chooser, ..GameSpec::default() };
+        // Best-of-three: the decks are hidden within the pools (ENGINE.md
+        // 36.11); best-of-one keeps open decklists (M5a-M8a's game).
+        let gspec = GameSpec {
+            max_turns: spec.max_turns,
+            mulligans: spec.mulligans,
+            chooser: spec.chooser,
+            hidden_decks: spec.format == Format::Bo3,
+            ..GameSpec::default()
+        };
         let [a, b] = &seats;
         let g = Game::with_sideboards(CardDb::cube(), gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
         let m = MatchState::new(CardDb::cube(), spec.format, gspec, &seats, seed)?;
-        Ok(MtgAz { g, m })
+        let mut az = MtgAz { g, m };
+        az.set_known_pools();
+        Ok(az)
     }
 }
 
@@ -366,11 +377,15 @@ impl SearchGame for MtgAz {
     }
 
     /// The game's hidden information (not while sideboarding: the last
-    /// game is over and nothing of it carries over), and the match's RNG
-    /// that seeds the later games. (Part b: the opponent's deck within
-    /// their pool, ENGINE.md 36.10.)
+    /// game is over), and the match's RNG that seeds the later games.
+    /// Best-of-three (ENGINE.md 36.11): first the opponent's unknown first
+    /// picks, deck and sideboard (and between games their chosen deck),
+    /// sampled from what the viewer knows (`sample.rs`).
     fn determinize(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng) {
         let mut r = Rng::new(rng.next_u64());
+        if self.m.format == Format::Bo3 && !self.m.over {
+            self.sample_hidden_pool(viewer as u8, &mut r);
+        }
         if self.m.sb.is_none() {
             self.g.determinize(viewer as u8, &mut r);
         }

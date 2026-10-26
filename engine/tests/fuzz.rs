@@ -15,7 +15,11 @@
 //! decider's actions, view and encoding), the decks of every later game
 //! (legal, from the pool), the chooser of every later game (CR 103.1) and
 //! the match's end; `FUZZ_MATCHES=n` (default `FUZZ_GAMES` / 20, at least
-//! 20).
+//! 20). M8b part b (ENGINE.md 36.11): `determinize` for both viewers, in
+//! games and while sideboarding, samples the opponent's hidden pool and deck
+//! consistently with what the viewer knows (`check_hidden_pool`), keeps the
+//! viewer's encoding, and two sampled worlds stay indistinguishable to the
+//! decider while zero-core would keep them in one node.
 
 mod common;
 
@@ -385,7 +389,156 @@ struct PlayedMatch {
     changed_decks: u32,
 }
 
+/// Counts of the hidden-pool checks (ENGINE.md 36.11).
+#[derive(Default)]
+struct HiddenStats {
+    worlds: u64,
+    first_picks_changed: u64,
+    decks_changed: u64,
+}
+
+/// A world `determinize(viewer)` sampled (`d`) from match `g`: the viewer's
+/// view and own cards unchanged, no card it knows resampled; the opponent's
+/// pool its known part plus as many first picks; their deck a legal deck of
+/// that pool with the public sizes, holding every card of theirs the viewer
+/// knows, fulfilling a revealed companion, and in the game the world's
+/// cards; the clouds hold.
+fn check_hidden_pool(g: &engine::az::MtgAz, d: &engine::az::MtgAz, viewer: u8, seed: u64, stats: &mut HiddenStats) {
+    use engine::az::sample;
+    let o = 1 - viewer;
+    let (v, ou) = (viewer as usize, o as usize);
+    assert_eq!(g.m.pools[v], d.m.pools[v], "match {seed}: the viewer's pool was resampled");
+    assert_eq!(g.m.decks[v], d.m.decks[v], "match {seed}: the viewer's deck was resampled");
+    assert_eq!(g.g.player(viewer).sideboard, d.g.player(viewer).sideboard, "match {seed}: the viewer's sideboard was resampled");
+    let ids = engine::az::identity::identities(g.g.db());
+    let (rp, sp) = (&g.m.pools[ou], &d.m.pools[ou]);
+    let known = |m: &engine::az::MatchState, pool: &engine::az::matches::MatchPool| -> Vec<(u16, u8)> {
+        pool.list[..pool.n_cards].iter().copied().filter(|e| sample::known_before(m, o, ids, e.0)).collect()
+    };
+    assert_eq!(known(&g.m, rp), known(&d.m, sp), "match {seed}: the known part of P{o}'s pool changed");
+    assert_eq!(rp.first_picks.len(), sp.first_picks.len());
+    assert_eq!(rp.list.len(), sp.list.len());
+    assert!(sp.list[..sp.n_cards].windows(2).all(|w| w[0].0 < w[1].0), "match {seed}: sampled pool not sorted");
+    assert!(sp.first_picks.iter().all(|f| sp.list.iter().any(|e| e.0 == *f)));
+    assert!(sp.first_picks.iter().all(|f| !g.m.pools[v].list.iter().any(|e| e.0 == *f)), "match {seed}: a first pick in the viewer's pool");
+    let size = |c: &[u8]| c.iter().map(|&n| n as usize).sum::<usize>();
+    assert_eq!(size(&g.m.decks[ou]), size(&d.m.decks[ou]), "match {seed}: deck size");
+    for (k, &(_, n)) in sp.list.iter().enumerate() {
+        assert!(d.m.decks[ou][k] <= n, "match {seed}: more copies than the pool has");
+    }
+    let deck = sp.deck(&d.m.decks[ou]);
+    if let Some(c) = d.g.player(o).companion_def {
+        if let Some(cond) = &g.g.db().def(c).companion {
+            assert!(g.g.db().deck_satisfies(cond, &deck), "match {seed}: the sampled deck breaks the revealed companion");
+        }
+    }
+    // What they revealed in this game (between games: the last) is in it.
+    let comp = g.g.player(o).companion_def;
+    for &(dd, _) in &sp.list {
+        let i = ids[dd as usize] as usize;
+        if g.m.seen[ou][i >> 6] & (1 << (i & 63)) != 0 && Some(dd) != comp {
+            assert!(deck.contains(&dd), "match {seed}: a card P{o} revealed this game is not in the sampled deck");
+        }
+    }
+    stats.worlds += 1;
+    stats.first_picks_changed += (rp.first_picks != sp.first_picks) as u64;
+    stats.decks_changed += (rp.deck(&g.m.decks[ou]) != deck) as u64;
+    if d.sideboarding().is_some() {
+        return;
+    }
+    let mut want = deck.clone();
+    if let Some(c) = d.g.player(o).companion_def {
+        want.push(c);
+        want.sort_unstable();
+    }
+    assert_eq!(sample::game_cards(d, o), want, "match {seed}: the world's cards of P{o} are not the sampled deck (and companion)");
+    assert_eq!(d.g.player(o).sideboard.as_ref(), sp.sideboard(&d.m.decks[ou]).as_slice(), "match {seed}: the sampled sideboard");
+    assert_eq!(g.g.sideboard_size(o), d.g.sideboard_size(o));
+    assert_eq!(g.g.view_of(viewer), d.g.view_of(viewer), "match {seed}: determinize changed the view of P{viewer}");
+    for (i, x) in g.g.objs().iter().enumerate() {
+        let c = engine::CardIdx(i as u16);
+        if g.g.knows(viewer, c) {
+            assert_eq!((x.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "match {seed}: a card P{viewer} knows was resampled");
+        }
+    }
+    d.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} (a world of P{viewer}): {e}"));
+    d.g.check_knowledge().unwrap_or_else(|e| panic!("match {seed} (a world of P{viewer}): {e}"));
+}
+
+/// Two worlds sampled for the decider, played with the same actions, give it
+/// the same encoding while their keys, next decider and legal actions agree
+/// (zero-core's child signature), across games and sideboarding.
+fn check_match_information_set(g: &engine::az::MtgAz, viewer: usize, seed: u64, rng: &mut Rng) {
+    use zero_search::game::SearchGame;
+    let s = rng.next_u64();
+    let mut a = g.clone();
+    a.determinize(viewer, &mut zero_search::rng::Rng::new(s));
+    let mut b = g.clone();
+    b.determinize(viewer, &mut zero_search::rng::Rng::new(s ^ 0x5EED));
+    let (mut la, mut lb) = (Vec::new(), Vec::new());
+    let (mut xa, mut xb) = (vec![0.0f32; engine::az::NUM_FEATURES], vec![0.0f32; engine::az::NUM_FEATURES]);
+    for step in 0..25 {
+        if a.match_over() || b.match_over() {
+            return;
+        }
+        a.legal_actions(&mut la);
+        b.legal_actions(&mut lb);
+        if a.to_move() != b.to_move() || la != lb {
+            assert!(!(a.to_move() == Some(viewer) && b.to_move() == Some(viewer)), "match {seed} step {step}: the viewer's options differ");
+            return;
+        }
+        xa.fill(0.0);
+        xb.fill(0.0);
+        a.encode(viewer, &mut xa);
+        b.encode(viewer, &mut xb);
+        if let Some(i) = (0..xa.len()).find(|&i| xa[i] != xb[i]) {
+            panic!(
+                "match {seed} step {step}: same keys, different encodings of P{viewer} at {i} ({} / {}); decisions {:?} / {:?}; game {} sb {}
+{}
+----
+{}",
+                xa[i],
+                xb[i],
+                a.pending_decision(),
+                b.pending_decision(),
+                a.m.game_no,
+                a.sideboarding().is_some(),
+                stack_names(&a.g),
+                stack_names(&b.g)
+            );
+        }
+        let act = la[rng.below(la.len() as u32) as usize];
+        let (mut ka, mut kb) = (Vec::new(), Vec::new());
+        a.step(act, &mut ka).unwrap();
+        b.step(act, &mut kb).unwrap();
+        if ka != kb {
+            return;
+        }
+    }
+}
+
+fn stack_names(g: &Game) -> String {
+    let db = g.db();
+    let mut v: Vec<String> = g
+        .stack()
+        .iter()
+        .map(|it| match it.kind {
+            engine::game::StackKind::Spell { card } => format!("spell {} (own {})", db.def(g.obj(card).def).name, db.def(g.own_def(card)).name),
+            engine::game::StackKind::Ability { source, .. } => format!("ability of {}", db.def(g.obj(source.idx).def).name),
+        })
+        .collect();
+    for p in 0..2u8 {
+        v.push(format!("P{p} battlefield: {:?}", g.objs().iter().filter(|o| o.zone == engine::Zone::Battlefield && o.controller == p).map(|o| db.def(o.def).name.clone()).collect::<Vec<_>>()));
+    }
+    v.join("
+")
+}
+
 fn play_match(seed: u64, checks: bool) -> PlayedMatch {
+    play_match_stats(seed, checks, &mut HiddenStats::default())
+}
+
+fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedMatch {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
     let sp = match_spec(seed);
@@ -412,18 +565,42 @@ fn play_match(seed: u64, checks: bool) -> PlayedMatch {
             c1.step(a, &mut k1).unwrap();
             c2.step(a, &mut k2).unwrap();
             assert_eq!((c1.g.fingerprint(), &k1, c1.m.game_no), (c2.g.fingerprint(), &k2, c2.m.game_no), "match {seed}: clones diverged");
-            // determinize keeps the decider's actions, view and encoding.
-            let mut d = g.clone();
-            d.determinize(p, &mut zero_search::rng::Rng::new(rng.next_u64()));
-            d.legal_actions(&mut legal2);
-            assert_eq!(legal, legal2, "match {seed}: determinize changed the decider's actions");
-            x1.fill(0.0);
-            x2.fill(0.0);
-            g.encode(p, &mut x1);
-            d.encode(p, &mut x2);
-            assert!(x1 == x2, "match {seed}: determinize changed the decider's encoding");
-            if !sb {
-                assert_eq!(g.g.view_of(p as u8), d.g.view_of(p as u8), "match {seed}: determinize changed the view");
+            // determinize keeps the decider's actions, both viewers' view
+            // and encoding, and samples the opponent's hidden pool and deck
+            // consistently (ENGINE.md 36.11).
+            for viewer in [p, 1 - p] {
+                let mut d = g.clone();
+                d.determinize(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()));
+                d.legal_actions(&mut legal2);
+                if viewer == p {
+                    assert_eq!(legal, legal2, "match {seed}: determinize changed the decider's actions");
+                } else {
+                    assert_eq!(d.to_move(), Some(p), "match {seed}: determinize changed the decider: {:?} -> {:?}", g.pending_decision(), d.pending_decision());
+                }
+                x1.fill(0.0);
+                x2.fill(0.0);
+                g.encode(viewer, &mut x1);
+                d.encode(viewer, &mut x2);
+                if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
+                    panic!("match {seed}: determinize changed the encoding of P{viewer} (mover P{p}) at {i}: {} -> {}", x1[i], x2[i]);
+                }
+                check_hidden_pool(&g, &d, viewer as u8, seed, stats);
+                if viewer == p && rng.below(4) == 0 {
+                    check_match_information_set(&g, viewer, seed, &mut rng);
+                }
+                // The world plays on.
+                let mut kd = Vec::new();
+                for _ in 0..30 {
+                    if d.to_move().is_none() {
+                        break;
+                    }
+                    d.legal_actions(&mut legal2);
+                    let a2 = legal2[rng.below(legal2.len() as u32) as usize];
+                    d.step(a2, &mut kd).unwrap_or_else(|e| panic!("match {seed} (determinized for P{viewer}): {e}"));
+                    if d.sideboarding().is_none() && !d.match_over() {
+                        d.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} (determinized for P{viewer}): {e}"));
+                    }
+                }
             }
         }
         g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
@@ -479,8 +656,9 @@ fn fuzz_random_matches() {
     let n: u64 = std::env::var("FUZZ_MATCHES").ok().and_then(|s| s.parse().ok()).unwrap_or((games / 20).max(20));
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     let (mut games_played, mut draws, mut decisions, mut sb, mut changed, mut three) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    let mut stats = HiddenStats::default();
     for seed in first..first + n {
-        let p = std::panic::catch_unwind(|| play_match(seed, true))
+        let p = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| play_match_stats(seed, true, &mut stats)))
             .unwrap_or_else(|e| panic!("match {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_MATCHES=1): {e:?}"));
         games_played += p.games as u64;
         draws += p.results.iter().filter(|&&r| r == 3).count() as u64;
@@ -491,10 +669,15 @@ fn fuzz_random_matches() {
     }
     println!(
         "{n} matches: {games_played} games ({three} matches of three, {draws} drawn games), mean decisions {:.1}, \
-         sideboarding decisions {sb}, decks changed {changed}",
-        decisions as f64 / n as f64
+         sideboarding decisions {sb}, decks changed {changed}; hidden pools: {} worlds, first picks resampled in {}, \
+         decks in {}",
+        decisions as f64 / n as f64,
+        stats.worlds,
+        stats.first_picks_changed,
+        stats.decks_changed
     );
     assert!(sb > 0 && changed > 0 && three > 0);
+    assert!(n < 20 || stats.first_picks_changed > stats.worlds / 4 && stats.decks_changed > stats.worlds / 4, "the hidden pool is rarely resampled");
 }
 
 #[test]

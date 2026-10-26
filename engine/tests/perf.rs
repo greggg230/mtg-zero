@@ -218,3 +218,60 @@ fn match_layer() {
         );
     }
 }
+
+/// Clone + `determinize(to_move)` through `MtgAz` (one search simulation's
+/// setup): best-of-one (open decklists) and best-of-three (the hidden pool:
+/// the opponent's first picks, deck and sideboard sampled too, ENGINE.md
+/// 36.11), on states of heuristic-against-random play, one every ~7
+/// decisions.
+#[test]
+#[ignore]
+fn match_determinize() {
+    use engine::az::{bots::Heuristic, MtgAz, MtgSpec};
+    use zero_search::game::SearchGame;
+    for (label, json) in [("best-of-one", "{}"), ("best-of-three", r#"{"format": "bo3"}"#)] {
+        let sp = MtgSpec::parse(json).unwrap();
+        let mut snapshots: Vec<MtgAz> = Vec::new();
+        let mut rng = Rng::new(3);
+        for seed in 0..120u64 {
+            let mut g = MtgAz::new_game(&sp, 2, seed).unwrap();
+            let mut h = Heuristic::new(seed);
+            let (mut l, mut k) = (Vec::new(), Vec::new());
+            while let Some(p) = g.to_move() {
+                g.legal_actions(&mut l);
+                if rng.below(7) == 0 {
+                    snapshots.push(g.clone());
+                }
+                let a = match g.sideboarding() {
+                    Some(sb) => engine::az::bots::sideboard(sb, &l),
+                    None if p as u64 == seed % 2 => h.choose(&g.g, &l),
+                    None => l[rng.below(l.len() as u32) as usize],
+                };
+                g.step(a, &mut k).unwrap();
+            }
+        }
+        let mut zr = zero_search::rng::Rng::new(5);
+        for d in &snapshots {
+            let mut c = d.clone();
+            c.determinize(c.to_move().unwrap(), &mut zr);
+        }
+        let reps = 20;
+        let t = Instant::now();
+        for _ in 0..reps {
+            for s in &snapshots {
+                black_box(s.clone());
+            }
+        }
+        let clone = t.elapsed().as_secs_f64() * 1e9 / (reps * snapshots.len()) as f64;
+        let t = Instant::now();
+        for _ in 0..reps {
+            for s in &snapshots {
+                let mut d = s.clone();
+                d.determinize(d.to_move().unwrap(), &mut zr);
+                black_box(&d);
+            }
+        }
+        let both = t.elapsed().as_secs_f64() * 1e9 / (reps * snapshots.len()) as f64;
+        println!("{label}: {} states, clone {clone:.0} ns, clone + determinize {both:.0} ns", snapshots.len());
+    }
+}

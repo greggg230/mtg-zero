@@ -31,6 +31,11 @@ pub const KEY_AUTO: u64 = 4;
 pub const KEY_COIN: u64 = 5;
 /// A die roll (CR 706): payload = the result. Public.
 pub const KEY_DIE: u64 = 6;
+/// A later game of a best-of-three match begins (ENGINE.md 36.11): public
+/// facts the sideboarding (hidden) decided. Payload: each player's deck size
+/// and number of sideboard cards (`deck0 | deck1 << 8 | side0 << 16 | side1
+/// << 24`). Emitted by the match, not by a `Game`.
+pub const KEY_GAME: u64 = 7;
 /// Payload of a private key emitted while another player is the observer.
 pub const HIDDEN: u64 = 0xFFFF_FFFF;
 
@@ -66,6 +71,25 @@ pub struct Cloud {
     pub library: bool,
     pub slots: Vec<CardIdx>,
     pub defs: Vec<DefId>,
+}
+
+/// The rare-rule bits (`Game::seen`) of each definition of `db`, its back
+/// face's included (as `Game::add_card` sets them; not the per-player
+/// miracle bits); computed once.
+fn seen_bits_of(db: &'static crate::db::CardDb) -> &'static [u16] {
+    static BITS: std::sync::OnceLock<(usize, Vec<u16>)> = std::sync::OnceLock::new();
+    let key = db as *const crate::db::CardDb as usize;
+    let b = BITS.get_or_init(|| {
+        let v = (0..db.len())
+            .map(|i| {
+                let d = db.def(i as DefId);
+                d.seen_bits() | d.back.map_or(0, |b| db.def(b).seen_bits())
+            })
+            .collect();
+        (key, v)
+    });
+    assert_eq!(b.0, key, "one card database per process");
+    &b.1
 }
 
 /// Remove one `d` from a sorted multiset; false if absent.
@@ -535,23 +559,7 @@ impl Game {
     pub fn determinize(&mut self, viewer: PlayerId, rng: &mut Rng) {
         let payer = self.payment_in_progress();
         for owner in 0..2u8 {
-            let mut slots = self.unknown_to_in(viewer, owner);
-            let mut pinned: Vec<CardIdx> = Vec::new();
-            if payer == Some(owner) && owner != viewer {
-                // A payment in progress may count on the payer's mana
-                // sources in hand, and on the cards a cost exiles from hand:
-                // they are pinned (ENGINE.md 10).
-                let exile = self.exile_filters_in_progress();
-                slots.retain(|&c| {
-                    let pin = self.hand_mana_source(c)
-                        || (self.objs[c.i()].zone == Zone::Hand
-                            && exile.iter().any(|(f, ctx)| self.card_matches(f, c, ctx)));
-                    if pin {
-                        pinned.push(c);
-                    }
-                    !pin
-                });
-            }
+            let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
             let mut defs: SVec<DefId, 64> = slots.iter().map(|&c| self.ident(c)).collect();
             if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
                 rng.shuffle(&mut defs);
@@ -576,6 +584,51 @@ impl Game {
             c.refresh_pending();
             assert_eq!(c.pending, self.pending, "determinize changed the viewer's decision");
         }
+    }
+
+    /// The cards of `owner` whose identities `determinize(viewer)` deals
+    /// again (those `viewer` does not know exactly, ENGINE.md 10), and the
+    /// pinned ones it keeps (a payment in progress by `owner` may count on
+    /// them).
+    pub(crate) fn hidden_slots(&self, viewer: PlayerId, owner: PlayerId) -> (SVec<CardIdx, 64>, Vec<CardIdx>) {
+        self.hidden_slots_with(viewer, owner, self.payment_in_progress())
+    }
+
+    fn hidden_slots_with(&self, viewer: PlayerId, owner: PlayerId, payer: Option<PlayerId>) -> (SVec<CardIdx, 64>, Vec<CardIdx>) {
+        let mut slots = self.unknown_to_in(viewer, owner);
+        let mut pinned: Vec<CardIdx> = Vec::new();
+        if payer == Some(owner) && owner != viewer {
+            // A payment in progress may count on the payer's mana sources in
+            // hand, and on the cards a cost exiles from hand: they are pinned
+            // (ENGINE.md 10).
+            let exile = self.exile_filters_in_progress();
+            slots.retain(|&c| {
+                let pin = self.hand_mana_source(c)
+                    || (self.objs[c.i()].zone == Zone::Hand && exile.iter().any(|(f, ctx)| self.card_matches(f, c, ctx)));
+                if pin {
+                    pinned.push(c);
+                }
+                !pin
+            });
+        }
+        (slots, pinned)
+    }
+
+    /// Hidden decks (ENGINE.md 36.11): give `owner`'s cards `slots` the
+    /// identities `defs` (one each, in order; a sampled deck's cards) and
+    /// set their sideboard. The rare-rule bits (`seen`) learn the new
+    /// identities (with hidden decks the miracle question does not read
+    /// them: `Game::deck_question`).
+    pub(crate) fn redeal(&mut self, owner: PlayerId, slots: &[CardIdx], defs: &[DefId], sideboard: std::sync::Arc<[DefId]>) {
+        debug_assert_eq!(slots.len(), defs.len());
+        let bits = seen_bits_of(self.db);
+        for (&c, &d) in slots.iter().zip(defs) {
+            if self.ident(c) != d {
+                self.seen |= bits[d as usize];
+                self.set_ident(c, d);
+            }
+        }
+        self.players[owner as usize].sideboard = sideboard;
     }
 
     /// The identities of `slots` (all of them, `pool`) are dealt so each
