@@ -344,6 +344,14 @@ impl Game {
         }
         // A special action (CR 116.2): its cost, then it happens; no stack.
         if let Some(sp) = ad.special {
+            if sp == crate::db::Special::TurnFaceUp {
+                // CR 701.40b: "show all players that the card representing
+                // that permanent is a creature card and what that card's mana
+                // cost is, pay that cost, then turn the permanent face up":
+                // the card is shown before the payment, which its cost would
+                // otherwise tell (ENGINE.md 36.11).
+                self.reveal(card);
+            }
             self.agenda.push(Task::Special { p, card, sp });
             let mana = self.special_mana(p, card, ad);
             if !mana.is_zero() {
