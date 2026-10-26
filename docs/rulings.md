@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1226 | 977 |
 | class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 772 | 606 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 484 | 415 |
+| a, tested (passing) | 834 | 662 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 546 | 471 |
 | a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
 | a, deferred | 0 | 0 |
-| a, untested | 454 | 371 |
+| a, untested | 392 | 315 |
 
-Class a by area (distinct texts): mana 76/173, triggers 91/139, stack 126/126, zones 48/123, copies 95/96, other 44/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
+Class a by area (distinct texts): mana 77/173, triggers 139/139, stack 126/126, zones 53/123, copies 95/96, other 46/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
 
 ## Per card
 
@@ -269,7 +269,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `408732b7` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist | untested |
 | `6d79b5c1` | a | triggers | the monarch carries two built-in triggers: draw at end step, and passing on combat damage dealt to it | `rules_shortcuts::cr_724_2_the_monarchs_end_step_draw_uses_the_stack`; `rules_shortcuts::cr_724_2_combat_damage_to_the_monarch_triggers_per_creature` |
 | `078cc0d2` | a | zones | an exiled creature token ceases to exist instead of ever returning | `rulings_triggers2::palace_jailer_exiling_a_token_it_ceases_to_exist_cr_111_7` |
-| `867620c4` | a | triggers | if you're not monarch when the delayed exile trigger resolves, it stays exiled until an opponent becomes monarch | untested |
+| `867620c4` | a | triggers | if you're not monarch when the delayed exile trigger resolves, it stays exiled until an opponent becomes monarch | `rulings_triggers3::palace_jailers_exile_lasts_until_an_opponent_becomes_monarch_even_if_p0_isnt_monarch_now_cr_724_610_3` |
 | `2239016d` | b | MP | multiplayer monarch succession when the monarch leaves the game | multiplayer |
 | `e5e352da` | a | triggers | the source leaving doesn't return its exiled card; it keeps watching for an opponent to become monarch | `rulings_triggers2::palace_jailer_gone_the_creature_returns_when_an_opponent_becomes_the_monarch_cr_610_3c` |
 | `88b92913` | b | DEF | the game starts with no monarch, but exactly one exists from the first time one is assigned onward [part 3, was a/other: no monarch until one is made; a definition] | a definition, no behaviour of its own |
@@ -508,7 +508,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `814381be` | a | triggers | a draw-counting ability doesn't need to have been in play for the first draw, only when the later draw happens | untested |
+| `814381be` | a | triggers | a draw-counting ability doesn't need to have been in play for the first draw, only when the later draw happens | `rulings_triggers3::draw_limits_and_draw_counters_see_draws_before_their_source_entered_cr_121_2` |
 
 ### Jace, Vryn's Prodigy // Jace, Telepath Unbound
 
@@ -606,9 +606,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c961b628` | a | triggers | ETB and enters-with abilities of a copied creature trigger normally for the token it becomes | untested |
-| `b3cee2a5` | a | triggers | if the spell is countered, its offspring-style ability doesn't trigger and no token is made | untested |
-| `3d567b94` | a | triggers | if the creature leaves the battlefield before its offspring-style ability resolves, the token is still created | untested |
+| `c961b628` | a | triggers | ETB and enters-with abilities of a copied creature trigger normally for the token it becomes | `rulings_triggers3::cast_triggers_resolve_without_their_spell_and_countered_creatures_make_no_tokens_cr_603_2` |
+| `b3cee2a5` | a | triggers | if the spell is countered, its offspring-style ability doesn't trigger and no token is made | `rulings_triggers3::cast_triggers_resolve_without_their_spell_and_countered_creatures_make_no_tokens_cr_603_2` |
+| `3d567b94` | a | triggers | if the creature leaves the battlefield before its offspring-style ability resolves, the token is still created | `rulings_triggers3::cast_triggers_resolve_without_their_spell_and_countered_creatures_make_no_tokens_cr_603_2` |
 | `965f8740` | c | NR | if the creature somehow lacks the triggering ability when it enters, it won't trigger even if its cost was paid [part 3, was a/triggers: no cube effect removes a creature's abilities as it enters] | not reachable with the cube's cards |
 | `76edf0a6` | c | NR | if the original is itself copying something when this resolves, the token copies that other thing as a 1/1 [part 3, was a/copies: offspring triggers only for a Thundertrap Trainer cast with its offspring cost paid, and no cube card makes a cast creature spell copy something else] | not reachable with the cube's cards |
 | `0b566f81` | b | DEF | some abilities refer to their source as 'this creature' purely for clarity, with no functional difference | a definition, no behaviour of its own |
@@ -690,7 +690,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8de0da15` | a | triggers | if the spell is countered, its squad-style ability doesn't trigger and no tokens are made | untested |
+| `8de0da15` | a | triggers | if the spell is countered, its squad-style ability doesn't trigger and no tokens are made | `rulings_triggers3::cast_triggers_resolve_without_their_spell_and_countered_creatures_make_no_tokens_cr_603_2` |
 | `6a59b1e6` | c | NR | if the creature somehow lacks the triggering ability on the battlefield, it won't trigger even if its cost was paid [part 3, was a/triggers: no cube effect removes a creature's abilities as it enters] | not reachable with the cube's cards |
 | `247e39a7` | b | DEF | tokens made by a squad-style ability aren't 'cast', so cast-triggered abilities don't fire for them [part 3, was a/stack: squad tokens are created, never spells; a definition] | a definition, no behaviour of its own |
 | `2e930377` | a | mana | a squad-style cost can be paid any number of times, making one token copy per payment | `cards_m7b_copies2::sicarian_infiltrator_squad_makes_a_copy_per_payment_cr_702_157a` |
@@ -802,7 +802,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `a549c65a` | a | other | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | untested |
-| `f872e80b` | a | other | a draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | untested |
+| `f872e80b` | a | other | a draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | `rulings_triggers3::draw_limits_and_draw_counters_see_draws_before_their_source_entered_cr_121_2` |
 | `64a8b100` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | `rulings_replacement2::a_draw_hullbreacher_replaced_doesnt_count_for_narset_or_leovold_cr_614_6`; `rulings_replacement2::a_draw_narset_or_leovold_disallows_cant_be_replaced_by_hullbreacher_cr_614_6_121_2` |
 | `1a963653` | a | other | opponents affected by a one-draw-per-turn restriction have any further draws that turn simply ignored | `cards_m7b_walkers2::narset_each_opponent_draws_at_most_one_card_each_turn` |
 
@@ -901,9 +901,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `6ca5d31d` | a | mana | an X spell being cast via this flash-like ability still forces X to be 0 | untested |
-| `0fb23eca` | a | triggers | declining to pay sacrifices the creature at once with no priority gap; ETB and dies triggers stack together | untested |
+| `0fb23eca` | a | triggers | declining to pay sacrifices the creature at once with no priority gap; ETB and dies triggers stack together | `rulings_triggers3::flash_declined_the_creature_entered_and_its_enter_and_dies_triggers_go_together_cr_603_3` |
 | `46dde370` | a | mana | only the generic portion of that creature's mana cost is reduced | `cards_m7a_misc::flash_sacrifices_the_creature_unless_its_reduced_cost_is_paid` |
-| `70ba8133` | a | triggers | the creature still enters the battlefield (triggering ETB abilities) even if you later decline to pay for it | untested |
+| `70ba8133` | a | triggers | the creature still enters the battlefield (triggering ETB abilities) even if you later decline to pay for it | `rulings_triggers3::flash_declined_the_creature_entered_and_its_enter_and_dies_triggers_go_together_cr_603_3` |
 
 ### Lose Focus
 
@@ -1086,7 +1086,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `efbce0fd` | a | copies | a token copy of a DFC is itself double-faced, matching the source's current face, and can still transform | untested |
 | `ec269542` | a | dfc | only the currently-up face's characteristics apply on the battlefield; the other face is ignored | untested |
 | `165eb81a` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | untested |
-| `7f9205e7` | a | triggers | if this dies exactly as it deals damage, its death trigger fires, but LKI means it wont untap or transform anymore | untested |
+| `7f9205e7` | a | triggers | if this dies exactly as it deals damage, its death trigger fires, but LKI means it wont untap or transform anymore | `rulings_triggers3::reanimates_life_loss_comes_first_and_cecil_dying_as_it_deals_damage_still_triggers_cr_603_10_704_5a` |
 | `bae0f4a4` | c | NR | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone [part 3, was a/zones: Cecil transforms in place; no cube effect puts a single-faced copy of it onto the battlefield transformed] | not reachable with the cube's cards |
 | `05383bc0` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `4c2dcef3` | a | dfc | a DFC's back face usually has a color indicator that defines its color | untested |
@@ -1161,7 +1161,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `f73afa66` | c | NR | amass Zombies works like amass Orcs but makes/uses a Zombie Army and adds the Zombie type if needed [part 3, was a/copies: no cube card amasses Zombies] | not reachable with the cube's cards |
 | `3127ca2a` | b | PRINT | amass's current wording ('amass [subtype] N') replaced older 'amass Zombies N' text via errata | printing, wording, reminder text |
-| `8ff49c69` | a | zones | putting cards into a hand without using the word 'draw' doesn't count as drawing them | untested |
+| `8ff49c69` | a | zones | putting cards into a hand without using the word 'draw' doesn't count as drawing them | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 | `921a0532` | c | NR | a newly created Army token enters as a 0/0 before getting its counters, so ETB-power triggers see a 0/0 [part 3, was a/triggers: the cube's only amass is 1 (Orcish Bowmasters), and no trigger tells a 0/0 Army from a 1/1 (Enduring Innocence sees power 2 or less either way)] | not reachable with the cube's cards |
 | `afcdb2b8` | c | NR | with multiple Army creatures controlled, you choose which one gets the amass counters, gaining the Orc type if needed [part 3, was a/other: the cube has one Army source and no changeling] | not reachable with the cube's cards |
 | `adf3a67e` | c | NR | 'the amassed Army' means the chosen Army creature even if it ended up with no counters [part 3, was a/other: no cube card refers to the amassed Army] | not reachable with the cube's cards |
@@ -1180,12 +1180,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `73ddf41c` | a | triggers | magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect | untested |
-| `f41a9b99` | a | triggers | casting an instant or sorcery triggers every magecraft ability you control | untested |
+| `73ddf41c` | a | triggers | magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
+| `f41a9b99` | a | triggers | casting an instant or sorcery triggers every magecraft ability you control | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
 | `e50427e3` | a | protection | targeting multiple ward permanents triggers each ward; missing any payment counters the whole spell | untested |
 | `ee14929e` | a | triggers | an effect that copies an instant or sorcery spell on the stack also triggers magecraft | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
 | `be6a31bb` | a | triggers | making multiple copies of a spell triggers magecraft once per copy | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
-| `e120a54f` | a | triggers | copying an instant/sorcery card in a non-stack zone doesn't trigger magecraft by itself, but casting that copy does | untested |
+| `e120a54f` | a | triggers | copying an instant/sorcery card in a non-stack zone doesn't trigger magecraft by itself, but casting that copy does | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
 
 ### Grief
 
@@ -1213,7 +1213,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `628c3597` | a | triggers | if you and an opponent would draw simultaneously, you choose the order the resulting triggered abilities resolve in | untested |
+| `628c3597` | a | triggers | if you and an opponent would draw simultaneously, you choose the order the resulting triggered abilities resolve in | `rulings_triggers3::simultaneous_draws_let_sheoldreds_controller_order_and_landfall_triggers_are_ordered_cr_603_3b` |
 
 ### Harvester of Misery
 
@@ -1243,17 +1243,17 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f353546d` | a | zones | putting a card into a hand without using the word 'draw' doesn't count as drawing it | untested |
+| `f353546d` | a | zones | putting a card into a hand without using the word 'draw' doesn't count as drawing it | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 | `755b454d` | c | NR | if a miracle card leaves your hand before its triggered ability resolves, you can no longer cast it via miracle [part 3, was a/triggers: no cube card makes a player discard at instant speed or otherwise moves a revealed miracle card from hand] | not reachable with the cube's cards |
 | `9c0b0e4d` | b | PRINT | a miracle card must be revealed as it's drawn, before it mixes into the rest of your hand [part 3, was a/triggers: revealing before mixing the card into the hand is a physical-play instruction] | printing, wording, reminder text |
 | `a45f943c` | b | DEF | miracle is an alternative cost that can't combine with other alternative costs, only additional ones [part 3, was a/mana: miracle is one alternative cost; a definition] | a definition, no behaviour of its own |
-| `0cb05459` | a | zones | drawing multiple cards is always a sequence of individual draws; only the first drawn that way can use miracle | untested |
+| `0cb05459` | a | zones | drawing multiple cards is always a sequence of individual draws; only the first drawn that way can use miracle | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 | `d3edc491` | a | mana | total cost = base/alt cost (e.g. miracle) + increases, then reductions; mana value unaffected | untested |
-| `bf463705` | a | triggers | you can only cast a miracle card exactly as its triggered ability resolves; missing that window forfeits the option | untested |
-| `0f9f54eb` | a | triggers | miracle can be used on any turn, not just your own, as long as it's the first card you drew that turn | untested |
+| `bf463705` | a | triggers | you can only cast a miracle card exactly as its triggered ability resolves; missing that window forfeits the option | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
+| `0f9f54eb` | a | triggers | miracle can be used on any turn, not just your own, as long as it's the first card you drew that turn | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 | `3904df2a` | a | stack | casting a card via miracle happens during its triggered ability's resolution, ignoring normal card-type timing rules | `cards_m7c_tail2::metamorphosis_fanatic_miracle_cast_for_two_cr702_94a` |
 | `ac2fc577` | a | triggers | you don't have to reveal a drawn miracle card if you don't want to cast it | `cards_m7c_tail2::metamorphosis_fanatic_miracle_cast_for_two_cr702_94a` |
-| `33d4b423` | a | triggers | the card is still drawn regardless of miracle use, triggering draw-triggers, and stays in hand if not cast that way | untested |
+| `33d4b423` | a | triggers | the card is still drawn regardless of miracle use, triggering draw-triggers, and stays in hand if not cast that way | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 
 ### Troll of Khazad-dûm
 
@@ -1266,7 +1266,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `89a61120` | a | triggers | multi-clause ETB abilities run in order; sacrificed permanents are gone for later clauses, triggers wait till resolution | untested |
+| `89a61120` | a | triggers | multi-clause ETB abilities run in order; sacrificed permanents are gone for later clauses, triggers wait till resolution | `rulings_triggers3::archon_of_cruelty_the_sacrifice_comes_before_the_discard_and_the_life_cr_608_2c` |
 
 ### Griselbrand
 
@@ -1295,7 +1295,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `adbe4a9a` | a | stack | a removal spell with a mana-value restriction can target anything; the restriction is checked only at resolution | `rulings_stack::fatal_push_may_target_any_creature_and_checks_its_mana_value_on_resolution_cr_608_2b` |
 | `aafa61cb` | a | mana | a battlefield creature with X in its mana cost treats X as 0 | untested |
-| `7995d7c4` | a | triggers | a revolt-style condition doesn't care how, why, or by whom a permanent left, or where it went | untested |
+| `7995d7c4` | a | triggers | a revolt-style condition doesn't care how, why, or by whom a permanent left, or where it went | `rulings_triggers3::revolt_counts_any_permanent_leaving_and_dash_returns_only_a_creature_still_there_cr_702_109a` |
 | `94a79602` | a | zones | a token leaving the battlefield still satisfies a revolt-style condition | untested |
 
 ### Rain of Filth
@@ -1368,7 +1368,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `e7efe1ca` | a | mana | a card in a graveyard with X in its mana cost treats X as 0 | `rulings_mana::reanimate_a_card_with_x_loses_life_for_x_zero_cr_107_3b` |
-| `0a7655f0` | a | triggers | ETB triggers from a reanimated creature resolve after the life-loss cost; a game-ending loss skips them | untested |
+| `0a7655f0` | a | triggers | ETB triggers from a reanimated creature resolve after the life-loss cost; a game-ending loss skips them | `rulings_triggers3::reanimates_life_loss_comes_first_and_cecil_dying_as_it_deals_damage_still_triggers_cr_603_10_704_5a` |
 | `8be95947` | b | MP | multiplayer: a player leaving the game and the cards/permanents they own leaving with them | multiplayer |
 | `7e8fdb68` | a | mana | the life lost is based on the card's mana value while still in the graveyard, not after it becomes a creature | `rulings_mana::reanimate_a_card_with_x_loses_life_for_x_zero_cr_107_3b` |
 | `92b47e83` | c | NR | life loss happens after the creature is already on the battlefield, so its own life-loss triggers can apply [part 3, was a/triggers: no cube permanent interacts with its controller losing life as Reanimate's loss happens] | not reachable with the cube's cards |
@@ -1401,8 +1401,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1790c518` | a | zones | this effect puts the card directly into your hand instead of drawing it | untested |
-| `e61f99f9` | a | zones | the card found this way isn't revealed to your opponent | untested |
+| `1790c518` | a | zones | this effect puts the card directly into your hand instead of drawing it | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
+| `e61f99f9` | a | zones | the card found this way isn't revealed to your opponent | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 | `3200cc0f` | b | DEF | the card to put into your hand is chosen as the spell resolves [part 3, was a/zones: the card is chosen as the spell resolves, the only time the engine asks; a definition] | a definition, no behaviour of its own |
 
 ### Life // Death
@@ -1423,7 +1423,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `e08d64dc` | a | triggers | a mass-removal effect only hits creatures present when it resolves, not later entrants or new creatures that turn | untested |
+| `e08d64dc` | a | triggers | a mass-removal effect only hits creatures present when it resolves, not later entrants or new creatures that turn | `rulings_triggers3::deathclaw_gone_before_monstrosity_resolves_doesnt_trigger_and_phlage_not_escaped_is_sacrificed_cr_701_37_702_138` |
 | `38801307` | a | mana | casting an X-cost-paid-as-life spell without paying its mana cost still requires choosing X and paying the life cost | untested |
 
 ### Yawgmoth's Will
@@ -1520,7 +1520,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `d7de1c3d` | a | copies | a creature that enters as or becomes a copy of a dashed creature doesn't gain haste and won't bounce to hand later | `rulings_copies3::a_copy_of_a_dashed_ragavan_has_no_haste_and_isnt_returned_cr_702_109a_707_2` |
 | `4f0780ad` | a | mana | paying a dash-style cost is still a normal cast: responsive, counterable, only when castable anyway | untested |
-| `d96d165d` | a | triggers | a dash-style return-to-hand trigger only works if the creature is still on the battlefield when that trigger resolves | untested |
+| `d96d165d` | a | triggers | a dash-style return-to-hand trigger only works if the creature is still on the battlefield when that trigger resolves | `rulings_triggers3::revolt_counts_any_permanent_leaving_and_dash_returns_only_a_creature_still_there_cr_702_109a` |
 | `7929f582` | a | combat | a dash-style effect doesn't force the creature to attack unless something else says so | untested |
 | `b5df7fc5` | a | zones | casting an exiled card this way still needs its full costs and timing; you cant play an exiled land | untested |
 | `421327a3` | a | zones | a Treasure-creating exile effect still makes the token even if the affected library has no cards left to exile | untested |
@@ -1544,7 +1544,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `de5ecf09` | a | other | an extra-combat effect skips a main phase, so beginning of combat follows right after the first combat ends | untested |
+| `de5ecf09` | a | other | an extra-combat effect skips a main phase, so beginning of combat follows right after the first combat ends | `rulings_triggers3::ursine_triggers_at_each_combat_with_no_main_phase_between_and_persist_returns_apnap_cr_506_1_603_3b` |
 | `4404ca0c` | a | stack | an illegal target at resolution means an extra-combat ability doesn't resolve, so no extra combat phase happens | `rulings_stack3::triggers_with_their_targets_gone_or_condition_failed_cr_608_2b_603_4` |
 
 ### Generous Plunderer
@@ -1585,7 +1585,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `dc0e9b36` | a | triggers | the trigger needs an actual untapped-to-tapped change; tapping an already-tapped permanent doesn't trigger it | untested |
+| `dc0e9b36` | a | triggers | the trigger needs an actual untapped-to-tapped change; tapping an already-tapped permanent doesn't trigger it | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `0b6a7a6e` | b | DEF | this ability doesn't itself tap anything; you need another way to tap the relevant permanents, like attacking [part 3, was a/other: Magda's trigger taps nothing; a definition] | a definition, no behaviour of its own |
 
 ### Robber of the Rich
@@ -1594,9 +1594,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `edc91fad` | a | zones | an effect that lets you 'cast' a card doesn't let you play lands with it | untested |
 | `9b682c79` | a | zones | casting a card from exile removes it from exile, so you can't cast it again from there | untested |
-| `08172cc2` | a | triggers | this cast-permission keeps applying on later turns if the source leaves, as long as its condition is met again | untested |
+| `08172cc2` | a | triggers | this cast-permission keeps applying on later turns if the source leaves, as long as its condition is met again | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `69d95378` | a | combat | when a creature attacks a planeswalker, that planeswalker's controller counts as the defending player | untested |
-| `bcb139f0` | a | triggers | a comparative trigger condition is checked at trigger time and again at resolution; in-between doesnt matter | untested |
+| `bcb139f0` | a | triggers | a comparative trigger condition is checked at trigger time and again at resolution; in-between doesnt matter | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `dca8fc68` | a | dfc | stealing and casting an Adventure card this way lets you, not its owner, cast the permanent later | untested |
 | `03c107f1` | b | MP | multiplayer: a player leaving the game and the cards/permanents they own leaving with them | multiplayer |
 | `0614c7a7` | a | zones | letting you cast an exiled card doesn't change its normal timing restrictions | untested |
@@ -1652,7 +1652,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `551aa933` | a | zones | cards exiled by this effect are exiled face up | untested |
 | `1178d637` | a | triggers | an 'exile cards until some event' effect exiles them one at a time, so a watching trigger fires once per card | `rulings_triggers2::laelia_cascade_exiles_one_card_at_a_time_one_trigger_each_cr_702_85a_603_2c` |
 | `1e2502fc` | a | zones | playing a card from exile makes it a new object; if it returns to exile later, you can't play it again | untested |
-| `a898c85e` | a | triggers | this trigger doesn't care which player exiled the cards or from which zone, including via delve | untested |
+| `a898c85e` | a | triggers | this trigger doesn't care which player exiled the cards or from which zone, including via delve | `rulings_triggers3::laelia_an_opponents_exile_counts_and_rockets_destroyed_draw_and_a_crewed_copter_doesnt_enter_cr_603_2_603_6a` |
 | `cefea9b0` | a | triggers | this trigger fires once per exiling event, no matter how many cards were exiled simultaneously | `rules_shortcuts::cr_603_2c_laelia_triggers_once_per_exile_event` |
 | `8e48cc76` | a | zones | playing a card exiled this way still follows normal timing restrictions, including needing an available land play | untested |
 | `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | untested |
@@ -1683,7 +1683,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `903365a8` | a | triggers | a graveyard-size-gated ability checks the count both when it triggers and again at resolution, failing either check | untested |
+| `903365a8` | a | triggers | a graveyard-size-gated ability checks the count both when it triggers and again at resolution, failing either check | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `1e4d5a35` | a | zones | cards played this way still require paying all costs and following normal timing rules, including land-play availability | untested |
 
 ### Caves of Chaos Adventurer
@@ -1691,10 +1691,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `5e36ae3b` | a | other | retaking the initiative while already holding it doesn't grant a second designation | `rules_initiative::taking_the_initiative_again_ventures_again_cr_725_2` |
-| `e25495c7` | a | triggers | a dungeon-completion check happens at the moment of exiling, not any time later that turn | untested |
+| `e25495c7` | a | triggers | a dungeon-completion check happens at the moment of exiling, not any time later that turn | `rulings_triggers3::caves_of_chaos_checks_a_completed_dungeon_as_it_exiles_cr_603_4` |
 | `e8573af9` | b | MP | a player leaving the game (initiative transfer) | multiplayer |
 | `9b870816` | a | zones | venturing into Undercity while not in a dungeon puts it in the command zone at the first room | `rules_initiative::taking_the_initiative_ventures_into_undercity_cr_725_2` |
-| `4f2c74cd` | a | mana | if the condition is met at resolution, you may only play the card for free, not choose to pay its mana cost instead | untested |
+| `4f2c74cd` | a | mana | if the condition is met at resolution, you may only play the card for free, not choose to pay its mana cost instead | `rulings_triggers3::caves_of_chaos_checks_a_completed_dungeon_as_it_exiles_cr_603_4` |
 | `840d087a` | a | other | venturing while already in a dungeon advances a room, or starts Undercity if it completes the last room | `rules_initiative::venturing_on_the_bottommost_room_completes_it_and_starts_anew_cr_701_49c` |
 | `3d2835db` | b | MP | Two-Headed Giant initiative/venture ordering | multiplayer |
 | `5549b685` | a | other | only one player holds the initiative at a time; taking it strips it from whoever had it | `rules_initiative::combat_damage_to_its_holder_takes_the_initiative_cr_725_2` |
@@ -1982,7 +1982,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `3e2199e1` | c | NR | this trigger only fires on a real tap-cost mana ability, not alternate tap wording or another objects ability [part 3, was a/triggers: no cube mana ability taps a creature other than its own source or without {T}] | not reachable with the cube's cards |
 | `4565f55b` | a | mana | this triggered mana ability doesn't use the stack and can't be responded to | `cards_m7c_tail::badgermole_cub_earthbends_and_creatures_tap_for_more_cr701_65a` |
 | `a1b92c37` | a | copies | animating a land this way doesn't give it a color, so most animated lands stay colorless | `rulings_copies3::earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_resets_to_0_0_cr_701_65a` |
-| `b4e0984f` | a | triggers | if an animated land leaves to any zone but graveyard or exile, its delayed return trigger wont reclaim it | untested |
+| `b4e0984f` | a | triggers | if an animated land leaves to any zone but graveyard or exile, its delayed return trigger wont reclaim it | `rulings_triggers3::an_earthbended_land_bounced_isnt_returned_and_teferis_untaps_are_chosen_at_the_end_step_cr_603_7` |
 | `8c334374` | a | stack | an illegal land target makes the animate effect fail, voiding the whole spell if it had no other targets | `rulings_stack3::abilities_and_reflexive_effects_with_their_targets_gone_cr_608_2b` |
 | `0decf500` | a | copies | an animated land keeps its other types, subtypes, supertypes, and any mana abilities those grant | `rulings_copies3::earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_resets_to_0_0_cr_701_65a` |
 | `28832e4a` | a | copies | targeting an already-animated land adds more counters and haste, and resets its base power/toughness to 0/0 | `rulings_copies3::earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_resets_to_0_0_cr_701_65a` |
@@ -1994,7 +1994,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `3e9497f2` | c | NR | doubling a permanent's counters means adding that many more, which other counter-interacting effects still see happen [part 3, was a/other: no cube card reacts to counters being put on a permanent] | not reachable with the cube's cards |
 | `7ab9e10f` | c | NR | a landfall-style ability doesn't trigger when an existing permanent merely becomes a land [part 3, was a/triggers: no cube effect makes a permanent on the battlefield become a land] | not reachable with the cube's cards |
 | `0908c190` | a | triggers | a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect | `rules_layers::cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering` |
-| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | untested |
+| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | `rulings_triggers3::simultaneous_draws_let_sheoldreds_controller_order_and_landfall_triggers_are_ordered_cr_603_3b` |
 
 ### Fanatic of Rhonas
 
@@ -2021,8 +2021,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `7ab9e10f` | c | NR | a landfall-style ability doesn't trigger when an existing permanent merely becomes a land [part 3, was a/triggers: no cube effect makes a permanent on the battlefield become a land] | not reachable with the cube's cards |
 | `0908c190` | a | triggers | a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect | `rules_layers::cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering` |
 | `0908c190` | a | triggers | a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect | `rules_layers::cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering` |
-| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | untested |
-| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | untested |
+| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | `rulings_triggers3::simultaneous_draws_let_sheoldreds_controller_order_and_landfall_triggers_are_ordered_cr_603_3b` |
+| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | `rulings_triggers3::simultaneous_draws_let_sheoldreds_controller_order_and_landfall_triggers_are_ordered_cr_603_3b` |
 
 ### Outland Liberator // Frenzied Trapbreaker
 
@@ -2045,7 +2045,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `7ab9e10f` | c | NR | a landfall-style ability doesn't trigger when an existing permanent merely becomes a land [part 3, was a/triggers: no cube effect makes a permanent on the battlefield become a land] | not reachable with the cube's cards |
 | `0908c190` | a | triggers | a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect | `rules_layers::cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering` |
 | `3f9e2325` | c | NR | doubling a creature's counters means adding that many more, which other counter-interacting effects still see happen [part 3, was a/other: no cube card reacts to counters being put on a permanent] | not reachable with the cube's cards |
-| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | untested |
+| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | `rulings_triggers3::simultaneous_draws_let_sheoldreds_controller_order_and_landfall_triggers_are_ordered_cr_603_3b` |
 
 ### Springheart Nantuko
 
@@ -2059,7 +2059,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `25014ba1` | a | replacement | an unattached bestow permanent skips the graveyard, just stopping being an Aura and staying a creature | `rulings_replacement2::a_bestowed_nantuko_whose_creature_leaves_stays_untapped_and_can_attack_cr_702_103f` |
 | `7ab9e10f` | c | NR | a landfall-style ability doesn't trigger when an existing permanent merely becomes a land [part 3, was a/triggers: no cube effect makes a permanent on the battlefield become a land] | not reachable with the cube's cards |
 | `0908c190` | a | triggers | a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect | `rules_layers::cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering` |
-| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | untested |
+| `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | `rulings_triggers3::simultaneous_draws_let_sheoldreds_controller_order_and_landfall_triggers_are_ordered_cr_603_3b` |
 
 ### Elvish Spirit Guide
 
@@ -2119,7 +2119,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `1d87aaa2` | c | NR | if not forced to attack a specific player but still able, you may attack elsewhere or not attack at all [part 3, was a/combat: Ursine Monstrosity's requirement has no cost, so it's never "not forced but able"] | not reachable with the cube's cards |
 | `ccae9ec2` | a | zones | if a required mill can't happen, the rest of the ability's instructions still get followed | untested |
-| `c298a763` | a | triggers | an attack-triggered ability fires at each of multiple combat phases in a turn, ignoring choices made in earlier phases | untested |
+| `c298a763` | a | triggers | an attack-triggered ability fires at each of multiple combat phases in a turn, ignoring choices made in earlier phases | `rulings_triggers3::ursine_triggers_at_each_combat_with_no_main_phase_between_and_persist_returns_apnap_cr_506_1_603_3b` |
 | `7bf7bcc3` | a | combat | a must-attack creature is excused if tapped, cant-attack, or lacks haste+continuous control; its cost isnt forced | untested |
 | `d8d3cb67` | b | DEF | card types are artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery; no super/subtypes [part 3, was a/other: the list of card types; a definition] | a definition, no behaviour of its own |
 | `dbf6f20e` | a | combat | a 'must attack a player' effect requires attacking that player directly, not a planeswalker or battle they control | untested |
@@ -2169,7 +2169,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `747e785b` | a | mana | this color-removing ability applies in every zone, not just on the battlefield | untested |
 | `85aaba03` | c | NR | losing a color-removing ability still leaves it colorless, since the color change applied before the loss [part 3, was a/copies: no cube effect removes devoid without setting a colour (Oko's Elk makes it green)] | not reachable with the cube's cards |
 | `1896f056` | a | copies | another effect granting a color to a colorless card just makes it that color alone, not that color plus colorless | `rulings_copies3::painters_servant_adds_its_colour_cumulatively_and_a_later_colour_setting_wins_cr_105_3_613_7` |
-| `591acf16` | a | triggers | a permanents own triggers resolve before the spell that made it, even if that spell leaves the stack | untested |
+| `591acf16` | a | triggers | a permanents own triggers resolve before the spell that made it, even if that spell leaves the stack | `rulings_triggers3::cast_triggers_resolve_without_their_spell_and_countered_creatures_make_no_tokens_cr_603_2` |
 | `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `e6ad3498` | b | DEF | paying a kicker cost is what makes a spell 'kicked', a term definition | a definition, no behaviour of its own |
 | `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
@@ -2220,7 +2220,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `fdcd2e1f` | c | NR | persist uses last-known counters right before leaving the battlefield, so a lingering +1/+1 counter blocks its return [part 3, was a/triggers: no cube card puts -1/-1 counters on a persist creature except lethal infect damage, which leaves it with -1/-1 counters either way] | not reachable with the cube's cards |
 | `28deec8d` | c | NR | multiple instances of persist on one permanent each trigger separately, but only the first to resolve has any effect [part 3, was a/triggers: no cube effect gives a creature a second persist] | not reachable with the cube's cards |
 | `15f83ca8` | a | zones | a token with no -1/-1 counters that has persist still triggers on death, but ceases to exist and can't return | untested |
-| `54494365` | a | triggers | simultaneous persist deaths stack active-player triggers first, then others; the last one stacked resolves first | untested |
+| `54494365` | a | triggers | simultaneous persist deaths stack active-player triggers first, then others; the last one stacked resolves first | `rulings_triggers3::persist_triggers_go_on_the_stack_apnap_so_the_nonactive_players_creature_returns_first_cr_603_3b` |
 | `6363d351` | a | triggers | persist triggers on hitting the graveyard, using last-known info to check for a -1/-1 counter | `cards_m7a_threats2::cr_702_79_woodfall_primus_persists_once` |
 | `e7319af2` | a | zones | a permanent returned by persist is a new object with no memory of its previous existence | `cards_m7a_threats2::cr_702_79_woodfall_primus_persists_once` |
 
@@ -2471,7 +2471,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `7e54db0f` | a | triggers | this death trigger fires no matter how the source reaches the graveyard from the battlefield | untested |
+| `7e54db0f` | a | triggers | this death trigger fires no matter how the source reaches the graveyard from the battlefield | `rulings_triggers3::laelia_an_opponents_exile_counts_and_rockets_destroyed_draw_and_a_crewed_copter_doesnt_enter_cr_603_2_603_6a` |
 | `0e489daa` | b | DEF | the color choice for a mana-producing ability must be made before that same ability's card draw happens [part 3, was a/mana: the colours are chosen before the draw; the engine asks them first] | a definition, no behaviour of its own |
 
 ### Lightning Greaves
@@ -2501,7 +2501,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `8de9353a` | a | combat | once a Vehicle becomes a creature, it follows all the normal rules for artifact creatures, including summoning sickness | untested |
 | `db2bccf4` | a | stack | once a crew ability is announced, it's atomic; no one can stop it by changing or removing the tapped creatures | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
 | `65d7c435` | a | copies | Vehicle is an artifact type, not a creature type, so a crewed Vehicle has no inherent creature type | `rulings_copies3::a_copy_of_a_crewed_copter_isnt_a_creature_and_a_crewed_copter_has_no_creature_type_cr_707_2_301_7` |
-| `526a6c5c` | a | triggers | a Vehicle becoming a creature isn't a permanent entering the battlefield, so ETB-creature triggers don't fire for it | untested |
+| `526a6c5c` | a | triggers | a Vehicle becoming a creature isn't a permanent entering the battlefield, so ETB-creature triggers don't fire for it | `rulings_triggers3::laelia_an_opponents_exile_counts_and_rockets_destroyed_draw_and_a_crewed_copter_doesnt_enter_cr_603_2_603_6a` |
 | `d5ea249a` | b | DEF | you may activate a crew ability on a Vehicle that's already a creature, but doing so has no effect [part 3, was a/mana: crewing a creature Vehicle changes nothing; a definition] | a definition, no behaviour of its own |
 | `15f2809b` | b | DEF | you may tap more creatures than strictly required to pay a crew cost [part 3, was a/mana: tapping more than needed is allowed and changes nothing; a definition] | a definition, no behaviour of its own |
 
@@ -2580,8 +2580,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `8279c4b9` | a | triggers | an unblocked attack against a planeswalker you control doesn't trigger this unblocked-attacker-triggered ability | `rulings_triggers2::coveted_jewel_doesnt_trigger_on_an_attack_at_a_planeswalker_cr_508_1b` |
-| `1ec0d4c1` | a | triggers | this ability resolves after blockers are declared but before combat damage is dealt | untested |
-| `8d31adf9` | a | triggers | this triggers once blockers are declared (or skipped) if any attacker went unblocked, regardless of other attackers | untested |
+| `1ec0d4c1` | a | triggers | this ability resolves after blockers are declared but before combat damage is dealt | `rulings_triggers3::coveted_jewel_resolves_after_blocks_before_damage_with_one_attacker_unblocked_cr_509_1h` |
+| `8d31adf9` | a | triggers | this triggers once blockers are declared (or skipped) if any attacker went unblocked, regardless of other attackers | `rulings_triggers3::coveted_jewel_resolves_after_blocks_before_damage_with_one_attacker_unblocked_cr_509_1h` |
 | `c5826706` | b | MP | each opponent attacking at once triggers this separately, each getting a chance at its own effect | multiplayer |
 
 ### Aang, Swift Savior // Aang and La, Ocean's Fury
@@ -2622,8 +2622,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `18387350` | a | triggers | the target for this emblem's triggered ability is chosen only after you've seen the card drawn earlier in its effect | untested |
-| `956752d0` | a | triggers | which two lands to untap isn't decided until the delayed trigger resolves at the next end step | untested |
+| `18387350` | a | triggers | the target for this emblem's triggered ability is chosen only after you've seen the card drawn earlier in its effect | `rulings_triggers3::teferis_emblem_targets_after_the_draw_cr_603_3d` |
+| `956752d0` | a | triggers | which two lands to untap isn't decided until the delayed trigger resolves at the next end step | `rulings_triggers3::an_earthbended_land_bounced_isnt_returned_and_teferis_untaps_are_chosen_at_the_end_step_cr_603_7` |
 
 ### Lim-Dûl's Vault
 
@@ -2922,7 +2922,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fb8555e1` | a | triggers | a cast-triggered ability resolves before its source spell, even if that spell is countered or otherwise leaves the stack | untested |
+| `fb8555e1` | a | triggers | a cast-triggered ability resolves before its source spell, even if that spell is countered or otherwise leaves the stack | `rulings_triggers3::cast_triggers_resolve_without_their_spell_and_countered_creatures_make_no_tokens_cr_603_2` |
 
 ### Saheeli, Sublime Artificer
 
@@ -2967,11 +2967,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `73ddf41c` | a | triggers | magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect | untested |
-| `3cf2e3a4` | a | triggers | casting an instant or sorcery triggers every magecraft-style ability you control | untested |
+| `73ddf41c` | a | triggers | magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
+| `3cf2e3a4` | a | triggers | casting an instant or sorcery triggers every magecraft-style ability you control | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
 | `ee14929e` | a | triggers | an effect that copies an instant or sorcery spell on the stack also triggers magecraft | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
 | `be6a31bb` | a | triggers | making multiple copies of a spell triggers magecraft once per copy | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
-| `e120a54f` | a | triggers | copying an instant/sorcery card in a non-stack zone doesn't trigger magecraft by itself, but casting that copy does | untested |
+| `e120a54f` | a | triggers | copying an instant/sorcery card in a non-stack zone doesn't trigger magecraft by itself, but casting that copy does | `rulings_triggers3::every_magecraft_triggers_and_a_prepare_copy_triggers_only_when_cast_cr_702_150` |
 
 ### Vicious Rivalry
 
@@ -2983,7 +2983,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `956681d4` | a | triggers | a becomes-monstrous trigger wont fire if its creature isnt on the battlefield when monstrosity resolves | untested |
+| `956681d4` | a | triggers | a becomes-monstrous trigger wont fire if its creature isnt on the battlefield when monstrosity resolves | `rulings_triggers3::deathclaw_gone_before_monstrosity_resolves_doesnt_trigger_and_phlage_not_escaped_is_sacrificed_cr_701_37_702_138` |
 | `6aa2fef7` | c | NR | being monstrous is a fact, not an ability, so it survives losing creature status or other abilities [part 3, was a/other: monstrous matters only to Alpha Deathclaw's own ability, which nothing in the cube removes while it keeps the designation] | not reachable with the cube's cards |
 | `51f91fae` | a | other | once a creature becomes monstrous, activating the ability again while already monstrous does nothing | `cards_m7a_threats2::cr_701_37_alpha_deathclaw_monstrosity_once_and_its_trigger` |
 
@@ -3017,8 +3017,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `75e9fc66` | a | mana | casting via an escape-style permission forbids other alternative costs but still requires mandatory additional costs | `rules_shortcuts::cr_601_2b_breach_escape_with_the_cards_own_additional_cost` |
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
-| `0d9e6436` | a | triggers | this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically | untested |
-| `8e644e8c` | a | triggers | this permanent's second ability triggers on entering the battlefield regardless of whether it escaped to get there | untested |
+| `0d9e6436` | a | triggers | this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically | `rulings_triggers3::deathclaw_gone_before_monstrosity_resolves_doesnt_trigger_and_phlage_not_escaped_is_sacrificed_cr_701_37_702_138` |
+| `8e644e8c` | a | triggers | this permanent's second ability triggers on entering the battlefield regardless of whether it escaped to get there | `rulings_triggers3::deathclaw_gone_before_monstrosity_resolves_doesnt_trigger_and_phlage_not_escaped_is_sacrificed_cr_701_37_702_138` |
 | `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
 
 ### Zirda, the Dawnwaker
@@ -3069,9 +3069,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `96e9a886` | a | triggers | if the source returns anew, its granted ability is a separate object whose per-creature trigger count resets | untested |
-| `be65848a` | a | triggers | if the source leaves while abilities it granted are still on the stack, those abilities resolve normally | untested |
-| `1b428e03` | a | triggers | if the source enters while a targeting spell is already on the stack, the newly granted ability misses that event | untested |
+| `96e9a886` | a | triggers | if the source returns anew, its granted ability is a separate object whose per-creature trigger count resets | `rulings_triggers3::a_new_nadu_grants_a_new_ability_whose_two_triggers_count_anew_cr_400_7_603_2` |
+| `be65848a` | a | triggers | if the source leaves while abilities it granted are still on the stack, those abilities resolve normally | `rulings_triggers3::nadus_granted_triggers_resolve_without_nadu_and_reset_for_a_new_nadu_cr_603_2_400_7` |
+| `1b428e03` | a | triggers | if the source enters while a targeting spell is already on the stack, the newly granted ability misses that event | `rulings_triggers3::nadu_entering_after_a_spell_targeted_misses_it_and_a_new_nadus_ability_counts_anew_cr_603_2_400_7` |
 | `129d1cb5` | c | NR | multiple copies grant multiple separate ability instances per creature, each triggering independently [part 3, was a/triggers: Nadu is legendary and the cube has one; a copy of it meets the legend rule] | not reachable with the cube's cards |
 | `309a7b0c` | a | triggers | the source grants its triggered ability to itself as well as to your other creatures | `cards_m7d::nadu_grants_a_target_trigger_twice_each_turn_per_creature_cr603_2e` |
 | `80bc0a3f` | a | triggers | the granted ability's per-turn trigger limit applies separately to each creature that has it, not once overall | `cards_m7d::nadu_grants_a_target_trigger_twice_each_turn_per_creature_cr603_2e` |
@@ -3158,7 +3158,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `f6790404` | a | replacement | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | `rulings_replacement2::leovold_an_optional_draw_is_taken_only_while_none_was_drawn_cr_121_2` |
 | `f0765796` | a | triggers | if you and your permanent(s) are both targeted by one opposing spell, this punisher trigger fires once per target | `rulings_triggers2::leovold_triggers_once_per_target_of_one_spell_cr_603_2e` |
-| `618eec3a` | a | triggers | this draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | untested |
+| `618eec3a` | a | triggers | this draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | `rulings_triggers3::draw_limits_and_draw_counters_see_draws_before_their_source_entered_cr_121_2` |
 | `a137ea0d` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | `rulings_replacement2::a_draw_hullbreacher_replaced_doesnt_count_for_narset_or_leovold_cr_614_6`; `rulings_replacement2::a_draw_narset_or_leovold_disallows_cant_be_replaced_by_hullbreacher_cr_614_6_121_2` |
 | `f8af3256` | a | other | opponents affected by this one-draw-per-turn restriction have any further draws that turn simply ignored | `cards_m7b_stack::leovold_opponents_draw_at_most_one_card_each_turn` |
 
@@ -3400,7 +3400,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `4a5ce741` | a | triggers | if this becomes a creature via another effect, its own attack-triggered ability still fires when it attacks | untested |
+| `4a5ce741` | a | triggers | if this becomes a creature via another effect, its own attack-triggered ability still fires when it attacks | `rulings_triggers3::a_land_animated_by_another_effect_still_has_its_attack_trigger_cr_603_2` |
 | `cdbf63ec` | a | combat | without continuous control since turn start, a newly-creature permanent cant attack or tap for mana that turn | untested |
 
 ### Tropical Island

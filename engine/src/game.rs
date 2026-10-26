@@ -784,8 +784,10 @@ pub enum Mark {
     NotSorceryTiming,
     /// The triggered ability (`slot` of `def`) a static ability grants this
     /// object triggered `n` times in turn `turn` (M7d: Nadu's "only twice
-    /// each turn").
-    Triggered { def: DefId, slot: u8, turn: u16, n: u8 },
+    /// each turn"), granted by the incarnation `src_inc` of the granting
+    /// permanent (a Nadu that left and came back grants a new ability, whose
+    /// count starts anew: CR 400.7, ruling 96e9a886).
+    Triggered { def: DefId, slot: u8, turn: u16, n: u8, src_inc: u16 },
     /// It looked at an opponent's hand as it entered (Anointed Peacekeeper:
     /// the name is chosen next).
     LookedHand,

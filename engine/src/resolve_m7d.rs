@@ -530,33 +530,34 @@ impl Game {
 impl Game {
     /// How many times this turn the triggered ability granted by a static
     /// ability of definition `def` triggered for object `r`.
-    pub(crate) fn granted_triggered(&self, r: crate::ids::ObjRef, def: crate::ids::DefId) -> u8 {
+    pub(crate) fn granted_triggered(&self, r: crate::ids::ObjRef, def: crate::ids::DefId, src_inc: u16) -> u8 {
         let turn = self.turn.number as u16;
         self.marks
             .iter()
             .find_map(|&(o, m)| match m {
-                crate::game::Mark::Triggered { def: d, turn: t, n, .. } if o == r && d == def && t == turn => Some(n),
+                crate::game::Mark::Triggered { def: d, turn: t, n, src_inc: i, .. } if o == r && d == def && t == turn && i == src_inc => Some(n),
                 _ => None,
             })
             .unwrap_or(0)
     }
 
-    pub(crate) fn note_granted_trigger(&mut self, r: crate::ids::ObjRef, def: crate::ids::DefId, slot: u8) {
+    pub(crate) fn note_granted_trigger(&mut self, r: crate::ids::ObjRef, def: crate::ids::DefId, slot: u8, src_inc: u16) {
         let turn = self.turn.number as u16;
         for (o, m) in self.marks.iter_mut() {
-            if let crate::game::Mark::Triggered { def: d, slot: s, turn: t, n } = m {
+            if let crate::game::Mark::Triggered { def: d, slot: s, turn: t, n, src_inc: i } = m {
                 if *o == r && *d == def && *s == slot {
-                    if *t == turn {
+                    if *t == turn && *i == src_inc {
                         *n += 1;
                     } else {
                         *t = turn;
+                        *i = src_inc;
                         *n = 1;
                     }
                     return;
                 }
             }
         }
-        self.marks.push((r, crate::game::Mark::Triggered { def, slot, turn, n: 1 }));
+        self.marks.push((r, crate::game::Mark::Triggered { def, slot, turn, n: 1, src_inc }));
     }
 }
 
