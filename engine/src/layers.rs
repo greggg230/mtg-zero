@@ -249,7 +249,14 @@ impl Game {
     /// Does `c` have subtype `s` (layer 4: an effect that sets creature
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
-        let mut printed = self.def_of(c).subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(s));
+        let d = self.def_of(c);
+        let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(s));
+        // Reconfigure (CR 702.151b, 205.3d): attached, it isn't a creature,
+        // so it has no creature types either (ruling cff2c1c6). The cube's
+        // one reconfigure card, Lion Sash (Equipment Cat), keeps Equipment.
+        if printed && d.reconfigure && self.objs[c.i()].attached.is_some() {
+            printed = self.db.equipment_subtype() == Some(s);
+        }
         if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
                 if let Mod::Types { subtypes, replace, .. } = m {
