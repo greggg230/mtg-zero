@@ -1,6 +1,7 @@
 # The MTG Zero rules engine (`engine` crate)
 
-Status: M7d's IR fixes (the IR of mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: the last 9 cards; 546 supported cube cards, all of
+Status: M8d part 1 (the cube's official rulings as engine tests: 1,607 fetched and triaged, the risky
+interaction areas tested, three engine fixes; section 37), 2026-10-26; M7d's IR fixes (the IR of mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: the last 9 cards; 546 supported cube cards, all of
 the cube; reflexive triggers with an intervening "if", "this turn" triggered abilities, a spell
 shuffling itself into its library, mana abilities with {X}; section 32), 2026-10-25; M7d (the last
 cards that needed subsystems: face-down permanents and manifest dread, plot,
@@ -1198,6 +1199,7 @@ they isolate one keyword or trigger each.
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b); sideboarded decks are legal and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes holding every card the viewer knows (in games and between games); the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
+| `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/` |
 | `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
@@ -5477,3 +5479,97 @@ only the one played. To watch in the first run: the share of sideboardings that 
 and the spread of game-2 openings; if sideboarding collapses to "keep", raise `eps` for the run
 rather than `temp_moves`, or add a zero-core option that counts temperature decisions per game
 (a `SearchGame` hook marking a new game; a zero-core change, not made here).
+
+## 37. The cube's official rulings as tests (M8d part 1)
+
+Every cube card has its own Oracle-text test (sections 23-32); what those don't reach is how
+cards behave together. The official rulings of the cube's cards are the cheapest list of such
+interactions written by the rules managers, so M8d turns them into engine tests.
+
+**37.1 Data.** `tools/fetch_rulings.py` fetches each card's `rulings_uri` (Scryfall; cached per
+card in `data/rulings/.cache/`, gitignored; ~8 requests/s with a User-Agent) into
+`data/rulings/powerlsv.rulings.json`: 546 cards, 1,607 rulings (1,602 WotC, 5 Scryfall), 1,260
+distinct texts (boilerplate repeats across cards: shock lands, flashback, the initiative); 171
+cards have none. A ruling is named by `hash8`, the first 8 hex digits of the SHA-1 of its text.
+
+**37.2 Triage.** `data/rulings/triage.tsv`, one row per distinct text: class **a** (testable
+here: two players, the cube's cards), **b** (not applicable: multiplayer, Commander, tournament
+and deck construction, printing and wording, a bare definition) or **c** (a mechanic or
+situation no cube card reaches), with an area (copies, replacement, protection, facedown, dfc,
+walkers, stack, triggers, mana, combat, zones, other) or a reason. The first pass was made by a
+model with that rubric; the b and c rows were reviewed (one b, "to play a card", is tested and
+now a). Class a is generous: 1,193 distinct texts (1,507 rulings), many of them restating what
+the Oracle tests already check; part 2 should narrow it as it goes. `tools/rulings_doc.py` joins
+the rulings, the triage and the `// ruling: <hash8>` comments of the tests into `docs/rulings.md`
+(per card, per ruling: class, area or reason, test or status; the coverage table), and fails on
+a comment naming an unknown ruling; `#[ignore = "RULING: ..."]` marks a deferred one.
+
+**37.3 Tests.** 97 new tests in nine `tests/rulings_*.rs` files (section 15), one or a few
+rulings each, written first for the risky interactions (copies and layers, replacement effects
+and their order, protection and targeting, face-down cards, double-faced cards, planeswalkers,
+the stack, triggers whose source is gone, costs); 15 existing tests that already checked a
+ruling now name it. Coverage after part 1: 130 rulings (126 distinct texts) tested, all passing,
+none deferred; 1,377 class-a rulings (1,067 distinct) untested. By area (distinct, tested/class
+a): facedown 10/17, walkers 4/10, protection 6/29, replacement 15/70, copies 16/110, stack
+17/133, triggers 18/166, mana 17/213, dfc 6/72, zones 8/142, combat 5/65, other 4/166.
+
+**37.4 What the rulings found: three engine faults, fixed.**
+
+* *Containment Priest entering with other creatures* (ruling e9e31107; test
+  `rulings_replacement::containment_priest_entering_with_other_creatures_doesnt_exile_them_or_itself_cr_614_12`).
+  Exhume returning the Priest and the opponent's creature exiled that creature: the "nontoken
+  creature that wasn't cast" replacement looked at every Priest on the battlefield, including one
+  put there by the same event a moment before. A permanent's static ability applies only from the
+  battlefield (CR 113.6), so a Priest entering at the same time doesn't see the others (614.12;
+  the rule of Phyrexian Metamorph's choice, `EnterAsCopy`): the check now skips a Priest whose
+  timestamp is from the current event group (`group_ts`).
+* *One draw under Hullbreacher and Quantum Riddler* (ruling 60f3ab6b; test
+  `rulings_replacement::hullbreacher_and_quantum_riddler_on_one_draw_the_drawer_gets_hullbreacher_first_cr_616_1`).
+  Both replace the same single draw and the drawing player chooses the order (CR 616.1). The
+  engine always applied Quantum Riddler first ("draw two"), then Hullbreacher to each: two
+  Treasures for the opponent. Hullbreacher first leaves no draw for the Riddler: one Treasure.
+  Neither order draws a card, so the engine now takes Hullbreacher first for the drawer (the
+  other order only gives the opponent a Treasure more; no cube card rewards that), without a
+  decision. For more than one card the Riddler applies to the instruction first, then
+  Hullbreacher to each draw (rulings 5a48fcc2, d9d5b8ea; unchanged, tested).
+* *Kaito, Bane of Nightmares on his turn* (ruling f0224bc7; tests
+  `rulings_walkers::kaito_as_a_creature_is_dealt_damage_not_loyalty_loss_cr_306_8` and
+  `rules_walkers::cr_205_1a_kaito_is_a_creature_not_a_planeswalker_on_his_turn_and_damage_is_marked`).
+  "During your turn, as long as Kaito has one or more loyalty counters on him, he's a 3/4 Ninja
+  creature" was lowered as a creature *in addition to* a planeswalker, so damage to him removed
+  loyalty (and `rules_walkers.rs` pinned that). Without "in addition to its other types" the card
+  types and subtypes become exactly these (CR 205.1a-b; the ruling: he stops being a
+  planeswalker): `Mod::Types { replace: true }` on his own static, and `types_of` /
+  `has_subtype` honour `replace` for a permanent's own type-changing static. Damage to him on his
+  turn is marked (120.3e); he keeps his loyalty abilities (606.3 doesn't ask for the type).
+
+**37.5 What held.** Everything else tested passed on the engine as it was, including: copies of
+tokens, of animated manlands (the animation isn't copied), of a Saheeli copy (the artifact
+exception is copiable); X as 0 for Metamorph, Spider-Man, Shifting Woodland, Reflection and
+Reanimate; Equipment that becomes or stops being one; replacement order chosen by the affected
+player; infect against indestructible, planeswalkers and protection from colorless; Dauthi's
+free casts paying additional costs and following timing; Yawgmoth's Will on costs and on itself;
+Containment Priest exiling a manifested card; Emrakul targeted on the stack by a counterspell,
+destroyed by a coloured permanent's trigger, returned by Sink into Stupor, exiled by Aang, put
+into its library by Subtlety, still giving Mana Drain its 15 mana; annihilator taking the
+attacked planeswalker; a countered "next end step" trigger never returning Memory Jar's cards;
+Tidebinder leaving before its trigger resolves; storm counting countered spells, and a countered
+storm trigger; Lutri's copy not being cast; Chain Lightning's copy controlled by its copier;
+Thalia's tax on alternative costs, and Daze returning the Island it tapped for that tax (CR
+601.2g-h); manifest dread with one or no card; turning a face-down permanent up (no enter
+trigger, still tapped and attacking, Equipment stays); Headliner Scarlett's card after she
+leaves; daybound at night.
+
+**37.6 Deferred, IR.** Nothing deferred: no test is ignored. No ruling showed a wrong IR (Kaito's
+`creature_during_your_turn` says nothing about "in addition to"; the reading was the lowering's,
+`docs/ir_defects.md`).
+
+**37.7 Part 2 starts here.** `docs/rulings.md`'s `untested` rows, by area (the counts above),
+first the risky ones left: divided damage with a target gone illegal (Fury, Pyrokinesis, Fire
+Covenant, Shatterskull Smashing: 45abd910, 17a878c0, 7afb4bdb, d70bd868), copies of modal and
+split spells (Lutri 23cf3168, 7be1b615; Three Steps Ahead d4f44dfc; Mystic Confluence 3ef23eda),
+Invert Polarity's variable targets (747157aa, c3434e5c), Reflection of Kiki-Jiki's copies of
+copies (b30727cf, 3f6b90f2), Dauthi and a discarded card (8d9db447), Etali's and Bolas's
+Citadel's casts, converge on copies and free casts (Prismatic Ending 41553eae, fc8abf83), the
+prepare cards (Emeritus), then triggers, zones and mana by number. Then the interaction matrix
+and combo-dense fuzz decks (the M8d plan).

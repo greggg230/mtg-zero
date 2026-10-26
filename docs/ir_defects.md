@@ -454,6 +454,12 @@ once each turn."
 
 ## Checked and not defects
 
+* M8d part 1, the official rulings (ENGINE.md 37): no ruling tested showed a wrong IR. Kaito,
+  Bane of Nightmares' `creature_during_your_turn` (p, t, subtypes, keywords) carries no "in
+  addition to its other types", which is right: "he's a 3/4 Ninja creature" replaces his card
+  types (CR 205.1a, the card's ruling f0224bc7). The engine's lowering had read it as "in addition
+  to"; fixed there, not in the IR.
+
 * M7d, the 13 cards (ENGINE.md 31): the IR matches the Oracle text. Representational notes, each
   read together with what it summarises and checked to agree: Gemstone Caverns'
   `produces_with_counter` (its mana ability's `IfConditionElse` on `SourceHasCounter`); Lion
