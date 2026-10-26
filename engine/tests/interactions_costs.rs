@@ -150,3 +150,30 @@ fn a_lotus_petal_exiled_by_yawgmoths_will_cant_feed_a_graveyard_exile_cost_cr_61
         }
     }
 }
+
+#[test]
+fn citadel_kicker_keeps_the_life_the_citadel_takes_cr_601_2h_702_33a() {
+    // Burst Lightning (kicker {4}) on top with Bolas's Citadel (1 life);
+    // the kicker needs Mana Confluence ({T}, pay 1 life) and three basic
+    // lands. At 1 life the kicker isn't offered, unkicked it is; at 3 it
+    // is, and the kicked spell deals 4. (Found by FUZZ_POOL=interactions,
+    // seed 92590: the kicker was offered and the payment panicked.)
+    for (life, kicker) in [(1, false), (3, true)] {
+        let mut g = scen()
+            .library(0, &["Burst Lightning", "Island", "Island"])
+            .battlefield(0, &["Bolas's Citadel", "Mana Confluence", "Mountain", "Mountain", "Mountain"])
+            .life(0, life)
+            .start();
+        let bl = top(&g, 0);
+        assert!(g.has_option(Choice::Cast(bl)), "{}", opts(&g));
+        g.choose(Choice::Cast(bl));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseCost) || g.kind() == Some(DecisionKind::Target));
+        assert_eq!(g.kind() == Some(DecisionKind::ChooseCost) && g.has_option(Choice::Number(1)), kicker, "at {life} life: {}", opts(&g));
+        if !kicker {
+            continue;
+        }
+        g.choose(Choice::Number(1));
+        resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(player(1)));
+        assert_eq!((g.life(0), g.life(1)), (1, 16), "{}", log(&g));
+    }
+}

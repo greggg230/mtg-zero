@@ -871,6 +871,8 @@ impl Game {
         let def = self.def_of(card);
         let delved = self.delve_classes(card, classes);
         let classes = &delved[..];
+        // Bolas's Citadel's life, paid after the mana: kept (ENGINE.md 38).
+        let top_life = if from == crate::game::CastFrom::LibraryTop { def.mana_value() } else { 0 };
         // (A granted escape or retrace with the option: their one cost.)
         def.additional.iter().enumerate().filter_map(|(k, _)| self.route_extra(card, from, k as u8).map(|o| (k, o))).any(|(k, o)| {
             (!def.kicker
@@ -881,7 +883,7 @@ impl Game {
                     .is_some_and(|m| self.spell_targets_available(&m.list[k], p, card)))
                 && {
                     let cost = self.delve_reduced(card, p, self.route_mana_plus(card, p, from, &extra.plus(&o.mana)), keep);
-                    self.cost_payable(p, card, o, &cost, classes, exclude)
+                    self.cost_payable(p, card, &Self::with_life(o, top_life), &cost, classes, exclude)
                 }
         })
     }
@@ -1539,6 +1541,17 @@ impl Game {
         x_life.saturating_add(if item.from == crate::game::CastFrom::LibraryTop { self.mana_value_of(card) } else { 0 })
     }
 
+    /// Cost `o` with `life` more life to pay after its mana (X life,
+    /// Bolas's Citadel's: kept by its mana payment, CR 601.2h).
+    fn with_life(o: &crate::db::Cost, life: u8) -> std::borrow::Cow<'_, crate::db::Cost> {
+        if life == 0 {
+            return std::borrow::Cow::Borrowed(o);
+        }
+        let mut c = o.clone();
+        c.life = c.life.saturating_add(life);
+        std::borrow::Cow::Owned(c)
+    }
+
     /// Can the caster of `item` pay `cost` for spell `card` (its spending
     /// restrictions, the life its cost takes later kept)?
     pub(crate) fn can_pay_spell(&self, card: CardIdx, item: &StackItem, cost: &crate::mana::ManaCost) -> bool {
@@ -1949,6 +1962,7 @@ impl Game {
                 let classes = self.mana_classes(p, None);
                 let classes = self.delve_classes(card, &classes).into_owned();
                 let keep = self.escape_exiles(card, item.from);
+                let life_later = self.life_later(card, item);
                 let src = Some(self.obj_ref(card));
                 let kicker_ok = |k: usize| {
                     !def.kicker
@@ -1960,7 +1974,10 @@ impl Game {
                     .filter(|&k| {
                         base.cost_option = k as u8;
                         let cost = self.delve_reduced(card, p, self.total_mana(card, &base), keep);
-                        kicker_ok(k) && self.route_extra(card, item.from, k as u8).is_some_and(|o| self.cost_payable(p, card, o, &cost, &classes, None))
+                        kicker_ok(k)
+                            && self
+                                .route_extra(card, item.from, k as u8)
+                                .is_some_and(|o| self.cost_payable(p, card, &Self::with_life(o, life_later), &cost, &classes, None))
                     })
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();
