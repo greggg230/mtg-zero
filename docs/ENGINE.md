@@ -2535,6 +2535,12 @@ pool, the cards they revealed in earlier games), and the match block (32 globals
 blocks after the list and the bags move. Two decision kinds (46 of 64), one task code (26,
 sideboarding).
 
+**Frozen** at the end of M8b (2026-10-26, the merge of `m8b-hidden`): 33,652 floats, 11
+segments, 17 bags, 1024 identities; part b changed no width (its hidden-pool model fills the
+same bags from what the viewer knows). The first run of layout v4 is `runs/mtg4` (preset
+`mtg-4`, best-of-three matches). From here a change to a width, offset, segment or identity is
+layout v5; newly appended token keys keep v4.
+
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
 M7a grew the supported cube from 191 to 360 cards, creatures from 20 to 113 (threats, i.e.
