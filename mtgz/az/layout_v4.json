@@ -1033,7 +1033,7 @@
     null,
     null
   ],
-  "features": 29860,
+  "features": 29972,
   "segments": [
     {
       "count": 1,
@@ -1229,6 +1229,43 @@
       },
       "name": "graveyard_abilities",
       "offset": 29636,
+      "present": 52,
+      "width": 56
+    },
+    {
+      "actions": [
+        [
+          2,
+          1
+        ]
+      ],
+      "count": 1,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "my_companion",
+      "offset": 29860,
+      "present": 52,
+      "width": 56
+    },
+    {
+      "actions": [],
+      "count": 1,
+      "id": {
+        "at": 0,
+        "radix": [
+          16,
+          8,
+          8
+        ]
+      },
+      "name": "opponent_companion",
+      "offset": 29916,
       "present": 52,
       "width": 56
     }
