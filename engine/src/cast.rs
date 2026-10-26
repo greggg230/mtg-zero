@@ -906,7 +906,13 @@ impl Game {
         for cl in &classes {
             if cl.sac_self && cl.need == 0 && matches!(cl.yld, crate::pay::Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot) {
                 for s in cl.members.iter() {
-                    if !self.is_token(s.card) && !out.contains(&s.card) {
+                    // (Only a card that would reach the graveyard: not under
+                    // Yawgmoth's Will or an opponent's Dauthi Voidwalker,
+                    // CR 614.1a; ENGINE.md 38.)
+                    if !self.is_token(s.card)
+                        && !out.contains(&s.card)
+                        && matches!(self.replaced_dest(s.card, Zone::Battlefield, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
+                    {
                         out.push(s.card);
                     }
                 }

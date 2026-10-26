@@ -1843,7 +1843,7 @@ impl Game {
     /// Catacombs, a finality counter), flashback's exile (702.34a) and a
     /// permission's "exile it instead". None of them is a self-replacement
     /// effect (616.1a). `Dest::Choose` when orders give different results.
-    fn replaced_dest(&self, idx: CardIdx, from: Zone, to: Zone) -> Dest {
+    pub(crate) fn replaced_dest(&self, idx: CardIdx, from: Zone, to: Zone) -> Dest {
         if from == Zone::Nowhere && to != Zone::Graveyard {
             return Dest::To(to);
         }

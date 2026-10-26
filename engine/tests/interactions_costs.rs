@@ -110,3 +110,43 @@ fn citadel_casts_pay_life_and_thalias_tax_in_mana_cr_118_9d_601_2f() {
         assert!(g.lands_of(0).all(|c| g.obj(c).tapped));
     }
 }
+
+#[test]
+fn a_lotus_petal_exiled_by_yawgmoths_will_cant_feed_a_graveyard_exile_cost_cr_614_1a_601_2g() {
+    // Abhorrent Oculus: "As an additional cost to cast this spell, exile six
+    // cards from your graveyard." Five cards there and a Lotus Petal: the
+    // Petal sacrificed for mana while paying would be the sixth (CR 601.2g
+    // before 601.2h), but under Yawgmoth's Will ("If a card would be put
+    // into your graveyard from anywhere this turn, exile that card
+    // instead") it never reaches the graveyard: the Oculus can't be cast.
+    // (Found by FUZZ_POOL=interactions, seed 79031: it was offered and the
+    // exile cost had no card to choose.) Without the Will it can.
+    for will in [true, false] {
+        let mut g = scen()
+            .battlefield(0, &["Swamp", "Island", "Island", "Island", "Island", "Lotus Petal"])
+            .graveyard(0, &["Plains"; 5])
+            .hand(0, &["Abhorrent Oculus", "Yawgmoth's Will"])
+            .start();
+        if will {
+            let w = g.card(0, "Yawgmoth's Will", Zone::Hand);
+            g.choose(Choice::Cast(w));
+            resolve_with(&mut g, |g| {
+                // (Pay with the Swamp and two Islands, keeping the Petal.)
+                g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| match c {
+                    Choice::Ability(x, _) => g.name(x) != "Lotus Petal",
+                    _ => true,
+                })
+            });
+            assert_eq!(g.count_in(0, "Lotus Petal", Zone::Battlefield), 1, "{}", log(&g));
+            assert_eq!(g.player(0).graveyard.len(), 5);
+        }
+        let oc = g.card(0, "Abhorrent Oculus", Zone::Hand);
+        assert_eq!(g.has_option(Choice::Cast(oc)), !will, "Will {will}: {}", opts(&g));
+        if !will {
+            g.choose(Choice::Cast(oc));
+            resolve(&mut g);
+            assert_eq!(g.obj(oc).zone, Zone::Battlefield, "{}", log(&g));
+            assert_eq!(g.player(0).graveyard.len(), 0, "the five and the Petal exiled");
+        }
+    }
+}
