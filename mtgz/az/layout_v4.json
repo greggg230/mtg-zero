@@ -1,7 +1,7 @@
 {
   "bags": [
     {
-      "count": 15,
+      "count": 17,
       "name": "bags",
       "offset": 384,
       "width": 1024
@@ -1033,7 +1033,7 @@
     null,
     null
   ],
-  "features": 29972,
+  "features": 33652,
   "segments": [
     {
       "count": 1,
@@ -1061,7 +1061,7 @@
         ]
       },
       "name": "tops",
-      "offset": 15744,
+      "offset": 17792,
       "present": 1,
       "width": 54
     },
@@ -1098,7 +1098,7 @@
         ]
       },
       "name": "my_permanents",
-      "offset": 16068,
+      "offset": 18116,
       "present": 52,
       "width": 148
     },
@@ -1119,7 +1119,7 @@
         ]
       },
       "name": "opponent_permanents",
-      "offset": 20804,
+      "offset": 22852,
       "present": 52,
       "width": 148
     },
@@ -1144,7 +1144,7 @@
         ]
       },
       "name": "hand",
-      "offset": 25540,
+      "offset": 27588,
       "present": 52,
       "width": 60
     },
@@ -1165,7 +1165,7 @@
         ]
       },
       "name": "stack",
-      "offset": 26500,
+      "offset": 28548,
       "present": 52,
       "width": 84
     },
@@ -1186,7 +1186,7 @@
         ]
       },
       "name": "triggers",
-      "offset": 27172,
+      "offset": 29220,
       "present": 52,
       "width": 56
     },
@@ -1197,7 +1197,7 @@
           1
         ]
       ],
-      "count": 40,
+      "count": 64,
       "id": {
         "at": 0,
         "radix": [
@@ -1207,9 +1207,9 @@
         ]
       },
       "name": "list",
-      "offset": 27396,
+      "offset": 29444,
       "present": 52,
-      "width": 56
+      "width": 60
     },
     {
       "actions": [
@@ -1228,7 +1228,7 @@
         ]
       },
       "name": "graveyard_abilities",
-      "offset": 29636,
+      "offset": 33284,
       "present": 52,
       "width": 56
     },
@@ -1249,7 +1249,7 @@
         ]
       },
       "name": "my_companion",
-      "offset": 29860,
+      "offset": 33508,
       "present": 52,
       "width": 56
     },
@@ -1265,7 +1265,7 @@
         ]
       },
       "name": "opponent_companion",
-      "offset": 29916,
+      "offset": 33564,
       "present": 52,
       "width": 56
     }
