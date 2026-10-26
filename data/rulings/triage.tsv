@@ -5,15 +5,15 @@ b0d58e2b	a	protection	protection from color blocks block/target/enchant-equip/da
 ff5e14a1	b	DEF	energy counters are a counter type, not tied to a permanent
 d8a8c57b	a	other	energy isn't mana, persists across turns/phases, mana of any type can't make energy
 d0a321ea	a	stack	if may-pay-E ability's target becomes illegal, it doesn't resolve so E can't be paid
-0b123bc3	a	other	gain/pay-counter effects work the same way for energy as other counters
+0b123bc3	b	DEF	gain/pay-counter effects work the same way for energy as other counters [part 3, was a/other: energy counters are counters a player has and pays; a definition]
 a85af301	b	DEF	players may track energy counters by any mutually agreeable method
 b3258d86	a	stack	if all targets of an E-granting ability become illegal, it doesn't resolve, no E gained
-aadebd9c	a	other	may-pay-E can't be paid multiple times to multiply a single ability's effect
+aadebd9c	b	DEF	may-pay-E can't be paid multiple times to multiply a single ability's effect [part 3, was a/other: "may pay {E}{E}{E}" is one choice; the engine asks it once]
 2aa2b091	a	triggers	'may pay. If you do' has no response window; 'when you do' makes a reflexive trigger with its own target
 d9f993eb	a	triggers	reflexive trigger's target is chosen when it goes on the stack, not when it triggers
 253ce5ed	a	copies	a non-EOT type-changing effect persists past cleanup and after its source leaves
 3ae78179	b	PRINT	{E} is the energy symbol, representing one energy counter
-3836800c	a	other	a permanent is any object on the battlefield incl tokens/lands; spells/emblems aren't permanents
+3836800c	b	DEF	a permanent is any object on the battlefield incl tokens/lands; spells/emblems aren't permanents [part 3, was a/other: what a permanent is; a definition]
 8a378f1a	a	triggers	ETB triggers and enters-with abilities on tokens work normally
 0cbf6a07	a	triggers	ascend/city's blessing check is a state-based action, not triggered; can't respond to it
 c8005233	a	copies	token copies use only copiable values: no counters, taps, auras/equipment, non-copy P/T changes
@@ -39,7 +39,7 @@ e62216f3	a	zones	putting a non-DFC onto the battlefield 'transformed' fails enti
 18fa2a99	a	zones	lands can't be chosen or sacrificed by a permanent-type-based effect even if they'd qualify
 177cd810	a	dfc	a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't
 cba16ce1	a	dfc	a transforming DFC's mana value is always its front face's, regardless of which face is up
-b0b5c8d4	a	combat	opponents choose sacrifice targets in turn order, each knowing earlier choices, then sac simultaneously
+b0b5c8d4	b	MP	opponents choose sacrifice targets in turn order, each knowing earlier choices, then sac simultaneously [part 3, was a/combat: the order in which several opponents choose]
 e5b123ca	a	walkers	a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed
 9e9b6606	a	triggers	a reflexive trigger's target is chosen when put on the stack, not when the activated ability triggers it
 dfd5820c	a	replacement	an exile-on-cast replacement ability doesn't affect creatures that were actually cast, even from unusual zones
@@ -48,10 +48,10 @@ e9e31107	a	triggers	simultaneous ETB: the ability won't affect creatures enterin
 aa0d632c	a	replacement	a noncreature card that wasn't cast but becomes a creature while entering is exiled; the reverse isn't
 4759d007	a	replacement	ravenous puts its counters on as it enters, not after; entering triggers see the counters
 ef3a8866	a	triggers	if the source leaves while its ability is on the stack, use its last-known power to size the token
-def76a42	a	copies	a copied ravenous permanent spell keeps X and its resulting token enters with X counters
+def76a42	c	NR	a copied ravenous permanent spell keeps X and its resulting token enters with X counters [part 3, was a/copies: no cube effect copies a ravenous creature spell (the only creature-spell copy is Sage of the Skies copying itself)]
 5ebd5143	a	replacement	a permanent entering as a copy of a ravenous creature doesn't get ravenous's counters
-7cf36dbe	a	mana	a trigger referencing X uses the value chosen at cast, which can differ from counters entered with
-5ef445cd	a	other	reconfigure attaching isn't an 'equip ability' for cards that care about equipping
+7cf36dbe	c	NR	a trigger referencing X uses the value chosen at cast, which can differ from counters entered with [part 3, was a/mana: no cube replacement effect changes the number of counters a ravenous creature enters with, so X and the counters never differ]
+5ef445cd	c	NR	reconfigure attaching isn't an 'equip ability' for cards that care about equipping [part 3, was a/other: no cube card cares about equip abilities as such]
 f76d59c9	a	replacement	an Equipment creature can never become attached to itself; such an attempt does nothing
 35466139	a	other	a reconfigure Equipment can be attached by other effects too, not just its own ability
 dde8305d	a	combat	an attached Equipment doesn't share the tapped state of the creature it's attached to
@@ -75,18 +75,18 @@ c97738b6	a	combat	tokens entering already attacking were never 'declared' attack
 d1f9751e	a	combat	tokens entering already attacking don't count as declared attackers for other triggers
 ab682fd6	a	triggers	attacking with any creature triggers the ability, even if the source itself isn't attacking
 c264835f	a	copies	a power-defining ability works in every zone, and counts its own source while on the battlefield
-89ee123a	a	combat	the per-opponent token trigger makes a token for every qualifying opponent, not just attacked ones
+89ee123a	b	MP	the per-opponent token trigger makes a token for every qualifying opponent, not just attacked ones [part 3, was a/combat: one token per opponent; two-player games have one]
 bdd4c462	a	combat	you choose whether each created token attacks that opponent directly or a planeswalker they control
-a6040722	a	other	activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone
-252f0b38	a	mana	a mana ability is one that produces mana on resolution, not one costing mana to activate
+a6040722	b	DEF	activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition]
+252f0b38	b	DEF	a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition]
 93ee06dd	a	other	a naming ability that affects cards applies in every zone, not just one
-90d8b0d0	a	other	an ability applying to 'opponents' generally applies to all opponents, not just one you interacted with
-2a160983	a	other	you may name any card, even one without an activated ability, not just ones you've seen
-abac3051	a	other	you can't name a token's name unless it duplicates an actual card's name
+90d8b0d0	b	MP	an ability applying to 'opponents' generally applies to all opponents, not just one you interacted with [part 3, was a/other: all opponents]
+2a160983	b	DEF	you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition]
+abac3051	b	DEF	you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition]
 0e494778	a	other	a once-per-turn cast-restriction static ability checks the whole turn, even retroactively, incl. own casts
 e0fa70ce	a	replacement	an enters-tapped-unless-condition land still enters tapped if a separate effect forces it, even if met
 5153b574	a	other	a once-per-turn cast restriction still applies even if the earlier spell was countered
-954c6e31	a	other	activated (incl keyword) abilities are identifiable by their colon, relevant to activated-ability restrictions
+954c6e31	b	DEF	activated (incl keyword) abilities are identifiable by their colon, relevant to activated-ability restrictions [part 3, was a/other: activated abilities have colons; a definition]
 43d5100f	a	dfc	an exiled MDFC's land back face can still be played as a land by its owner
 f0d7b0c7	a	zones	playing a card let loose from exile still follows normal timing restrictions
 525efd15	a	zones	a token copy of a dies-trigger permanent can't return to the battlefield, since it ceased to exist as a token
@@ -95,7 +95,7 @@ f0d7b0c7	a	zones	playing a card let loose from exile still follows normal timing
 0a655fc3	a	copies	removing creature type by changing types also removes any creature subtypes carried with it
 2cf497b2	a	triggers	a delayed end-step return trigger still fires even once its source has left the battlefield
 5548984d	a	triggers	an ETB exile trigger still resolves and exiles its target even if its source has already left
-ac1d8481	a	mana	a token's P/T sums the mana values of all cards exiled from one player; each affected player gets a token
+ac1d8481	c	NR	a token's P/T sums the mana values of all cards exiled from one player; each affected player gets a token [part 3, was a/mana: Skyclave Apparition exiles at most one card, so no player has several cards exiled by it]
 aafa61cb	a	mana	a battlefield creature with X in its mana cost treats X as 0
 ecf56d5c	a	triggers	if there's no exiled card yet when the source leaves (ability unresolved), no token is created
 5e36ae3b	a	other	retaking the initiative while already holding it doesn't grant a second designation
@@ -104,10 +104,10 @@ e8573af9	b	MP	a player leaving the game (initiative transfer)
 840d087a	a	other	venturing while already in a dungeon advances a room, or starts Undercity if it completes the last room
 3d2835db	b	MP	Two-Headed Giant initiative/venture ordering
 5549b685	a	other	only one player holds the initiative at a time; taking it strips it from whoever had it
-13a2e1f4	a	other	being told to venture into Undercity specifically can't be redirected to start a different dungeon
+13a2e1f4	c	NR	being told to venture into Undercity specifically can't be redirected to start a different dungeon [part 3, was a/other: the cube has no other dungeon and no plain venture]
 76a58801	a	triggers	the initiative carries built-in triggers: venture at upkeep, and passing on combat damage to its holder
-f9bccbf7	a	other	no one has the initiative until an effect grants it; it then persists until transferred
-8e4e4c74	a	other	you can't venture without being instructed; a generic venture instruction can't start Undercity specifically
+f9bccbf7	b	DEF	no one has the initiative until an effect grants it; it then persists until transferred [part 3, was a/other: no initiative until one is taken; a definition]
+8e4e4c74	c	NR	you can't venture without being instructed; a generic venture instruction can't start Undercity specifically [part 3, was a/other: the cube has no other dungeon and no plain venture]
 ee3d4607	a	mana	a graveyard card with X in its mana cost treats X as 0
 408732b7	a	zones	blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist
 6d79b5c1	a	triggers	the monarch carries two built-in triggers: draw at end step, and passing on combat damage dealt to it
@@ -115,9 +115,9 @@ ee3d4607	a	mana	a graveyard card with X in its mana cost treats X as 0
 867620c4	a	triggers	if you're not monarch when the delayed exile trigger resolves, it stays exiled until an opponent becomes monarch
 2239016d	b	MP	multiplayer monarch succession when the monarch leaves the game
 e5e352da	a	triggers	the source leaving doesn't return its exiled card; it keeps watching for an opponent to become monarch
-88b92913	a	other	the game starts with no monarch, but exactly one exists from the first time one is assigned onward
+88b92913	b	DEF	the game starts with no monarch, but exactly one exists from the first time one is assigned onward [part 3, was a/other: no monarch until one is made; a definition]
 bd46894c	a	triggers	any opponent becoming monarch triggers the return, not just the original controller of the exiled card
-559c03e3	a	dfc	a modal DFC can never be transformed; ignore any instruction telling it to
+559c03e3	c	NR	a modal DFC can never be transformed; ignore any instruction telling it to [part 3, was a/dfc: no cube effect tries to transform an MDFC or put one onto the battlefield transformed (the rule changed since; Norman Osborn's own transform is tested)]
 e5e7f31f	a	dfc	choosing among a group of cards to play/cast lets you pick either face of a qualifying MDFC
 62d54d14	a	dfc	'play' a specific MDFC lets you choose either face; 'cast' it specifically forbids playing it as a land
 ab202931	a	dfc	putting a card with given traits onto the battlefield without casting only sees an MDFCs front face
@@ -126,23 +126,23 @@ ab202931	a	dfc	putting a card with given traits onto the battlefield without cas
 a2837ded	a	triggers	paying an alt cost like evoke lets its own ETB trigger resolve before the sacrifice trigger, priority between
 ee340297	a	mana	total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone
 75dde743	a	triggers	an ability's effect only covers creatures controlled at the moment it resolves, not later ones
-372c3d41	a	other	typecycling counts as cycling for any ability that triggers on or restricts cycling
+372c3d41	c	NR	typecycling counts as cycling for any ability that triggers on or restricts cycling [part 3, was a/other: no cube card triggers on or stops cycling]
 33404617	a	zones	typecycling searches the library for a card of the named type instead of drawing a card
 3b688dfd	a	walkers	only one loyalty ability may be activated the turn a planeswalker enters, even instant-speed ones
 18b42e53	a	replacement	extra tokens from a doubling-style replacement effect inherit every stated property of the original
-546c2768	a	zones	shuffle-then-reveal-top is one action; a face-up top card doesn't reveal what's under it
+546c2768	b	DEF	shuffle-then-reveal-top is one action; a face-up top card doesn't reveal what's under it [part 3, was a/zones: no cube effect makes the top card of a library face up, so a single "shuffle and put on top" action has nothing to observe]
 74a7cb90	a	stack	an illegal target at resolution means the spell does nothing, including unrelated effects
 6a98686c	a	mana	the triggered-ability tax payment is optional for the opponent to pay
 546924df	a	stack	an illegal target at resolution means the spell doesn't resolve and no search happens
 cf14fa1b	a	zones	the affected player isn't required to search; declining means no shuffle either
 518b1bf6	a	triggers	life gained uses the creature's last-known power from when it left the battlefield
-608e8ab7	a	triggers	a named creature still explores via its ability even if it has since left the battlefield
+608e8ab7	c	NR	a named creature still explores via its ability even if it has since left the battlefield [part 3, was a/triggers: every cube explore names its creature as a target (Map tokens, Seasoned Dungeoneer), so a creature gone is an illegal target]
 03aef98a	a	other	explore: reveal top card; land goes to hand, otherwise get a +1/+1 counter and choose to keep or bin it
 bf9c2cf4	a	other	if no card is revealed (empty library), the exploring creature still gets a +1/+1 counter
-cc77d340	a	other	even a noncreature permanent can explore if an effect instructs it to
+cc77d340	c	NR	even a noncreature permanent can explore if an effect instructs it to [part 3, was a/other: every cube explore names a creature as its target]
 3311656f	c	NR	describes the Map token, which no cube card creates
 ee85216a	a	stack	once an explore ability starts resolving, no player can act until it finishes
-27483a4c	a	other	repeated explores from one spell/ability can reveal and re-reveal the same kept card
+27483a4c	c	NR	repeated explores from one spell/ability can reveal and re-reveal the same kept card [part 3, was a/other: no cube spell or ability explores twice]
 5c58b83a	a	stack	returning a spell to hand removes it from the stack so it can't resolve, even if uncounterable
 f13eb15b	a	zones	if fewer than X library cards remain, the permanent goes to the bottom instead
 68100e83	a	zones	choosing X=0 puts the permanent on top of its owner's library
@@ -155,20 +155,20 @@ cd7798a0	a	zones	if the library has cards, the creature goes directly under the 
 a95c3d78	a	mana	mana spent on alternative or additional costs counts toward a converge-style count
 fc8abf83	a	mana	casting a converge spell without paying its mana cost counts zero colors spent
 51285906	a	mana	mana value isn't checked as a targeting restriction, only when the spell resolves
-68200d2c	a	mana	at most five colors of mana can ever be spent on one spell; colorless doesn't count as a color
-38997c8b	a	mana	you can't overpay a converge-style spell to spend more colors, or skip a cost reduction to do so
+68200d2c	b	DEF	at most five colors of mana can ever be spent on one spell; colorless doesn't count as a color [part 3, was a/mana: there are five colours; a definition]
+38997c8b	b	DEF	you can't overpay a converge-style spell to spend more colors, or skip a cost reduction to do so [part 3, was a/mana: a cost is paid exactly; the engine never offers to overpay]
 b64c158e	a	mana	a higher X lets you pay (and spend the colors of) more mana for a converge-style effect
 408d5ec3	a	protection	an effect with no targets can still affect permanents that can't be targeted, like shroud/protection
 fe4ee6d9	a	other	a multi-step spell counts each category after the previous step resolves, so earlier sacrifices don't recount
-476f3637	a	other	a turn-order keep/sacrifice choice reveals each player's choice to later choosers, resolves simultaneously per step
-6b60b26f	a	zones	a creature exiled this way still counts as such even if it later left exile for elsewhere
+476f3637	b	DEF	a turn-order keep/sacrifice choice reveals each player's choice to later choosers, resolves simultaneously per step [part 3, was a/other: the active player chooses first and both sacrifice at once; with two players nothing else follows]
+6b60b26f	b	DEF	a creature exiled this way still counts as such even if it later left exile for elsewhere [part 3, was a/zones: the exiled creatures are counted within Winds of Abandon's own resolution, where nothing can move them; a definition]
 c1c20030	a	protection	a non-targeting overload-cast version of a spell can still hit hexproof or protected permanents
 68a438a9	a	mana	casting a spell 'without paying its mana cost' forbids substituting the overload cost instead
 7297f704	a	mana	an overload spell has one target if cast normally, but no targets if its overload cost is paid
 b7498104	a	mana	total cost = mana/alt cost (e.g. overload) + increases - reductions; mana value unaffected
-f1cdbb7c	a	other	votes are cast in turn order, so each player sees the votes made before their own
-a85b5f8f	a	other	every player must vote for a candidate; abstaining isn't allowed
-89ba7a72	a	other	if every candidate somehow ends with zero votes, nothing gets exiled
+f1cdbb7c	b	DEF	votes are cast in turn order, so each player sees the votes made before their own [part 3, was a/other: the votes are made in turn order; a definition]
+a85b5f8f	b	DEF	every player must vote for a candidate; abstaining isn't allowed [part 3, was a/other: every player votes; the engine has no abstain option]
+89ba7a72	c	NR	if every candidate somehow ends with zero votes, nothing gets exiled [part 3, was a/other: every player must vote for a candidate, so a candidate always has a vote]
 28672f55	a	stack	no one votes until the ability resolves; responses must happen without knowing the outcome
 f5cbaa26	a	protection	vote candidates aren't targeted, so a permanent with protection from a color is still a valid candidate
 0f0a2aaf	a	stack	voting and exiling happen as one atomic resolution; no actions can be taken in between
@@ -179,8 +179,8 @@ aff80611	a	replacement	an exiled Auras owner picks what it reattaches to, untarg
 1fdbbd6e	b	DEF	flavor-only ruling, no rules content
 338a52df	a	other	an Equipment stays on the battlefield when its equipped creature dies, and can be moved by paying its equip cost
 faade90a	a	replacement	if the ability makes two tokens at once, the Equipment only attaches to one of them
-0a8ce7d7	a	triggers	the created token enters first, then the Equipment attaches, so ETB triggers see it before any bonus
-bca63806	a	mana	discarding the required card is itself part of the activation cost
+0a8ce7d7	c	NR	the created token enters first, then the Equipment attaches, so ETB triggers see it before any bonus [part 3, was a/triggers: Glimmer Lens gives no power or toughness, so no trigger can tell the Rebel before and after the attachment]
+bca63806	b	DEF	discarding the required card is itself part of the activation cost [part 3, was a/mana: the discard is part of the channel cost; a definition]
 8ba35794	a	triggers	if the source leaves before its exile ability resolves, the target is never exiled
 5edd9028	a	protection	an ability that requires a target can't be activated without one, even just to pay its cost
 d07fb867	a	dfc	a DFC exiled and later returned to the battlefield by this effect comes back front-face up
@@ -190,7 +190,7 @@ ac3bb678	a	zones	a token exiled this way ceases to exist instead of returning
 86da9a0c	b	MP	multiplayer: exiled card returns if the exiling permanent's owner leaves the game
 fa232a08	a	triggers	an 'exile then return when this leaves' ability is one ability making two independent one-shot effects
 d5edbfb1	a	mana	a domain-based ability doesn't change the spell's own fixed mana value
-3e825920	a	other	multiple hand-size-affecting effects apply in timestamp order
+3e825920	c	NR	multiple hand-size-affecting effects apply in timestamp order [part 3, was a/other: no other cube effect changes a maximum hand size]
 3888033e	a	dfc	if forced to transform via another effect, the resulting walker enters with no loyalty and dies
 fee44c31	a	walkers	a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed
 5d366152	a	mana	a cost reduction that targets generic mana can't reduce colored mana requirements
@@ -209,7 +209,7 @@ b83c13f9	a	dfc	if forced to transform via another effect, the resulting walker e
 74e8317e	a	zones	exile-on-cast-from-GY only applies if cast from GY and it returns there; a hidden-zone detour loses track of it
 1155292d	a	dfc	the mana value of a DFC not on the battlefield is its front face's mana value
 14835878	a	walkers	a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed
-c416be01	a	triggers	discarding a card to satisfy a graveyard-size-check ability can't itself count toward that same check
+c416be01	c	NR	discarding a card to satisfy a graveyard-size-check ability can't itself count toward that same check [part 3, was a/triggers: no cube card has madness]
 7621bfed	a	dfc	a DFC's back face has no mana cost; its mana value still equals the front face's, and its color indicator sets its color
 004fe294	a	dfc	you can have two objects of the same DFC on the battlefield at once, one on each face
 b9423c74	a	triggers	if the source is gone at resolution, draw/discard still happens, using last-known counters for any bonus
@@ -220,12 +220,12 @@ c86d4e2f	a	zones	you may not play land cards discarded by this kind of effect
 56f9c956	a	dfc	a modal DFC can be transformed if its other face has a permanent type; otherwise the instruction fails
 7c5ccf73	b	PRINT	DFC face icons (triangle vs double triangle) are print/frame markers
 eea821be	a	dfc	only the currently-up face's characteristics apply while on the stack or battlefield
-7a46be96	a	mana	a cost reducer doesnt grant graveyard-casting permission; it only cuts cost once another effect allows it
+7a46be96	b	DEF	a cost reducer doesnt grant graveyard-casting permission; it only cuts cost once another effect allows it [part 3, was a/mana: a cost reduction grants no permission to cast; a definition]
 7536ad72	a	mana	a cost reduction tied to a specific color only reduces that spell's generic mana component
 8eb07966	a	triggers	a named creature still connives via its ability even if it has since left the battlefield
 b0d988d8	a	dfc	choosing among a group of cards to play/cast lets you pick either face of a qualifying modal DFC
 8bd16ad8	a	dfc	putting a card with given traits onto the battlefield without casting only sees an MDFCs front face
-6d8a93b1	a	dfc	choosing a card name can be either face's name of a modal DFC; a linked ability then considers only that chosen name
+6d8a93b1	c	NR	choosing a card name can be either face's name of a modal DFC; a linked ability then considers only that chosen name [part 3, was a/dfc: the cube's naming cards (Demonic Consultation, Tamiyo, Collector of Tales) look at cards outside the stack, where another face's name never matches; naming it is naming a card that isn't there (tested)]
 12cec5e6	a	other	if no card can be discarded (empty hand, can't draw), the conniving creature gets no counter
 78c4509d	b	CMD	Commander color identity uses both DFC faces' mana costs/symbols/indicators
 b5fe5fd5	a	stack	once a connive ability starts resolving, it's atomic; no responses until it's done
@@ -237,7 +237,7 @@ b5fe5fd5	a	stack	once a connive ability starts resolving, it's atomic; no respon
 0ede9b79	a	zones	a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way
 a92b37a5	a	mana	if a card has multiple flashback costs, you may pay any one of them
 64b09987	a	stack	a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts
-fec2f94a	a	mana	a card with no mana cost that gains flashback has no flashback cost and can't be cast this way
+fec2f94a	c	NR	a card with no mana cost that gains flashback has no flashback cost and can't be cast this way [part 3, was a/mana: every cube instant and sorcery has a mana cost]
 cc0a60e7	a	mana	a split card that gains flashback only requires paying the cost of the half being cast
 d38450c1	a	mana	flashback forbids paying other alternative costs, but still allows/requires additional costs like kicker
 e8a86435	a	mana	casting an X spell via flashback still requires choosing and paying for X normally
@@ -247,7 +247,7 @@ de6aa02a	a	stack	flashback still follows the card's normal timing restrictions (
 2508542e	a	mana	colorless/generic mana symbols on permanents you control don't count toward devotion to any color
 4760ea2e	a	mana	hybrid and Phyrexian mana symbols do count toward devotion to their color(s)
 e36f6dac	a	mana	devotion is counted as the ability resolves, using whatever permanents (incl. the source) are on the battlefield then
-2a173b06	a	mana	an Aura you control that's attached to an opponent's permanent still counts toward your devotion
+2a173b06	c	NR	an Aura you control that's attached to an opponent's permanent still counts toward your devotion [part 3, was a/mana: no cube Aura can be attached to an opponent's permanent (Animate Dead and Necromancy return the creature under their controller)]
 cabf6b70	a	other	if your devotion check is zero, the library search is skipped, though the win-if-empty check still happens
 a40c5a6d	a	mana	mana symbols in a permanent's ability text (not its cost) don't count toward devotion
 bd583829	a	replacement	if an equip-attach target is gone at resolution, the Equipment stays wherever it was, or unattached
@@ -257,27 +257,27 @@ f4a1b9c8	a	copies	a permanent entering as a copy of a kicked permanent isn't its
 e6ad3498	b	DEF	paying a kicker cost is what makes a spell 'kicked', a term definition
 cef3bc5c	a	copies	copying a kicked spell makes the copy kicked too, including any token the copy becomes
 fbef54b0	a	mana	putting a permanent with kicker onto the battlefield without casting it means it can't be kicked
-c9b38795	a	mana	a kicker cost can't be paid more than once per cast
+c9b38795	b	DEF	a kicker cost can't be paid more than once per cast [part 3, was a/mana: kicker is paid at most once; a definition]
 ceea39f5	a	mana	total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected
 c961b628	a	triggers	ETB and enters-with abilities of a copied creature trigger normally for the token it becomes
 b3cee2a5	a	triggers	if the spell is countered, its offspring-style ability doesn't trigger and no token is made
 3d567b94	a	triggers	if the creature leaves the battlefield before its offspring-style ability resolves, the token is still created
-965f8740	a	triggers	if the creature somehow lacks the triggering ability when it enters, it won't trigger even if its cost was paid
-76edf0a6	a	copies	if the original is itself copying something when this resolves, the token copies that other thing as a 1/1
+965f8740	c	NR	if the creature somehow lacks the triggering ability when it enters, it won't trigger even if its cost was paid [part 3, was a/triggers: no cube effect removes a creature's abilities as it enters]
+76edf0a6	c	NR	if the original is itself copying something when this resolves, the token copies that other thing as a 1/1 [part 3, was a/copies: offspring triggers only for a Thundertrap Trainer cast with its offspring cost paid, and no cube card makes a cast creature spell copy something else]
 0b566f81	b	DEF	some abilities refer to their source as 'this creature' purely for clarity, with no functional difference
 eab6cd25	a	copies	the token copies exactly what was printed as a 1/1, with no counters, tap state, attachments, or non-copy changes
-7f1ecc50	a	stack	a token made this way isn't 'cast', so cast-triggered abilities don't fire for it
-42d86493	a	mana	an offspring-style cost can only be paid once per cast, not multiple times for extra tokens
+7f1ecc50	b	DEF	a token made this way isn't 'cast', so cast-triggered abilities don't fire for it [part 3, was a/stack: the offspring token is created, never a spell, so nothing casts it; a definition]
+42d86493	b	DEF	an offspring-style cost can only be paid once per cast, not multiple times for extra tokens [part 3, was a/mana: offspring is paid at most once; a definition]
 6bdf2a83	a	facedown	turning a permanent face up or down doesn't change its identity; existing targets/attachments stay unless now illegal
 a263d6ad	a	mana	this additional cost must still be paid even when casting free or via an alternative cost
 0c11bb22	a	facedown	turning a manifested permanent face up is a special action (reveal + pay mana cost), no stack, any time with priority
 9aced886	a	facedown	you may always look at your own face-down cards; you can't look at an opponent's without permission
-4097a6de	a	facedown	face-down creatures have no name, so they can never share a name with anything, even each other
+4097a6de	b	DEF	face-down creatures have no name, so they can never share a name with anything, even each other [part 3, was a/facedown: nothing in the cube compares the names of two face-down creatures (no shared-name rule applies to them); a definition]
 57af8087	a	facedown	turning face up doesnt trigger enters-the-battlefield abilities, since its the same permanent throughout
 7f95b9dc	a	facedown	a manifested DFC enters face down, cant transform there, and flips up by paying its fronts mana cost
-fda29975	a	facedown	a face-down creature that lost its abilities cant use disguise/morph to flip, since it lost that cost too
+fda29975	c	NR	a face-down creature that lost its abilities cant use disguise/morph to flip, since it lost that cost too [part 3, was a/facedown: no cube card has disguise or morph]
 fbf56d96	a	facedown	a face-down spell or permanent that leaves the stack or battlefield (other than resolving normally) must be revealed
-d09bca96	a	facedown	a manifested creature that would have disguise or morph if face up can turn face up by paying that cost instead
+d09bca96	c	NR	a manifested creature that would have disguise or morph if face up can turn face up by paying that cost instead [part 3, was a/facedown: no cube card has disguise or morph]
 522ee812	a	facedown	trying to flip a face-down instant/sorcery just reveals it; it stays face down and no turn-face-up trigger fires
 a3f0fe48	a	facedown	manifesting dread with one library card manifests it with no graveyard option; with zero cards, nothing happens
 aa366faf	a	triggers	'whenever you manifest dread' triggers fire even if the library is too small to complete the full process
@@ -286,33 +286,33 @@ a4c44a79	a	facedown	turning a permanent face up or face down doesn't change whet
 0e33b18d	a	facedown	unlike a disguise/morph creature, a manifested creature can still be turned face up after losing its abilities
 2615a81c	b	DEF	table etiquette for keeping multiple face-down cards distinguishable, no checkable rules behavior
 266aee1f	a	dfc	an Adventure card uses only its base characteristics in every zone except while on the stack as the Adventure spell
-22d0dd32	a	dfc	'has an Adventure' means a card with that alternative characteristic set, even if unused or never cast that way
+22d0dd32	c	NR	'has an Adventure' means a card with that alternative characteristic set, even if unused or never cast that way [part 3, was a/dfc: no cube card refers to a card that has an Adventure]
 5d19b09e	a	mana	casting a card as an Adventure isn't itself an alternative cost; alt-cost-granting effects may still apply to it
 c5e2c49b	a	dfc	an Adventure spell is exiled, not binned, on resolving so you can cast the permanent later; a fizzled one isnt exiled
 13492141	a	dfc	a card reaching exile any other way doesn't grant permission to play it with its Adventure permanent characteristics
 9a1260e0	a	dfc	a copy of an Adventure spell is exiled on resolving and then ceases to exist, so it can't be cast as the permanent
-699f170c	a	dfc	choosing a card name can select a modal/Adventure card's alternative name
-93a8a393	a	dfc	an effect looking for a card 'that has an Adventure' won't find one currently on the stack as the Adventure spell
+699f170c	c	NR	choosing a card name can select a modal/Adventure card's alternative name [part 3, was a/dfc: the cube's naming cards look at cards outside the stack, where an Adventure's name never matches; naming it is naming a card that isn't there]
+93a8a393	c	NR	an effect looking for a card 'that has an Adventure' won't find one currently on the stack as the Adventure spell [part 3, was a/dfc: no cube card refers to a card that has an Adventure]
 ca262086	a	dfc	a copy of an object with an Adventure also has the Adventure, but loses that ability to cast it once it changes zones
 4b8b633b	a	dfc	casting a card as its Adventure checks legality using only the Adventure's alternative characteristics
 ee323737	a	dfc	playing a card as its Adventure uses only the alternative characteristics; it reverts to normal once it leaves the stack
 5b5ff3d6	a	zones	playing a card from exile (e.g. an Adventure permanent) still follows its normal timing restrictions
 b2c5a21b	a	zones	casting a card from the graveyard makes it a new object; it cant be recast if it returns there that turn
-4097b21c	a	zones	targeting an artifact land to let you cast it still doesnt let you play it, since cast-permission excludes lands
+4097b21c	c	NR	targeting an artifact land to let you cast it still doesnt let you play it, since cast-permission excludes lands [part 3, was a/zones: the cube has no artifact land]
 4f616c51	a	stack	once casting is announced, no responses are allowed until its fully paid for, including cost reductions
 8f8116e7	a	mana	a cost-reduction ability that reduces generic mana leaves colored mana costs untouched
 a5f46a35	a	mana	total cost = base/alt cost + increases, then reductions; mana value unaffected by total cost paid
 6d4a6721	a	zones	casting an artifact card via another card's permission still follows normal timing restrictions unless it has flash
 eb35fd18	a	mana	a spell cast this way still requires paying all its costs, including additional and any available alternative costs
-2cc33610	a	other	activated (incl keyword) abilities use a colon; a tax/cost-reduction on activated abilities leaves triggered ones alone
-1c7103f8	a	mana	a cost reduction for artifact abilities only applies on the battlefield, not other-zone ones like cycling
-7603f467	a	triggers	'whenever you sacrifice a Clue' triggers for any reason you sacrifice one, not just via its own activated ability
-1ac94022	a	stack	an investigate ability with a target that becomes illegal at resolution doesn't resolve, so no Clue is created
+2cc33610	b	DEF	activated (incl keyword) abilities use a colon; a tax/cost-reduction on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; a definition]
+1c7103f8	c	NR	a cost reduction for artifact abilities only applies on the battlefield, not other-zone ones like cycling [part 3, was a/mana: no cube artifact card has an ability that works outside the battlefield]
+7603f467	c	NR	'whenever you sacrifice a Clue' triggers for any reason you sacrifice one, not just via its own activated ability [part 3, was a/triggers: no cube card triggers on sacrificing a Clue]
+1ac94022	c	NR	an investigate ability with a target that becomes illegal at resolution doesn't resolve, so no Clue is created [part 3, was a/stack: the cube's investigate abilities (Forensic Gadgeteer, Carnage Interpreter, Thraben Inspector) have no targets]
 60f3ab6b	a	replacement	if multiple replacement effects could apply to the same draw, the drawing player chooses the order
 ebaa36d0	a	replacement	controlling multiple copies of the same draw-replacing effect still only replaces a single draw once
 8de0da15	a	triggers	if the spell is countered, its squad-style ability doesn't trigger and no tokens are made
-6a59b1e6	a	triggers	if the creature somehow lacks the triggering ability on the battlefield, it won't trigger even if its cost was paid
-247e39a7	a	stack	tokens made by a squad-style ability aren't 'cast', so cast-triggered abilities don't fire for them
+6a59b1e6	c	NR	if the creature somehow lacks the triggering ability on the battlefield, it won't trigger even if its cost was paid [part 3, was a/triggers: no cube effect removes a creature's abilities as it enters]
+247e39a7	b	DEF	tokens made by a squad-style ability aren't 'cast', so cast-triggered abilities don't fire for them [part 3, was a/stack: squad tokens are created, never spells; a definition]
 2e930377	a	mana	a squad-style cost can be paid any number of times, making one token copy per payment
 53a3d100	a	mana	a card in your library with X in its mana cost treats X as 0
 da0512a5	a	triggers	if the source leaves before its countering ability resolves, the counter still happens but no ability is stripped
@@ -350,12 +350,12 @@ f872e80b	a	other	a draw-restricting ability 'sees' draws from earlier in the tur
 80ee1489	a	zones	if the targeted player has no cards in hand, nothing shuffles in; their library stays empty until theyd draw
 c83041cc	a	stack	a draw-some-put-back ability resolves atomically; no player may act between the draw and the putting back
 bc4ce4a3	a	other	a loyalty ability's instructions are followed strictly in the order they're written
-d1861a0f	a	replacement	a replaced empty-library draw doesn't cause a loss, even if you couldn't otherwise win the game at that moment
-758a2ece	a	stack	an illegal target at resolution means a loyalty ability doesn't resolve and no draw happens
+d1861a0f	c	NR	a replaced empty-library draw doesn't cause a loss, even if you couldn't otherwise win the game at that moment [part 3, was a/replacement: no cube card stops a player from winning (Platinum Angel); Jace's win itself is tested]
+758a2ece	c	NR	an illegal target at resolution means a loyalty ability doesn't resolve and no draw happens [part 3, was a/stack: a player can't become an illegal target in a two-player cube game (no player hexproof or leaving)]
 ff7b6120	b	MP	multiple players simultaneously controlling the same draw-all-or-win ability
 0dc0242d	a	replacement	with too few library cards and the source gone, you draw what you can and win before the empty-library loss
 953f3cb9	a	stack	a draw-some-put-back spell resolves atomically; no player may act between the draw and the putting back
-06dd36f2	a	other	a card's listed actions are performed in sequence; some do their surveil-like step last, others earlier
+06dd36f2	b	DEF	a card's listed actions are performed in sequence; some do their surveil-like step last, others earlier [part 3, was a/other: the actions are done in order; a definition]
 d12fc076	a	other	card types for a type-choice: artifact, creature, enchantment, land, planeswalker, instant, sorcery; no super/subtypes
 dcdbba23	a	triggers	ETB and enters-with abilities of a copied permanent trigger normally for the resulting token
 6b2a875f	b	PRINT	the '+' indicator on additional-cost modes is a reminder only, with no rules meaning
@@ -367,14 +367,14 @@ f0054ad7	a	mana	a copied permanent with X in its mana cost treats X as 0
 b045bc66	a	copies	a token copy of a token uses that token's own stated copiable characteristics
 6c18a1f3	a	copies	if the copied permanent is itself copying something else, the new token becomes that other thing
 acbc3ade	a	stack	a modal spell only has targets if a target-needing mode is chosen; all-illegal targets void the resolve
-1026bb70	a	other	a spell's instructions are always followed in their written order, regardless of which modes are chosen
+1026bb70	b	DEF	a spell's instructions are always followed in their written order, regardless of which modes are chosen [part 3, was a/other: Three Steps Ahead's modes don't affect each other, so their order changes nothing]
 e9521273	a	stack	no responses are allowed between the modes of one resolving spell; any triggers wait until it fully resolves
 c2c62fb3	b	PRINT	the '+' indicator on modal spell frames is a reminder only, with no rules meaning
 fcbbe43e	a	mana	a modal spell's mana value is only its printed mana cost, regardless of modes or additional costs chosen
 b9b0e621	a	copies	a token copy copies exactly what's printed, with no tap state, counters, attachments, or non-copy changes
-a69ad6a9	a	other	you can't choose the same mode more than once on a modal spell
-47fcf447	a	mana	modes for a modal spell are locked in as you cast it and can't be changed afterward
-21f7cabc	a	mana	you must choose at least one mode and pay its additional cost to cast a modal spell
+a69ad6a9	b	DEF	you can't choose the same mode more than once on a modal spell [part 3, was a/other: a mode once; the engine never offers it twice]
+47fcf447	b	DEF	modes for a modal spell are locked in as you cast it and can't be changed afterward [part 3, was a/mana: modes are chosen once, while casting; a definition]
+21f7cabc	b	DEF	you must choose at least one mode and pay its additional cost to cast a modal spell [part 3, was a/mana: a spree spell needs a mode; the engine never offers none]
 c33f0cb3	a	stack	each copy made by storm must be countered individually; countering the original doesn't stop the copies
 158501c3	a	stack	storm counts spells cast from any zone and even ones that were countered
 500a78f9	a	stack	storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later
@@ -382,7 +382,7 @@ c33f0cb3	a	stack	each copy made by storm must be countered individually; counter
 bf7e6c38	a	stack	each storm copy may be given new targets independently of the others
 e237dd05	b	DEF	paying a kicker cost is what makes a spell 'kicked'
 85680b80	a	copies	a copy of a kicked spell on the stack is also kicked
-017770a9	a	mana	a kicker cost can't be paid more than once
+017770a9	b	DEF	a kicker cost can't be paid more than once [part 3, was a/mana: kicker is paid at most once; a definition]
 4580d03c	a	mana	an X value is calculated only once, as the spell resolves
 5fb37854	a	mana	total cost = base/alt cost + increases (e.g. kicker), then reductions; mana value unaffected
 f94acd2b	a	mana	total cost = base/alt cost (e.g. Daze) + increases, then reductions; mana value unaffected
@@ -403,26 +403,26 @@ fb03cf68	a	stack	a copy of a spell returned to its owner's hand ceases to exist 
 7466b29b	a	stack	returning a spell to hand removes it from the stack without countering it, working even on uncounterable spells
 a00dc8c2	a	mana	total cost = base/alt cost + increases, then reductions; this spell's mana value is fixed regardless of what was paid
 3ef23eda	a	stack	a copy of a modal spell may get new targets from the copying effect, but never new modes
-d8e048f4	a	other	if the same mode is chosen more than once, you choose the relative order of its repeated effect
+d8e048f4	b	DEF	if the same mode is chosen more than once, you choose the relative order of its repeated effect [part 3, was a/other: the order of returning the creatures changes nothing observable]
 e260f820	a	stack	if all chosen modes targets become illegal, the whole modal spell fails, including any non-targeted mode
-b87d5668	a	other	a modal spell's instructions are always followed in their written order, regardless of which modes are chosen
+b87d5668	b	DEF	a modal spell's instructions are always followed in their written order, regardless of which modes are chosen [part 3, was a/other: Mystic Confluence's modes don't affect each other, so their order changes nothing]
 78ef5708	a	stack	no responses are allowed between the modes of one resolving spell; triggers wait until it fully resolves
 0a2cf1a9	a	mana	delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too
 4029cc96	a	mana	delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it
 c6f70acd	a	mana	delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled
 729bf672	a	mana	a Phyrexian mana symbol makes a card that color regardless of how it was actually paid
-2cb44a57	a	mana	you choose how to pay each Phyrexian mana symbol at the same time as choosing modes or an X value
+2cb44a57	b	DEF	you choose how to pay each Phyrexian mana symbol at the same time as choosing modes or an X value [part 3, was a/mana: when the Phyrexian payment is chosen; the engine asks it while casting]
 cab93df4	a	mana	you can't pay the life portion of Phyrexian mana if you're at 1 life or less
-0a14c78b	a	mana	Phyrexian mana isn't a color of its own, and players can't produce it as mana
+0a14c78b	b	DEF	Phyrexian mana isn't a color of its own, and players can't produce it as mana [part 3, was a/mana: Phyrexian mana isn't a colour; a definition]
 98549dec	a	other	the affected player may have an empty hand; the draw still happens regardless
 5c4578c4	a	mana	each Phyrexian mana symbol counts as 1 toward a card's mana value
-9a6a7a03	a	zones	choosing to shuffle your library afterward reshuffles in the cards you looked at and put back
+9a6a7a03	b	DEF	choosing to shuffle your library afterward reshuffles in the cards you looked at and put back [part 3, was a/zones: a shuffle randomizes the whole library, including cards just put on top; a definition]
 066e2812	a	other	multiple extra-turn effects are taken in reverse of the order they resolved, most recent first
 825d28a0	a	mana	extra mana paid to cover a cost difference isn't part of the spell's mana cost and is paid during resolution
 2878adab	a	zones	a 'search for a card with certain characteristics' effect never forces you to find a card you don't want to
 98bf27cb	a	mana	if the found replacement costs the same or less than what was sacrificed, it enters with no extra cost paid
-109a1e64	a	stack	the found permanent enters as the spell resolves, which doesn't count as casting it
-ec89adc7	a	zones	this effect can't be used to sacrifice more than one artifact
+109a1e64	b	DEF	the found permanent enters as the spell resolves, which doesn't count as casting it [part 3, was a/stack: Transmute Artifact puts the card onto the battlefield, which is never a cast; a definition]
+ec89adc7	b	DEF	this effect can't be used to sacrifice more than one artifact [part 3, was a/zones: Transmute Artifact says "an artifact"; a definition]
 81386b1f	a	zones	the sacrifice is an effect at resolution, not a cost, so a countered spell requires sacrificing nothing
 872a13f6	a	zones	this card isnt in the graveyard until it fully resolves, so its own shuffle effect misses it
 65329593	a	zones	this card isnt in the graveyard until it fully resolves, so its own shuffle effect misses it
@@ -432,35 +432,35 @@ f1a0fb40	a	stack	a Class level-up ability is a normal activated ability that use
 0a86d2b2	a	copies	this ability doesn't strip any abilities from the artifact it transforms into a creature
 9327dac0	a	other	a Class gains the abilities of each level it reaches cumulatively, starting from level 1
 0d70edc6	a	other	leveling up a Class never removes abilities it had at an earlier level
-45d23f21	a	copies	if the targeted artifact has station, this sets its base power/toughness to 0/0, which charge counters won't restore
+45d23f21	c	NR	if the targeted artifact has station, this sets its base power/toughness to 0/0, which charge counters won't restore [part 3, was a/copies: no cube card has station]
 a0398e1e	a	copies	if the targeted artifact is a Vehicle, this sets its base power/toughness to 0/0, which crewing won't restore
 006c710e	a	replacement	if the target was an attached Equipment, it becomes unattached, and can't reattach later unless it has reconfigure
 ce58981e	a	copies	the artifact keeps all its existing types, subtypes, and supertypes after becoming a creature
 8733df71	a	combat	the new creature can attack if controlled since turn start, regardless of how long its been a creature
-702ccd9a	a	other	you can control any number of Class permanents, each tracking its own level independently
+702ccd9a	c	NR	you can control any number of Class permanents, each tracking its own level independently [part 3, was a/other: the cube has one Class card]
 b94705dd	a	other	you can't activate a level-up ability for a level the Class has already reached or passed
 3d923737	a	dfc	a transforming DFC enters front-up by default unless told to enter/cast transformed
 efbce0fd	a	copies	a token copy of a DFC is itself double-faced, matching the source's current face, and can still transform
 ec269542	a	dfc	only the currently-up face's characteristics apply on the battlefield; the other face is ignored
 165eb81a	a	dfc	cast face up; the front face is used everywhere except on the battlefield, where only the up face matters
 7f9205e7	a	triggers	if this dies exactly as it deals damage, its death trigger fires, but LKI means it wont untap or transform anymore
-bae0f4a4	a	zones	putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone
+bae0f4a4	c	NR	putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone [part 3, was a/zones: Cecil transforms in place; no cube effect puts a single-faced copy of it onto the battlefield transformed]
 05383bc0	b	CMD	Commander color identity uses both DFC faces' mana costs/symbols/indicators
 4c2dcef3	a	dfc	a DFC's back face usually has a color indicator that defines its color
 bb602230	a	dfc	a transforming DFC's mana value is always its front face's, regardless of which face is up
-96113165	a	combat	an attacks-while-saddled trigger only fires if the creature was saddled at the moment it attacked
+96113165	c	NR	an attacks-while-saddled trigger only fires if the creature was saddled at the moment it attacked [part 3, was a/combat: no cube card has an "attacks while saddled" trigger (Caustic Bronco checks saddled as its trigger resolves)]
 87059541	a	combat	a saddle creature can attack or block normally even while unsaddled
 ed19c884	a	triggers	if the source leaves before its ability resolves, use its last-known saddled status to decide the effect
 90fe76e8	a	copies	a copy of a saddled Mount isn't itself saddled
 e63641fa	a	mana	a revealed card with no mana cost (e.g. a land) has a mana value of 0
 a56b34fa	a	mana	a revealed split card's mana value is its two halves' combined mana cost
 63a507fc	a	mana	a revealed card with X in its mana cost treats X as 0
-c140aa06	a	other	you may activate a saddle ability even on a permanent that's already saddled
+c140aa06	b	DEF	you may activate a saddle ability even on a permanent that's already saddled [part 3, was a/other: saddling again is allowed and changes nothing; a definition]
 e2e6c94c	a	combat	saddle N: tap other creatures with total power N to become saddled until end of turn, sorcery speed only
 cfd9220f	a	combat	being saddled is just a state, not an ability; it lasts until end of turn or until the creature leaves the battlefield
 ddc42357	a	mana	a card in a player's library with X in its mana cost treats X as 0
 9402dfbe	a	mana	casting a card without paying its mana cost forces any X in its cost to be 0
-2208ed2d	a	combat	multiple evasion abilities (e.g. shadow+flying) all must be satisfied for a creature to block it
+2208ed2d	c	NR	multiple evasion abilities (e.g. shadow+flying) all must be satisfied for a creature to block it [part 3, was a/combat: no cube creature has two evasion abilities with shadow (Dauthi Voidwalker has only shadow)]
 545961c8	a	mana	casting a card this way forbids other alternative costs but still requires any mandatory additional costs
 8d9db447	a	zones	a discard replaced to exile still fires discard triggers, and the card is findable there by checking effects
 19d382a1	a	zones	playing a card granted by this effect still follows normal timing restrictions
@@ -469,21 +469,21 @@ ddc42357	a	mana	a card in a player's library with X in its mana cost treats X as
 3eb469b4	a	triggers	if the source leaves before its ability resolves, you still look at the hand, but no cards get exiled
 3d6c926a	a	replacement	a finality counter grants no abilities, but still exiles the permanent instead of sending it to the graveyard
 8680e6f8	a	replacement	a finality counter only redirects graveyard-bound trips to exile; going to other zones like hand works normally
-9c387bc1	a	other	a creature that loses all its +1/+1 counters can be made to adapt again for more
+9c387bc1	c	NR	a creature that loses all its +1/+1 counters can be made to adapt again for more [part 3, was a/other: no cube card removes +1/+1 counters from a creature]
 a716fb13	a	replacement	any permanent with a finality counter is exiled instead of going to a graveyard from the battlefield
-8cfe785e	a	other	multiple finality counters on one permanent don't stack any extra effect
+8cfe785e	c	NR	multiple finality counters on one permanent don't stack any extra effect [part 3, was a/other: nothing in the cube puts a second finality counter on a permanent]
 1ef6042a	a	other	an adapt-style ability can always be activated; it simply does nothing extra if the creature already has a +1/+1 counter
 7678f65c	a	stack	if an ability ends up with all its modes already chosen, it's removed from the stack with no effect instead of resolving
 33154328	a	other	an ability can be activated even if its source is already tapped
-f73afa66	a	copies	amass Zombies works like amass Orcs but makes/uses a Zombie Army and adds the Zombie type if needed
+f73afa66	c	NR	amass Zombies works like amass Orcs but makes/uses a Zombie Army and adds the Zombie type if needed [part 3, was a/copies: no cube card amasses Zombies]
 3127ca2a	b	PRINT	amass's current wording ('amass [subtype] N') replaced older 'amass Zombies N' text via errata
 8ff49c69	a	zones	putting cards into a hand without using the word 'draw' doesn't count as drawing them
-921a0532	a	triggers	a newly created Army token enters as a 0/0 before getting its counters, so ETB-power triggers see a 0/0
-afcdb2b8	a	other	with multiple Army creatures controlled, you choose which one gets the amass counters, gaining the Orc type if needed
-adf3a67e	a	other	'the amassed Army' means the chosen Army creature even if it ended up with no counters
+921a0532	c	NR	a newly created Army token enters as a 0/0 before getting its counters, so ETB-power triggers see a 0/0 [part 3, was a/triggers: the cube's only amass is 1 (Orcish Bowmasters), and no trigger tells a 0/0 Army from a 1/1 (Enduring Innocence sees power 2 or less either way)]
+afcdb2b8	c	NR	with multiple Army creatures controlled, you choose which one gets the amass counters, gaining the Orc type if needed [part 3, was a/other: the cube has one Army source and no changeling]
+adf3a67e	c	NR	'the amassed Army' means the chosen Army creature even if it ended up with no counters [part 3, was a/other: no cube card refers to the amassed Army]
 a6497c7f	a	stack	an amass ability needing a target that becomes illegal at resolution doesn't resolve, so no amass happens
 d78e9d4c	a	copies	amass Orcs N makes an Army token if none exists, adds N counters to a chosen Army, giving it Orc if needed
-6697634c	a	other	graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only
+6697634c	b	DEF	graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only [part 3, was a/other: the list of card types; a definition]
 fa9b77b4	a	copies	a type-counting characteristic ability counts distinct card types present, not the number of cards
 754b54cb	a	copies	a characteristic-defining ability based on graveyard contents works in every zone, not just the battlefield
 73ddf41c	a	triggers	magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect
@@ -501,15 +501,15 @@ f9ebf9d5	a	mana	casting free forbids other alt costs but still requires any mand
 b2be720c	a	stack	once you begin casting with emerge, it's atomic; no one can remove the permanent you intend to sacrifice
 d5867659	a	mana	the artifact to sacrifice for emerge stays around through mana payment, but is gone before any cast-trigger can see it
 ca0c3283	a	mana	an emerge creature's mana value never changes based on whether its emerge cost was paid
-18fbc98e	a	mana	a DFC back faces mana value equals its fronts; a melds is both fronts summed; a copy of either is 0
+18fbc98e	c	NR	a DFC back faces mana value equals its fronts; a melds is both fronts summed; a copy of either is 0 [part 3, was a/mana: no cube artifact is a back face, a meld or a copy of one]
 8604bcad	a	stack	a spell cast without paying its mana cost during an ability's resolution ignores normal type-based timing restrictions
 733e5e17	a	stack	choosing to cast an exiled card happens inside the triggered abilitys resolution, ignoring normal timing, no delay
 936c4c1c	a	mana	you may sacrifice a 0-mana-value artifact for emerge, but then pay the full emerge cost with no reduction
 dfea8aa9	a	mana	sacrificing an artifact worth at least the emerge costs generic part means paying only the colored part
 f353546d	a	zones	putting a card into a hand without using the word 'draw' doesn't count as drawing it
-755b454d	a	triggers	if a miracle card leaves your hand before its triggered ability resolves, you can no longer cast it via miracle
-9c0b0e4d	a	triggers	a miracle card must be revealed as it's drawn, before it mixes into the rest of your hand
-a45f943c	a	mana	miracle is an alternative cost that can't combine with other alternative costs, only additional ones
+755b454d	c	NR	if a miracle card leaves your hand before its triggered ability resolves, you can no longer cast it via miracle [part 3, was a/triggers: no cube card makes a player discard at instant speed or otherwise moves a revealed miracle card from hand]
+9c0b0e4d	b	PRINT	a miracle card must be revealed as it's drawn, before it mixes into the rest of your hand [part 3, was a/triggers: revealing before mixing the card into the hand is a physical-play instruction]
+a45f943c	b	DEF	miracle is an alternative cost that can't combine with other alternative costs, only additional ones [part 3, was a/mana: miracle is one alternative cost; a definition]
 0cb05459	a	zones	drawing multiple cards is always a sequence of individual draws; only the first drawn that way can use miracle
 d3edc491	a	mana	total cost = base/alt cost (e.g. miracle) + increases, then reductions; mana value unaffected
 bf463705	a	triggers	you can only cast a miracle card exactly as its triggered ability resolves; missing that window forfeits the option
@@ -520,8 +520,8 @@ ac2fc577	a	triggers	you don't have to reveal a drawn miracle card if you don't w
 89a61120	a	triggers	multi-clause ETB abilities run in order; sacrificed permanents are gone for later clauses, triggers wait till resolution
 0cd49558	a	mana	you can't pay a life cost for this ability if you're at 6 or less life
 94ad0c21	a	other	a creature's 'total power and toughness' means its power plus its toughness added together
-44d6591f	a	other	this effect only ever affects its own controller and has no targets, so it can't be redirected to an opponent
-3e8af7d2	a	zones	you must name a card that's an actual, real Magic card
+44d6591f	b	DEF	this effect only ever affects its own controller and has no targets, so it can't be redirected to an opponent [part 3, was a/other: Demonic Consultation has no target; a definition]
+3e8af7d2	b	DEF	you must name a card that's an actual, real Magic card [part 3, was a/zones: the engine names cards by their definitions, which are real cards; a definition]
 d81b7805	a	zones	failing to find the named card exiles your whole library; you lose only the next time youd draw from it
 d1cf4160	a	stack	the named card isn't locked in until the spell actually resolves
 adbe4a9a	a	stack	a removal spell with a mana-value restriction can target anything; the restriction is checked only at resolution
@@ -539,7 +539,7 @@ c4b9b754	a	stack	all cards being spliced are revealed simultaneously, and each o
 36b545c9	a	other	a granted haste effect only lasts until end of turn, even if the creature somehow survives to a later turn
 cf12f8bf	a	mana	a Phyrexian mana symbol always contributes 1 to mana value, even if life was paid for it
 084701b5	a	mana	a cost change on a spell applies to its chosen alternative cost, which still counts as paid for other effects
-d283a696	a	mana	choosing one alternative cost for a spell means you can't also choose a different alternative cost for it
+d283a696	b	DEF	choosing one alternative cost for a spell means you can't also choose a different alternative cost for it [part 3, was a/mana: one alternative cost at a time; a definition]
 b0b57c4a	a	copies	a copy of a spell that had an alternative cost paid resolves as though that cost was paid
 258d5dd9	b	MP	multiplayer: you choose which opponent is affected
 0cef3ca5	a	mana	a spell's mana value on the stack comes from its mana cost, not whatever alternative cost was used to pay for it
@@ -550,22 +550,22 @@ e7efe1ca	a	mana	a card in a graveyard with X in its mana cost treats X as 0
 0a7655f0	a	triggers	ETB triggers from a reanimated creature resolve after the life-loss cost; a game-ending loss skips them
 8be95947	b	MP	multiplayer: a player leaving the game and the cards/permanents they own leaving with them
 7e8fdb68	a	mana	the life lost is based on the card's mana value while still in the graveyard, not after it becomes a creature
-92b47e83	a	triggers	life loss happens after the creature is already on the battlefield, so its own life-loss triggers can apply
+92b47e83	c	NR	life loss happens after the creature is already on the battlefield, so its own life-loss triggers can apply [part 3, was a/triggers: no cube permanent interacts with its controller losing life as Reanimate's loss happens]
 311524ab	a	other	you still lose the life even if the target has no nonland cards to discard
-139e55ad	a	mana	a cost-reduction effect reduces the total cost, including any escalate-style costs added on top
+139e55ad	c	NR	a cost-reduction effect reduces the total cost, including any escalate-style costs added on top [part 3, was a/mana: Collective Brutality's escalate cost is a discard, which no cube cost reduction touches]
 e0fdde77	a	mana	casting a multi-mode spell free still requires paying the extra per-mode costs for choosing more than one
 61f2c92b	a	stack	one illegal target in a multi-mode spell doesnt stop the others; only all-illegal targets void the resolve
 1f109819	a	stack	two chosen modes that each target a creature or player may share the same target or use different ones
-cb0f6856	a	other	you can't choose the same mode of a modal spell more than once
-fdf1875c	a	mana	all modes of a modal spell are chosen at once, before any of its effects happen; you can't add more partway through
+cb0f6856	b	DEF	you can't choose the same mode of a modal spell more than once [part 3, was a/other: a mode once; the engine never offers it twice]
+fdf1875c	b	DEF	all modes of a modal spell are chosen at once, before any of its effects happen; you can't add more partway through [part 3, was a/mana: modes are chosen together while casting; a definition]
 1790c518	a	zones	this effect puts the card directly into your hand instead of drawing it
 e61f99f9	a	zones	the card found this way isn't revealed to your opponent
-3200cc0f	a	zones	the card to put into your hand is chosen as the spell resolves
+3200cc0f	b	DEF	the card to put into your hand is chosen as the spell resolves [part 3, was a/zones: the card is chosen as the spell resolves, the only time the engine asks; a definition]
 0333f482	a	combat	a noncreature-turned-creature needs continuous control since turn start to attack or tap, not creature-status time
 d9bc4e52	a	mana	off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it
-b83b7a27	a	other	a split card has two names; choosing a card name picks only one of them
+b83b7a27	c	NR	a split card has two names; choosing a card name picks only one of them [part 3, was a/other: the cube's naming cards look at cards outside the stack, where a split card has both names together]
 7892efbd	a	zones	a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard
-7a9df48b	a	dfc	a spell-casting effect with set characteristics only sees the half of a split card being cast
+7a9df48b	c	NR	a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits)]
 ae909e09	a	copies	a copy of one half of a split card remains that same half
 64340627	a	copies	a land that becomes a creature keeps all its other supertypes, types, subtypes, and abilities
 9fbd1525	a	dfc	while a split card spell is on the stack, the characteristics of the half you didn't cast are ignored
@@ -574,7 +574,7 @@ e08d64dc	a	triggers	a mass-removal effect only hits creatures present when it re
 38801307	a	mana	casting an X-cost-paid-as-life spell without paying its mana cost still requires choosing X and paying the life cost
 e99990e7	a	zones	you cant discard a card already in the graveyard, since its not in hand, so GY cycling cant trigger this way
 c161e411	a	replacement	if two effects would both replace where a cast card goes, its controller chooses which replacement applies
-37bd86d7	a	triggers	playing a card from a zone other than hand doesn't satisfy a 'cast from your hand' trigger condition
+37bd86d7	c	NR	playing a card from a zone other than hand doesn't satisfy a 'cast from your hand' trigger condition [part 3, was a/triggers: no cube card triggers on a spell cast from a hand]
 8a5dcfec	a	zones	this effect still exiles itself normally, since it moves to the graveyard only after its own effect has already begun
 d58aedf3	a	replacement	this ability creates a replacement effect that applies to both the costs and the effects of what it modifies
 49e70d59	a	zones	'playing a card' means either casting a spell or playing a land via the main-phase special action
@@ -585,10 +585,10 @@ fd5ee67c	a	zones	after this resolves it returns to the graveyard, where escape c
 8e380ea1	a	stack	a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act
 75e9fc66	a	mana	casting via an escape-style permission forbids other alternative costs but still requires mandatory additional costs
 d4f53c05	a	stack	beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done
-bd1a3401	a	replacement	a reminder-only counter doesnt change which permanent an exile-replacement effect applies to, even if its moved
+bd1a3401	c	NR	a reminder-only counter doesnt change which permanent an exile-replacement effect applies to, even if its moved [part 3, was a/replacement: no cube card removes or moves a counter from a creature From the Catacombs returned]
 b02c5786	a	mana	total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless
 13cb7898	a	other	once a limited counter resource runs dry, the permanent stays but its tied ability can never fire again
-4eb291a4	a	other	you choose which opponent gains control of the stolen permanent while the ability resolves
+4eb291a4	b	MP	you choose which opponent gains control of the stolen permanent while the ability resolves [part 3, was a/other: which opponent]
 8b359ef5	a	zones	looking at the top of your library this way doesn't use the stack and can happen any time, even without priority
 7ee6c520	a	mana	a permanent can be one of the permanents it sacrifices to pay for its own ability
 2012f8f3	a	stack	if the librarys top card changes mid-cast or mid-activation, you cant see the new top until thats done
@@ -600,14 +600,14 @@ b02c5786	a	mana	total cost = base/alt cost (e.g. escape) + increases, then reduc
 ed2e62db	a	replacement	a reanimation Aura attaches to the GY card, returns it, then reattaches to the new object, never itself touching GY
 2a2eab5b	a	triggers	if the source isn't on the battlefield when its own reanimation trigger resolves, nothing happens and the card stays put
 e3ce0176	a	protection	if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac
-34b9e51a	a	other	once attached to the creature it returned, a reanimation Aura can't be moved to attach to a different creature instead
+34b9e51a	c	NR	once attached to the creature it returned, a reanimation Aura can't be moved to attach to a different creature instead [part 3, was a/other: no cube effect moves an Aura]
 47a5c145	a	replacement	returning the creature and attaching the reanimation Aura to it both happen within the same resolution
-ced5d68f	a	other	when a permanent entering the battlefield needs a value or choice defined, you make that choice as part of it entering
+ced5d68f	b	DEF	when a permanent entering the battlefield needs a value or choice defined, you make that choice as part of it entering [part 3, was a/other: choices for a permanent entering are made as it enters; a definition]
 3886f2e5	a	replacement	this enters as a plain enchantment, then its own ETB trigger makes it an Enchant Creature Aura under Aura rules
 9b32972a	a	protection	if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac
-db4fe052	a	other	the forced sacrifice only happens when cast via its own ability, not when another effect enabled the cast
-b97a017c	a	combat	damage stays marked until cleanup, so nonlethal damage can turn lethal if a graveyard-based toughness buff shrinks
-916aaa72	a	other	graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only
+db4fe052	c	NR	the forced sacrifice only happens when cast via its own ability, not when another effect enabled the cast [part 3, was a/other: no other cube effect lets Necromancy be cast as though it had flash]
+b97a017c	c	NR	damage stays marked until cleanup, so nonlethal damage can turn lethal if a graveyard-based toughness buff shrinks [part 3, was a/combat: Dragon's Rage Channeler's delirium changes only its power, so losing it never makes damage lethal]
+916aaa72	b	DEF	graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only [part 3, was a/other: the list of card types; a definition]
 7335701d	a	stack	both targets of a swap-style ability must still be legal as it resolves, or neither effect happens
 d7de1c3d	a	copies	a creature that enters as or becomes a copy of a dashed creature doesn't gain haste and won't bounce to hand later
 4f0780ad	a	mana	paying a dash-style cost is still a normal cast: responsive, counterable, only when castable anyway
@@ -629,11 +629,11 @@ c7e12cda	a	mana	activated-ability targets are chosen before its cost is paid, so
 360847f0	a	stack	targeting an uncounterable spell with a counter effect still works, just failing to counter it
 30e98d6a	a	triggers	no target is chosen when the first ability triggers; a reflexive trigger gets its own targets when it's put on the stack
 a4ed176d	a	zones	cards played via this effect still require paying all their costs and following normal timing rules
-49a75f69	a	zones	'a Blood token' means any artifact token with the Blood subtype, even one that gained other subtypes too
-be55862c	a	triggers	'whenever you sacrifice a Blood token' triggers no matter why that token was sacrificed
+49a75f69	c	NR	'a Blood token' means any artifact token with the Blood subtype, even one that gained other subtypes too [part 3, was a/zones: no cube effect gives a Blood token another subtype]
+be55862c	c	NR	'whenever you sacrifice a Blood token' triggers no matter why that token was sacrificed [part 3, was a/triggers: no cube card triggers on sacrificing a Blood token]
 1785126b	c	NR	needs a second ability requiring sacrifice of a Blood token specifically, not in cube
 dc0e9b36	a	triggers	the trigger needs an actual untapped-to-tapped change; tapping an already-tapped permanent doesn't trigger it
-0b6a7a6e	a	other	this ability doesn't itself tap anything; you need another way to tap the relevant permanents, like attacking
+0b6a7a6e	b	DEF	this ability doesn't itself tap anything; you need another way to tap the relevant permanents, like attacking [part 3, was a/other: Magda's trigger taps nothing; a definition]
 edc91fad	a	zones	an effect that lets you 'cast' a card doesn't let you play lands with it
 9b682c79	a	zones	casting a card from exile removes it from exile, so you can't cast it again from there
 08172cc2	a	triggers	this cast-permission keeps applying on later turns if the source leaves, as long as its condition is met again
@@ -647,21 +647,21 @@ c92140df	a	zones	a card exiled by this effect is exiled face up
 3d058a75	a	combat	a boast-style ability can activate any time after its creature attacks, through end step or even cleanup rarely
 931f5f75	a	combat	a creature entering already attacking was never declared an attacker, so its boast ability is unusable that turn
 909ac1ac	a	combat	a boast-style ability can be activated only once per turn even with extra combat phases and multiple attacks
-d980af0c	a	combat	gaining control of an attacker after it attacked still lets you use its unused boast-style ability that turn
+d980af0c	c	NR	gaining control of an attacker after it attacked still lets you use its unused boast-style ability that turn [part 3, was a/combat: no cube effect gains control of an attacking creature during the opponent's turn]
 22f30094	a	dfc	a DFC's back face has no mana cost; its mana value still equals the front face's
 5380460f	a	copies	backup grants only the abilities printed in its own box, never ones the source gained from elsewhere
-0f8febcf	a	copies	if a backup-granted ability itself grants more abilities, the backup source keeps those granted ones too
+0f8febcf	c	NR	if a backup-granted ability itself grants more abilities, the backup source keeps those granted ones too [part 3, was a/copies: no ability backup grants gives further abilities]
 d189cf68	a	copies	if a backup ability targets its own source, that creature gets the counters but not any additional abilities
-abd66204	a	copies	a copy of a creature with a backup ability keeps its printed abilities in the same order
-d1e1a1bd	a	copies	the abilities granted by backup are locked in when the ability triggers, unaffected by the source later losing abilities
+abd66204	b	DEF	a copy of a creature with a backup ability keeps its printed abilities in the same order [part 3, was a/copies: the order of printed abilities, nothing for the engine to check]
+d1e1a1bd	c	NR	the abilities granted by backup are locked in when the ability triggers, unaffected by the source later losing abilities [part 3, was a/copies: no cube card removes abilities at instant speed while a backup trigger waits]
 8a2d01a9	a	combat	a token entering already attacking was never declared an attacker, so attack-triggers skip it
 d9901593	b	CMD	a commander-control check is satisfied by controlling either of two commanders
-cea0ea66	a	combat	a 'can't attack' effect only stops declaration as an attacker, not a token entering the battlefield already attacking
+cea0ea66	c	NR	a 'can't attack' effect only stops declaration as an attacker, not a token entering the battlefield already attacking [part 3, was a/combat: no cube effect says a creature can't attack]
 549fab62	b	CMD	both commanders start in the command zone, with the rest of a larger deck becoming the library
 3fd29ee8	b	CMD	Choose a Background is a Commander-only variant of the partner ability
 29633b54	a	copies	power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it
 cdd6186e	a	triggers	the source doesn't need to be among the attacking creatures for its attack-triggered ability to fire
-4af60889	a	copies	a base power/toughness-setting ability overwrites earlier ones, and is itself overwritten by any later one
+4af60889	c	NR	a base power/toughness-setting ability overwrites earlier ones, and is itself overwritten by any later one [part 3, was a/copies: Gut has no P/T-setting ability; the set-order rule is tested with Figure of Destiny and Oko (4af60889's Halsin)]
 06cb2c7b	a	other	if a creature becomes an artifact, it becomes eligible to be sacrificed to its own artifact-sacrificing ability
 168c1f9f	b	CMD	Commander rules for how a Background interacts with 'your commander' references
 8ff08460	b	CMD	with two commanders, an effect referencing 'your commander' lets you choose which one it affects
@@ -678,7 +678,7 @@ a898c85e	a	triggers	this trigger doesn't care which player exiled the cards or f
 cefea9b0	a	triggers	this trigger fires once per exiling event, no matter how many cards were exiled simultaneously
 8e48cc76	a	zones	playing a card exiled this way still follows normal timing restrictions, including needing an available land play
 66fc62ef	a	triggers	damage dealt by multiple simultaneous sources still only triggers this ability once, for the total amount
-50dcb39f	a	replacement	a life-total-setting effect that would raise your life above its current value under this lock simply does nothing
+50dcb39f	c	NR	a life-total-setting effect that would raise your life above its current value under this lock simply does nothing [part 3, was a/replacement: no cube card sets a life total]
 ea71103f	a	triggers	taking lethal damage still lets this creature's damage-triggered ability trigger before it's destroyed
 1fec0c93	a	replacement	once this deals damage to a player, they can never gain life again all game, even if the source later leaves
 68a5e08c	a	replacement	life-gain effects still resolve under this lock; they just grant no life, other effects still happen
@@ -716,7 +716,7 @@ c85087fd	a	walkers	loyalty abilities arent mana abilities; they use the stack, a
 feeffce5	a	mana	you may pay zero of a cost and still get the resulting counters, just with no additional effect from paying more
 fa2aaa26	a	stack	a counter/destroy mode is chosen at cast before targeting; redirecting the spell cant change the mode, limiting targets
 4128e050	a	stack	this removal spell can target anything regardless of color; the color restriction is checked only at resolution
-282f09bb	a	other	graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only
+282f09bb	b	DEF	graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only [part 3, was a/other: the list of card types; a definition]
 009c63c0	a	zones	a graveyard-size check happens as the spell resolves, before the spell itself has reached the graveyard
 15eab260	a	stack	putting the found card onto the battlefield is optional, even after the ability resolves to that point
 63859cb3	a	stack	a splice ability cant splice onto its own spell, since the spell is already on the stack when revealing
@@ -742,9 +742,9 @@ d6bf1964	a	stack	if all targets across chosen modes go illegal, the spell fails;
 9403db83	a	combat	choosing the same damage mode repeatedly makes separate damage events, each subject to its own prevention effects
 a01ce385	a	other	modes always run in written order; a repeated modes relative order is chosen as you cast the spell
 9da53bfb	a	stack	no player may cast spells or activate abilities between the modes of one resolving spell
-3719f25f	a	mana	modes for this modal spell are chosen as you cast it and can't be changed afterward
+3719f25f	b	DEF	modes for this modal spell are chosen as you cast it and can't be changed afterward [part 3, was a/mana: modes are chosen while casting; a definition]
 a7269192	a	zones	a non-permanent escaped spell returns to GY after resolving; a permanent enters BF and returns to GY only when it dies
-f0b4b359	a	mana	a card with no mana cost has an unpayable escape cost, so it can't be cast that way
+f0b4b359	c	NR	a card with no mana cost has an unpayable escape cost, so it can't be cast that way [part 3, was a/mana: every cube nonland card has a mana cost]
 bea302d9	a	mana	cards discarded/sacrificed for an escape spells other costs can also be exiled toward its exile-cards cost
 6257ac75	a	mana	an escape-cast adventurer/split card: choose which half to cast, pay that cost plus the exile requirement
 c8da9e36	a	dfc	a transforming DFC enters front-up by default unless told to enter or be cast transformed
@@ -755,11 +755,11 @@ d1d85157	a	replacement	if a doubling effect makes this create multiple tokens, e
 b30727cf	a	copies	copying something that's itself copying another thing makes the new token use that other thing's copiable values
 6c4f38f7	a	copies	copying the created token copies the underlying card plus haste, but not its forced end-step sacrifice
 602bf769	a	mana	a copied creature with X in its mana cost treats X as 0
-d1aaefa0	a	zones	putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone
+d1aaefa0	c	NR	putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone [part 3, was a/zones: Fable is a Saga, which no cube copy effect can copy, so no single-faced copy of it reaches chapter III]
 8dff2c25	a	dfc	a transforming DFC's back face usually has a color indicator that defines its color
 40a8e390	a	copies	copies only whats printed plus haste; skips tap state, counters, attachments, and non-copy changes
 921387ce	a	other	you only sacrifice the creature if you still control it; if it left and returned as a new object, you don't sacrifice it
-a9320e9f	a	stack	if a spell cast this way is copied, the copy can still be countered even though the original couldn't
+a9320e9f	c	NR	if a spell cast this way is copied, the copy can still be countered even though the original couldn't [part 3, was a/stack: Lutri copies only instant and sorcery spells and the cube has no legendary one; nothing else copies a spell cast with Delighted Halfling's mana]
 64b63bdd	a	mana	this spell stays uncounterable as long as this sources mana paid any part of its cost, any cost type
 a3e958c5	a	copies	if this creatures power/toughness was set to a value after entering, a later level-up wont override it
 0951eeb1	a	copies	leveling abilities count level counters, with set power/toughness-and-ability thresholds at specific counter ranges
@@ -771,34 +771,34 @@ a3e958c5	a	copies	if this creatures power/toughness was set to a value after ent
 2de2fb41	a	combat	a creature that enters already attacking was never declared an attacker, so it's ignored for exalted-style triggers
 f6fa64c4	a	combat	exalted-style abilities need exactly one attacker total; splitting targets or losing one mid-combat disqualifies it
 9ce0a2f9	a	other	a keyword that animates a land as a 0/0 haste creature with counters, returning it if it dies or is exiled
-3e2199e1	a	triggers	this trigger only fires on a real tap-cost mana ability, not alternate tap wording or another objects ability
+3e2199e1	c	NR	this trigger only fires on a real tap-cost mana ability, not alternate tap wording or another objects ability [part 3, was a/triggers: no cube mana ability taps a creature other than its own source or without {T}]
 4565f55b	a	mana	this triggered mana ability doesn't use the stack and can't be responded to
 a1b92c37	a	copies	animating a land this way doesn't give it a color, so most animated lands stay colorless
 b4e0984f	a	triggers	if an animated land leaves to any zone but graveyard or exile, its delayed return trigger wont reclaim it
 8c334374	a	stack	an illegal land target makes the animate effect fail, voiding the whole spell if it had no other targets
 0decf500	a	copies	an animated land keeps its other types, subtypes, supertypes, and any mana abilities those grant
 28832e4a	a	copies	targeting an already-animated land adds more counters and haste, and resets its base power/toughness to 0/0
-3e9497f2	a	other	doubling a permanent's counters means adding that many more, which other counter-interacting effects still see happen
-7ab9e10f	a	triggers	a landfall-style ability doesn't trigger when an existing permanent merely becomes a land
+3e9497f2	c	NR	doubling a permanent's counters means adding that many more, which other counter-interacting effects still see happen [part 3, was a/other: no cube card reacts to counters being put on a permanent]
+7ab9e10f	c	NR	a landfall-style ability doesn't trigger when an existing permanent merely becomes a land [part 3, was a/triggers: no cube effect makes a permanent on the battlefield become a land]
 0908c190	a	triggers	a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect
 6ea84d35	a	triggers	multiple landfall triggers from one land can be stacked in any order you pick for their resolution
 33ad6e92	a	stack	an eternalize card hitting the GY on your main phase gives you priority to activate it before anyone can exile it
 d971bcd1	a	zones	activating an eternalize-style ability exiles the card right away, so it cant be stopped by later exiling it
 450b7583	a	copies	an eternalize-style token copies whats printed plus its own stated changes, with no memory of its GY time
 90ab1f80	a	copies	an eternalize-style tokens granted type, color, fixed P/T, and lack of mana cost are its copiable values
-0f56d153	a	other	card types here: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery
+0f56d153	b	DEF	card types here: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery [part 3, was a/other: the list of card types; a definition]
 e08aed32	a	mana	this triggered ability isn't a mana ability, so opponents may respond before the mana is added
 d82ba1b5	a	mana	this ability uses the stack and can be responded to, since its trigger event isn't itself a mana ability
-dc720bec	a	triggers	the day/night designation updates before players untap their permanents in the untap step
+dc720bec	b	DEF	the day/night designation updates before players untap their permanents in the untap step [part 3, was a/triggers: no cube permanent untaps differently by day or night, so the order of the check and the untap changes nothing observable]
 6a566e12	a	other	day and night start unset and, once set, stay exactly one of the two for the rest of the game
 03d27f15	a	dfc	daybound/nightbound transform immediately on any day/night change, any time, and its not a state-based action
 b5368c51	a	other	it becomes night if it's currently day and the previous turn's active player cast no spells
 0a3a2fe8	a	other	it becomes day if it's currently night and the previous turn's active player cast two or more spells
 9d7e7537	a	dfc	during night, a daybound permanent entering without being cast enters with its nightbound face up
-c574f848	a	other	with no day/night set, daybound and nightbound appearing together sets day, transforming the nightbound one
+c574f848	c	NR	with no day/night set, daybound and nightbound appearing together sets day, transforming the nightbound one [part 3, was a/other: no cube effect puts a daybound and a nightbound permanent onto the battlefield at once while it's neither]
 483aa586	a	dfc	a daybound spell cast at night stays daybound on the stack but enters the battlefield nightbound-face-up
 a73ce155	a	dfc	daybound/nightbound only transform via their own abilities, not generic transform effects from other cards
-3f9e2325	a	other	doubling a creature's counters means adding that many more, which other counter-interacting effects still see happen
+3f9e2325	c	NR	doubling a creature's counters means adding that many more, which other counter-interacting effects still see happen [part 3, was a/other: no cube card reacts to counters being put on a permanent]
 6a72e0e6	a	other	Auras dont tap with their enchanted creature, and a bestow Aura keeps that untapped state when unattaching
 3786a663	a	replacement	a bestow permanent that enters by any method other than casting is always an enchantment creature, never becomes an Aura
 aa3ceeab	a	mana	declining or being unable to pay an optional bonus cost still lets the rest of the triggered ability's effect happen
@@ -806,43 +806,43 @@ aa3ceeab	a	mana	declining or being unable to pay an optional bonus cost still le
 4031067f	a	replacement	a bestow Aura with an illegal target isnt countered; it just stops being an Aura and resolves as a creature
 25014ba1	a	replacement	an unattached bestow permanent skips the graveyard, just stopping being an Aura and staying a creature
 912d01f2	a	triggers	a creature can't become prepared a second time simultaneously; a redundant trigger doesn't create a second exiled copy
-513b768f	a	other	a creature without an associated alternate spell can never become 'prepared'
+513b768f	c	NR	a creature without an associated alternate spell can never become 'prepared' [part 3, was a/other: Emeritus of Abundance is the cube's only card with a prepare spell]
 1a88f316	a	dfc	a card with this alternate spell is just its base creature card except while cast as that alternate spell
 4afe6989	a	dfc	becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared
 30549a2b	a	copies	being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics
-a5afe2a8	a	mana	casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply
+a5afe2a8	c	NR	casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply [part 3, was a/mana: no cube effect offers an alternative cost for a prepare copy cast from exile]
 4d9f48c8	a	copies	making the exiled alternate-spell copy ignores any copy-exceptions; it keeps its own original characteristics
 41772f5d	a	triggers	a land-count-gated ability checks the count both when it triggers and again at resolution, failing either check
 4c9245c3	a	stack	an alternate spell with no legal targets left at resolution fails, and the creature stays unprepared
 f028f400	a	copies	losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy
 b775049c	a	copies	losing creature status or copying something else doesnt undo being prepared; the copy stays castable
-c6772882	a	replacement	an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared
-8c23b69e	a	dfc	choosing a card name may select this kind of alternate spell's name
+c6772882	c	NR	an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared [part 3, was a/replacement: no cube effect makes a creature unprepared (only casting the prepared spell, tested)]
+8c23b69e	c	NR	choosing a card name may select this kind of alternate spell's name [part 3, was a/dfc: the cube's naming cards look at cards outside the stack, where a prepare spell's name never matches; naming it is naming a card that isn't there]
 341b5cd9	a	other	only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner
 81739185	a	dfc	a card with this kind of alternate spell can only be cast with its base characteristics, unless it's prepared
 94077065	a	copies	copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception
 a276cb65	a	zones	a countered cast-from-graveyard spell returns there, where that permission can be used on it again
-1d87aaa2	a	combat	if not forced to attack a specific player but still able, you may attack elsewhere or not attack at all
+1d87aaa2	c	NR	if not forced to attack a specific player but still able, you may attack elsewhere or not attack at all [part 3, was a/combat: Ursine Monstrosity's requirement has no cost, so it's never "not forced but able"]
 ccae9ec2	a	zones	if a required mill can't happen, the rest of the ability's instructions still get followed
 c298a763	a	triggers	an attack-triggered ability fires at each of multiple combat phases in a turn, ignoring choices made in earlier phases
 7bf7bcc3	a	combat	a must-attack creature is excused if tapped, cant-attack, or lacks haste+continuous control; its cost isnt forced
-d8d3cb67	a	other	card types are artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery; no super/subtypes
+d8d3cb67	b	DEF	card types are artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery; no super/subtypes [part 3, was a/other: the list of card types; a definition]
 dbf6f20e	a	combat	a 'must attack a player' effect requires attacking that player directly, not a planeswalker or battle they control
-a5983f5b	a	triggers	if the source leaves exactly as you sac multiple lands, its land-sac trigger still fires once per land
-76c89b3d	a	zones	an ability letting you play graveyard lands doesnt let you activate their other abilities, like cycling
+a5983f5b	c	NR	if the source leaves exactly as you sac multiple lands, its land-sac trigger still fires once per land [part 3, was a/triggers: no cube effect sacrifices lands and Baloth Prime at once]
+76c89b3d	c	NR	an ability letting you play graveyard lands doesnt let you activate their other abilities, like cycling [part 3, was a/zones: no cube land card has an ability that works from a graveyard (cycling or otherwise)]
 84c13ea1	a	zones	playing lands from another zone via this effect keeps normal timing: once per turn, main phase, empty stack
-df961cd2	a	zones	multiple effects granting extra land plays per turn stack cumulatively with each other
+df961cd2	c	NR	multiple effects granting extra land plays per turn stack cumulatively with each other [part 3, was a/zones: the cube's other extra-land effect is Fastbond (any number), so no two "one additional land" effects add up]
 862c109c	a	triggers	no target is chosen when the first ability triggers; a reflexive trigger gets its own target when it's put on the stack
 b3653e3c	a	triggers	if the source leaves the battlefield while its ability is on the stack, use its last-known power to determine X
 509660c9	a	mana	an X value referenced by this ability is calculated only once, as it resolves
 c026cdc4	a	other	if the affected opponent controls no planeswalkers, this ability's extra effect simply does nothing
-6ab1199e	a	combat	once a strong enough blocker has blocked, later shrinking its power doesnt retroactively unblock the attacker
-c894eeb5	a	combat	this 'damage can't be prevented' effect only overrides effects that specifically use the word 'prevent'
-908a2924	a	combat	damage this ability deals directly to a planeswalker isn't combat damage, even though the ability is combat-related
+6ab1199e	c	NR	once a strong enough blocker has blocked, later shrinking its power doesnt retroactively unblock the attacker [part 3, was a/combat: no cube effect lowers a blocking creature's power at instant speed]
+c894eeb5	b	DEF	this 'damage can't be prevented' effect only overrides effects that specifically use the word 'prevent' [part 3, was a/combat: only "prevent" effects are stopped; a definition (the cube has no other damage-changing effect)]
+908a2924	c	NR	damage this ability deals directly to a planeswalker isn't combat damage, even though the ability is combat-related [part 3, was a/combat: no cube card treats combat and noncombat damage to a planeswalker differently]
 9924d9da	a	mana	a card with this ability is purely colorless, not colorless plus the colors in its printed mana cost
 f98c7fa0	b	CMD	this color-removing ability doesn't affect Commander color identity, which still comes from the printed mana cost
 747e785b	a	mana	this color-removing ability applies in every zone, not just on the battlefield
-85aaba03	a	copies	losing a color-removing ability still leaves it colorless, since the color change applied before the loss
+85aaba03	c	NR	losing a color-removing ability still leaves it colorless, since the color change applied before the loss [part 3, was a/copies: no cube effect removes devoid without setting a colour (Oko's Elk makes it green)]
 1896f056	a	copies	another effect granting a color to a colorless card just makes it that color alone, not that color plus colorless
 a3b82184	a	dfc	a modal DFCs mana value depends on which face is considered, unlike a transforming DFC
 81bbe983	a	replacement	if a doubling effect makes two Monks from this trigger, this Equipment attaches to only one of them
@@ -859,28 +859,28 @@ c28e08d7	a	copies	if the source was itself copying something when last on the ba
 95367116	a	triggers	both static power effects and replacement effects (counters, copying) count when checking a power-based trigger
 0c836eb3	a	triggers	once a power-threshold ability has triggered, later lowering that power or removing the creature doesn't stop its effect
 be7d384c	a	triggers	a token copy of this permanent entering the battlefield also triggers its own power-based ability
-cc1b356f	a	other	persist still works even if the creature stops being a creature before it would die
-fdcd2e1f	a	triggers	persist uses last-known counters right before leaving the battlefield, so a lingering +1/+1 counter blocks its return
-28deec8d	a	triggers	multiple instances of persist on one permanent each trigger separately, but only the first to resolve has any effect
+cc1b356f	c	NR	persist still works even if the creature stops being a creature before it would die [part 3, was a/other: no cube effect makes Woodfall Primus stop being a creature]
+fdcd2e1f	c	NR	persist uses last-known counters right before leaving the battlefield, so a lingering +1/+1 counter blocks its return [part 3, was a/triggers: no cube card puts -1/-1 counters on a persist creature except lethal infect damage, which leaves it with -1/-1 counters either way]
+28deec8d	c	NR	multiple instances of persist on one permanent each trigger separately, but only the first to resolve has any effect [part 3, was a/triggers: no cube effect gives a creature a second persist]
 15f83ca8	a	zones	a token with no -1/-1 counters that has persist still triggers on death, but ceases to exist and can't return
 54494365	a	triggers	simultaneous persist deaths stack active-player triggers first, then others; the last one stacked resolves first
 6363d351	a	triggers	persist triggers on hitting the graveyard, using last-known info to check for a -1/-1 counter
 e7319af2	a	zones	a permanent returned by persist is a new object with no memory of its previous existence
 ce2089b1	a	stack	a self-shuffling triggered ability can be responded to, e.g. by exiling the source from the graveyard first
 743f8a7f	a	copies	a continuous effect from a loyalty ability lasts indefinitely, surviving the cleanup step
-645fd990	a	mana	you must sacrifice exactly one land as this cost; you can't cast it without one or sacrifice extra lands for more effect
+645fd990	b	DEF	you must sacrifice exactly one land as this cost; you can't cast it without one or sacrifice extra lands for more effect [part 3, was a/mana: one land, exactly; a definition]
 f8ed4a40	a	stack	the earliest this spell can be cast is during the first player's upkeep, before they can play a land
 5a8e06f8	a	mana	paying a kicker-style cost on a removal spell widens its legal targets beyond its normal restriction
 e17f37b4	a	zones	if this spell doesnt resolve, none of its effects happen, so it hits the graveyard instead of the library
 673739a0	a	zones	if this spell is countered, none of its effects happen, so it hits the graveyard, not the library
 f8e4188f	a	zones	if someone else casts your spell, they search and shuffle their own library, then shuffle it into yours
-64e2a429	a	zones	normally casting and resolving this spell shuffles your library twice, which shuffle-counting effects will see
+64e2a429	c	NR	normally casting and resolving this spell shuffles your library twice, which shuffle-counting effects will see [part 3, was a/zones: no cube card counts shuffles]
 8d406a15	a	stack	if any targets were chosen and all become illegal at resolution, the spell doesn't resolve and creates no tokens
 1b8fdeea	a	other	the number of tokens created is always twice the chosen X, regardless of how many permanents were actually destroyed
 0a241466	a	stack	responses are possible only after the spell is fully cast and paid for; the sacrificed creature cant be saved
-81f099ed	a	mana	sacrificing a green creature is the cost; no extra sacs for more effect, and uncastable without one
+81f099ed	b	DEF	sacrificing a green creature is the cost; no extra sacs for more effect, and uncastable without one [part 3, was a/mana: one green creature, exactly; a definition]
 09abdfb0	a	triggers	ETB and enters-with abilities of a copied permanent trigger normally for the created token
-fe8c5c0f	a	replacement	a copied Auras token enters uncast and untargeted; controller picks a legal thing to enchant, or it isnt made
+fe8c5c0f	c	NR	a copied Auras token enters uncast and untargeted; controller picks a legal thing to enchant, or it isnt made [part 3, was a/replacement: the cube makes no Aura tokens for Esika's Chariot to copy]
 5a42cc51	a	copies	copying something that copies another thing uses that things copiable values, with X as 0
 018fe53e	a	copies	token copies stated traits only, skipping tap state, counters, attachments, non-copy changes, and attacking status
 fbba272e	a	other	putting a land onto the battlefield via a spell or ability's effect doesn't trigger this card's extra-land-play damage
@@ -889,7 +889,7 @@ fbba272e	a	other	putting a land onto the battlefield via a spell or ability's ef
 7062f665	a	stack	the targeting condition (controlling more creatures) must still be true when the ability resolves, or it doesn't resolve
 27f2af67	a	mana	a cost written as {X}{X} means paying double the chosen X, so X=3 costs {6}
 f730efa6	a	other	existing damage or toughness loss caps how many times a counter-removing ability fires before SBA destroys it
-60a1b604	a	replacement	color-granting effects reapply per zone, timed to still match simultaneous ETB/zone-change triggers on that color
+60a1b604	c	NR	color-granting effects reapply per zone, timed to still match simultaneous ETB/zone-change triggers on that color [part 3, was a/replacement: no cube replacement or trigger looks at the colour of an entering permanent or a cast spell (Painter's Servant's colour on cards, spells and permanents is tested)]
 0d163622	a	copies	a color-adding effect on a colorless thing just makes it that color, not colorless plus that color
 1095bb67	a	copies	multiple copies of the same color-adding static effect are cumulative with each other
 3304c432	a	other	a color-adding effect applies everywhere: every zones cards, battlefield tokens, and stacked spell copies, any owner
@@ -912,7 +912,7 @@ f0f2746f	a	protection	targeting a protected permanent with a counter effect stil
 075cc040	a	protection	protection from colored spells stops colored Aura targeting, but a colored Aura can still enter already attached
 b4e16ada	a	triggers	a cast-triggered ability resolves before its source spell, even if that spell is removed from the stack
 a6dd6e5a	a	mana	a card in your library with X in its mana cost treats X as 0
-f560f0bc	a	copies	turning a Vehicle into an artifact creature this way doesn't count as 'crewing' it for crew-triggered abilities
+f560f0bc	c	NR	turning a Vehicle into an artifact creature this way doesn't count as 'crewing' it for crew-triggered abilities [part 3, was a/copies: no cube card has an ability that triggers when a Vehicle becomes crewed]
 fc909d02	a	copies	this sets the affected permanents base power/toughness to 0/0, which crewing or counters wont restore
 95070e2f	a	copies	this ability doesn't strip any abilities, types, subtypes, or supertypes from the affected artifact
 111530fb	a	combat	the resulting creature can attack if controlled since turn start, regardless of how long its been a creature
@@ -942,13 +942,13 @@ f2096b7a	a	zones	this mill-and-repeat effect can continue indefinitely as long a
 b5ec1048	a	triggers	if the source leaves while its draw ability is on the stack, the draw still happens regardless
 3400bc39	a	stack	a second ability can be activated in response to a first one on the same source, letting both effects happen in sequence
 7e54db0f	a	triggers	this death trigger fires no matter how the source reaches the graveyard from the battlefield
-0e489daa	a	mana	the color choice for a mana-producing ability must be made before that same ability's card draw happens
+0e489daa	b	DEF	the color choice for a mana-producing ability must be made before that same ability's card draw happens [part 3, was a/mana: the colours are chosen before the draw; the engine asks them first]
 402f58a3	a	combat	a creature that loses haste before attacking cant attack that turn, so one haste Equipment cant enable two attackers
 4c667be8	a	other	Equipment cant be simply unequipped; attached to your only creature, it cant move until you have another to attach to
-e9d9e91b	a	other	once a limited-use counter resource runs out, the permanent just remains on the battlefield
-88a452d2	a	mana	sunburst counts only mana actually spent, even if another effect let you spend it as a different type
+e9d9e91b	b	DEF	once a limited-use counter resource runs out, the permanent just remains on the battlefield [part 3, was a/other: an artifact without counters stays; a definition]
+88a452d2	c	NR	sunburst counts only mana actually spent, even if another effect let you spend it as a different type [part 3, was a/mana: no cube effect lets mana be spent as though it were another type]
 3a81a6c3	a	mana	any untapped creature you control can pay a crew cost, even one you only just gained control of
-e863d618	a	other	creatures that crew a Vehicle aren't attached to it, so effects targeting the Vehicle don't affect them
+e863d618	b	DEF	creatures that crew a Vehicle aren't attached to it, so effects targeting the Vehicle don't affect them [part 3, was a/other: crew creates no link between the creatures and the Vehicle; a definition]
 429c5474	a	copies	a Vehicle has a printed power/toughness but isnt a creature until something makes it one, using that value
 bfeae3be	a	combat	a Vehicle needs to be a creature by declare attackers/blockers to join combat, capping its crew timing
 1bccbeb4	a	copies	a copy of a Vehicle is never a creature, even if the Vehicle it's copying currently is one
@@ -957,38 +957,38 @@ ea843c44	a	copies	an effect that turns a Vehicle into a creature with a specific
 db2bccf4	a	stack	once a crew ability is announced, it's atomic; no one can stop it by changing or removing the tapped creatures
 65d7c435	a	copies	Vehicle is an artifact type, not a creature type, so a crewed Vehicle has no inherent creature type
 526a6c5c	a	triggers	a Vehicle becoming a creature isn't a permanent entering the battlefield, so ETB-creature triggers don't fire for it
-d5ea249a	a	mana	you may activate a crew ability on a Vehicle that's already a creature, but doing so has no effect
-15f2809b	a	mana	you may tap more creatures than strictly required to pay a crew cost
-c0a633cc	a	other	an Equipment with a size-based bonus can still be attached to any creature, not just ones matching its bonus condition
+d5ea249a	b	DEF	you may activate a crew ability on a Vehicle that's already a creature, but doing so has no effect [part 3, was a/mana: crewing a creature Vehicle changes nothing; a definition]
+15f2809b	b	DEF	you may tap more creatures than strictly required to pay a crew cost [part 3, was a/mana: tapping more than needed is allowed and changes nothing; a definition]
+c0a633cc	b	DEF	an Equipment with a size-based bonus can still be attached to any creature, not just ones matching its bonus condition [part 3, was a/other: equip targets any creature you control; a definition]
 dee45a6f	a	replacement	if an Equipment cant reattach to its trigger creature (e.g. it left), it returns to the battlefield unattached instead
 d80bd9c5	a	triggers	an ETB power/toughness trigger only sees static abilities at that instant; nothing can react fast enough to change it
 d3c2bdb3	a	triggers	once a power/toughness-based trigger has fired, later changing that power or toughness doesn't stop its effect
 b1e42bd2	a	triggers	this trigger only fires if its source is already in your graveyard the instant the relevant creature enters
 b9d3a261	a	other	a skip-turn choice is made as the turn begins, only if tapped then; a skipped source untaps before next turn starts
-f801fa4a	a	other	this ability's wording prevents repeatedly activating it to skip more than one turn at a time
+f801fa4a	b	DEF	this ability's wording prevents repeatedly activating it to skip more than one turn at a time [part 3, was a/other: Time Vault's untap needs a turn skipped, one at a time; a definition]
 1efd0607	a	mana	a self-untapping mana ability can be activated as many times as you can pay for it, enabling unbounded mana generation
 2f4582bf	a	mana	removing multiple charge counters from this permanent at once lets you choose a different mana color for each one
-607c43dc	a	other	only a turn's first main phase counts as its precombat main phase, even with extra main or combat phases added
-8c728893	a	zones	an ability letting you play graveyard lands doesnt let you activate their other abilities, like cycling
+607c43dc	c	NR	only a turn's first main phase counts as its precombat main phase, even with extra main or combat phases added [part 3, was a/other: no cube effect adds a main phase]
+8c728893	c	NR	an ability letting you play graveyard lands doesnt let you activate their other abilities, like cycling [part 3, was a/zones: no cube land card has an ability that works from a graveyard (cycling or otherwise)]
 c96d5ecf	a	zones	playing lands from another zone via this effect keeps normal timing: once per turn, main phase, empty stack
-3ff80682	a	copies	a permanent that's both an artifact and an enchantment is only counted once toward a type-counting bonus
+3ff80682	c	NR	a permanent that's both an artifact and an enchantment is only counted once toward a type-counting bonus [part 3, was a/copies: the cube has no permanent that's both an artifact and an enchantment]
 745c7726	a	other	if a living-weapon token is destroyed, its Equipment stays on the battlefield like any other Equipment would
 f9096d07	a	replacement	if a doubling effect makes two living-weapon tokens, the Equipment attaches to one; the other dies unless boosted
 b88fdb37	a	other	moving a living-weapon Equipment via its equip cost leaves the unequipped token to die to SBA unless boosted
 bc0bcd33	a	replacement	a living-weapon token enters as 0/0 and the Equipment attaches before SBA could kill it, so ETB triggers see a 0/0
 32385cc4	b	PRINT	an errata changed the living-weapon token's name across all cards with the ability, a wording/printing update
-4928e319	a	triggers	this abilitys target is chosen on the stack; an illegal target at resolution removes it with none of its effects
-12531c0e	a	protection	gaining protection from everything can make you an illegal target, triggering normal full/partial fizzle rules
+4928e319	c	NR	this abilitys target is chosen on the stack; an illegal target at resolution removes it with none of its effects [part 3, was a/triggers: Palantir's only target is an opponent, who can't become an illegal target in a two-player cube game]
+12531c0e	c	NR	gaining protection from everything can make you an illegal target, triggering normal full/partial fizzle rules [part 3, was a/protection: The One Ring is cast at sorcery speed, so nothing targeting its controller can wait on the stack under its trigger]
 b0eae858	a	protection	protection from everything for a player: damage to them prevented, Auras cant attach, cant be targeted
 7b7445e2	a	protection	protection from everything blocks only the listed events; non-targeting effects and attacks still happen normally
-bd58b57f	a	protection	protection from everything usually prevents damage, but a few damage types bypass it and still cost life
+bd58b57f	c	NR	protection from everything usually prevents damage, but a few damage types bypass it and still cost life [part 3, was a/protection: no cube damage can't be prevented]
 a16cbfa9	a	zones	cards exiled this way can't be looked at until they return to hand
 8279c4b9	a	triggers	an unblocked attack against a planeswalker you control doesn't trigger this unblocked-attacker-triggered ability
 1ec0d4c1	a	triggers	this ability resolves after blockers are declared but before combat damage is dealt
 8d31adf9	a	triggers	this triggers once blockers are declared (or skipped) if any attacker went unblocked, regardless of other attackers
 c5826706	b	MP	each opponent attacking at once triggers this separately, each getting a chance at its own effect
 1fbf6f68	a	mana	a tap-for-generic alt payment lets you tap an untapped artifact/creature per generic mana in its stated cost
-69809137	a	mana	changing a spells total cost doesnt raise the cap on how much this tap-instead-of-mana payment can cover
+69809137	c	NR	changing a spells total cost doesnt raise the cap on how much this tap-instead-of-mana payment can cover [part 3, was a/mana: no cube effect raises an activation cost, and Zirda's reduction leaves the waterbend cap above the cost]
 f467488f	a	stack	exiling a spell this way removes it from the stack unresolved; its not countered, so it works on uncounterables
 f402e1f3	a	mana	this tap-for-generic-mana payment is capped at the generic mana amount in its own cost component
 5a445906	a	mana	tapping/saccing an artifact for its own mana ability during casting removes it from use for this other payment method
@@ -1011,13 +1011,13 @@ c556a504	a	copies	if the copied original was itself copying something else, the 
 2e75e441	a	zones	with five or fewer library cards, you can keep paying life to loop through seeing the same cards again
 89452e23	a	zones	declining to pay life shuffles the rest of the library, then returns the same five cards to the top in a chosen order
 582d92bc	a	zones	this is a repeatable look-five/keep-or-bottom-and-pay-life loop that ends once you choose to keep the cards on top
-60e34629	a	replacement	ETB replacement effects cant be targeted, and an untap-blocking replacement effect cant be countered
-953ed0e0	a	other	activated abilities are written as 'Cost: Effect,' and some keyword abilities like equip and crew use that colon form
+60e34629	b	DEF	ETB replacement effects cant be targeted, and an untap-blocking replacement effect cant be countered [part 3, was a/replacement: replacement effects never use the stack, so nothing targets or counters one; a definition (stun is tested)]
+953ed0e0	b	DEF	activated abilities are written as 'Cost: Effect,' and some keyword abilities like equip and crew use that colon form [part 3, was a/other: activated abilities have colons; a definition]
 4e573280	a	triggers	countering a delayed trigger that fires at the 'next' occurrence of a step or phase stops it from firing that next time
-16563efc	a	other	triggered abilities use when/whenever/at; some keywords like prowess and fabricate carry that wording
+16563efc	b	DEF	triggered abilities use when/whenever/at; some keywords like prowess and fabricate carry that wording [part 3, was a/other: triggered abilities use when, whenever, at; a definition]
 eed15a5f	a	combat	a creature entering attacking via ninjutsu was never declared an attacker, so attack-triggers skip it
 34862bd0	a	stack	ninjutsu activation reveals card and bounces attacker; creature enters only at resolution, not if it leaves hand
-a4335d8f	a	triggers	this ability still counts an opponent who lost life this turn, even if that player has since lost the game
+a4335d8f	b	MP	this ability still counts an opponent who lost life this turn, even if that player has since lost the game [part 3, was a/triggers: a player who lost the game ends a two-player game]
 68e1969c	a	combat	with first/double strike present, ninjutsu-entering creatures still deal damage in the regular damage step
 5a72d756	a	combat	a ninjutsu creature attacks the same target the bounced creature did, unlike the normal controllers-choice rule
 f36cad96	a	other	a 'lost life this turn' check cares only about whether a loss happened, not the net change to the life total
@@ -1045,12 +1045,12 @@ ac9d14f8	a	other	a modal spell's chosen effects are always carried out in the or
 0bcfa967	a	protection	a mode needing a target is only choosable if a legal target exists; unchosen modes ignore targeting
 4ba4f68d	a	mana	you choose exactly two different modes as you cast this spell, locked in once chosen
 03b4df6c	a	other	if some chosen permanents are indestructible and others aren't, a random one of the non-indestructible ones is destroyed
-585b5241	a	mana	you choose which color(s) of mana to add before drawing the resulting card
+585b5241	b	DEF	you choose which color(s) of mana to add before drawing the resulting card [part 3, was a/mana: the colours are chosen before the draw; the engine asks them first]
 b2b3d893	a	replacement	ravenous puts its counters on as the creature enters, not after; entering triggers see the counters
-6c7670da	a	copies	a copied ravenous permanent spell keeps X, and its resulting token enters with X counters
+6c7670da	c	NR	a copied ravenous permanent spell keeps X, and its resulting token enters with X counters [part 3, was a/copies: no cube effect copies a ravenous creature spell]
 a22e8f66	a	replacement	a permanent entering as a copy of a ravenous creature doesn't get ravenous's counters
 e9268eaf	a	replacement	a fought creature is exiled instead of binned if it dies that turn for any reason, even after the fighter leaves
-c912e42d	a	mana	a trigger referencing X uses the value chosen at cast, which can differ from the number of counters it entered with
+c912e42d	c	NR	a trigger referencing X uses the value chosen at cast, which can differ from the number of counters it entered with [part 3, was a/mana: no cube replacement effect changes the number of counters a ravenous creature enters with, so X and the counters never differ]
 3a28a872	a	mana	a domain-style ability counts distinct basic land types among lands you control, not the number of lands
 59274c44	a	mana	only Plains, Island, Swamp, Mountain, and Forest count as basic land types for a domain-style ability
 0bcbef41	a	zones	a retrace spell that resolves or is countered goes back to the graveyard, where retrace can be used on it again
@@ -1059,7 +1059,7 @@ a391f90a	a	triggers	a reflexive trigger with no legal, or a now-illegal, target 
 373235a1	a	mana	a spell's mana value comes only from its mana cost, ignoring any alternative costs, additional costs, or cost changes
 5a231246	a	zones	an escaped non-permanent returns to GY after resolving; a permanent enters BF, returns to GY on death, re-escapes
 acd60f05	a	stack	a cascade-style trigger fires on cast and resolves first, stacking any cast card above the source spell
-8d21f1db	a	mana	a cascade-style effect requires the cast spell, not just the exiled card, to beat the sources mana value
+8d21f1db	c	NR	a cascade-style effect requires the cast spell, not just the exiled card, to beat the sources mana value [part 3, was a/mana: no cube card's castable face or half has a higher mana value than the card it is in exile]
 8a83c9d0	a	triggers	if a spell with a cascade-style trigger is countered, the triggered ability still resolves normally
 01ac337a	a	mana	casting an exiled X spell without paying its mana cost forces X to be 0
 6187a75b	a	mana	a split cards mana value is both halves combined; a cascade-style effect still only casts one half
@@ -1080,15 +1080,15 @@ f103228a	a	mana	a card in a player's deck with X in its mana cost treats X as 0
 5b5e7097	a	stack	a permanent card hitting your graveyard on your main phase with an empty stack gives you priority to cast it first
 b4178eed	a	other	if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent
 5f5f59d3	a	other	this restriction skips a permanent spell cast from the graveyard via another permission; you can cast one more
-d2cef7ee	a	other	gaining control of a new copy in the same turn, after already using ones effect, lets you use the new ones too
+d2cef7ee	c	NR	gaining control of a new copy in the same turn, after already using ones effect, lets you use the new ones too [part 3, was a/other: Lurrus is legendary and the cube has one]
 a4cb7594	a	mana	while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card
 bd8a17c9	a	other	this companion's deckbuilding condition doesn't restrict the mana value of instants and sorceries in your starting deck
 a6bfcffb	a	zones	this cast-from-graveyard permission doesn't let you play land cards
-b3fcd7f8	a	stack	losing control of this source mid-cast doesnt stop you finishing the cast through its permission
+b3fcd7f8	c	NR	losing control of this source mid-cast doesnt stop you finishing the cast through its permission [part 3, was a/stack: nothing can change control of Lurrus while a spell is being cast (only mana abilities can be activated then)]
 a037c9c9	a	stack	paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after
-cd304617	a	other	this companion condition only restricts deck contents, creating no ban on pairing it with other cards
-3ded9c78	a	other	a companion's other abilities only function while it's on the battlefield, not while it's outside the game
-22273157	a	other	this companion's deckbuilding condition applies only to your starting deck, not your sideboard
+cd304617	b	TRN	this companion condition only restricts deck contents, creating no ban on pairing it with other cards [part 3, was a/other: deck construction]
+3ded9c78	b	DEF	a companion's other abilities only function while it's on the battlefield, not while it's outside the game [part 3, was a/other: a companion's other abilities work only on the battlefield; a definition]
+22273157	b	TRN	this companion's deckbuilding condition applies only to your starting deck, not your sideboard [part 3, was a/other: deck construction]
 5ff2b705	b	CMD	Commander-only: one companion per deck, and the commander itself counts toward its deckbuilding condition
 2deb11e0	a	zones	a spell cast from the graveyard via this permission still follows its normal timing restrictions
 90a51faf	a	mana	you must still pay this spells costs, though an available alt cost like mutate may substitute
@@ -1130,7 +1130,7 @@ d5edcac7	a	copies	copies printed values plus prior copy effects, not counters, a
 2080ede6	a	mana	a token that isn't a copy of anything has mana value 0; a token that is a copy shares that object's mana cost
 dbbd77b1	a	protection	ward still lets you pay its cost when targeting; this spells own cant-be-countered clause holds even if you dont pay
 159f8a4d	a	stack	exiling a card via a plot-style ability is a special action; nothing can respond by removing it from hand first
-5ff99a3f	a	mana	casting a plotted X card without paying its mana cost forces X to be 0
+5ff99a3f	c	NR	casting a plotted X card without paying its mana cost forces X to be 0 [part 3, was a/mana: Pillage the Bog is the cube's only card with plot and has no {X}]
 2b26e4d4	a	mana	casting a plotted card free forbids other alt costs but still needs any mandatory additional costs
 eb326c78	a	mana	a plot-style keyword pays a cost at sorcery speed to exile a card from hand, making it plotted
 4fb42bfe	a	mana	an X value referenced by this ability is calculated only once, as it resolves
@@ -1139,40 +1139,40 @@ a755e0f5	a	mana	you can sacrifice a land that produces no mana to this ability; 
 3cf2e3a4	a	triggers	casting an instant or sorcery triggers every magecraft-style ability you control
 0e713983	a	mana	a permanent with X in its mana cost treats X as 0
 956681d4	a	triggers	a becomes-monstrous trigger wont fire if its creature isnt on the battlefield when monstrosity resolves
-6aa2fef7	a	other	being monstrous is a fact, not an ability, so it survives losing creature status or other abilities
+6aa2fef7	c	NR	being monstrous is a fact, not an ability, so it survives losing creature status or other abilities [part 3, was a/other: monstrous matters only to Alpha Deathclaw's own ability, which nothing in the cube removes while it keeps the designation]
 51f91fae	a	other	once a creature becomes monstrous, activating the ability again while already monstrous does nothing
 1081633d	a	copies	these abilities overwrite both the creature's power/toughness and its creature types at once
 f2c033cf	a	other	a type-checking ability only cares about the creature's current type, regardless of how it got that type
 926f3cd5	a	copies	these effects last until the game ends, the source leaves, or a later effect changes the same trait
 215456ff	a	other	these abilities work regardless of current creature type; each checks the type at resolution and fizzles if wrong
 42771029	a	copies	this overwrites only pre-existing P/T-setting effects, not modifying or later-made ones; switch effects apply last
-1d369da9	a	triggers	if combat damage to the monarch ends the game by making them lose, the become-the-monarch trigger simply doesn't resolve
+1d369da9	b	DEF	if combat damage to the monarch ends the game by making them lose, the become-the-monarch trigger simply doesn't resolve [part 3, was a/triggers: a player losing to the combat damage ends the two-player game; nothing resolves after]
 4dc78ca8	b	MP	multiplayer: monarch succession depends on whether the monarch left during their turn or someone elses
-bdbe97cb	a	triggers	if a new monarch is set before the draw trigger resolves, the original triggering player still draws
+bdbe97cb	c	NR	if a new monarch is set before the draw trigger resolves, the original triggering player still draws [part 3, was a/triggers: no cube card makes a player the monarch at instant speed while the end-step draw waits]
 161ec23b	a	other	the game starts with no monarch; a new monarch always replaces the old one, so theres at most one at a time
 0d65c72c	a	triggers	being the monarch carries two sourceless triggers: draw at end step, and pass on taking combat damage
 0d9e6436	a	triggers	this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically
 8e644e8c	a	triggers	this permanent's second ability triggers on entering the battlefield regardless of whether it escaped to get there
-ca9bf5c4	a	other	activated abilities use a colon; some keyword abilities like cycling are activated too, shown in reminder text
+ca9bf5c4	b	DEF	activated abilities use a colon; some keyword abilities like cycling are activated too, shown in reminder text [part 3, was a/other: activated abilities have colons; a definition]
 f21fe774	a	combat	using an unblock ability on an already-blocked creature doesnt remove it from combat or unblock what it hit
 92589f1d	a	mana	a generic cost reduction cant touch colored costs, and wont reduce an already one-or-zero-mana activation further
 0ef1ce44	b	DEF	permanent cards are artifact, creature, enchantment, land, and planeswalker; basics carry intrinsic mana abilities
 46ac16d1	a	walkers	loyalty symbols in an effect (not a cost) still add/remove that many counters the same way
-2548ce05	a	other	a die is defined by its face count, rolls must be fair, and digital substitutes are fine unless physical is required
-c953527e	a	other	a rerolled dies original result never happened, triggering nothing and being ignored by anything that cares
-57864724	a	triggers	a roll-a-die trigger fires for any die, even non-numerical ones, which just make that part of the effect do nothing
+2548ce05	b	DEF	a die is defined by its face count, rolls must be fair, and digital substitutes are fine unless physical is required [part 3, was a/other: what a die is; a definition]
+c953527e	c	NR	a rerolled dies original result never happened, triggering nothing and being ignored by anything that cares [part 3, was a/other: no cube effect rerolls a die]
+57864724	c	NR	a roll-a-die trigger fires for any die, even non-numerical ones, which just make that part of the effect do nothing [part 3, was a/triggers: the cube has no planar die]
 97f29a80	a	other	a specific die outcome with no qualifying graveyard card just removes a loyalty counter instead
 23ff8ba2	a	walkers	a specific die outcome at exactly one loyalty counter deals fixed damage and then removes that counter
-13201ca5	a	walkers	if this permanent somehow gains other loyalty abilities, a specific die-roll bonus only applies to its normal ability
-37a938d4	a	other	none of these abilities require a target; any choices of cards, creatures, or players are made as they resolve
-6fd8cb86	a	other	another effect can push a die roll's result outside its normal range, such as to 0 or 7 on a six-sided die
-6626dc83	a	other	anything that checks the 'result' of a die roll looks at the result after any modifications are applied
-65903867	a	other	a die roll only counts for game purposes if something in the game actually instructs a roll
-33fceee4	a	mana	tapping a specific permanent is part of this cost; once activated, no one can respond by removing it first
+13201ca5	c	NR	if this permanent somehow gains other loyalty abilities, a specific die-roll bonus only applies to its normal ability [part 3, was a/walkers: no cube effect gives Comet other loyalty abilities]
+37a938d4	b	DEF	none of these abilities require a target; any choices of cards, creatures, or players are made as they resolve [part 3, was a/other: Comet's abilities have no targets; a definition]
+6fd8cb86	c	NR	another effect can push a die roll's result outside its normal range, such as to 0 or 7 on a six-sided die [part 3, was a/other: no cube effect modifies a die roll]
+6626dc83	c	NR	anything that checks the 'result' of a die roll looks at the result after any modifications are applied [part 3, was a/other: no cube effect modifies a die roll]
+65903867	b	DEF	a die roll only counts for game purposes if something in the game actually instructs a roll [part 3, was a/other: only rolls the game asks for count; a definition]
+33fceee4	b	DEF	tapping a specific permanent is part of this cost; once activated, no one can respond by removing it first [part 3, was a/mana: tapping the Rebel is part of the cost, paid during activation; a definition]
 96e9a886	a	triggers	if the source returns anew, its granted ability is a separate object whose per-creature trigger count resets
 be65848a	a	triggers	if the source leaves while abilities it granted are still on the stack, those abilities resolve normally
 1b428e03	a	triggers	if the source enters while a targeting spell is already on the stack, the newly granted ability misses that event
-129d1cb5	a	triggers	multiple copies grant multiple separate ability instances per creature, each triggering independently
+129d1cb5	c	NR	multiple copies grant multiple separate ability instances per creature, each triggering independently [part 3, was a/triggers: Nadu is legendary and the cube has one; a copy of it meets the legend rule]
 309a7b0c	a	triggers	the source grants its triggered ability to itself as well as to your other creatures
 80bc0a3f	a	triggers	the granted ability's per-turn trigger limit applies separately to each creature that has it, not once overall
 13ea38a2	a	combat	damage stays marked until cleanup, so nonlethal damage can turn lethal if toughness drops later that turn
@@ -1188,13 +1188,13 @@ ecd10cda	a	copies	this continuous effect lasts indefinitely regardless of later 
 5aaccf2e	a	zones	putting a land onto the battlefield this way isnt playing a land, so it can happen off-turn or land-drop-free
 d6c4fd3b	a	replacement	a forced sac/discard from an opponents effect just doesnt happen; an optional version removes the option entirely
 086988d9	a	walkers	a bounce-to-hand loyalty ability cant activate if its own loyalty cost would leave it unable to do so
-5397ca7b	a	replacement	a pure forced sac/discard cant be avoided, but an unless-you-do-X version lets you decline with nothing happening
-8837aa73	a	replacement	this sacrifice/discard protection doesn't stop a forced cleanup-step discard caused by a reduced maximum hand size
+5397ca7b	c	NR	a pure forced sac/discard cant be avoided, but an unless-you-do-X version lets you decline with nothing happening [part 3, was a/replacement: no cube card says "unless you sacrifice / discard" or "sacrifice unless you"; the forced case is tested (d6c4fd3b)]
+8837aa73	c	NR	this sacrifice/discard protection doesn't stop a forced cleanup-step discard caused by a reduced maximum hand size [part 3, was a/replacement: no cube card reduces a maximum hand size]
 348a2bf6	a	replacement	this protection covers only sacrifices, not lethal damage, 0 toughness, or the legend rule
 47a83114	a	mana	a permanent may be sacrificed to pay the cost of its own ability
 18c98b5c	a	other	a connive X-style ability draws X and discards X, then adds counters equal to the nonland cards discarded that way
-667bfc29	a	other	an exhaust-style ability can be activated any time you could normally activate an ability
-03983021	a	triggers	a trigger for activating an exhaust-style ability resolves before that exhaust ability itself does
+667bfc29	b	DEF	an exhaust-style ability can be activated any time you could normally activate an ability [part 3, was a/other: an exhaust ability is activated like any other; a definition]
+03983021	c	NR	a trigger for activating an exhaust-style ability resolves before that exhaust ability itself does [part 3, was a/triggers: no cube card triggers on activating an exhaust ability]
 fb4b130d	a	zones	once activated, if its source leaves and returns, the new objects exhaust ability can fire again
 ca40ad03	a	stack	this can activate with no target chosen; a chosen target turning illegal at resolution voids the effect
 f6790404	a	replacement	a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all
@@ -1206,45 +1206,45 @@ b248e1c5	b	PRINT	a publication-date commentary about how unlikely a particular i
 8b54ef2f	a	zones	a multi-type revealed card can go to hand under any one type, chosen independently per card
 3d047ce6	a	combat	an animated land's summoning sickness depends on when you gained control of it, not on when it became a creature
 e43b1205	a	triggers	a land becoming a creature doesn't count as a creature entering the battlefield, so ETB-creature triggers don't fire
-1b90fed1	a	combat	if this creature-land needs to pay a mana cost to attack, it may tap itself for that mana and still attack
+1b90fed1	c	NR	if this creature-land needs to pay a mana cost to attack, it may tap itself for that mana and still attack [part 3, was a/combat: no cube card makes attacking cost mana]
 90f93ad0	a	combat	tapping an attacking creature-land for mana afterward doesn't remove it from combat
 fa3e7a03	a	zones	a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work
 c355f025	a	replacement	paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped
 e20baeb2	a	zones	a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work
-208fa4c3	a	zones	a conditional land ignores other lands entering simultaneously when counting how many you control
+208fa4c3	c	NR	a conditional land ignores other lands entering simultaneously when counting how many you control [part 3, was a/zones: no cube effect puts a fast land onto the battlefield at once with other lands (Nissa's ultimate finds Forests)]
 3b8f4b59	a	replacement	a conditional land enters untapped with two or fewer other lands controlled, and tapped with three or more
 1e872694	a	zones	a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply
 2ad14f7c	a	mana	a dual land has the mana abilities of both of its basic land types
-ccb774e6	a	copies	changing a dual lands types fully replaces both; changing just one type via text leaves the other type intact
+ccb774e6	c	NR	changing a dual lands types fully replaces both; changing just one type via text leaves the other type intact [part 3, was a/copies: no cube card changes a land's types or text]
 576821b5	a	zones	a dual land keeps both of its basic land types even while in the graveyard, library, or any other zone
 61bb069e	a	replacement	a conditional land enters untapped with two or fewer other lands controlled, and tapped with three or more
 81d5d41d	a	zones	a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work
 a32635f0	a	replacement	a conditional land enters untapped as your first, second, or third land, and tapped from the fourth land on
 4a5ce741	a	triggers	if this becomes a creature via another effect, its own attack-triggered ability still fires when it attacks
 cdbf63ec	a	combat	without continuous control since turn start, a newly-creature permanent cant attack or tap for mana that turn
-82bd8d83	a	zones	basic lands entering at the same moment as this land aren't counted when checking whether it enters tapped or untapped
+82bd8d83	c	NR	basic lands entering at the same moment as this land aren't counted when checking whether it enters tapped or untapped [part 3, was a/zones: no cube effect puts Abandoned Air Temple onto the battlefield at once with basic lands]
 5b2bbb6a	a	combat	if an exerted permanent is already untapped by the next untap step, its skip-untap effect simply expires
 969ce586	a	mana	mana from this source spent on a noncreature spell that later becomes a creature doesn't give that creature haste
 9f8d1cca	a	mana	mana from this source spent on a noncreature spell that creates tokens doesn't give those tokens haste
 ce428cbf	a	mana	mana from this source spent on any part of a creature spell's cost grants that creature haste until end of turn
 f7ca85a0	a	mana	splitting mana from this source across two different creature spells grants haste to both resulting creatures
-27c0d773	a	combat	a temporarily-stolen, exerted permanent untaps on its original owner's untap step once control reverts to them
+27c0d773	c	NR	a temporarily-stolen, exerted permanent untaps on its original owner's untap step once control reverts to them [part 3, was a/combat: no cube effect gains control of a permanent until end of turn]
 c2ce9071	a	mana	mana from this source can be spent on anything, not just creature spells
-5191fad1	a	replacement	this land needs you to already control the matching basic type (not one entering alongside) to be untapped
+5191fad1	c	NR	this land needs you to already control the matching basic type (not one entering alongside) to be untapped [part 3, was a/replacement: no cube effect puts a Mountain and Arena of Glory onto the battlefield at once]
 119d09c6	a	triggers	this land's self-sacrifice-punishing trigger doesn't fire from itself being played
 123354f4	a	triggers	this land's trigger doesn't fire for lands put onto the battlefield without being played
 5ef962e6	a	other	opening hand = post-mulligan hand; pregame hand actions happen starting-player-first, then turn order, before turn 1
-10242be0	a	triggers	extra copies of this land from pregame setup arent legend-ruled away until just before the first upkeeps priority
-ae9b23c1	a	replacement	if this permanents last counter is removed any other way, it isnt sacrificed and its ability becomes unactivatable
+10242be0	c	NR	extra copies of this land from pregame setup arent legend-ruled away until just before the first upkeeps priority [part 3, was a/triggers: the cube has one Gemstone Caverns per deck (singleton)]
+ae9b23c1	c	NR	if this permanents last counter is removed any other way, it isnt sacrificed and its ability becomes unactivatable [part 3, was a/replacement: no cube card removes a counter from a land (Gemstone Mine's own removal is tested)]
 edc8892b	a	stack	a card-count cost is checked only at activation, not resolution, so copies can be activated in response to each other
-3c582a02	a	mana	mana from this source can't be used to pay echo costs
-b63811a7	a	mana	mana from this source may be used to pay additional costs like kicker
+3c582a02	c	NR	mana from this source can't be used to pay echo costs [part 3, was a/mana: no cube card has echo]
+b63811a7	c	NR	mana from this source may be used to pay additional costs like kicker [part 3, was a/mana: no cube artifact spell has an additional cost]
 5260a564	a	mana	mana from this source can't be used to pay costs added to a spell after it was initially cast
-2bccef6e	a	mana	mana from this source may be spent on costs written in the spell's own text
+2bccef6e	c	NR	mana from this source may be spent on costs written in the spell's own text [part 3, was a/mana: no cube artifact spell has a cost in its own text beyond its mana cost]
 68db9ec9	a	other	it doesnt matter which library meets this size condition, and you never need to specify which one
 4ff60fbf	a	facedown	hideaway-style: look at top library cards, exile one face down with a look-permission, bottom the rest randomly
-a3006007	a	facedown	anyone whos ever controlled a hideaway-style permanent since it exiled a card may look at that card
-63e22938	a	zones	a hideaway-style keyword puts the unchosen cards on the bottom in random order, not the players choice
+a3006007	c	NR	anyone whos ever controlled a hideaway-style permanent since it exiled a card may look at that card [part 3, was a/facedown: no cube effect changes control of a land]
+63e22938	b	DEF	a hideaway-style keyword puts the unchosen cards on the bottom in random order, not the players choice [part 3, was a/zones: the rest go to the bottom in a random order, no choice; a definition]
 87dc58ac	b	PRINT	an old automatic enters-tapped clause is now spelled out as separate reminder text via errata
 0b4e869e	a	copies	effects and counters already on a permanent continue to apply after it becomes a copy of something else
 310c47f1	a	copies	becoming a copy isnt the same as entering, so the copied cards enters-the-battlefield abilities dont apply
@@ -1252,10 +1252,10 @@ cdeb5763	a	mana	a card in your graveyard with X in its mana cost treats X as 0
 c31a3116	a	copies	this copy effect copies exactly what was printed on the original card, with no memory of its time in the graveyard
 9646e4e7	a	replacement	this land needs you to already control the matching basic type (not one entering alongside) to be untapped
 ef26b159	b	DEF	this land type carries no intrinsic abilities of its own
-19b9dfcf	a	zones	sharing part of a land-type family name doesn't create any interaction between differently-typed lands in that family
+19b9dfcf	c	NR	sharing part of a land-type family name doesn't create any interaction between differently-typed lands in that family [part 3, was a/zones: the cube has no Urza's Tower, Mine or Power Plant; a definition]
 4f70a7ab	a	zones	a land that's also a Saga still gets sacrificed after its final chapter ability resolves
 68a587c8	a	other	a permanent gains an ability from its early chapters and keeps that ability for as long as it's on the battlefield
-4d7a6d3a	a	zones	a land card can only ever be played as a land, never cast as a spell
+4d7a6d3a	b	DEF	a land card can only ever be played as a land, never cast as a spell [part 3, was a/zones: a land card is played, never cast; a definition]
 c8a74bc2	a	mana	a mana-cost-based search is restricted to the exact printed mana cost symbols, not just a matching mana value
 655d544a	a	triggers	this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically
 1b138927	a	triggers	this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there

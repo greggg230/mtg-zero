@@ -120,6 +120,7 @@ const TIDEBINDER: &str = "Tishana's Tidebinder";
 /// and the card is drawn as it resolves.
 #[test]
 fn cr_724_2_the_monarchs_end_step_draw_uses_the_stack() {
+    // ruling: 0d65c72c 6d79b5c1
     let mut g = scen().monarch(0).at(Step::Main2, 0).start();
     let hand = g.player(0).hand.len();
     g.pass_until(|g| g.turn().step == Step::End);
@@ -153,6 +154,7 @@ fn cr_724_2_tidebinder_counters_the_monarchs_draw() {
 /// monarch, on the stack; the monarchy changes as it resolves.
 #[test]
 fn cr_724_2_combat_damage_to_the_monarch_triggers_per_creature() {
+    // ruling: 0d65c72c 161ec23b 6d79b5c1
     let mut g = scen().monarch(1).battlefield(0, &["Test Hasty", "Test Bear"]).at(Step::Main1, 0).start();
     let (a, b) = (bf(&g, 0, "Test Hasty"), bf(&g, 0, "Test Bear"));
     g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
@@ -229,6 +231,7 @@ fn cr_603_7_okoyes_attack_trigger_resolves_before_damage() {
 /// (two counters); one instruction exiling two cards is one.
 #[test]
 fn cr_603_2c_laelia_triggers_once_per_exile_event() {
+    // ruling: cefea9b0
     let mut g = scen()
         .battlefield(0, &["Laelia, the Blade Reforged", "Swamp"])
         .hand(0, &["Test Twice Exile"])
@@ -358,6 +361,7 @@ fn cr_614_12a_metamorph_cant_copy_a_permanent_entering_at_the_same_time() {
 /// so a creature with protection from blue is dealt the damage.
 #[test]
 fn cr_608_2h_pyrogoyfs_creature_deals_damage_as_it_last_existed() {
+    // ruling: abcb7bc2
     let mut g = scen()
         .battlefield(0, &["Pyrogoyf", "Island", "Island", "Island", "Island", "Mountain"])
         .hand(0, &["Phyrexian Metamorph", "Lightning Bolt"])
@@ -476,6 +480,7 @@ fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
 /// still be turned face up.
 #[test]
 fn cr_116_2b_a_face_down_permanent_that_lost_its_abilities_can_turn_face_up() {
+    // ruling: 0e33b18d
     let mut g = scen()
         .library(0, &["Test Giant", "Lightning Bolt"])
         .battlefield(0, &["Abhorrent Oculus", "Forest", "Forest", "Forest", "Forest", "Forest"])
@@ -604,6 +609,7 @@ fn cr_614_1a_mox_diamond_put_onto_the_battlefield_asks_for_a_land() {
 /// instead" both apply; its controller chooses which (CR 616.1, 616.1e).
 #[test]
 fn cr_616_1_blightsteel_and_yawgmoths_will_the_controller_chooses() {
+    // ruling: c161e411
     for (k, zone) in [(1u8, Zone::Library), (2, Zone::Exile)] {
         let mut g = scen()
             .battlefield(0, &["Blightsteel Colossus", "Goblin Bombardment", "Swamp", "Swamp", "Swamp"])
@@ -676,6 +682,7 @@ fn cr_616_1_flashback_and_dauthi_voidwalker_the_controller_chooses() {
 /// cast paying both (CR 601.2b, 601.2f-h).
 #[test]
 fn cr_601_2b_breach_escape_with_the_cards_own_additional_cost() {
+    // ruling: 75e9fc66
     let mut g = scen()
         .battlefield(0, &["Underworld Breach", "Swamp", "Swamp"])
         .graveyard(0, &["Bitter Triumph", "Island", "Island", "Lightning Bolt"])
@@ -724,6 +731,7 @@ fn cr_601_2a_paragon_or_lurrus_the_player_chooses() {
 /// flashback cost.
 #[test]
 fn cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses() {
+    // ruling: 259e8644
     // (Yawgmoth's Will first; then black and white mana are left.)
     let mut g0 = scen()
         .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp", "Swamp", "Plains", "Plains", "Plains"])

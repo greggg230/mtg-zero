@@ -310,6 +310,7 @@ const JACE: &str = "Jace, Vryn's Prodigy // Jace, Telepath Unbound";
 
 #[test]
 fn jace_loots_and_flips_with_five_cards_in_the_graveyard_cr_712_14a() {
+    // ruling: 7621bfed d8700ef8
     // "{T}: Draw a card, then discard a card. If there are five or more
     // cards in your graveyard, exile Jace, then return him to the
     // battlefield transformed under his owner's control."
@@ -395,6 +396,7 @@ fn jace_minus_three_casts_a_graveyard_spell_then_exiles_it() {
 
 #[test]
 fn jace_minus_three_spell_countered_to_hand_is_not_exiled() {
+    // ruling: 74e8317e
     // Only "put into your graveyard" is replaced (unlike flashback, CR
     // 702.34a): Remand sends it to its owner's hand.
     let mut g = scen()
@@ -671,6 +673,7 @@ fn etali_may_cast_none() {
 
 #[test]
 fn etali_primal_sickness_poisons_and_ten_poison_counters_lose_cr_704_5c() {
+    // ruling: c160282e
     // "{9}{G/P}: Transform Etali. Activate only as a sorcery." // "Trample,
     // indestructible. Whenever Etali deals combat damage to a player, they
     // get that many poison counters."

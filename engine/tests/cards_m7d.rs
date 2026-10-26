@@ -128,6 +128,7 @@ fn next_main(g: &mut Game, p: PlayerId) {
 /// cast free on a later turn (702.170d), looking at twice the number of lands.
 #[test]
 fn pillage_the_bog_plots_then_casts_free_on_a_later_turn_cr702_170() {
+    // ruling: 8d9b640e eb326c78
     let mut g = scen()
         .battlefield(0, &["Bayou", "Bayou", "Bayou"])
         .hand(0, &["Pillage the Bog"])
@@ -181,6 +182,7 @@ fn pillage_the_bog_plots_then_casts_free_on_a_later_turn_cr702_170() {
 /// luck counter on it, instead add one mana of any color."
 #[test]
 fn gemstone_caverns_begins_the_game_on_the_battlefield_with_a_luck_counter_cr103_6() {
+    // ruling: 5ef962e6
     let d = db();
     let caverns = d.id("Gemstone Caverns").unwrap();
     let bolt = d.id("Lightning Bolt").unwrap();
@@ -372,6 +374,7 @@ fn dauthi_voidwalker_exiles_opponents_spells_cr614_1a() {
 /// sorcery. While attached, this isn't a creature.)"
 #[test]
 fn lion_sash_grows_and_reconfigures_cr702_151() {
+    // ruling: cff2c1c6 f76d59c9
     let mut g = scen()
         .battlefield(0, &["Lion Sash", "Test Bear", "Plains", "Plains", "Plains", "Plains", "Plains"])
         .graveyard(1, &["Test Giant", "Lightning Bolt"])
@@ -409,6 +412,8 @@ fn lion_sash_grows_and_reconfigures_cr702_151() {
     settle(&mut g);
     assert_eq!(g.obj(sash).attached.map(|r| r.idx), Some(bear), "{}", log(&g));
     assert!(!g.is_creature(sash), "while attached it isn't a creature (702.151b)");
+    assert!(!g.has_subtype(sash, db().subtype_id("Cat").unwrap()), "nor a Cat (ruling cff2c1c6)");
+    assert!(g.has_subtype(sash, db().subtype_id("Equipment").unwrap()));
     assert_eq!(g.pt(bear), (3, 3), "+1/+1 for its one counter");
     assert!(!g.has_option(act(sash, 0)), "out of mana");
     // Unattach (sorcery speed): a creature again.
@@ -418,6 +423,7 @@ fn lion_sash_grows_and_reconfigures_cr702_151() {
 /// Reconfigure only as a sorcery; unattached, it's a creature again.
 #[test]
 fn lion_sash_unattaches_as_a_sorcery_cr702_151a() {
+    // ruling: fd9f18ea
     let mut g = scen()
         .battlefield(0, &["Lion Sash", "Test Bear", "Plains", "Plains", "Plains", "Plains"])
         .at(Step::Main1, 0)
@@ -455,6 +461,7 @@ fn lion_sash_unattaches_as_a_sorcery_cr702_151a() {
 /// ability is sorcery-speed and only from level N-1; 716.2c.)
 #[test]
 fn does_machines_gains_levels_cr716() {
+    // ruling: 0d70edc6 90f6d2b4 9327dac0 b94705dd
     let mut g = scen()
         .battlefield(0, &["Island", "Island", "Island", "Island", "Island", "Island", "Island", "Sol Ring"])
         .hand(0, &["Does Machines"])
@@ -629,6 +636,7 @@ fn urza_taps_artifacts_for_blue_while_paying_cr605_1a() {
 /// summoning sick and still pays for Urza's ability.
 #[test]
 fn urza_construct_token_and_a_sick_artifact_creature_pay_cr302_6() {
+    // ruling: c2b769e4 e32a9bac
     let mut g = scen()
         .battlefield(0, &["Island", "Island", "Island", "Island", "Mox Jet"])
         .hand(0, &["Urza, Lord High Artificer", "Brainstorm"])
@@ -706,6 +714,7 @@ fn arena_of_glory_exerts_for_mana_that_gives_haste_cr701_39() {
 /// Its mana spent on a noncreature spell gives nothing (and is spent last).
 #[test]
 fn arena_of_glory_haste_mana_on_a_noncreature_spell_cr106_6() {
+    // ruling: c2ce9071
     let mut g = scen()
         .battlefield(0, &["Mountain", "Mountain", "Arena of Glory"])
         .hand(0, &["Lightning Bolt", "Test Dwarf"])
@@ -732,6 +741,7 @@ fn arena_of_glory_haste_mana_on_a_noncreature_spell_cr106_6() {
 /// way without paying its mana cost."
 #[test]
 fn crabomination_emerges_and_casts_an_exiled_card_free_cr702_119() {
+    // ruling: 733e5e17 8604bcad e4babdad
     let mut g = scen()
         .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp", "Swamp", "Mind Stone"])
         .hand(0, &["Crabomination"])
@@ -835,6 +845,7 @@ fn bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21() {
 /// can still be sacrificed. Lands that come later don't have it (611.2c).
 #[test]
 fn rain_of_filth_lands_tap_then_sacrifice_in_one_payment_cr601_2g() {
+    // ruling: fc5b8004
     let sac_for = AbilitySlot::Trigger(u8::MAX - 1);
     let mut g = scen()
         .battlefield(0, &["Swamp", "Swamp"])

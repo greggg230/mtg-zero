@@ -201,6 +201,7 @@ const LEOVOLD: &str = "Leovold, Emissary of Trest";
 
 #[test]
 fn leovold_opponents_draw_at_most_one_card_each_turn() {
+    // ruling: f8af3256
     // "Each opponent can't draw more than one card each turn."
     let mut g = scen().battlefield(0, &[LEOVOLD]).battlefield(1, &["Island"]).hand(1, &["Ancestral Recall"]).at(Step::Main1, 1).start();
     let ar = g.card(1, "Ancestral Recall", Zone::Hand);

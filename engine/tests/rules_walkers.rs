@@ -323,6 +323,7 @@ fn cr_510_3a_combat_damage_to_a_planeswalker_is_not_damage_to_a_player() {
 
 #[test]
 fn cr_508_4_a_creature_put_onto_the_battlefield_attacking_chooses_what_it_attacks() {
+    // ruling: 7745b178
     let mut g = Scenario::new(db())
         .spec(|s| s.auto_single = false)
         .library(0, &["Island", "Test Bear", "Island"])
@@ -375,6 +376,7 @@ fn cr_114_an_emblem_is_in_the_command_zone_its_abilities_function_there() {
 
 #[test]
 fn cr_606_3_the_wandering_emperor_activates_at_instant_speed_the_turn_she_entered() {
+    // ruling: 3b688dfd
     let mut g = manual()
         .battlefield(0, &["Plains", "Plains", "Plains", "Plains"])
         .hand(0, &["The Wandering Emperor"])

@@ -160,6 +160,7 @@ fn a_copy_of_a_copy_has_its_exceptions_cr_707_3_707_9b() {
 
 #[test]
 fn a_copy_leaving_the_battlefield_is_its_card_again_cr_400_7() {
+    // ruling: ca262086
     // Metamorph copying Thraben Inspector, returned to hand by Petty Theft:
     // in hand it is the Metamorph card.
     let mut g = scen()
@@ -541,6 +542,7 @@ fn cast_nantuko(g: &mut Game, host: Option<CardIdx>) -> CardIdx {
 
 #[test]
 fn springheart_nantuko_cast_bestowed_is_an_aura_cr_702_103b() {
+    // ruling: 748a92bb
     // "Bestow {1}{G}. Enchanted creature gets +1/+1."
     let mut g = scen().battlefield(0, &["Forest", "Forest", "Test Bear"]).hand(0, &[NANTUKO]).start();
     let bear = bf(&g, 0, "Test Bear");
@@ -555,6 +557,7 @@ fn springheart_nantuko_cast_bestowed_is_an_aura_cr_702_103b() {
 
 #[test]
 fn springheart_nantuko_landfall_copies_its_creature_or_makes_an_insect() {
+    // ruling: aa3ceeab
     // "Landfall - Whenever a land you control enters, you may pay {1}{G} if
     // this permanent is attached to a creature you control. If you do,
     // create a token that's a copy of that creature. If you didn't create a

@@ -200,6 +200,7 @@ fn fastbond_any_number_of_lands_and_a_damage_after_the_first_cr305_2() {
 /// black and green Pest creature tokens" (X announced first, CR 601.2b-c).
 #[test]
 fn pest_infestation_up_to_x_targets_and_twice_x_pests_cr601_2c() {
+    // ruling: 1b8fdeea
     let mut g = scen()
         .battlefield(0, &["Forest"; 5])
         .hand(0, &["Pest Infestation"])
@@ -320,6 +321,7 @@ fn attack_with(g: &mut Game, names: &[&str]) {
 /// defending player equal to the number of artifacts they control."
 #[test]
 fn generous_plunderer_reflexive_treasure_cr603_12_and_damage_by_their_artifacts() {
+    // ruling: c5526106
     let mut g = scen()
         .battlefield(0, &["Generous Plunderer"])
         .battlefield(1, &["Sol Ring"])
@@ -360,6 +362,7 @@ fn generous_plunderer_declined_makes_no_reflexive_trigger_cr603_12() {
 /// your library. You may play that card until your next end step."
 #[test]
 fn inti_discard_then_reflexive_counter_cr603_12_and_play_until_your_next_end_step() {
+    // ruling: 30e98d6a
     let mut g = scen()
         .battlefield(0, &["Inti, Seneschal of the Sun", "Test Bear"])
         .hand(0, &["Lightning Bolt"])
@@ -632,6 +635,7 @@ fn a_spell_cast_from_hand_chooses_targets_with_the_hand_it_left_cr601_2a() {
 /// owner's library instead" (614.1a).
 #[test]
 fn blightsteel_infect_poison_and_minus_counters_cr702_90() {
+    // ruling: 7714d41e
     let mut g = scen()
         .battlefield(0, &["Blightsteel Colossus"])
         .battlefield(1, &["Test Giant"])
@@ -1086,6 +1090,7 @@ fn parallax_wave_fading_sacrificed_without_counters_cr702_32a() {
 /// opponent loses that much life."
 #[test]
 fn caustic_bronco_saddled_makes_the_opponent_lose_cr702_171() {
+    // ruling: e2e6c94c
     let mut g = scen()
         .battlefield(0, &["Caustic Bronco", "Test Bear", "Test Flyer"])
         .library(0, &["Test Giant", "Island"])
@@ -1105,6 +1110,7 @@ fn caustic_bronco_saddled_makes_the_opponent_lose_cr702_171() {
 /// Not saddled: you lose the life.
 #[test]
 fn caustic_bronco_unsaddled_you_lose_cr702_171() {
+    // ruling: 87059541
     let mut g = scen().battlefield(0, &["Caustic Bronco"]).library(0, &["Test Giant", "Island"]).at(Step::Main1, 0).start();
     attack_with(&mut g, &["Caustic Bronco"]);
     settle(&mut g);
@@ -1155,6 +1161,7 @@ fn sword_of_the_meek_on_the_battlefield_doesnt_trigger() {
 /// hasn't been chosen" (700.2): each mode once.
 #[test]
 fn gollum_parity_trigger_each_mode_once_cr700_2() {
+    // ruling: 7678f65c
     let mut g = scen()
         .battlefield(0, &["Swamp", "Swamp"])
         .hand(0, &["Gollum, Riddle Master"])
@@ -1200,6 +1207,7 @@ fn gollum_parity_trigger_each_mode_once_cr700_2() {
 /// end step."
 #[test]
 fn emperor_of_bones_adapt_reanimates_with_a_finality_counter_cr701_46a() {
+    // ruling: 1ef6042a a716fb13
     let mut g = scen()
         .battlefield(0, &["Emperor of Bones", "Swamp", "Swamp"])
         .graveyard(1, &["Test Giant"])
@@ -1375,6 +1383,7 @@ fn memory_jar_hands_face_down_then_back_at_the_end_step_cr406_3() {
 /// library has twenty or fewer cards in it."
 #[test]
 fn shelldock_isle_hideaway_then_cast_free_cr702_75a() {
+    // ruling: 4ff60fbf
     let mut g = scen()
         .battlefield(0, &["Island"])
         .hand(0, &["Shelldock Isle"])
@@ -1409,6 +1418,7 @@ fn shelldock_isle_hideaway_then_cast_free_cr702_75a() {
 /// creature gets -1/-0."
 #[test]
 fn animate_dead_reanimates_and_its_leaving_sacrifices_the_creature_cr303_4a() {
+    // ruling: ed2e62db
     let mut g = scen()
         .battlefield(0, &["Scrubland"; 5])
         .hand(0, &["Animate Dead", "Vindicate"])
@@ -1494,6 +1504,7 @@ fn necromancy_at_instant_speed_is_sacrificed_at_cleanup_cr514_3a() {
 /// Cast as a sorcery: it stays.
 #[test]
 fn necromancy_at_sorcery_speed_stays_cr514_3a() {
+    // ruling: 47a5c145
     let mut g = scen()
         .battlefield(0, &["Swamp"; 3])
         .hand(0, &["Necromancy"])

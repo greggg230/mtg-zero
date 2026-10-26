@@ -93,6 +93,7 @@ def main():
 
     # Per ruling instance (a card's ruling) and per distinct text.
     inst = Counter()
+    by_suite = Counter()
     distinct = {}
     rows = []
     for c in rulings:
@@ -112,6 +113,11 @@ def main():
                 status = "tested"
             inst[(cls, status)] += 1
             distinct[h] = (cls, status)
+            if status == "tested":
+                # Tested by a rulings suite, or only by an earlier (Oracle or
+                # rules) test that names the ruling (ENGINE.md 39).
+                own = any(f.startswith(("rulings_", "interactions_")) and not ig for (f, _, ig) in t)
+                by_suite[("rulings" if own else "earlier", h)] += 1
             rows.append((c["name"], h, cls, code, note + flag, t, status))
     dcount = Counter(distinct.values())
 
@@ -130,7 +136,8 @@ def main():
     w("(" + ", ".join(f"{k} {v}" for k, v in CODES.items() if k != "NR") + "); **c** about a mechanic or situation")
     w("no cube card reaches (NR). An `a` ruling's area is where its test belongs (`engine/tests/rulings_<area>.rs`")
     w("or an existing suite). Status: `tested` (a passing test names it), `deferred` (only `#[ignore]`d tests: an engine")
-    w("bug left, below), `untested` (class a, no test yet: part 2's work).")
+    w("bug left, below), `untested` (class a, no test yet). A tested ruling is tested by a rulings suite or only by an")
+    w("earlier test that checks the same point (an Oracle or rules test naming it; ENGINE.md 39).")
     w("")
     w("## Coverage")
     w("")
@@ -141,6 +148,8 @@ def main():
     w(f"| class b | {n(inst, 'b')} | {n(dcount, 'b')} |")
     w(f"| class c | {n(inst, 'c')} | {n(dcount, 'c')} |")
     w(f"| a, tested (passing) | {n(inst, 'a', 'tested')} | {n(dcount, 'a', 'tested')} |")
+    for kind, label in (("rulings", "by a rulings test (`rulings_*`, `interactions_*`)"), ("earlier", "only by an earlier test (Oracle or rules)")):
+        w(f"| a, tested {label} | {sum(v for (k, _), v in by_suite.items() if k == kind)} | {sum(1 for (k, _) in by_suite if k == kind)} |")
     w(f"| a, deferred | {n(inst, 'a', 'deferred')} | {n(dcount, 'a', 'deferred')} |")
     w(f"| a, untested | {n(inst, 'a', 'untested')} | {n(dcount, 'a', 'untested')} |")
     w("")

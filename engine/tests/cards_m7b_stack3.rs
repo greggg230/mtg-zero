@@ -223,6 +223,7 @@ fn brain_freeze_storm_counts_every_players_spells_cr_702_40a() {
 
 #[test]
 fn brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10() {
+    // ruling: 500a78f9
     // P0 casts a Bauble, then Brain Freeze (one copy, which P0 points at
     // itself), then a second Brain Freeze: the spells cast before it are the
     // Bauble and the first Brain Freeze, not its copy - two copies.
@@ -283,6 +284,7 @@ fn occult_epiphany_makes_a_spirit_per_card_type_discarded_cr_205_2a() {
 
 #[test]
 fn occult_epiphany_counts_each_type_once() {
+    // ruling: d12fc076
     // Two lands and an artifact creature discarded: land, artifact,
     // creature - three Spirits; two Islands alone: one.
     let mut g = scen()
@@ -369,6 +371,7 @@ fn spawn_attacks_alone(lands: &[&str]) -> (Game, CardIdx) {
 
 #[test]
 fn ninjutsu_cant_pay_its_mana_with_the_attacker_it_returns_cr_601_2h() {
+    // ruling: 28dc7333 ffe10a85
     // Ninjutsu {2}{U}{B}: "Return an unblocked attacker you control to
     // hand: Put this card onto the battlefield from your hand tapped and
     // attacking." The mana is paid first (601.2g-h): the Spawn can't be

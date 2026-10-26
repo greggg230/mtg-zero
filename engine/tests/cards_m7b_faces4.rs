@@ -131,6 +131,7 @@ fn norman_osborn_cant_be_blocked_and_connives_cr_701_50() {
 
 #[test]
 fn norman_osborn_transforms_into_green_goblin_and_green_goblin_is_castable() {
+    // ruling: 56f9c956
     // "{1}{U}{B}{R}: Transform Norman Osborn. Activate only as a sorcery."
     let mut g = scen().battlefield(0, &[NORMAN, "Island", "Swamp", "Mountain", "Mountain"]).start();
     let n = bf(&g, 0, NORMAN);
@@ -153,6 +154,7 @@ fn norman_osborn_transforms_into_green_goblin_and_green_goblin_is_castable() {
 
 #[test]
 fn green_goblin_makes_spells_cast_from_your_graveyard_cheaper() {
+    // ruling: 7536ad72
     // "Spells you cast from your graveyard cost {2} less to cast."
     // Faithless Looting's flashback {2}{R} costs {R}.
     for goblin in [true, false] {
@@ -224,6 +226,7 @@ const LIFE_DEATH: &str = "Life // Death";
 
 #[test]
 fn life_death_is_cast_as_one_half_cr_709_3() {
+    // ruling: 9fbd1525 c622b600
     let mut g = scen()
         .battlefield(0, &["Forest", "Swamp", "Swamp"])
         .graveyard(0, &["Test Giant"])
@@ -252,6 +255,7 @@ fn life_death_is_cast_as_one_half_cr_709_3() {
 
 #[test]
 fn life_makes_your_lands_one_one_creatures_until_end_of_turn() {
+    // ruling: 64340627
     // "All lands you control become 1/1 creatures until end of turn.
     // They're still lands."
     let mut g = scen().battlefield(0, &["Forest", "Swamp"]).battlefield(1, &["Island"]).hand(0, &[LIFE_DEATH]).start();
@@ -264,6 +268,12 @@ fn life_makes_your_lands_one_one_creatures_until_end_of_turn() {
     assert!(g.is_creature(forest) && g.is_type(forest, engine::db::types::LAND));
     assert_eq!(g.pt(forest), (1, 1));
     assert!(!g.is_creature(bf(&g, 1, "Island")));
+    // They keep their subtypes and the mana abilities those give (ruling
+    // 64340627): the untapped Swamp is a Swamp and still taps for {B}.
+    let swamp = bf(&g, 0, "Swamp");
+    assert!(g.is_creature(swamp) && g.has_subtype(swamp, db().subtype_id("Swamp").unwrap()));
+    assert!(g.can_pay(0, &engine::mana::ManaCost::parse("{B}").unwrap()), "{}", g.log_lines().join("
+"));
     quiet_until(&mut g, |g| g.turn().active == 1);
     assert!(!g.is_creature(forest));
 }

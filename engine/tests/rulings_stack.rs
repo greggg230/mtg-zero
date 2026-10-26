@@ -451,7 +451,7 @@ fn teferi_time_ravelers_restriction_beats_flash_cr_101_2() {
 
 #[test]
 fn ninjutsu_the_ninja_enters_only_as_the_ability_resolves_cr_702_49a() {
-    // ruling: df42df1d
+    // ruling: df42df1d 34862bd0
     let mut g = scen()
         .battlefield(0, &["Test Bear", "Island", "Island", "Swamp", "Swamp"])
         .hand(0, &["Fallen Shinobi"])

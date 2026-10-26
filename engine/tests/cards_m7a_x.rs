@@ -131,6 +131,7 @@ fn unexpectedly_absent_puts_it_beneath_the_top_x() {
 
 #[test]
 fn walking_ballista_enters_with_x_counters_and_removes_them_to_ping() {
+    // ruling: 27f2af67
     let mut g = scen()
         .battlefield(0, &["Sol Ring", "Mountain", "Mountain"])
         .hand(0, &["Walking Ballista"])
@@ -156,6 +157,7 @@ fn walking_ballista_enters_with_x_counters_and_removes_them_to_ping() {
 
 #[test]
 fn cr_702_122_crew_taps_creatures_with_enough_power_and_the_copter_loots() {
+    // ruling: 429c5474
     let mut g = scen()
         .battlefield(0, &["Smuggler's Copter", "Test Bear"])
         .hand(0, &["Island"])

@@ -198,6 +198,7 @@ fn time_walk_takes_an_extra_turn() {
 
 #[test]
 fn cut_down_and_flame_slash_filters() {
+    // ruling: 94ad0c21
     let mut g = scen()
         .battlefield(0, &["Swamp", "Mountain"])
         .hand(0, &["Cut Down", "Flame Slash"])

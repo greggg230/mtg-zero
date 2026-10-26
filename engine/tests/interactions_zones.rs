@@ -79,6 +79,7 @@ fn a_flickered_face_down_instant_cant_return_and_stays_exiled_cr_708_9_400_4a() 
 
 #[test]
 fn a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7() {
+    // ruling: 3a1f2d79 3d923737 7d989429 c8da9e36
     let mut g = scen()
         .battlefield(0, &["Plains", "Plains", "Plains", "Ulvenwald Oddity // Ulvenwald Behemoth"])
         .transformed(0, "Ulvenwald Oddity // Ulvenwald Behemoth")
@@ -120,6 +121,7 @@ fn a_reanimated_creature_flickered_returns_under_its_owner_and_the_aura_is_gone_
 
 #[test]
 fn leyline_binding_flickered_returns_its_card_and_exiles_anew_cr_610_3_400_7() {
+    // ruling: fa232a08
     // Leyline Binding exiled P1's Bear "until this leaves the battlefield";
     // Flickerwisp exiles the Binding: the Bear returns at once (610.3a). At
     // the end step the Binding returns, a new object whose enter ability

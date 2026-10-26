@@ -25,6 +25,7 @@ fn option_of(g: &Game, c: CardIdx) -> Option<Choice> {
 
 #[test]
 fn a_split_card_with_two_graveyard_permissions_casts_its_left_half_cr_709_3_601_2b() {
+    // ruling: cc0a60e7
     // Yawgmoth's Will (cast spells from your graveyard this turn) and
     // Snapcaster Mage's flashback both let Life // Death be cast from P0's
     // graveyard: casting Life (the left half) asks which permission, then

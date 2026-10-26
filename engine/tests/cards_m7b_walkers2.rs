@@ -151,6 +151,7 @@ fn karn_plus_one_the_opponent_chooses_the_card_the_other_is_exiled_with_silver()
 
 #[test]
 fn karn_minus_two_makes_a_construct_that_counts_artifacts() {
+    // ruling: 7e0c0fb5 ae903f55
     let mut g = scen().battlefield(0, &[KARN, "Sol Ring"]).at(Step::Main1, 0).start();
     let karn = bf(&g, 0, KARN);
     activate(&mut g, karn, 2, none);
@@ -234,6 +235,7 @@ fn minsc_and_boo_sacrificing_a_non_hamster_draws_nothing() {
 
 #[test]
 fn narset_each_opponent_draws_at_most_one_card_each_turn() {
+    // ruling: 1a963653
     let mut g = scen()
         .battlefield(0, &["Narset, Parter of Veils"])
         .battlefield(1, &["Island"])
@@ -308,6 +310,7 @@ fn nissa_forests_tap_for_an_additional_green() {
 
 #[test]
 fn nissa_animates_a_land_and_ultimates() {
+    // ruling: 743f8a7f
     let mut g = scen().battlefield(0, &[NISSA, "Forest", "Island"]).at(Step::Main1, 0).start();
     let forest = bf(&g, 0, "Forest");
     let n = bf(&g, 0, NISSA);

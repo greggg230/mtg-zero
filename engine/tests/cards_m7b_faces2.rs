@@ -140,6 +140,7 @@ fn shatterskull_land_face_enters_tapped_unpaid_and_needs_a_land_drop() {
 
 #[test]
 fn shatterskull_smashing_divides_x_damage_and_doubles_at_six() {
+    // ruling: b7b8e44e
     // "Shatterskull Smashing deals X damage divided as you choose among up
     // to two target creatures and/or planeswalkers. If X is 6 or more, it
     // deals twice X damage divided as you choose among them instead."

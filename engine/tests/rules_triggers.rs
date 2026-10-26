@@ -36,6 +36,7 @@ fn cr_603_3_etb_trigger_goes_on_the_stack_before_priority() {
 
 #[test]
 fn cr_603_3d_targets_chosen_as_the_trigger_is_put_on_the_stack() {
+    // ruling: 9ef5a7f0
     // Flametongue Kavu must target a creature: with no other, itself.
     let mut g = scen().battlefield(0, &["Mountain"; 4]).hand(0, &["Flametongue Kavu"]).at(Step::Main1, 0).start();
     let ftk = g.card(0, "Flametongue Kavu", Zone::Hand);

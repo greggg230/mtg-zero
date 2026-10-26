@@ -83,6 +83,7 @@ const SAGA: &str = "Urza's Saga";
 
 #[test]
 fn urzas_saga_chapters_cr_714() {
+    // ruling: 4f70a7ab 68a587c8
     // "(As this Saga enters and after your draw step, add a lore counter.
     // Sacrifice after III.) I - This Saga gains '{T}: Add {C}.' II - This
     // Saga gains '{2}, {T}: Create a 0/0 colorless Construct artifact

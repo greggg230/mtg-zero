@@ -43,6 +43,7 @@ fn cast(g: &mut Game, p: u8, name: &str, targets: &[Choice]) {
 
 #[test]
 fn swords_to_plowshares_gives_life_equal_to_the_last_known_power() {
+    // ruling: 518b1bf6
     let mut g = scen().battlefield(0, &["Plains"]).hand(0, &["Swords to Plowshares"]).battlefield(1, &["Test Giant"]).at(Step::Main1, 0).start();
     let giant = g.card(1, "Test Giant", Zone::Battlefield);
     let t = g.tgt(giant);

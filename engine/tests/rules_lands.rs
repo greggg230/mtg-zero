@@ -40,6 +40,7 @@ fn cr_614_1c_a_land_that_enters_tapped() {
 
 #[test]
 fn cr_614_1c_fast_lands_count_the_other_lands_as_they_enter() {
+    // ruling: 61bb069e
     let mut g = manual().battlefield(0, &["Swamp", "Mountain"]).hand(0, &["Blackcleave Cliffs"]).at(Step::Main1, 0).start();
     let c = play(&mut g, 0, "Blackcleave Cliffs");
     assert!(!g.obj(c).tapped, "two other lands");

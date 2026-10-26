@@ -191,6 +191,7 @@ fn time_spiral_exiles_itself_and_untaps_up_to_six_lands() {
 
 #[test]
 fn cr_711_hexdrinker_levels() {
+    // ruling: 0951eeb1
     let mut g = scen().battlefield(0, &["Hexdrinker"]).battlefield(0, &["Island"; 9]).at(Step::Main1, 0).start();
     let hd = bf(&g, 0, "Hexdrinker");
     assert_eq!(g.pt(hd), (2, 1));

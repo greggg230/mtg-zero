@@ -96,6 +96,7 @@ const FETCH_LIB: &[&str] =
 /// enters untapped; the search may fail (701.19b: a stated quality).
 #[test]
 fn fetch_lands_find_a_land_card_with_one_of_their_two_types_for_one_life() {
+    // ruling: 576821b5
     let rows: &[(&str, [&str; 2])] = &[
         ("Arid Mesa", ["Mountain", "Plains"]),
         ("Bloodstained Mire", ["Swamp", "Mountain"]),
@@ -211,6 +212,7 @@ fn surveil_lands_enter_tapped_surveil_one_and_have_two_land_types() {
 /// {T}: Add A or B." (614.1c, the other lands counted as it enters.)
 #[test]
 fn fast_lands_enter_untapped_with_two_or_fewer_other_lands() {
+    // ruling: 3b8f4b59 a32635f0
     let rows: &[(&str, &str)] = &[
         ("Blooming Marsh", "BG"),
         ("Botanical Sanctum", "UG"),
@@ -311,6 +313,7 @@ fn shock_lands_pay_two_life_or_enter_tapped() {
 /// (305.6), untapped, nothing else.
 #[test]
 fn dual_lands_tap_for_either_of_their_two_basic_land_types() {
+    // ruling: 2ad14f7c
     let rows: &[(&str, &str, [&str; 2])] = &[
         ("Plateau", "WR", ["Mountain", "Plains"]),
         ("Savannah", "WG", ["Forest", "Plains"]),

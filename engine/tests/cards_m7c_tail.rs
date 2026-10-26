@@ -137,6 +137,7 @@ fn mana_vault_stays_tapped_cr502_3_pays_4_to_untap_and_pings_if_tapped_cr603_4()
 /// mana its own colour).
 #[test]
 fn coalition_relic_charge_counters_become_mana_of_any_colours_cr106_4() {
+    // ruling: 2f4582bf
     // (Main 2: the precombat-main trigger isn't waiting.)
     let mut g = scen().battlefield(0, &["Coalition Relic"]).at(Step::Main2, 0).start();
     let r = bf(&g, 0, "Coalition Relic");
@@ -530,6 +531,7 @@ fn ursine_monstrosity_mills_must_attack_and_grows_by_card_types_cr508_1d() {
 /// into its owner's graveyard. Then shuffle" (CR 701.19).
 #[test]
 fn transmute_artifact_trades_up_paying_the_difference_cr701_19() {
+    // ruling: 825d28a0
     let mut g = scen()
         .battlefield(0, &["Sol Ring", "Island", "Island", "Island", "Island"])
         .library(0, &["Mana Vault", "Coalition Relic", "Island", "Island"])
@@ -605,6 +607,7 @@ fn transmute_artifact_trades_up_paying_the_difference_cr701_19() {
 /// looked at this way on top in any order" (CR 119.4, 701.20).
 #[test]
 fn lim_duls_vault_pays_life_to_dig_then_stacks_the_top_cr119_4() {
+    // ruling: 582d92bc
     // (The first card is the top: the Bolt is in the second five.)
     let mut lib = vec!["Island"; 5];
     lib.extend(["Island", "Island", "Lightning Bolt", "Island", "Island"]);
@@ -764,6 +767,7 @@ fn chromatic_star_draws_when_put_into_a_graveyard_not_when_exiled_cr603_10a() {
 /// CR 614.10). "{T}: Take an extra turn after this one" (500.7).
 #[test]
 fn time_vault_skips_a_turn_to_untap_cr614_10_and_taps_for_an_extra_turn_cr500_7() {
+    // ruling: b9d3a261
     let mut g = scen().battlefield(0, &["Time Vault"]).at(Step::Main1, 0).start();
     let v = bf(&g, 0, "Time Vault");
     let t = g.turn().number;
@@ -910,6 +914,7 @@ fn black_widow_counter_or_cast_their_card_with_any_mana_cr609_4b() {
 /// count is the most its sources can show).
 #[test]
 fn prismatic_ending_counts_the_colours_spent_converge_cr106_1b() {
+    // ruling: b64c158e
     for (lands, exiled) in [(["Plains", "Island", "Swamp"], true), (["Plains", "Plains", "Island"], false), (["Plains", "Tundra", "Underground Sea"], true)] {
         let mut g = scen()
             .battlefield(0, &lands)
@@ -940,6 +945,7 @@ fn prismatic_ending_counts_the_colours_spent_converge_cr106_1b() {
 /// addition to their other colors" (layer 5, 613.1e).
 #[test]
 fn painters_servant_paints_cards_spells_and_permanents_cr613_1e() {
+    // ruling: 3304c432 3a9f7af7
     let mut g = scen()
         .battlefield(0, &["Island", "Island"])
         .battlefield(1, &["Mountain"])
@@ -1038,6 +1044,7 @@ fn mishras_workshop_mana_only_for_artifact_spells_cr106_6() {
 /// spell, and that spell can't be countered" (CR 106.6, 101.2).
 #[test]
 fn delighted_halfling_mana_for_legends_that_cant_be_countered_cr101_2() {
+    // ruling: 64b63bdd
     let mut g = scen()
         .battlefield(0, &["Delighted Halfling", "Forest"])
         .battlefield(1, &["Island", "Island"])
@@ -1085,6 +1092,7 @@ fn pay_with(g: &mut Game, cards: &[CardIdx]) {
 /// battlefield tapped."
 #[test]
 fn badgermole_cub_earthbends_and_creatures_tap_for_more_cr701_65a() {
+    // ruling: 4565f55b 9ce0a2f9
     let g = scen().battlefield(0, &["Badgermole Cub", "Llanowar Elves"]).at(Step::Main1, 0).start();
     assert!(g.can_pay(0, &cost("{G}{G}")) && !g.can_pay(0, &cost("{G}{G}{G}")), "the Elves make {{G}}{{G}}");
     let g = scen().battlefield(0, &["Llanowar Elves"]).at(Step::Main1, 0).start();

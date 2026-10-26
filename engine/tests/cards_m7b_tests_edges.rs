@@ -92,6 +92,7 @@ fn quiet_until(g: &mut Game, stop: impl Fn(&Game) -> bool) {
 
 #[test]
 fn cr_611_2c_harvester_of_misery_spares_creatures_that_enter_later() {
+    // ruling: b300f11d
     // "Other creatures get -2/-2 until end of turn": the set of affected
     // creatures is fixed as the ability resolves.
     let mut g = scen()
@@ -164,6 +165,7 @@ fn cr_611_2c_ravenous_robots_hastes_only_the_tokens_already_there() {
 
 #[test]
 fn cr_610_3c_touch_the_spirit_realm_gone_before_its_trigger_resolves_exiles_nothing() {
+    // ruling: 8ba35794
     // With the enters trigger on the stack, P0 sacrifices Cathar Commando to
     // destroy Touch the Spirit Realm; the trigger then exiles nothing.
     let mut g = scen()
@@ -317,6 +319,7 @@ fn flashback_granted_by_flashback_ends_at_end_of_turn() {
 
 #[test]
 fn phelia_exiling_a_token_does_not_return_it() {
+    // ruling: aded29b5
     // A token that leaves the battlefield ceases to exist (111.7, 704.5d):
     // "return that card" finds nothing.
     let mut g = scen()
@@ -407,6 +410,7 @@ fn cr_602_2b_goblin_engineer_may_sacrifice_the_mox_that_paid_its_red() {
 
 #[test]
 fn cr_702_34a_reprieve_on_a_flashed_back_echo_of_eons_exiles_it() {
+    // ruling: ef0edbdb
     // Reprieve would return the spell to its owner's hand; a spell cast
     // with flashback is exiled instead whenever it would leave the stack.
     let mut g = scen()
@@ -433,6 +437,7 @@ fn cr_702_34a_reprieve_on_a_flashed_back_echo_of_eons_exiles_it() {
 
 #[test]
 fn echo_of_eons_cast_from_hand_ends_in_the_graveyard_after_the_shuffle() {
+    // ruling: 65329593
     // It is on the stack while it resolves (608.2n: then put into its
     // owner's graveyard), so it isn't shuffled into the library.
     let mut g = scen()

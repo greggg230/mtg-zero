@@ -136,6 +136,7 @@ fn councils_judgment_exiles_both_when_the_votes_are_tied() {
 
 #[test]
 fn grindstone_repeats_while_the_two_milled_cards_share_a_colour() {
+    // ruling: f2096b7a
     let mut g = base()
         .library(0, &["Island"; 5])
         .library(1, &["Lightning Bolt", "Lightning Bolt", "Counterspell", "Test Bear", "Forest", "Forest"])
@@ -186,6 +187,7 @@ fn cr_702_66_treasure_cruise_delves_its_generic_cost() {
 
 #[test]
 fn flash_sacrifices_the_creature_unless_its_reduced_cost_is_paid() {
+    // ruling: 46dde370
     let mut g = scen()
         .battlefield(0, &["Island", "Island"])
         .hand(0, &["Flash", "Test Giant"])
@@ -227,6 +229,7 @@ fn mox_diamond_enters_only_by_discarding_a_land() {
 
 #[test]
 fn oath_of_druids_reveals_until_a_creature_for_the_player_with_fewer() {
+    // ruling: 61ccf32a
     let mut g = base()
         .library(0, &["Island", "Lightning Bolt", "Test Giant", "Island", "Island"])
         .library(1, &["Forest"; 5])
@@ -260,6 +263,7 @@ fn cr_702_33_burst_lightning_kicked_deals_four() {
 
 #[test]
 fn tear_asunder_kicked_targets_any_nonland_permanent() {
+    // ruling: 5a8e06f8
     let mut g = scen()
         .battlefield(0, &["Forest", "Swamp", "Swamp", "Swamp"])
         .hand(0, &["Tear Asunder"])

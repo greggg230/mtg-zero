@@ -228,6 +228,7 @@ fn basalt_monolith_makes_three_colorless_stays_tapped_and_untaps_for_three() {
 
 #[test]
 fn expedition_map_sacrifices_to_find_any_land_card_revealed_into_hand() {
+    // ruling: 7f205095
     // "{2}, {T}, Sacrifice this artifact: Search your library for a land
     // card, reveal it, put it into your hand, then shuffle."
     let mut g = Scenario::new(db())

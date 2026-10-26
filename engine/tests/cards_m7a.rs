@@ -263,6 +263,7 @@ fn faerie_mastermind_triggers_on_an_opponents_second_draw_each_turn() {
 
 #[test]
 fn explore_cr_701_44_a_land_goes_to_hand_otherwise_a_counter() {
+    // ruling: 03aef98a
     let mut g = scen()
         .library(0, &["Lightning Bolt", "Forest"])
         .battlefield(0, &["Sentinel of the Nameless City", "Forest", "Forest"])

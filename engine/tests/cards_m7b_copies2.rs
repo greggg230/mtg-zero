@@ -122,6 +122,7 @@ const SICARIAN: &str = "Sicarian Infiltrator";
 
 #[test]
 fn sicarian_infiltrator_squad_makes_a_copy_per_payment_cr_702_157a() {
+    // ruling: 2e930377
     // "Flash. Squad {2}. Benediction of the Omnissiah - When this creature
     // enters, draw a card."
     let mut g = scen().battlefield(0, &["Island"; 7]).hand(0, &[SICARIAN]).start();

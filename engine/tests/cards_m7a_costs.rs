@@ -168,6 +168,7 @@ fn force_of_negation_alternative_cost_only_on_another_players_turn() {
 
 #[test]
 fn cr_702_74_evoke_solitude_exiles_and_then_is_sacrificed() {
+    // ruling: a2837ded
     let mut g = scen()
         .battlefield(1, &["Test Bear"])
         .hand(0, &["Solitude", "Swords to Plowshares"])
@@ -244,6 +245,7 @@ fn cr_601_2d_fury_divides_its_damage_as_the_trigger_goes_on_the_stack() {
 
 #[test]
 fn subtlety_the_spells_owner_puts_it_on_top_or_bottom() {
+    // ruling: 64eaa2ca
     let mut g = scen()
         .battlefield(0, &["Forest", "Forest"])
         .hand(0, &["Test Bear"])

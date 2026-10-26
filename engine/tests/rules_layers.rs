@@ -120,6 +120,7 @@ fn cr_613_4c_counters_and_until_end_of_turn_pumps_add_up_and_514_2_ends_the_pump
 
 #[test]
 fn cr_611_2c_a_pump_of_creatures_you_control_affects_only_those_there_at_resolution() {
+    // ruling: 75dde743
     // Eagles of the North: creatures you control get +1/+0 and first
     // strike until end of turn.
     let mut g = scen()
@@ -147,6 +148,7 @@ fn cr_611_2c_a_pump_of_creatures_you_control_affects_only_those_there_at_resolut
 
 #[test]
 fn cr_613_4b_base_power_and_toughness_in_timestamp_order_and_205_1b_creature_types() {
+    // ruling: 1081633d 215456ff 926f3cd5 f2c033cf
     let mut g = scen()
         .battlefield(0, &["Figure of Destiny"])
         .battlefield(0, &["Mountain"; 10])
@@ -299,6 +301,7 @@ fn cr_704_5n_equipment_stays_on_the_battlefield_unattached_when_its_creature_die
 
 #[test]
 fn cr_702_83_exalted_and_702_91_battle_cry() {
+    // ruling: 8f207d3f f6fa64c4
     // Exalted: a creature attacking alone gets +1/+1 per instance.
     let mut g = scen()
         .battlefield(0, &["Noble Hierarch", "Ignoble Hierarch", "Test Bear"])
@@ -362,6 +365,7 @@ fn dark_confidant_reveals_the_top_card_into_hand_and_its_owner_loses_its_mana_va
 
 #[test]
 fn cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering() {
+    // ruling: 0908c190 d82ba1b5 e08aed32
     let mut g = manual().battlefield(0, &["Lotus Cobra"]).hand(0, &["Forest"]).at(Step::Main1, 0).start();
     let forest = g.card(0, "Forest", Zone::Hand);
     g.choose(Choice::Play(forest));
@@ -489,6 +493,7 @@ fn creeping_tar_pit_becomes_an_unblockable_blue_and_black_elemental() {
 
 #[test]
 fn cr_122_1d_stun_counters_and_502_3_doesnt_untap() {
+    // ruling: 340468b6
     let mut g = scen().battlefield(0, &["Grim Monolith", "Forest"]).hand(0, &["Baloth Prime"]).at(Step::Main1, 0).start();
     let (mono, forest) = (bf(&g, 0, "Grim Monolith"), bf(&g, 0, "Forest"));
     cast(&mut g, 0, "Baloth Prime");

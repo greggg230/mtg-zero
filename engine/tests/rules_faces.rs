@@ -122,6 +122,7 @@ fn transforming_a_single_faced_permanent_does_nothing_cr_701_27c() {
 
 #[test]
 fn a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i() {
+    // ruling: 3888033e 75da186b b83c13f9
     // Loyalty counters come as a planeswalker enters (CR 306.5b), not as a
     // permanent transforms: with 0 loyalty it is put into its owner's
     // graveyard (704.5i), as its front face (712.8a).
@@ -176,6 +177,7 @@ fn a_transform_is_public_and_keeps_the_hidden_state_cr_712_6() {
 
 #[test]
 fn a_daybound_permanent_transforms_only_through_day_and_night_cr_702_145b() {
+    // ruling: a73ce155
     let mut g = scen().battlefield(0, &["Test Werewolf", "Forest"]).day(Some(true)).start();
     let w = bf(&g, 0, "Test Werewolf");
     g.choose(act(w, 0));

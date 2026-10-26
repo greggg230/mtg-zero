@@ -90,6 +90,7 @@ fn action_of(g: &Game, c: Choice) -> u16 {
 
 #[test]
 fn cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled() {
+    // ruling: 12673ccc 15896ad1
     let mut g = scen().battlefield(0, &["Swamp", "Plains"]).graveyard(0, &["Lingering Souls"]).at(Step::Main1, 0).start();
     let ls = g.card(0, "Lingering Souls", Zone::Graveyard);
     assert!(g.has_option(Choice::Cast(ls)));
@@ -102,6 +103,7 @@ fn cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled() {
 
 #[test]
 fn cr_702_34a_a_countered_flashback_spell_is_exiled() {
+    // ruling: 15896ad1
     let mut g = scen()
         .battlefield(0, &["Mountain", "Mountain", "Mountain"])
         .graveyard(0, &["Faithless Looting"])

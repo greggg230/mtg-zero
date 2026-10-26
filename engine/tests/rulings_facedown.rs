@@ -137,7 +137,7 @@ fn manifest_dread_with_one_card_manifests_it_and_with_none_does_nothing_cr_701_6
 
 #[test]
 fn a_manifested_double_faced_card_turns_face_up_front_face_up_cr_701_40e() {
-    // ruling: 7f95b9dc
+    // ruling: 7f95b9dc 5653e6a4
     let (mut g, c) = manifested(JACE, &["Island", "Island"]);
     turn_up(&mut g, c);
     // Its front face: a 0/2 creature (the card's name is both faces').

@@ -268,6 +268,7 @@ fn cr_700_2_a_mode_without_legal_targets_cannot_be_chosen() {
 
 #[test]
 fn fiery_confluence_repeats_modes_in_non_decreasing_order() {
+    // ruling: a01ce385
     let mut g = scen()
         .battlefield(0, &["Mountain"; 4])
         .battlefield(0, &["Test Bear"])
@@ -347,6 +348,7 @@ fn mystic_confluence_gives_each_mode_instance_its_own_target() {
 
 #[test]
 fn cr_608_2b_a_modal_spell_with_every_target_illegal_does_not_resolve() {
+    // ruling: e260f820
     // Mystic Confluence: bounce the Bear twice and draw. P1 exiles its own
     // Bear in response: every target is illegal, so even the draw does not
     // happen.
@@ -469,6 +471,7 @@ fn cr_111_a_token_is_a_new_object_and_ceases_to_exist_off_the_battlefield() {
 
 #[test]
 fn cr_704_5d_a_token_put_into_a_library_ceases_to_exist() {
+    // ruling: 2a33d679
     // Oust puts the Golem token into its owner's library: gone at the next
     // state-based action check; its controller still gains 3 life.
     let mut g = scen()
@@ -631,6 +634,7 @@ fn generous_ent_forestcycles_or_makes_food() {
 
 #[test]
 fn timetwister_shuffles_hands_and_graveyards_away_and_forgets_their_places() {
+    // ruling: 872a13f6
     // P1 knew the Time Walk in P0's hand. After Timetwister it is in P0's
     // library or new hand: P1 knows nothing more about it.
     let mut g = Scenario::new(db())

@@ -355,7 +355,7 @@ fn lutri_copies(g: &mut Game, spell: CardIdx, answer: impl Fn(&Game) -> Option<C
 
 #[test]
 fn lutris_copy_of_a_modal_spell_has_the_same_modes_cr_707_10() {
-    // ruling: 23cf3168
+    // ruling: 23cf3168 2e168182
     // Fiery Confluence, "2 damage to each opponent" three times: the copy
     // has the same modes (no mode is chosen for it): 12 damage.
     let mut g = scen()

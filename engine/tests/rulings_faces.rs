@@ -69,7 +69,7 @@ fn aang_airbends_a_spell_that_cant_be_countered_cr_101_2() {
 
 #[test]
 fn yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12() {
-    // ruling: e5e7f31f
+    // ruling: e5e7f31f 62d54d14 b0d988d8
     let mut g = scen()
         .battlefield(0, &["Swamp", "Swamp", "Swamp", "Mountain", "Mountain"])
         .graveyard(0, &[SMASHING])
@@ -114,7 +114,7 @@ fn a_daybound_card_put_onto_the_battlefield_at_night_is_nightbound_cr_702_145e()
 
 #[test]
 fn it_becomes_night_after_a_turn_without_spells_and_day_after_two_cr_726_3a() {
-    // ruling: b5368c51 0a3a2fe8 03d27f15
+    // ruling: b5368c51 0a3a2fe8 03d27f15 6a566e12
     let mut g = scen().battlefield(0, &[LIBERATOR]).day(Some(true)).start();
     let l = bf(&g, 0, LIBERATOR);
     // P0 casts nothing in turn 3: at turn 4 it is night.
@@ -193,7 +193,7 @@ fn a_copy_of_the_reflection_token_has_haste_and_isnt_sacrificed_cr_707_9b() {
 
 #[test]
 fn a_countered_adventure_goes_to_the_graveyard_without_the_permission_cr_715_4() {
-    // ruling: c5e2c49b 13492141
+    // ruling: c5e2c49b 13492141 c29e2fc3
     let mut g = scen()
         .battlefield(0, &["Island", "Island", "Island", "Island", "Island"])
         .battlefield(1, &["Sol Ring", "Island", "Island"])

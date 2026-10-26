@@ -112,6 +112,7 @@ fn cr_701_19c_an_empty_library_finds_nothing() {
 
 #[test]
 fn cr_701_19b_a_search_for_a_stated_quality_may_fail_and_reveals_on_top() {
+    // ruling: 2878adab
     // Mystical Tutor: an instant or sorcery card, reveal it, then shuffle
     // and put it on top.
     let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Mystical Tutor"]).at(Step::Main1, 0).start();
@@ -261,6 +262,7 @@ fn path_to_exile_lets_the_creatures_controller_search_for_a_tapped_basic() {
 
 #[test]
 fn islandcycling_searches_for_an_island_card_and_reveals_it() {
+    // ruling: 33404617
     // Lórien Revealed: islandcycling {1}. Underground Sea is an Island card.
     let mut g = Scenario::new(db())
         .spec(|s| s.auto_single = false)

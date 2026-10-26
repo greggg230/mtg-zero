@@ -83,6 +83,7 @@ fn player(p: PlayerId) -> Choice {
 
 #[test]
 fn orcish_bowmasters_pings_and_amasses_on_entering_and_on_extra_draws() {
+    // ruling: d78e9d4c
     let mut g = scen()
         .battlefield(0, &["Swamp", "Swamp"])
         .hand(0, &["Orcish Bowmasters"])
@@ -170,6 +171,7 @@ fn cr_614_12_true_name_nemesis_has_protection_from_the_chosen_player() {
 
 #[test]
 fn cr_702_79_woodfall_primus_persists_once() {
+    // ruling: 6363d351 e7319af2
     let mut g = scen()
         .battlefield(0, &["Woodfall Primus"])
         .battlefield(1, &["Swamp", "Swamp", "Swamp", "Swamp"])
@@ -247,6 +249,7 @@ fn skyclave_apparition_exiles_and_its_leave_trigger_gives_an_illusion() {
 
 #[test]
 fn cr_701_37_alpha_deathclaw_monstrosity_once_and_its_trigger() {
+    // ruling: 51f91fae
     let mut g = scen()
         .battlefield(0, &["Alpha Deathclaw", "Swamp", "Forest", "Swamp", "Forest", "Swamp", "Forest", "Swamp"])
         .battlefield(1, &["Sol Ring"])

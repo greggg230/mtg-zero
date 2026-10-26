@@ -391,6 +391,7 @@ fn cr_107_4e_hybrid_mana_and_a_mana_choice_on_resolution() {
 
 #[test]
 fn cr_601_2b_additional_cost_options_are_a_decision() {
+    // ruling: 45691656
     // Bone Shards: sacrifice a creature or discard a card.
     let mut g = manual()
         .battlefield(0, &["Swamp", "Test Bear"])
@@ -579,6 +580,7 @@ fn a_hand_mana_source_leaves_the_cards_a_discard_cost_needs() {
 
 #[test]
 fn an_instant_only_mana_ability_is_activated_with_priority() {
+    // ruling: c40e2ee8
     // Lion's Eye Diamond: discard your hand, sacrifice: three mana of one
     // colour; never while paying a cost.
     let mut g = manual()

@@ -187,6 +187,7 @@ fn the_mind_stone_end_step_flicker_only_once_harnessed() {
 /// once.
 #[test]
 fn lurrus_casts_one_permanent_of_mana_value_two_or_less_from_the_graveyard_each_turn() {
+    // ruling: 90a51faf
     let mut g = scen()
         .battlefield(0, &["Lurrus of the Dream-Den", "Forest", "Forest", "Forest", "Forest", "Forest"])
         .graveyard(0, &["Test Bear", "Test Reacher", "Test Giant", "Forest", "Lightning Bolt"])
@@ -219,6 +220,7 @@ fn lurrus_casts_one_permanent_of_mana_value_two_or_less_from_the_graveyard_each_
 /// mana." (CR 602.2b, 601.2f.)
 #[test]
 fn zirda_reduces_activation_costs_by_two_leaving_one_mana_cr601_2f() {
+    // ruling: 92589f1d
     // The Mind Stone's {5}{W} harness: {3}{W} with Zirda.
     let g = scen().battlefield(0, &["Zirda, the Dawnwaker", "The Mind Stone", "Plains", "Plains", "Plains", "Plains"]).at(Step::Main1, 0).start();
     let stone = bf(&g, 0, "The Mind Stone");
@@ -295,6 +297,7 @@ fn thor_permission_ends_after_your_next_turn() {
 /// equal to this creature's power."
 #[test]
 fn jacked_rabbit_ravenous_draws_at_x_five_cr702_156a_and_makes_rabbits_equal_to_power() {
+    // ruling: 4759d007
     for (x, draws) in [(5u8, 1usize), (4, 0)] {
         let mut g = scen().battlefield(0, &["Plains"; 7]).hand(0, &["Jacked Rabbit"]).at(Step::Main1, 0).start();
         let r = g.card(0, "Jacked Rabbit", Zone::Hand);
@@ -436,6 +439,7 @@ fn currency_converter_exiles_discards_then_cashes_them_in_for_tokens_cr607_2a() 
 /// each turn.)" (CR 702.142a; the mana value as it last existed, 608.2h.)
 #[test]
 fn broadside_bombardiers_boasts_once_after_attacking_cr702_142a() {
+    // ruling: 3d058a75
     let mut g = scen()
         .battlefield(0, &["Broadside Bombardiers", "Test Giant", "Sol Ring"])
         .at(Step::Main1, 0)
@@ -549,6 +553,7 @@ fn green_suns_zenith_finds_a_green_creature_then_shuffles_itself_in_cr608_2n() {
 /// anywhere" (docs/ir_defects.md 17).
 #[test]
 fn green_suns_zenith_countered_goes_to_the_graveyard_cr701_6a() {
+    // ruling: e17f37b4
     let mut g = scen()
         .battlefield(0, &["Forest", "Forest"])
         .hand(0, &["Green Sun's Zenith"])
@@ -732,6 +737,7 @@ fn ocelot_pride_makes_a_cat_and_with_the_citys_blessing_copies_it_cr702_131() {
 /// blessing stays once gotten (702.131b).
 #[test]
 fn ocelot_pride_needs_life_gained_and_keeps_the_blessing_cr702_131b() {
+    // ruling: dc8411a7
     let mut nine = vec!["Ocelot Pride"];
     nine.extend(["Plains"; 9]);
     let mut g = scen().battlefield(0, &nine).hand(1, &["Lightning Bolt"]).battlefield(1, &["Mountain"]).at(Step::Main1, 0).start();
@@ -834,6 +840,7 @@ fn bilbo_casts_from_the_graveyard_on_attack_for_one_less_and_exiles_it_cr601_2f(
 /// one Mountain.
 #[test]
 fn bilbo_reduces_spells_cast_from_outside_the_hand_cr601_2f() {
+    // ruling: 5d366152
     let mut g = scen()
         .battlefield(0, &["Bilbo, Thief in the Night", "Mountain"])
         .graveyard(0, &["Grim Monolith"])
@@ -1084,6 +1091,7 @@ fn pinnacle_emissary_cant_be_recast_the_turn_it_is_exiled_cr702_185a() {
 /// the battlefield with a lifelink counter on it."
 #[test]
 fn metamorphosis_fanatic_miracle_cast_for_two_cr702_94a() {
+    // ruling: 3904df2a ac2fc577
     let mut g = scen()
         .battlefield(0, &["Swamp", "Swamp"])
         .library(0, &["Metamorphosis Fanatic"])
@@ -1133,6 +1141,7 @@ fn miracle_question_is_asked_on_every_first_draw_of_its_owner_cr702_94a() {
 /// its mana cost.)"
 #[test]
 fn aang_airbends_a_spell_its_owner_may_recast_for_two() {
+    // ruling: 962ca2f6 96856673
     let mut g = scen()
         .battlefield(0, &["Plains", "Island", "Island"])
         .hand(0, &["Aang, Swift Savior // Aang and La, Ocean's Fury"])
@@ -1167,6 +1176,7 @@ fn aang_airbends_a_spell_its_owner_may_recast_for_two() {
 /// tap your untapped artifacts and creatures to help; each pays for {1}.)
 #[test]
 fn aang_waterbends_with_creatures_and_artifacts_to_transform() {
+    // ruling: 1fbf6f68 f402e1f3
     let names = ["Aang, Swift Savior // Aang and La, Ocean's Fury", "Test Bear", "Test Bear", "Test Flyer", "Currency Converter", "Plains", "Plains"];
     let g = scen().battlefield(0, &names).at(Step::Main1, 0).start();
     let a = bf(&g, 0, "Aang, Swift Savior // Aang and La, Ocean's Fury");
@@ -1217,6 +1227,7 @@ fn candelabra_of_tawnos_untaps_x_target_lands_cr602_2b() {
 /// engine cuts at 31 activations of one permanent's ability a turn.
 #[test]
 fn zirda_and_basalt_monolith_loop_is_cut_at_31_activations_cr732_2a() {
+    // ruling: 1efd0607
     let mut g = scen().battlefield(0, &["Zirda, the Dawnwaker", "Basalt Monolith"]).at(Step::Main1, 0).start();
     let m = bf(&g, 0, "Basalt Monolith");
     let mut n = 0;

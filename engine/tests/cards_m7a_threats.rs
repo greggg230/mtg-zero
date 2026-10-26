@@ -296,6 +296,7 @@ fn psychic_frog_exiles_three_graveyard_cards_as_a_cost() {
 
 #[test]
 fn cr_603_12_leatherhead_removes_a_counter_then_the_reflexive_trigger_targets() {
+    // ruling: 862c109c
     let mut g = scen()
         .battlefield(0, &["Forest", "Forest", "Forest", "Forest"])
         .hand(0, &["Leatherhead, Swamp Stalker"])

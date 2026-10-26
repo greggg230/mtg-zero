@@ -64,6 +64,7 @@ fn find_basic(g: &Game) -> Option<Choice> {
 
 #[test]
 fn taking_the_initiative_ventures_into_undercity_cr_725_2() {
+    // ruling: 76a58801 9b870816
     // Feywild Caretaker: "When this creature enters, you take the
     // initiative." Then "whenever a player takes the initiative, that
     // player ventures into Undercity" (a triggered ability): Undercity goes
@@ -86,6 +87,7 @@ fn taking_the_initiative_ventures_into_undercity_cr_725_2() {
 
 #[test]
 fn the_initiative_ventures_at_its_holders_upkeep_and_rooms_are_chosen_cr_309_5() {
+    // ruling: 76a58801
     // From Secret Entrance the marker moves to Forge or Lost Well (a
     // `ChooseRoom` decision: `NUMBER` = room index); Forge: "put two +1/+1
     // counters on target creature".
@@ -109,6 +111,7 @@ fn no_venture_at_the_upkeep_of_a_player_without_the_initiative() {
 
 #[test]
 fn combat_damage_to_its_holder_takes_the_initiative_cr_725_2() {
+    // ruling: 5549b685 76a58801
     // "Whenever one or more creatures a player controls deal combat damage
     // to the player who has the initiative, the controller of those
     // creatures takes the initiative" (controlled by the player who had
@@ -132,6 +135,7 @@ fn combat_damage_to_its_holder_takes_the_initiative_cr_725_2() {
 
 #[test]
 fn taking_the_initiative_again_ventures_again_cr_725_2() {
+    // ruling: 5e36ae3b
     let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Test Initiative"]).initiative(0).dungeon(0, Some(0), 0).start();
     let c = g.card(0, "Test Initiative", Zone::Hand);
     g.choose(Choice::Cast(c));
@@ -174,6 +178,7 @@ fn throne_of_the_dead_three_then_the_dungeon_is_completed_cr_309_7_704_5t() {
 
 #[test]
 fn venturing_on_the_bottommost_room_completes_it_and_starts_anew_cr_701_49c() {
+    // ruling: 840d087a
     // With Throne's ability on the stack, P0 takes the initiative again: the
     // venture completes Undercity and starts a new one on Secret Entrance;
     // Throne's ability still resolves.

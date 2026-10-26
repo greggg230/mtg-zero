@@ -251,6 +251,7 @@ fn comet_three_returns_a_cheap_card_from_the_graveyard() {
 
 #[test]
 fn comet_four_or_five_deals_its_loyalty_to_a_chosen_creature_or_player_then_minus_two() {
+    // ruling: 46ac16d1
     let mut g = scen().battlefield(0, &[COMET]).battlefield(1, &["Test Bear"]).at(Step::Main1, 0).start();
     let comet = bf(&g, 0, COMET);
     let bear = bf(&g, 1, "Test Bear");
@@ -332,6 +333,7 @@ fn dack_fayden_emblem_steals_the_permanents_a_spell_targets() {
 
 #[test]
 fn dack_fayden_emblem_steals_even_when_the_spell_is_countered_first() {
+    // ruling: e2bef5e6
     // "Gain control of those permanents": the permanents the spell targeted
     // as the ability triggered, whether or not the spell is still there.
     let mut g = scen()
@@ -404,6 +406,7 @@ const JWM: &str = "Jace, Wielder of Mysteries";
 
 #[test]
 fn jace_wielder_mills_draws_and_wins_on_an_empty_library() {
+    // ruling: bc4ce4a3
     let mut g = scen().battlefield(0, &[JWM]).at(Step::Main1, 0).start();
     let j = bf(&g, 0, JWM);
     activate(&mut g, j, 0, |g| (g.kind() == Some(DecisionKind::Target)).then_some(tgt_player(1)));
@@ -421,6 +424,7 @@ fn jace_wielder_mills_draws_and_wins_on_an_empty_library() {
 
 #[test]
 fn jace_wielder_minus_eight_draws_seven_then_wins_with_an_empty_library() {
+    // ruling: 0dc0242d
     for (n, wins) in [(7usize, true), (5, true), (10, false)] {
         let lib = vec!["Island"; n];
         let mut g = manual()

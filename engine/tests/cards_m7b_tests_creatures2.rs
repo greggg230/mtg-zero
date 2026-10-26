@@ -583,6 +583,7 @@ fn trinket_mage_finds_an_artifact_with_mana_value_one_or_less() {
 
 #[test]
 fn stoneforge_mystic_finds_an_equipment_and_puts_one_onto_the_battlefield() {
+    // ruling: 60ef2118
     // "When this creature enters, you may search your library for an
     // Equipment card, reveal it, put it into your hand, then shuffle."
     let mut g = Scenario::new(db())
@@ -621,6 +622,8 @@ fn stoneforge_mystic_finds_an_equipment_and_puts_one_onto_the_battlefield() {
     g.choose(Choice::Card(clamp));
     settle(&mut g);
     assert_eq!(g.obj(clamp).zone, Zone::Battlefield);
+    // Not the Equipment searched for, and unattached (ruling 60ef2118).
+    assert!(g.obj(clamp).attached.is_none());
 }
 
 // ---- Sylvan Safekeeper --------------------------------------------------------------------

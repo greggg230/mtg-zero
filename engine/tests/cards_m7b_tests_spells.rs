@@ -614,6 +614,7 @@ fn force_of_vigor_exiles_a_green_card_on_the_opponents_turn_to_destroy_two() {
 
 #[test]
 fn kolaghans_command_chooses_two_different_modes() {
+    // ruling: 4ba4f68d
     // "Choose two - Return target creature card from your graveyard to your
     // hand; Target player discards a card; Destroy target artifact;
     // Kolaghan's Command deals 2 damage to any target."
@@ -714,6 +715,7 @@ fn spell_vs(spell: &str, p0_lands: &[&str], counter: &str) -> Game {
 
 #[test]
 fn mana_tithe_counters_unless_its_controller_pays_one() {
+    // ruling: 6a98686c
     // "Counter target spell unless its controller pays {1}."
     let mut g = spell_vs("Test Bear", &["Forest", "Forest", "Forest"], "Mana Tithe");
     let mt = g.card(1, "Mana Tithe", Zone::Hand);

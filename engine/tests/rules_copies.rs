@@ -254,6 +254,7 @@ fn a_token_copy_of_an_exiled_permanent_uses_its_last_known_values_cr_608_2h() {
 
 #[test]
 fn a_copy_of_a_spell_isnt_cast_cr_707_10() {
+    // ruling: 81e80e72
     // Lose Focus replicated once under Saheeli and Witherbloom Apprentice:
     // Saheeli's "whenever you cast a noncreature spell" triggers once;
     // magecraft ("whenever you cast or copy") twice.

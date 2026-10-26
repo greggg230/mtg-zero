@@ -155,7 +155,7 @@ fn etali_a_free_x_spell_has_x_zero_cr_107_3b() {
 
 #[test]
 fn etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f() {
-    // ruling: a2b92065
+    // ruling: a2b92065 276611ee 2b26e4d4 892b7ab2 ad951704 f9ebf9d5
     // Abhorrent Oculus ("As an additional cost to cast this spell, exile six
     // cards from your graveyard"): offered with six cards in P0's graveyard,
     // not with five. Solitude is cast free (no choice of its evoke cost: it

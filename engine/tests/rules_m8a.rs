@@ -123,6 +123,7 @@ fn reveals(d0: &[u16], s0: &[u16], d1: &[u16], s1: &[u16]) -> (Game, Vec<(u8, Ve
 
 #[test]
 fn cr_702_139a_lurrus_condition_each_permanent_mana_value_2_or_less() {
+    // ruling: bd8a17c9 f103228a
     let lurrus = db().expect_id(LURRUS).unwrap();
     let ok = lurrus_deck();
     let (g, r) = reveals(&ok, &ids(&[LURRUS, "Counterspell"]), &ok, &[]);
@@ -164,6 +165,7 @@ fn cr_702_139a_zirda_condition_each_permanent_has_an_activated_ability() {
 
 #[test]
 fn cr_103_2b_companions_in_turn_order_and_at_most_one() {
+    // ruling: a2e75b69 aa67eb2c b4178eed
     let (lurrus, zirda) = (db().expect_id(LURRUS).unwrap(), db().expect_id(ZIRDA).unwrap());
     // A deck fulfilling both: Lurrus and Zirda are offered, one is revealed
     // (CR 103.2b: no more than one); the starting player first, then the
@@ -189,6 +191,7 @@ fn cr_103_2b_companions_in_turn_order_and_at_most_one() {
 
 #[test]
 fn cr_116_2g_the_companion_special_action() {
+    // ruling: a037c9c9 e980e48f
     let start = |step: Step, active: u8| {
         Scenario::new(db())
             .spec(|s| s.auto_single = false)
