@@ -441,8 +441,9 @@ at once (704.5e, section 26.4).
   kind << 16 | action)` (public) when the engine answers a single-option decision itself
   (`auto_single`): no search node sees that decision, and that its decider had no
   alternative can depend on hidden cards (no castable instant in hand). Layout: kind in bits
-  56-63, player in bits 48-55, payload in the low bits. Shuffles, random orders and token
-  creation emit nothing (they reveal nothing; the next draw is keyed).
+  56-63, player in bits 48-55, payload in the low bits. `KEY_GAME` (public; best-of-three:
+  emitted by the match as a later game begins, the decks' and sideboards' sizes, section 36.11).
+  Shuffles, random orders and token creation emit nothing (they reveal nothing; the next draw is keyed).
 * **Observer masking.** zero-core keys children by chance keys, and the search's tree is the
   root decider's. `determinize(viewer)` records `observer = viewer` in the state; from then
   on a private reveal to another player is emitted with the definition replaced by
@@ -473,11 +474,15 @@ at once (704.5e, section 26.4).
   on cards hidden from another player is asked even when only "pass" remains** (a pile with
   no matching card, a hand without the card a "put from hand" names), so a refresh for that
   player finds the same decision instead of running on.
-  Assumption for now: both decklists are known (open decklists); team drafts will need
-  partial pool knowledge (M6; DESIGN.md 0: the opponent's pool but their first picks, M8
-  phase 2). **Sideboards** (M8a, section 35.5) are hidden from the other player but for a
-  revealed companion (public, a card in no zone), and `determinize` keeps them: no card of a
-  sideboard can enter the game but a revealed companion.
+  `Game::determinize` assumes both decklists are known (open decklists: best-of-one): it deals
+  the owner's hidden cards from the owner's actual deck. **Best-of-three** (M8b part b, section
+  36.11) hides each deck within its pool: the match's `determinize` first samples the
+  opponent's unknown first picks, deck and sideboard from what the viewer knows
+  (`az/sample.rs`), deals the deck's unknown cards to the opponent's unknown cards
+  (`Game::redeal`), then runs this one. **Sideboards** (M8a, section 35.5) are hidden from the
+  other player but for a revealed companion (public, a card in no zone); with open decklists
+  `determinize` keeps them (no card of a sideboard can enter the game but a revealed
+  companion), with hidden decks the opponent's is the rest of their sampled pool.
 * **Cards exiled face down** (M7c tail part 3, section 30.2): `Zone::FaceDown` is hidden like a
   library. A card moved there keeps its knowledge bits and is known to its owner, who saw it go
   (a look keyed `KEY_LOOK`, private; a hand exiled face down; a hideaway pile); a cloud whose
@@ -495,7 +500,8 @@ at once (704.5e, section 26.4).
   only to a viewer who knows it (otherwise an unknown 2/2). Turned face up or leaving the
   battlefield it is revealed (708.8-9). Bolas's Citadel's top card (31.1) is known to its
   controller before every decision (a keyed private look).
-* **Checks** (`tests/fuzz.rs`, every ~40 actions): `determinize(to_move)` keeps the viewer's
+* **Checks** (`tests/fuzz.rs`, every ~40 actions; matches: both viewers and the hidden pool,
+  section 36.11): `determinize(to_move)` keeps the viewer's
   legal actions and its whole observable view (`Game::view_of`: public zones and objects
   named by public place, sizes, life, mana, the turn, its own hand, the cards it knows
   exactly and where, its clouds, the pending decision) and never resamples a known card;
@@ -1191,7 +1197,8 @@ they isolate one keyword or trigger each.
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
 | `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b); sideboarded decks are legal and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
-| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay |
+| `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes holding every card the viewer knows (in games and between games); the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
@@ -1268,7 +1275,7 @@ Pool; it panics on 4613d0f) and `cards_m7c_tail2.rs` (Bilbo, Lingering Souls).
 earlier milestone's games (section 17). `check_invariants` also checks the fast paths' counts:
 `n_static`, and that no slot below `Game::first_token` is a token (M7c, section 17).
 
-**Matches** (M8b, section 36.8): `fuzz_random_matches` plays best-of-three matches through
+**Matches** (M8b, section 36.8; the hidden pool's checks: 36.11): `fuzz_random_matches` plays best-of-three matches through
 `MtgAz` with random actions, sideboarding included (`FUZZ_MATCHES=n`, default `FUZZ_GAMES` / 20,
 at least 20; `FUZZ_FIRST` as for games), and `same_seed_and_actions_replay_matches_identically`
 replays 12.
@@ -1329,9 +1336,11 @@ other decks, every game differs; and for M7e part 1's rules fixes and its three 
 161108b935c03d14, and for M7e part 2's payment model, b3a102f4d67c5e97, and for M8a's setup (the
 play-or-draw decision first, the shuffles after it: every game differs; the digest games have
 no sideboards), 076e92a6939c6798, and for M8b's layout additions, the encodings only:
-63d5bd84a9f7c19b), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
+63d5bd84a9f7c19b, and for M8b part b's turning face up (the card shown before its cost is paid,
+CR 701.40b: 50 games differ), 646d779580df7517), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
 prints the combined digest alone: compare it before and after a layout change (M8b: 3fb15384404c7428
-on both sides, section 36.8). `DIGEST_WRITE=1` records
+on both sides, section 36.8; part b: the same without the face-up change, e4783eb5c6705fc3 with it,
+section 36.11). `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
 are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every
@@ -1482,6 +1491,12 @@ heavy-tailed), not the code. `Game::clone` 1.32-1.65 us (main 1.43-1.49), `size_
 1,568 B (+72: each player's sideboard, an `Arc<[DefId]>`, the companion's slot and identity and
 its use); clone + determinize 1.71-2.16 us (main 1.95-2.21). Fuzzer 20,000 games: 160 s with
 other load (a quarter of the games with generated decks, sideboards and companions).
+
+**M8b part b** (546 cards, branch `m8b-hidden`, section 36.11): `Game` holds the known pools (two
+`Option<Arc<[DefId]>>`). `tests/perf.rs` `match_determinize` (unpinned): clone +
+`determinize` through `MtgAz`: best-of-one 1.61-1.79 us, best-of-three 6.71-6.72 us (the hidden
+pool sampled: ~5 us per world; section 36.11). The best-of-one game is unchanged but for turning
+a face-down card face up (section 36.11).
 
 M7b's column is measured with the process pinned to one logical CPU of a performance core
 (`cmd /c start /b /wait /affinity 0x4 perf-....exe --ignored --nocapture`), best of three:
@@ -4999,14 +5014,16 @@ the branch's last commit): combined digest 076e92a6939c6798 (section 15). Speed:
 * Layout v4's file: this branch renamed `layout_v3.json` and set `"version": 4`; the content
   (offsets, segments) is regenerated on merge with the `az` test (not run here).
 
-## 36. Matches and sideboarding (M8b part a)
+## 36. Matches and sideboarding (M8b)
 
 Branch `m8b-match` (from main at 536f659): phase 2 part a of "matches and sideboarding" (DESIGN.md
 0, M8). The `mtg` episode becomes a match: best-of-one (exactly the game of M5a-M8a) or
 best-of-three with sideboarding between games, whose result is the match's; seeded card pools and
 a deckbuilder for self-play and evaluation; the encoding's match additions (layout v4, still
-open). The information model stays phase 1's (open decklists); 36.10 lists what part b changes for
-the hidden pool. `NUM_ACTIONS` and the action ranges are unchanged.
+open). Part a kept phase 1's information model (open decklists); 36.10 lists what part b had to
+change for the hidden pool, 36.11 is the information model as built (part b, branch
+`m8b-hidden`): in best-of-three each player knows the opponent's pool but their first picks, and
+their deck is hidden within it. `NUM_ACTIONS` and the action ranges are unchanged.
 
 ### 36.1 The match
 
@@ -5023,7 +5040,7 @@ existing presets, tests and digests) or `"bo3"`.
 
 The Magic Tournament Rules play on after a drawn game until a player has two wins or the round's
 time runs out (then the player with more game wins wins); stopping after three games is the
-user's choice for self-play (not checked against the current MTR text). Companion reveals (103.2b)
+user's choice for self-play (checked against MTR 2.1 and 2.2 in 36.12). Companion reveals (103.2b)
 and the play-or-draw choice happen in every game (M8a); the companion's "once per game" special
 action is per game.
 
@@ -5031,7 +5048,8 @@ The search sees one episode: the last decision of a game leads straight to the f
 decision (or the end of the match), the last sideboarding decision to the next game's play-or-draw
 decision. No chance key marks a game boundary: a game's end follows from public facts, and the
 next game's setup reveals nothing (its shuffles come after the play-or-draw choice; its draws are
-keyed as before). The next game's seed comes from the match's RNG, which `determinize` reseeds (a
+keyed as before). (Part b: with hidden decks the next game's setup shows the decks' and
+sideboards' sizes, which the hidden sideboarding decided: a public `KEY_GAME`, 36.11.) The next game's seed comes from the match's RNG, which `determinize` reseeds (a
 future game's shuffles are not known in the search's worlds).
 
 ### 36.2 Sideboarding (`Sideboard`, `SideboardCount`)
@@ -5039,7 +5057,8 @@ future game's shuffles are not known in the search's worlds).
 Each player's **pool list** (`MatchPool::list`): the pool's cards (deck and sideboard, basic lands
 excluded) as (definition, copies) sorted by definition, then the five basic lands (W U B R G, any
 number). A deck is a count per entry. Players sideboard one after the other, the next game's
-chooser first (36.10: the hiding is nominal in this part); each player's decisions:
+chooser first (the first one's choice hidden from the second, and resampled by the second's
+`determinize`: 36.11); each player's decisions:
 
 * `Sideboard`: `PASS` = done (offered when the deck has `min_deck..=max_deck` cards), or `LIBRARY`
   + k = change entry k, for k after the last entry changed (increasing list order). A single card
@@ -5192,6 +5211,10 @@ scratch file, not checked in).
 
 ### 36.10 What part b must change (the hidden pool)
 
+(Part a's list, kept as written; all of it is done in part b, 36.11: 1-3 by `az/sample.rs`, the
+companion question asked of every player; 4 by the bags; 5 by the prior; 6 checked and measured;
+7 checked by a test.)
+
 Part b replaces open decklists by DESIGN.md 0's knowledge: each player knows the opponent's pool
 but their first picks, and the opponent's current deck is hidden within it. Every place that
 assumes open decklists:
@@ -5219,3 +5242,230 @@ assumes open decklists:
    every player": still right within a sampled deck.
 7. The heuristic bot reads the true `Game`: check that none of its choices reads the opponent's
    hidden cards before the deck is hidden.
+
+### 36.11 The hidden pool (M8b part b)
+
+Branch `m8b-hidden` (from main at fe72487): DESIGN.md 0's knowledge replaces open decklists in
+best-of-three. Each player knows the opponent's pool but their first picks (one per pack: in a
+team draft the only picks no other drafter sees); the opponent's current deck (which pool cards,
+plus basic lands) is hidden within that pool. Best-of-one keeps open decklists: it is M5a-M8a's
+game, bit for bit (`GameSpec::hidden_decks` is false; the digests are unchanged, below).
+
+**What the viewer knows of the opponent** (`az/sample.rs`):
+
+| | known to the viewer | hidden from it |
+|---|---|---|
+| their pool | every card but the first picks; the number of first picks (3 per generated pool, none for spec decks); a first pick once seen: revealed in an earlier game (`MatchState::earlier`), or known in the current game (on a public zone, looked at, an identity of a cloud, revealed this game, a revealed companion) | the unseen first picks |
+| their deck in a game | its size (their cards in the game); the sideboard's size (public, `glob::SIDEBOARD`), so the number of pool cards in the deck (pool size less sideboard size) and of basic lands; their deck cards it knows exactly; its clouds' identities; what they revealed this game (`MatchState::seen`: in the deck wherever it is now); a revealed companion (in the sideboard; the deck fulfills its condition) | which pool cards, which basic lands, the order and the hand |
+| between games | the last deck's size and what the last game showed (the game's final state, `seen` kept until the next game begins) | the last deck; for the second sideboarder, the first one's chosen deck; the other player's sideboarding in progress |
+
+The viewer's own pool, deck, sideboard and hand are never resampled, nor any card it knows
+exactly.
+
+**`MtgAz::determinize(viewer)` in best-of-three** (`sample_hidden_pool`, then
+`Game::determinize` as before; not when the match is over), for the opponent `o`:
+
+1. **First picks.** The seen ones stay. The others are drawn without replacement from the prior
+   `FirstPickPrior` (one per player, fixed per match, built from what the other player knows): the
+   supported cards but basic lands and tokens that are neither in the known part of `o`'s pool
+   nor in the viewer's own pool (the cube is singleton: a card known to be elsewhere is not a
+   first pick), weighted as the generator weighs spells (creatures 3, interaction 2, other
+   coloured cards 1, colourless 0.5) and x4 when playable in the colours the deckbuilder would
+   choose for the known part of the pool (`pools::best_pair`; a land: when it makes or fetches
+   one of them). A heuristic prior close to how the generator marks first picks (three of the
+   pool's main-colour spells); to be replaced by one learned from drafts once team drafting
+   exists. The sampled pool is the known part plus the seen and drawn first picks (marked as
+   first picks), with the real pool's deck bounds.
+2. **The deck.** It holds the required cards (their deck cards the viewer knows exactly, by their
+   own card: not a copy effect's identity, not a face; its clouds' identities; what they
+   revealed this game; a revealed companion is not a deck card), has the public size N and
+   M = pool cards - sideboard size pool cards; the other M - (required pool cards) pool cards are
+   drawn by weight per copy: the generator's weight, x4 on the deck's colours (the prior's pair
+   and the colours of the required spells and basic lands), x3 for a card revealed in an earlier
+   game. A revealed companion stays in the sideboard and every other card passes its condition
+   (Lurrus, Zirda: card by card; Lutri: one copy per name). The N - M basic lands: the required
+   ones, the rest uniformly among the basic land types of the deck's colours. (If no deck fits,
+   which needs first picks crowding out the cards a revealed companion allows, the first picks
+   are drawn again among cards the condition allows, then the condition is dropped; the fuzzer
+   checks every sampled deck against a revealed companion and never saw it broken.)
+3. **The game.** The deck's cards the viewer does not know (and any non-deck card of `o`'s it
+   lost track of: a companion put into the hand and shuffled away) are dealt to `o`'s cards the
+   viewer does not know (`Game::redeal`: their identities; the sideboard = the rest of the pool;
+   the rare-rule bits `seen` learn new identities), then `Game::determinize` shuffles them among
+   those cards as before (clouds in their domains, pinned cards kept). `MatchState::pools[o]` and `decks[o]` become the sampled
+   pool and deck, so the rest of the match in that world (sideboarding, later games) plays with
+   them.
+4. **Between games** the same is done from the last game's final state (nothing is dealt into
+   the finished game). The first sideboarder's chosen deck, hidden from the second
+   (zero-core's simultaneous-choice pattern, Glass Road Zero docs/search.md 9.3), becomes the
+   sampled last deck (the prior: kept; the heuristic always keeps, the network's sideboarding
+   is to be seen): the second sideboarder's tree is no longer conditioned on the real choice.
+   When the opponent is the one sideboarding (another viewer: tests, analysis), their
+   sideboarding in progress restarts from the sampled last deck.
+
+The real first picks and deck are read only through what the viewer knows: the pool less its
+first picks is the viewer's by DESIGN.md 0, a seen first pick is a card the viewer knows.
+`tests/rules_m8b_hidden.rs` checks this directly for the second sideboarder: two matches that
+differ only in the first sideboarder's choice give the second the same worlds.
+
+**Questions whose asking depended on a deck.**
+
+* The companion reveal (103.2b): in best-of-three every player is asked in every game, `PASS`
+  only when their deck fulfills no sideboard companion, and never answered internally (no
+  `KEY_AUTO`): whether a player is asked, and with how many options, says nothing (a question
+  asked when the pool holds a companion would tell when the only one is a first pick).
+  Best-of-one asks as M8a (only with a candidate). Cost: two decisions per game (one option most
+  of the time: zero-core plays it without a search).
+* "Look at an opponent's hand, then choose a card name" (`NameCard`, Anointed Peacekeeper): the
+  names were those of the opponent's cards (open decklists). With hidden decks: the names of
+  their pool the chooser knows (`Game::known_pools`, set by the match at each game's start: the
+  pool less the first picks not revealed in an earlier game, and the basic lands), of their cards
+  the chooser knows in the game and of its clouds' identities; the same in every world of the
+  chooser's.
+* Three questions were asked because a player's deck has a card: the miracle reveal (on every
+  first draw, a deck with a miracle card: Metamorphosis Fanatic), Gemstone Caverns' opening
+  action, splice (a deck with a card that splices onto the spell's subtype: Goryo's Vengeance,
+  Through the Breach). Asked so, they tell the opponent what the deck holds (who decides next is
+  public to zero-core: a node's signature), and a world whose sampled deck differs runs past the
+  real decision (the match fuzz found it: a refresh of the opponent's opening question ran on to
+  the next decision). With hidden decks they are asked when the part of the player's pool the
+  other player knows has such a card (`Game::deck_question` over `known_pools`), whatever the
+  deck holds: the same in every world. The cost: a first pick the opponent has not seen before
+  the game does not enable them (a Gemstone Caverns or Metamorphosis Fanatic first-picked and
+  unseen gives no opening action or miracle in that game); one card each, rare.
+
+**Keys.** A later game's setup now shows something the hidden sideboarding decided: each
+player's deck and sideboard sizes. The match emits a public key `KEY_GAME` (kind 7, player 0,
+payload `deck0 | deck1 << 8 | side0 << 16 | side1 << 24`) as the game begins, so two worlds of a
+viewer whose opponent built decks of different sizes are told apart (the match fuzz found two
+such worlds with equal keys and different encodings); it replaces 36.1's "no chance key marks a
+game boundary" for best-of-three. The play-or-draw choice and its chooser are public as before.
+
+**A leak in the game the match fuzz found** (best-of-one too): turning a manifested card face up
+(116.2b) paid its mana cost before the card was revealed, so the payment showed the hidden card's
+cost (the context block's cost) while the worlds still agreed on every key. CR 701.40b: "show all
+players that the card representing that permanent is a creature card and what that card's mana
+cost is, pay that cost, then turn the permanent face up": the card is now revealed when the
+special action begins (`reveal`: known to both, a public `KEY_REVEAL`), before the payment, and
+again as it turns face up (as a hand card activated, 602.2a, then cast). This changes best-of-one
+games that turn a face-down card face up: 50 of the 2,500 digest games (below).
+
+**Encoding** (layout v4 unchanged: 33,652 floats; best-of-one encodings unchanged):
+
+* `bag::OPP_POOL`: the known part of the opponent's pool (no first pick not revealed in an
+  earlier game).
+* `bag::OPP_HIDDEN`, in a game: the candidates, the known part less their cards the viewer knows
+  in the game (exactly or by its clouds) and a revealed companion still outside; basic lands left
+  out. `Game::encode_features` no longer reads the opponent's unknown cards when
+  `hidden_decks` (the match writes the bag).
+* While sideboarding, the other player's context shows the kind `Sideboard` whatever the
+  decider's decision (a `SideboardCount` would tell that a basic land or a card with copies was
+  chosen).
+
+The `az` feature-invariance test runs on best-of-one states; the same check on best-of-three
+states (both viewers, sideboarding included) is in `tests/rules_m8b_hidden.rs` and in the match
+fuzz (`tests/az.rs` is not run on this branch).
+
+**Pools.** `pools::random_pools` makes the second pool from the cards the first does not hold
+(`random_pool_without`; the cube is singleton): a first pick is never in the other player's pool,
+as the prior assumes. The first pool, `random_pool` and the deckbuilder are unchanged; a match's
+second pool and so the evaluation pools' second seats change (best-of-three only; nothing is
+trained on them yet).
+
+**`force_chance`.** Unchanged rule: a forced draw or look swaps the named identity in from a
+library card interchangeable with the one seen for every player, which stays right within a
+sampled deck. A forced identity the world's deck lacks falls back to the world's outcome: a swap
+between deck and sideboard would change what the owner knows of their own library (an owner
+knows its library's contents), so it is not done. The decider's own draws come from its real
+deck, so its keys replay as in best-of-one: 334 of 378 forced transitions with the decider's
+draws or looks reproduced all their keys (88%; `force_chance_replays_the_deciders_draws_in_matches`).
+
+**The heuristic bot.** It reads the true `Game`; no read of the opponent's hidden cards was found
+(its reads of the opponent are life, permanents and creatures; options name cards the decider
+knows). Test: at 5,382 decisions of best-of-three matches its choice is the same in three worlds
+of the decider (the opponent's first picks, deck, hand, library and sideboard resampled, its own
+library order too).
+
+**Tests** (`tests/rules_m8b_hidden.rs`, 7): the first picks drawn from the prior (never in the
+known part or the viewer's pool, mostly in the prior's colours, varying; the real ones kept in at
+most one of 240 worlds) and seen ones kept (2,115 worlds); sampled decks with the public sizes
+holding every card the viewer knows, in games and between games, other than the real deck in
+every world (2,970, 90 of them between games); the second sideboarder blind to the first's choice; the companion question
+asked of everyone (240 questions in 120 games, 204 with `PASS` only) and every sampled deck
+fulfilling a revealed companion (210 worlds); the bags (no unseen first pick, `OPP_HIDDEN` within
+`OPP_POOL`, every feature the same in the viewer's worlds: 3,052 worlds, both viewers); the bot;
+`force_chance`. `tests/rules_m8b.rs`: `OPP_POOL` is the known part.
+
+**Fuzzing.** The match fuzz now checks, every ~40 actions, `determinize` for both viewers (in
+games and while sideboarding): the decider's actions (or the decider kept, for the other viewer),
+the viewer's whole encoding, the viewer's pool, deck and sideboard untouched, the known part of
+the opponent's pool kept and as many first picks (none in the viewer's pool), the deck's size and
+copies, a revealed companion fulfilled, this game's reveals in the deck, the world's cards equal
+to the sampled deck and its sideboard to the rest of the pool, the sideboard's size, the view
+(`view_of`), no known card resampled, the invariants and the clouds (`check_knowledge`); then 30
+random actions in the world (across game ends and sideboarding); and for the decider, one time in
+four, two worlds played with the same actions stay indistinguishable while their keys, next
+decider and legal actions agree (zero-core's child signature).
+`FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`: no failure, 165 s; the 20,000 games
+as before and 1,000 matches (2,579 games, 579 matches of three, 754 drawn games, 418.6 decisions
+per match, 20,721 sideboarding decisions, 3,099 decks changed) with 20,970 sampled worlds: the
+first picks other than the real ones in 11,934 (the rest: M8a's decks without first picks, or all
+first picks seen), the deck other than the real one in 20,945. Also clean: `FUZZ_FIRST=2000
+FUZZ_MATCHES=6000` (124,544 worlds). Found and fixed on the way: a later game's deck sizes unkeyed
+(`KEY_GAME`), turning face up paid before the reveal, the opening question asked by the deck, the
+sampled deck checked by its slots (a companion the viewer lost track of may be dealt to a deck
+card's slot: the check counts the player's cards and the companion).
+
+`cargo test --release -p engine --no-fail-fast --lib --test 'cards*' --test 'rules*' --test hidden
+--test support --test smoke --test 'bots*'`: 907 pass (part a's 900 and the 7 new), 7 ignored.
+`bash tools/build_py.sh`, `python -m pytest -q tests`: 20 pass (the layout test included: the
+layout is unchanged). Search smoke (`python tools/search_smoke.py`, seeds 0-3, specs random, eval,
+match): 0 failed of 12 configurations, 1,189 s (random 64-66 s, eval 67-71 s, match 155-164 s:
+1,600 matches, 1,499,267 decisions, 39.8 million simulations); `--specs match_eval --seeds 0-1`:
+0 failed of 2 (800 matches, 739,587 decisions), 310 s.
+
+Behaviour digests (`cargo test --release -p engine --test digest -- --ignored`): best-of-one is
+unchanged but for the face-up reveal: without that change the 2,500 games give part a's
+digests exactly (`DIGEST_ENCODING=0` 3fb15384404c7428; with the encodings 63d5bd84a9f7c19b, every
+game equal to the recorded file); with it 50 games differ (`DIGEST_ENCODING=0` e4783eb5c6705fc3).
+Re-recorded (`DIGEST_WRITE=1`, this branch's last code commit): combined digest 646d779580df7517.
+
+**Speed** (`cargo test --release -p engine --test perf match_determinize -- --ignored
+--nocapture`, the desktop, unpinned, two runs): clone + `determinize(to_move)` through `MtgAz`,
+states of heuristic-against-random play one every ~7 decisions: best-of-one 1.61-1.79 us (2,745
+states; clone 1.11-1.20 us), best-of-three 6.71-6.72 us (4,599 states, games and sideboarding;
+clone 1.17-1.20 us): the sampling adds ~5 us per world (the first picks, the deck's weighted
+draws, the sampled pool and deck built, the deal), against a simulation's encoding (~10 us) and
+network evaluation. Two costs found on the way and cached per card definition (the `seen` bits of
+a new identity, the generator's weights and colours): 9.2 -> 6.7 us.
+
+### 36.12 Drawn games in the Magic Tournament Rules; temperature in a match
+
+**Drawn games.** MTR 2.1 (Match Structure, read 2026-10-25 at blogs.magicjudges.org/rules/mtr2-1):
+"A match consists of a series of games that are played until one side has won a set number of
+games, usually two. Drawn games do not count toward this goal. If the round ends before a player
+has won the required number of games, the winner of the match is the player who has won the most
+games at that point" (equal game wins: a drawn match). MTR 2.2 (Play/Draw Rule): "If the previous
+game was a draw, the player who decided to play or draw at the beginning of the drawn game
+chooses." Implemented (36.1): a match ends at two wins or after three games, a drawn game counts
+as one of the three, the result is by game wins (equal: a draw), and after a drawn game its
+chooser chooses again. The MTR's match plays on after a draw until two wins or the round's time;
+the fixed three games stand in for the time limit (a self-play match has no clock), and the
+result rule is the MTR's end-of-round rule. The play/draw rule is the MTR's. Kept: not clearly
+wrong for a fixed-length self-play match.
+
+**`temp_moves` for `mtg-4`.** zero-core samples the move by visit count for the first
+`temp_moves` searched decisions of an episode (`slot.decisions`, every `decide` of the slot,
+both seats, minor payment decisions included; reset only at a new episode), then plays the most
+visited move; root Dirichlet noise (`alpha`, `eps`) applies at every searched decision of
+self-play. In a match the 60 of `mtg-3` cover game 1's mulligans and first turns only; games 2
+and 3 and the sideboarding are played greedily. No setting of the pinned zero-core covers each
+game's opening without also covering most of game 1 (a game is ~400 decisions): a larger value
+puts temperature on game 1's whole middle (noisier value targets), a smaller one less on game 1.
+Proposal: keep `temp_moves` 60 for `mtg-4`. Later games and sideboarding still vary: new
+shuffles, decks that differ after sideboarding, root noise at every searched decision (eps
+0.25), and the completed-Q policy target (`cq`) trains every option of a searched decision, not
+only the one played. To watch in the first run: the share of sideboardings that change the deck
+and the spread of game-2 openings; if sideboarding collapses to "keep", raise `eps` for the run
+rather than `temp_moves`, or add a zero-core option that counts temperature decisions per game
+(a `SearchGame` hook marking a new game; a zero-core change, not made here).
