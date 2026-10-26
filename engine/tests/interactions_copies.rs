@@ -190,3 +190,37 @@ fn a_spell_copy_retargeted_at_a_ward_creature_triggers_ward_cr_707_10c_702_21a()
     assert_eq!(g.life(1), 17);
     let _ = Counter::P1P1;
 }
+
+#[test]
+fn a_token_copy_of_a_face_down_creature_is_a_face_up_nameless_2_2_cr_707_2_708_2() {
+    // Reflection of Kiki-Jiki copies P0's manifested Test Giant: the token
+    // is a face-up 2/2 with no name or abilities but haste (CR 707.2,
+    // 708.2a, 707.9b); nothing turns it "face up" (it has no card).
+    let mut g = scen()
+        .library(0, &["Island", "Test Giant", "Island", "Island", "Island"])
+        .battlefield(0, &["Abhorrent Oculus", "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki", "Mountain"])
+        .battlefield(0, &["Forest"; 5])
+        .transformed(0, "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki")
+        .at(Step::End, 0)
+        .start();
+    quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::PutOntoBattlefield));
+    let fd = g.card(0, "Test Giant", Zone::Library);
+    g.choose(Choice::Card(fd));
+    quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
+    assert!(g.is_face_down(fd));
+    let r = bf(&g, 0, "Reflection of Kiki-Jiki");
+    let before: Vec<CardIdx> = g.battlefield().to_vec();
+    g.choose(Choice::Ability(r, AbilitySlot::Activated(0)));
+    let t = g.tgt(fd);
+    answer_targets(&mut g, &[t]);
+    let tok: Vec<CardIdx> = g.battlefield().iter().copied().filter(|c| !before.contains(c) && g.is_token(*c)).collect();
+    assert_eq!(tok.len(), 1, "{}", log(&g));
+    let tk = tok[0];
+    assert!(!g.is_face_down(tk));
+    assert_eq!(g.pt(tk), (2, 2));
+    assert_eq!(g.name(tk), "");
+    assert!(g.has_kw(tk, Kw::Haste));
+    let face_up = (0..4u8).any(|i| g.has_option(Choice::Ability(tk, AbilitySlot::Activated(i))));
+    assert!(!face_up, "nothing turns the token face up: {}", opts(&g));
+    assert!(g.is_face_down(fd), "the original stays face down");
+}

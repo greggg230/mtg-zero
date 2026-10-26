@@ -107,6 +107,7 @@ Classes:
 | 13.15 | (Part 2) The mana of a mana ability with a mana cost never pays another such ability's cost in the same payment (`MADE` and `NOT_MADE` are one bit each) | B | kept: Loot's three red for Arena of Glory's {R}, or Sunken Ruins' for Chromatic Star's {1}, in one payment; the cube has the four cards, rarely two together | `mana.rs` (`fits`) |
 | 13.16 | (Part 2) A several-mana source that sacrifices itself (Black Lotus) isn't one of delve's or an escape's cards in the payment it helps; delve's commitments come before its graveyard cards | B / C | kept (B): a forced source is a single-mana one (Lotus Petal, a Gemstone Mine's last counter); the order is representation (C) | `cast.rs` (`delve_sources`) |
 | 13.17 | (Part 2) Teamwork tapping a creature while an Orcish Lumberjack is a payment source | C | kept: the Lumberjack's sacrifices aren't offered in that payment (rare: teamwork with a Lumberjack and only it to pay) | `pay.rs` (`classes_without`) |
+| 38.1 | (M8d part 2) Containment Priest and a card entering "as a copy" (Phyrexian Metamorph, Superior Spider-Man) not cast: the copy choice is made first and the Priest exiles it only if it is still a creature; no decision for the order of the two replacement effects (616.1) | C | kept: the other order (the Priest first) exiles it, an outcome the copy-first order reaches by copying a creature or nothing (ENGINE.md 38.4) | `game.rs` (`put_onto_battlefield`), `copies.rs` (`priest_exiles`) |
 
 ## Notes on the new mechanisms
 

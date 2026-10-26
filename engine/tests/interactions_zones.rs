@@ -244,3 +244,20 @@ fn trample_assigns_lethal_damage_to_a_protected_blocker_before_the_player_cr_702
     assert_eq!(g.obj(bear).damage, 0);
     assert_eq!(g.life(1), 18, "{}", log(&g));
 }
+
+#[test]
+fn fractured_identity_on_a_face_down_permanent_gives_a_nameless_2_2_cr_708_2_707_2() {
+    // P0 casts Fractured Identity at its own manifested Test Giant: the card
+    // is exiled (revealed, CR 708.9) and P1 creates a token copy of the
+    // face-down permanent: a face-up 2/2 with no name or abilities.
+    let (mut g, fd) = manifested_then_main("Test Giant", &["Plains", "Plains", "Island", "Island", "Island"], &["Fractured Identity"]);
+    let fi = g.card(0, "Fractured Identity", Zone::Hand);
+    let t = g.tgt(fd);
+    cast_targets(&mut g, fi, &[t]);
+    assert_eq!(g.obj(fd).zone, Zone::Exile, "{}", log(&g));
+    assert!(g.knows(1, fd));
+    let tok: Vec<CardIdx> = g.battlefield().iter().copied().filter(|&c| g.is_token(c) && g.obj(c).controller == 1).collect();
+    assert_eq!(tok.len(), 1, "{}", log(&g));
+    assert!(!g.is_face_down(tok[0]));
+    assert_eq!((g.pt(tok[0]), g.name(tok[0])), ((2, 2), ""));
+}
