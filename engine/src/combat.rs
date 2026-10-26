@@ -402,6 +402,10 @@ impl Game {
         // Combat damage each source dealt in all (one "deals damage" event
         // per source: the damage is dealt at once, CR 510.2).
         let mut by_source: Vec<(crate::ids::ObjRef, i32)> = Vec::new();
+        // Combat damage each creature or planeswalker was dealt in all (one
+        // "is dealt damage" event per recipient: Screaming Nemesis blocked by
+        // two creatures triggers once, for the total; ruling 66fc62ef).
+        let mut by_recipient: Vec<(crate::ids::ObjRef, i32)> = Vec::new();
         for ((&(s, t, n), src), r) in list.iter().zip(sources).zip(refs) {
             if first {
                 self.objs[s.i()].struck_first = true;
@@ -417,6 +421,12 @@ impl Game {
                     None => by_source.push((r, dealt)),
                 }
             }
+            if let (Target::Obj(o), true) = (t, dealt > 0) {
+                match by_recipient.iter_mut().find(|x| x.0 == o) {
+                    Some(x) => x.1 += dealt,
+                    None => by_recipient.push((o, dealt)),
+                }
+            }
             if let (Target::Player(p), true) = (t, dealt > 0) {
                 to_players.push((r, p, dealt));
             }
@@ -428,6 +438,11 @@ impl Game {
             }
         }
         self.combat_damage_now = false;
+        for (o, n) in by_recipient {
+            let mut ev = Event::obj(EventKind::DealtDamage, o);
+            ev.amount = n.min(u16::MAX as i32) as u16;
+            self.event(ev);
+        }
         for (r, n) in by_source {
             self.event(Event { kind: EventKind::DealsDamage, a: Subj::Obj(r), b: Subj::None, amount: n.min(u16::MAX as i32) as u16 });
         }

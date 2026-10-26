@@ -514,6 +514,7 @@ fn does_machines_gains_levels_cr716() {
 /// creature's.)
 #[test]
 fn nadu_grants_a_target_trigger_twice_each_turn_per_creature_cr603_2e() {
+    // ruling: 309a7b0c 80bc0a3f
     let mut g = scen()
         .library(0, &["Forest", "Lightning Bolt", "Mountain", "Plains"])
         .battlefield(0, &["Nadu, Winged Wisdom", "Test Giant"])

@@ -273,6 +273,10 @@ impl Game {
                 while let Some(&top) = self.players[q as usize].library.last() {
                     self.force_library_card(top, crate::hidden::KEY_REVEAL, q);
                     self.reveal(top);
+                    // "Until": one card at a time, each its own event (a
+                    // "one or more cards are exiled" trigger per card:
+                    // Laelia's ruling 1178d637, CR 603.2c; ENGINE.md 38).
+                    self.new_event();
                     self.move_card(top, Zone::Exile, Pos::Top);
                     if !self.def_of(top).is(types::LAND) {
                         f.picked.push(top);

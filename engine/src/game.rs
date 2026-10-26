@@ -2245,9 +2245,14 @@ impl Game {
                         o.deathtouched = true;
                     }
                 }
-                let mut ev = Event::obj(EventKind::DealtDamage, r);
-                ev.amount = amount.min(u16::MAX as i32) as u16;
-                self.event(ev);
+                // "Whenever this is dealt damage": combat damage from several
+                // sources at once is one event with the total (Screaming
+                // Nemesis's ruling 66fc62ef, CR 510.2; `combat.rs` emits it).
+                if !self.combat_damage_now {
+                    let mut ev = Event::obj(EventKind::DealtDamage, r);
+                    ev.amount = amount.min(u16::MAX as i32) as u16;
+                    self.event(ev);
+                }
             }
         }
         if src.lifelink {

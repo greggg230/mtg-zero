@@ -333,6 +333,9 @@ impl Game {
             let mut hit = None;
             while let Some(&top) = self.players[p as usize].library.last() {
                 self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
+                // One card at a time, each its own event (Laelia's ruling
+                // 1178d637, CR 603.2c; ENGINE.md 38).
+                self.new_event();
                 self.move_card(top, Zone::Exile, Pos::Top);
                 f.picked.push(top);
                 if !self.def_of(top).is(types::LAND) && self.def_of(top).mana_value() < mv {

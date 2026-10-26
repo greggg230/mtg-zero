@@ -632,6 +632,8 @@ impl Game {
                 // exiled.
                 while let Some(&top) = self.players[q as usize].library.last() {
                     self.force_library_card(top, crate::hidden::KEY_REVEAL, q);
+                    // One card at a time, each its own event (CR 603.2c).
+                    self.new_event();
                     self.move_card(top, Zone::Exile, Pos::Top);
                     if !self.def_of(top).is(types::LAND) {
                         f.picked.push(top);
