@@ -495,6 +495,7 @@ fn prepare_copy(g: &Game) -> Option<CardIdx> {
 
 #[test]
 fn emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3() {
+    // ruling: 4afe6989 94077065
     // "Vigilance. This creature enters prepared. Whenever this creature
     // attacks, if you control eight or more lands, this creature becomes
     // prepared." Prepare spell: "Regrowth {1}{G} Sorcery: Return target card

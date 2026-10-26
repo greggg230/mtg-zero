@@ -776,6 +776,7 @@ fn crabomination_emerges_and_casts_an_exiled_card_free_cr702_119() {
 /// (CR 118.9: an alternative cost; 401.? the top card known to its owner.)
 #[test]
 fn bolas_citadel_casts_from_the_top_paying_life_cr118_9() {
+    // ruling: 8b359ef5
     let mut g = scen()
         .library(0, &["Test Giant", "Forest", "Lightning Bolt"])
         .battlefield(0, &["Bolas's Citadel"])
@@ -804,6 +805,7 @@ fn bolas_citadel_casts_from_the_top_paying_life_cr118_9() {
 /// "{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life."
 #[test]
 fn bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21() {
+    // ruling: 7ee6c520
     let mut g = scen()
         .battlefield(0, &["Bolas's Citadel"])
         .battlefield(0, &["Test Bear"; 9])
