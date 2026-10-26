@@ -575,11 +575,6 @@ pub struct Game {
     pub(crate) permissions: Vec<Permission>,
     /// Combat damage is being dealt (CR 510.2).
     pub(crate) combat_damage_now: bool,
-    /// Cards entering "as a copy" that Containment Priest's replacement
-    /// would exile: its controller applies the copy first (CR 614.12,
-    /// 616.1), and the Priest exiles it only if it is still a creature
-    /// (`Game::enter_as_copy`; ENGINE.md 38).
-    pub(crate) priest_pending: Vec<CardIdx>,
     /// A move off the battlefield that isn't a leave (a card exiled
     /// "instead" of entering, after its copy choice): no leave events.
     pub(crate) quiet_leave: bool,
@@ -746,6 +741,9 @@ pub(crate) const SEEN_LKI_DAMAGE: u16 = 16384;
 /// 400.7).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Mark {
+    /// Entering "as a copy" while Containment Priest's replacement would
+    /// exile it: decided after the copy choice (CR 614.12, 616.1).
+    PriestPending,
     /// Its exhaust ability k was activated (CR 702.177a).
     Exhausted(u8),
     /// A spell with converge being paid for: the colours of the pool mana
@@ -962,7 +960,6 @@ impl Game {
             resolved: Vec::new(),
             permissions: Vec::new(),
             combat_damage_now: false,
-            priest_pending: Vec::new(),
             quiet_leave: false,
             monarch: None,
             lki_counters: Vec::new(),
@@ -1298,6 +1295,7 @@ impl Game {
         let cast = std::mem::take(&mut self.entering_cast);
         let evoked = std::mem::take(&mut self.entering_evoked);
         let times = std::mem::take(&mut self.entering_times);
+        let mut priest_after_copy = false;
         if !cast && self.def_of(idx).is(types::CREATURE) && !self.is_token(idx) {
             // Only a permanent on the battlefield before this event applies:
             // not one entering at the same time (Exhume returning Containment
@@ -1313,8 +1311,9 @@ impl Game {
                 // (CR 616.1), and the Priest's applies only if what would
                 // enter is still a creature (614.12: Phyrexian Metamorph
                 // reanimated as a copy of Sol Ring enters). Decided after
-                // the copy choice (`Game::enter_as_copy`).
-                self.priest_pending.push(idx);
+                // the copy choice (`Mark::PriestPending`,
+                // `Game::enter_as_copy`; ENGINE.md 38).
+                priest_after_copy = true;
             } else if replaced {
                 self.entering_copy = None;
                 // (A card that would have entered face down is exiled face
@@ -1384,6 +1383,9 @@ impl Game {
             });
         }
         if copy_choice {
+            if priest_after_copy {
+                self.marks.push((r, Mark::PriestPending));
+            }
             self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1 });
             return r;
         }

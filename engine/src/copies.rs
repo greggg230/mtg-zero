@@ -518,8 +518,9 @@ impl Game {
     /// still a nontoken creature, it is exiled instead (it never entered:
     /// no leave or enter events). True if it was.
     fn priest_exiles(&mut self, card: CardIdx) -> bool {
-        let Some(i) = self.priest_pending.iter().position(|&c| c == card) else { return false };
-        self.priest_pending.swap_remove(i);
+        let pending = |&(o, m): &(ObjRef, crate::game::Mark)| o.idx == card && m == crate::game::Mark::PriestPending;
+        let Some(i) = self.marks.iter().position(pending) else { return false };
+        self.marks.swap_remove(i);
         if !self.is_creature(card) || self.is_token(card) {
             return false;
         }
@@ -603,7 +604,7 @@ impl Game {
     /// 707.6) and its `Enters` event (with `note`) happens.
     pub(crate) fn enter_as_copy(&mut self, card: CardIdx, note: u16, since: u32) {
         if self.objs[card.i()].zone != Zone::Battlefield {
-            self.priest_pending.retain(|&c| c != card);
+            self.marks.retain(|&(o, m)| !(o.idx == card && m == crate::game::Mark::PriestPending));
             return;
         }
         let own = self.own_def(card);
