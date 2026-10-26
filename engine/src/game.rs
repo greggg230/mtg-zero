@@ -1220,6 +1220,12 @@ impl Game {
     /// 614.1c, decided before it moves) and queueing "as this enters"
     /// choices (614.12, a task that runs next).
     pub(crate) fn put_onto_battlefield(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
+        self.put_onto_battlefield_attached(idx, controller, None)
+    }
+
+    /// [`put_onto_battlefield`](Self::put_onto_battlefield) of an Aura that
+    /// enters attached to `attach` (CR 303.4f, chosen as it enters).
+    pub(crate) fn put_onto_battlefield_attached(&mut self, idx: CardIdx, controller: PlayerId, attach: Option<ObjRef>) -> ObjRef {
         // Mox Diamond: "If this would enter, you may discard a land card
         // instead. If you do, put it onto the battlefield. If you don't, put
         // it into its owner's graveyard" (CR 614.1a), however it would enter
@@ -1254,17 +1260,7 @@ impl Game {
             let d = self.entering_face.unwrap_or(self.objs[idx.i()].def);
             if self.db.def(d).is(types::INSTANT | types::SORCERY) {
                 self.entering_cast = false;
-                self.entering_copy = None;
-                self.entering_counters.clear();
-                let _ = std::mem::take(&mut self.entering_dash);
-                self.entering_escaped = false;
-                self.entering_evoked = false;
-                self.entering_face = None;
-                let _ = std::mem::take(&mut self.entering_sunburst);
-                self.entering_tapped = false;
-                let _ = std::mem::take(&mut self.entering_times);
-                let _ = std::mem::take(&mut self.entering_warp);
-                let _ = std::mem::take(&mut self.entering_x);
+                self.clear_entering();
                 self.note(|g| format!("{} can't enter the battlefield", g.name(idx)));
                 return self.obj_ref(idx);
             }
@@ -1295,6 +1291,28 @@ impl Game {
         let cast = std::mem::take(&mut self.entering_cast);
         let evoked = std::mem::take(&mut self.entering_evoked);
         let times = std::mem::take(&mut self.entering_times);
+        // CR 303.4f-g: an Aura put onto the battlefield other than by
+        // resolving as an Aura spell: its controller chooses, as it enters,
+        // a legal object for its enchant ability (not targeted); with none
+        // it stays in its zone. The cube's one such Aura is Animate Dead
+        // ("enchant creature card in a graveyard"; returned by Portable Hole,
+        // Leyline Binding, Flickerwisp, Phelia; ruling aff80611, ENGINE.md
+        // 39). (Its ability then returns that card, 603.4.)
+        let mut attach = attach;
+        if !cast && attach.is_none() && self.def_of(idx).aura_spell && !self.moving_face_down {
+            let cands = self.aura_candidates(idx);
+            if cands.len() != 1 {
+                let tapped = std::mem::take(&mut self.entering_tapped);
+                self.clear_entering();
+                if cands.is_empty() {
+                    self.note(|g| format!("{} has nothing to enchant and stays where it is", g.name(idx)));
+                } else {
+                    self.agenda.push(Task::EnterAura { card: idx, controller, tapped });
+                }
+                return self.obj_ref(idx);
+            }
+            attach = Some(self.obj_ref(cands[0]));
+        }
         let mut priest_after_copy = false;
         if !cast && self.def_of(idx).is(types::CREATURE) && !self.is_token(idx) {
             // Only a permanent on the battlefield before this event applies:
@@ -1351,6 +1369,10 @@ impl Game {
         // tapped", "enters with counters", CR 614.1c, 122.6.)
         self.defer_enters = true;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
+        if let Some(h) = attach {
+            self.objs[idx.i()].attached = Some(h);
+            self.note(|g| format!("{} enters attached to {}", g.name(idx), g.name(h.idx)));
+        }
         if fx_tapped {
             self.objs[idx.i()].tapped = true;
         }
@@ -1404,6 +1426,50 @@ impl Game {
             self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note });
         }
         r
+    }
+
+    /// Forget what the effect putting a card onto the battlefield set up
+    /// (it doesn't enter after all).
+    fn clear_entering(&mut self) {
+        self.entering_copy = None;
+        self.entering_counters.clear();
+        let _ = std::mem::take(&mut self.entering_dash);
+        self.entering_escaped = false;
+        self.entering_evoked = false;
+        self.entering_face = None;
+        let _ = std::mem::take(&mut self.entering_sunburst);
+        self.entering_tapped = false;
+        let _ = std::mem::take(&mut self.entering_times);
+        let _ = std::mem::take(&mut self.entering_warp);
+        let _ = std::mem::take(&mut self.entering_x);
+    }
+
+    /// The legal objects for an Aura entering without being cast to
+    /// enchant (CR 303.4f): Animate Dead's "creature card in a graveyard".
+    pub(crate) fn aura_candidates(&self, aura: CardIdx) -> Vec<CardIdx> {
+        debug_assert!(self.def_of(aura).reanimates, "only Animate Dead");
+        (0..2u8).flat_map(|p| self.graveyard_cards(p)).filter(|&c| c != aura && self.def_of(c).is(types::CREATURE)).collect()
+    }
+
+    /// `Task::EnterAura`: the Aura's controller chooses what it enchants;
+    /// it enters attached to that (CR 303.4f).
+    pub(crate) fn enter_aura(&mut self, card: CardIdx, p: PlayerId, tapped: bool) {
+        match self.answer.take() {
+            Some(Choice::Card(c)) => {
+                self.entering_tapped = tapped;
+                let h = self.obj_ref(c);
+                self.put_onto_battlefield_attached(card, p, Some(h));
+            }
+            Some(other) => unreachable!("enchant choice {other:?}"),
+            None => {
+                let opts: Vec<crate::decision::Opt> = self
+                    .aura_candidates(card)
+                    .into_iter()
+                    .map(|c| crate::decision::Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
+                    .collect();
+                self.ask(Task::EnterAura { card, controller: p, tapped }, p, crate::decision::DecisionKind::ChooseGraveyardCard, opts);
+            }
+        }
     }
 
     /// What applies as a permanent enters (CR 614.1c, 614.12): "enters

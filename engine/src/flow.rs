@@ -78,6 +78,11 @@ pub(crate) enum Task {
     /// a land card (it enters, under `controller`) or not (its owner's
     /// graveyard).
     EnterByDiscardAny { card: CardIdx, controller: PlayerId, tapped: bool },
+    /// CR 303.4f: an Aura put onto the battlefield other than by resolving
+    /// (Animate Dead returned from exile): `controller` chooses, as it
+    /// enters, the creature card in a graveyard it enchants; it waits in its
+    /// zone meanwhile.
+    EnterAura { card: CardIdx, controller: PlayerId, tapped: bool },
     /// CR 616.1: `chooser` orders the replacement effects of `card`'s move
     /// from `from` (exiled for now): `results` the reachable results.
     ChooseReplacement { card: crate::ids::ObjRef, from: Zone, results: u8, void: Option<crate::db::Counter>, chooser: PlayerId },
@@ -269,6 +274,7 @@ impl Game {
             Task::Delve { id } => self.delve(id),
             Task::EnterByDiscard { id } => self.enter_by_discard(id),
             Task::EnterByDiscardAny { card, controller, tapped } => self.enter_by_discard_any(card, controller, tapped),
+            Task::EnterAura { card, controller, tapped } => self.enter_aura(card, controller, tapped),
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),

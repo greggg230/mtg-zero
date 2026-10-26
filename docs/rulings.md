@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1228 | 979 |
 | class b | 198 | 149 |
 | class c | 181 | 132 |
-| a, tested (passing) | 500 | 384 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 220 | 201 |
-| a, tested only by an earlier test (Oracle or rules) | 280 | 183 |
+| a, tested (passing) | 542 | 416 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 260 | 231 |
+| a, tested only by an earlier test (Oracle or rules) | 282 | 185 |
 | a, deferred | 0 | 0 |
-| a, untested | 728 | 595 |
+| a, untested | 686 | 563 |
 
-Class a by area (distinct texts): mana 69/173, triggers 60/140, stack 45/126, zones 44/123, copies 35/97, other 41/95, dfc 25/65, replacement 27/59, combat 11/52, protection 8/27, facedown 13/13, walkers 6/9 (tested/all).
+Class a by area (distinct texts): mana 69/173, triggers 60/140, stack 45/126, zones 44/123, copies 35/97, other 42/95, dfc 25/65, replacement 58/59, combat 11/52, protection 8/27, facedown 13/13, walkers 6/9 (tested/all).
 
 ## Per card
 
@@ -116,7 +116,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `4759d007` | a | replacement | ravenous puts its counters on as it enters, not after; entering triggers see the counters | `cards_m7c_tail2::jacked_rabbit_ravenous_draws_at_x_five_cr702_156a_and_makes_rabbits_equal_to_power` |
 | `ef3a8866` | a | triggers | if the source leaves while its ability is on the stack, use its last-known power to size the token | untested |
 | `def76a42` | c | NR | a copied ravenous permanent spell keeps X and its resulting token enters with X counters [part 3, was a/copies: no cube effect copies a ravenous creature spell (the only creature-spell copy is Sage of the Skies copying itself)] | not reachable with the cube's cards |
-| `5ebd5143` | a | replacement | a permanent entering as a copy of a ravenous creature doesn't get ravenous's counters | untested |
+| `5ebd5143` | a | replacement | a permanent entering as a copy of a ravenous creature doesn't get ravenous's counters | `rulings_replacement2::ravenous_counters_come_with_it_and_a_copy_of_it_gets_none_cr_614_1c_707_2` |
 | `7cf36dbe` | c | NR | a trigger referencing X uses the value chosen at cast, which can differ from counters entered with [part 3, was a/mana: no cube replacement effect changes the number of counters a ravenous creature enters with, so X and the counters never differ] | not reachable with the cube's cards |
 
 ### Lion Sash
@@ -127,9 +127,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `f76d59c9` | a | replacement | an Equipment creature can never become attached to itself; such an attempt does nothing | `cards_m7d::lion_sash_grows_and_reconfigures_cr702_151` |
 | `35466139` | a | other | a reconfigure Equipment can be attached by other effects too, not just its own ability | untested |
 | `dde8305d` | a | combat | an attached Equipment doesn't share the tapped state of the creature it's attached to | untested |
-| `a2560fad` | a | replacement | when a reconfigure Equipment stops being a creature, enchant-creature Auras/Equipment on it unattach | untested |
+| `a2560fad` | a | replacement | when a reconfigure Equipment stops being a creature, enchant-creature Auras/Equipment on it unattach | `rulings_replacement2::reconfiguring_lion_sash_onto_a_creature_unattaches_its_equipment_cr_702_151b_704_5n` |
 | `cff2c1c6` | a | copies | attaching a reconfigure Equipment makes it stop being a creature (and lose creature subtypes) until unattached | `cards_m7d::lion_sash_grows_and_reconfigures_cr702_151` |
-| `576a8296` | a | replacement | if a reconfigured permanent is somehow still a creature once attached, it immediately unattaches | untested |
+| `576a8296` | a | replacement | if a reconfigured permanent is somehow still a creature once attached, it immediately unattaches | `rulings_replacement2::an_attached_equipment_made_a_creature_by_does_machines_becomes_unattached_cr_301_5c_704_5n` |
 | `05fbac90` | a | other | if an attached reconfigure Equipment loses its abilities, it still stays a noncreature until unattached | untested |
 | `fd9f18ea` | a | other | reconfigure is two activated abilities (attach, unattach), both sorcery-speed only | `cards_m7d::lion_sash_unattaches_as_a_sorcery_cr702_151a` |
 | `19d3529a` | a | other | a tapped Equipment can still reconfigure and attach; attaching doesn't untap it | untested |
@@ -198,7 +198,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `0e494778` | a | other | a once-per-turn cast-restriction static ability checks the whole turn, even retroactively, incl. own casts | untested |
-| `e0fa70ce` | a | replacement | an enters-tapped-unless-condition land still enters tapped if a separate effect forces it, even if met | untested |
+| `e0fa70ce` | a | replacement | an enters-tapped-unless-condition land still enters tapped if a separate effect forces it, even if met | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `5153b574` | a | other | a once-per-turn cast restriction still applies even if the earlier spell was countered | untested |
 
 ### Clarion Conqueror
@@ -326,7 +326,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `18b42e53` | a | replacement | extra tokens from a doubling-style replacement effect inherit every stated property of the original | untested |
+| `18b42e53` | a | replacement | extra tokens from a doubling-style replacement effect inherit every stated property of the original | `rulings_replacement2::elspeth_doubles_adelines_token_and_both_enter_tapped_and_attacking_cr_614_1a_508_4` |
 
 ### Enlightened Tutor
 
@@ -448,7 +448,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `9398525c` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease, new object on return | untested |
 | `f8e77455` | a | triggers | if the source leaves before its exile ability resolves, the target is never exiled | `rulings_triggers::portable_hole_gone_before_its_ability_resolves_exiles_nothing_cr_610_3c` |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
-| `aff80611` | a | replacement | an exiled Auras owner picks what it reattaches to, untargeted, but bound by its enchant restriction | untested |
+| `aff80611` | a | replacement | an exiled Auras owner picks what it reattaches to, untargeted, but bound by its enchant restriction | `rulings_replacement2::portable_hole_returning_animate_dead_lets_its_owner_choose_what_it_enchants_cr_303_4f` |
 | `1fdbbd6e` | b | DEF | flavor-only ruling, no rules content | a definition, no behaviour of its own |
 
 ### Glimmer Lens
@@ -456,7 +456,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `338a52df` | a | other | an Equipment stays on the battlefield when its equipped creature dies, and can be moved by paying its equip cost | untested |
-| `faade90a` | a | replacement | if the ability makes two tokens at once, the Equipment only attaches to one of them | untested |
+| `faade90a` | a | replacement | if the ability makes two tokens at once, the Equipment only attaches to one of them | `rulings_replacement2::elspeth_doubles_a_create_and_attach_token_and_the_equipment_attaches_to_one_cr_614_1a_301_5` |
 | `0a8ce7d7` | c | NR | the created token enters first, then the Equipment attaches, so ETB triggers see it before any bonus [part 3, was a/triggers: Glimmer Lens gives no power or toughness, so no trigger can tell the Rebel before and after the attachment] | not reachable with the cube's cards |
 
 ### Touch the Spirit Realm
@@ -592,7 +592,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `bd583829` | a | replacement | if an equip-attach target is gone at resolution, the Equipment stays wherever it was, or unattached | untested |
+| `bd583829` | a | replacement | if an equip-attach target is gone at resolution, the Equipment stays wherever it was, or unattached | `rulings_replacement2::thieving_skydiver_gone_before_its_trigger_resolves_leaves_the_equipment_where_it_is_cr_608_2b` |
 | `3a9c110e` | a | other | a continuous control-change effect lasts indefinitely, surviving cleanup and the source leaving the battlefield | untested |
 | `194f57a3` | a | other | a steal-and-equip ability can target an artifact you already control, attaching it to the source if it's an Equipment | untested |
 | `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | untested |
@@ -803,7 +803,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `a549c65a` | a | other | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | untested |
 | `f872e80b` | a | other | a draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | untested |
-| `64a8b100` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | untested |
+| `64a8b100` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | `rulings_replacement2::a_draw_hullbreacher_replaced_doesnt_count_for_narset_or_leovold_cr_614_6`; `rulings_replacement2::a_draw_narset_or_leovold_disallows_cant_be_replaced_by_hullbreacher_cr_614_6_121_2` |
 | `1a963653` | a | other | opponents affected by a one-draw-per-turn restriction have any further draws that turn simply ignored | `cards_m7b_walkers2::narset_each_opponent_draws_at_most_one_card_each_turn` |
 
 ### Jace, the Mind Sculptor
@@ -923,7 +923,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `9ded89e9` | a | replacement | a spells own destination-replacement applies first, but flashbacks exile destination still overrides it | untested |
+| `9ded89e9` | a | replacement | a spells own destination-replacement applies first, but flashbacks exile destination still overrides it | `rulings_replacement2::memory_lapse_on_a_flashed_back_spell_exiles_it_cr_702_34a` |
 
 ### Remand
 
@@ -1072,7 +1072,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `0d70edc6` | a | other | leveling up a Class never removes abilities it had at an earlier level | `cards_m7d::does_machines_gains_levels_cr716` |
 | `45d23f21` | c | NR | if the targeted artifact has station, this sets its base power/toughness to 0/0, which charge counters won't restore [part 3, was a/copies: no cube card has station] | not reachable with the cube's cards |
 | `a0398e1e` | a | copies | if the targeted artifact is a Vehicle, this sets its base power/toughness to 0/0, which crewing won't restore | untested |
-| `006c710e` | a | replacement | if the target was an attached Equipment, it becomes unattached, and can't reattach later unless it has reconfigure | untested |
+| `006c710e` | a | replacement | if the target was an attached Equipment, it becomes unattached, and can't reattach later unless it has reconfigure | `rulings_replacement2::an_attached_equipment_made_a_creature_by_does_machines_becomes_unattached_cr_301_5c_704_5n` |
 | `ce58981e` | a | copies | the artifact keeps all its existing types, subtypes, and supertypes after becoming a creature | untested |
 | `8733df71` | a | combat | the new creature can attack if controlled since turn start, regardless of how long its been a creature | untested |
 | `702ccd9a` | c | NR | you can control any number of Class permanents, each tracking its own level independently [part 3, was a/other: the cube has one Class card] | not reachable with the cube's cards |
@@ -1136,8 +1136,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3d6c926a` | a | replacement | a finality counter grants no abilities, but still exiles the permanent instead of sending it to the graveyard | untested |
-| `8680e6f8` | a | replacement | a finality counter only redirects graveyard-bound trips to exile; going to other zones like hand works normally | untested |
+| `3d6c926a` | a | replacement | a finality counter grants no abilities, but still exiles the permanent instead of sending it to the graveyard | `rulings_replacement2::a_finality_counter_exiles_an_elk_and_lets_a_bounce_go_to_the_hand_cr_122_1_614_1a` |
+| `8680e6f8` | a | replacement | a finality counter only redirects graveyard-bound trips to exile; going to other zones like hand works normally | `rulings_replacement2::a_finality_counter_exiles_an_elk_and_lets_a_bounce_go_to_the_hand_cr_122_1_614_1a` |
 | `9c387bc1` | c | NR | a creature that loses all its +1/+1 counters can be made to adapt again for more [part 3, was a/other: no cube card removes +1/+1 counters from a creature] | not reachable with the cube's cards |
 | `a716fb13` | a | replacement | any permanent with a finality counter is exiled instead of going to a graveyard from the battlefield | `cards_m7c_tail3::emperor_of_bones_adapt_reanimates_with_a_finality_counter_cr701_46a` |
 | `8cfe785e` | c | NR | multiple finality counters on one permanent don't stack any extra effect [part 3, was a/other: nothing in the cube puts a second finality counter on a permanent] | not reachable with the cube's cards |
@@ -1497,7 +1497,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `47a5c145` | a | replacement | returning the creature and attaching the reanimation Aura to it both happen within the same resolution | `cards_m7c_tail3::necromancy_at_sorcery_speed_stays_cr514_3a` |
 | `ced5d68f` | b | DEF | when a permanent entering the battlefield needs a value or choice defined, you make that choice as part of it entering [part 3, was a/other: choices for a permanent entering are made as it enters; a definition] | a definition, no behaviour of its own |
-| `3886f2e5` | a | replacement | this enters as a plain enchantment, then its own ETB trigger makes it an Enchant Creature Aura under Aura rules | untested |
+| `3886f2e5` | a | replacement | this enters as a plain enchantment, then its own ETB trigger makes it an Enchant Creature Aura under Aura rules | `rulings_replacement2::necromancy_is_an_aura_once_its_trigger_resolves_and_goes_when_its_creature_leaves_cr_704_5m` |
 | `9b32972a` | a | protection | if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac | untested |
 | `db4fe052` | c | NR | the forced sacrifice only happens when cast via its own ability, not when another effect enabled the cast [part 3, was a/other: no other cube effect lets Necromancy be cast as though it had flash] | not reachable with the cube's cards |
 
@@ -1664,8 +1664,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `66fc62ef` | a | triggers | damage dealt by multiple simultaneous sources still only triggers this ability once, for the total amount | `rulings_triggers2::screaming_nemesis_dealt_damage_by_two_blockers_triggers_once_cr_603_2c_510_2` |
 | `50dcb39f` | c | NR | a life-total-setting effect that would raise your life above its current value under this lock simply does nothing [part 3, was a/replacement: no cube card sets a life total] | not reachable with the cube's cards |
 | `ea71103f` | a | triggers | taking lethal damage still lets this creature's damage-triggered ability trigger before it's destroyed | `rulings_triggers2::screaming_nemesis_dealt_damage_by_two_blockers_triggers_once_cr_603_2c_510_2` |
-| `1fec0c93` | a | replacement | once this deals damage to a player, they can never gain life again all game, even if the source later leaves | untested |
-| `68a5e08c` | a | replacement | life-gain effects still resolve under this lock; they just grant no life, other effects still happen | untested |
+| `1fec0c93` | a | replacement | once this deals damage to a player, they can never gain life again all game, even if the source later leaves | `cards_m7a_threats::screaming_nemesis_redirects_the_damage_and_the_player_cant_gain_life` |
+| `68a5e08c` | a | replacement | life-gain effects still resolve under this lock; they just grant no life, other effects still happen | `cards_m7a_threats::screaming_nemesis_redirects_the_damage_and_the_player_cant_gain_life` |
 
 ### Seasoned Pyromancer
 
@@ -1899,7 +1899,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `81bbe983` | a | replacement | if a doubling effect makes two Monks from this trigger, this Equipment attaches to only one of them | untested |
+| `81bbe983` | a | replacement | if a doubling effect makes two Monks from this trigger, this Equipment attaches to only one of them | `rulings_replacement2::elspeth_doubles_a_create_and_attach_token_and_the_equipment_attaches_to_one_cr_614_1a_301_5` |
 | `379a1727` | a | stack | no actions are allowed between creating the Monk token and choosing whether to attach the Equipment to it | untested |
 | `110f09f6` | a | other | a flurry-style count includes spells cast before the permanent entered, so an early cast still counts toward later ones | untested |
 | `2bb24717` | a | triggers | the created Monk token enters as a 1/1, so ETB-power triggers see a 1/1 before any static effect changes that | untested |
@@ -1927,7 +1927,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `7409fd1a` | a | triggers | ETB and enters-with abilities of a copied creature trigger normally for the token it becomes | `rulings_copies2::reflections_token_has_the_copied_creatures_enter_ability_cr_707_4_603_6a` |
 | `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | untested |
 | `4d5c3fbb` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | untested |
-| `d1d85157` | a | replacement | if a doubling effect makes this create multiple tokens, every one gets sacrificed by its end-step clause | untested |
+| `d1d85157` | a | replacement | if a doubling effect makes this create multiple tokens, every one gets sacrificed by its end-step clause | `rulings_replacement2::elspeth_doubles_reflections_token_and_each_is_sacrificed_at_the_end_step_cr_614_1a_603_7` |
 | `3f6b90f2` | a | copies | copying a token that isn't itself copying something uses that token's original stated characteristics | `rulings_copies2::reflection_copying_a_token_uses_what_made_it_cr_707_2_111_4` |
 | `b30727cf` | a | copies | copying something that's itself copying another thing makes the new token use that other thing's copiable values | `rulings_copies2::reflection_copying_a_metamorph_copying_a_bear_makes_that_bear_cr_707_9b` |
 | `6c4f38f7` | a | copies | copying the created token copies the underlying card plus haste, but not its forced end-step sacrifice | `rulings_faces::a_copy_of_the_reflection_token_has_haste_and_isnt_sacrificed_cr_707_9b` |
@@ -2051,12 +2051,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `6a72e0e6` | a | other | Auras dont tap with their enchanted creature, and a bestow Aura keeps that untapped state when unattaching | untested |
-| `3786a663` | a | replacement | a bestow permanent that enters by any method other than casting is always an enchantment creature, never becomes an Aura | untested |
+| `6a72e0e6` | a | other | Auras dont tap with their enchanted creature, and a bestow Aura keeps that untapped state when unattaching | `rulings_replacement2::a_bestowed_nantuko_whose_creature_leaves_stays_untapped_and_can_attack_cr_702_103f` |
+| `3786a663` | a | replacement | a bestow permanent that enters by any method other than casting is always an enchantment creature, never becomes an Aura | `rulings_replacement2::springheart_nantuko_put_onto_the_battlefield_is_an_enchantment_creature_cr_702_103_303_4` |
 | `aa3ceeab` | a | mana | declining or being unable to pay an optional bonus cost still lets the rest of the triggered ability's effect happen | `cards_m7b_copies::springheart_nantuko_landfall_copies_its_creature_or_makes_an_insect` |
 | `748a92bb` | a | other | on the stack, a bestow spell is a creature spell or an Aura spell, never both, but always an enchantment spell | `cards_m7b_copies::springheart_nantuko_cast_bestowed_is_an_aura_cr_702_103b` |
 | `4031067f` | a | replacement | a bestow Aura with an illegal target isnt countered; it just stops being an Aura and resolves as a creature | untested |
-| `25014ba1` | a | replacement | an unattached bestow permanent skips the graveyard, just stopping being an Aura and staying a creature | untested |
+| `25014ba1` | a | replacement | an unattached bestow permanent skips the graveyard, just stopping being an Aura and staying a creature | `rulings_replacement2::a_bestowed_nantuko_whose_creature_leaves_stays_untapped_and_can_attack_cr_702_103f` |
 | `7ab9e10f` | c | NR | a landfall-style ability doesn't trigger when an existing permanent merely becomes a land [part 3, was a/triggers: no cube effect makes a permanent on the battlefield become a land] | not reachable with the cube's cards |
 | `0908c190` | a | triggers | a landfall-style ability triggers whenever a land you control enters for any reason, played or put there by an effect | `rules_layers::cr_603_2_landfall_lotus_cobra_and_603_6a_other_objects_entering` |
 | `6ea84d35` | a | triggers | multiple landfall triggers from one land can be stacked in any order you pick for their resolution | untested |
@@ -2510,7 +2510,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c0a633cc` | b | DEF | an Equipment with a size-based bonus can still be attached to any creature, not just ones matching its bonus condition [part 3, was a/other: equip targets any creature you control; a definition] | a definition, no behaviour of its own |
-| `dee45a6f` | a | replacement | if an Equipment cant reattach to its trigger creature (e.g. it left), it returns to the battlefield unattached instead | untested |
+| `dee45a6f` | a | replacement | if an Equipment cant reattach to its trigger creature (e.g. it left), it returns to the battlefield unattached instead | `rulings_replacement2::sword_of_the_meek_returns_unattached_when_its_creature_is_gone_cr_608_2b_301_5` |
 | `d80bd9c5` | a | triggers | an ETB power/toughness trigger only sees static abilities at that instant; nothing can react fast enough to change it | untested |
 | `d3c2bdb3` | a | triggers | once a power/toughness-based trigger has fired, later changing that power or toughness doesn't stop its effect | untested |
 | `b1e42bd2` | a | triggers | this trigger only fires if its source is already in your graveyard the instant the relevant creature enters | untested |
@@ -2549,9 +2549,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `3ff80682` | c | NR | a permanent that's both an artifact and an enchantment is only counted once toward a type-counting bonus [part 3, was a/copies: the cube has no permanent that's both an artifact and an enchantment] | not reachable with the cube's cards |
 | `745c7726` | a | other | if a living-weapon token is destroyed, its Equipment stays on the battlefield like any other Equipment would | untested |
-| `f9096d07` | a | replacement | if a doubling effect makes two living-weapon tokens, the Equipment attaches to one; the other dies unless boosted | untested |
+| `f9096d07` | a | replacement | if a doubling effect makes two living-weapon tokens, the Equipment attaches to one; the other dies unless boosted | `rulings_replacement2::elspeth_doubles_a_create_and_attach_token_and_the_equipment_attaches_to_one_cr_614_1a_301_5` |
 | `b88fdb37` | a | other | moving a living-weapon Equipment via its equip cost leaves the unequipped token to die to SBA unless boosted | untested |
-| `bc0bcd33` | a | replacement | a living-weapon token enters as 0/0 and the Equipment attaches before SBA could kill it, so ETB triggers see a 0/0 | untested |
+| `bc0bcd33` | a | replacement | a living-weapon token enters as 0/0 and the Equipment attaches before SBA could kill it, so ETB triggers see a 0/0 | `rulings_replacement2::a_nettlecyst_germ_enters_as_a_0_0_so_sword_of_the_meek_doesnt_trigger_cr_603_6a` |
 | `32385cc4` | b | PRINT | an errata changed the living-weapon token's name across all cards with the ability, a wording/printing update | printing, wording, reminder text |
 
 ### Palantír of Orthanc
@@ -2732,10 +2732,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `b2b3d893` | a | replacement | ravenous puts its counters on as the creature enters, not after; entering triggers see the counters | untested |
+| `b2b3d893` | a | replacement | ravenous puts its counters on as the creature enters, not after; entering triggers see the counters | `rulings_replacement2::ravenous_counters_come_with_it_and_a_copy_of_it_gets_none_cr_614_1c_707_2` |
 | `6c7670da` | c | NR | a copied ravenous permanent spell keeps X, and its resulting token enters with X counters [part 3, was a/copies: no cube effect copies a ravenous creature spell] | not reachable with the cube's cards |
-| `a22e8f66` | a | replacement | a permanent entering as a copy of a ravenous creature doesn't get ravenous's counters | untested |
-| `e9268eaf` | a | replacement | a fought creature is exiled instead of binned if it dies that turn for any reason, even after the fighter leaves | untested |
+| `a22e8f66` | a | replacement | a permanent entering as a copy of a ravenous creature doesn't get ravenous's counters | `rulings_replacement2::ravenous_counters_come_with_it_and_a_copy_of_it_gets_none_cr_614_1c_707_2` |
+| `e9268eaf` | a | replacement | a fought creature is exiled instead of binned if it dies that turn for any reason, even after the fighter leaves | `rulings_replacement2::mawlocs_fought_creature_is_exiled_when_it_dies_later_that_turn_cr_614_1a` |
 | `c912e42d` | c | NR | a trigger referencing X uses the value chosen at cast, which can differ from the number of counters it entered with [part 3, was a/mana: no cube replacement effect changes the number of counters a ravenous creature enters with, so X and the counters never differ] | not reachable with the cube's cards |
 
 ### Territorial Kavu
@@ -3113,11 +3113,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `d6c4fd3b` | a | replacement | a forced sac/discard from an opponents effect just doesnt happen; an optional version removes the option entirely | untested |
+| `d6c4fd3b` | a | replacement | a forced sac/discard from an opponents effect just doesnt happen; an optional version removes the option entirely | `rulings_replacement2::tamiyo_stops_an_opponents_edict_and_discard_but_not_lethal_damage_cr_101_2` |
 | `086988d9` | a | walkers | a bounce-to-hand loyalty ability cant activate if its own loyalty cost would leave it unable to do so | `rulings_walkers::tamiyo_with_three_loyalty_cant_return_herself_cr_602_2b` |
 | `5397ca7b` | c | NR | a pure forced sac/discard cant be avoided, but an unless-you-do-X version lets you decline with nothing happening [part 3, was a/replacement: no cube card says "unless you sacrifice / discard" or "sacrifice unless you"; the forced case is tested (d6c4fd3b)] | not reachable with the cube's cards |
 | `8837aa73` | c | NR | this sacrifice/discard protection doesn't stop a forced cleanup-step discard caused by a reduced maximum hand size [part 3, was a/replacement: no cube card reduces a maximum hand size] | not reachable with the cube's cards |
-| `348a2bf6` | a | replacement | this protection covers only sacrifices, not lethal damage, 0 toughness, or the legend rule | untested |
+| `348a2bf6` | a | replacement | this protection covers only sacrifices, not lethal damage, 0 toughness, or the legend rule | `rulings_replacement2::tamiyo_stops_an_opponents_edict_and_discard_but_not_lethal_damage_cr_101_2` |
 
 ### Thopter Foundry
 
@@ -3156,10 +3156,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f6790404` | a | replacement | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | untested |
+| `f6790404` | a | replacement | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | `rulings_replacement2::leovold_an_optional_draw_is_taken_only_while_none_was_drawn_cr_121_2` |
 | `f0765796` | a | triggers | if you and your permanent(s) are both targeted by one opposing spell, this punisher trigger fires once per target | `rulings_triggers2::leovold_triggers_once_per_target_of_one_spell_cr_603_2e` |
 | `618eec3a` | a | triggers | this draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | untested |
-| `a137ea0d` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | untested |
+| `a137ea0d` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | `rulings_replacement2::a_draw_hullbreacher_replaced_doesnt_count_for_narset_or_leovold_cr_614_6`; `rulings_replacement2::a_draw_narset_or_leovold_disallows_cant_be_replaced_by_hullbreacher_cr_614_6_121_2` |
 | `f8af3256` | a | other | opponents affected by this one-draw-per-turn restriction have any further draws that turn simply ignored | `cards_m7b_stack::leovold_opponents_draw_at_most_one_card_each_turn` |
 
 ### Atraxa, Grand Unifier
@@ -3183,7 +3183,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Seachrome Coast
@@ -3225,7 +3225,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Badlands
@@ -3249,7 +3249,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Copperline Gorge
@@ -3263,7 +3263,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Taiga
@@ -3292,7 +3292,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `81d5d41d` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Concealed Courtyard
@@ -3306,7 +3306,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Scrubland
@@ -3328,7 +3328,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Volcanic Island
@@ -3356,9 +3356,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Inspiring Vantage
@@ -3379,7 +3379,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Botanical Sanctum
@@ -3393,7 +3393,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | untested |
+| `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
 | `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
 
 ### Restless Vinestalk

@@ -97,6 +97,7 @@ fn pyrogoyf_the_entering_lhurgoyf_deals_damage_equal_to_its_power() {
 
 #[test]
 fn screaming_nemesis_redirects_the_damage_and_the_player_cant_gain_life() {
+    // ruling: 1fec0c93 68a5e08c
     let mut g = scen()
         .battlefield(0, &["Screaming Nemesis"])
         .battlefield(1, &["Mountain", "Plains", "Test Bear"])
