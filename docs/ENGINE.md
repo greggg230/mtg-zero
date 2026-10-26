@@ -5560,6 +5560,11 @@ Thalia's tax on alternative costs, and Daze returning the Island it tapped for t
 trigger, still tapped and attacking, Equipment stays); Headliner Scarlett's card after she
 leaves; daybound at night.
 
+**Checks.** Every engine test binary but `az` (73 binaries, 1,005 passed, 7 ignored as before);
+20,000 fuzz games over the 546 cards and the custom cards, no failure (196 s; matches and replays
+too); `tools/build_py.sh` and `tools/search_smoke.py --specs random,match --seeds 0-1` (4 x 400
+games, 0 failed, 592 s); the digests re-recorded (the three fixes change some games).
+
 **37.6 Deferred, IR.** Nothing deferred: no test is ignored. No ruling showed a wrong IR (Kaito's
 `creature_during_your_turn` says nothing about "in addition to"; the reading was the lowering's,
 `docs/ir_defects.md`).
