@@ -1,23 +1,25 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
-//! f32 vector for a viewer, with no hidden information. Layout v4 (29,972
-//! floats; M8a, ENGINE.md 35: open until the matches of phase 2 are done)
-//! is layout v3 (29,860 floats; frozen at the end of the M7b card batch,
-//! ENGINE.md 22.6) plus the companions block, a global and two per-player
-//! globals; in order:
+//! f32 vector for a viewer, with no hidden information. Layout v4 (33,652
+//! floats; M8a and M8b, ENGINE.md 35.6, 36.7: open until the matches of
+//! phase 2 are done) is layout v3 (29,860 floats; frozen at the end of the
+//! M7b card batch, ENGINE.md 22.6) plus the companions block, a global and
+//! two per-player globals (M8a), and (M8b) a list block of 64 slots with
+//! four more floats each, two more bags and the match block; in order:
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
 //! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash; M7b part 2: poison, cards on an adventure, temporary triggered abilities, no maximum hand size; day and night; part 3b: the initiative, the dungeon room, dungeons completed, experience counters |
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
-//! | bags | 15 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them) |
+//! | bags | 17 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
 //! | permanents | 2 x 32 x 148 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
 //! | stack | 8 x 84 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
-//! | list | 40 x 56 | `LIBRARY` slots 0..39 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition |
+//! | list | 64 x 60 | `LIBRARY` slots 0..63 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition; M8b: sideboarding's pool list (`list::*`: copies in the pool, in the deck, in the deck at the start, a first pick, a basic land, already decided) |
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
+//! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`) |
 //!
 //! v4's globals (ENGINE.md 35): `g[124]` the viewer chose who takes the first
 //! turn (CR 103.1; `g[18]`: the viewer is the starting player); per player
@@ -59,7 +61,7 @@ pub const D: usize = identity::D;
 pub const CODE: usize = 52;
 pub const GLOBALS: usize = 128;
 pub const CONTEXT: usize = 256;
-pub const BAGS: usize = 15;
+pub const BAGS: usize = 17;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
 pub const PERMS: usize = 32;
@@ -70,13 +72,17 @@ pub const STACKS: usize = 8;
 pub const STACK_W: usize = CODE + 32;
 pub const TRIGS: usize = 4;
 pub const TRIG_W: usize = CODE + 4;
-pub const LIST: usize = 40;
-pub const LIST_W: usize = CODE + 4;
+/// M8b: 64 slots (every `LIBRARY` id; a sideboarding pool list has up to
+/// 64 entries), four more floats (`list::*`).
+pub const LIST: usize = 64;
+pub const LIST_W: usize = CODE + 8;
 pub const GYAS: usize = 4;
 pub const GYA_W: usize = CODE + 4;
 /// Companions (layout v4): the viewer's, then the opponent's.
 pub const COMPS: usize = 2;
 pub const COMP_W: usize = CODE + 4;
+/// The match block (layout v4, M8b; globals).
+pub const MATCH: usize = 32;
 
 pub const O_GLOBALS: usize = 0;
 pub const O_CONTEXT: usize = O_GLOBALS + GLOBALS;
@@ -90,7 +96,63 @@ pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
 pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
 pub const O_GYA: usize = O_LIST + LIST * LIST_W;
 pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
-pub const NUM_FEATURES: usize = O_COMP + COMPS * COMP_W;
+pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
+pub const NUM_FEATURES: usize = O_MATCH + MATCH;
+
+/// Offsets inside a list slot (after its card code). A decision's list:
+/// `PRESENT`, `OPTION`, `COPIES` (copies in the list / 4). Sideboarding's
+/// pool list (M8b, ENGINE.md 36.7): `COPIES` = copies in the pool / 4 (0 for
+/// a basic land: any number), the rest below.
+pub mod list {
+    pub const PRESENT: usize = 0;
+    /// Its `LIBRARY` id is an option of the viewer's decision.
+    pub const OPTION: usize = 1;
+    pub const COPIES: usize = 2;
+    /// Copies in the deck being built / 4.
+    pub const IN_DECK: usize = 3;
+    /// Copies in the deck of the last game / 4.
+    pub const AT_START: usize = 4;
+    /// One of the viewer's first picks (part b: hidden from the opponent).
+    pub const FIRST_PICK: usize = 5;
+    /// A basic land (any number may be in a deck, CR 100.2b).
+    pub const BASIC: usize = 6;
+    /// Decided: at or before the last entry changed (entries change in
+    /// increasing order).
+    pub const DECIDED: usize = 7;
+}
+
+/// Offsets inside the match block (layout v4, M8b, ENGINE.md 36.7). "Me" is
+/// the viewer.
+pub mod mtch {
+    /// A best-of-three match (else one game).
+    pub const BO3: usize = 0;
+    /// The current (or last) game's number / 3.
+    pub const GAME: usize = 1;
+    /// Game wins / 2: mine, the opponent's; drawn games / 3.
+    pub const MY_WINS: usize = 2;
+    pub const OPP_WINS: usize = 3;
+    pub const DRAWS: usize = 4;
+    /// Sideboarding now; I sideboard first (I choose who takes the first
+    /// turn of the next game, CR 103.1); I have chosen my deck.
+    pub const SIDEBOARDING: usize = 5;
+    pub const SB_FIRST: usize = 6;
+    pub const SB_DONE: usize = 7;
+    /// My deck's size / 40 (being built, while I sideboard), the
+    /// opponent's last deck's size / 40 (open decklists).
+    pub const MY_DECK: usize = 8;
+    pub const OPP_DECK: usize = 9;
+    /// Per game 0..2: 3 floats, I won, I lost, drawn (games played).
+    pub const RESULTS: usize = 10;
+    /// Per game 0..2 played: I took the first turn; I chose who did.
+    pub const STARTED: usize = 19;
+    pub const CHOSE: usize = 22;
+    /// The entry (k + 1) / 64 the pending `SideboardCount` is about (mine),
+    /// and the last entry changed (k + 1) / 64.
+    pub const COUNT_ENTRY: usize = 25;
+    pub const LAST_ENTRY: usize = 26;
+    pub const END: usize = 27;
+}
+const _: () = assert!(mtch::END <= MATCH);
 
 /// Offsets inside a companion slot (after its card code; layout v4).
 pub mod comp {
@@ -127,6 +189,12 @@ pub mod bag {
     /// Emblems (CR 114), by the identity of the card that made them.
     pub const MY_EMBLEMS: usize = 13;
     pub const OPP_EMBLEMS: usize = 14;
+    /// M8b (ENGINE.md 36.7): the opponent's pool as the viewer knows it (this
+    /// part's open decklists: all of it; part b: but their first picks).
+    pub const OPP_POOL: usize = 15;
+    /// The identities the opponent revealed (made public) in earlier games
+    /// of the match.
+    pub const OPP_REVEALED: usize = 16;
 }
 
 /// Offsets inside a permanent's status (after its card code).
@@ -342,6 +410,10 @@ fn task_code(t: &Task) -> usize {
         _ => 18,
     }
 }
+
+/// The asking-task code of sideboarding (no game task asks it; ENGINE.md
+/// 36.7).
+const TASK_SIDEBOARD: usize = 26;
 
 /// The effect op a frame is at (context block); exhaustive, so a new op is
 /// a compile error here.
@@ -1108,11 +1180,116 @@ impl Game {
     }
 }
 
+/// The match block and the match bags of `a` for `viewer` (ENGINE.md 36.7);
+/// the rest of `out` is the game's (`Game::encode_features`) or
+/// sideboarding's.
+pub fn encode_match(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
+    let m = &a.m;
+    let me = viewer;
+    let op_ = opp(me);
+    let db = a.g.db();
+    let ids = identity::identities(db);
+    let x = &mut out[O_MATCH..O_MATCH + MATCH];
+    x[mtch::BO3] = (m.format == super::Format::Bo3) as u8 as f32;
+    x[mtch::GAME] = m.game_no as f32 / 3.0;
+    x[mtch::MY_WINS] = m.wins[me as usize] as f32 / 2.0;
+    x[mtch::OPP_WINS] = m.wins[op_ as usize] as f32 / 2.0;
+    x[mtch::DRAWS] = m.draws as f32 / 3.0;
+    for i in 0..3 {
+        let r = m.results[i];
+        if r == 0 {
+            continue;
+        }
+        let k = match r {
+            3 => 2,
+            w if w - 1 == me => 0,
+            _ => 1,
+        };
+        x[mtch::RESULTS + 3 * i + k] = 1.0;
+        x[mtch::STARTED + i] = (m.starters[i] == me) as u8 as f32;
+        x[mtch::CHOSE + i] = (m.choosers[i] == me) as u8 as f32;
+    }
+    let size = |c: &[u8]| c.iter().map(|&n| n as f32).sum::<f32>() / 40.0;
+    x[mtch::MY_DECK] = size(&m.decks[me as usize]);
+    x[mtch::OPP_DECK] = size(&m.decks[op_ as usize]);
+    if let Some(sb) = &m.sb {
+        x[mtch::SIDEBOARDING] = 1.0;
+        x[mtch::SB_FIRST] = (sb.order[0] == me) as u8 as f32;
+        x[mtch::SB_DONE] = sb.done[me as usize].is_some() as u8 as f32;
+        if sb.decider() == me {
+            x[mtch::MY_DECK] = size(&sb.counts);
+            x[mtch::LAST_ENTRY] = sb.last.map_or(0.0, |l| (l as f32 + 1.0) / 64.0);
+            x[mtch::COUNT_ENTRY] = sb.asking.map_or(0.0, |k| (k as f32 + 1.0) / 64.0);
+        } else if let Some(d) = &sb.done[me as usize] {
+            x[mtch::MY_DECK] = size(d);
+        }
+    }
+    // The opponent's pool (open decklists: all of it; part b, ENGINE.md
+    // 36.10: but their first picks) and what they revealed before.
+    let pool = &m.pools[op_ as usize];
+    for &(def, n) in &pool.list[..pool.n_cards] {
+        out[O_BAGS + bag::OPP_POOL * D + ids[def as usize] as usize] += 0.25 * n as f32;
+    }
+    for (w, &bits) in m.earlier[op_ as usize].iter().enumerate() {
+        let mut b = bits;
+        while b != 0 {
+            let i = w * 64 + b.trailing_zeros() as usize;
+            out[O_BAGS + bag::OPP_REVEALED * D + i] += 0.25;
+            b &= b - 1;
+        }
+    }
+}
+
+/// The encoding while sideboarding (ENGINE.md 36.7): the match block and
+/// bags, the context (the decision kind, the decider, the entry a
+/// `SideboardCount` is about) and, for the decider, the pool list in the
+/// list block. The game blocks are empty (the last game is over). The
+/// other player's deck being built is not shown (a simultaneous choice).
+pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) {
+    assert_eq!(out.len(), NUM_FEATURES);
+    encode_match(a, viewer, out);
+    let sb = a.sideboarding().expect("sideboarding");
+    let db = a.g.db();
+    let ids = identity::identities(db);
+    let d = &sb.decision;
+    let mine = d.player == viewer;
+    let x = &mut out[O_CONTEXT..O_CONTEXT + CONTEXT];
+    x[ctx::KIND + d.kind as usize] = 1.0;
+    x[ctx::DECIDER_IS_VIEWER] = mine as u8 as f32;
+    x[ctx::PENDING] = 1.0;
+    x[ctx::TASK + TASK_SIDEBOARD] = 1.0;
+    if !mine {
+        return;
+    }
+    x[ctx::OPTIONS] = d.options.len() as f32 / 32.0;
+    let pool = &a.m.pools[viewer as usize];
+    if let Some(k) = sb.asking {
+        code(&mut x[ctx::CARD..ctx::CARD + CODE], db, ids, pool.list[k as usize].0);
+        x[ctx::HAS_CARD] = 1.0;
+    }
+    let legal = |id: u16| d.options.binary_search_by_key(&id, |o| o.action).is_ok();
+    for (k, &(def, n)) in pool.list.iter().enumerate().take(LIST) {
+        let o = O_LIST + k * LIST_W;
+        code(&mut out[o..o + CODE], db, ids, def);
+        let s = &mut out[o + CODE..o + LIST_W];
+        let basic = k >= pool.n_cards;
+        s[list::PRESENT] = 1.0;
+        s[list::OPTION] = (d.kind == crate::decision::DecisionKind::Sideboard && legal(act::LIBRARY + k as u16)) as u8 as f32;
+        s[list::COPIES] = if basic { 0.0 } else { n as f32 / 4.0 };
+        s[list::IN_DECK] = sb.counts[k] as f32 / 4.0;
+        s[list::AT_START] = sb.start[k] as f32 / 4.0;
+        s[list::FIRST_PICK] = pool.first_picks.binary_search(&def).is_ok() as u8 as f32;
+        s[list::BASIC] = basic as u8 as f32;
+        s[list::DECIDED] = sb.last.is_some_and(|l| k <= l as usize) as u8 as f32;
+    }
+}
+
 /// The object layout of this encoding for zero-core's token network (arch `tokens`, zero-core
 /// `python/zero/net.py` `TokenNet`; ENGINE.md 22): JSON with the identity capacity as the
 /// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
-/// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (15 multisets of
-/// 1024 identities). Every other feature (the 128 globals) is the global token's input.
+/// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (17 multisets of
+/// 1024 identities). Every other feature (the 128 globals and the match block) is the global
+/// token's input.
 /// Checked in as `mtgz/az/layout_v4.json` (a test keeps the two equal). `cards` (the name behind
 /// each identity of `db`, for analysis; null where none) is not read by the network.
 pub fn layout_json(db: &'static CardDb) -> String {

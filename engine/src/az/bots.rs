@@ -65,6 +65,17 @@ fn replacement_choice(g: &Game, d: &Decision) -> u16 {
 
 pub use v1::HeuristicV1;
 
+/// The heuristic's sideboarding between the games of a match (ENGINE.md
+/// 36.5): it keeps its deck (`PASS`, always legal at the first decision: the
+/// last game's deck is legal); the first legal option otherwise.
+pub fn sideboard(sb: &super::matches::Sideboarding, legal: &[u16]) -> u16 {
+    if sb.decision.kind == K::Sideboard && legal.contains(&act::PASS) {
+        act::PASS
+    } else {
+        legal[0]
+    }
+}
+
 pub struct Heuristic {
     pub rng: Rng,
     /// Activations at priority this turn: (player, card, ability, times).

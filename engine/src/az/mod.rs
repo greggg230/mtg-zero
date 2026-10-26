@@ -1,13 +1,16 @@
-//! The zero-core game `mtg` (ENGINE.md 21): one game of Magic between two
-//! 40-card decks of supported cards, as a `zero_search::SearchGame`.
+//! The zero-core game `mtg` (ENGINE.md 21): one match of Magic between two
+//! players with 40-card decks of supported cards, as a
+//! `zero_search::SearchGame`: one game (`"format": "bo1"`, the default) or
+//! a best-of-three with sideboarding (`"bo3"`, ENGINE.md 36: `matches.rs`).
 //!
 //! * Decisions are the engine's (`pending_decision`); actions are its
 //!   decision-relative ids (`NUM_ACTIONS` = 1024, ENGINE.md 11).
 //! * `step` = `Game::apply` with its chance keys (ENGINE.md 10);
 //!   `force_chance` replays a key in another world; `determinize` resamples
 //!   what the viewer does not know.
-//! * `result`: 1 / 0, a draw (including the turn cap) 0.5 each; `margin`:
-//!   the life difference / 20 in [-1, 1].
+//! * `result`: 1 / 0, a draw (including the turn cap) 0.5 each (a match:
+//!   by game wins); `margin`: the life difference / 20 in [-1, 1] (a match:
+//!   mostly the game wins, ENGINE.md 36.6).
 //! * `encode`: `encode.rs` (13,532 floats, no hidden information).
 //! * Decks: `decks.rs` (random two-colour decks per game, or the fixed
 //!   evaluation set, or given lists).
@@ -17,6 +20,8 @@ pub mod bots;
 pub mod decks;
 pub mod encode;
 pub mod identity;
+pub mod matches;
+pub mod pools;
 
 use crate::db::CardDb;
 use crate::game::{Game, GameSpec};
@@ -27,6 +32,7 @@ use zero_search::game::{Bot, SearchGame, MAX_SEATS};
 
 pub use decks::DeckGen;
 pub use encode::NUM_FEATURES;
+pub use matches::{Format, MatchState, Seat};
 
 /// Where a game's decks come from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,7 +62,11 @@ pub enum DeckMode {
 /// evaluation decks have generated sideboards). `max_turns`: the game is a
 /// draw after this many turns (both players' turns count). `chooser`: the
 /// seat that chooses who takes the first turn (CR 103.1; default: chosen at
-/// random each game).
+/// random each game). M8b (ENGINE.md 36): `format`: `"bo1"` (one game, the
+/// default) or `"bo3"` (a best-of-three match with sideboarding); `pools`:
+/// random and evaluation decks come from generated card pools of 45 cards
+/// built into decks by the heuristic deckbuilder, the rest of the pool the
+/// sideboard (`pools.rs`; default: true for `"bo3"`, false for `"bo1"`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -66,6 +76,8 @@ pub struct MtgSpec {
     pub eval_decks: u32,
     pub eval_seed: u64,
     pub chooser: Option<u8>,
+    pub format: Format,
+    pub pools: bool,
 }
 
 impl Default for MtgSpec {
@@ -78,6 +90,8 @@ impl Default for MtgSpec {
             eval_decks: 16,
             eval_seed: 1,
             chooser: None,
+            format: Format::Bo1,
+            pools: false,
         }
     }
 }
@@ -91,10 +105,19 @@ impl MtgSpec {
         let v: Value = serde_json::from_str(json).map_err(|e| format!("mtg spec: {e}"))?;
         let obj = v.as_object().ok_or("mtg spec: not a JSON object")?;
         let db = CardDb::cube();
+        let mut pools = None;
         for (k, x) in obj {
             let int = || x.as_u64().ok_or_else(|| format!("mtg spec: {k} must be a non-negative integer"));
             match k.as_str() {
                 "max_turns" => s.max_turns = int()? as u32,
+                "format" => {
+                    s.format = match x.as_str() {
+                        Some("bo1") => Format::Bo1,
+                        Some("bo3") => Format::Bo3,
+                        _ => return Err(format!("mtg spec: format must be \"bo1\" or \"bo3\", not {x}")),
+                    }
+                }
+                "pools" => pools = Some(x.as_bool().ok_or("mtg spec: pools must be a boolean")?),
                 "mulligans" => s.mulligans = x.as_bool().ok_or("mtg spec: mulligans must be a boolean")?,
                 "eval_decks" => s.eval_decks = (int()? as u32).max(1),
                 "eval_seed" => s.eval_seed = int()?,
@@ -157,6 +180,7 @@ impl MtgSpec {
         if s.max_turns == 0 {
             return Err("mtg spec: max_turns must be positive".into());
         }
+        s.pools = pools.unwrap_or(s.format == Format::Bo3);
         Ok(s)
     }
 
@@ -167,10 +191,35 @@ impl MtgSpec {
     }
 
     /// The two decks of a game with this seed and their sideboards
-    /// (ENGINE.md 35).
+    /// (ENGINE.md 35; with `pools`, the deckbuilder's decks and the rest of
+    /// the pools, ENGINE.md 36.4).
     pub fn pools(&self, seed: u64) -> [(Vec<DefId>, Vec<DefId>); 2] {
+        self.seats(seed).map(|s| (s.deck, s.sideboard))
+    }
+
+    /// The first game's decks, sideboards and first picks of a match with
+    /// this seed (ENGINE.md 36.4).
+    pub fn seats(&self, seed: u64) -> [Seat; 2] {
         let db = CardDb::cube();
-        match &self.decks {
+        let built = |p: pools::Pool| -> Seat {
+            let (deck, sideboard) = pools::build_deck(db, &p.cards, &self.gen);
+            Seat { deck, sideboard, first_picks: p.first_picks }
+        };
+        if self.pools {
+            match &self.decks {
+                DeckMode::Random => {
+                    let mut rng = Rng::new(seed ^ 0x9001_5EED_0B03);
+                    return pools::random_pools(db, &mut rng).map(built);
+                }
+                DeckMode::Eval => {
+                    let i = (zero_search::rng::split64(seed) % self.eval_decks as u64) as u32;
+                    return pools::eval_pools(db, self.eval_seed, i).map(built);
+                }
+                _ => {}
+            }
+        }
+        let seat = |(deck, sideboard): (Vec<DefId>, Vec<DefId>)| Seat { deck, sideboard, first_picks: Vec::new() };
+        let p: [(Vec<DefId>, Vec<DefId>); 2] = match &self.decks {
             DeckMode::Random => {
                 let mut rng = Rng::new(seed ^ 0x00DE_C50F_2A11);
                 let mut side = Rng::new(seed ^ 0x51DE_B0A2_D5EE);
@@ -182,7 +231,8 @@ impl MtgSpec {
             }
             DeckMode::Lists(a, b) => [(a.clone(), Vec::new()), (b.clone(), Vec::new())],
             DeckMode::ListsWithSideboards(p) => p.clone(),
-        }
+        };
+        p.map(seat)
     }
 
     /// The same spec with the fixed evaluation decks (zero-core uses one
@@ -200,17 +250,22 @@ impl MtgSpec {
     }
 }
 
-/// One game of Magic for zero-core.
+/// One match of Magic for zero-core: its current (or last) game and the
+/// rest of the match (ENGINE.md 36).
 #[derive(Clone)]
 pub struct MtgAz {
     pub g: Game,
+    pub m: MatchState,
 }
 
 impl MtgAz {
     pub fn new(spec: &MtgSpec, seed: u64) -> Result<MtgAz, String> {
-        let [(d0, s0), (d1, s1)] = spec.pools(seed);
+        let seats = spec.seats(seed);
         let gspec = GameSpec { max_turns: spec.max_turns, mulligans: spec.mulligans, chooser: spec.chooser, ..GameSpec::default() };
-        Ok(MtgAz { g: Game::with_sideboards(CardDb::cube(), gspec, [&d0, &d1], [&s0, &s1], seed)? })
+        let [a, b] = &seats;
+        let g = Game::with_sideboards(CardDb::cube(), gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
+        let m = MatchState::new(CardDb::cube(), spec.format, gspec, &seats, seed)?;
+        Ok(MtgAz { g, m })
     }
 }
 
@@ -219,7 +274,10 @@ struct HeuristicBot(bots::Heuristic);
 
 impl Bot<MtgAz> for HeuristicBot {
     fn choose(&mut self, g: &MtgAz, legal: &[u16]) -> u16 {
-        self.0.choose(&g.g, legal)
+        match g.sideboarding() {
+            Some(sb) => bots::sideboard(sb, legal),
+            None => self.0.choose(&g.g, legal),
+        }
     }
 }
 
@@ -247,15 +305,24 @@ impl SearchGame for MtgAz {
     }
 
     fn to_move(&self) -> Option<usize> {
-        self.g.to_move().map(|p| p as usize)
+        match &self.m.sb {
+            Some(sb) => Some(sb.decider() as usize),
+            None => self.g.to_move().map(|p| p as usize),
+        }
     }
 
     fn legal_actions(&self, out: &mut Vec<u16>) {
-        self.g.legal_actions(out);
+        match &self.m.sb {
+            Some(sb) => {
+                out.clear();
+                out.extend(sb.decision.options.iter().map(|o| o.action));
+            }
+            None => self.g.legal_actions(out),
+        }
     }
 
     fn step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
-        self.g.apply(a, chance)
+        self.match_step(a, chance)
     }
 
     fn force_chance(&mut self, forced: &[u64]) {
@@ -264,33 +331,64 @@ impl SearchGame for MtgAz {
 
     fn result(&self) -> [f32; MAX_SEATS] {
         let mut r = [0.0; MAX_SEATS];
-        let v = if self.g.is_over() { self.g.result_values() } else { [0.5, 0.5] };
+        let v = match self.m.format {
+            Format::Bo1 if self.g.is_over() => self.g.result_values(),
+            Format::Bo3 if self.m.over => self.m.result(),
+            _ => [0.5, 0.5],
+        };
         r[0] = v[0];
         r[1] = v[1];
         r
     }
 
+    /// Best-of-one: the game's life difference / 20. Best-of-three
+    /// (ENGINE.md 36.6): 0.75 x the game-win difference / 2 + 0.25 x the
+    /// current (at the end: the last) game's life margin.
     fn margin(&self, seat: usize) -> f32 {
         let me = self.g.life(seat as u8).max(0) as f32;
         let them = self.g.life(1 - seat as u8).max(0) as f32;
-        ((me - them) / 20.0).clamp(-1.0, 1.0)
+        let life = ((me - them) / 20.0).clamp(-1.0, 1.0);
+        match self.m.format {
+            Format::Bo1 => life,
+            Format::Bo3 => {
+                let w = (self.m.wins[seat] as f32 - self.m.wins[1 - seat] as f32) / 2.0;
+                0.75 * w.clamp(-1.0, 1.0) + 0.25 * life
+            }
+        }
     }
 
+    /// Life (best-of-one), game wins (best-of-three).
     fn score(&self, seat: usize) -> f32 {
-        self.g.life(seat as u8) as f32
+        match self.m.format {
+            Format::Bo1 => self.g.life(seat as u8) as f32,
+            Format::Bo3 => self.m.wins[seat] as f32,
+        }
     }
 
+    /// The game's hidden information (not while sideboarding: the last
+    /// game is over and nothing of it carries over), and the match's RNG
+    /// that seeds the later games. (Part b: the opponent's deck within
+    /// their pool, ENGINE.md 36.10.)
     fn determinize(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng) {
         let mut r = Rng::new(rng.next_u64());
-        self.g.determinize(viewer as u8, &mut r);
+        if self.m.sb.is_none() {
+            self.g.determinize(viewer as u8, &mut r);
+        }
+        self.m.rng = Rng::new(r.next_u64());
     }
 
     fn encode(&self, viewer: usize, out: &mut [f32]) {
-        self.g.encode_features(viewer as u8, out);
+        if self.m.sb.is_some() {
+            encode::encode_sideboarding(self, viewer as u8, out);
+        } else {
+            self.g.encode_features(viewer as u8, out);
+            encode::encode_match(self, viewer as u8, out);
+        }
     }
 
+    /// The turns of the match's games.
     fn rounds(&self) -> u32 {
-        self.g.turn().number
+        self.m.turns_before + if self.m.format == Format::Bo3 && (self.m.over || self.m.sb.is_some()) { 0 } else { self.g.turn().number }
     }
 
     /// Minor: which mana source to tap next while paying (ENGINE.md 22; zero-core searches it

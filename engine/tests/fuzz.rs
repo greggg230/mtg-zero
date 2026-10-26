@@ -8,6 +8,14 @@
 //! worlds `determinize` samples.
 //!
 //! `FUZZ_GAMES=n` sets the number of games (default 300).
+//!
+//! Matches (M8b, ENGINE.md 36.8): `fuzz_random_matches` plays best-of-three
+//! matches through `MtgAz` with random actions (sideboarding too), checking
+//! the legal actions, the game invariants, clones, `determinize` (the
+//! decider's actions, view and encoding), the decks of every later game
+//! (legal, from the pool), the chooser of every later game (CR 103.1) and
+//! the match's end; `FUZZ_MATCHES=n` (default `FUZZ_GAMES` / 20, at least
+//! 20).
 
 mod common;
 
@@ -42,7 +50,7 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
         ];
     }
     let (_, spells) = common::fuzz_pool();
-    let mut sideboard = |side: &mut Rng| -> Vec<u16> { (0..7).map(|_| spells[side.below(spells.len() as u32) as usize]).collect() };
+    let sideboard = |side: &mut Rng| -> Vec<u16> { (0..7).map(|_| spells[side.below(spells.len() as u32) as usize]).collect() };
     let d0 = common::random_deck(db, &mut rng);
     let d1 = common::random_deck(db, &mut rng);
     [(d0, sideboard(&mut side)), (d1, sideboard(&mut side))]
@@ -351,5 +359,157 @@ fn same_seed_and_actions_replay_identically() {
         // And the whole random game is reproducible.
         let b = play(seed, false);
         assert_eq!(b.fingerprint, a.fingerprint);
+    }
+}
+
+/// The spec of fuzzed match `seed`: random pools (bo3's default), the
+/// evaluation pools, M8a's generated decks with 7-card sideboards, or short
+/// games (drawn games: the turn cap).
+fn match_spec(seed: u64) -> engine::az::MtgSpec {
+    let json = match seed % 4 {
+        0 => r#"{"format": "bo3"}"#,
+        1 => r#"{"format": "bo3", "decks": "eval"}"#,
+        2 => r#"{"format": "bo3", "pools": false}"#,
+        _ => r#"{"format": "bo3", "max_turns": 12}"#,
+    };
+    engine::az::MtgSpec::parse(json).unwrap()
+}
+
+struct PlayedMatch {
+    actions: Vec<u16>,
+    keys: Vec<u64>,
+    fingerprint: u64,
+    results: [u8; 3],
+    games: u8,
+    sideboard_decisions: u32,
+    changed_decks: u32,
+}
+
+fn play_match(seed: u64, checks: bool) -> PlayedMatch {
+    use engine::az::MtgAz;
+    use zero_search::game::SearchGame;
+    let sp = match_spec(seed);
+    let mut g = MtgAz::new_game(&sp, 2, seed).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+    let mut rng = Rng::new(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 5);
+    let (mut legal, mut legal2, mut keys, mut all_keys, mut actions) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut x1 = vec![0.0f32; engine::az::NUM_FEATURES];
+    let mut x2 = vec![0.0f32; engine::az::NUM_FEATURES];
+    let (mut sideboard_decisions, mut changed_decks) = (0u32, 0u32);
+    let mut decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
+    let mut game_no = 1;
+    while let Some(p) = g.to_move() {
+        g.legal_actions(&mut legal);
+        assert!(!legal.is_empty(), "match {seed}: no legal action");
+        assert!(legal.windows(2).all(|w| w[0] < w[1]), "match {seed}: actions not sorted/unique");
+        assert!(legal.iter().all(|&a| (a as usize) < NUM_ACTIONS));
+        let sb = g.sideboarding().is_some();
+        sideboard_decisions += sb as u32;
+        let a = legal[rng.below(legal.len() as u32) as usize];
+        if checks && rng.below(40) == 0 {
+            // A clone continues identically.
+            let (mut c1, mut c2) = (g.clone(), g.clone());
+            let (mut k1, mut k2) = (Vec::new(), Vec::new());
+            c1.step(a, &mut k1).unwrap();
+            c2.step(a, &mut k2).unwrap();
+            assert_eq!((c1.g.fingerprint(), &k1, c1.m.game_no), (c2.g.fingerprint(), &k2, c2.m.game_no), "match {seed}: clones diverged");
+            // determinize keeps the decider's actions, view and encoding.
+            let mut d = g.clone();
+            d.determinize(p, &mut zero_search::rng::Rng::new(rng.next_u64()));
+            d.legal_actions(&mut legal2);
+            assert_eq!(legal, legal2, "match {seed}: determinize changed the decider's actions");
+            x1.fill(0.0);
+            x2.fill(0.0);
+            g.encode(p, &mut x1);
+            d.encode(p, &mut x2);
+            assert!(x1 == x2, "match {seed}: determinize changed the decider's encoding");
+            if !sb {
+                assert_eq!(g.g.view_of(p as u8), d.g.view_of(p as u8), "match {seed}: determinize changed the view");
+            }
+        }
+        g.step(a, &mut keys).unwrap_or_else(|e| panic!("match {seed}: {e}"));
+        all_keys.append(&mut keys);
+        actions.push(a);
+        if g.sideboarding().is_none() && !g.match_over() {
+            g.g.check_invariants().unwrap_or_else(|e| panic!("match {seed} step {}: {e}", actions.len()));
+        }
+        if g.m.game_no != game_no && g.sideboarding().is_none() {
+            // A later game: its decks are legal and from the pools; its
+            // chooser is the previous game's loser, or after a draw its
+            // chooser (CR 103.1).
+            game_no = g.m.game_no;
+            let i = (game_no - 2) as usize;
+            let want = match g.m.results[i] {
+                3 => g.m.choosers[i],
+                w => 1 - (w - 1),
+            };
+            assert_eq!(g.g.turn().chooser, want, "match {seed}: the chooser of game {game_no}");
+            for q in 0..2u8 {
+                let pool = &g.m.pools[q as usize];
+                let deck = g.m.deck(q);
+                assert!((pool.min_deck..=pool.max_deck).contains(&deck.len()), "match {seed}: {} cards", deck.len());
+                for (k, &(_, n)) in pool.list.iter().enumerate() {
+                    assert!(g.m.decks[q as usize][k] <= n.max(decks[q as usize][k]));
+                }
+                changed_decks += (g.m.decks[q as usize] != decks[q as usize]) as u32;
+            }
+            decks = [g.m.decks[0].clone(), g.m.decks[1].clone()];
+        }
+        assert!(actions.len() < 300_000, "match {seed}: does not end");
+    }
+    let m = &g.m;
+    assert!(g.match_over());
+    assert!(m.wins.contains(&2) || m.game_no == 3, "match {seed}: ended early: {:?}", m.results);
+    assert_eq!(m.wins[0] + m.wins[1] + m.draws, m.game_no);
+    let r = g.result();
+    assert!((r[0] + r[1] - 1.0).abs() < 1e-6);
+    PlayedMatch {
+        actions,
+        keys: all_keys,
+        fingerprint: g.g.fingerprint(),
+        results: m.results,
+        games: m.game_no,
+        sideboard_decisions,
+        changed_decks,
+    }
+}
+
+#[test]
+fn fuzz_random_matches() {
+    let games: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+    let n: u64 = std::env::var("FUZZ_MATCHES").ok().and_then(|s| s.parse().ok()).unwrap_or((games / 20).max(20));
+    let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let (mut games_played, mut draws, mut decisions, mut sb, mut changed, mut three) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+    for seed in first..first + n {
+        let p = std::panic::catch_unwind(|| play_match(seed, true))
+            .unwrap_or_else(|e| panic!("match {seed} failed (rerun: FUZZ_FIRST={seed} FUZZ_MATCHES=1): {e:?}"));
+        games_played += p.games as u64;
+        draws += p.results.iter().filter(|&&r| r == 3).count() as u64;
+        decisions += p.actions.len() as u64;
+        sb += p.sideboard_decisions as u64;
+        changed += p.changed_decks as u64;
+        three += (p.games == 3) as u64;
+    }
+    println!(
+        "{n} matches: {games_played} games ({three} matches of three, {draws} drawn games), mean decisions {:.1}, \
+         sideboarding decisions {sb}, decks changed {changed}",
+        decisions as f64 / n as f64
+    );
+    assert!(sb > 0 && changed > 0 && three > 0);
+}
+
+#[test]
+fn same_seed_and_actions_replay_matches_identically() {
+    use engine::az::MtgAz;
+    use zero_search::game::SearchGame;
+    for seed in 2000..2012 {
+        let a = play_match(seed, false);
+        let mut g = MtgAz::new_game(&match_spec(seed), 2, seed).unwrap();
+        let mut keys = Vec::new();
+        for &x in &a.actions {
+            g.step(x, &mut keys).unwrap();
+        }
+        assert_eq!((g.g.fingerprint(), g.m.results), (a.fingerprint, a.results), "match {seed}");
+        assert_eq!(keys, a.keys, "match {seed}: chance keys differ");
+        assert_eq!(play_match(seed, false).fingerprint, a.fingerprint);
     }
 }

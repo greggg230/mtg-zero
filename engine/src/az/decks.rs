@@ -79,7 +79,7 @@ fn search_colors(db: &CardDb, f: &Filter) -> u8 {
 }
 
 /// A fetch land: a land without mana abilities that searches for lands.
-fn is_fetch(d: &CardDef) -> bool {
+pub(crate) fn is_fetch(d: &CardDef) -> bool {
     d.activated.iter().all(|a| a.mana().is_none())
         && d.activated.iter().any(|a| match &a.effect {
             ActEffect::Stack(ab) => ab.program.iter().any(|op| matches!(op, Op::Search { .. })),
@@ -88,7 +88,7 @@ fn is_fetch(d: &CardDef) -> bool {
 }
 
 /// Does the card interact (damage, removal, counters, discard)?
-fn interacts(d: &CardDef) -> bool {
+pub(crate) fn interacts(d: &CardDef) -> bool {
     let prog = |ops: &[Op]| {
         ops.iter().any(|op| {
             matches!(
@@ -113,7 +113,7 @@ fn interacts(d: &CardDef) -> bool {
 }
 
 /// The supported non-token cards: (lands, spells).
-fn card_pool(db: &CardDb) -> (Vec<DefId>, Vec<DefId>) {
+pub(crate) fn card_pool(db: &CardDb) -> (Vec<DefId>, Vec<DefId>) {
     let (mut lands, mut spells) = (Vec::new(), Vec::new());
     for id in 0..db.num_cards() as DefId {
         let d = db.def(id);
@@ -130,7 +130,7 @@ fn card_pool(db: &CardDb) -> (Vec<DefId>, Vec<DefId>) {
 }
 
 /// Weighted pick without replacement; returns the index into `w`.
-fn pick(rng: &mut Rng, w: &[f64]) -> Option<usize> {
+pub(crate) fn pick(rng: &mut Rng, w: &[f64]) -> Option<usize> {
     let tot: f64 = w.iter().sum();
     if tot <= 0.0 {
         return None;

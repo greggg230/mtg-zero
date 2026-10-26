@@ -192,6 +192,18 @@ pub enum DecisionKind {
     /// definition (`Choice::Def`); `PASS` = none. Asked only when there is
     /// one. M8a.
     RevealCompanion,
+    /// Sideboarding between the games of a match (CR 100.4, 100.2b; the
+    /// match's, not a game's: ENGINE.md 36): the decider changes the count
+    /// of entries of their pool list (the pool's cards sorted by
+    /// definition, then the five basic lands), in increasing list order:
+    /// `LIBRARY` + k = change entry k (a single card in or out of the deck;
+    /// a basic land or a card with several copies: a `SideboardCount`
+    /// follows), k after the last entry changed; `PASS` = done (the deck as
+    /// it is, legal: 40 cards or more). M8b.
+    Sideboard,
+    /// The new count in the deck of the entry just chosen (`NUMBER` + n, n
+    /// other than its count now). M8b.
+    SideboardCount,
     // (At most 64 kinds: the network's context block has 64 slots, layout v3. "Top or
     // bottom" is a `YesNo`: `YES` = top.)
 }

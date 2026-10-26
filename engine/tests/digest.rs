@@ -20,7 +20,10 @@
 //! compares with `tests/data/digests.txt`; `DIGEST_WRITE=1` records it
 //! instead (only when behaviour is meant to change, or for a new baseline).
 //! `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` change the game counts (a
-//! subset of the recorded games is still compared).
+//! subset of the recorded games is still compared). `DIGEST_ENCODING=0`
+//! leaves the encodings out and prints the combined digest only (compare it
+//! across a layout change, run on both sides; the recorded file covers the
+//! encodings).
 
 mod common;
 
@@ -113,6 +116,11 @@ fn hash_determinized(h: &mut H, g: &Game, seed: u64, step: u32, legal: &mut Vec<
 }
 
 fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
+    // `DIGEST_ENCODING=0`: leave the encodings out (the behaviour alone, to
+    // compare across a layout change: ENGINE.md 36.9).
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0") {
+        return;
+    }
     let Some(viewer) = g.to_move() else { return };
     buf.fill(0.0);
     g.encode_features(viewer, buf);
@@ -189,6 +197,9 @@ fn behaviour_digests() {
         t.elapsed().as_secs_f64(),
         all.0
     );
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0") {
+        return;
+    }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/digests.txt");
     if std::env::var("DIGEST_WRITE").is_ok() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
