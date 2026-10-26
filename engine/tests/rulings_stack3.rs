@@ -681,3 +681,670 @@ fn a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_oppone
         }
     }
 }
+
+// ---- uncounterable spells: what else the spell does (CR 101.2) ---------------------------------
+
+#[test]
+fn reprieve_returns_an_uncounterable_spell_and_mana_drain_still_gives_its_mana_cr_101_2() {
+    // ruling: 5c58b83a 7c1cc9dc 360847f0
+    // P1's Abrupt Decay ("can't be countered") at P0's Sol Ring: Reprieve
+    // returns it to P1's hand (not a counter) and P0 draws. Mana Drain at
+    // it: not countered, the Sol Ring is destroyed, and P0 still gets {C}{C}
+    // at its next main phase. The same under Hexing Squelcher ("spells you
+    // control can't be countered") with a Lightning Bolt.
+    let mut g = scen()
+        .battlefield(0, &["Sol Ring", "Plains", "Plains"])
+        .hand(0, &["Reprieve"])
+        .battlefield(1, &["Bayou", "Bayou"])
+        .hand(1, &["Abrupt Decay"])
+        .at(Step::Main1, 1)
+        .start();
+    let ring = bf(&g, 0, "Sol Ring");
+    let ad = g.card(1, "Abrupt Decay", Zone::Hand);
+    g.choose(Choice::Cast(ad));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(ring));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0);
+    let hand = g.player(0).hand.len();
+    let rp = g.card(0, "Reprieve", Zone::Hand);
+    g.choose(Choice::Cast(rp));
+    let t = g.tgt(ad);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(t));
+    assert_eq!(g.obj(ad).zone, Zone::Hand, "{}", log(&g));
+    assert_eq!(g.obj(ring).zone, Zone::Battlefield);
+    assert_eq!(g.player(0).hand.len(), hand, "Reprieve left, a card drawn");
+    for (spell, extra) in [("Abrupt Decay", None), ("Lightning Bolt", Some("Hexing Squelcher"))] {
+        let mut sc = scen()
+            .battlefield(0, &["Sol Ring", "Island", "Island", "Test Bear"])
+            .hand(0, &["Mana Drain"])
+            .battlefield(1, &["Bayou", "Bayou", "Mountain"])
+            .hand(1, &[spell])
+            .at(Step::Main1, 1);
+        if let Some(e) = extra {
+            sc = sc.battlefield(1, &[e]);
+        }
+        let mut g = sc.start();
+        let target = if spell == "Abrupt Decay" { bf(&g, 0, "Sol Ring") } else { bf(&g, 0, "Test Bear") };
+        let c = g.card(1, spell, Zone::Hand);
+        g.choose(Choice::Cast(c));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(g.tgt(target));
+        pay(&mut g);
+        g.drive_until(|g| at_priority(g) && g.turn().priority == 0);
+        let md = g.card(0, "Mana Drain", Zone::Hand);
+        g.choose(Choice::Cast(md));
+        let t = g.tgt(c);
+        resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(t));
+        assert_eq!(g.obj(target).zone, Zone::Graveyard, "{spell} not countered\n{}", log(&g));
+        quiet_until(&mut g, |g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g) && g.stack().is_empty());
+        let mv = if spell == "Abrupt Decay" { 2 } else { 1 };
+        assert_eq!(g.player(0).pool.total(), mv, "{spell}: Mana Drain's mana all the same\n{}", log(&g));
+    }
+}
+
+// ---- spells cast during a resolution or from other zones: timing (CR 608.2g, 601.2) ------------
+
+#[test]
+fn spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g() {
+    // ruling: 92f52ee7 d4e8981b 95b53341
+    // Malcolm's combat-damage trigger (four chorus counters) casts the
+    // discarded sorcery Chain Lightning during combat. Chandra's +1 casts
+    // an exiled sorcery while its ability resolves (the stack holds the
+    // ability). Jace, Telepath Unbound's -3 lets P0 cast a sorcery from the
+    // graveyard this turn, at sorcery timing only.
+    let chorus = Counter::Named(common::db().subtype_id("counter:chorus").unwrap());
+    let mut g = scen()
+        .battlefield(0, &["Malcolm, Alluring Scoundrel"])
+        .counters(0, "Malcolm, Alluring Scoundrel", chorus, 3)
+        .hand(0, &["Chain Lightning"])
+        .library(0, &["Island", "Island"])
+        .at(Step::DeclareAttackers, 0)
+        .start();
+    let m = bf(&g, 0, "Malcolm, Alluring Scoundrel");
+    let cl = g.card(0, "Chain Lightning", Zone::Hand);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Card(m));
+    if g.kind() == Some(DecisionKind::AttackTarget) {
+        g.choose(player(1));
+    }
+    g.choose(Choice::Pass);
+    quiet_until_with(&mut g, |g| g.turn().step == Step::Main2, |g| match g.kind() {
+        Some(DecisionKind::Discard) | Some(DecisionKind::ChooseDiscard) if g.has_option(Choice::Card(cl)) => Some(Choice::Card(cl)),
+        Some(DecisionKind::YesNo) if g.pending_decision().unwrap().player == 0 => Some(Choice::Yes),
+        Some(DecisionKind::Target) => Some(player(1)),
+        _ => None,
+    });
+    assert_eq!(g.life(1), 20 - 2 - 3, "Malcolm's 2, Chain Lightning's 3 in combat\n{}", log(&g));
+    // Chandra's +1: the exiled top card, a sorcery, cast while the
+    // ability resolves.
+    let mut g = scen()
+        .battlefield(0, &["Chandra, Torch of Defiance", "Mountain"])
+        .library(0, &["Chain Lightning", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let ch = bf(&g, 0, "Chandra, Torch of Defiance");
+    g.choose(ab(ch, 0));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::YesNo) if g.pending_decision().unwrap().player == 0 => Some(Choice::Yes),
+        Some(DecisionKind::Target) => Some(player(1)),
+        _ => None,
+    });
+    assert_eq!(g.life(1), 17, "{}", log(&g));
+    // Jace, Telepath Unbound's -3: Chain Lightning from the graveyard, not
+    // in combat.
+    let jace = "Jace, Vryn's Prodigy // Jace, Telepath Unbound";
+    let mut g = scen()
+        .battlefield(0, &[jace, "Mountain", "Mountain", "Test Bear"])
+        .transformed(0, jace)
+        .counters(0, "Jace, Telepath Unbound", Counter::Loyalty, 5)
+        .graveyard(0, &["Chain Lightning"])
+        .at(Step::Main1, 0)
+        .start();
+    let j = bf(&g, 0, "Jace, Telepath Unbound");
+    let cl = g.card(0, "Chain Lightning", Zone::Graveyard);
+    let a = (0..3u8).map(|i| ab(j, i)).filter(|&a| g.has_option(a)).last().expect("-3");
+    g.choose(a);
+    let t = g.tgt(cl);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(t)).then_some(t));
+    let bear = bf(&g, 0, "Test Bear");
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers) || (at_priority(g) && g.turn().step == Step::BeginCombat));
+    if at_priority(&g) {
+        assert!(!g.has_option(Choice::Cast(cl)), "a sorcery: not in combat");
+    }
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    g.choose(Choice::Card(bear));
+    if g.kind() == Some(DecisionKind::AttackTarget) {
+        g.choose(player(1));
+    }
+    g.choose(Choice::Pass);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0);
+    assert!(!g.has_option(Choice::Cast(cl)), "not in combat: {}", opts(&g));
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
+    assert!(g.has_option(Choice::Cast(cl)), "in the main phase: {}", opts(&g));
+}
+
+// ---- copies on the stack (CR 707.10) -----------------------------------------------------------
+
+#[test]
+fn storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10() {
+    // ruling: c33f0cb3 bf7e6c38 f9e25ba1
+    // Brain Freeze with storm 2 (two spells before): one copy at P0, one at
+    // P1, the original at P1. P1 counters the original (Counterspell): the
+    // copies still resolve. Lose Focus replicated once, countered: its
+    // replicate trigger still copies it.
+    let mut g = scen()
+        .battlefield(0, &["Island"; 4])
+        .hand(0, &["Mishra's Bauble", "Mishra's Bauble", "Brain Freeze"])
+        .library(0, &["Island"; 20])
+        .library(1, &["Forest"; 20])
+        .battlefield(1, &["Island", "Island"])
+        .hand(1, &["Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    for _ in 0..2 {
+        let b = g.card(0, "Mishra's Bauble", Zone::Hand);
+        g.choose(Choice::Cast(b));
+        resolve(&mut g);
+    }
+    let bf_ = g.card(0, "Brain Freeze", Zone::Hand);
+    g.choose(Choice::Cast(bf_));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    pay(&mut g);
+    // The storm trigger: two copies, new targets: P0, P1.
+    let k = std::cell::Cell::new(0);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0 && g.stack().len() == 1);
+    g.pass();
+    let (l0, l1) = (g.player(0).library.len(), g.player(1).library.len());
+    // P1 lets the storm trigger resolve, then counters the original.
+    quiet_until_with(&mut g, |g| g.stack().len() == 3 && at_priority(g) && g.turn().priority == 1, |g| match g.kind() {
+        Some(DecisionKind::YesNo) => Some(Choice::Yes),
+        Some(DecisionKind::NewTarget) | Some(DecisionKind::Target) => {
+            k.set(k.get() + 1);
+            Some(if k.get() % 2 == 1 { player(0) } else { player(1) })
+        }
+        _ => None,
+    });
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    let t = g.tgt(bf_);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(t)).then_some(t));
+    assert_eq!(g.obj(bf_).zone, Zone::Graveyard, "countered");
+    assert_eq!((l0 - g.player(0).library.len(), l1 - g.player(1).library.len()), (3, 3), "the copies: P0 and P1, three each\n{}", log(&g));
+    // Lose Focus replicated once, countered by P1's Counterspell first.
+    let mut g = scen()
+        .battlefield(0, &["Island"; 4])
+        .hand(0, &["Lose Focus"])
+        .battlefield(1, &["Island", "Island", "Mountain"])
+        .hand(1, &["Counterspell", "Lightning Bolt"])
+        .at(Step::Main1, 1)
+        .start();
+    let b = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(0));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0);
+    let lf = g.card(0, "Lose Focus", Zone::Hand);
+    g.choose(Choice::Cast(lf));
+    quiet_until_with(&mut g, |g| at_priority(g) && g.turn().priority == 1, |g| match g.kind() {
+        Some(DecisionKind::ChooseMode) | Some(DecisionKind::ChooseCost) => Some(Choice::Number(1)),
+        Some(DecisionKind::Target) => Some(g.tgt(b)),
+        _ => None,
+    });
+    // The replicate trigger is on top; P1 counters Lose Focus under it.
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    let t = g.tgt(lf);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) if g.has_option(t) => Some(t),
+        Some(DecisionKind::YesNo) => Some(Choice::Pass),
+        _ => None,
+    });
+    assert_eq!(g.obj(lf).zone, Zone::Graveyard);
+    assert_eq!(g.obj(b).zone, Zone::Graveyard);
+    assert_eq!(g.life(0), 20, "the copy countered the Bolt (P1 didn't pay)\n{}", log(&g));
+}
+
+#[test]
+fn a_copy_returned_to_hand_ceases_to_exist_and_chain_lightnings_copy_isnt_cast_cr_707_10a() {
+    // ruling: fb03cf68 c0f2a5ef
+    // Sink into Stupor at Lutri's copy of P0's Lightning Bolt: the copy
+    // goes to P0's hand and ceases to exist. P1 copies Chain Lightning
+    // under Saheeli ("whenever you cast a noncreature spell"): no Servo;
+    // P0 may respond to the copy.
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Island", "Island", "Island"])
+        .hand(0, &["Lightning Bolt", "Lutri, the Spellchaser"])
+        .battlefield(1, &["Island", "Island", "Island"])
+        .hand(1, &["Sink into Stupor // Soporific Springs"])
+        .at(Step::Main1, 0)
+        .start();
+    let b = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0);
+    let l = g.card(0, "Lutri, the Spellchaser", Zone::Hand);
+    g.choose(Choice::Cast(l));
+    quiet_until_with(&mut g, |g| at_priority(g) && g.turn().priority == 1 && g.log_lines().iter().any(|x| x.contains("copies Lightning Bolt")), |g| match g.kind() {
+        Some(DecisionKind::Target) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c != Choice::Pass),
+        Some(DecisionKind::YesNo) => Some(Choice::Pass),
+        _ => None,
+    });
+    let hand = g.player(0).hand.len();
+    let sink = g.card(1, "Sink into Stupor // Soporific Springs", Zone::Hand);
+    g.choose(Choice::Cast(sink));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| matches!(c, Choice::Target(engine::Target::Obj(r)) if g.is_copy_obj(r.idx))),
+        _ => None,
+    });
+    assert_eq!(g.player(0).hand.len(), hand, "the copy ceased to exist in the hand\n{}", log(&g));
+    assert_eq!(g.life(1), 17, "the original resolved");
+    // Chain Lightning copied by P1 (Saheeli's): no Servo; P0 may respond.
+    let mut g = scen()
+        .battlefield(0, &["Mountain"])
+        .hand(0, &["Chain Lightning"])
+        .battlefield(1, &["Saheeli, Sublime Artificer", "Mountain", "Mountain"])
+        .at(Step::Main1, 0)
+        .start();
+    let cl = g.card(0, "Chain Lightning", Zone::Hand);
+    g.choose(Choice::Cast(cl));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    pay(&mut g);
+    let mut p0_could_respond = false;
+    for _ in 0..200 {
+        if g.stack().is_empty() && at_priority(&g) {
+            break;
+        }
+        let d = g.pending_decision().unwrap();
+        if d.kind == DecisionKind::Priority && d.player == 0 && !g.stack().is_empty() && g.obj(cl).zone != Zone::Stack {
+            p0_could_respond = true;
+        }
+        let c = match d.kind {
+            DecisionKind::YesNo if d.player == 1 => Choice::Yes,
+            DecisionKind::YesNo => Choice::Pass,
+            DecisionKind::Target | DecisionKind::NewTarget if g.has_option(player(0)) => player(0),
+            DecisionKind::Priority => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.life(0), 17, "P1's copy hit P0: {}", log(&g));
+    assert!(p0_could_respond, "the copy was on the stack with P0's priority");
+    assert!(tokens_named(&g, "Servo").is_empty(), "the copy wasn't cast");
+}
+
+// ---- abilities on the stack, special actions (CR 602.2, 116.2) ---------------------------------
+
+#[test]
+fn class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2() {
+    // ruling: f1a0fb40 450c2022 159f8a4d a4cb7594 5a3cfad1 3d37a052
+    // Does Machines's level-up and Candelabra of Tawnos's untap are
+    // abilities on the stack: P1 gets priority with them waiting. Plotting
+    // Pillage the Bog is a special action: nothing on the stack, P0 still
+    // has priority. The companion put into hand for {3} (a special action)
+    // is then an ordinary card: cast and countered, it goes to the graveyard.
+    let mut g = scen().battlefield(0, &["Does Machines", "Island", "Island"]).at(Step::Main1, 0).start();
+    let dm = bf(&g, 0, "Does Machines");
+    g.choose(ab(dm, 0));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 1);
+    assert_eq!(g.stack().len(), 1, "the level-up waits on the stack\n{}", log(&g));
+    let mut g = scen().battlefield(0, &["Candelabra of Tawnos", "Island", "Island"]).at(Step::Main1, 0).start();
+    let ca = bf(&g, 0, "Candelabra of Tawnos");
+    let isl = bf(&g, 0, "Island");
+    g.choose(ab(ca, 0));
+    quiet_until_with(&mut g, |g| at_priority(g) && g.turn().priority == 1, |g| match g.kind() {
+        Some(DecisionKind::ChooseMode) => Some(Choice::Number(1)),
+        Some(DecisionKind::Target) => Some(g.tgt(isl)),
+        _ => None,
+    });
+    assert_eq!(g.stack().len(), 1, "Candelabra's ability waits\n{}", log(&g));
+    let mut g = scen().battlefield(0, &["Bayou", "Bayou"]).hand(0, &["Pillage the Bog"]).at(Step::Main1, 0).start();
+    let pb = g.card(0, "Pillage the Bog", Zone::Hand);
+    let plot = g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c != Choice::Cast(pb) && c != Choice::Pass && g.describe_choice(c).contains("Pillage"));
+    if let Some(p) = plot {
+        g.choose(p);
+        pay(&mut g);
+        assert!(g.stack().is_empty() && at_priority(&g) && g.turn().priority == 0, "{}", log(&g));
+        assert_eq!(g.obj(pb).zone, Zone::Exile);
+    }
+    // The companion.
+    let mut g = scen()
+        .battlefield(0, &["Plains"; 6])
+        .companion(0, "Lurrus of the Dream-Den")
+        .battlefield(1, &["Island", "Island"])
+        .hand(1, &["Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    g.choose(Choice::Companion);
+    pay(&mut g);
+    let lurrus = g.card(0, "Lurrus of the Dream-Den", Zone::Hand);
+    assert!(g.stack().is_empty() && g.turn().priority == 0, "no stack, P0 still acts");
+    g.choose(Choice::Cast(lurrus));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 1);
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    let t = g.tgt(lurrus);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(t));
+    assert_eq!(g.obj(lurrus).zone, Zone::Graveyard, "an ordinary card now\n{}", log(&g));
+}
+
+// ---- splice (CR 702.47) ------------------------------------------------------------------------
+
+#[test]
+fn splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47() {
+    // ruling: e8d43bb3 63859cb3 c4b9b754 0fbdcacf 913357b1 15eab260
+    // Goryo's Vengeance alone: no splice offered (it can't be spliced onto
+    // itself). Two Goryo's: the other is spliced once, and each "target"
+    // gets its own: Griselbrand and Atraxa both return. Through the Breach:
+    // putting a creature onto the battlefield is optional.
+    let mut g = scen().battlefield(0, &["Badlands"; 8]).hand(0, &["Goryo's Vengeance"]).graveyard(0, &["Griselbrand"]).at(Step::Main1, 0).start();
+    let gv = g.card(0, "Goryo's Vengeance", Zone::Hand);
+    g.choose(Choice::Cast(gv));
+    g.drive_until(|g| !matches!(g.kind(), Some(DecisionKind::Priority)));
+    if g.kind() == Some(DecisionKind::ChooseHandCard) {
+        assert_eq!(g.pending_decision().unwrap().options.len(), 1, "nothing to splice but no: {}", opts(&g));
+    }
+    let mut g = scen()
+        .battlefield(0, &["Badlands"; 8])
+        .hand(0, &["Goryo's Vengeance", "Goryo's Vengeance"])
+        .graveyard(0, &["Griselbrand", "Atraxa, Grand Unifier"])
+        .at(Step::Main1, 0)
+        .start();
+    let gris = g.card(0, "Griselbrand", Zone::Graveyard);
+    let atr = g.card(0, "Atraxa, Grand Unifier", Zone::Graveyard);
+    let gvs: Vec<CardIdx> = g.player(0).hand.clone();
+    g.choose(Choice::Cast(gvs[0]));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard));
+    assert!(g.has_option(Choice::Card(gvs[1])) && !g.has_option(Choice::Card(gvs[0])), "the other one only");
+    g.choose(Choice::Card(gvs[1]));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::ChooseHandCard) || g.pending_decision().unwrap().options.len() == 1);
+    if g.kind() == Some(DecisionKind::ChooseHandCard) {
+        g.choose(Choice::Pass);
+    }
+    let picked = std::cell::Cell::new(0);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => {
+            picked.set(picked.get() + 1);
+            let want = if picked.get() == 1 { gris } else { atr };
+            g.has_option(g.tgt(want)).then(|| g.tgt(want))
+        }
+        Some(DecisionKind::YesNo) => Some(Choice::Pass),
+        _ => None,
+    });
+    assert_eq!(g.obj(gris).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.obj(atr).zone, Zone::Battlefield, "a different target for the spliced instance\n{}", log(&g));
+    // Through the Breach: may put nothing.
+    let mut g = scen().battlefield(0, &["Badlands"; 5]).hand(0, &["Through the Breach", "Test Bear"]).at(Step::Main1, 0).start();
+    let tb = g.card(0, "Through the Breach", Zone::Hand);
+    g.choose(Choice::Cast(tb));
+    let asked = std::cell::Cell::new(false);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseHandCard) => {
+            asked.set(true);
+            assert!(g.has_option(Choice::Pass), "optional: {}", opts(g));
+            Some(Choice::Pass)
+        }
+        _ => None,
+    });
+    assert!(asked.get());
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Hand), 1, "{}", log(&g));
+}
+
+// ---- modes and targets (CR 700.2, 115.3) -------------------------------------------------------
+
+#[test]
+fn two_modes_of_collective_brutality_may_target_the_same_opponent_and_lutris_kolaghans_copy_keeps_its_modes_cr_700_2d_707_10c() {
+    // ruling: 1f109819 4b30736a
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &["Collective Brutality", "Island", "Island"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let cb = g.card(0, "Collective Brutality", Zone::Hand);
+    g.choose(Choice::Cast(cb));
+    let modes = std::cell::Cell::new(0);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseMode) => {
+            modes.set(modes.get() + 1);
+            let c = [Choice::Number(0), Choice::Number(2), Choice::Pass][(modes.get() - 1).min(2)];
+            g.has_option(c).then_some(c).or(Some(Choice::Pass))
+        }
+        Some(DecisionKind::Target) => Some(player(1)),
+        Some(DecisionKind::DiscardCost) | Some(DecisionKind::ChooseCost) | Some(DecisionKind::Discard) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c != Choice::Pass),
+        Some(DecisionKind::ChooseHandCard) | Some(DecisionKind::ChooseDiscard) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c != Choice::Pass),
+        _ => None,
+    });
+    assert_eq!(g.life(1), 18, "{}", log(&g));
+    assert_eq!(g.count_in(1, "Lightning Bolt", Zone::Graveyard), 1, "both modes at P1\n{}", log(&g));
+    // Lutri copying Kolaghan's Command (2 damage to the Bear, destroy the
+    // Sol Ring): the copy has the same modes, new targets allowed: P1.
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Swamp", "Island", "Island", "Island"])
+        .hand(0, &["Kolaghan's Command", "Lutri, the Spellchaser"])
+        .battlefield(1, &["Sol Ring", "Mox Pearl", "Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let ring = bf(&g, 1, "Sol Ring");
+    let pearl = bf(&g, 1, "Mox Pearl");
+    let bear = bf(&g, 1, "Test Bear");
+    let kc = g.card(0, "Kolaghan's Command", Zone::Hand);
+    g.choose(Choice::Cast(kc));
+    let modes = std::cell::Cell::new(0);
+    until_p0_priority(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseMode) => {
+            modes.set(modes.get() + 1);
+            Some(Choice::Number(if modes.get() == 1 { 2 } else { 3 }))
+        }
+        Some(DecisionKind::Target) if g.has_option(g.tgt(ring)) => Some(g.tgt(ring)),
+        Some(DecisionKind::Target) => Some(g.tgt(bear)),
+        _ => None,
+    });
+    let l = g.card(0, "Lutri, the Spellchaser", Zone::Hand);
+    g.choose(Choice::Cast(l));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) | Some(DecisionKind::NewTarget) if g.has_option(g.tgt(pearl)) => Some(g.tgt(pearl)),
+        Some(DecisionKind::Target) | Some(DecisionKind::NewTarget) if g.has_option(player(1)) => Some(player(1)),
+        Some(DecisionKind::Target) => g.pending_decision().unwrap().options.iter().map(|o| o.choice).find(|&c| c != Choice::Pass),
+        Some(DecisionKind::YesNo) => Some(Choice::Yes),
+        _ => None,
+    });
+    assert_eq!(g.obj(ring).zone, Zone::Graveyard);
+    assert_eq!(g.obj(pearl).zone, Zone::Graveyard, "the copy's new artifact target\n{}", log(&g));
+    assert_eq!(g.life(1), 18, "the copy's 2 damage at P1\n{}", log(&g));
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "the original's 2 damage");
+}
+
+// ---- hidden information during a cast (CR 601.2, Bolas's Citadel) --------------------------------
+
+#[test]
+fn bolass_citadel_the_new_top_card_is_unseen_until_the_cast_is_done_cr_601_2() {
+    // ruling: 2012f8f3
+    let mut g = scen()
+        .battlefield(0, &["Bolas's Citadel"])
+        .library(0, &["Lightning Bolt", "Ancestral Recall", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Library);
+    let ar = g.card(0, "Ancestral Recall", Zone::Library);
+    assert!(g.knows(0, bolt));
+    g.choose(Choice::Cast(bolt));
+    let mut seen_mid = false;
+    while !(at_priority(&g) && !g.stack().is_empty()) {
+        if g.knows(0, ar) {
+            seen_mid = true;
+        }
+        let d = g.pending_decision().unwrap();
+        let c = if d.kind == DecisionKind::Target { player(1) } else { d.options[0].choice };
+        g.choose(c);
+    }
+    assert!(!seen_mid, "the next card isn't seen while casting");
+    assert!(g.knows(0, ar), "seen once the cast is done\n{}", log(&g));
+}
+
+// ---- Pyroblast redirected (CR 115.7) -----------------------------------------------------------
+
+#[test]
+fn a_redirected_pyroblast_keeps_its_counter_mode_cr_700_2_115_7() {
+    // ruling: fa2aaa26
+    // P1's Pyroblast (counter mode) at P0's Brainstorm; P0's Invert
+    // Polarity wins the flip and takes it: its new target must be a spell,
+    // not a permanent.
+    use engine::hidden::{key, KEY_COIN};
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Mountain", "Sol Ring"])
+        .hand(0, &["Brainstorm", "Invert Polarity"])
+        .battlefield(1, &["Mountain", "Island"])
+        .hand(1, &["Pyroblast"])
+        .at(Step::Main1, 0)
+        .start();
+    let bs = g.card(0, "Brainstorm", Zone::Hand);
+    g.choose(Choice::Cast(bs));
+    pay(&mut g);
+    g.pass();
+    let pb = g.card(1, "Pyroblast", Zone::Hand);
+    g.choose(Choice::Cast(pb));
+    quiet_until_with(&mut g, at_priority, |g| match g.kind() {
+        Some(DecisionKind::ChooseMode) => Some(Choice::Number(0)),
+        Some(DecisionKind::Target) => Some(g.tgt(bs)),
+        _ => None,
+    });
+    g.pass();
+    let ip = g.card(0, "Invert Polarity", Zone::Hand);
+    g.choose(Choice::Cast(ip));
+    let t = g.tgt(pb);
+    quiet_until_with(&mut g, at_priority, |g| (g.kind() == Some(DecisionKind::Target)).then_some(t));
+    g.pass();
+    g.force_chance(&[key(KEY_COIN, 1, 1)]);
+    g.pass();
+    let ring = bf(&g, 0, "Sol Ring");
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::NewTarget) | Some(DecisionKind::Target) => {
+            assert!(!g.has_option(g.tgt(ring)), "not a permanent: {}", opts(g));
+            None
+        }
+        Some(DecisionKind::YesNo) => Some(Choice::Yes),
+        _ => None,
+    });
+    assert_eq!(g.obj(pb).zone, Zone::Graveyard, "{}", log(&g));
+}
+
+// ---- triggers one can respond to; the legend rule before priority (CR 603.6, 704.3) -------------
+
+#[test]
+fn worldspine_wurms_shuffle_can_be_answered_and_a_second_mox_opal_meets_the_legend_rule_first_cr_603_3_704_3() {
+    // ruling: ce2089b1 235f6424
+    // Worldspine Wurm dies (Snuff Out can't: it's green; a Bolt can't: so
+    // Entomb it): its shuffle trigger waits; Ghost Vacuum exiles it in
+    // response: it isn't shuffled. A second Mox Opal (the third artifact)
+    // goes to the graveyard (legend rule) before anyone has priority: one
+    // Mox Opal to tap.
+    let mut g = scen()
+        .battlefield(0, &["Ghost Vacuum", "Swamp"])
+        .hand(0, &["Entomb"])
+        .library(0, &["Worldspine Wurm", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let en = g.card(0, "Entomb", Zone::Hand);
+    g.choose(Choice::Cast(en));
+    let ww = g.card(0, "Worldspine Wurm", Zone::Library);
+    quiet_until_with(&mut g, |g| at_priority(g) && g.obj(ww).zone == Zone::Graveyard && !g.stack().is_empty() && g.turn().priority == 0, |g| match g.kind() {
+        Some(DecisionKind::SearchLibrary) => Some(Choice::Def(id("Worldspine Wurm"))),
+        _ => None,
+    });
+    let gv = bf(&g, 0, "Ghost Vacuum");
+    g.choose(ab(gv, 0));
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(g.tgt(ww))).then(|| g.tgt(ww)));
+    assert_eq!(g.obj(ww).zone, Zone::Exile, "{}", log(&g));
+    // Mox Opal.
+    let mut g = scen().battlefield(0, &["Mox Opal", "Sol Ring"]).hand(0, &["Mox Opal"]).at(Step::Main1, 0).start();
+    let m2 = g.card(0, "Mox Opal", Zone::Hand);
+    g.choose(Choice::Cast(m2));
+    quiet_until_with(&mut g, |g| at_priority(g) && g.stack().is_empty(), |g| (g.kind() == Some(DecisionKind::LegendRule)).then(|| g.pending_decision().unwrap().options[0].choice));
+    assert_eq!(g.count_in(0, "Mox Opal", Zone::Battlefield), 1, "{}", log(&g));
+}
+
+// ---- Once Upon a Time, Sensei's Divining Top, Library of Alexandria ---------------------------
+
+#[test]
+fn once_upon_a_time_in_the_first_upkeep_top_in_response_to_itself_library_checked_on_activation_cr_117_602_2() {
+    // ruling: f8ed4a40 3400bc39 edc8892b
+    // Turn 1's upkeep: Once Upon a Time is cast for free before any land is
+    // played. Sensei's Divining Top: its draw ability in response to its
+    // look ability: P0 draws, Top goes on top, then the look sees it among
+    // the three. Library of Alexandria with seven cards; in response P0
+    // plays... casts a card (six now): it still draws.
+    let mut g = scen().hand(0, &["Once Upon a Time"]).library(0, &["Island"; 8]).at(Step::Upkeep, 0).turn_number(1).start();
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0);
+    let ou = g.card(0, "Once Upon a Time", Zone::Hand);
+    assert_eq!(g.turn().step, Step::Upkeep);
+    assert!(g.has_option(Choice::Cast(ou)), "free, in the first upkeep: {}", opts(&g));
+    // Top.
+    let mut g = scen().battlefield(0, &["Sensei's Divining Top", "Island"]).library(0, &["Island", "Forest", "Plains"]).at(Step::Main1, 0).start();
+    let top = bf(&g, 0, "Sensei's Divining Top");
+    g.choose(ab(top, 0));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0 && !g.stack().is_empty());
+    let hand = g.player(0).hand.len();
+    assert!(g.has_option(ab(top, 1)), "{}", opts(&g));
+    g.choose(ab(top, 1));
+    resolve(&mut g);
+    assert_eq!(g.player(0).hand.len(), hand + 1);
+    assert_eq!(g.obj(top).zone, Zone::Library, "{}", log(&g));
+    // Library of Alexandria.
+    let mut g = scen()
+        .battlefield(0, &["Library of Alexandria", "Mountain"])
+        .hand(0, &["Lightning Bolt", "Island", "Island", "Island", "Island", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let loa = bf(&g, 0, "Library of Alexandria");
+    let a = (0..3u8).map(|i| ab(loa, i)).find(|&a| g.has_option(a)).expect("seven cards");
+    g.choose(a);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 0 && !g.stack().is_empty());
+    let b = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b));
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then(|| player(1)));
+    assert_eq!(g.player(0).hand.len(), 7, "six, then the draw\n{}", log(&g));
+}
+
+// ---- cascade (CR 702.85) -----------------------------------------------------------------------
+
+#[test]
+fn cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a() {
+    // ruling: acd60f05 8a83c9d0 4f3bb425
+    // Bloodbraid Challenger (P0) countered by P1's Counterspell in response
+    // to its cascade trigger: the cascade still resolves; it exiles until a
+    // Bolt (no choice to stop), and the Bolt cast goes on the stack above
+    // where Bloodbraid was.
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Forest", "Forest", "Forest"])
+        .hand(0, &["Bloodbraid Challenger"])
+        .library(0, &["Forest", "Lightning Bolt", "Island"])
+        .battlefield(1, &["Island", "Island"])
+        .hand(1, &["Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    let bb = g.card(0, "Bloodbraid Challenger", Zone::Hand);
+    g.choose(Choice::Cast(bb));
+    pay(&mut g);
+    g.drive_until(|g| at_priority(g) && g.turn().priority == 1);
+    assert_eq!(g.stack().len(), 2, "the spell and its cascade trigger above it");
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(cs));
+    let t = g.tgt(bb);
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) if g.has_option(t) => Some(t),
+        Some(DecisionKind::Target) => Some(player(1)),
+        Some(DecisionKind::YesNo) => Some(Choice::Yes),
+        _ => None,
+    });
+    assert_eq!(g.obj(bb).zone, Zone::Graveyard, "countered");
+    assert_eq!(g.life(1), 17, "the cascade resolved and the Bolt was cast\n{}", log(&g));
+}

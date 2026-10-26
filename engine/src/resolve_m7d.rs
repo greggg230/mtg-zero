@@ -734,6 +734,15 @@ impl Game {
             if self.objs[top.i()].known & (1 << p) != 0 || !self.permanents_of(p).any(|c| self.abilities(c).look_top) {
                 continue;
             }
+            // A top card that changed while its player casts a spell (the
+            // spell cast from the top) is seen only once the cast is done
+            // (CR 601.2; ruling 2012f8f3).
+            let casting = self.agenda.iter().any(|t| {
+                matches!(t, crate::flow::Task::CastDone { id } if self.item_index(*id).is_some_and(|i| self.stack[i].controller == p))
+            });
+            if casting {
+                continue;
+            }
             self.force_library_card(top, crate::hidden::KEY_LOOK, p);
             self.learn(p, top);
             let d = self.objs[top.i()].def;

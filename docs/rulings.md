@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1227 | 978 |
 | class b | 198 | 149 |
 | class c | 182 | 133 |
-| a, tested (passing) | 709 | 550 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 421 | 359 |
+| a, tested (passing) | 749 | 585 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 461 | 394 |
 | a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
 | a, deferred | 0 | 0 |
-| a, untested | 518 | 428 |
+| a, untested | 478 | 393 |
 
-Class a by area (distinct texts): mana 73/173, triggers 69/140, stack 96/126, zones 47/123, copies 95/96, other 44/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
+Class a by area (distinct texts): mana 75/173, triggers 71/140, stack 126/126, zones 48/123, copies 95/96, other 44/95, dfc 25/65, replacement 59/59, combat 14/52, protection 9/27, facedown 13/13, walkers 6/9 (tested/all).
 
 ## Per card
 
@@ -375,7 +375,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `5c58b83a` | a | stack | returning a spell to hand removes it from the stack so it can't resolve, even if uncounterable | untested |
+| `5c58b83a` | a | stack | returning a spell to hand removes it from the stack so it can't resolve, even if uncounterable | `rulings_stack3::reprieve_returns_an_uncounterable_spell_and_mana_drain_still_gives_its_mana_cr_101_2` |
 
 ### Unexpectedly Absent
 
@@ -518,7 +518,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `7d989429` | a | dfc | a transforming DFC enters front-up by default unless told to enter/cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
 | `f8573515` | a | dfc | only the currently-up face's characteristics apply on the battlefield; elsewhere only the front face matters | untested |
 | `5653e6a4` | a | facedown | a manifested DFC is a face-down vanilla 2/2, cant transform face down, and flips up by paying its fronts mana cost | `rulings_facedown::a_manifested_double_faced_card_turns_face_up_front_face_up_cr_701_40e` |
-| `95b53341` | a | stack | casting a card from exile via a transform-back ability still follows normal timing rules for its card type | untested |
+| `95b53341` | a | stack | casting a card from exile via a transform-back ability still follows normal timing rules for its card type | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
 | `703251e7` | a | zones | if an exile-and-cast-later permission isn't used that turn, the card just stays in exile | untested |
 | `b83c13f9` | a | dfc | if forced to transform via another effect, the resulting walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `527934db` | a | triggers | this graveyard-size check fires right after a discard, not whenever the graveyard later reaches that size | `rulings_walkers::jace_transformed_in_the_upkeep_activates_loyalty_only_in_a_main_phase_cr_606_3` |
@@ -537,7 +537,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `b9423c74` | a | triggers | if the source is gone at resolution, draw/discard still happens, using last-known counters for any bonus | untested |
 | `550a74ab` | a | mana | casting a spell with X without paying its mana cost forces X to be 0 | untested |
 | `ad951704` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
-| `92f52ee7` | a | stack | casting a spell as part of an ability's resolution happens immediately, ignoring normal timing permissions | untested |
+| `92f52ee7` | a | stack | casting a spell as part of an ability's resolution happens immediately, ignoring normal timing permissions | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
 | `c86d4e2f` | a | zones | you may not play land cards discarded by this kind of effect | untested |
 
 ### Norman Osborn // Green Goblin
@@ -874,11 +874,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | untested |
+| `c33f0cb3` | a | stack | each copy made by storm must be countered individually; countering the original doesn't stop the copies | `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
 | `158501c3` | a | stack | storm counts spells cast from any zone and even ones that were countered | `rulings_stack::storm_counts_spells_that_were_countered_and_every_players_spells_cr_702_40a` |
 | `500a78f9` | a | stack | storm copies go straight onto the stack uncast, and don't count toward other storm spells cast later | `cards_m7b_stack3::brain_freeze_copies_may_get_new_targets_and_are_not_cast_cr_707_10` |
 | `543beb2e` | a | stack | the triggered ability that makes storm copies can itself be countered, preventing any copies | `rulings_stack::a_countered_storm_trigger_makes_no_copies_cr_702_40a` |
-| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | untested |
+| `bf7e6c38` | a | stack | each storm copy may be given new targets independently of the others | `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
 
 ### Consult the Star Charts
 
@@ -909,7 +909,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f9e25ba1` | a | stack | a replicate ability makes one copy per time its cost was paid, even if the original spell has since left the stack | untested |
+| `f9e25ba1` | a | stack | a replicate ability makes one copy per time its cost was paid, even if the original spell has since left the stack | `rulings_stack3::storm_and_replicate_copies_dont_need_their_original_and_each_takes_its_own_target_cr_707_10` |
 | `81e80e72` | a | stack | copies made by replicate are put on the stack directly, not cast, so cast-triggers don't fire | `rules_copies::a_copy_of_a_spell_isnt_cast_cr_707_10` |
 
 ### Mana Drain
@@ -944,7 +944,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `559c03e3` | c | NR | a modal DFC can never be transformed; ignore any instruction telling it to [part 3, was a/dfc: no cube effect tries to transform an MDFC or put one onto the battlefield transformed (the rule changed since; Norman Osborn's own transform is tested)] | not reachable with the cube's cards |
-| `fb03cf68` | a | stack | a copy of a spell returned to its owner's hand ceases to exist as a state-based action instead of being recastable | untested |
+| `fb03cf68` | a | stack | a copy of a spell returned to its owner's hand ceases to exist as a state-based action instead of being recastable | `rulings_stack3::a_copy_returned_to_hand_ceases_to_exist_and_chain_lightnings_copy_isnt_cast_cr_707_10a` |
 | `7466b29b` | a | stack | returning a spell to hand removes it from the stack without countering it, working even on uncounterable spells | `rulings_faces::sink_into_stupor_returns_a_spell_that_cant_be_countered_cr_101_2` |
 | `e5e7f31f` | a | dfc | choosing among a group of cards to play/cast lets you pick either face of a qualifying MDFC | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
 | `62d54d14` | a | dfc | 'play' a specific MDFC lets you choose either face; 'cast' it specifically forbids playing it as a land | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
@@ -1065,7 +1065,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f1a0fb40` | a | stack | a Class level-up ability is a normal activated ability that uses the stack and can be responded to | untested |
+| `f1a0fb40` | a | stack | a Class level-up ability is a normal activated ability that uses the stack and can be responded to | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `90f6d2b4` | a | other | each section below a Class card's top box is an activated ability with that cost, advancing it to the listed level | `cards_m7d::does_machines_gains_levels_cr716` |
 | `0a86d2b2` | a | copies | this ability doesn't strip any abilities from the artifact it transforms into a creature | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
 | `9327dac0` | a | other | a Class gains the abilities of each level it reaches cumulatively, starting from level 1 | `cards_m7d::does_machines_gains_levels_cr716` |
@@ -1315,10 +1315,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `e8d43bb3` | a | stack | a splice ability cant splice onto its own spell, since the spell is already on the stack when revealing | untested |
+| `e8d43bb3` | a | stack | a splice ability cant splice onto its own spell, since the spell is already on the stack when revealing | `rulings_stack3::splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47` |
 | `fd8ef0a1` | a | stack | if all of a spell's targets become illegal at resolution, it doesn't resolve and none of its effects happen | `rulings_stack3::abilities_and_reflexive_effects_with_their_targets_gone_cr_608_2b` |
-| `0fbdcacf` | a | stack | spliced-up targets are all chosen after revealing the spliced cards, and can differ per target instance | untested |
-| `c4b9b754` | a | stack | all cards being spliced are revealed simultaneously, and each one can only be spliced onto one spell | untested |
+| `0fbdcacf` | a | stack | spliced-up targets are all chosen after revealing the spliced cards, and can differ per target instance | `rulings_stack3::splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47` |
+| `c4b9b754` | a | stack | all cards being spliced are revealed simultaneously, and each one can only be spliced onto one spell | `rulings_stack3::splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47` |
 | `0e4f61cd` | a | zones | if the returned creature leaves before end step, it just stays put instead of being exiled | `rulings_triggers::goryos_vengeance_a_returned_creature_that_left_stays_where_it_is_cr_603_7c` |
 
 ### Shallow Grave
@@ -1393,7 +1393,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `139e55ad` | c | NR | a cost-reduction effect reduces the total cost, including any escalate-style costs added on top [part 3, was a/mana: Collective Brutality's escalate cost is a discard, which no cube cost reduction touches] | not reachable with the cube's cards |
 | `e0fdde77` | a | mana | casting a multi-mode spell free still requires paying the extra per-mode costs for choosing more than one | untested |
 | `61f2c92b` | a | stack | one illegal target in a multi-mode spell doesnt stop the others; only all-illegal targets void the resolve | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
-| `1f109819` | a | stack | two chosen modes that each target a creature or player may share the same target or use different ones | untested |
+| `1f109819` | a | stack | two chosen modes that each target a creature or player may share the same target or use different ones | `rulings_stack3::two_modes_of_collective_brutality_may_target_the_same_opponent_and_lutris_kolaghans_copy_keeps_its_modes_cr_700_2d_707_10c` |
 | `cb0f6856` | b | DEF | you can't choose the same mode of a modal spell more than once [part 3, was a/other: a mode once; the engine never offers it twice] | a definition, no behaviour of its own |
 | `fdf1875c` | b | DEF | all modes of a modal spell are chosen at once, before any of its effects happen; you can't add more partway through [part 3, was a/mana: modes are chosen together while casting; a definition] | a definition, no behaviour of its own |
 
@@ -1475,7 +1475,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `8b359ef5` | a | zones | looking at the top of your library this way doesn't use the stack and can happen any time, even without priority | `cards_m7d::bolas_citadel_casts_from_the_top_paying_life_cr118_9` |
 | `7ee6c520` | a | mana | a permanent can be one of the permanents it sacrifices to pay for its own ability | `cards_m7d::bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21` |
 | `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
-| `2012f8f3` | a | stack | if the librarys top card changes mid-cast or mid-activation, you cant see the new top until thats done | untested |
+| `2012f8f3` | a | stack | if the librarys top card changes mid-cast or mid-activation, you cant see the new top until thats done | `rulings_stack3::bolass_citadel_the_new_top_card_is_unseen_until_the_cast_is_done_cr_601_2` |
 | `4c7c58fa` | a | mana | casting a card rather than paying its mana cost forbids other alt costs but still needs mandatory ones | `rulings_casts::citadel_no_other_alternative_cost_but_additional_costs_cr_118_9a_601_2f` |
 | `9cf8d89b` | b | MP | Two-Headed Giant: a life-loss effect hits the opposing team for a fixed amount | multiplayer |
 | `8ccdbbbd` | a | zones | playing a land this way still requires an available land play for the turn | `rulings_casts::citadel_a_land_from_the_top_needs_a_land_drop_cr_305_2` |
@@ -1564,7 +1564,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `360847f0` | a | stack | targeting an uncounterable spell with a counter effect still works, just failing to counter it | untested |
+| `360847f0` | a | stack | targeting an uncounterable spell with a counter effect still works, just failing to counter it | `rulings_stack3::reprieve_returns_an_uncounterable_spell_and_mana_drain_still_gives_its_mana_cr_101_2` |
 
 ### Inti, Seneschal of the Sun
 
@@ -1760,7 +1760,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `dcd6db69` | a | zones | cast doesnt let you play a land; an exiled land card fails this way and triggers the fallback effect | untested |
 | `3c21533f` | a | triggers | an emblem's own ability resolves before the spell that caused its creation, even if that spell is later countered | `rulings_triggers::chandras_emblem_trigger_resolves_even_if_the_spell_is_countered_cr_603_3` |
-| `d4e8981b` | a | stack | casting from exile during resolution skips type-timing rules, but other stated restrictions still apply | untested |
+| `d4e8981b` | a | stack | casting from exile during resolution skips type-timing rules, but other stated restrictions still apply | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
 | `cdf038bc` | b | MP | Two-Headed Giant: a fixed total damage amount is dealt to the opposing team | multiplayer |
 | `c85087fd` | a | walkers | loyalty abilities arent mana abilities; they use the stack, are respondable, and follow the once-per-turn rule | `rulings_walkers::chandras_mana_ability_is_a_loyalty_ability_on_the_stack_cr_606_605_1a` |
 | `3c8289db` | a | other | an emblem created this way is colorless, so the damage it deals is from a colorless source | untested |
@@ -1811,7 +1811,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fa2aaa26` | a | stack | a counter/destroy mode is chosen at cast before targeting; redirecting the spell cant change the mode, limiting targets | untested |
+| `fa2aaa26` | a | stack | a counter/destroy mode is chosen at cast before targeting; redirecting the spell cant change the mode, limiting targets | `rulings_stack3::a_redirected_pyroblast_keeps_its_counter_mode_cr_700_2_115_7` |
 | `4128e050` | a | stack | this removal spell can target anything regardless of color; the color restriction is checked only at resolution | `rulings_stack::pyroblast_may_target_a_nonblue_permanent_and_does_nothing_to_it_cr_608_2b` |
 
 ### Unholy Heat
@@ -1825,11 +1825,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `15eab260` | a | stack | putting the found card onto the battlefield is optional, even after the ability resolves to that point | untested |
-| `63859cb3` | a | stack | a splice ability cant splice onto its own spell, since the spell is already on the stack when revealing | untested |
+| `15eab260` | a | stack | putting the found card onto the battlefield is optional, even after the ability resolves to that point | `rulings_stack3::splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47` |
+| `63859cb3` | a | stack | a splice ability cant splice onto its own spell, since the spell is already on the stack when revealing | `rulings_stack3::splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47` |
 | `717f2c88` | a | stack | if all of a spell's targets become illegal at resolution, it doesn't resolve and none of its effects happen | `rulings_stack3::abilities_and_reflexive_effects_with_their_targets_gone_cr_608_2b` |
-| `913357b1` | a | stack | targets for a spliced-up spell are all chosen after revealing the spliced cards, and can differ per instance of 'target' | untested |
-| `c4b9b754` | a | stack | all cards being spliced are revealed simultaneously, and each one can only be spliced onto one spell | untested |
+| `913357b1` | a | stack | targets for a spliced-up spell are all chosen after revealing the spliced cards, and can differ per instance of 'target' | `rulings_stack3::splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47` |
+| `c4b9b754` | a | stack | all cards being spliced are revealed simultaneously, and each one can only be spliced onto one spell | `rulings_stack3::splice_reveals_other_cards_once_each_and_targets_are_chosen_per_instance_cr_702_47` |
 
 ### Pyrokinesis
 
@@ -1845,7 +1845,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `532a71a4` | a | stack | as this resolves, its target may copy it with a new target before the original finishes resolving | `rulings_stack::chain_lightnings_copy_is_controlled_by_the_player_who_copies_it_cr_707_10` |
 | `ec37be99` | a | stack | an illegal target at resolution means the spell doesn't resolve, doesn't have its effects, and can't be copied | `rulings_stack3::removal_whose_target_is_gone_does_none_of_its_other_effects_cr_608_2b` |
-| `c0f2a5ef` | a | stack | the copy is put directly on the stack, not cast, so cast-triggers don't fire, though players may still respond to it | untested |
+| `c0f2a5ef` | a | stack | the copy is put directly on the stack, not cast, so cast-triggers don't fire, though players may still respond to it | `rulings_stack3::a_copy_returned_to_hand_ceases_to_exist_and_chain_lightnings_copy_isnt_cast_cr_707_10a` |
 | `9f05d6cd` | a | stack | the player who puts a copy of a spell on the stack controls that copy | `rulings_stack::chain_lightnings_copy_is_controlled_by_the_player_who_copies_it_cr_707_10` |
 
 ### Faithless Looting
@@ -2228,7 +2228,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `ce2089b1` | a | stack | a self-shuffling triggered ability can be responded to, e.g. by exiling the source from the graveyard first | untested |
+| `ce2089b1` | a | stack | a self-shuffling triggered ability can be responded to, e.g. by exiling the source from the graveyard first | `rulings_stack3::worldspine_wurms_shuffle_can_be_answered_and_a_second_mox_opal_meets_the_legend_rule_first_cr_603_3_704_3` |
 
 ### Nissa, Who Shakes the World
 
@@ -2252,7 +2252,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f8ed4a40` | a | stack | the earliest this spell can be cast is during the first player's upkeep, before they can play a land | untested |
+| `f8ed4a40` | a | stack | the earliest this spell can be cast is during the first player's upkeep, before they can play a land | `rulings_stack3::once_upon_a_time_in_the_first_upkeep_top_in_response_to_itself_library_checked_on_activation_cr_117_602_2` |
 
 ### Tear Asunder
 
@@ -2431,14 +2431,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `235f6424` | a | stack | a simultaneous legend-rule sac happens before anyone gets priority, so neither copys mana ability goes first | untested |
+| `235f6424` | a | stack | a simultaneous legend-rule sac happens before anyone gets priority, so neither copys mana ability goes first | `rulings_stack3::worldspine_wurms_shuffle_can_be_answered_and_a_second_mox_opal_meets_the_legend_rule_first_cr_603_3_704_3` |
 
 ### Candelabra of Tawnos
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `256006dc` | a | other | this untap ability can legally target a land that's already untapped | untested |
-| `450c2022` | a | stack | this isn't a mana ability; it's a normal ability that resolves on the stack, untapping its targets during resolution | untested |
+| `450c2022` | a | stack | this isn't a mana ability; it's a normal ability that resolves on the stack, untapping its targets during resolution | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `9e0e545b` | a | other | this untap ability may target lands you don't control | untested |
 
 ### Expedition Map
@@ -2465,7 +2465,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `b5ec1048` | a | triggers | if the source leaves while its draw ability is on the stack, the draw still happens regardless | `rulings_triggers::senseis_top_gone_while_its_draw_ability_waits_you_still_draw_and_it_stays_cr_113_7a` |
-| `3400bc39` | a | stack | a second ability can be activated in response to a first one on the same source, letting both effects happen in sequence | untested |
+| `3400bc39` | a | stack | a second ability can be activated in response to a first one on the same source, letting both effects happen in sequence | `rulings_stack3::once_upon_a_time_in_the_first_upkeep_top_in_response_to_itself_library_checked_on_activation_cr_117_602_2` |
 
 ### Wizard's Rockets
 
@@ -2711,7 +2711,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `ac9d14f8` | a | other | a modal spell's chosen effects are always carried out in the order printed on the card | untested |
-| `4b30736a` | a | stack | a copy of this modal spell may get new targets from the copying effect, but never new modes | untested |
+| `4b30736a` | a | stack | a copy of this modal spell may get new targets from the copying effect, but never new modes | `rulings_stack3::two_modes_of_collective_brutality_may_target_the_same_opponent_and_lutris_kolaghans_copy_keeps_its_modes_cr_700_2d_707_10c` |
 | `61ed8f24` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
 | `0bcfa967` | a | protection | a mode needing a target is only choosable if a legal target exists; unchosen modes ignore targeting | untested |
 | `4ba4f68d` | a | mana | you choose exactly two different modes as you cast this spell, locked in once chosen | `cards_m7b_tests_spells::kolaghans_command_chooses_two_different_modes` |
@@ -2764,19 +2764,19 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `373235a1` | a | mana | a spell's mana value comes only from its mana cost, ignoring any alternative costs, additional costs, or cost changes | untested |
 | `5a231246` | a | zones | an escaped non-permanent returns to GY after resolving; a permanent enters BF, returns to GY on death, re-escapes | untested |
-| `acd60f05` | a | stack | a cascade-style trigger fires on cast and resolves first, stacking any cast card above the source spell | untested |
+| `acd60f05` | a | stack | a cascade-style trigger fires on cast and resolves first, stacking any cast card above the source spell | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
 | `8d21f1db` | c | NR | a cascade-style effect requires the cast spell, not just the exiled card, to beat the sources mana value [part 3, was a/mana: no cube card's castable face or half has a higher mana value than the card it is in exile] | not reachable with the cube's cards |
 | `6c69604c` | a | zones | an escape-style permission changes how you may cast a card from the graveyard, not when you may do so | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `259e8644` | a | zones | if a card has multiple permissions to cast it from the graveyard, you choose one to apply; the rest do nothing | `rules_shortcuts::cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses` |
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
-| `8a83c9d0` | a | triggers | if a spell with a cascade-style trigger is countered, the triggered ability still resolves normally | untested |
+| `8a83c9d0` | a | triggers | if a spell with a cascade-style trigger is countered, the triggered ability still resolves normally | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
 | `01ac337a` | a | mana | casting an exiled X spell without paying its mana cost forces X to be 0 | untested |
 | `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
 | `75e9fc66` | a | mana | casting via an escape-style permission forbids other alternative costs but still requires mandatory additional costs | `rules_shortcuts::cr_601_2b_breach_escape_with_the_cards_own_additional_cost` |
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
 | `6187a75b` | a | mana | a split cards mana value is both halves combined; a cascade-style effect still only casts one half | untested |
 | `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
-| `4f3bb425` | a | triggers | a cascade-style ability's exile step is mandatory; only casting the final exiled card is optional | untested |
+| `4f3bb425` | a | triggers | a cascade-style ability's exile step is mandatory; only casting the final exiled card is optional | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
 | `d4aa6557` | a | zones | a cascade-style ability exiles its cards face up, visible to every player | untested |
 
 ### Raph & Mikey, Troublemakers
@@ -2845,7 +2845,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `b4178eed` | a | other | if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
 | `5f5f59d3` | a | other | this restriction skips a permanent spell cast from the graveyard via another permission; you can cast one more | untested |
 | `d2cef7ee` | c | NR | gaining control of a new copy in the same turn, after already using ones effect, lets you use the new ones too [part 3, was a/other: Lurrus is legendary and the cube has one] | not reachable with the cube's cards |
-| `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | untested |
+| `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `bd8a17c9` | a | other | this companion's deckbuilding condition doesn't restrict the mana value of instants and sorceries in your starting deck | `rules_m8a::cr_702_139a_lurrus_condition_each_permanent_mana_value_2_or_less` |
 | `a6bfcffb` | a | zones | this cast-from-graveyard permission doesn't let you play land cards | untested |
 | `b3fcd7f8` | c | NR | losing control of this source mid-cast doesnt stop you finishing the cast through its permission [part 3, was a/stack: nothing can change control of Lurrus while a spell is being cast (only mana abilities can be activated then)] | not reachable with the cube's cards |
@@ -2857,8 +2857,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `2deb11e0` | a | zones | a spell cast from the graveyard via this permission still follows its normal timing restrictions | untested |
 | `90a51faf` | a | mana | you must still pay this spells costs, though an available alt cost like mutate may substitute | `cards_m7c_tail2::lurrus_casts_one_permanent_of_mana_value_two_or_less_from_the_graveyard_each_turn` |
 | `aa67eb2c` | a | other | a companion begins the game outside the game rather than in your starting deck | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
-| `5a3cfad1` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | untested |
-| `3d37a052` | a | zones | once a companion is in hand its a normal card; if countered/destroyed it goes to the graveyard and stays in the game | untested |
+| `5a3cfad1` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
+| `3d37a052` | a | zones | once a companion is in hand its a normal card; if countered/destroyed it goes to the graveyard and stays in the game | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `a037c9c9` | a | stack | paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after | `rules_m8a::cr_116_2g_the_companion_special_action` |
 | `e980e48f` | a | mana | put companion into hand once/game for a fixed cost at sorcery speed; cant be countered or stopped | `rules_m8a::cr_116_2g_the_companion_special_action` |
 
@@ -2904,7 +2904,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cf220ddc` | a | stack | a redirected/copied spells pre-cast damage or counter division cant change, though its targets still can | `rulings_stack2::lutris_copy_keeps_x_the_division_and_the_cost_paid_new_targets_allowed_cr_707_10_601_2d` |
 | `8e0d3377` | a | mana | a copy of an X spell keeps the same X value chosen for the original at cast | `rulings_stack2::lutris_copy_keeps_x_the_division_and_the_cost_paid_new_targets_allowed_cr_707_10_601_2d` |
 | `23cf3168` | a | stack | a copy of a modal spell keeps the same chosen mode; a different mode can't be chosen for the copy | `rulings_stack2::lutris_copy_of_a_modal_spell_has_the_same_modes_cr_707_10` |
-| `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | untested |
+| `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `b7a14c0f` | a | stack | this copy ability can copy any instant or sorcery spell you control, not only ones with targets | `rulings_stack2::lutri_copies_a_spell_without_targets_cr_707_10` |
 | `a037c9c9` | a | stack | paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after | `rules_m8a::cr_116_2g_the_companion_special_action` |
 | `cd304617` | b | TRN | this companion condition only restricts deck contents, creating no ban on pairing it with other cards [part 3, was a/other: deck construction] | tournament / deck construction |
@@ -2915,7 +2915,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `22273157` | b | TRN | this companion's deckbuilding condition applies only to your starting deck, not your sideboard [part 3, was a/other: deck construction] | tournament / deck construction |
 | `5ff2b705` | b | CMD | Commander-only: one companion per deck, and the commander itself counts toward its deckbuilding condition | Commander |
 | `aa67eb2c` | a | other | a companion begins the game outside the game rather than in your starting deck | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
-| `5a3cfad1` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | untested |
+| `5a3cfad1` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `a037c9c9` | a | stack | paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after | `rules_m8a::cr_116_2g_the_companion_special_action` |
 
 ### Pinnacle Emissary
@@ -2941,7 +2941,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `7c1cc9dc` | a | stack | targeting an uncounterable spell with a counter effect still works, just failing to counter it | untested |
+| `7c1cc9dc` | a | stack | targeting an uncounterable spell with a counter effect still works, just failing to counter it | `rulings_stack3::reprieve_returns_an_uncounterable_spell_and_mana_drain_still_gives_its_mana_cr_101_2` |
 | `8044d61d` | a | mana | a permanent with X in its mana cost treats X as 0 | untested |
 | `2080ede6` | a | mana | a token that isn't a copy of anything has mana value 0; a token that is a copy shares that object's mana cost | untested |
 | `dbbd77b1` | a | protection | ward still lets you pay its cost when targeting; this spells own cant-be-countered clause holds even if you dont pay | untested |
@@ -2950,7 +2950,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `159f8a4d` | a | stack | exiling a card via a plot-style ability is a special action; nothing can respond by removing it from hand first | untested |
+| `159f8a4d` | a | stack | exiling a card via a plot-style ability is a special action; nothing can respond by removing it from hand first | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `5ff99a3f` | c | NR | casting a plotted X card without paying its mana cost forces X to be 0 [part 3, was a/mana: Pillage the Bog is the cube's only card with plot and has no {X}] | not reachable with the cube's cards |
 | `2b26e4d4` | a | mana | casting a plotted card free forbids other alt costs but still needs any mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `eb326c78` | a | mana | a plot-style keyword pays a cost at sorcery speed to exile a card from hand, making it plotted | `cards_m7d::pillage_the_bog_plots_then_casts_free_on_a_later_turn_cr702_170` |
@@ -3031,7 +3031,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a2e75b69` | a | other | before shuffling your library, you may reveal one companion from outside the game if your deck meets its condition | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
 | `92589f1d` | a | mana | a generic cost reduction cant touch colored costs, and wont reduce an already one-or-zero-mana activation further | `cards_m7c_tail2::zirda_reduces_activation_costs_by_two_leaving_one_mana_cr601_2f` |
 | `b4178eed` | a | other | if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
-| `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | untested |
+| `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `a037c9c9` | a | stack | paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after | `rules_m8a::cr_116_2g_the_companion_special_action` |
 | `0ef1ce44` | b | DEF | permanent cards are artifact, creature, enchantment, land, and planeswalker; basics carry intrinsic mana abilities | a definition, no behaviour of its own |
 | `cd304617` | b | TRN | this companion condition only restricts deck contents, creating no ban on pairing it with other cards [part 3, was a/other: deck construction] | tournament / deck construction |
@@ -3039,7 +3039,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `22273157` | b | TRN | this companion's deckbuilding condition applies only to your starting deck, not your sideboard [part 3, was a/other: deck construction] | tournament / deck construction |
 | `5ff2b705` | b | CMD | Commander-only: one companion per deck, and the commander itself counts toward its deckbuilding condition | Commander |
 | `aa67eb2c` | a | other | a companion begins the game outside the game rather than in your starting deck | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
-| `5a3cfad1` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | untested |
+| `5a3cfad1` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `a037c9c9` | a | stack | paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after | `rules_m8a::cr_116_2g_the_companion_special_action` |
 | `e980e48f` | a | mana | put companion into hand once/game for a fixed cost at sorcery speed; cant be countered or stopped | `rules_m8a::cr_116_2g_the_companion_special_action` |
 
@@ -3460,7 +3460,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `edc8892b` | a | stack | a card-count cost is checked only at activation, not resolution, so copies can be activated in response to each other | untested |
+| `edc8892b` | a | stack | a card-count cost is checked only at activation, not resolution, so copies can be activated in response to each other | `rulings_stack3::once_upon_a_time_in_the_first_upkeep_top_in_response_to_itself_library_checked_on_activation_cr_117_602_2` |
 
 ### Mishra's Workshop
 
