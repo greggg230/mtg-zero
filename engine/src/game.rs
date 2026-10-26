@@ -1266,10 +1266,14 @@ impl Game {
         let evoked = std::mem::take(&mut self.entering_evoked);
         let times = std::mem::take(&mut self.entering_times);
         if !cast && self.def_of(idx).is(types::CREATURE) && !self.is_token(idx) {
-            let replaced = self
-                .battlefield
-                .iter()
-                .any(|&c| self.abilities(c).exiles_uncast_creatures);
+            // Only a permanent on the battlefield before this event applies:
+            // not one entering at the same time (Exhume returning Containment
+            // Priest; CR 614.12a, its ruling), as for `EnterAsCopy`.
+            let group = self.group_ts;
+            let ev = self.ev_seq;
+            let replaced = self.battlefield.iter().any(|&c| {
+                self.abilities(c).exiles_uncast_creatures && !(group.0 == ev && self.objs[c.i()].timestamp >= group.1)
+            });
             if replaced {
                 self.entering_copy = None;
                 // (A card that would have entered face down is exiled face
@@ -1977,6 +1981,18 @@ impl Game {
     /// while its controller has few cards in hand) applies to it as a whole.
     pub(crate) fn draw_cards(&mut self, p: PlayerId, n: u32) {
         let mut n = n;
+        // One card, which an opponent's Hullbreacher would replace too: both
+        // replace the same draw and the drawer chooses the order (CR 616.1).
+        // Hullbreacher first leaves no draw for Quantum Riddler (one
+        // Treasure); Quantum Riddler first gives "draw two", each replaced
+        // (two Treasures, no card either). The engine takes the first order
+        // for the drawer: the other only gives the opponent a Treasure more.
+        // (To more than one card Quantum Riddler applies first, to the
+        // instruction, its ruling: then Hullbreacher to each draw.)
+        if n == 1 && self.seen & SEEN_DRAW_REPL != 0 && self.opp_draw_token(p).is_some() {
+            self.draw(p);
+            return;
+        }
         if n > 0 && self.seen & SEEN_DRAW_REPL != 0 {
             let hand = self.players[p as usize].hand.len();
             let plus: u32 = self
@@ -1995,6 +2011,20 @@ impl Game {
         }
     }
 
+    /// The token an opponent's Hullbreacher would create instead if `p` drew
+    /// a card now ("except the first one they draw in each of their draw
+    /// steps").
+    fn opp_draw_token(&self, p: PlayerId) -> Option<u16> {
+        if self.turn.number == 0 {
+            return None;
+        }
+        let first_in_draw_step = self.turn.step == Step::Draw && self.turn.active == p && self.players[p as usize].draw_step_draws == 0;
+        if first_in_draw_step {
+            return None;
+        }
+        self.permanents_of(opp(p)).find_map(|c| self.abilities(c).opp_draw_token)
+    }
+
     /// Draw a card (CR 121.2); from an empty library, flag 704.5b instead.
     pub(crate) fn draw(&mut self, p: PlayerId) {
         // "Each opponent can't draw more than one card each turn" (Narset).
@@ -2008,17 +2038,13 @@ impl Game {
         // "If an opponent would draw a card except the first one they draw in
         // each of their draw steps, instead you create a Treasure token"
         // (Hullbreacher, CR 614.1a: the draw doesn't happen).
-        if self.seen & SEEN_DRAW_REPL != 0 && self.turn.number > 0 {
-            let first_in_draw_step = self.turn.step == Step::Draw && self.turn.active == p && self.players[p as usize].draw_step_draws == 0;
-            if !first_in_draw_step {
+        if self.seen & SEEN_DRAW_REPL != 0 {
+            if let Some(token) = self.opp_draw_token(p) {
                 let q = opp(p);
-                let token = self.permanents_of(q).find_map(|c| self.abilities(c).opp_draw_token);
-                if let Some(token) = token {
-                    self.note(|_| format!("P{p} would draw: P{q} creates a token instead"));
-                    let def = self.db.token_def(token);
-                    self.create_tokens(def, q, 1, false);
-                    return;
-                }
+                self.note(|_| format!("P{p} would draw: P{q} creates a token instead"));
+                let def = self.db.token_def(token);
+                self.create_tokens(def, q, 1, false);
+                return;
             }
         }
         // "If you would draw a card while your library has no cards in it,
