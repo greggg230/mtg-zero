@@ -5290,7 +5290,9 @@ exactly.
    and the colours of the required spells and basic lands), x3 for a card revealed in an earlier
    game. A revealed companion stays in the sideboard and every other card passes its condition
    (Lurrus, Zirda: card by card; Lutri: one copy per name). The N - M basic lands: the required
-   ones, the rest uniformly among the basic land types of the deck's colours. (If no deck fits,
+   ones, the rest uniformly among the basic land types of the deck's colours that are below the
+   count cap (31, `MAX_COUNT`), then among any type below it (a 60-card deck of 34 basic lands in
+   one colour pair is legal: runs/mtg4 stalled on it before this, `a_deck_of_basic_lands_up_to_the_cap_is_sampled`). (If no deck fits,
    which needs first picks crowding out the cards a revealed companion allows, the first picks
    are drawn again among cards the condition allows, then the condition is dropped; the fuzzer
    checks every sampled deck against a revealed companion and never saw it broken.)

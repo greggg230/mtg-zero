@@ -445,3 +445,73 @@ fn force_chance_replays_the_deciders_draws_in_matches() {
     assert!(tried > 100, "{tried}");
     assert!(hits * 10 > tried * 7, "forced {hits}/{tried}");
 }
+
+#[test]
+fn a_deck_of_basic_lands_up_to_the_cap_is_sampled() {
+    // One player sideboards every pool card it can out and every basic land it
+    // can in, up to the deck cap (legal, CR 100.2b; runs/mtg4's network built
+    // a 60-card deck with 34 basic lands and the other player's determinize
+    // then found no deck: the basic lands' spread over the deck's colours
+    // stopped at one type's count cap). Every world of the other player holds
+    // a deck of the real size.
+    let sp = spec(r#"{"format": "bo3", "max_turns": 4}"#);
+    let mut tested = 0;
+    for seed in 0..16u64 {
+        let mut g = MtgAz::new_game(&sp, 2, 90 + seed).unwrap();
+        let mut keys = Vec::new();
+        let mut rng = Rng::new(seed);
+        while g.sideboarding().is_none() && !g.match_over() {
+            let l = legal(&g);
+            g.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+        }
+        if g.match_over() {
+            continue;
+        }
+        let stuffer = g.to_move().unwrap();
+        let other = 1 - stuffer;
+        let basic0 = g.m.pools[stuffer].list.len() - 5;
+        while g.to_move() == Some(stuffer) && g.sideboarding().is_some() {
+            let l = legal(&g);
+            let sb = g.sideboarding().unwrap();
+            let a = if sb.decision.kind == DecisionKind::SideboardCount {
+                let k = sb.asking.unwrap() as usize;
+                let nums = l.iter().copied().filter(|&a| a >= act::NUMBER);
+                if k >= basic0 { nums.max() } else { nums.min() }.unwrap()
+            } else {
+                l.iter()
+                    .copied()
+                    .find(|&a| {
+                        a >= act::LIBRARY && {
+                            let k = (a - act::LIBRARY) as usize;
+                            k >= basic0 || sb.counts[k] > 0
+                        }
+                    })
+                    .unwrap_or(if l.contains(&act::PASS) { act::PASS } else { l[0] })
+            };
+            g.step(a, &mut keys).unwrap();
+        }
+        let size: usize = g.sideboarding().map_or_else(|| g.m.decks[stuffer].iter().map(|&c| c as usize).sum(), |sb| {
+            sb.done[stuffer].as_ref().map_or(0, |d| d.iter().map(|&c| c as usize).sum())
+        });
+        assert!(size >= 55, "the stuffed deck has {size} cards");
+        // The other player sideboards (keeps), then game 2: the other
+        // player's worlds at several points.
+        let mut steps = 0;
+        while !g.match_over() && steps < 400 {
+            if g.to_move() == Some(other) && steps % 10 == 0 {
+                for w in 0..6 {
+                    let d = world(&g, other, 1000 * seed + w + steps as u64);
+                    let n: usize = d.m.decks[stuffer].iter().map(|&c| c as usize).sum();
+                    assert_eq!(n, g.m.decks[stuffer].iter().map(|&c| c as usize).sum::<usize>());
+                    d.g.check_invariants().unwrap();
+                    tested += 1;
+                }
+            }
+            let l = legal(&g);
+            let a = if g.sideboarding().is_some() && l.contains(&act::PASS) { act::PASS } else { l[rng.below(l.len() as u32) as usize] };
+            g.step(a, &mut keys).unwrap();
+            steps += 1;
+        }
+    }
+    assert!(tested >= 200, "{tested}");
+}

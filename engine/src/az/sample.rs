@@ -373,13 +373,20 @@ fn sample_deck(
     // Basic lands: the rest, of the deck's colours (or any).
     let basic_cols: Vec<usize> = (0..5).filter(|&i| cols & (1 << i) != 0 && allowed(db, cond, pool.list[pool.n_cards + i].0)).collect();
     let basic_cols: Vec<usize> = if basic_cols.is_empty() { (0..5).collect() } else { basic_cols };
+    // A type at `MAX_COUNT` takes no more: the rest goes to the deck's other
+    // colours, then to any type (a deck of 60 with 34 basic lands in one
+    // colour pair is legal; runs/mtg4 stalled on it).
     for _ in basics_have..n - npool {
-        let i = basic_cols[rng.below(basic_cols.len() as u32) as usize];
-        let k = pool.n_cards + i;
-        if counts[k] >= MAX_COUNT {
+        let open = |i: &usize| counts[pool.n_cards + *i] < MAX_COUNT;
+        let mut choice: Vec<usize> = basic_cols.iter().copied().filter(open).collect();
+        if choice.is_empty() {
+            choice = (0..5).filter(|i| allowed(db, cond, pool.list[pool.n_cards + i].0)).filter(open).collect();
+        }
+        if choice.is_empty() {
             return None;
         }
-        counts[k] += 1;
+        let i = choice[rng.below(choice.len() as u32) as usize];
+        counts[pool.n_cards + i] += 1;
     }
     Some(counts)
 }
