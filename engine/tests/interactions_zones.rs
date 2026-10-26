@@ -261,3 +261,24 @@ fn fractured_identity_on_a_face_down_permanent_gives_a_nameless_2_2_cr_708_2_707
     assert!(!g.is_face_down(tok[0]));
     assert_eq!((g.pt(tok[0]), g.name(tok[0])), ((2, 2), ""));
 }
+
+#[test]
+fn a_flickered_mdfc_land_face_returns_front_face_up_and_a_sorcery_cant_enter_cr_712_14_307_4() {
+    // ruling: 47775ed7
+    // Shatterskull, the Hammer Pass (the land face of Shatterskull
+    // Smashing) exiled by Flickerwisp: "return that card to the
+    // battlefield" puts it front face up, a sorcery, which can't enter
+    // (CR 307.4): it stays in exile.
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .hand(0, &["Flickerwisp", "Shatterskull Smashing // Shatterskull, the Hammer Pass"])
+        .start();
+    let s = g.card(0, "Shatterskull Smashing // Shatterskull, the Hammer Pass", Zone::Hand);
+    g.choose(Choice::PlayFace(s));
+    quiet_until(&mut g, at_priority);
+    assert_eq!(g.obj(s).zone, Zone::Battlefield, "{}", log(&g));
+    flicker(&mut g, s);
+    assert_eq!(g.obj(s).zone, Zone::Exile);
+    to_end_step(&mut g);
+    assert_eq!(g.obj(s).zone, Zone::Exile, "{}", log(&g));
+}

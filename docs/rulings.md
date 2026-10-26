@@ -18,11 +18,11 @@ bug left, below), `untested` (class a, no test yet: part 2's work).
 | class a | 1507 | 1193 |
 | class b | 87 | 61 |
 | class c | 13 | 6 |
-| a, tested (passing) | 130 | 126 |
+| a, tested (passing) | 218 | 203 |
 | a, deferred | 0 | 0 |
-| a, untested | 1377 | 1067 |
+| a, untested | 1289 | 990 |
 
-Class a by area (distinct texts): mana 17/213, other 4/166, triggers 18/166, zones 8/142, stack 17/133, copies 16/110, dfc 6/72, replacement 15/70, combat 5/65, protection 6/29, facedown 10/17, walkers 4/10 (tested/all).
+Class a by area (distinct texts): mana 26/213, other 6/166, triggers 42/166, zones 23/142, stack 35/133, copies 23/110, dfc 8/72, replacement 15/70, combat 5/65, protection 6/29, facedown 10/17, walkers 4/10 (tested/all).
 
 ## Per card
 
@@ -227,7 +227,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `35f3a5dc` | a | zones | blink exile: Auras go to graveyard, Equipment unattaches and stays, counters cease; returnee is a new object | untested |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | untested |
 | `d29b2c9d` | a | triggers | a returning permanent's beginning-of-end-step triggers don't fire that turn (missed window) | untested |
-| `2cf497b2` | a | triggers | a delayed end-step return trigger still fires even once its source has left the battlefield | untested |
+| `2cf497b2` | a | triggers | a delayed end-step return trigger still fires even once its source has left the battlefield | `rulings_triggers2::flickerwisp_gone_its_exiled_permanent_still_returns_at_the_end_step_cr_603_7` |
 
 ### Skyclave Apparition
 
@@ -265,12 +265,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `408732b7` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist | untested |
 | `6d79b5c1` | a | triggers | the monarch carries two built-in triggers: draw at end step, and passing on combat damage dealt to it | untested |
-| `078cc0d2` | a | zones | an exiled creature token ceases to exist instead of ever returning | untested |
+| `078cc0d2` | a | zones | an exiled creature token ceases to exist instead of ever returning | `rulings_triggers2::palace_jailer_exiling_a_token_it_ceases_to_exist_cr_111_7` |
 | `867620c4` | a | triggers | if you're not monarch when the delayed exile trigger resolves, it stays exiled until an opponent becomes monarch | untested |
 | `2239016d` | b | MP | multiplayer monarch succession when the monarch leaves the game | multiplayer |
-| `e5e352da` | a | triggers | the source leaving doesn't return its exiled card; it keeps watching for an opponent to become monarch | untested |
+| `e5e352da` | a | triggers | the source leaving doesn't return its exiled card; it keeps watching for an opponent to become monarch | `rulings_triggers2::palace_jailer_gone_the_creature_returns_when_an_opponent_becomes_the_monarch_cr_610_3c` |
 | `88b92913` | a | other | the game starts with no monarch, but exactly one exists from the first time one is assigned onward | untested |
-| `bd46894c` | a | triggers | any opponent becoming monarch triggers the return, not just the original controller of the exiled card | untested |
+| `bd46894c` | a | triggers | any opponent becoming monarch triggers the return, not just the original controller of the exiled card | `rulings_triggers2::palace_jailer_gone_the_creature_returns_when_an_opponent_becomes_the_monarch_cr_610_3c` |
 
 ### Seasoned Dungeoneer
 
@@ -378,8 +378,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f13eb15b` | a | zones | if fewer than X library cards remain, the permanent goes to the bottom instead | untested |
-| `68100e83` | a | zones | choosing X=0 puts the permanent on top of its owner's library | untested |
+| `f13eb15b` | a | zones | if fewer than X library cards remain, the permanent goes to the bottom instead | `rulings_triggers2::unexpectedly_absent_x_zero_puts_it_on_top_and_x_past_the_bottom_on_the_bottom_cr_401_4` |
+| `68100e83` | a | zones | choosing X=0 puts the permanent on top of its owner's library | `rulings_triggers2::unexpectedly_absent_x_zero_puts_it_on_top_and_x_past_the_bottom_on_the_bottom_cr_401_4` |
 
 ### Oust
 
@@ -387,17 +387,17 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `2a33d679` | a | zones | a targeted token ceases to exist once it would be put into its owner's library | untested |
 | `09936adc` | a | stack | an illegal target at resolution means the spell doesn't resolve and no life is gained | untested |
-| `1f35b259` | a | zones | if the owner's library is empty, the creature becomes the only card in it | untested |
-| `cd7798a0` | a | zones | if the library has cards, the creature goes directly under the top card, not shuffled in | untested |
+| `1f35b259` | a | zones | if the owner's library is empty, the creature becomes the only card in it | `rulings_triggers2::oust_into_an_empty_library_and_second_from_the_top_cr_401_4` |
+| `cd7798a0` | a | zones | if the library has cards, the creature goes directly under the top card, not shuffled in | `rulings_triggers2::oust_into_an_empty_library_and_second_from_the_top_cr_401_4` |
 | `259ab0fd` | a | other | the creature's controller, not its owner, is the one who gains the life | untested |
 
 ### Prismatic Ending
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `41553eae` | a | mana | a copy of a converge spell counts zero colors spent, since no mana was spent to cast the copy | untested |
+| `41553eae` | a | mana | a copy of a converge spell counts zero colors spent, since no mana was spent to cast the copy | `rulings_casts::prismatic_ending_copied_counts_no_colours_cr_707_10_601_2h` |
 | `a95c3d78` | a | mana | mana spent on alternative or additional costs counts toward a converge-style count | untested |
-| `fc8abf83` | a | mana | casting a converge spell without paying its mana cost counts zero colors spent | untested |
+| `fc8abf83` | a | mana | casting a converge spell without paying its mana cost counts zero colors spent | `rulings_casts::prismatic_ending_cast_free_counts_no_colours_cr_601_2h` |
 | `51285906` | a | mana | mana value isn't checked as a targeting restriction, only when the spell resolves | untested |
 | `68200d2c` | a | mana | at most five colors of mana can ever be spent on one spell; colorless doesn't count as a color | untested |
 | `38997c8b` | a | mana | you can't overpay a converge-style spell to spend more colors, or skip a cost reduction to do so | untested |
@@ -472,8 +472,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `429a116f` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist | untested |
-| `0f86b94f` | a | triggers | if the source leaves before its ETB ability resolves, the target permanent won't be exiled | untested |
-| `ac3bb678` | a | zones | a token exiled this way ceases to exist instead of returning | untested |
+| `0f86b94f` | a | triggers | if the source leaves before its ETB ability resolves, the target permanent won't be exiled | `rulings_triggers2::leyline_binding_gone_before_its_enter_ability_resolves_exiles_nothing_cr_610_3c` |
+| `ac3bb678` | a | zones | a token exiled this way ceases to exist instead of returning | `rulings_triggers2::palace_jailer_exiling_a_token_it_ceases_to_exist_cr_111_7` |
 | `86da9a0c` | b | MP | multiplayer: exiled card returns if the exiling permanent's owner leaves the game | multiplayer |
 | `fa232a08` | a | triggers | an 'exile then return when this leaves' ability is one ability making two independent one-shot effects | untested |
 | `d5edbfb1` | a | mana | a domain-based ability doesn't change the spell's own fixed mana value | untested |
@@ -563,7 +563,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | untested |
-| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | untested |
+| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `a92b37a5` | a | mana | if a card has multiple flashback costs, you may pay any one of them | untested |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | untested |
 | `fec2f94a` | a | mana | a card with no mana cost that gains flashback has no flashback cost and can't be cast this way | untested |
@@ -752,7 +752,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | untested |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
 | `751982e2` | a | zones | if an exiled card made playable by an ability isn't played, it simply remains in exile | untested |
 | `e32a9bac` | a | copies | a count-based power/toughness-setting ability counts its own source, guaranteeing at least a 1/1 | untested |
@@ -851,7 +851,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `dcdbba23` | a | triggers | ETB and enters-with abilities of a copied permanent trigger normally for the resulting token | untested |
 | `6b2a875f` | b | PRINT | the '+' indicator on additional-cost modes is a reminder only, with no rules meaning | printing, wording, reminder text |
 | `4cdbead7` | a | protection | you may only choose a mode requiring a target if a legal target for it exists; unchosen modes' targeting is ignored | untested |
-| `d4f44dfc` | a | stack | a copy of a modal spell may get new targets from the copying effect, but never new modes | untested |
+| `d4f44dfc` | a | stack | a copy of a modal spell may get new targets from the copying effect, but never new modes | `rulings_stack2::three_steps_ahead_copied_keeps_its_modes_and_may_target_anew_cr_702_172_707_10c` |
 | `9dcd9c8e` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | untested |
 | `77eebb68` | a | mana | casting a modal spell free still needs choosing at least one mode and paying its additional cost | untested |
 | `f0054ad7` | a | mana | a copied permanent with X in its mana cost treats X as 0 | untested |
@@ -926,7 +926,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `e487566e` | a | zones | targeting a card cast via flashback with a bounce-to-hand effect still exiles it per flashback's own replacement | untested |
+| `e487566e` | a | zones | targeting a card cast via flashback with a bounce-to-hand effect still exiles it per flashback's own replacement | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `20aee8cd` | a | stack | bouncing an uncounterable spell still works: removed from the stack (not countered), other effects still happen | `rulings_stack::remand_on_a_spell_that_cant_be_countered_still_draws_cr_101_2` |
 
 ### Frantic Search
@@ -959,7 +959,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3ef23eda` | a | stack | a copy of a modal spell may get new targets from the copying effect, but never new modes | untested |
+| `3ef23eda` | a | stack | a copy of a modal spell may get new targets from the copying effect, but never new modes | `rulings_stack2::mystic_confluences_copy_may_get_new_targets_not_new_modes_cr_707_10c` |
 | `d8e048f4` | a | other | if the same mode is chosen more than once, you choose the relative order of its repeated effect | untested |
 | `e260f820` | a | stack | if all chosen modes targets become illegal, the whole modal spell fails, including any non-targeted mode | untested |
 | `b87d5668` | a | other | a modal spell's instructions are always followed in their written order, regardless of which modes are chosen | untested |
@@ -1038,7 +1038,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `65329593` | a | zones | this card isnt in the graveyard until it fully resolves, so its own shuffle effect misses it | untested |
 | `ef0edbdb` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | untested |
-| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | untested |
+| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | untested |
 | `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | untested |
@@ -1118,7 +1118,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `9402dfbe` | a | mana | casting a card without paying its mana cost forces any X in its cost to be 0 | `rulings_replacement::dauthi_a_card_played_without_paying_its_mana_cost_has_x_zero_cr_107_3b` |
 | `2208ed2d` | a | combat | multiple evasion abilities (e.g. shadow+flying) all must be satisfied for a creature to block it | untested |
 | `545961c8` | a | mana | casting a card this way forbids other alternative costs but still requires any mandatory additional costs | `rulings_replacement::dauthi_additional_costs_must_still_be_paid_cr_601_2f` |
-| `8d9db447` | a | zones | a discard replaced to exile still fires discard triggers, and the card is findable there by checking effects | untested |
+| `8d9db447` | a | zones | a discard replaced to exile still fires discard triggers, and the card is findable there by checking effects | `rulings_casts::dauthi_a_discard_exiled_instead_still_triggers_discard_abilities_cr_614_1a`; `rulings_casts::dauthi_occult_epiphany_counts_the_types_of_cards_discarded_into_exile_cr_614_1a` |
 | `19d382a1` | a | zones | playing a card granted by this effect still follows normal timing restrictions | `rulings_replacement::dauthi_a_card_played_this_way_follows_its_timing_cr_307_1` |
 | `1f7c33df` | a | zones | tokens still die normally even while this death-replacement effect is active, since it only covers nontoken creatures | `rulings_replacement::dauthi_an_opponents_token_still_dies_cr_111_7` |
 | `2891b4c7` | a | replacement | affected opponent creatures are exiled instead of dying, so die-triggered abilities never fire for them | `rulings_replacement::dauthi_an_opponents_creature_is_exiled_and_its_dies_ability_doesnt_trigger_cr_700_4` |
@@ -1180,8 +1180,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `73ddf41c` | a | triggers | magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect | untested |
 | `f41a9b99` | a | triggers | casting an instant or sorcery triggers every magecraft ability you control | untested |
 | `e50427e3` | a | protection | targeting multiple ward permanents triggers each ward; missing any payment counters the whole spell | untested |
-| `ee14929e` | a | triggers | an effect that copies an instant or sorcery spell on the stack also triggers magecraft | untested |
-| `be6a31bb` | a | triggers | making multiple copies of a spell triggers magecraft once per copy | untested |
+| `ee14929e` | a | triggers | an effect that copies an instant or sorcery spell on the stack also triggers magecraft | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
+| `be6a31bb` | a | triggers | making multiple copies of a spell triggers magecraft once per copy | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
 | `e120a54f` | a | triggers | copying an instant/sorcery card in a non-stack zone doesn't trigger magecraft by itself, but casting that copy does | untested |
 
 ### Grief
@@ -1322,13 +1322,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `58787dbc` | a | triggers | a delayed exile trigger only exiles the creature if it's still on the battlefield when the trigger condition checks | untested |
+| `58787dbc` | a | triggers | a delayed exile trigger only exiles the creature if it's still on the battlefield when the trigger condition checks | `rulings_triggers2::shallow_grave_exiles_only_the_creature_still_on_the_battlefield_cr_603_7_400_7` |
 
 ### Corpse Dance
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `280ed0d1` | a | triggers | a delayed exile trigger only exiles the card if it's still on the battlefield when the trigger condition checks | untested |
+| `280ed0d1` | a | triggers | a delayed exile trigger only exiles the card if it's still on the battlefield when the trigger condition checks | `rulings_triggers2::shallow_grave_exiles_only_the_creature_still_on_the_battlefield_cr_603_7_400_7` |
 | `36b545c9` | a | other | a granted haste effect only lasts until end of turn, even if the creature somehow survives to a later turn | untested |
 
 ### Dismember
@@ -1469,14 +1469,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8b359ef5` | a | zones | looking at the top of your library this way doesn't use the stack and can happen any time, even without priority | untested |
-| `7ee6c520` | a | mana | a permanent can be one of the permanents it sacrifices to pay for its own ability | untested |
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | untested |
+| `8b359ef5` | a | zones | looking at the top of your library this way doesn't use the stack and can happen any time, even without priority | `cards_m7d::bolas_citadel_casts_from_the_top_paying_life_cr118_9` |
+| `7ee6c520` | a | mana | a permanent can be one of the permanents it sacrifices to pay for its own ability | `cards_m7d::bolas_citadel_sacrifices_ten_nonland_permanents_cr701_21` |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `2012f8f3` | a | stack | if the librarys top card changes mid-cast or mid-activation, you cant see the new top until thats done | untested |
-| `4c7c58fa` | a | mana | casting a card rather than paying its mana cost forbids other alt costs but still needs mandatory ones | untested |
+| `4c7c58fa` | a | mana | casting a card rather than paying its mana cost forbids other alt costs but still needs mandatory ones | `rulings_casts::citadel_no_other_alternative_cost_but_additional_costs_cr_118_9a_601_2f` |
 | `9cf8d89b` | b | MP | Two-Headed Giant: a life-loss effect hits the opposing team for a fixed amount | multiplayer |
-| `8ccdbbbd` | a | zones | playing a land this way still requires an available land play for the turn | untested |
-| `8f6f883e` | a | zones | cards played from your library this way still follow their normal timing permissions and restrictions | untested |
+| `8ccdbbbd` | a | zones | playing a land this way still requires an available land play for the turn | `rulings_casts::citadel_a_land_from_the_top_needs_a_land_drop_cr_305_2` |
+| `8f6f883e` | a | zones | cards played from your library this way still follow their normal timing permissions and restrictions | `rulings_casts::citadel_spells_from_the_top_follow_their_timing_cr_307_1` |
 
 ### Animate Dead
 
@@ -1484,7 +1484,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `2d1b2d97` | a | protection | shroud/protection only work on the battlefield, so a shrouded graveyard card can still be targeted by reanimation | untested |
 | `ed2e62db` | a | replacement | a reanimation Aura attaches to the GY card, returns it, then reattaches to the new object, never itself touching GY | untested |
-| `2a2eab5b` | a | triggers | if the source isn't on the battlefield when its own reanimation trigger resolves, nothing happens and the card stays put | untested |
+| `2a2eab5b` | a | triggers | if the source isn't on the battlefield when its own reanimation trigger resolves, nothing happens and the card stays put | `rulings_triggers2::animate_dead_gone_before_its_trigger_resolves_returns_nothing_cr_608_2b` |
 | `e3ce0176` | a | protection | if the returned creature cant legally be enchanted, the Aura fails to attach, goes to GY, and triggers a delayed sac | untested |
 | `34b9e51a` | a | other | once attached to the creature it returned, a reanimation Aura can't be moved to attach to a different creature instead | untested |
 
@@ -1647,7 +1647,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `551aa933` | a | zones | cards exiled by this effect are exiled face up | untested |
-| `1178d637` | a | triggers | an 'exile cards until some event' effect exiles them one at a time, so a watching trigger fires once per card | untested |
+| `1178d637` | a | triggers | an 'exile cards until some event' effect exiles them one at a time, so a watching trigger fires once per card | `rulings_triggers2::laelia_cascade_exiles_one_card_at_a_time_one_trigger_each_cr_702_85a_603_2c` |
 | `1e2502fc` | a | zones | playing a card from exile makes it a new object; if it returns to exile later, you can't play it again | untested |
 | `a898c85e` | a | triggers | this trigger doesn't care which player exiled the cards or from which zone, including via delve | untested |
 | `cefea9b0` | a | triggers | this trigger fires once per exiling event, no matter how many cards were exiled simultaneously | untested |
@@ -1658,9 +1658,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `66fc62ef` | a | triggers | damage dealt by multiple simultaneous sources still only triggers this ability once, for the total amount | untested |
+| `66fc62ef` | a | triggers | damage dealt by multiple simultaneous sources still only triggers this ability once, for the total amount | `rulings_triggers2::screaming_nemesis_dealt_damage_by_two_blockers_triggers_once_cr_603_2c_510_2` |
 | `50dcb39f` | a | replacement | a life-total-setting effect that would raise your life above its current value under this lock simply does nothing | untested |
-| `ea71103f` | a | triggers | taking lethal damage still lets this creature's damage-triggered ability trigger before it's destroyed | untested |
+| `ea71103f` | a | triggers | taking lethal damage still lets this creature's damage-triggered ability trigger before it's destroyed | `rulings_triggers2::screaming_nemesis_dealt_damage_by_two_blockers_triggers_once_cr_603_2c_510_2` |
 | `1fec0c93` | a | replacement | once this deals damage to a player, they can never gain life again all game, even if the source later leaves | untested |
 | `68a5e08c` | a | replacement | life-gain effects still resolve under this lock; they just grant no life, other effects still happen | untested |
 
@@ -1727,10 +1727,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `45abd910` | a | stack | illegal targets in a divided-damage ability just get no damage; the original division still applies to the rest | untested |
+| `45abd910` | a | stack | illegal targets in a divided-damage ability just get no damage; the original division still applies to the rest | `rulings_stack2::fury_a_target_gone_illegal_gets_nothing_and_the_others_keep_their_shares_cr_608_2b` |
 | `a2837ded` | a | triggers | paying an alt cost like evoke lets its own ETB trigger resolve before the sacrifice trigger, priority between | untested |
 | `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | untested |
-| `17a878c0` | a | stack | divide-on-cast damage is assigned when the ability triggers, not at resolution, min 1 per chosen target | untested |
+| `17a878c0` | a | stack | divide-on-cast damage is assigned when the ability triggers, not at resolution, min 1 per chosen target | `rulings_stack2::fury_divides_as_its_trigger_is_put_on_the_stack_at_least_one_each_cr_603_3d_601_2d` |
 
 ### Oliphaunt
 
@@ -1743,11 +1743,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8b4092d0` | a | zones | exiled cards that are never cast, including lands, simply stay in exile forever | untested |
-| `8f234701` | a | mana | casting an exiled X spell without paying its mana cost forces X to be 0 | untested |
-| `a2b92065` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
-| `dbec9eeb` | a | stack | casting an exiled card happens inside the triggered abilitys resolution, with no delay and ignoring timing rules | untested |
-| `45dd8bdb` | a | stack | casting exiled cards in order: later ones can target earlier spells, not the permanents they resolve into | untested |
+| `8b4092d0` | a | zones | exiled cards that are never cast, including lands, simply stay in exile forever | `rulings_casts::etali_cards_not_cast_stay_in_exile_lands_too_cr_406` |
+| `8f234701` | a | mana | casting an exiled X spell without paying its mana cost forces X to be 0 | `rulings_casts::etali_a_free_x_spell_has_x_zero_cr_107_3b` |
+| `a2b92065` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
+| `dbec9eeb` | a | stack | casting an exiled card happens inside the triggered abilitys resolution, with no delay and ignoring timing rules | `rulings_casts::etali_a_later_spell_cant_target_the_permanent_an_earlier_one_will_become_cr_608_2g`; `rulings_casts::etali_casts_a_sorcery_with_a_spell_on_the_stack_during_its_resolution_cr_608_2g` |
+| `45dd8bdb` | a | stack | casting exiled cards in order: later ones can target earlier spells, not the permanents they resolve into | `rulings_casts::etali_a_later_spell_may_target_an_earlier_one_cr_608_2g`; `rulings_casts::etali_a_later_spell_cant_target_the_permanent_an_earlier_one_will_become_cr_608_2g` |
 | `6c62cc8a` | b | MP | multiplayer: a player leaving the game and the cards/permanents they own leaving with them | multiplayer |
 | `c160282e` | a | other | losing to ten-plus poison counters is a game rule, independent of whether its source is still around | untested |
 
@@ -1779,7 +1779,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | untested |
-| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | untested |
+| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `a92b37a5` | a | mana | if a card has multiple flashback costs, you may pay any one of them | untested |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | untested |
 | `fec2f94a` | a | mana | a card with no mana cost that gains flashback has no flashback cost and can't be cast this way | untested |
@@ -1832,9 +1832,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `7ea4dd5a` | a | stack | each target of this divided-damage spell must be assigned at least 1 damage | untested |
+| `7ea4dd5a` | a | stack | each target of this divided-damage spell must be assigned at least 1 damage | `rulings_stack2::pyrokinesis_divides_as_cast_and_an_illegal_target_gets_none_cr_601_2d_608_2b` |
 | `6cfaf27f` | a | mana | if another effect raises this spell's cost, you must pay the increase even while paying its alternative cost | untested |
-| `d70bd868` | a | stack | damage divides as the spell is cast, not at resolution; illegal targets just get none; all-illegal voids it | untested |
+| `d70bd868` | a | stack | damage divides as the spell is cast, not at resolution; illegal targets just get none; all-illegal voids it | `rulings_stack2::pyrokinesis_divides_as_cast_and_an_illegal_target_gets_none_cr_601_2d_608_2b`; `rulings_stack2::pyrokinesis_with_every_target_illegal_doesnt_resolve_cr_608_2b` |
 
 ### Chain Lightning
 
@@ -1851,7 +1851,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `6082220c` | a | stack | a draw-two-discard-two spell resolves atomically; no player may act between the draw and the discard | untested |
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | untested |
-| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | untested |
+| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | untested |
 | `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | untested |
@@ -1866,13 +1866,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `b0d988d8` | a | dfc | choosing among a group of cards to play/cast lets you pick either face of a qualifying modal DFC | untested |
 | `62d54d14` | a | dfc | 'play' a specific MDFC lets you choose either face; 'cast' it specifically forbids playing it as a land | untested |
 | `6d8a93b1` | a | dfc | choosing a card name can be either face's name of a modal DFC; a linked ability then considers only that chosen name | untested |
-| `47775ed7` | a | dfc | putting a DFC onto the battlefield uses its front face; if that face cant legally enter, it doesnt enter | untested |
-| `7afb4bdb` | a | stack | an illegal target just gets no damage; the original division still applies fully to the remaining legal one | untested |
+| `47775ed7` | a | dfc | putting a DFC onto the battlefield uses its front face; if that face cant legally enter, it doesnt enter | `interactions_zones::a_flickered_mdfc_land_face_returns_front_face_up_and_a_sorcery_cant_enter_cr_712_14_307_4` |
+| `7afb4bdb` | a | stack | an illegal target just gets no damage; the original division still applies fully to the remaining legal one | `rulings_stack2::shatterskull_smashing_an_illegal_target_gets_nothing_the_other_its_share_cr_608_2b` |
 | `78c4509d` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `a3b82184` | a | dfc | a modal DFCs mana value depends on which face is considered, unlike a transforming DFC | untested |
 | `3429f2bd` | b | PRINT | modal DFC face icons (single vs double triangle) are print/frame markers | printing, wording, reminder text |
 | `819a55be` | a | dfc | legality of playing a modal DFC considers only the characteristics of the face being played | untested |
-| `f85041f1` | a | stack | damage for this spell is divided as it's cast, not at resolution, with each of two chosen targets getting at least 1 | untested |
+| `f85041f1` | a | stack | damage for this spell is divided as it's cast, not at resolution, with each of two chosen targets getting at least 1 | `rulings_stack2::shatterskull_smashing_an_illegal_target_gets_nothing_the_other_its_share_cr_608_2b` |
 
 ### Suplex
 
@@ -1921,18 +1921,18 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c8da9e36` | a | dfc | a transforming DFC enters front-up by default unless told to enter or be cast transformed | untested |
-| `7409fd1a` | a | triggers | ETB and enters-with abilities of a copied creature trigger normally for the token it becomes | untested |
+| `7409fd1a` | a | triggers | ETB and enters-with abilities of a copied creature trigger normally for the token it becomes | `rulings_copies2::reflections_token_has_the_copied_creatures_enter_ability_cr_707_4_603_6a` |
 | `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | untested |
 | `4d5c3fbb` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | untested |
 | `d1d85157` | a | replacement | if a doubling effect makes this create multiple tokens, every one gets sacrificed by its end-step clause | untested |
-| `3f6b90f2` | a | copies | copying a token that isn't itself copying something uses that token's original stated characteristics | untested |
-| `b30727cf` | a | copies | copying something that's itself copying another thing makes the new token use that other thing's copiable values | untested |
+| `3f6b90f2` | a | copies | copying a token that isn't itself copying something uses that token's original stated characteristics | `rulings_copies2::reflection_copying_a_token_uses_what_made_it_cr_707_2_111_4` |
+| `b30727cf` | a | copies | copying something that's itself copying another thing makes the new token use that other thing's copiable values | `rulings_copies2::reflection_copying_a_metamorph_copying_a_bear_makes_that_bear_cr_707_9b` |
 | `6c4f38f7` | a | copies | copying the created token copies the underlying card plus haste, but not its forced end-step sacrifice | `rulings_faces::a_copy_of_the_reflection_token_has_haste_and_isnt_sacrificed_cr_707_9b` |
 | `602bf769` | a | mana | a copied creature with X in its mana cost treats X as 0 | `rulings_faces::reflection_of_kiki_jiki_copying_walking_ballista_has_x_zero_cr_107_3m` |
 | `d1aaefa0` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone | untested |
 | `8dff2c25` | a | dfc | a transforming DFC's back face usually has a color indicator that defines its color | untested |
 | `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
-| `40a8e390` | a | copies | copies only whats printed plus haste; skips tap state, counters, attachments, and non-copy changes | untested |
+| `40a8e390` | a | copies | copies only whats printed plus haste; skips tap state, counters, attachments, and non-copy changes | `rulings_copies2::reflection_copies_neither_counters_nor_attachments_nor_tapped_state_cr_707_2` |
 
 ### Sneak Attack
 
@@ -2068,22 +2068,22 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `912d01f2` | a | triggers | a creature can't become prepared a second time simultaneously; a redundant trigger doesn't create a second exiled copy | untested |
+| `912d01f2` | a | triggers | a creature can't become prepared a second time simultaneously; a redundant trigger doesn't create a second exiled copy | `rulings_copies2::emeritus_already_prepared_isnt_prepared_again_cr_722_3a` |
 | `513b768f` | a | other | a creature without an associated alternate spell can never become 'prepared' | untested |
 | `1a88f316` | a | dfc | a card with this alternate spell is just its base creature card except while cast as that alternate spell | untested |
-| `4afe6989` | a | dfc | becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared | untested |
-| `30549a2b` | a | copies | being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics | untested |
+| `4afe6989` | a | dfc | becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared | `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
+| `30549a2b` | a | copies | being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics | `rulings_copies2::being_prepared_isnt_copiable_cr_722_2b_707_2` |
 | `a5afe2a8` | a | mana | casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply | untested |
 | `4d9f48c8` | a | copies | making the exiled alternate-spell copy ignores any copy-exceptions; it keeps its own original characteristics | untested |
-| `41772f5d` | a | triggers | a land-count-gated ability checks the count both when it triggers and again at resolution, failing either check | untested |
+| `41772f5d` | a | triggers | a land-count-gated ability checks the count both when it triggers and again at resolution, failing either check | `rulings_copies2::emeritus_the_land_count_is_checked_again_on_resolution_cr_603_4` |
 | `4c9245c3` | a | stack | an alternate spell with no legal targets left at resolution fails, and the creature stays unprepared | untested |
-| `f028f400` | a | copies | losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy | untested |
-| `b775049c` | a | copies | losing creature status or copying something else doesnt undo being prepared; the copy stays castable | untested |
+| `f028f400` | a | copies | losing all abilities doesn't undo being prepared or affect its alternate characteristics or exiled spell copy | `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
+| `b775049c` | a | copies | losing creature status or copying something else doesnt undo being prepared; the copy stays castable | `rulings_copies2::emeritus_losing_all_abilities_stays_prepared_cr_722_3a_613_1f` |
 | `c6772882` | a | replacement | an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared | untested |
 | `8c23b69e` | a | dfc | choosing a card name may select this kind of alternate spell's name | untested |
-| `341b5cd9` | a | other | only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner | untested |
+| `341b5cd9` | a | other | only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner | `rulings_copies2::only_the_prepared_creatures_controller_may_cast_its_copy_cr_722_3c` |
 | `81739185` | a | dfc | a card with this kind of alternate spell can only be cast with its base characteristics, unless it's prepared | untested |
-| `94077065` | a | copies | copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception | untested |
+| `94077065` | a | copies | copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception | `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
 
 ### Endurance
 
@@ -2262,8 +2262,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `e17f37b4` | a | zones | if this spell doesnt resolve, none of its effects happen, so it hits the graveyard instead of the library | untested |
-| `673739a0` | a | zones | if this spell is countered, none of its effects happen, so it hits the graveyard, not the library | untested |
-| `f8e4188f` | a | zones | if someone else casts your spell, they search and shuffle their own library, then shuffle it into yours | untested |
+| `673739a0` | a | zones | if this spell is countered, none of its effects happen, so it hits the graveyard, not the library | `rulings_triggers2::green_suns_zenith_countered_goes_to_the_graveyard_cr_701_6a` |
+| `f8e4188f` | a | zones | if someone else casts your spell, they search and shuffle their own library, then shuffle it into yours | `rulings_triggers2::green_suns_zenith_stolen_its_new_controller_searches_its_owners_library_gets_it_cr_608_2c` |
 | `64e2a429` | a | zones | normally casting and resolving this spell shuffles your library twice, which shuffle-counting effects will see | untested |
 
 ### Pest Infestation
@@ -2334,7 +2334,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3f63bb36` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | untested |
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | untested |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `892b7ab2` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
 | `07bd45b4` | a | zones | exiled cards you don't play via this effect simply remain in exile | untested |
 
@@ -2379,7 +2379,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | untested |
+| `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `276611ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
 | `8d32d60f` | a | zones | spells cast via this granted permission still follow their normal timing restrictions | untested |
 
@@ -2576,7 +2576,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8279c4b9` | a | triggers | an unblocked attack against a planeswalker you control doesn't trigger this unblocked-attacker-triggered ability | untested |
+| `8279c4b9` | a | triggers | an unblocked attack against a planeswalker you control doesn't trigger this unblocked-attacker-triggered ability | `rulings_triggers2::coveted_jewel_doesnt_trigger_on_an_attack_at_a_planeswalker_cr_508_1b` |
 | `1ec0d4c1` | a | triggers | this ability resolves after blockers are declared but before combat damage is dealt | untested |
 | `8d31adf9` | a | triggers | this triggers once blockers are declared (or skipped) if any attacker went unblocked, regardless of other attackers | untested |
 | `c5826706` | b | MP | each opponent attacking at once triggers this separately, each getting a chance at its own effect | multiplayer |
@@ -2699,9 +2699,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `79c9546a` | a | other | if X is 0 for this divided-damage spell, it can't have any targets either | untested |
-| `77f08ae0` | a | stack | damage for this spell is divided as it's cast; it can't be redistributed if a target becomes illegal before resolving | untested |
-| `5f015d91` | a | stack | each target of this divided-damage spell must get at least 1 damage | untested |
+| `79c9546a` | a | other | if X is 0 for this divided-damage spell, it can't have any targets either | `rulings_stack2::fire_covenant_with_x_zero_has_no_targets_cr_601_2d` |
+| `77f08ae0` | a | stack | damage for this spell is divided as it's cast; it can't be redistributed if a target becomes illegal before resolving | `rulings_stack2::fire_covenant_division_isnt_redistributed_when_a_target_goes_cr_601_2d_608_2b` |
+| `5f015d91` | a | stack | each target of this divided-damage spell must get at least 1 damage | `rulings_stack2::fire_covenant_division_isnt_redistributed_when_a_target_goes_cr_601_2d_608_2b` |
 
 ### Kolaghan's Command
 
@@ -2820,8 +2820,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | untested |
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | untested |
-| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | untested |
-| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | untested |
+| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
+| `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | untested |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | untested |
 | `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
@@ -2887,8 +2887,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `747157aa` | a | stack | redirecting a spell with a variable number of targets can't change how many targets it has | untested |
-| `c3434e5c` | a | stack | a redirected/copied spells pre-cast damage or counter division cant change, though its targets still can | untested |
+| `747157aa` | a | stack | redirecting a spell with a variable number of targets can't change how many targets it has | `rulings_stack2::invert_polarity_changes_targets_not_their_number_or_the_division_cr_115_7_601_2d` |
+| `c3434e5c` | a | stack | a redirected/copied spells pre-cast damage or counter division cant change, though its targets still can | `rulings_stack2::invert_polarity_changes_targets_not_their_number_or_the_division_cr_115_7_601_2d` |
 | `7918b317` | a | stack | any new targets chosen while redirecting a spell must be legal | `rules_stack::a_stolen_spell_may_get_new_targets_which_become_targets_cr_115_7` |
 | `ee4efa4c` | a | stack | no decisions about a redirected spell's new targets are made until after winning the relevant coin flip | `rules_stack::a_stolen_spell_may_get_new_targets_which_become_targets_cr_115_7` |
 
@@ -2898,17 +2898,17 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `a2e75b69` | a | other | before shuffling your library, you may reveal one companion from outside the game if your deck meets its condition | untested |
 | `b4178eed` | a | other | if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent | untested |
-| `cf220ddc` | a | stack | a redirected/copied spells pre-cast damage or counter division cant change, though its targets still can | untested |
-| `8e0d3377` | a | mana | a copy of an X spell keeps the same X value chosen for the original at cast | untested |
-| `23cf3168` | a | stack | a copy of a modal spell keeps the same chosen mode; a different mode can't be chosen for the copy | untested |
+| `cf220ddc` | a | stack | a redirected/copied spells pre-cast damage or counter division cant change, though its targets still can | `rulings_stack2::lutris_copy_keeps_x_the_division_and_the_cost_paid_new_targets_allowed_cr_707_10_601_2d` |
+| `8e0d3377` | a | mana | a copy of an X spell keeps the same X value chosen for the original at cast | `rulings_stack2::lutris_copy_keeps_x_the_division_and_the_cost_paid_new_targets_allowed_cr_707_10_601_2d` |
+| `23cf3168` | a | stack | a copy of a modal spell keeps the same chosen mode; a different mode can't be chosen for the copy | `rulings_stack2::lutris_copy_of_a_modal_spell_has_the_same_modes_cr_707_10` |
 | `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | untested |
-| `b7a14c0f` | a | stack | this copy ability can copy any instant or sorcery spell you control, not only ones with targets | untested |
+| `b7a14c0f` | a | stack | this copy ability can copy any instant or sorcery spell you control, not only ones with targets | `rulings_stack2::lutri_copies_a_spell_without_targets_cr_707_10` |
 | `a037c9c9` | a | stack | paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after | untested |
 | `cd304617` | a | other | this companion condition only restricts deck contents, creating no ban on pairing it with other cards | untested |
 | `3ded9c78` | a | other | a companion's other abilities only function while it's on the battlefield, not while it's outside the game | untested |
-| `2213efb8` | a | mana | a copys controller cant pay new alt/additional costs, but effects from costs paid on the original still apply to it | untested |
+| `2213efb8` | a | mana | a copys controller cant pay new alt/additional costs, but effects from costs paid on the original still apply to it | `rulings_stack2::lutris_copy_keeps_x_the_division_and_the_cost_paid_new_targets_allowed_cr_707_10_601_2d` |
 | `c574b96b` | a | stack | the copy goes straight onto the stack uncast, so cast-triggers skip it; it resolves before the original | `rulings_stack::lutris_copy_isnt_cast_and_resolves_before_the_original_cr_707_10` |
-| `7be1b615` | a | stack | a copy keeps its original targets unless given new legal ones; an unchangeable target stays, even if illegal | untested |
+| `7be1b615` | a | stack | a copy keeps its original targets unless given new legal ones; an unchangeable target stays, even if illegal | `rulings_stack2::lutris_copy_keeps_x_the_division_and_the_cost_paid_new_targets_allowed_cr_707_10_601_2d` |
 | `22273157` | a | other | this companion's deckbuilding condition applies only to your starting deck, not your sideboard | untested |
 | `5ff2b705` | b | CMD | Commander-only: one companion per deck, and the commander itself counts toward its deckbuilding condition | Commander |
 | `aa67eb2c` | a | other | a companion begins the game outside the game rather than in your starting deck | untested |
@@ -2966,8 +2966,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `73ddf41c` | a | triggers | magecraft abilities share one trigger condition (casting or copying an instant/sorcery) but each has its own effect | untested |
 | `3cf2e3a4` | a | triggers | casting an instant or sorcery triggers every magecraft-style ability you control | untested |
-| `ee14929e` | a | triggers | an effect that copies an instant or sorcery spell on the stack also triggers magecraft | untested |
-| `be6a31bb` | a | triggers | making multiple copies of a spell triggers magecraft once per copy | untested |
+| `ee14929e` | a | triggers | an effect that copies an instant or sorcery spell on the stack also triggers magecraft | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
+| `be6a31bb` | a | triggers | making multiple copies of a spell triggers magecraft once per copy | `rulings_triggers2::magecraft_triggers_for_a_copy_and_once_per_copy_cr_707_10_702_40a` |
 | `e120a54f` | a | triggers | copying an instant/sorcery card in a non-stack zone doesn't trigger magecraft by itself, but casting that copy does | untested |
 
 ### Vicious Rivalry
@@ -3070,8 +3070,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `be65848a` | a | triggers | if the source leaves while abilities it granted are still on the stack, those abilities resolve normally | untested |
 | `1b428e03` | a | triggers | if the source enters while a targeting spell is already on the stack, the newly granted ability misses that event | untested |
 | `129d1cb5` | a | triggers | multiple copies grant multiple separate ability instances per creature, each triggering independently | untested |
-| `309a7b0c` | a | triggers | the source grants its triggered ability to itself as well as to your other creatures | untested |
-| `80bc0a3f` | a | triggers | the granted ability's per-turn trigger limit applies separately to each creature that has it, not once overall | untested |
+| `309a7b0c` | a | triggers | the source grants its triggered ability to itself as well as to your other creatures | `cards_m7d::nadu_grants_a_target_trigger_twice_each_turn_per_creature_cr603_2e` |
+| `80bc0a3f` | a | triggers | the granted ability's per-turn trigger limit applies separately to each creature that has it, not once overall | `cards_m7d::nadu_grants_a_target_trigger_twice_each_turn_per_creature_cr603_2e` |
 
 ### Oko, Thief of Crowns
 
@@ -3103,8 +3103,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | untested |
 | `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
 | `5aaccf2e` | a | zones | putting a land onto the battlefield this way isnt playing a land, so it can happen off-turn or land-drop-free | untested |
-| `655d544a` | a | triggers | this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically | untested |
-| `1b138927` | a | triggers | this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there | untested |
+| `655d544a` | a | triggers | this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically | `rulings_triggers2::uro_put_onto_the_battlefield_is_sacrificed_and_its_enter_ability_triggers_cr_603_6a` |
+| `1b138927` | a | triggers | this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there | `rulings_triggers2::uro_put_onto_the_battlefield_is_sacrificed_and_its_enter_ability_triggers_cr_603_6a` |
 
 ### Tamiyo, Collector of Tales
 
@@ -3154,7 +3154,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `f6790404` | a | replacement | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | untested |
-| `f0765796` | a | triggers | if you and your permanent(s) are both targeted by one opposing spell, this punisher trigger fires once per target | untested |
+| `f0765796` | a | triggers | if you and your permanent(s) are both targeted by one opposing spell, this punisher trigger fires once per target | `rulings_triggers2::leovold_triggers_once_per_target_of_one_spell_cr_603_2e` |
 | `618eec3a` | a | triggers | this draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | untested |
 | `a137ea0d` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | untested |
 | `f8af3256` | a | other | opponents affected by this one-draw-per-turn restriction have any further draws that turn simply ignored | untested |
@@ -3171,7 +3171,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3d047ce6` | a | combat | an animated land's summoning sickness depends on when you gained control of it, not on when it became a creature | untested |
-| `e43b1205` | a | triggers | a land becoming a creature doesn't count as a creature entering the battlefield, so ETB-creature triggers don't fire | untested |
+| `e43b1205` | a | triggers | a land becoming a creature doesn't count as a creature entering the battlefield, so ETB-creature triggers don't fire | `rulings_triggers2::celestial_colonnade_becoming_a_creature_doesnt_enter_cr_603_6a` |
 | `1b90fed1` | a | combat | if this creature-land needs to pay a mana cost to attack, it may tap itself for that mana and still attack | untested |
 | `90f93ad0` | a | combat | tapping an attacking creature-land for mana afterward doesn't remove it from combat | untested |
 
@@ -3202,7 +3202,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3d047ce6` | a | combat | an animated land's summoning sickness depends on when you gained control of it, not on when it became a creature | untested |
-| `e43b1205` | a | triggers | a land becoming a creature doesn't count as a creature entering the battlefield, so ETB-creature triggers don't fire | untested |
+| `e43b1205` | a | triggers | a land becoming a creature doesn't count as a creature entering the battlefield, so ETB-creature triggers don't fire | `rulings_triggers2::celestial_colonnade_becoming_a_creature_doesnt_enter_cr_603_6a` |
 
 ### Darkslick Shores
 
@@ -3437,8 +3437,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `119d09c6` | a | triggers | this land's self-sacrifice-punishing trigger doesn't fire from itself being played | untested |
-| `123354f4` | a | triggers | this land's trigger doesn't fire for lands put onto the battlefield without being played | untested |
+| `119d09c6` | a | triggers | this land's self-sacrifice-punishing trigger doesn't fire from itself being played | `rulings_triggers2::city_of_traitors_ignores_itself_and_a_land_put_onto_the_battlefield_cr_305_1` |
+| `123354f4` | a | triggers | this land's trigger doesn't fire for lands put onto the battlefield without being played | `rulings_triggers2::city_of_traitors_ignores_itself_and_a_land_put_onto_the_battlefield_cr_305_1` |
 
 ### Gemstone Caverns
 
