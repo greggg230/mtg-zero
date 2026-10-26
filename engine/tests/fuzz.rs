@@ -20,12 +20,211 @@
 //! consistently with what the viewer knows (`check_hidden_pool`), keeps the
 //! viewer's encoding, and two sampled worlds stay indistinguishable to the
 //! decider while zero-core would keep them in one node.
+//!
+//! `FUZZ_POOL=interactions` (M8d part 2, ENGINE.md 38.5): combo-dense decks.
+//! Each player's 23 spells come from two or three of the interaction groups
+//! below (`GROUPS`: cards that interact under the CR, one group per family
+//! of cells of `docs/interactions.md`: copy effects with enter and leave
+//! abilities, flicker and linked exile, reanimation with replacement
+//! effects, face-down cards, double-faced cards, counterspells and copies of
+//! spells, control changes, taxes and free casts, damage and protection,
+//! planeswalkers, last known information and state-based actions, combat
+//! keywords, day and night), one in eight from all the groups; 17 random
+//! lands; a sideboard of seven from the same groups. Games and matches
+//! (best-of-three on those lists, open decklists) both use it, with every
+//! check of the default mode. The decision kinds asked are counted and
+//! printed (interaction decisions per 1,000, against the default mode's).
+//! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 
 mod common;
 
+use engine::db::CardDb;
 use engine::rng::Rng;
 use engine::{Choice, DecisionKind, Game, GameSpec, Outcome, NUM_ACTIONS};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The interaction groups of `FUZZ_POOL=interactions` (ENGINE.md 38.5; cube
+/// cards only, so matches can use them; a misspelt name fails loudly).
+const GROUPS: &[(&str, &[&str])] = &[
+    ("copies x enter and leave abilities", &[
+        "Phyrexian Metamorph", "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki", "Saheeli, Sublime Artificer",
+        "Superior Spider-Man", "Fractured Identity", "Springheart Nantuko", "Esika's Chariot", "Vaultborn Tyrant",
+        "Thundertrap Trainer", "Sicarian Infiltrator", "Archon of Cruelty", "Grief", "Solitude", "Fury", "Endurance",
+        "Subtlety", "Orcish Bowmasters", "Haywire Mite", "Skyclave Apparition", "Flametongue Kavu", "Baleful Strix",
+        "Thraben Inspector", "Shifting Woodland", "Seasoned Pyromancer", "Enduring Innocence", "Woodfall Primus",
+        "Three Steps Ahead", "Emeritus of Abundance // Regrowth", "Sage of the Skies",
+    ]),
+    ("flicker x linked exile, the new object", &[
+        "Flickerwisp", "Phelia, Exuberant Shepherd", "Palace Jailer", "Leyline Binding", "Portable Hole",
+        "Touch the Spirit Realm", "Displacer Kitten", "Skyclave Apparition", "Oust", "Elite Spellbinder",
+        "Tidehollow Sculler", "Parallax Wave", "Containment Priest", "Unexpectedly Absent", "Swords to Plowshares",
+        "Path to Exile", "Get Lost", "Council's Judgment", "Brazen Borrower // Petty Theft", "Memory Jar",
+        "Phyrexian Metamorph", "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki", "Solitude", "Grief",
+    ]),
+    ("reanimation x replacement effects", &[
+        "Reanimate", "Animate Dead", "Exhume", "Necromancy", "Shallow Grave", "Corpse Dance", "Goryo's Vengeance",
+        "Unearth", "Entomb", "Faithless Looting", "Frantic Search", "Containment Priest", "Dauthi Voidwalker",
+        "Archon of Cruelty", "Griselbrand", "Atraxa, Grand Unifier", "Uro, Titan of Nature's Wrath",
+        "Phlage, Titan of Fire's Fury", "Woodfall Primus", "Emrakul, the Aeons Torn", "Sneak Attack",
+        "Through the Breach", "Blightsteel Colossus", "Worldspine Wurm", "Yawgmoth's Will", "Underworld Breach",
+        "Hullbreacher", "Quantum Riddler", "Sword of the Meek", "Thopter Foundry",
+    ]),
+    ("face-down x copies, flicker, zones", &[
+        "Abhorrent Oculus", "Cloak and Dagger, Entwined", "Headliner Scarlett", "Shelldock Isle", "Memory Jar",
+        "Phyrexian Metamorph", "Containment Priest", "Flickerwisp", "Oust", "Swords to Plowshares",
+        "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki", "Saheeli, Sublime Artificer", "Oko, Thief of Crowns",
+        "Tishana's Tidebinder", "Displacer Kitten", "Fractured Identity", "Dauthi Voidwalker", "Skyclave Apparition",
+    ]),
+    ("double-faced cards, Adventures x copies, zones, mana value", &[
+        "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki", "Concealing Curtains // Revealing Eye",
+        "Cecil, Dark Knight // Cecil, Redeemed Paladin", "Jace, Vryn's Prodigy // Jace, Telepath Unbound",
+        "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar", "Etali, Primal Conqueror // Etali, Primal Sickness",
+        "Outland Liberator // Frenzied Trapbreaker", "Ulvenwald Oddity // Ulvenwald Behemoth",
+        "Jennifer Walters // The Sensational She-Hulk", "Shatterskull Smashing // Shatterskull, the Hammer Pass",
+        "Sink into Stupor // Soporific Springs", "Witch Enchanter // Witch-Blessed Meadow", "Brazen Borrower // Petty Theft",
+        "Embereth Shieldbreaker // Battle Display", "Emeritus of Abundance // Regrowth", "Norman Osborn // Green Goblin",
+        "Life // Death", "Ajani, Nacatl Pariah // Ajani, Nacatl Avenger", "Aang, Swift Savior // Aang and La, Ocean's Fury",
+        "Phyrexian Metamorph", "Flickerwisp", "Oust", "Displacer Kitten", "Phelia, Exuberant Shepherd",
+        "Saheeli, Sublime Artificer", "Cut Down", "Abrupt Decay", "Fatal Push",
+    ]),
+    ("counterspells x copies of spells, split, modal, X", &[
+        "Counterspell", "Mana Leak", "Memory Lapse", "Remand", "Force of Will", "Force of Negation", "Daze",
+        "Mana Drain", "Spell Pierce", "No More Lies", "Stern Scolding", "We Say Thee Nay!", "Lutri, the Spellchaser",
+        "Chain Lightning", "Three Steps Ahead", "Mystic Confluence", "Fiery Confluence", "Invert Polarity",
+        "Tishana's Tidebinder", "Ertai Resurrected", "Subtlety", "Witherbloom Apprentice", "Sedgemoor Witch",
+        "Lose Focus", "Brain Freeze", "Chain of Smog", "Pyroblast", "Kolaghan's Command", "Collective Brutality",
+        "Snapcaster Mage", "Flashback", "Fire Covenant", "Pyrokinesis", "Life // Death", "Prismatic Ending",
+        "Green Sun's Zenith", "Walking Ballista",
+    ]),
+    ("control changes x you and its controller", &[
+        "Fractured Identity", "Oko, Thief of Crowns", "Dack Fayden", "Thieving Skydiver", "Invert Polarity",
+        "Coveted Jewel", "Palace Jailer", "Forth Eorlingas!", "Aragorn, King of Gondor", "Emeritus of Abundance // Regrowth",
+        "Hullbreacher", "Ragavan, Nimble Pilferer", "Sol Ring", "Mana Vault", "Lightning Greaves", "Skullclamp",
+        "Smuggler's Copter", "Esika's Chariot", "Bolas's Citadel", "Phyrexian Metamorph",
+    ]),
+    ("taxes, alternative and additional costs x free casts", &[
+        "Thalia, Guardian of Thraben", "Etali, Primal Conqueror // Etali, Primal Sickness", "Bolas's Citadel",
+        "Dauthi Voidwalker", "Flash", "Force of Will", "Daze", "Solitude", "Fury", "Subtlety", "Grief", "Snapcaster Mage",
+        "Yawgmoth's Will", "Underworld Breach", "Lurrus of the Dream-Den", "Zirda, the Dawnwaker", "Mishra's Workshop",
+        "Arena of Glory", "Bloodbraid Challenger", "Prismatic Ending", "Walking Ballista", "Malcolm, Alluring Scoundrel",
+        "Through the Breach", "Sneak Attack", "Gitaxian Probe", "Dismember", "Mana Tithe", "Spell Pierce",
+        "Delighted Halfling", "Lotus Petal", "Black Lotus", "Chrome Mox", "Mox Diamond", "Pillage the Bog",
+        "Fallen Shinobi", "Robber of the Rich", "Tersa Lightshatter", "Laelia, the Blade Reforged", "Golos, Tireless Pilgrim",
+        "Abhorrent Oculus", "Fire Covenant", "Toxic Deluge",
+    ]),
+    ("damage x protection, deathtouch, infect, divided damage", &[
+        "Giver of Runes", "Mother of Runes", "True-Name Nemesis", "Sylvan Safekeeper", "Lightning Greaves",
+        "Emrakul, the Aeons Torn", "Fury", "Pyrokinesis", "Fire Covenant", "Walking Ballista", "Lightning Bolt",
+        "Chain Lightning", "Burst Lightning", "Galvanic Discharge", "Sheoldred, the Apocalypse", "Screaming Nemesis",
+        "Blightsteel Colossus", "Goblin Bombardment", "Kappa Cannoneer", "Hexdrinker", "Pyrogoyf", "Fiery Confluence",
+        "Wizard's Rockets", "Kolaghan's Command", "Suplex", "Skullclamp", "Bone Shards",
+        "Shatterskull Smashing // Shatterskull, the Hammer Pass", "Questing Beast", "Kaldra Compleat",
+    ]),
+    ("planeswalkers x damage, copies, control", &[
+        "Oko, Thief of Crowns", "Dack Fayden", "Jace, the Mind Sculptor", "Teferi, Hero of Dominaria", "Teferi, Time Raveler",
+        "Chandra, Torch of Defiance", "Karn, Scion of Urza", "Narset, Parter of Veils", "Nissa, Who Shakes the World",
+        "Wrenn and Six", "Minsc & Boo, Timeless Heroes", "Tamiyo, Collector of Tales", "The Wandering Emperor",
+        "Elspeth, Storm Slayer", "Ugin, Eye of the Storms", "Tezzeret, Cruel Captain", "Kaito, Bane of Nightmares",
+        "Saheeli, Sublime Artificer", "Fury", "Lightning Bolt", "Questing Beast", "Phyrexian Metamorph",
+        "Fractured Identity", "Clarion Conqueror", "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar",
+        "Jace, Vryn's Prodigy // Jace, Telepath Unbound",
+    ]),
+    ("last known information, triggers and state-based actions", &[
+        "Pyrogoyf", "Jacked Rabbit", "Ouroboroid", "Orcish Bowmasters", "Woodfall Primus", "Sword of the Meek",
+        "Thopter Foundry", "Skullclamp", "Laelia, the Blade Reforged", "Nadu, Winged Wisdom", "Hullbreacher",
+        "Quantum Riddler", "Sheoldred, the Apocalypse", "Leovold, Emissary of Trest", "Wan Shi Tong, All-Knowing",
+        "Inti, Seneschal of the Sun", "Currency Converter", "Ivora, Insatiable Heir", "Bloodtithe Harvester",
+        "Carnage Interpreter", "Forensic Gadgeteer", "Generous Plunderer", "Screaming Nemesis", "Walking Ballista",
+        "Toxic Deluge", "Balance", "Wrath of God", "Damn", "Sunfall", "Goblin Bombardment", "Swords to Plowshares",
+        "Fatal Push", "Tishana's Tidebinder",
+    ]),
+    ("combat: first and double strike, trample, deathtouch, protection", &[
+        "Questing Beast", "True-Name Nemesis", "Ragavan, Nimble Pilferer", "Adeline, Resplendent Cathar",
+        "Mother of Runes", "Giver of Runes", "Kaldra Compleat", "Blightsteel Colossus", "Swords to Plowshares",
+        "Lightning Greaves", "Skullclamp", "Nettlecyst", "Kappa Cannoneer", "Hexdrinker", "Figure of Destiny",
+        "Smuggler's Copter", "Esika's Chariot", "Dauthi Voidwalker", "Dragon's Rage Channeler", "Gut, True Soul Zealot",
+        "Okoye, Mighty and Adored", "Surrak, Elusive Hunter", "Coveted Jewel", "Thalia, Guardian of Thraben",
+        "Archon of Emeria", "Ocelot Pride", "Guide of Souls", "Luminarch Aspirant",
+    ]),
+    ("day and night, transform x copies", &[
+        "Outland Liberator // Frenzied Trapbreaker", "Ulvenwald Oddity // Ulvenwald Behemoth",
+        "Concealing Curtains // Revealing Eye", "Cecil, Dark Knight // Cecil, Redeemed Paladin",
+        "Jace, Vryn's Prodigy // Jace, Telepath Unbound", "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki",
+        "Phyrexian Metamorph", "Saheeli, Sublime Artificer", "Flickerwisp", "Oust", "Swords to Plowshares",
+        "Etali, Primal Conqueror // Etali, Primal Sickness", "Brainstorm", "Ponder", "Lightning Bolt",
+    ]),
+];
+
+/// `FUZZ_POOL`: unset (the default decks) or `interactions`.
+fn interactions_mode() -> bool {
+    match std::env::var("FUZZ_POOL").as_deref() {
+        Err(_) | Ok("") => false,
+        Ok("interactions") => true,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset or \"interactions\")"),
+    }
+}
+
+/// The groups' cards as ids of `db`, and `db`'s supported lands.
+fn interaction_pool(db: &CardDb) -> (Vec<Vec<u16>>, Vec<u16>) {
+    let groups = GROUPS
+        .iter()
+        .map(|(_, names)| names.iter().map(|n| db.expect_id(n).unwrap_or_else(|e| panic!("FUZZ_POOL group card: {e}"))).collect())
+        .collect();
+    let lands = db.supported().map(|n| db.id(n).unwrap()).filter(|&id| db.def(id).is(engine::db::types::LAND)).collect();
+    (groups, lands)
+}
+
+/// A combo-dense deck (40 cards: 17 random lands; 23 spells, each from two
+/// or three interaction groups, or one time in eight from all of them) and
+/// a sideboard of seven from the same groups.
+fn interaction_deck(db: &CardDb, rng: &mut Rng) -> (Vec<u16>, Vec<u16>) {
+    let (groups, lands) = interaction_pool(db);
+    let k = 2 + rng.below(2) as usize;
+    let mut chosen: Vec<usize> = Vec::new();
+    while chosen.len() < k {
+        let i = rng.below(groups.len() as u32) as usize;
+        if !chosen.contains(&i) {
+            chosen.push(i);
+        }
+    }
+    let cards: Vec<u16> = chosen.iter().flat_map(|&i| groups[i].iter().copied()).collect();
+    let all: Vec<u16> = groups.iter().flatten().copied().collect();
+    let mut deck: Vec<u16> = (0..17).map(|_| lands[rng.below(lands.len() as u32) as usize]).collect();
+    for _ in 0..23 {
+        let from = if rng.below(8) == 0 { &all } else { &cards };
+        deck.push(from[rng.below(from.len() as u32) as usize]);
+    }
+    let side = (0..7).map(|_| cards[rng.below(cards.len() as u32) as usize]).collect();
+    (deck, side)
+}
+
+/// Decisions asked, by kind (printed: what the interaction mode changes).
+static KINDS: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
+
+fn count_kind(k: Option<DecisionKind>) {
+    if let Some(k) = k {
+        KINDS[(k as usize).min(63)].fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn kinds_report() -> String {
+    let total: u64 = KINDS.iter().map(|k| k.load(Ordering::Relaxed)).sum();
+    let names = [
+        DecisionKind::NewTarget,
+        DecisionKind::DivideDamage,
+        DecisionKind::ChooseExiled,
+        DecisionKind::ChoosePermanent,
+        DecisionKind::ChooseGraveyardCard,
+        DecisionKind::ChooseAltCost,
+        DecisionKind::ChooseMode,
+        DecisionKind::OrderTriggers,
+        DecisionKind::YesNo,
+        DecisionKind::Sacrifice,
+        DecisionKind::Target,
+    ];
+    let per = |k: DecisionKind| KINDS[(k as usize).min(63)].load(Ordering::Relaxed) as f64 * 1000.0 / total.max(1) as f64;
+    names.iter().map(|&k| format!("{k:?} {:.2}", per(k))).collect::<Vec<_>>().join(", ") + " (per 1,000 decisions)"
+}
 
 struct Played {
     actions: Vec<u16>,
@@ -46,6 +245,9 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     let db = common::db();
     let mut rng = Rng::new(seed ^ 0xDEC5);
     let mut side = Rng::new(seed ^ 0x51DE);
+    if interactions_mode() {
+        return [interaction_deck(db, &mut rng), interaction_deck(db, &mut rng)];
+    }
     if seed % 4 == 3 {
         let gen = engine::az::decks::DeckGen::default();
         return [
@@ -84,6 +286,9 @@ fn play(seed: u64, checks: bool) -> Played {
         assert!(legal.windows(2).all(|w| w[0] < w[1]), "seed {seed}: actions not sorted/unique");
         assert!(legal.iter().all(|&a| (a as usize) < NUM_ACTIONS));
         let a = legal[rng.below(legal.len() as u32) as usize];
+        if checks {
+            count_kind(g.kind());
+        }
         if checks && rng.below(40) == 0 {
             check_clone(&g, a, seed);
             check_determinize(&g, seed, &mut rng);
@@ -257,12 +462,13 @@ fn check_options_complete(g: &Game, seed: u64, world: &str) {
         let mut path = Some(Vec::new());
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| follow(&mut path)));
         panic!(
-            "seed {seed}: in {world}, option {a} ({}) of {:?} for P{} can't be completed: {err}\npath after it: {:?}\noptions: {:?}",
+            "seed {seed}: in {world}, option {a} ({}) of {:?} for P{} can't be completed: {err}\npath after it: {:?}\noptions: {:?}\n{}",
             g.describe_action(a).unwrap_or_default(),
             d.kind,
             d.player,
             path.unwrap_or_default(),
-            g.options_desc()
+            g.options_desc(),
+            g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("\n")
         );
     }
 }
@@ -342,7 +548,8 @@ fn fuzz_random_games() {
         OPTION_STEPS.load(Ordering::Relaxed)
     );
     println!("companions revealed {companions}, put into a hand {companions_used}");
-    if n >= 200 {
+    println!("decisions{}: {}", if interactions_mode() { " (FUZZ_POOL=interactions)" } else { "" }, kinds_report());
+    if n >= 200 && !interactions_mode() {
         assert!(companions_used > 0, "no companion special action in {n} games");
     }
 }
@@ -370,6 +577,19 @@ fn same_seed_and_actions_replay_identically() {
 /// evaluation pools, M8a's generated decks with 7-card sideboards, or short
 /// games (drawn games: the turn cap).
 fn match_spec(seed: u64) -> engine::az::MtgSpec {
+    if interactions_mode() {
+        // Combo-dense lists (cube cards), best-of-three, open decklists;
+        // one match in four short.
+        let db = CardDb::cube();
+        let mut rng = Rng::new(seed ^ 0x1A7E_DEC5);
+        let p = [interaction_deck(db, &mut rng), interaction_deck(db, &mut rng)];
+        let mut s = engine::az::MtgSpec::parse(r#"{"format": "bo3", "pools": false}"#).unwrap();
+        s.decks = engine::az::DeckMode::ListsWithSideboards(p);
+        if seed % 4 == 3 {
+            s.max_turns = 12;
+        }
+        return s;
+    }
     let json = match seed % 4 {
         0 => r#"{"format": "bo3"}"#,
         1 => r#"{"format": "bo3", "decks": "eval"}"#,
@@ -677,7 +897,11 @@ fn fuzz_random_matches() {
         stats.decks_changed
     );
     assert!(sb > 0 && changed > 0 && three > 0);
-    assert!(n < 20 || stats.first_picks_changed > stats.worlds / 4 && stats.decks_changed > stats.worlds / 4, "the hidden pool is rarely resampled");
+    // (Interaction lists have no first picks: open decklists.)
+    assert!(
+        n < 20 || interactions_mode() || stats.first_picks_changed > stats.worlds / 4 && stats.decks_changed > stats.worlds / 4,
+        "the hidden pool is rarely resampled"
+    );
 }
 
 #[test]
