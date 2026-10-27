@@ -4,8 +4,9 @@
 //! three games have been played (a drawn game counts as a game; a match can
 //! be a draw), with sideboarding between games (CR 100.4; in limited the
 //! sideboard is the rest of the player's pool, 100.4b, and a deck is at
-//! least 40 cards, 100.2b). The terminal result is the match's: 1 / 0 to
-//! the player with more game wins, 0.5 each on equal wins.
+//! least 40 cards, 100.2b; a deck built from a pool is exactly 40 here, the
+//! user's format restriction, ENGINE.md 42). The terminal result is the
+//! match's: 1 / 0 to the player with more game wins, 0.5 each on equal wins.
 //!
 //! * Who chooses who takes the first turn (CR 103.1): in game 1 a player
 //!   chosen at random (or the spec's `chooser`); in a later game the loser
@@ -19,8 +20,9 @@
 //!   is their pool's cards by definition, then the five basic lands; the
 //!   player changes entries in increasing list order (one decision per
 //!   single card, two for a basic land or a card with several copies: the
-//!   entry, then its new count), `PASS` when done: every legal deck (40 to
-//!   `MAX_DECK` cards) is reachable in exactly one way.
+//!   entry, then its new count), `PASS` when done: every legal deck (the
+//!   first deck's size: 40 for a pool's deck; a spec decklist of tests keeps
+//!   its own) is reachable in exactly one way.
 //! * The next game starts after both: decks and sideboards from the
 //!   choices, its seed from the match's RNG (which `determinize` reseeds).
 //! * The cards each player revealed (made public: `KEY_REVEAL`) in earlier
@@ -38,11 +40,6 @@ use crate::rng::Rng;
 use super::identity;
 use super::pools::basic_ids;
 
-/// The least deck size of limited (CR 100.2b).
-pub const MIN_DECK: usize = 40;
-/// The largest deck sideboarding may build (no rule caps a deck; an engine
-/// bound so the decisions stay finite and small; ENGINE.md 36.2).
-pub const MAX_DECK: usize = 60;
 /// The largest count a `SideboardCount` sets (`NUMBER` ids 0..31).
 pub const MAX_COUNT: u8 = (act::NUMBER_N - 1) as u8;
 /// Games and wins of a best-of-three.
@@ -71,9 +68,11 @@ pub struct MatchPool {
     /// The first picks (sorted): the pool cards the other player does not
     /// know of until they see them (ENGINE.md 36.11).
     pub first_picks: Vec<DefId>,
-    /// Deck sizes sideboarding may build: 40 (or the first deck's size if
-    /// smaller: spec decklists of tests) to `MAX_DECK` (or the first
-    /// deck's size if larger).
+    /// Deck sizes sideboarding may build (`min_deck..=max_deck`): both the
+    /// first deck's size (ENGINE.md 42: a deck built from a pool is exactly
+    /// 40 cards, `decks::DECK_SIZE`: the deckbuilder's, the generator's,
+    /// a drafted one; a spec decklist of tests of another size keeps its
+    /// size). Sideboarding takes any range (tests).
     pub min_deck: usize,
     pub max_deck: usize,
 }
@@ -101,7 +100,7 @@ impl MatchPool {
         }
         let mut fp = first_picks.to_vec();
         fp.sort_unstable();
-        let pool = MatchPool { list, n_cards, first_picks: fp, min_deck: MIN_DECK.min(deck.len()), max_deck: MAX_DECK.max(deck.len()) };
+        let pool = MatchPool { list, n_cards, first_picks: fp, min_deck: deck.len(), max_deck: deck.len() };
         (pool, counts)
     }
 

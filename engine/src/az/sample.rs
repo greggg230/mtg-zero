@@ -276,7 +276,9 @@ fn one_per_name(db: &CardDb, cond: Option<&DeckCond>, d: DefId) -> bool {
 }
 
 /// The sampled pool of `owner` for the viewer: the known part, the seen
-/// first picks and `drawn` (new first picks), with the real pool's bounds.
+/// first picks and `drawn` (new first picks), with the real pool's deck
+/// size (40 for a pool's deck, ENGINE.md 42: sideboarding in the world keeps
+/// it, as the real one does).
 fn pool_with(real: &MatchPool, keep: &[DefId], seen_fp: &[DefId], drawn: &[DefId]) -> MatchPool {
     let mut cards: Vec<(DefId, u8)> = real.list[..real.n_cards].iter().copied().filter(|e| keep.binary_search(&e.0).is_ok()).collect();
     cards.extend(seen_fp.iter().chain(drawn).map(|&d| (d, 1)));
@@ -374,8 +376,9 @@ fn sample_deck(
     let basic_cols: Vec<usize> = (0..5).filter(|&i| cols & (1 << i) != 0 && allowed(db, cond, pool.list[pool.n_cards + i].0)).collect();
     let basic_cols: Vec<usize> = if basic_cols.is_empty() { (0..5).collect() } else { basic_cols };
     // A type at `MAX_COUNT` takes no more: the rest goes to the deck's other
-    // colours, then to any type (a deck of 60 with 34 basic lands in one
-    // colour pair is legal; runs/mtg4 stalled on it).
+    // colours, then to any type (runs/mtg4 stalled on a 60-card deck of 34
+    // basic lands in one colour pair; a 40-card deck's basics always fit in
+    // two colours, but a spec decklist of tests keeps its size).
     for _ in basics_have..n - npool {
         let open = |i: &usize| counts[pool.n_cards + *i] < MAX_COUNT;
         let mut choice: Vec<usize> = basic_cols.iter().copied().filter(open).collect();

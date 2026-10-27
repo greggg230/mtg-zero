@@ -1,12 +1,13 @@
 //! M8b part a (ENGINE.md 36): the best-of-three match as the `mtg` episode
 //! (CR 103.1: who chooses in later games; the match's end and result),
 //! sideboarding between games (CR 100.2b, 100.4b: legal decks, every deck
-//! reachable once), the pools and the deckbuilder, the encoding's match
-//! additions, and the best-of-one mode unchanged.
+//! reachable once; a pool's deck exactly 40 cards, ENGINE.md 42), the pools
+//! and the deckbuilder, the encoding's match additions, and the best-of-one
+//! mode unchanged.
 
 use engine::az::decks::{self, DeckGen};
 use engine::az::matches::{MatchPool, Sideboarding, MAX_COUNT};
-use engine::az::{encode, pools, Format, MtgAz, MtgSpec};
+use engine::az::{bots, encode, pools, Format, MtgAz, MtgSpec};
 use engine::db::CardDb;
 use engine::decision::act;
 use engine::rng::Rng;
@@ -188,7 +189,8 @@ fn a_match_ends_at_two_wins_or_after_three_games() {
 }
 
 /// Every count vector a DFS over the sideboarding decisions reaches, with
-/// the number of paths to each.
+/// the number of paths to each. `PASS` is offered exactly when the deck's
+/// size is within the pool's bounds.
 fn reachable(pool: &MatchPool, start: Vec<u8>) -> (Vec<Vec<u8>>, usize, usize) {
     let mut out = Vec::new();
     let mut nodes = 0;
@@ -198,6 +200,11 @@ fn reachable(pool: &MatchPool, start: Vec<u8>) -> (Vec<Vec<u8>>, usize, usize) {
         nodes += 1;
         deepest = deepest.max(depth);
         assert!(!sb.decision.options.is_empty(), "a dead end: {:?}", sb.counts);
+        if sb.decision.kind == DecisionKind::Sideboard {
+            let size: usize = sb.counts.iter().map(|&c| c as usize).sum();
+            let pass = sb.decision.options.iter().any(|o| o.action == act::PASS);
+            assert_eq!(pass, (pool.min_deck..=pool.max_deck).contains(&size), "PASS with {size} cards");
+        }
         for o in &sb.decision.options {
             let mut c = sb.clone();
             if c.choose(pool, o.action).unwrap() {
@@ -213,46 +220,214 @@ fn reachable(pool: &MatchPool, start: Vec<u8>) -> (Vec<Vec<u8>>, usize, usize) {
 #[test]
 fn cr_100_2b_sideboarding_reaches_every_legal_deck_exactly_once() {
     // A small list (two single cards, a card with two copies, two basics)
-    // with decks of 5 to 7 cards: the DFS over the decisions reaches every
-    // count vector within the copies with 5..=7 cards, each by one path.
-    let pool = MatchPool {
-        list: vec![(10, 1), (11, 1), (12, 2), (20, MAX_COUNT), (21, MAX_COUNT)],
-        n_cards: 3,
-        first_picks: vec![],
-        min_deck: 5,
-        max_deck: 7,
-    };
-    for start in [vec![1, 0, 1, 2, 2], vec![0, 0, 0, 3, 3], vec![1, 1, 2, 3, 0]] {
-        let (got, nodes, deepest) = reachable(&pool, start.clone());
-        let set: BTreeSet<Vec<u8>> = got.iter().cloned().collect();
-        assert_eq!(set.len(), got.len(), "a deck reached twice");
-        let mut want = BTreeSet::new();
-        for a in 0..=1u8 {
-            for b in 0..=1u8 {
-                for c in 0..=2u8 {
-                    for p in 0..=7u8 {
-                        for i in 0..=7u8 {
-                            let n = (a + b + c + p + i) as usize;
-                            if (5..=7).contains(&n) {
-                                want.insert(vec![a, b, c, p, i]);
+    // with decks of 5 to 7 cards, then of exactly 6 (as a pool's deck keeps
+    // its 40 cards, ENGINE.md 42): the DFS over the decisions reaches every
+    // count vector within the copies with a size in the bounds, each by one
+    // path, and `PASS` only at those sizes.
+    for ((lo, hi), starts) in [
+        ((5, 7), [vec![1, 0, 1, 2, 2], vec![0, 0, 0, 3, 3], vec![1, 1, 2, 3, 0]]),
+        ((6, 6), [vec![1, 0, 1, 2, 2], vec![0, 0, 0, 3, 3], vec![1, 1, 2, 2, 0]]),
+    ] {
+        let pool = MatchPool {
+            list: vec![(10, 1), (11, 1), (12, 2), (20, MAX_COUNT), (21, MAX_COUNT)],
+            n_cards: 3,
+            first_picks: vec![],
+            min_deck: lo,
+            max_deck: hi,
+        };
+        for start in starts {
+            let (got, nodes, deepest) = reachable(&pool, start.clone());
+            let set: BTreeSet<Vec<u8>> = got.iter().cloned().collect();
+            assert_eq!(set.len(), got.len(), "a deck reached twice");
+            let mut want = BTreeSet::new();
+            for a in 0..=1u8 {
+                for b in 0..=1u8 {
+                    for c in 0..=2u8 {
+                        for p in 0..=7u8 {
+                            for i in 0..=7u8 {
+                                let n = (a + b + c + p + i) as usize;
+                                if (lo..=hi).contains(&n) {
+                                    want.insert(vec![a, b, c, p, i]);
+                                }
                             }
                         }
                     }
                 }
             }
+            assert_eq!(set, want, "bounds {lo}..={hi}, start {start:?}");
+            // Keeping the deck is one decision; changing every entry at most
+            // 1 + singles + 2 x the others.
+            assert!(deepest <= 1 + 2 + 2 * 3, "{deepest}");
+            println!("decks of {lo}..={hi}, start {start:?}: {} decks, {nodes} decision nodes, depth {deepest}", got.len());
         }
-        assert_eq!(set, want, "start {start:?}");
-        // Keeping the deck is one decision; changing every entry at most
-        // 1 + singles + 2 x the others.
-        assert!(deepest <= 1 + 2 + 2 * 3, "{deepest}");
-        println!("start {start:?}: {} decks, {nodes} decision nodes, depth {deepest}", got.len());
     }
+}
+
+/// Sideboard `pool` from `start` to `target` by the canonical path (the
+/// entries that change, in list order, then `PASS`): `Err` at the first
+/// option not offered.
+fn sideboard_to(pool: &MatchPool, start: &[u8], target: &[u8]) -> Result<Vec<u8>, String> {
+    let mut sb = Sideboarding::new(0, start.to_vec(), pool);
+    let offered = |sb: &Sideboarding, a: u16| sb.decision.options.iter().any(|o| o.action == a);
+    for k in 0..pool.list.len() {
+        if target[k] == start[k] {
+            continue;
+        }
+        let a = act::LIBRARY + k as u16;
+        if !offered(&sb, a) {
+            return Err(format!("entry {k} not offered"));
+        }
+        assert!(!sb.choose(pool, a).unwrap());
+        if sb.decision.kind == DecisionKind::SideboardCount {
+            let a = act::NUMBER + target[k] as u16;
+            if !offered(&sb, a) {
+                return Err(format!("entry {k}: count {} not offered", target[k]));
+            }
+            assert!(!sb.choose(pool, a).unwrap());
+        }
+    }
+    if !offered(&sb, act::PASS) {
+        return Err("PASS not offered".into());
+    }
+    assert!(sb.choose(pool, act::PASS).unwrap());
+    Ok(sb.counts)
+}
+
+#[test]
+fn a_pool_deck_is_sideboarded_to_exactly_40_cards() {
+    // ENGINE.md 42: a deck built from a pool (generated pools, the
+    // evaluation pools, M8a's generated decks) is exactly 40 cards: the
+    // bounds are 40..=40; every 40-card deck of the pool is reached by its
+    // canonical path (the extremes too: 40 pool cards and no basic land, 40
+    // basic lands with 31 of a type), a 39- or 41-card deck by none; a
+    // random sideboarding only finishes at 40 (`PASS` offered exactly
+    // then); the heuristic's answers are legal from any point and finish at
+    // 40.
+    let mut rng = Rng::new(42);
+    let (mut paths, mut walks, mut walk_decisions) = (0, 0, 0);
+    let specs = [r#"{"format": "bo3"}"#, r#"{"format": "bo3", "decks": "eval"}"#, r#"{"format": "bo3", "pools": false}"#];
+    for (i, json) in specs.iter().enumerate() {
+        for seed in 0..8u64 {
+            let g = MtgAz::new_game(&spec(json), 2, 100 * i as u64 + seed).unwrap();
+            for p in 0..2 {
+                let pool = &g.m.pools[p];
+                let start: Vec<u8> = g.m.decks[p].to_vec();
+                assert_eq!((pool.min_deck, pool.max_deck), (40, 40));
+                assert_eq!(start.iter().map(|&c| c as usize).sum::<usize>(), 40);
+                let nb = pool.n_cards;
+                // Targets: random subsets of the pool's cards and random
+                // basic counts, and the two extremes.
+                for t in 0..24 {
+                    let mut target = vec![0u8; pool.list.len()];
+                    let m = match t {
+                        0 => 40.min(nb),
+                        1 => 0,
+                        _ => rng.below(40.min(nb) as u32 + 1) as usize,
+                    };
+                    let mut idx: Vec<usize> = (0..nb).collect();
+                    for j in 0..m {
+                        let r = j + rng.below((nb - j) as u32) as usize;
+                        idx.swap(j, r);
+                        target[idx[j]] = 1;
+                    }
+                    let mut left = 40 - m;
+                    if t == 1 {
+                        target[nb] = 31;
+                        target[nb + 1] = 9;
+                        left = 0;
+                    }
+                    while left > 0 {
+                        let b = nb + rng.below(5) as usize;
+                        if target[b] < MAX_COUNT {
+                            target[b] += 1;
+                            left -= 1;
+                        }
+                    }
+                    assert_eq!(sideboard_to(pool, &start, &target).unwrap(), target, "seed {seed} P{p} target {t}");
+                    paths += 1;
+                    // One card more or fewer: no path.
+                    let mut more = target.clone();
+                    let b = nb + rng.below(5) as usize;
+                    if more[b] < MAX_COUNT {
+                        more[b] += 1;
+                        assert!(sideboard_to(pool, &start, &more).is_err(), "a 41-card deck");
+                    }
+                    let mut fewer = target.clone();
+                    if let Some(k) = (0..fewer.len()).find(|&k| fewer[k] > 0) {
+                        fewer[k] -= 1;
+                        assert!(sideboard_to(pool, &start, &fewer).is_err(), "a 39-card deck");
+                    }
+                }
+                // Random walks, and the heuristic from a random point.
+                for w in 0..20 {
+                    let mut sb = Sideboarding::new(0, start.clone(), pool);
+                    let cut = rng.below(6);
+                    let mut n = 0;
+                    loop {
+                        let l: Vec<u16> = sb.decision.options.iter().map(|o| o.action).collect();
+                        assert!(!l.is_empty());
+                        if sb.decision.kind == DecisionKind::Sideboard {
+                            let size: usize = sb.counts.iter().map(|&c| c as usize).sum();
+                            assert_eq!(l.contains(&act::PASS), size == 40, "PASS with {size} cards");
+                        }
+                        let a = if w % 2 == 1 && n >= cut { bots::sideboard(&sb, &l) } else { l[rng.below(l.len() as u32) as usize] };
+                        assert!(l.contains(&a));
+                        n += 1;
+                        if sb.choose(pool, a).unwrap() {
+                            break;
+                        }
+                    }
+                    assert_eq!(sb.counts.iter().map(|&c| c as usize).sum::<usize>(), 40);
+                    walks += 1;
+                    walk_decisions += n;
+                }
+            }
+        }
+    }
+    println!("{paths} canonical paths, {walks} walks, {:.1} decisions per walk", walk_decisions as f64 / walks as f64);
+}
+
+#[test]
+fn a_spec_decklist_keeps_its_size() {
+    // A fixed decklist of another size than 40 (tests) keeps its size: 36 and
+    // 44 cards here, whatever the sideboarding.
+    let list = |cards: &[(&str, usize)]| -> String {
+        let v: Vec<String> = cards.iter().flat_map(|&(n, k)| std::iter::repeat_n(format!("\"{n}\""), k)).collect();
+        format!("[{}]", v.join(", "))
+    };
+    let json = format!(
+        r#"{{"format": "bo3", "max_turns": 6, "decks": {{"p0": {}, "p0_sideboard": {}, "p1": {}, "p1_sideboard": {}}}}}"#,
+        list(&[("Mountain", 18), ("Lightning Bolt", 18)]),
+        list(&[("Llanowar Elves", 2)]),
+        list(&[("Forest", 22), ("Llanowar Elves", 22)]),
+        list(&[("Lightning Bolt", 1)]),
+    );
+    let sp = spec(&json);
+    let mut later = 0;
+    for seed in 0..12u64 {
+        let mut g = MtgAz::new_game(&sp, 2, seed).unwrap();
+        let bounds = |p: usize| (g.m.pools[p].min_deck, g.m.pools[p].max_deck);
+        assert_eq!([bounds(0), bounds(1)], [(36, 36), (44, 44)]);
+        let mut rng = Rng::new(seed);
+        let mut keys = Vec::new();
+        let mut game_no = 1;
+        while g.to_move().is_some() {
+            let l = legal(&g);
+            g.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+            if g.m.game_no != game_no && g.sideboarding().is_none() {
+                game_no = g.m.game_no;
+                assert_eq!([g.m.deck(0).len(), g.m.deck(1).len()], [36, 44]);
+                later += 1;
+            }
+        }
+    }
+    assert!(later > 0);
 }
 
 #[test]
 fn sideboarded_decks_are_legal_and_played_in_the_next_game() {
     // Random sideboarding in random matches: every deck a player ends with
-    // is 40..=60 cards of their pool and basics, and the next game's
+    // is 40 cards of their pool and basics (ENGINE.md 42), and the next game's
     // libraries and sideboards are exactly the chosen decks and the rest
     // of the pools.
     let sp = spec(r#"{"format": "bo3", "max_turns": 6}"#);
@@ -273,7 +448,7 @@ fn sideboarded_decks_are_legal_and_played_in_the_next_game() {
                 for p in 0..2u8 {
                     let deck = g.m.deck(p);
                     let pool = &pools[p as usize];
-                    assert!((40..=60).contains(&deck.len()), "{} cards", deck.len());
+                    assert_eq!(deck.len(), 40, "a pool's deck stays at 40 cards");
                     let mut lib: Vec<u16> = g.g.player(p).library.iter().map(|&c| g.g.obj(c).def).collect();
                     lib.extend(g.g.player(p).hand.iter().map(|&c| g.g.obj(c).def));
                     lib.sort_unstable();

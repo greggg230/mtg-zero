@@ -8,7 +8,7 @@
 //! fuzz's events (default 200).
 
 use engine::az::draft::{
-    self, cube, DraftSpec, Phase, TeamDraftAz, COUNT, DECK_MAX, DECK_MIN, KEY_SEE, KEY_TEAM, MAX_BASIC, OUT,
+    self, cube, DraftSpec, Phase, TeamDraftAz, COUNT, DECK_SIZE, KEY_SEE, KEY_TEAM, MAX_BASIC, OUT,
 };
 use engine::az::draft_bots::{self, Consensus};
 use engine::az::draft_encode::{self, NUM_FEATURES};
@@ -205,7 +205,7 @@ fn every_pool_has_45_cards_and_decks_are_legal() {
             assert_eq!(g.first_picks(s).len(), 3);
             all.extend_from_slice(&pool);
             let (deck, side) = g.deck_and_sideboard(s).unwrap();
-            assert!((DECK_MIN..=DECK_MAX).contains(&deck.len()), "{}", deck.len());
+            assert_eq!(deck.len(), DECK_SIZE, "a deck is exactly 40 cards (ENGINE.md 42)");
             let mut non_basic: Vec<u16> = deck.iter().map(|&d| cube.ident_of(d)).filter(|c| !cube.basic_ids.contains(c)).collect();
             for &b in &cube.basic_defs {
                 assert!(deck.iter().filter(|&&d| d == b).count() <= MAX_BASIC as usize);
@@ -237,38 +237,135 @@ fn every_pool_has_45_cards_and_decks_are_legal() {
     }
 }
 
+/// Seat `builder()`'s whole build: `card(legal)` answers a pool card,
+/// `count(legal)` a basic count; returns the options of each decision.
+fn build_seat(g: &mut TeamDraftAz, card: impl Fn(&[u16]) -> u16, count: impl Fn(&[u16]) -> u16) -> Vec<Vec<u16>> {
+    let s = g.builder();
+    let mut keys = Vec::new();
+    let mut asked = Vec::new();
+    while g.to_move() == Some(s as usize) {
+        let l = legal(g);
+        let a = if l.contains(&OUT) { card(&l) } else { count(&l) };
+        asked.push(l);
+        g.step(a, &mut keys).unwrap();
+    }
+    asked
+}
+
 #[test]
-fn deckbuilding_reaches_every_legal_deck_shape_and_the_counts_keep_it_legal() {
-    // All OUT then the smallest counts: 40 basic lands (at most 31 of a type).
-    let mut g = TeamDraftAz::new(&spec(r#"{"packs": 1, "pack_size": 3}"#), 2, 5).unwrap();
+fn deckbuilding_makes_exactly_40_cards_from_either_extreme() {
+    // ENGINE.md 42: a deck is exactly 40 cards. From 45-card pools: every
+    // card out then the smallest or the largest counts (40 basic lands, at
+    // most 31 of a type), and every card in (40 pool cards, the last five
+    // forced out, every count forced to 0). The Forest count is always
+    // forced (a single option).
+    let mut g = new(4, 5);
     let mut keys = Vec::new();
     while g.phase() == Phase::Draft {
         let l = legal(&g);
         g.step(l[0], &mut keys).unwrap();
     }
-    // Seat 0: everything out, minimum counts.
-    loop {
+    let single = |asked: &[Vec<u16>]| asked.iter().map(|l| l.len() == 1).collect::<Vec<_>>();
+    // Seat 0: everything out, minimum counts: the most basic lands.
+    let asked = build_seat(&mut g, |_| OUT, |l| l[0]);
+    assert_eq!(asked.len(), 50);
+    assert!(asked[..45].iter().all(|l| l.len() == 2 && l[1] == OUT), "a card in or out while the deck has room");
+    assert_eq!(single(&asked[45..]), [false, false, false, false, true]);
+    let b = g.build(0).unwrap();
+    assert_eq!((b.size(), b.basics), (40, [0, 0, 0, 9, 31]));
+    // Seat 1: everything out, maximum counts.
+    let asked = build_seat(&mut g, |_| OUT, |l| *l.last().unwrap());
+    assert_eq!(single(&asked[45..]), [false, false, true, true, true], "Plains 31, Island 9, then 0 forced");
+    let b = g.build(1).unwrap();
+    assert_eq!((b.size(), b.basics), (40, [31, 9, 0, 0, 0]));
+    // Seat 2: everything in: the fewest basic lands. Once the deck holds 40
+    // cards the rest of the pool is forced out and every count is 0.
+    let asked = build_seat(&mut g, |l| l[0], |l| l[0]);
+    assert!(asked[..40].iter().all(|l| l.len() == 2));
+    assert!(asked[40..45].iter().all(|l| l == &[OUT]), "forced out once the deck is full");
+    assert!(asked[45..].iter().all(|l| l == &[COUNT]), "every count forced to 0");
+    let b = g.build(2).unwrap();
+    assert_eq!((b.size(), b.basics, b.inn.count_ones()), (40, [0; 5], 40));
+    let (deck, side) = g.deck_and_sideboard(2).unwrap();
+    assert_eq!((deck.len(), side.len()), (40, 5));
+    // Seat 3: the first three cards out, then every card in: the deck is
+    // full at the 43rd card, the last two are forced out. Putting a card
+    // into a full deck is an error.
+    for i in 0..45 {
         let l = legal(&g);
-        if g.builder() != 0 {
-            break;
+        if i >= 43 {
+            assert_eq!(l, [OUT], "card {i}");
+            let card = g.build(3).unwrap().order[i];
+            assert!(g.clone().step(card, &mut keys).is_err(), "a card into a full deck");
+        } else {
+            assert_eq!(l.len(), 2, "card {i}");
         }
-        let a = if l.contains(&OUT) { OUT } else { l[0] };
-        g.step(a, &mut keys).unwrap();
+        g.step(if i < 3 { OUT } else { l[0] }, &mut keys).unwrap();
     }
-    let b0 = g.build(0).unwrap();
-    assert_eq!(b0.size(), 40);
-    assert_eq!(b0.basics, [0, 0, 0, 9, 31]);
-    // Seat 1: everything in, maximum counts.
-    while g.to_move().is_some() {
-        let l = legal(&g);
-        let a = if l.contains(&OUT) { l[0] } else { *l.last().unwrap() };
-        g.step(a, &mut keys).unwrap();
-    }
-    let b1 = g.build(1).unwrap();
-    assert_eq!(b1.size(), 60);
-    assert_eq!(b1.basics, [31, 26, 0, 0, 0]);
-    // Every option of a count decision keeps a legal deck reachable (fuzz checks it at scale).
+    build_seat(&mut g, |_| unreachable!(), |l| l[0]);
+    let b = g.build(3).unwrap();
+    assert_eq!((b.size(), b.basics, b.inn.count_ones()), (40, [0; 5], 40));
     g.check_invariants().unwrap();
+    assert!(g.deferred());
+}
+
+#[test]
+fn every_40_card_deck_is_reachable_exactly_once() {
+    // A two-card pool (one pack of two per seat): a depth-first search over
+    // seat 0's deckbuilding decisions reaches every deck of exactly 40 cards
+    // (any subset of the pool, basic lands at most 31 of a type) once, and
+    // no other.
+    let mut g = TeamDraftAz::new(&spec(r#"{"packs": 1, "pack_size": 2}"#), 2, 7).unwrap();
+    let mut keys = Vec::new();
+    while g.phase() == Phase::Draft {
+        let l = legal(&g);
+        g.step(l[0], &mut keys).unwrap();
+    }
+    assert_eq!(g.build(0).unwrap().order.len(), 2);
+    let mut seen = std::collections::HashSet::new();
+    let (mut leaves, mut nodes, mut forced) = (0u64, 0u64, 0u64);
+    let mut stack = vec![g];
+    while let Some(g) = stack.pop() {
+        if g.builder() != 0 {
+            let b = g.build(0).unwrap();
+            assert_eq!(b.size(), DECK_SIZE);
+            assert!(b.basics.iter().all(|&x| x <= MAX_BASIC));
+            let key = b.inn | b.basics.iter().enumerate().fold(0u64, |k, (j, &x)| k | (x as u64) << (8 + 6 * j));
+            assert!(seen.insert(key), "a deck reached twice: {:?} {:?}", b.inn, b.basics);
+            leaves += 1;
+            continue;
+        }
+        nodes += 1;
+        let l = legal(&g);
+        assert!(!l.is_empty(), "a dead end");
+        forced += (l.len() == 1) as u64;
+        for &a in &l {
+            let mut c = g.clone();
+            c.step(a, &mut keys).unwrap();
+            stack.push(c);
+        }
+    }
+    // Every deck: m pool cards (C(2, m) ways) and five counts of 0..=31
+    // summing to 40 - m.
+    let mut want = 0u64;
+    for m in 0..=2u32 {
+        let ways = [1, 2, 1][m as usize];
+        let mut n = 0u64;
+        for a in 0..=31u32 {
+            for b in 0..=31u32 {
+                for c in 0..=31u32 {
+                    for d in 0..=31u32 {
+                        let e = 40i64 - m as i64 - (a + b + c + d) as i64;
+                        n += (0..=31).contains(&e) as u64;
+                    }
+                }
+            }
+        }
+        want += ways * n;
+    }
+    println!("{leaves} decks, {nodes} decisions, {forced} forced (single option)");
+    assert_eq!(leaves, want);
+    assert_eq!(seen.len() as u64, want);
 }
 
 #[test]

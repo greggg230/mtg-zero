@@ -13,11 +13,12 @@
 //!   each hidden from the others. A pack is stored as its **removal order**:
 //!   position `t` holds the card taken at pick `t`, the positions from
 //!   `taken` on the cards still in it (kept sorted by identity).
-//! * **Deckbuilding** (after the draft, seat by seat): one binary decision per
-//!   pool card in the seat's build order (its identity = in the deck, `OUT` =
-//!   in the sideboard), then the five basic land counts (`COUNT + n`); every
-//!   deck of `DECK_MIN..=DECK_MAX` cards with at most `MAX_BASIC` of a basic
-//!   land is reachable in exactly one way.
+//! * **Deckbuilding** (after the draft, seat by seat): one decision per pool
+//!   card in the seat's build order (its identity = in the deck, `OUT` = in
+//!   the sideboard; once the deck holds `DECK_SIZE` cards only `OUT`), then
+//!   the five basic land counts (`COUNT + n`; the last is forced); every deck
+//!   of exactly `DECK_SIZE` = 40 cards with at most `MAX_BASIC` of a basic
+//!   land is reachable in exactly one way (ENGINE.md 42).
 //! * **The deferred terminal**: after the last seat's last count `to_move()`
 //!   is `None` and the event waits for its matches (`matches`,
 //!   `deferred_payload`); `resolve` sets their results. `result`, `margin`
@@ -44,7 +45,7 @@ use crate::rng::{split64, Rng};
 
 use super::decks::{self, DeckGen};
 use super::identity;
-use super::matches::{Format, MAX_COUNT, MAX_DECK, MIN_DECK};
+use super::matches::{Format, MAX_COUNT};
 use super::pools;
 
 /// Action ids: `0..CARD_CAP` a card by identity (pick it; in deckbuilding, put
@@ -63,10 +64,11 @@ pub const MAX_POOL: usize = MAX_PACK * MAX_PACKS;
 pub const MAX_TEAM: usize = 4;
 pub const MAX_SEATS_DRAFT: usize = 2 * MAX_TEAM;
 
-/// Deck bounds (CR 100.2b: at least 40, any number of basic lands; 60 and
-/// 31 are the engine bounds sideboarding uses, ENGINE.md 36.2).
-pub const DECK_MIN: usize = MIN_DECK;
-pub const DECK_MAX: usize = MAX_DECK;
+/// A deck has exactly 40 cards (ENGINE.md 42: a limited deck built from a
+/// pool, a format restriction the user chose; CR 100.2b makes 40 a minimum
+/// and allows any number of basic lands), at most 31 of a basic land (the
+/// `SideboardCount` range of the match, ENGINE.md 36.2).
+pub const DECK_SIZE: usize = decks::DECK_SIZE;
 pub const MAX_BASIC: u8 = MAX_COUNT;
 
 /// Key kinds (the `mtg` game's are 1..7).
@@ -343,14 +345,21 @@ impl Build {
         self.inn.count_ones() as usize + self.basics.iter().map(|&b| b as usize).sum::<usize>()
     }
 
-    /// The counts the type being decided may take (a deck of `DECK_MIN..=
-    /// DECK_MAX` stays reachable; never empty).
+    /// May the card being decided go in the deck (it holds fewer than
+    /// `DECK_SIZE` pool cards; else the rest of the pool is forced `OUT`)?
+    pub fn room(&self) -> bool {
+        (self.inn.count_ones() as usize) < DECK_SIZE
+    }
+
+    /// The counts the type being decided may take: a deck of exactly
+    /// `DECK_SIZE` stays reachable with at most `MAX_BASIC` of each type
+    /// (never empty; the Forest count is forced).
     pub fn count_range(&self) -> (u8, u8) {
         let j = self.basic_k as usize;
         let before = self.inn.count_ones() as i64 + self.basics[..j].iter().map(|&b| b as i64).sum::<i64>();
         let after = (4 - j) as i64 * MAX_BASIC as i64;
-        let lo = (DECK_MIN as i64 - before - after).max(0);
-        let hi = (MAX_BASIC as i64).min(DECK_MAX as i64 - before);
+        let lo = (DECK_SIZE as i64 - before - after).max(0);
+        let hi = (MAX_BASIC as i64).min(DECK_SIZE as i64 - before);
         debug_assert!(lo <= hi, "a deck stays reachable");
         (lo as u8, hi.max(lo) as u8)
     }
@@ -670,7 +679,11 @@ impl TeamDraftAz {
             Phase::Build => {
                 let b = &self.builds[self.builder as usize];
                 if (b.k as usize) < b.order.len() {
-                    out.push(b.order[b.k as usize]);
+                    // (A full deck forces the rest of the pool out: a single
+                    // option, as a pack's last card.)
+                    if b.room() {
+                        out.push(b.order[b.k as usize]);
+                    }
                     out.push(OUT);
                 } else {
                     let (lo, hi) = b.count_range();
@@ -876,10 +889,10 @@ impl TeamDraftAz {
         let b = &mut self.builds[s as usize];
         if (b.k as usize) < b.order.len() {
             let c = b.order[b.k as usize];
-            if a == c {
+            if a == c && b.room() {
                 b.inn |= 1 << b.k;
             } else if a != OUT {
-                return Err(format!("team_draft: seat {s} deciding {c}: action {a} (the card or OUT)"));
+                return Err(format!("team_draft: seat {s} deciding {c}: action {a} (the card while the deck has room, or OUT)"));
             }
             b.k += 1;
             return Ok(());
@@ -1181,7 +1194,10 @@ impl TeamDraftAz {
                     return Err(format!("seat {s}: a pool of {}", b.order.len()));
                 }
                 let finished = self.phase == Phase::Done || s < self.builder;
-                if finished && (!b.done() || !(DECK_MIN..=DECK_MAX).contains(&b.size())) {
+                if b.inn.count_ones() as usize > DECK_SIZE || b.size() > DECK_SIZE {
+                    return Err(format!("seat {s}: {} pool cards, {} cards", b.inn.count_ones(), b.size()));
+                }
+                if finished && (!b.done() || b.size() != DECK_SIZE) {
                     return Err(format!("seat {s}: deck of {} cards (done {})", b.size(), b.done()));
                 }
                 if s > self.builder && self.phase == Phase::Build && (b.k > 0 || b.basic_k > 0) {

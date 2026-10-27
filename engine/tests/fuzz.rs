@@ -843,7 +843,9 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
             for q in 0..2u8 {
                 let pool = &g.m.pools[q as usize];
                 let deck = g.m.deck(q);
-                assert!((pool.min_deck..=pool.max_deck).contains(&deck.len()), "match {seed}: {} cards", deck.len());
+                // (Every fuzzed deck has 40 cards, and a pool's deck keeps
+                // them: ENGINE.md 42.)
+                assert_eq!((pool.min_deck, pool.max_deck, deck.len()), (40, 40, 40), "match {seed}: {} cards", deck.len());
                 for (k, &(_, n)) in pool.list.iter().enumerate() {
                     assert!(g.m.decks[q as usize][k] <= n.max(decks[q as usize][k]));
                 }

@@ -10,7 +10,9 @@ use crate::mana::COLORS;
 use crate::program::Op;
 use crate::rng::Rng;
 
-/// Deck size (limited).
+/// Deck size (limited): a deck built from a pool is exactly 40 cards
+/// (ENGINE.md 42: the user's format restriction; CR 100.2b makes 40 a
+/// minimum), and sideboarding keeps it.
 pub const DECK_SIZE: usize = 40;
 /// The basic land of each colour (W, U, B, R, G).
 pub const BASICS: [&str; 5] = ["Plains", "Island", "Swamp", "Mountain", "Forest"];

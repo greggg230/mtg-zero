@@ -86,8 +86,9 @@ impl Consensus {
         }
         let plan = &self.plan.as_ref().expect("a plan").2;
         if (b.k as usize) < b.order.len() {
+            // (The plan's deck has 40 cards, so its cards always have room.)
             let k = b.k as usize;
-            return if plan.inn & (1 << k) != 0 { b.order[k] } else { OUT };
+            return if plan.inn & (1 << k) != 0 && legal.contains(&b.order[k]) { b.order[k] } else { OUT };
         }
         // The count nearest the plan's among the legal ones.
         let want = COUNT + plan.basics[b.basic_k as usize] as u16;

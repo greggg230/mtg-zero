@@ -177,10 +177,11 @@ fn first_picks_are_drawn_from_the_prior_and_seen_ones_kept() {
 #[test]
 fn sampled_decks_hold_what_the_viewer_knows() {
     // Each world's opponent deck: the public sizes (cards, pool cards,
-    // basic lands, sideboard), every card of theirs the viewer knows in the
-    // game, a legal deck of the sampled pool; between games the last deck
-    // holds what the viewer knew at the end of the last game. The decks
-    // vary between worlds.
+    // basic lands, sideboard; 40 cards, the sampled pool's bounds 40..=40,
+    // and the first sideboarder's sampled choice 40 too: ENGINE.md 42),
+    // every card of theirs the viewer knows in the game, a legal deck of the
+    // sampled pool; between games the last deck holds what the viewer knew
+    // at the end of the last game. The decks vary between worlds.
     let mut checked = 0;
     let mut differ = 0;
     let mut between = 0;
@@ -196,6 +197,11 @@ fn sampled_decks_hold_what_the_viewer_knows() {
         for w in 0..2 {
             let d = world(&g, v, 1000 + w);
             assert_eq!(size(&d.m.decks[o]), size(&g.m.decks[o]));
+            assert_eq!(size(&d.m.decks[o]), 40, "a pool's deck is 40 cards");
+            assert_eq!((d.m.pools[o].min_deck, d.m.pools[o].max_deck), (40, 40));
+            if let Some(chosen) = d.sideboarding().and_then(|sb| sb.done[o].clone()) {
+                assert_eq!(size(&chosen), 40);
+            }
             assert_eq!(pool_cards(&d), pool_cards(&g), "the number of pool cards in the deck is public");
             assert_eq!(d.g.player(o as u8).sideboard.len(), g.g.player(o as u8).sideboard.len());
             let deck = d.m.pools[o].deck(&d.m.decks[o]);
@@ -448,12 +454,13 @@ fn force_chance_replays_the_deciders_draws_in_matches() {
 
 #[test]
 fn a_deck_of_basic_lands_up_to_the_cap_is_sampled() {
-    // One player sideboards every pool card it can out and every basic land it
-    // can in, up to the deck cap (legal, CR 100.2b; runs/mtg4's network built
-    // a 60-card deck with 34 basic lands and the other player's determinize
-    // then found no deck: the basic lands' spread over the deck's colours
-    // stopped at one type's count cap). Every world of the other player holds
-    // a deck of the real size.
+    // One player sideboards every pool card out and basic lands in, as many
+    // of the first type as it can: 40 basic lands, 31 of a type (the count
+    // cap; ENGINE.md 42: the deck stays at 40 cards). (runs/mtg4's network
+    // built a 60-card deck with 34 basic lands when decks could grow to 60,
+    // and the other player's determinize then found no deck: the basic
+    // lands' spread over the deck's colours stopped at one type's count
+    // cap.) Every world of the other player holds a deck of the real size.
     let sp = spec(r#"{"format": "bo3", "max_turns": 4}"#);
     let mut tested = 0;
     for seed in 0..16u64 {
@@ -490,10 +497,11 @@ fn a_deck_of_basic_lands_up_to_the_cap_is_sampled() {
             };
             g.step(a, &mut keys).unwrap();
         }
-        let size: usize = g.sideboarding().map_or_else(|| g.m.decks[stuffer].iter().map(|&c| c as usize).sum(), |sb| {
-            sb.done[stuffer].as_ref().map_or(0, |d| d.iter().map(|&c| c as usize).sum())
-        });
-        assert!(size >= 55, "the stuffed deck has {size} cards");
+        let deck: Vec<u8> = g.sideboarding().map_or_else(|| g.m.decks[stuffer].to_vec(), |sb| sb.done[stuffer].as_ref().map_or(Vec::new(), |d| d.to_vec()));
+        let size: usize = deck.iter().map(|&c| c as usize).sum();
+        assert_eq!(size, 40, "the stuffed deck has {size} cards");
+        assert!(deck[..basic0].iter().all(|&c| c == 0), "no pool card");
+        assert_eq!(deck[basic0], 31, "31 of the first basic land type");
         // The other player sideboards (keeps), then game 2: the other
         // player's worlds at several points.
         let mut steps = 0;
