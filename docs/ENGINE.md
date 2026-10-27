@@ -5209,9 +5209,8 @@ sideboarding in progress and the match's RNG. Clones copy pointers and ~600 byte
 Before team drafting exists, a match's pools are generated (`"pools": true`, the default for
 `"bo3"`; `"pools": false` keeps M8a's generated decks with 7-card sideboards):
 
-* `random_pool` (45 singleton cards of the 546 supported, seeded): two main colours; one pool in
-  four a companion the main colours can cast; 27 spells of the main colours (weighted to creatures
-  3, interaction 2, other 1), 4 colourless spells, 5 nonbasic lands (weighted to the pair's duals,
+* `random_pool` (45 singleton cards of the 546 supported, seeded): two main colours; 27 spells of
+  the main colours (weighted to creatures 3, interaction 2, other 1), 4 colourless spells, 5 nonbasic lands (weighted to the pair's duals,
   then lands of one colour, triomes and any-colour lands, colourless utility), then off-colour
   spells, half of them of a splash colour. Three of its main-colour spells are marked as the
   player's **first picks** (data only in this part: part b hides them from the opponent).
@@ -5225,10 +5224,21 @@ Before team drafting exists, a match's pools are generated (`"pools": true`, the
   `split64 % eval_decks`, as the evaluation decks). The evaluation spec keeps the format, so the
   yardstick, random and Elo games of a best-of-three run are matches.
 
-Measured (tests/rules_m8b.rs, 200 pools): every pool 45 cards, 3 first picks among them; 79
-pools with a companion (one in four by design, the others among the random off-colour or main-colour
-picks); none without 23 playable spells; every deck passes `decks::check` (40 cards, 17 lands, two
-colours of spells, singleton but basics).
+Measured (tests/rules_m8b.rs, 200 pools): every pool 45 cards, 3 first picks among them; 35
+pools with a companion (as ordinary main-colour or off-colour picks); none without 23 playable
+spells; every deck passes `decks::check` (40 cards, 17 lands, two colours of spells, singleton
+but basics).
+
+Companions (2026-10-26, the user's call): until then one pool in four was also built around a
+companion its main colours could cast, which runs/mtg4 used. Over 40,000 pools (20,000 matches) a
+pool held a companion 38.4% of the time and could use it (the deck fulfills it and can cast it)
+13.5%, every time Lutri (a singleton deck always fulfills it; the deckbuilder never builds for
+Lurrus or Zirda); a uniform 45-card share of the cube would hold each companion ~8.2% of the time,
+one of the three ~23%. Without the insert: 19.1% hold one (each 6.6-6.8%), 5.8% can use it
+(Lutri); 35.6% of matches have one in some pool. The insert drew from the pool's random stream,
+so every generated pool changed with it, the evaluation pools too: a run after this one doesn't
+play mtg4's evaluation pools. M8a's best-of-one decks (`decks::generate_pool`, 35.7) still build
+one deck in four for a companion. Team drafting (M6) replaces generated pools.
 
 ### 36.5 Bots
 

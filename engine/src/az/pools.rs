@@ -1,7 +1,7 @@
 //! Card pools for matches (ENGINE.md 36.4), before team drafting exists:
 //! seeded random pools of `POOL_SIZE` cards from the supported cards (two
 //! main colours, a splash and other off-colour cards, colourless spells,
-//! nonbasic lands, sometimes a companion), three of them marked as the
+//! nonbasic lands), three of them marked as the
 //! player's first picks (data only for now: M8b part b hides them from the
 //! opponent), and a heuristic deckbuilder for game 1 (23 spells and 17
 //! lands in the pool's best two colours, a sensible curve) whose leftovers
@@ -68,13 +68,14 @@ fn take(rng: &mut Rng, cands: &[DefId], mut w: Vec<f64>, n: usize, out: &mut Vec
     }
 }
 
-/// A random pool of `POOL_SIZE` singleton cards: two main colours; one pool
-/// in four a companion its main colours can cast; 27 spells of the main
-/// colours (weighted to creatures and interaction), 4 colourless spells, 5
-/// nonbasic lands (weighted to the main colours' duals and fetches), then
-/// off-colour spells: half of a splash colour's (within the main colours
-/// and the splash), half of any colour outside the pair. The first picks
-/// are three of its main-colour spells (weighted as the spells).
+/// A random pool of `POOL_SIZE` singleton cards: two main colours; 27
+/// spells of the main colours (weighted to creatures and interaction), 4
+/// colourless spells, 5 nonbasic lands (weighted to the main colours' duals
+/// and fetches), then off-colour spells: half of a splash colour's (within
+/// the main colours and the splash), half of any colour outside the pair.
+/// Companions come only as such picks (no pool is built around one:
+/// ENGINE.md 36.4). The first picks are three of its main-colour spells
+/// (weighted as the spells).
 pub fn random_pool(db: &CardDb, rng: &mut Rng) -> Pool {
     random_pool_without(db, rng, &[])
 }
@@ -93,13 +94,6 @@ pub fn random_pool_without(db: &CardDb, rng: &mut Rng, taken: &[DefId]) -> Pool 
     let others: Vec<usize> = (0..5).filter(|&c| pair & (1 << c) == 0).collect();
     let splash = 1u8 << others[rng.below(others.len() as u32) as usize];
     let mut cards: Vec<DefId> = Vec::with_capacity(POOL_SIZE);
-    let comps: Vec<DefId> = decks::companions(db)
-        .into_iter()
-        .filter(|&c| decks::castable_with(db.def(c), pair) && taken.binary_search(&c).is_err())
-        .collect();
-    if rng.below(4) == 0 && !comps.is_empty() {
-        cards.push(comps[rng.below(comps.len() as u32) as usize]);
-    }
     let spells_of = |f: &dyn Fn(&CardDef) -> bool| -> (Vec<DefId>, Vec<f64>) {
         let c: Vec<DefId> = spells.iter().copied().filter(|&id| f(db.def(id))).collect();
         let w = c.iter().map(|&id| weight(db.def(id))).collect();

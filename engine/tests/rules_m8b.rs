@@ -456,7 +456,9 @@ fn pools_and_the_deckbuilder() {
         assert_eq!(pools::random_pool(db(), &mut Rng::new(seed)), p);
     }
     println!("{with_comp} of 200 pools with a companion, {short} without 23 playable spells");
-    assert!(with_comp > 20, "companions in {with_comp} pools");
+    // Companions only as ordinary picks: about one pool in five (35 of these
+    // 200); 79 while one pool in four was built around one (ENGINE.md 36.4).
+    assert!(with_comp > 10 && with_comp < 60, "companions in {with_comp} pools");
     assert!(short <= 2, "{short} pools without 23 playable spells");
     // The evaluation pools: fixed per (seed, index), different across indices.
     assert_eq!(pools::eval_pools(db(), 1, 3), pools::eval_pools(db(), 1, 3));
