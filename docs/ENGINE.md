@@ -1204,6 +1204,7 @@ they isolate one keyword or trigger each.
 | `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c). Part 3 (section 39.5): the last two cells, a token copy of a nightbound permanent (`interactions_copies.rs`: 707.8a, 702.145f) and True-Name Nemesis's chosen player after Oko's exchange (`interactions_zones.rs`: 702.16j, 110.2) |
 | `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5) |
 | `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), both extremes reachable (40 basic lands, 31 of a type; 40 pool cards with the rest of the pool forced out and every count forced to 0; a card into a full deck an error), every 40-card deck of a two-card pool reachable exactly once (487,676 decks), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`), measurements (`--ignored`: `measure`); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v1` |
+| `tests/draft_deferred.rs` | `team_draft` through zero-core's deferred hook (section 43): 2v2 and 1v1 events through the self-play driver with a stand-in network (deferred terminals evaluated as leaves of no options, every event parked, a malformed result refused, resolved with heuristic-played matches, samples with the real outcome and margin), the hooks mapping the inherent methods (1v1-4v4); `--ignored`: `measure_parked_memory` |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
@@ -6708,3 +6709,138 @@ simulations; match_eval 172-184 s: 800 matches, 723,239 decisions, 19.1 million 
 * Section 36's measurements (36.2's "~7 per sideboarding", 36.8, 36.11) and section 41's (41.5,
   41.7) were taken with 40-60-card decks and are kept as written, with this section's numbers next
   to them where they changed.
+
+## 43. zero-core's deferred results (M6 part 2)
+
+Branch `m6-corepin` (from main at 0054b32): zero-core pinned at `feat/deferred-cotrain`
+(e6166c3, four commits on zero-core main 681ba8d: zero-core docs/search.md 1.1, 2.8-2.9,
+3.2, 5.1 and docs/az.md 11), and `team_draft`'s trait hooks (DESIGN.md 5.1, 7.1 part 2). Section
+42 is the 40-card change's (branch m6-deck40). The `mtg` path is unchanged (digests below).
+
+### 43.1 What was built
+
+**In zero-core** (generic: nothing names MTG):
+
+| Piece | What |
+|---|---|
+| `SearchGame` | `deferred()` (over, the result from outside), `deferred_payload() -> Result<String, String>` (what decides it, JSON), `resolve(&str)` (the episodes' results, in order; a malformed result is an error), `team_size()` (seat `s` in team `s % (n / T)`; `result()` = the team's outcome / T); defaults: never deferred, teams of one |
+| Search (`tree.rs`, `mcts.py`) | a deferred terminal is a no-option node of the tree's viewer: a leaf the network evaluates (`encode(viewer)`, an empty option segment: value and margin, no priors), its utility and win vector stored on the node and backed up on every later visit; `result()` never called there. Utilities are `T x win` (+ the margin term): Q in [0, 1] |
+| Driver | a game at a deferred terminal is parked (records with float16 features, root values); `take_deferred()` -> `[(gid, payload)]`, `resolve(gid, results)` emits its row and samples exactly as a finished game's (`z` = `result()`, `q` = root values, `sc` = `margin()`), `pending`, `parked_game(gid)`; rolling quotas count resolved games; `enqueue(tag, spec)` (the next new game takes that spec, its row carries the tag), `queue_only` (rolling drivers that start only queued setups) |
+| Bindings | `Game.deferred`, `.team_size`, `.deferred_payload()`, `.resolve(...)`, `.result()` / `.margin()` refused (ValueError) at a deferred terminal; `SearchDriver(..., queue_only=)`, `.take_deferred()`, `.resolve()`, `.pending`, `.enqueue()`, `.queued`, rows with `tag`, stats `parked`, `parked_bytes`, `deferred`, `resolved`, `queued` |
+| The run (`zero.cotrain`) | settings `resolver` (the resolver game), `resolver_cfg` (its settings, nested), `resolver_init`, `resolver_conc`, `pending_max`, `draft_eval_net_every`; `<run>/resolver/`; two rolling drivers on two threads and a coordinator (parked events -> queued matches tagged `gid/k` -> results by tag -> `resolve`), an iteration = `games` events resolved, backpressure; both nets trained, the non-finite guard on both before either is saved (`NonFinite` names the net); evaluation and Elo of both (the draft net's matches are team events whose matches the resolver's yardstick, or every `draft_eval_net_every` its network, plays); resume, PAUSE, STOP, `fork_run` with both nets, `resolver_init` from a single-game checkpoint; progress `{iter, phase, events_resolved, target, drafting, pending_events, matches_queued, matches_in_flight, matches_done}` |
+| The package glue | `GamePackage.deferred`: a game's `episodes(payload)` -> resolver specs and `results(payload, rows)` -> the `resolve` JSON (defaults: the payload's `"episodes"`, `[{"result", "scores"}, ...]`) |
+| Toy team game | `toy_team`: 1v1 / 2v2 picks of food cards, its deferred result decided by toy matches (`{"food": [a, b]}`, a new optional toy spec key); the core's tests and preset `toy-cotrain-smoke` |
+
+**Here**: `TeamDraftAz`'s `SearchGame` impl maps the trait hooks onto part 1's inherent methods
+(`deferred`, `deferred_payload`, `resolve_json`, `ev.t`): 19 lines in `engine/src/az/draft.rs`,
+nothing else of the file changed (the panic of `result()` / `margin()` at the deferred terminal
+stays: nothing in the core reads them there now). So the search now evaluates the end of
+deckbuilding as a deferred leaf (the draft network's estimate of the event from the root
+viewer's encoding) and the self-play driver parks the event until its matches are played.
+`engine/tests/draft_deferred.rs` (new): events of 2v2 (one pack of 6) and 1v1 (three packs of
+15) through zero-core's driver with self-play seats and a stand-in network: the searches
+evaluate deferred terminals (rows of no options), every event parks (no row, no sample before
+its matches), a malformed result is refused and the event stays parked, the matches played by
+the heuristic (`draft_bots::play_matches_heuristic`) resolve it, and the emitted samples carry
+the real outcome (`z` = the resolved event's `result()` per relative seat, `sc` = its
+`margin()`); the hooks map to the inherent methods (1v1-4v4); `measure_parked_memory`
+(`--ignored`). `tests/test_team_draft.py`: the event through the bindings is `deferred` with
+`team_size` T and its payload's matches (12 / 4), the result refused with zero-core's
+ValueError; a driver parks the event, refuses a malformed result and emits its row once
+resolved (instead of part 1's loud failure). `mtgz/az/__init__.py`: comments.
+
+### 43.2 Deviations from DESIGN.md 5.1 (the smallest sound changes)
+
+* `deferred_payload()` returns `Result<String, String>` (5.1: `String`): `team_draft`'s is
+  fallible (the cube table), and an error then stops the driver naming the game instead of a
+  panic.
+* The core never parses the payload: the run's game package turns it into resolver specs and the
+  episodes' rows back into the `resolve` JSON (`GamePackage.deferred`; the defaults read
+  `"episodes"` and send `[{"result": [...], "scores": [...]}, ...]`, which `resolve_json` takes).
+  `team_draft`'s part-1 payload lists `"matches"` (decks, sideboards, first picks, elsewhere,
+  seeds), not `mtg` specs: part 3 adds the mapping (with the spec keys of 2.3.6).
+* The phase quota is exact: when more events are ready than the quota needs, the rest wait for
+  the next iteration (each iteration resolves exactly `games` events).
+* `pending_max` counts resolver episodes (matches) queued or playing, 0 = 2 x `resolver_conc`
+  (2.3.9's "matches queued up to 2 x 768").
+* The draft net's evaluation with play-network matches (`eval_yard_net`, every
+  `draft_eval_net_every` evaluated iteration, `eval_games` events against the yardstick) is kept
+  out of its Elo fit: the Elo pool (`elo/`) is heuristic-played (one play agent, 2.3.8). The
+  anchor is the run's `yardstick` setting (part 3: `consensus`); external drafters are
+  `ext:<name>` players (`GamePackage.externals`).
+* With `resolver_init` the play network's architecture is the checkpoint's (widened if the game
+  grew; another game's checkpoint is refused). One player count per game (`players`);
+  `eval_remote` is refused with a resolver.
+* The Python reference driver (`play.PyDriver`) does not park: it raises at a deferred terminal
+  (the Rust driver is the one that parks). `TokenNet`'s `id_actions` is not in part 2 (7.1 lists
+  it in part 3; 41.8 had it in part 2).
+
+### 43.3 Measurements
+
+* **Parked memory** (`cargo test --release -p engine --test draft_deferred -- --ignored
+  --nocapture`; self-play seats with mtg-4's playout cap, p_full 0.25; the records' features in
+  float16): **5.24 MB per 4v4 event** (DESIGN.md 2.3.9 estimated ~5 MB: ~185 records of 14,488
+  features), 2.74 MB per 2v2 event, 1.41 MB per 1v1 event. 64 events waiting for their matches
+  (2.3.9's "in flight") hold ~335 MB.
+* **The coordinator and the GPU** (measured in zero-core on its toy co-training, its docs/az.md
+  11.4: 300 `toy_team` events and ~1,200 toy matches per iteration): from an event's last match
+  result to its `resolve` 0.11 ms on average (max 2.4 ms); from parking to `resolve` 0.8 s on
+  average (the matches' play); the match driver's leaves/s with the draft driver beside it, each
+  with its own evaluator on the same GPU, 30.5k / 27.5k against 27.8k / 31.6k alone (no
+  measurable interference); the draft driver waited for backpressure most of the time (the
+  matches are the bottleneck, as 2.3.9 expects). Not measured here: real draft and play networks
+  on the GPU (part 3's smoke run).
+* A team_draft event through the driver with a stand-in network (4 simulations, two threads, the
+  heuristic matches included): 4 events of 4v4 in 0.4 s, of 2v2 in 0.2 s.
+
+### 43.4 Checks
+
+**zero-core** (`feat/deferred-cotrain`): `cargo test --release` 43 passed (the search crate's 40:
+main's 30 and 10 new; webnet's 3); `python -m pytest tests` 101 passed (main's 82 and 19 new:
+`test_deferred.py` 8, `test_cotrain.py` 11; the non-finite guard's 15 among the 82). Golden
+digests unchanged: the crate's `visits_records_unchanged` / `minor_decisions...` (toy records
+347, 8501300995519660688), `check_checkpoint_compat` against zero-core main 681ba8d on the toy
+(random and uniform evaluators) and on Glass Road (Glass Road Zero c1f56dc built with each core:
+`{"intro": false}`, random and uniform evaluators: 607 / 622 samples, visits and cq records,
+results and the match against random identical); toy-smoke single-game runs (rolling; classic
+with margin_w 0.2, chance_k 2, cq) give the same metrics, checkpoints, optimizer state and shards
+byte for byte as 681ba8d. `SMOKE_TARGET=cotrain bash tools/smoke_all.sh --with-this-core`
+(Glass Road, Caverna, Kingdom Builder, MTG Zero at their HEADs with this core): **GREEN**, 19
+steps: core cargo test (43), pytest (101); Glass Road cargo test 46, pytest 33, `glassroad-smoke`
+4 metrics rows; Caverna 47, 32, `caverna-smoke` 4 rows; Kingdom Builder 105 (4 ignored), 45,
+`kingdombuilder-smoke` 4 rows; MTG Zero (main) cargo test 1,369 (every binary, `az` included; 12
+ignored), pytest 24, `mtg-smoke` 4 rows.
+
+**Here** (`m6-corepin`): every engine test binary but `az` (`cargo test --release -p engine
+--no-fail-fast --lib --test <each file of engine/tests but az>`, 97 binaries): 1,352 passed
+(main's 1,350 and the 2 of `draft_deferred.rs`), 0 failed, 13 ignored (main's 12 and
+`measure_parked_memory`). Behaviour digests (`cargo test --release -p engine --test digest --
+--ignored`): combined digest **12642107250032a7**, main's (the `mtg` path is unchanged). `bash
+tools/build_py.sh` and `python -m pytest -q tests`: 24 passed (main's 24; one test replaced:
+the driver now parks the event instead of failing). `python tools/search_smoke.py --specs
+random,match --seeds 0-1`: 0 failed of 4 configurations, 954 s on the loaded desktop (random
+110-111 s, 800 games, 328,537 decisions; match 360-361 s: 800 matches, 765,206 decisions, 20.3
+million simulations - the same match decisions and simulations as section 40.8's run: the core's
+search plays `mtg` as before). The draft fuzz at scale (`DRAFT_FUZZ=20000`): no failure, 134 s,
+identical to 41.7 (20,000 events, 11.4 million actions, 573,334 worlds, 13,893 options
+completed, 1,866 heuristic matches, team A 8,163 / 8,136 / 3,701).
+`check_checkpoint_compat` for an `mtg` checkpoint (DESIGN.md 5.1's guard rail): runs/mtg5's
+iteration 8 (a copy) on main with zero-core 681ba8d against this branch (4 self-play games at 16
+/ 4 simulations, policy targets visits and cq, 2 matches against random): identical (378 samples,
+records, results).
+
+### 43.5 Left for part 3
+
+* The `mtg` side of drafted matches: the spec keys (`pN_first_picks`, `pN_elsewhere`; 2.3.6) and
+  `team_draft`'s package glue (`GamePackage.deferred`: its payload's matches -> `mtg` specs with
+  their seeds; the results' default format already fits `resolve_json`); a test that a drafted
+  match spec plays the same match as `draft_bots::match_game`.
+* `TokenNet` actions by identity (`id_actions`, zero-core).
+* The co-training presets (a 2v2 smoke, the 4v4 run: `resolver` 'mtg', `resolver_cfg` mtg-4's
+  settings, `resolver_init` mtg5's best, `yardstick` 'consensus', `draft_eval_net_every` 4,
+  `pending_max`, the draft net's search settings of 2.3.9), the draft yardsticks (held-out
+  human-pick agreement), the search smoke for `team_draft`, a smoke run on the GPU (the toy
+  measured no interference between the two drivers' evaluators; MTG's draft leaves are ~2x an
+  `mtg` leaf).
+* zero-core tools that play matches outside the run (`zero.h2h`, `zero.replay`, `zero.targets`,
+  `zero.bench`) do not resolve deferred games; the dashboard does not show `<run>/resolver/` yet.

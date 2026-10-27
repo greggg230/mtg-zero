@@ -1,8 +1,10 @@
-"""The game `team_draft` (docs/ENGINE.md 41, DESIGN.md 2.3) through the bindings: its info, a whole
-event of random actions (encode, determinize keeping the decider's view and options), the deferred
-terminal (the result is refused until the matches are played: zero-core's deferred hook is M6 part
-2, so a driver that reaches the terminal fails loudly), the spec, and the token network reading
-layout draft_v1 on real positions and a driver's leaf batch."""
+"""The game `team_draft` (docs/ENGINE.md 41, 43, DESIGN.md 2.3) through the bindings: its info, a
+whole event of random actions (encode, determinize keeping the decider's view and options), the
+deferred terminal (the result is refused until the matches are played; zero-core's driver parks the
+event there and resolves it with the matches' results, ENGINE.md 43), the spec, and the token network
+reading layout draft_v1 on real positions and a driver's leaf batch."""
+import json
+
 import numpy as np
 import pytest
 
@@ -42,19 +44,31 @@ def test_an_event_through_the_bindings():
             g.step(int(legal[rng.integers(len(legal))]))
             steps += 1
         assert steps == players * 45 + players * 50
-        assert g.to_move is None
-        # the deferred terminal: no result until the matches are played (a Rust panic -> BaseException)
-        with pytest.raises(BaseException):
+        assert g.to_move is None and g.deferred and g.team_size == players // 2
+        # the deferred terminal: no result until the matches are played (zero-core's bindings refuse it)
+        with pytest.raises(ValueError, match='deferred terminal'):
             g.result()
+        assert len(json.loads(g.deferred_payload())['matches']) == {8: 12, 4: 4}[players]
 
 
-def test_a_driver_reaching_the_deferred_terminal_fails_loudly():
+def test_a_driver_parks_the_event_until_its_matches_are_played():
+    """zero-core's deferred hook (ENGINE.md 43): the driver parks the event at its deferred terminal
+    with the matches as its payload, refuses a malformed result and emits the row once resolved."""
     r = G.seat_dict('random')
     drv = G.Driver('team_draft', [[r] * 4], spec='{"packs": 1, "pack_size": 4}', concurrency=1, threads=1, seed=1,
                    max_steps=10_000)
     from mtgz.az.infer import drive
-    with pytest.raises(BaseException):
-        drive(drv, {})
+    drive(drv, {})
+    assert drv.pending == 1 and drv.take_results() == []
+    (gid, payload), = drv.take_deferred()
+    n = len(json.loads(payload)['matches'])
+    assert n == 4
+    with pytest.raises(ValueError):
+        drv.resolve(gid, [[1, 0]])
+    assert drv.pending == 1
+    drv.resolve(gid, [[1, 0]] * (n - 1) + [{'result': [0, 1], 'scores': [0, 2]}])     # team A wins 3-1
+    row, = drv.take_results()
+    assert row['result'] == [0.5, 0.0, 0.5, 0.0] and row['scores'] == [3, 1, 3, 1] and drv.finished
 
 
 def test_token_network_reads_layout_draft_v1():

@@ -4,8 +4,8 @@ docs/search.md) + what is MTG's, registered here as the process's game package: 
 supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match with sideboarding
 between games, decks built from random card pools), its object layout for zero-core's token
 network (arch 'tokens': `layout_v4.json`, written by the engine's `encode::layout_json`), the game
-`team_draft` (docs/ENGINE.md 41, DESIGN.md 2.3: a team cube draft and deckbuilding up to the matches,
-which wait for zero-core's deferred hook; its layout `layout_draft_v1.json`), the run
+`team_draft` (docs/ENGINE.md 41, 43, DESIGN.md 2.3: a team cube draft and deckbuilding up to the
+matches, its deferred terminal; its layout `layout_draft_v1.json`), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4), the default spec, the evaluation spec
 and the dashboard's title / port.
 
@@ -40,12 +40,13 @@ EVAL_SPEC = eval_spec(SPEC)
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v4.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
 # The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41: layout draft_v1, the pack and pool slots
-# and 13 bags; its `id_actions` key is M6 part 2's and ignored by the pinned core)
+# and 13 bags; its `id_actions` key is M6 part 3's and ignored by the pinned core)
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_draft_v1.json'), encoding='utf-8') as _f:
     LAYOUT_DRAFT = json.load(_f)
 # The team draft's default spec: 3 packs of 15, min(T, 3) rounds of best-of-three matches (the seats,
-# 2T, are the run's `players`: [8] for 4v4, [4] for 2v2). No preset yet: its matches need zero-core's
-# deferred hook (M6 part 2; DESIGN.md 5.1, 7.1).
+# 2T, are the run's `players`: [8] for 4v4, [4] for 2v2). No preset yet: zero-core's deferred hook and
+# co-training are in (M6 part 2, ENGINE.md 43); its matches as `mtg` specs and the presets are part 3
+# (DESIGN.md 5.1, 7.1).
 SPEC_DRAFT = '{}'
 
 PRESETS = {

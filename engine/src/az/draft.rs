@@ -1352,6 +1352,25 @@ impl SearchGame for TeamDraftAz {
         }
     }
 
+    /// zero-core's deferred hook (its docs/search.md 1.1; ENGINE.md 43): the
+    /// inherent methods above.
+    fn deferred(&self) -> bool {
+        TeamDraftAz::deferred(self)
+    }
+
+    fn deferred_payload(&self) -> Result<String, String> {
+        TeamDraftAz::deferred_payload(self)
+    }
+
+    fn resolve(&mut self, results: &str) -> Result<(), String> {
+        self.resolve_json(results)
+    }
+
+    /// Seats per team: seat `s` is in team `s % 2` (zero-core's `s % (n / T)`).
+    fn team_size(&self) -> usize {
+        self.ev.t as usize
+    }
+
     fn bot_names() -> &'static [&'static str] {
         &["consensus"]
     }
