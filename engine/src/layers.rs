@@ -437,16 +437,12 @@ impl Game {
             Some((p, t)) => (p as i32, t as i32),
             None => (d.power.unwrap_or(0), d.toughness.unwrap_or(0)),
         };
-        if self.objs[c.i()].zone != Zone::Battlefield {
-            // CR 604.3: a characteristic-defining ability works in every
-            // zone (Adeline's power on the stack, for Stern Scolding; a
-            // Lhurgoyf's in hand; rulings c264835f, 754b54cb).
-            return match (&d.pt_cda, exc_pt) {
-                (Some(cda), None) => self.cda_pt(c, cda, printed),
-                _ => printed,
-            };
-        }
-        if self.printed_only(c) {
+        // Off the battlefield only a characteristic-defining ability
+        // applies: it works in every zone (CR 604.3: Adeline's power on the
+        // stack, for Stern Scolding; a Lhurgoyf's in hand; rulings
+        // c264835f, 754b54cb).
+        let off = self.objs[c.i()].zone != Zone::Battlefield;
+        if !off && self.printed_only(c) {
             return printed;
         }
         // 7a: characteristic-defining abilities.
@@ -454,6 +450,9 @@ impl Game {
             (Some(cda), None) => self.cda_pt(c, cda, printed),
             _ => printed,
         };
+        if off {
+            return (p, t);
+        }
         // 7b: the latest base P/T set (the last of equal timestamps, in
         // `mods_on` order: effects, then statics); 7c summed. The statics
         // are walked once for their sets, modifications and "+1/+1 for each
