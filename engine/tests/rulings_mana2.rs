@@ -1723,3 +1723,57 @@ fn an_alternative_cost_with_retrace_or_with_elite_spellbinders_tax_cr_118_9_702_
         }
     }
 }
+
+#[test]
+fn retrace_with_emerge_needs_the_land_card_to_discard_as_well_cr_702_81a_702_119a_601_2f() {
+    // Six gives Crabomination in P0's graveyard retrace: cast it by
+    // discarding a land card in addition to its other costs (CR 702.81a),
+    // which may be its emerge cost (118.9; 702.119a: {5}{B}{B} and an
+    // artifact sacrificed, less that artifact's mana value). The total cost
+    // is both (601.2f-h). With only The One Ring in hand there is no land
+    // card to discard: not castable (the match fuzz's match 1202 on main
+    // 0054b32, ENGINE.md 40.9). With a Forest too: cast for emerge, the
+    // Forest discarded, Golos (an artifact creature, mana value 5)
+    // sacrificed, {B}{B} paid with two of the three Swamps.
+    let setup = |hand: &[&str]| {
+        scen()
+            .battlefield(0, &["Six", "Golos, Tireless Pilgrim", "Swamp", "Swamp", "Swamp"])
+            .graveyard(0, &["Crabomination"])
+            .hand(0, hand)
+            .library(1, &["Island", "Forest"])
+            .hand(1, &["Forest"])
+            .at(Step::Main1, 0)
+            .start()
+    };
+    let g = setup(&["The One Ring"]);
+    let crab = g.card(0, "Crabomination", Zone::Graveyard);
+    assert!(!g.has_option(Choice::Cast(crab)), "no land card to discard: {}", opts(&g));
+    let mut g = setup(&["The One Ring", "Forest"]);
+    let crab = g.card(0, "Crabomination", Zone::Graveyard);
+    let golos = bf(&g, 0, "Golos, Tireless Pilgrim");
+    let forest = g.card(0, "Forest", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(crab)), "retrace with emerge: {}", opts(&g));
+    let alts = std::cell::Cell::new(0usize);
+    let asked = cast_recording(&mut g, Choice::Cast(crab), |g| match g.kind() {
+        Some(DecisionKind::ChooseAltCost) => {
+            alts.set(g.pending_decision().unwrap().options.len());
+            Some(Choice::Number(1))
+        }
+        Some(DecisionKind::Sacrifice) => Some(Choice::Card(golos)),
+        Some(DecisionKind::Target) => Some(player(1)),
+        _ => None,
+    });
+    assert!(asked.contains(&DecisionKind::Sacrifice) && asked.contains(&DecisionKind::DiscardCost), "{asked:?}\n{}", log(&g));
+    assert_eq!(alts.get(), 1, "emerge only: its mana cost {{4}}{{B}}{{B}} can't be paid");
+    assert!(log(&g).contains("Retrace"), "cast with retrace\n{}", log(&g));
+    assert_eq!(g.obj(forest).zone, Zone::Graveyard, "the land card discarded\n{}", log(&g));
+    assert_eq!(g.obj(golos).zone, Zone::Graveyard, "Golos sacrificed\n{}", log(&g));
+    assert_eq!(g.count_in(0, "The One Ring", Zone::Hand), 1);
+    assert_eq!(g.permanents_of(0).filter(|&c| g.obj(c).tapped).count(), 2, "{{5}}{{B}}{{B}} less 5: {{B}}{{B}}\n{}", log(&g));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(player(1)),
+        Some(DecisionKind::ChooseExiled) => Some(Choice::Pass),
+        _ => None,
+    });
+    assert_eq!(g.count_in(0, "Crabomination", Zone::Battlefield), 1, "{}", log(&g));
+}

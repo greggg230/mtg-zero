@@ -1764,6 +1764,8 @@ impl Game {
         }
         let Some(rest) = self.alt_rest(card, from, k) else { return false };
         if a.emerge.is_some() {
+            // A permanent to sacrifice that leaves the reduced mana and
+            // `rest` (retrace's land discard) payable (`emerge_options`).
             return !self.emerge_options(p, card, k, classes, from).is_empty();
         }
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());

@@ -668,7 +668,10 @@ impl Game {
     }
 
     /// The permanents `p` could sacrifice to cast `card` with its emerge
-    /// alternative cost `k`: those leaving the reduced cost payable.
+    /// alternative cost `k`, cast the way `from` says: those leaving the
+    /// rest of the total cost payable (CR 601.2f-h), the reduced mana and
+    /// the cost's other parts (`alt_rest`: with retrace, its land discard,
+    /// 702.81a; ENGINE.md 40.9).
     pub(crate) fn emerge_options(
         &self,
         p: PlayerId,
@@ -679,9 +682,15 @@ impl Game {
     ) -> Vec<CardIdx> {
         let a = &self.def_of(card).alt_costs[k];
         let Some(filter) = &a.emerge else { return Vec::new() };
+        // (Emerge's own rest is empty, so no sacrifice changes whether the
+        // rest's non-mana parts can be paid: checked once, without mana.)
+        let Some(rest) = self.alt_rest(card, from, k) else { return Vec::new() };
+        if !self.cost_payable(p, card, rest, &Default::default(), classes, Some(card)) {
+            return Vec::new();
+        }
         let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
         let mana = self.alt_mana_via(card, p, from, k, &Default::default());
-        let keep = crate::pay::Keep { allow: self.spend_allow(card), ..Default::default() };
+        let keep = crate::pay::Keep { allow: self.spend_allow(card), ..Self::keep_for(card, rest, None) };
         self.sacrifice_candidates(p, card, &s)
             .into_iter()
             .filter(|&x| {
