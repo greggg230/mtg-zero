@@ -423,7 +423,7 @@ impl Game {
             StackKind::Spell { card } => {
                 let def = self.db.def(self.objs[card.i()].def);
                 let c = if item.alt > 0 {
-                    &def.alt_costs[item.alt as usize - 1].cost
+                    self.alt_rest(card, item.from, item.alt as usize - 1).unwrap_or(&def.alt_costs[item.alt as usize - 1].cost)
                 } else {
                     self.route_extra(card, item.from, item.cost_option)?
                 };
@@ -499,15 +499,69 @@ impl Game {
             }
         }
         // (Mana sources that sacrifice themselves are cards in the graveyard
-        // by then: activated first, CR 601.2g-h.)
+        // by then: activated first, CR 601.2g-h. So are the cards the cost
+        // itself discards and the nontoken permanents it sacrifices: paid
+        // before the graveyard's cards are chosen, 601.2h; ruling bea302d9.)
         let short = self.exile_short(p, card, cost);
-        if short > 0 && short > self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude).count() {
-            return false;
+        if short > 0 {
+            let d: Vec<CardIdx> = self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude).collect();
+            if short > d.len() + self.cost_feeds_graveyard(p, card, cost, &d) {
+                return false;
+            }
         }
         if mana.is_zero() {
             return true;
         }
         self.can_pay_without(p, mana, classes, &Self::keep_for(card, cost, exclude), exclude)
+    }
+
+    /// Sacrifice the permanents chosen for a cost (together, one batch).
+    fn sacrifice_picked(&mut self, p: PlayerId, id: u32, picked: &[CardIdx]) {
+        let mut sacs: Vec<CardIdx> = picked.to_vec();
+        sacs.sort_by_key(|c| self.objs[c.i()].timestamp);
+        // "The sacrificed permanent's mana value" (as it last existed, CR
+        // 608.2h): an activated ability's item keeps it (`Amount::CostMvPlus`).
+        if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
+            if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
+                self.stack[pos].ev.amount = self.mana_value_of(c) as u16;
+            }
+        }
+        self.begin_batch();
+        for c in sacs {
+            self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
+            self.sacrifice(c);
+        }
+        self.end_batch();
+    }
+
+    /// Would permanent `c`, sacrificed, be a card in its owner's graveyard
+    /// (not a token; not exiled instead, CR 614.1a)?
+    pub(crate) fn feeds_graveyard(&self, c: CardIdx) -> bool {
+        !self.is_token(c) && matches!(self.replaced_dest(c, Zone::Battlefield, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
+    }
+
+    /// The cards `cost`'s discards put into `p`'s graveyard (none under
+    /// "exile it instead", CR 614.1a).
+    pub(crate) fn discards_feed(&self, p: PlayerId, card: CardIdx, cost: &Cost) -> usize {
+        if cost.discard == 0 {
+            return 0;
+        }
+        let h = self.players[p as usize].hand.iter().copied().find(|&c| c != card);
+        match h {
+            Some(h) if matches!(self.replaced_dest(h, Zone::Hand, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard)) => cost.discard as usize,
+            _ => 0,
+        }
+    }
+
+    /// The cards `cost` itself puts into `p`'s graveyard before its
+    /// graveyard cards are chosen (CR 601.2h; ruling bea302d9): its
+    /// discards, and as many of its sacrifices as can be nontoken cards
+    /// besides the mana sources `d` counted already (each card once).
+    pub(crate) fn cost_feeds_graveyard(&self, p: PlayerId, card: CardIdx, cost: &Cost, d: &[CardIdx]) -> usize {
+        let sacs = cost.sacrifice.as_ref().map_or(0, |s| {
+            (s.n as usize).min(self.sacrifice_candidates(p, card, s).into_iter().filter(|&c| !d.contains(&c) && self.feeds_graveyard(c)).count())
+        });
+        self.discards_feed(p, card, cost) + sacs
     }
 
     /// Untapped permanents `p` controls that a "tap n untapped <filter> you
@@ -669,7 +723,9 @@ impl Game {
     /// graveyard for `cost`'s "exile n cards from your graveyard" (CR
     /// 601.2g-h; the first in canonical order: Lotus Petals alike).
     pub(crate) fn exile_sources(&self, p: PlayerId, card: CardIdx, cost: &Cost, exclude: Option<CardIdx>) -> Vec<(crate::pay::Src, bool)> {
-        let short = self.exile_short(p, card, cost);
+        // (The cost's own discards are graveyard cards by then: ruling
+        // bea302d9.)
+        let short = self.exile_short(p, card, cost).saturating_sub(self.discards_feed(p, card, cost));
         if short == 0 {
             return Vec::new();
         }
@@ -728,10 +784,21 @@ impl Game {
         }
         if picked.len() < n_sac {
             let s = cost.sacrifice.as_ref().unwrap();
+            // A cost that also exiles graveyard cards: while the graveyard
+            // (with the cost's discards and the cards sacrificed so far)
+            // would be short by as many cards as sacrifices are left, only
+            // a card that will be there helps (ruling bea302d9).
+            let need = if cost.exile_graveyard > 0 {
+                let fed = picked.iter().filter(|&&c| self.feeds_graveyard(c)).count() + self.discards_feed(p, card, cost);
+                self.exile_short(p, card, cost).saturating_sub(fed)
+            } else {
+                0
+            };
+            let only_cards = need > 0 && need >= n_sac - picked.len();
             let opts: Vec<Opt> = self
                 .sacrifice_candidates(p, card, s)
                 .into_iter()
-                .filter(|c| !picked.contains(c))
+                .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(*c)))
                 .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
@@ -762,6 +829,11 @@ impl Game {
                 .collect();
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::BounceCost, opts);
             return;
+        }
+        if picked.len() == n_bounce && n_sac > 0 && cost.exile_graveyard > 0 {
+            // CR 601.2h, any order: the permanents sacrificed first, so
+            // they may be exiled from the graveyard too (ruling bea302d9).
+            self.sacrifice_picked(p, id, &picked[..n_sac]);
         }
         if picked.len() < n_gy {
             // Graveyard cards to exile, a set: picked in increasing
@@ -878,21 +950,9 @@ impl Game {
         if cost.tap {
             self.tap(card);
         }
-        let mut sacs: Vec<CardIdx> = picked.iter().copied().take(n_sac).collect();
-        sacs.sort_by_key(|c| self.objs[c.i()].timestamp);
-        // "The sacrificed permanent's mana value" (as it last existed, CR
-        // 608.2h): an activated ability's item keeps it (`Amount::CostMvPlus`).
-        if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
-            if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
-                self.stack[pos].ev.amount = self.mana_value_of(c) as u16;
-            }
+        if !(n_sac > 0 && cost.exile_graveyard > 0) {
+            self.sacrifice_picked(p, id, &picked[..n_sac]);
         }
-        self.begin_batch();
-        for c in sacs {
-            self.note(|g| format!("P{p} sacrifices {}", g.name(c)));
-            self.sacrifice(c);
-        }
-        self.end_batch();
         if cost.life > 0 {
             self.lose_life(p, cost.life as i32);
         }
@@ -1067,13 +1127,16 @@ impl Game {
     }
 
     /// The types of mana permanent `c`'s mana abilities could make now
-    /// (CR 106.7).
+    /// (CR 106.7): the abilities it has (not a latent one it hasn't gained:
+    /// Urza's Saga before its chapter I; ruling a755e0f5).
     pub(crate) fn could_produce(&self, c: CardIdx) -> crate::mana::ManaMask {
         let p = self.objs[c.i()].controller;
-        self.abilities(c)
-            .activated
+        let d = self.abilities(c);
+        d.activated
             .iter()
-            .filter_map(|a| a.mana())
+            .enumerate()
+            .filter(|&(i, _)| d.latent == 0 || self.has_activated(c, i))
+            .filter_map(|(_, a)| a.mana())
             .flat_map(|m| productions(self, p, &m.prod, Some(c)))
             .fold(0, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)))
     }

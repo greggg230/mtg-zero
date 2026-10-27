@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1226 | 977 |
 | class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1051 | 835 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 757 | 638 |
-| a, tested only by an earlier test (Oracle or rules) | 294 | 197 |
+| a, tested (passing) | 1173 | 929 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 878 | 731 |
+| a, tested only by an earlier test (Oracle or rules) | 295 | 198 |
 | a, deferred | 0 | 0 |
-| a, untested | 175 | 142 |
+| a, untested | 53 | 48 |
 
-Class a by area (distinct texts): mana 79/173, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 173/173, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -238,7 +238,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `5548984d` | a | triggers | an ETB exile trigger still resolves and exiles its target even if its source has already left | `rulings_triggers::skyclave_apparition_gone_before_its_enter_ability_resolves_still_exiles_and_no_token_cr_603_6` |
 | `ac1d8481` | c | NR | a token's P/T sums the mana values of all cards exiled from one player; each affected player gets a token [part 3, was a/mana: Skyclave Apparition exiles at most one card, so no player has several cards exiled by it] | not reachable with the cube's cards |
-| `aafa61cb` | a | mana | a battlefield creature with X in its mana cost treats X as 0 | untested |
+| `aafa61cb` | a | mana | a battlefield creature with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
 | `ecf56d5c` | a | triggers | if there's no exiled card yet when the source leaves (ability unresolved), no token is created | `rulings_triggers::skyclave_apparition_gone_before_its_enter_ability_resolves_still_exiles_and_no_token_cr_603_6` |
 
 ### White Plume Adventurer
@@ -260,7 +260,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `ee3d4607` | a | mana | a graveyard card with X in its mana cost treats X as 0 | untested |
+| `ee3d4607` | a | mana | a graveyard card with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
 
 ### Palace Jailer
 
@@ -306,7 +306,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `a2837ded` | a | triggers | paying an alt cost like evoke lets its own ETB trigger resolve before the sacrifice trigger, priority between | `cards_m7a_costs::cr_702_74_evoke_solitude_exiles_and_then_is_sacrificed` |
-| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | untested |
+| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Eagles of the North
 
@@ -399,9 +399,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `41553eae` | a | mana | a copy of a converge spell counts zero colors spent, since no mana was spent to cast the copy | `rulings_casts::prismatic_ending_copied_counts_no_colours_cr_707_10_601_2h` |
-| `a95c3d78` | a | mana | mana spent on alternative or additional costs counts toward a converge-style count | untested |
+| `a95c3d78` | a | mana | mana spent on alternative or additional costs counts toward a converge-style count | `rulings_mana2::converge_counts_mana_spent_on_increases_and_mana_value_is_checked_on_resolution_cr_702_149_601_2f` |
 | `fc8abf83` | a | mana | casting a converge spell without paying its mana cost counts zero colors spent | `rulings_casts::prismatic_ending_cast_free_counts_no_colours_cr_601_2h` |
-| `51285906` | a | mana | mana value isn't checked as a targeting restriction, only when the spell resolves | untested |
+| `51285906` | a | mana | mana value isn't checked as a targeting restriction, only when the spell resolves | `rulings_mana2::converge_counts_mana_spent_on_increases_and_mana_value_is_checked_on_resolution_cr_702_149_601_2f` |
 | `68200d2c` | b | DEF | at most five colors of mana can ever be spent on one spell; colorless doesn't count as a color [part 3, was a/mana: there are five colours; a definition] | a definition, no behaviour of its own |
 | `38997c8b` | b | DEF | you can't overpay a converge-style spell to spend more colors, or skip a cost reduction to do so [part 3, was a/mana: a cost is paid exactly; the engine never offers to overpay] | a definition, no behaviour of its own |
 | `b64c158e` | a | mana | a higher X lets you pay (and spend the colors of) more mana for a converge-style effect | `cards_m7c_tail::prismatic_ending_counts_the_colours_spent_converge_cr106_1b` |
@@ -420,9 +420,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `6b60b26f` | b | DEF | a creature exiled this way still counts as such even if it later left exile for elsewhere [part 3, was a/zones: the exiled creatures are counted within Winds of Abandon's own resolution, where nothing can move them; a definition] | a definition, no behaviour of its own |
 | `c1c20030` | a | protection | a non-targeting overload-cast version of a spell can still hit hexproof or protected permanents | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
-| `68a438a9` | a | mana | casting a spell 'without paying its mana cost' forbids substituting the overload cost instead | untested |
+| `68a438a9` | a | mana | casting a spell 'without paying its mana cost' forbids substituting the overload cost instead | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `7297f704` | a | mana | an overload spell has one target if cast normally, but no targets if its overload cost is paid | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
-| `b7498104` | a | mana | total cost = mana/alt cost (e.g. overload) + increases - reductions; mana value unaffected | untested |
+| `b7498104` | a | mana | total cost = mana/alt cost (e.g. overload) + increases - reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Council's Judgment
 
@@ -479,7 +479,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `ac3bb678` | a | zones | a token exiled this way ceases to exist instead of returning | `rulings_triggers2::palace_jailer_exiling_a_token_it_ceases_to_exist_cr_111_7` |
 | `86da9a0c` | b | MP | multiplayer: exiled card returns if the exiling permanent's owner leaves the game | multiplayer |
 | `fa232a08` | a | triggers | an 'exile then return when this leaves' ability is one ability making two independent one-shot effects | `interactions_zones::leyline_binding_flickered_returns_its_card_and_exiles_anew_cr_610_3_400_7` |
-| `d5edbfb1` | a | mana | a domain-based ability doesn't change the spell's own fixed mana value | untested |
+| `d5edbfb1` | a | mana | a domain-based ability doesn't change the spell's own fixed mana value | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar
 
@@ -501,7 +501,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `5d366152` | a | mana | a cost reduction that targets generic mana can't reduce colored mana requirements | `cards_m7c_tail2::bilbo_reduces_spells_cast_from_outside_the_hand_cr601_2f` |
-| `c220d94b` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | untested |
+| `c220d94b` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `d26ce62d` | a | dfc | casting an Adventure from the graveyard: if it resolves you can cast the permanent later, if not you cant | `rulings_faces2::bilbo_casts_an_adventure_from_the_graveyard_resolved_it_may_be_cast_later_countered_not_cr_715_4` |
 
 ### Faerie Mastermind
@@ -535,7 +535,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `b9423c74` | a | triggers | if the source is gone at resolution, draw/discard still happens, using last-known counters for any bonus | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
-| `550a74ab` | a | mana | casting a spell with X without paying its mana cost forces X to be 0 | untested |
+| `550a74ab` | a | mana | casting a spell with X without paying its mana cost forces X to be 0 | `rulings_mana2::x_is_zero_when_cast_without_paying_its_mana_cost_or_put_onto_the_battlefield_cr_107_3b` |
 | `ad951704` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `92f52ee7` | a | stack | casting a spell as part of an ability's resolution happens immediately, ignoring normal timing permissions | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
 | `c86d4e2f` | a | zones | you may not play land cards discarded by this kind of effect | `rulings_zones2::malcolm_cant_play_a_discarded_land_cr_305_1` |
@@ -567,13 +567,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled`; `cards_m7a_zones2::cr_702_34a_a_countered_flashback_spell_is_exiled` |
 | `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
-| `a92b37a5` | a | mana | if a card has multiple flashback costs, you may pay any one of them | untested |
+| `a92b37a5` | a | mana | if a card has multiple flashback costs, you may pay any one of them | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `fec2f94a` | c | NR | a card with no mana cost that gains flashback has no flashback cost and can't be cast this way [part 3, was a/mana: every cube instant and sorcery has a mana cost] | not reachable with the cube's cards |
 | `cc0a60e7` | a | mana | a split card that gains flashback only requires paying the cost of the half being cast | `interactions_faces::a_split_card_with_two_graveyard_permissions_casts_its_left_half_cr_709_3_601_2b` |
-| `d38450c1` | a | mana | flashback forbids paying other alternative costs, but still allows/requires additional costs like kicker | untested |
-| `e8a86435` | a | mana | casting an X spell via flashback still requires choosing and paying for X normally | untested |
-| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
+| `d38450c1` | a | mana | flashback forbids paying other alternative costs, but still allows/requires additional costs like kicker | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `e8a86435` | a | mana | casting an X spell via flashback still requires choosing and paying for X normally | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled` |
 | `de6aa02a` | a | stack | flashback still follows the card's normal timing restrictions (e.g. sorcery speed for sorceries) | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 
@@ -581,12 +581,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `2508542e` | a | mana | colorless/generic mana symbols on permanents you control don't count toward devotion to any color | untested |
-| `4760ea2e` | a | mana | hybrid and Phyrexian mana symbols do count toward devotion to their color(s) | untested |
-| `e36f6dac` | a | mana | devotion is counted as the ability resolves, using whatever permanents (incl. the source) are on the battlefield then | untested |
+| `2508542e` | a | mana | colorless/generic mana symbols on permanents you control don't count toward devotion to any color | `rulings_mana2::devotion_counts_the_mana_costs_colored_hybrid_and_phyrexian_symbols_as_the_ability_resolves_cr_700_5` |
+| `4760ea2e` | a | mana | hybrid and Phyrexian mana symbols do count toward devotion to their color(s) | `rulings_mana2::devotion_counts_the_mana_costs_colored_hybrid_and_phyrexian_symbols_as_the_ability_resolves_cr_700_5` |
+| `e36f6dac` | a | mana | devotion is counted as the ability resolves, using whatever permanents (incl. the source) are on the battlefield then | `rulings_mana2::devotion_counts_the_mana_costs_colored_hybrid_and_phyrexian_symbols_as_the_ability_resolves_cr_700_5` |
 | `2a173b06` | c | NR | an Aura you control that's attached to an opponent's permanent still counts toward your devotion [part 3, was a/mana: no cube Aura can be attached to an opponent's permanent (Animate Dead and Necromancy return the creature under their controller)] | not reachable with the cube's cards |
 | `cabf6b70` | a | other | if your devotion check is zero, the library search is skipped, though the win-if-empty check still happens | untested |
-| `a40c5a6d` | a | mana | mana symbols in a permanent's ability text (not its cost) don't count toward devotion | untested |
+| `a40c5a6d` | a | mana | mana symbols in a permanent's ability text (not its cost) don't count toward devotion | `rulings_mana2::devotion_counts_the_mana_costs_colored_hybrid_and_phyrexian_symbols_as_the_ability_resolves_cr_700_5` |
 
 ### Thieving Skydiver
 
@@ -600,7 +600,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
 | `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `c9b38795` | b | DEF | a kicker cost can't be paid more than once per cast [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
-| `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
+| `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Thundertrap Trainer
 
@@ -644,7 +644,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `266aee1f` | a | dfc | an Adventure card uses only its base characteristics in every zone except while on the stack as the Adventure spell | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
 | `22d0dd32` | c | NR | 'has an Adventure' means a card with that alternative characteristic set, even if unused or never cast that way [part 3, was a/dfc: no cube card refers to a card that has an Adventure] | not reachable with the cube's cards |
-| `5d19b09e` | a | mana | casting a card as an Adventure isn't itself an alternative cost; alt-cost-granting effects may still apply to it | untested |
+| `5d19b09e` | a | mana | casting a card as an Adventure isn't itself an alternative cost; alt-cost-granting effects may still apply to it | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `c5e2c49b` | a | dfc | an Adventure spell is exiled, not binned, on resolving so you can cast the permanent later; a fizzled one isnt exiled | `rulings_faces::a_countered_adventure_goes_to_the_graveyard_without_the_permission_cr_715_4` |
 | `13492141` | a | dfc | a card reaching exile any other way doesn't grant permission to play it with its Adventure permanent characteristics | `rulings_faces::a_countered_adventure_goes_to_the_graveyard_without_the_permission_cr_715_4` |
 | `9a1260e0` | a | dfc | a copy of an Adventure spell is exiled on resolving and then ceases to exist, so it can't be cast as the permanent | `rulings_faces2::a_copy_of_an_adventure_ceases_to_exist_and_only_the_card_may_be_cast_later_cr_715_4` |
@@ -662,10 +662,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `b2c5a21b` | a | zones | casting a card from the graveyard makes it a new object; it cant be recast if it returns there that turn | `rulings_zones2::a_card_cast_with_a_permission_that_comes_back_is_a_new_object_without_it_cr_400_7` |
 | `4097b21c` | c | NR | targeting an artifact land to let you cast it still doesnt let you play it, since cast-permission excludes lands [part 3, was a/zones: the cube has no artifact land] | not reachable with the cube's cards |
 | `4f616c51` | a | stack | once casting is announced, no responses are allowed until its fully paid for, including cost reductions | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
-| `8f8116e7` | a | mana | a cost-reduction ability that reduces generic mana leaves colored mana costs untouched | untested |
-| `a5f46a35` | a | mana | total cost = base/alt cost + increases, then reductions; mana value unaffected by total cost paid | untested |
+| `8f8116e7` | a | mana | a cost-reduction ability that reduces generic mana leaves colored mana costs untouched | `rulings_mana2::affinity_reduces_only_generic_mana_cr_702_41a_601_2f` |
+| `a5f46a35` | a | mana | total cost = base/alt cost + increases, then reductions; mana value unaffected by total cost paid | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `6d4a6721` | a | zones | casting an artifact card via another card's permission still follows normal timing restrictions unless it has flash | `rulings_zones2::cards_cast_or_played_from_a_graveyard_keep_their_timing_cr_601_3_307_1_305_2` |
-| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | untested |
+| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b` |
 
 ### Forensic Gadgeteer
 
@@ -699,7 +699,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `53a3d100` | a | mana | a card in your library with X in its mana cost treats X as 0 | untested |
+| `53a3d100` | a | mana | a card in your library with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
 
 ### Tishana's Tidebinder
 
@@ -713,7 +713,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `edf475b1` | a | mana | a card in a player's library with X in its mana cost treats X as 0 | untested |
+| `edf475b1` | a | mana | a card in a player's library with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
 
 ### True-Name Nemesis
 
@@ -749,14 +749,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a2837ded` | a | triggers | paying an alt cost like evoke lets its own ETB trigger resolve before the sacrifice trigger, priority between | `cards_m7a_costs::cr_702_74_evoke_solitude_exiles_and_then_is_sacrificed` |
 | `43fd075d` | a | stack | an ability that targets 'a spell on the stack' can't target creatures or planeswalkers on the battlefield | `rulings_stack::subtlety_puts_a_spell_that_cant_be_countered_into_its_library_cr_101_2` |
 | `64eaa2ca` | a | zones | a spells owner chooses top or bottom of their library for it, and that choice is public | `cards_m7a_costs::subtlety_the_spells_owner_puts_it_on_top_or_bottom` |
-| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | untested |
+| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Urza, Lord High Artificer
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
-| `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
+| `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `751982e2` | a | zones | if an exiled card made playable by an ability isn't played, it simply remains in exile | `rulings_zones2::an_unused_permission_ends_and_the_card_stays_where_it_is_cr_611_2a` |
 | `e32a9bac` | a | copies | a count-based power/toughness-setting ability counts its own source, guaranteeing at least a 1/1 | `cards_m7d::urza_construct_token_and_a_sick_artifact_creature_pay_cr302_6` |
 | `a32fb196` | a | zones | letting you cast/play an exiled card doesn't change its normal timing restrictions for its card type | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
@@ -856,7 +856,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `4cdbead7` | a | protection | you may only choose a mode requiring a target if a legal target for it exists; unchosen modes' targeting is ignored | `rulings_protection2::a_mode_needing_a_target_is_offered_only_with_one_and_may_repeat_it_cr_700_2a` |
 | `d4f44dfc` | a | stack | a copy of a modal spell may get new targets from the copying effect, but never new modes | `rulings_stack2::three_steps_ahead_copied_keeps_its_modes_and_may_target_anew_cr_702_172_707_10c` |
 | `9dcd9c8e` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
-| `77eebb68` | a | mana | casting a modal spell free still needs choosing at least one mode and paying its additional cost | untested |
+| `77eebb68` | a | mana | casting a modal spell free still needs choosing at least one mode and paying its additional cost | `rulings_mana2::a_free_cast_still_announces_x_paid_with_life_modes_and_escalate_costs_cr_118_9_107_3b` |
 | `f0054ad7` | a | mana | a copied permanent with X in its mana cost treats X as 0 | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
 | `b045bc66` | a | copies | a token copy of a token uses that token's own stated copiable characteristics | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
 | `6c18a1f3` | a | copies | if the copied permanent is itself copying something else, the new token becomes that other thing | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
@@ -864,7 +864,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `1026bb70` | b | DEF | a spell's instructions are always followed in their written order, regardless of which modes are chosen [part 3, was a/other: Three Steps Ahead's modes don't affect each other, so their order changes nothing] | a definition, no behaviour of its own |
 | `e9521273` | a | stack | no responses are allowed between the modes of one resolving spell; any triggers wait until it fully resolves | `rulings_stack3::no_player_can_act_in_the_middle_of_a_resolution_cr_608_2` |
 | `c2c62fb3` | b | PRINT | the '+' indicator on modal spell frames is a reminder only, with no rules meaning | printing, wording, reminder text |
-| `fcbbe43e` | a | mana | a modal spell's mana value is only its printed mana cost, regardless of modes or additional costs chosen | untested |
+| `fcbbe43e` | a | mana | a modal spell's mana value is only its printed mana cost, regardless of modes or additional costs chosen | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `b9b0e621` | a | copies | a token copy copies exactly what's printed, with no tap state, counters, attachments, or non-copy changes | `rulings_copies3::three_steps_ahead_copies_whats_copiable_of_a_tapped_pumped_token_or_copy_cr_707_2_707_9b` |
 | `a69ad6a9` | b | DEF | you can't choose the same mode more than once on a modal spell [part 3, was a/other: a mode once; the engine never offers it twice] | a definition, no behaviour of its own |
 | `47fcf447` | b | DEF | modes for a modal spell are locked in as you cast it and can't be changed afterward [part 3, was a/mana: modes are chosen once, while casting; a definition] | a definition, no behaviour of its own |
@@ -887,8 +887,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `e237dd05` | b | DEF | paying a kicker cost is what makes a spell 'kicked' | a definition, no behaviour of its own |
 | `85680b80` | a | copies | a copy of a kicked spell on the stack is also kicked | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
 | `017770a9` | b | DEF | a kicker cost can't be paid more than once [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
-| `4580d03c` | a | mana | an X value is calculated only once, as the spell resolves | untested |
-| `5fb37854` | a | mana | total cost = base/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
+| `4580d03c` | a | mana | an X value is calculated only once, as the spell resolves | `rulings_mana2::values_an_ability_counts_are_counted_once_as_it_resolves_cr_608_2h` |
+| `5fb37854` | a | mana | total cost = base/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Daze
 
@@ -900,7 +900,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `6ca5d31d` | a | mana | an X spell being cast via this flash-like ability still forces X to be 0 | untested |
+| `6ca5d31d` | a | mana | an X spell being cast via this flash-like ability still forces X to be 0 | `rulings_mana2::x_is_zero_when_cast_without_paying_its_mana_cost_or_put_onto_the_battlefield_cr_107_3b` |
 | `0fb23eca` | a | triggers | declining to pay sacrifices the creature at once with no priority gap; ETB and dies triggers stack together | `rulings_triggers3::flash_declined_the_creature_entered_and_its_enter_and_dies_triggers_go_together_cr_603_3` |
 | `46dde370` | a | mana | only the generic portion of that creature's mana cost is reduced | `cards_m7a_misc::flash_sacrifices_the_creature_unless_its_reduced_cost_is_paid` |
 | `70ba8133` | a | triggers | the creature still enters the battlefield (triggering ETB abilities) even if you later decline to pay for it | `rulings_triggers3::flash_declined_the_creature_entered_and_its_enter_and_dies_triggers_go_together_cr_603_3` |
@@ -972,20 +972,20 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | untested |
-| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | untested |
+| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `c6f70acd` | a | mana | delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled | `rulings_mana::delve_pays_only_generic_mana_cr_702_66a` |
 
 ### Gitaxian Probe
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `729bf672` | a | mana | a Phyrexian mana symbol makes a card that color regardless of how it was actually paid | untested |
+| `729bf672` | a | mana | a Phyrexian mana symbol makes a card that color regardless of how it was actually paid | `rulings_mana2::chrome_mox_makes_one_mana_of_an_exiled_cards_colours_never_colorless_cr_106_1b_702_114` |
 | `2cb44a57` | b | DEF | you choose how to pay each Phyrexian mana symbol at the same time as choosing modes or an X value [part 3, was a/mana: when the Phyrexian payment is chosen; the engine asks it while casting] | a definition, no behaviour of its own |
 | `cab93df4` | a | mana | you can't pay the life portion of Phyrexian mana if you're at 1 life or less | `rulings_mana::phyrexian_mana_cant_be_paid_with_life_you_dont_have_cr_119_4` |
 | `0a14c78b` | b | DEF | Phyrexian mana isn't a color of its own, and players can't produce it as mana [part 3, was a/mana: Phyrexian mana isn't a colour; a definition] | a definition, no behaviour of its own |
 | `98549dec` | a | other | the affected player may have an empty hand; the draw still happens regardless | untested |
-| `5c4578c4` | a | mana | each Phyrexian mana symbol counts as 1 toward a card's mana value | untested |
+| `5c4578c4` | a | mana | each Phyrexian mana symbol counts as 1 toward a card's mana value | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Ponder
 
@@ -1005,7 +1005,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `825d28a0` | a | mana | extra mana paid to cover a cost difference isn't part of the spell's mana cost and is paid during resolution | `cards_m7c_tail::transmute_artifact_trades_up_paying_the_difference_cr701_19` |
 | `2878adab` | a | zones | a 'search for a card with certain characteristics' effect never forces you to find a card you don't want to | `rules_library::cr_701_19b_a_search_for_a_stated_quality_may_fail_and_reveals_on_top` |
-| `98bf27cb` | a | mana | if the found replacement costs the same or less than what was sacrificed, it enters with no extra cost paid | untested |
+| `98bf27cb` | a | mana | if the found replacement costs the same or less than what was sacrificed, it enters with no extra cost paid | `rulings_mana2::transmute_artifact_trading_down_pays_nothing_cr_701_19` |
 | `109a1e64` | b | DEF | the found permanent enters as the spell resolves, which doesn't count as casting it [part 3, was a/stack: Transmute Artifact puts the card onto the battlefield, which is never a cast; a definition] | a definition, no behaviour of its own |
 | `ec89adc7` | b | DEF | this effect can't be used to sacrifice more than one artifact [part 3, was a/zones: Transmute Artifact says "an artifact"; a definition] | a definition, no behaviour of its own |
 | `81386b1f` | a | zones | the sacrifice is an effect at resolution, not a cost, so a countered spell requires sacrificing nothing | `rulings_zones2::transmute_artifacts_sacrifice_is_an_effect_so_a_countered_transmute_sacrifices_nothing_cr_608_2` |
@@ -1043,7 +1043,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `ef0edbdb` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | `cards_m7b_tests_edges::cr_702_34a_reprieve_on_a_flashed_back_echo_of_eons_exiles_it` |
 | `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
-| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
+| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled` |
 | `de6aa02a` | a | stack | flashback still follows the card's normal timing restrictions (e.g. sorcery speed for sorceries) | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 
@@ -1057,8 +1057,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | untested |
-| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | untested |
+| `0a2cf1a9` | a | mana | delve isn't an alternative cost, so it can combine with one, and can pay the generic part of additional costs too | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `4029cc96` | a | mana | delve doesn't change a spell's mana cost or mana value, no matter how many cards are exiled to pay for it | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `c6f70acd` | a | mana | delve can only pay for a spell's generic mana requirement, capping how many cards can be exiled | `rulings_mana::delve_pays_only_generic_mana_cr_702_66a` |
 
 ### Does Machines
@@ -1100,9 +1100,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `87059541` | a | combat | a saddle creature can attack or block normally even while unsaddled | `cards_m7c_tail3::caustic_bronco_unsaddled_you_lose_cr702_171` |
 | `ed19c884` | a | triggers | if the source leaves before its ability resolves, use its last-known saddled status to decide the effect | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
 | `90fe76e8` | a | copies | a copy of a saddled Mount isn't itself saddled | `rulings_copies3::a_copy_of_a_saddled_bronco_isnt_saddled_cr_702_171b_707_2` |
-| `e63641fa` | a | mana | a revealed card with no mana cost (e.g. a land) has a mana value of 0 | untested |
-| `a56b34fa` | a | mana | a revealed split card's mana value is its two halves' combined mana cost | untested |
-| `63a507fc` | a | mana | a revealed card with X in its mana cost treats X as 0 | untested |
+| `e63641fa` | a | mana | a revealed card with no mana cost (e.g. a land) has a mana value of 0 | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
+| `a56b34fa` | a | mana | a revealed split card's mana value is its two halves' combined mana cost | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
+| `63a507fc` | a | mana | a revealed card with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
 | `c140aa06` | b | DEF | you may activate a saddle ability even on a permanent that's already saddled [part 3, was a/other: saddling again is allowed and changes nothing; a definition] | a definition, no behaviour of its own |
 | `e2e6c94c` | a | combat | saddle N: tap other creatures with total power N to become saddled until end of turn, sorcery speed only | `cards_m7c_tail3::caustic_bronco_saddled_makes_the_opponent_lose_cr702_171` |
 | `cfd9220f` | a | combat | being saddled is just a state, not an ability; it lasts until end of turn or until the creature leaves the battlefield | `rulings_combat::caustic_bronco_stays_saddled_until_the_turn_ends_cr_702_171b` |
@@ -1111,8 +1111,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `edf475b1` | a | mana | a card in a player's library with X in its mana cost treats X as 0 | untested |
-| `ddc42357` | a | mana | a card in a player's library with X in its mana cost treats X as 0 | untested |
+| `edf475b1` | a | mana | a card in a player's library with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
+| `ddc42357` | a | mana | a card in a player's library with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
 
 ### Dauthi Voidwalker
 
@@ -1192,7 +1192,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `a2837ded` | a | triggers | paying an alt cost like evoke lets its own ETB trigger resolve before the sacrifice trigger, priority between | `cards_m7a_costs::cr_702_74_evoke_solitude_exiles_and_then_is_sacrificed` |
-| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | untested |
+| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Passageway Seer
 
@@ -1225,19 +1225,19 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `2e4566d6` | a | mana | an artifacts mana value is its printed cost only (exceptions: DFC backs, melds, copies); X and no symbols both mean 0 | untested |
-| `62210dab` | a | mana | the colored mana portion of an emerge cost can't be reduced | untested |
+| `2e4566d6` | a | mana | an artifacts mana value is its printed cost only (exceptions: DFC backs, melds, copies); X and no symbols both mean 0 | `rulings_mana2::emerge_reduces_by_the_sacrificed_artifacts_printed_mana_value_never_the_colored_part_cr_702_119` |
+| `62210dab` | a | mana | the colored mana portion of an emerge cost can't be reduced | `rulings_mana2::emerge_reduces_by_the_sacrificed_artifacts_printed_mana_value_never_the_colored_part_cr_702_119` |
 | `33c73fb6` | a | zones | an exile-then-maybe-cast ability can't be used to play land cards; unchosen or unplayable cards just stay exiled | `rulings_zones2::crabominations_cast_plays_no_land_and_the_cards_not_cast_stay_exiled_cr_305_1_406_6` |
 | `e4babdad` | a | mana | emerge from artifact lets you sacrifice an artifact instead of a creature, otherwise working just like emerge | `cards_m7d::crabomination_emerges_and_casts_an_exiled_card_free_cr702_119` |
 | `f9ebf9d5` | a | mana | casting free forbids other alt costs but still requires any mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `b2be720c` | a | stack | once you begin casting with emerge, it's atomic; no one can remove the permanent you intend to sacrifice | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
-| `d5867659` | a | mana | the artifact to sacrifice for emerge stays around through mana payment, but is gone before any cast-trigger can see it | untested |
-| `ca0c3283` | a | mana | an emerge creature's mana value never changes based on whether its emerge cost was paid | untested |
+| `d5867659` | a | mana | the artifact to sacrifice for emerge stays around through mana payment, but is gone before any cast-trigger can see it | `rulings_mana2::emerge_reduces_by_the_sacrificed_artifacts_printed_mana_value_never_the_colored_part_cr_702_119` |
+| `ca0c3283` | a | mana | an emerge creature's mana value never changes based on whether its emerge cost was paid | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `18fbc98e` | c | NR | a DFC back faces mana value equals its fronts; a melds is both fronts summed; a copy of either is 0 [part 3, was a/mana: no cube artifact is a back face, a meld or a copy of one] | not reachable with the cube's cards |
 | `8604bcad` | a | stack | a spell cast without paying its mana cost during an ability's resolution ignores normal type-based timing restrictions | `cards_m7d::crabomination_emerges_and_casts_an_exiled_card_free_cr702_119` |
 | `733e5e17` | a | stack | choosing to cast an exiled card happens inside the triggered abilitys resolution, ignoring normal timing, no delay | `cards_m7d::crabomination_emerges_and_casts_an_exiled_card_free_cr702_119` |
-| `936c4c1c` | a | mana | you may sacrifice a 0-mana-value artifact for emerge, but then pay the full emerge cost with no reduction | untested |
-| `dfea8aa9` | a | mana | sacrificing an artifact worth at least the emerge costs generic part means paying only the colored part | untested |
+| `936c4c1c` | a | mana | you may sacrifice a 0-mana-value artifact for emerge, but then pay the full emerge cost with no reduction | `rulings_mana2::emerge_reduces_by_the_sacrificed_artifacts_printed_mana_value_never_the_colored_part_cr_702_119` |
+| `dfea8aa9` | a | mana | sacrificing an artifact worth at least the emerge costs generic part means paying only the colored part | `rulings_mana2::emerge_reduces_by_the_sacrificed_artifacts_printed_mana_value_never_the_colored_part_cr_702_119` |
 
 ### Metamorphosis Fanatic
 
@@ -1248,7 +1248,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `9c0b0e4d` | b | PRINT | a miracle card must be revealed as it's drawn, before it mixes into the rest of your hand [part 3, was a/triggers: revealing before mixing the card into the hand is a physical-play instruction] | printing, wording, reminder text |
 | `a45f943c` | b | DEF | miracle is an alternative cost that can't combine with other alternative costs, only additional ones [part 3, was a/mana: miracle is one alternative cost; a definition] | a definition, no behaviour of its own |
 | `0cb05459` | a | zones | drawing multiple cards is always a sequence of individual draws; only the first drawn that way can use miracle | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
-| `d3edc491` | a | mana | total cost = base/alt cost (e.g. miracle) + increases, then reductions; mana value unaffected | untested |
+| `d3edc491` | a | mana | total cost = base/alt cost (e.g. miracle) + increases, then reductions; mana value unaffected | `rulings_mana2::a_spell_cast_for_its_miracle_cost_keeps_its_mana_value_cr_702_94a_202_3` |
 | `bf463705` | a | triggers | you can only cast a miracle card exactly as its triggered ability resolves; missing that window forfeits the option | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 | `0f9f54eb` | a | triggers | miracle can be used on any turn, not just your own, as long as it's the first card you drew that turn | `rulings_triggers3::miracle_on_the_first_draw_any_turn_only_as_its_trigger_resolves_the_card_drawn_either_way_cr_702_94` |
 | `3904df2a` | a | stack | casting a card via miracle happens during its triggered ability's resolution, ignoring normal card-type timing rules | `cards_m7c_tail2::metamorphosis_fanatic_miracle_cast_for_two_cr702_94a` |
@@ -1294,7 +1294,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `adbe4a9a` | a | stack | a removal spell with a mana-value restriction can target anything; the restriction is checked only at resolution | `rulings_stack::fatal_push_may_target_any_creature_and_checks_its_mana_value_on_resolution_cr_608_2b` |
-| `aafa61cb` | a | mana | a battlefield creature with X in its mana cost treats X as 0 | untested |
+| `aafa61cb` | a | mana | a battlefield creature with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
 | `7995d7c4` | a | triggers | a revolt-style condition doesn't care how, why, or by whom a permanent left, or where it went | `rulings_triggers3::revolt_counts_any_permanent_leaving_and_dash_returns_only_a_creature_still_there_cr_702_109a` |
 | `94a79602` | a | zones | a token leaving the battlefield still satisfies a revolt-style condition | `rulings_zones2::fatal_push_revolt_counts_a_token_leaving_the_battlefield_cr_111_7` |
 
@@ -1302,7 +1302,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `380a3828` | a | mana | this effect only grants the bonus ability to lands you control at the moment it resolves | untested |
+| `380a3828` | a | mana | this effect only grants the bonus ability to lands you control at the moment it resolves | `rulings_mana2::rain_of_filth_grants_its_ability_only_to_lands_controlled_as_it_resolves_cr_611_2c` |
 | `fc5b8004` | a | mana | the granted mana ability can still be used even while the land is tapped | `cards_m7d::rain_of_filth_lands_tap_then_sacrifice_in_one_payment_cr601_2g` |
 
 ### Vampiric Tutor
@@ -1338,17 +1338,17 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `cf12f8bf` | a | mana | a Phyrexian mana symbol always contributes 1 to mana value, even if life was paid for it | untested |
+| `cf12f8bf` | a | mana | a Phyrexian mana symbol always contributes 1 to mana value, even if life was paid for it | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Baleful Mastery
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `084701b5` | a | mana | a cost change on a spell applies to its chosen alternative cost, which still counts as paid for other effects | untested |
+| `084701b5` | a | mana | a cost change on a spell applies to its chosen alternative cost, which still counts as paid for other effects | `rulings_mana2::thalias_tax_applies_to_pyrokinesis_and_baleful_masterys_alternative_costs_cr_601_2f` |
 | `d283a696` | b | DEF | choosing one alternative cost for a spell means you can't also choose a different alternative cost for it [part 3, was a/mana: one alternative cost at a time; a definition] | a definition, no behaviour of its own |
 | `b0b57c4a` | a | copies | a copy of a spell that had an alternative cost paid resolves as though that cost was paid | `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
 | `258d5dd9` | b | MP | multiplayer: you choose which opponent is affected | multiplayer |
-| `0cef3ca5` | a | mana | a spell's mana value on the stack comes from its mana cost, not whatever alternative cost was used to pay for it | untested |
+| `0cef3ca5` | a | mana | a spell's mana value on the stack comes from its mana cost, not whatever alternative cost was used to pay for it | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Bone Shards
 
@@ -1383,15 +1383,15 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `ee3d4607` | a | mana | a graveyard card with X in its mana cost treats X as 0 | untested |
+| `ee3d4607` | a | mana | a graveyard card with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
 
 ### Collective Brutality
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8082fca1` | a | mana | additional costs paid for a spell dont affect its mana value | untested |
+| `8082fca1` | a | mana | additional costs paid for a spell dont affect its mana value | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `139e55ad` | c | NR | a cost-reduction effect reduces the total cost, including any escalate-style costs added on top [part 3, was a/mana: Collective Brutality's escalate cost is a discard, which no cube cost reduction touches] | not reachable with the cube's cards |
-| `e0fdde77` | a | mana | casting a multi-mode spell free still requires paying the extra per-mode costs for choosing more than one | untested |
+| `e0fdde77` | a | mana | casting a multi-mode spell free still requires paying the extra per-mode costs for choosing more than one | `rulings_mana2::a_free_cast_still_announces_x_paid_with_life_modes_and_escalate_costs_cr_118_9_107_3b` |
 | `61f2c92b` | a | stack | one illegal target in a multi-mode spell doesnt stop the others; only all-illegal targets void the resolve | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
 | `1f109819` | a | stack | two chosen modes that each target a creature or player may share the same target or use different ones | `rulings_stack3::two_modes_of_collective_brutality_may_target_the_same_opponent_and_lutris_kolaghans_copy_keeps_its_modes_cr_700_2d_707_10c` |
 | `cb0f6856` | b | DEF | you can't choose the same mode of a modal spell more than once [part 3, was a/other: a mode once; the engine never offers it twice] | a definition, no behaviour of its own |
@@ -1410,7 +1410,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `0333f482` | a | combat | a noncreature-turned-creature needs continuous control since turn start to attack or tap, not creature-status time | `rulings_combat::a_permanent_made_a_creature_attacks_and_taps_only_if_controlled_since_the_turn_began_cr_302_6` |
-| `d9bc4e52` | a | mana | off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it | untested |
+| `d9bc4e52` | a | mana | off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
 | `b83b7a27` | c | NR | a split card has two names; choosing a card name picks only one of them [part 3, was a/other: the cube's naming cards look at cards outside the stack, where a split card has both names together] | not reachable with the cube's cards |
 | `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | `rulings_zones2::a_split_card_is_one_card_when_discarded_cr_709_4` |
 | `7a9df48b` | c | NR | a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits)] | not reachable with the cube's cards |
@@ -1424,7 +1424,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `e08d64dc` | a | triggers | a mass-removal effect only hits creatures present when it resolves, not later entrants or new creatures that turn | `rulings_triggers3::deathclaw_gone_before_monstrosity_resolves_doesnt_trigger_and_phlage_not_escaped_is_sacrificed_cr_701_37_702_138` |
-| `38801307` | a | mana | casting an X-cost-paid-as-life spell without paying its mana cost still requires choosing X and paying the life cost | untested |
+| `38801307` | a | mana | casting an X-cost-paid-as-life spell without paying its mana cost still requires choosing X and paying the life cost | `rulings_mana2::a_free_cast_still_announces_x_paid_with_life_modes_and_escalate_costs_cr_118_9_107_3b` |
 
 ### Yawgmoth's Will
 
@@ -1458,7 +1458,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `bd1a3401` | c | NR | a reminder-only counter doesnt change which permanent an exile-replacement effect applies to, even if its moved [part 3, was a/replacement: no cube card removes or moves a counter from a creature From the Catacombs returned] | not reachable with the cube's cards |
 | `76a58801` | a | triggers | the initiative carries built-in triggers: venture at upkeep, and passing on combat damage to its holder | `rules_initiative::taking_the_initiative_ventures_into_undercity_cr_725_2`; `rules_initiative::the_initiative_ventures_at_its_holders_upkeep_and_rooms_are_chosen_cr_309_5`; `rules_initiative::combat_damage_to_its_holder_takes_the_initiative_cr_725_2` |
 | `f9bccbf7` | b | DEF | no one has the initiative until an effect grants it; it then persists until transferred [part 3, was a/other: no initiative until one is taken; a definition] | a definition, no behaviour of its own |
-| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
+| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `8e4e4c74` | c | NR | you can't venture without being instructed; a generic venture instruction can't start Undercity specifically [part 3, was a/other: the cube has no other dungeon and no plain venture] | not reachable with the cube's cards |
 
 ### Wishclaw Talisman
@@ -1519,7 +1519,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `d7de1c3d` | a | copies | a creature that enters as or becomes a copy of a dashed creature doesn't gain haste and won't bounce to hand later | `rulings_copies3::a_copy_of_a_dashed_ragavan_has_no_haste_and_isnt_returned_cr_702_109a_707_2` |
-| `4f0780ad` | a | mana | paying a dash-style cost is still a normal cast: responsive, counterable, only when castable anyway | untested |
+| `4f0780ad` | a | mana | paying a dash-style cost is still a normal cast: responsive, counterable, only when castable anyway | `rulings_mana2::a_dashed_creature_is_cast_counterable_and_at_sorcery_speed_cr_702_109a` |
 | `d96d165d` | a | triggers | a dash-style return-to-hand trigger only works if the creature is still on the battlefield when that trigger resolves | `rulings_triggers3::revolt_counts_any_permanent_leaving_and_dash_returns_only_a_creature_still_there_cr_702_109a` |
 | `7929f582` | a | combat | a dash-style effect doesn't force the creature to attack unless something else says so | `rulings_combat::a_dashed_creature_doesnt_have_to_attack_cr_702_109a` |
 | `b5df7fc5` | a | zones | casting an exiled card this way still needs its full costs and timing; you cant play an exiled land | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
@@ -1530,7 +1530,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `442dc321` | a | dfc | an Adventure card uses only its base characteristics in every zone except while cast as the Adventure spell on the stack | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
-| `5d19b09e` | a | mana | casting a card as an Adventure isn't itself an alternative cost; alt-cost-granting effects may still apply to it | untested |
+| `5d19b09e` | a | mana | casting a card as an Adventure isn't itself an alternative cost; alt-cost-granting effects may still apply to it | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `c29e2fc3` | a | dfc | an Adventure spell is exiled, not binned, on resolving so you can cast the permanent later; a fizzled one isnt exiled | `rulings_faces::a_countered_adventure_goes_to_the_graveyard_without_the_permission_cr_715_4` |
 | `571ea1ea` | a | dfc | a card reaching exile any other way doesn't grant permission to cast it as its Adventure permanent | `rulings_faces2::an_adventurer_card_exiled_another_way_gives_no_permission_cr_715_4` |
 | `5d8546ba` | a | dfc | a copy of an Adventure spell is exiled on resolving and then ceases to exist, so the copy can't be cast as the permanent | `rulings_faces2::a_copy_of_an_adventure_ceases_to_exist_and_only_the_card_may_be_cast_later_cr_715_4` |
@@ -1558,7 +1558,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c7e12cda` | a | mana | activated-ability targets are chosen before its cost is paid, so it cant target what pays that very cost | `rulings_mana::goblin_engineer_cant_target_the_artifact_it_sacrifices_cr_602_2b` |
-| `ee3d4607` | a | mana | a graveyard card with X in its mana cost treats X as 0 | untested |
+| `ee3d4607` | a | mana | a graveyard card with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
 
 ### Hexing Squelcher
 
@@ -1655,7 +1655,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a898c85e` | a | triggers | this trigger doesn't care which player exiled the cards or from which zone, including via delve | `rulings_triggers3::laelia_an_opponents_exile_counts_and_rockets_destroyed_draw_and_a_crewed_copter_doesnt_enter_cr_603_2_603_6a` |
 | `cefea9b0` | a | triggers | this trigger fires once per exiling event, no matter how many cards were exiled simultaneously | `rules_shortcuts::cr_603_2c_laelia_triggers_once_per_exile_event` |
 | `8e48cc76` | a | zones | playing a card exiled this way still follows normal timing restrictions, including needing an available land play | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
-| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | untested |
+| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b` |
 
 ### Screaming Nemesis
 
@@ -1732,7 +1732,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `45abd910` | a | stack | illegal targets in a divided-damage ability just get no damage; the original division still applies to the rest | `rulings_stack2::fury_a_target_gone_illegal_gets_nothing_and_the_others_keep_their_shares_cr_608_2b` |
 | `a2837ded` | a | triggers | paying an alt cost like evoke lets its own ETB trigger resolve before the sacrifice trigger, priority between | `cards_m7a_costs::cr_702_74_evoke_solitude_exiles_and_then_is_sacrificed` |
-| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | untested |
+| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `17a878c0` | a | stack | divide-on-cast damage is assigned when the ability triggers, not at resolution, min 1 per chosen target | `rulings_stack2::fury_divides_as_its_trigger_is_put_on_the_stack_at_least_one_each_cr_603_3d_601_2d` |
 
 ### Oliphaunt
@@ -1764,7 +1764,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cdf038bc` | b | MP | Two-Headed Giant: a fixed total damage amount is dealt to the opposing team | multiplayer |
 | `c85087fd` | a | walkers | loyalty abilities arent mana abilities; they use the stack, are respondable, and follow the once-per-turn rule | `rulings_walkers::chandras_mana_ability_is_a_loyalty_ability_on_the_stack_cr_606_605_1a` |
 | `3c8289db` | a | other | an emblem created this way is colorless, so the damage it deals is from a colorless source | untested |
-| `9950a418` | a | mana | casting the exiled card still requires paying its costs, and alternative costs like emerge may be used | untested |
+| `9950a418` | a | mana | casting the exiled card still requires paying its costs, and alternative costs like emerge may be used | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b` |
 
 ### Burst Lightning
 
@@ -1775,7 +1775,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
 | `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `c9b38795` | b | DEF | a kicker cost can't be paid more than once per cast [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
-| `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
+| `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Flashback
 
@@ -1783,12 +1783,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled`; `cards_m7a_zones2::cr_702_34a_a_countered_flashback_spell_is_exiled` |
 | `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
-| `a92b37a5` | a | mana | if a card has multiple flashback costs, you may pay any one of them | untested |
+| `a92b37a5` | a | mana | if a card has multiple flashback costs, you may pay any one of them | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `fec2f94a` | c | NR | a card with no mana cost that gains flashback has no flashback cost and can't be cast this way [part 3, was a/mana: every cube instant and sorcery has a mana cost] | not reachable with the cube's cards |
-| `40dba187` | a | mana | flashback forbids other alternative costs but still requires mandatory additional costs | untested |
-| `e8a86435` | a | mana | casting an X spell via flashback still requires choosing and paying for X normally | untested |
-| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
+| `40dba187` | a | mana | flashback forbids other alternative costs but still requires mandatory additional costs | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `e8a86435` | a | mana | casting an X spell via flashback still requires choosing and paying for X normally | `rulings_mana2::flashback_costs_snapcasters_and_printed_x_kicker_no_overload_additional_costs_cr_702_34a_118_9` |
+| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled` |
 | `de6aa02a` | a | stack | flashback still follows the card's normal timing restrictions (e.g. sorcery speed for sorceries) | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 
@@ -1836,7 +1836,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `7ea4dd5a` | a | stack | each target of this divided-damage spell must be assigned at least 1 damage | `rulings_stack2::pyrokinesis_divides_as_cast_and_an_illegal_target_gets_none_cr_601_2d_608_2b` |
-| `6cfaf27f` | a | mana | if another effect raises this spell's cost, you must pay the increase even while paying its alternative cost | untested |
+| `6cfaf27f` | a | mana | if another effect raises this spell's cost, you must pay the increase even while paying its alternative cost | `rulings_mana2::thalias_tax_applies_to_pyrokinesis_and_baleful_masterys_alternative_costs_cr_601_2f` |
 | `d70bd868` | a | stack | damage divides as the spell is cast, not at resolution; illegal targets just get none; all-illegal voids it | `rulings_stack2::pyrokinesis_divides_as_cast_and_an_illegal_target_gets_none_cr_601_2d_608_2b`; `rulings_stack2::pyrokinesis_with_every_target_illegal_doesnt_resolve_cr_608_2b` |
 
 ### Chain Lightning
@@ -1856,7 +1856,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `15896ad1` | a | zones | flashback casts from the graveyard for its own cost, exiling the card whenever it leaves the stack | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled`; `cards_m7a_zones2::cr_702_34a_a_countered_flashback_spell_is_exiled` |
 | `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
-| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
+| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled` |
 | `de6aa02a` | a | stack | flashback still follows the card's normal timing restrictions (e.g. sorcery speed for sorceries) | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 
@@ -1913,11 +1913,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `259e8644` | a | zones | if a card has multiple permissions to cast it from the graveyard, you choose one to apply; the rest do nothing | `rules_shortcuts::cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses` |
 | `f0b4b359` | c | NR | a card with no mana cost has an unpayable escape cost, so it can't be cast that way [part 3, was a/mana: every cube nonland card has a mana cost] | not reachable with the cube's cards |
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
-| `bea302d9` | a | mana | cards discarded/sacrificed for an escape spells other costs can also be exiled toward its exile-cards cost | untested |
+| `bea302d9` | a | mana | cards discarded/sacrificed for an escape spells other costs can also be exiled toward its exile-cards cost | `rulings_mana2::escape_exiles_the_card_discarded_for_its_additional_cost_and_casts_a_split_half_cr_702_138_709_3` |
 | `75e9fc66` | a | mana | casting via an escape-style permission forbids other alternative costs but still requires mandatory additional costs | `rules_shortcuts::cr_601_2b_breach_escape_with_the_cards_own_additional_cost` |
-| `6257ac75` | a | mana | an escape-cast adventurer/split card: choose which half to cast, pay that cost plus the exile requirement | untested |
+| `6257ac75` | a | mana | an escape-cast adventurer/split card: choose which half to cast, pay that cost plus the exile requirement | `rulings_mana2::escape_exiles_the_card_discarded_for_its_additional_cost_and_casts_a_split_half_cr_702_138_709_3` |
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
-| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
+| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Fable of the Mirror-Breaker // Reflection of Kiki-Jiki
 
@@ -2093,7 +2093,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `a2837ded` | a | triggers | paying an alt cost like evoke lets its own ETB trigger resolve before the sacrifice trigger, priority between | `cards_m7a_costs::cr_702_74_evoke_solitude_exiles_and_then_is_sacrificed` |
-| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | untested |
+| `ee340297` | a | mana | total cost = alt cost (e.g. evoke) + increases - reductions; mana value is based on mana cost alone | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Sentinel of the Nameless City
 
@@ -2164,9 +2164,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `9924d9da` | a | mana | a card with this ability is purely colorless, not colorless plus the colors in its printed mana cost | untested |
+| `9924d9da` | a | mana | a card with this ability is purely colorless, not colorless plus the colors in its printed mana cost | `rulings_mana2::chrome_mox_makes_one_mana_of_an_exiled_cards_colours_never_colorless_cr_106_1b_702_114` |
 | `f98c7fa0` | b | CMD | this color-removing ability doesn't affect Commander color identity, which still comes from the printed mana cost | Commander |
-| `747e785b` | a | mana | this color-removing ability applies in every zone, not just on the battlefield | untested |
+| `747e785b` | a | mana | this color-removing ability applies in every zone, not just on the battlefield | `rulings_mana2::chrome_mox_makes_one_mana_of_an_exiled_cards_colours_never_colorless_cr_106_1b_702_114` |
 | `85aaba03` | c | NR | losing a color-removing ability still leaves it colorless, since the color change applied before the loss [part 3, was a/copies: no cube effect removes devoid without setting a colour (Oko's Elk makes it green)] | not reachable with the cube's cards |
 | `1896f056` | a | copies | another effect granting a color to a colorless card just makes it that color alone, not that color plus colorless | `rulings_copies3::painters_servant_adds_its_colour_cumulatively_and_a_later_colour_setting_wins_cr_105_3_613_7` |
 | `591acf16` | a | triggers | a permanents own triggers resolve before the spell that made it, even if that spell leaves the stack | `rulings_triggers3::cast_triggers_resolve_without_their_spell_and_countered_creatures_make_no_tokens_cr_603_2` |
@@ -2175,7 +2175,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
 | `fbef54b0` | a | mana | putting a permanent with kicker onto the battlefield without casting it means it can't be kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `c9b38795` | b | DEF | a kicker cost can't be paid more than once per cast [part 3, was a/mana: kicker is paid at most once; a definition] | a definition, no behaviour of its own |
-| `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | untested |
+| `ceea39f5` | a | mana | total cost = mana/alt cost + increases (e.g. kicker), then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Undermountain Adventurer
 
@@ -2365,7 +2365,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a6dd6e5a` | a | mana | a card in your library with X in its mana cost treats X as 0 | untested |
+| `a6dd6e5a` | a | mana | a card in your library with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_in_a_library_and_a_revealed_cards_mana_value_is_its_mana_cost_cr_107_3b_202_3` |
 | `f560f0bc` | c | NR | turning a Vehicle into an artifact creature this way doesn't count as 'crewing' it for crew-triggered abilities [part 3, was a/copies: no cube card has an ability that triggers when a Vehicle becomes crewed] | not reachable with the cube's cards |
 | `fc909d02` | a | copies | this sets the affected permanents base power/toughness to 0/0, which crewing or counters wont restore | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
 | `95070e2f` | a | copies | this ability doesn't strip any abilities, types, subtypes, or supertypes from the affected artifact | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
@@ -2390,9 +2390,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8827464d` | a | mana | with no exiled card, or a colorless exiled card, this mana ability adds no mana at all | untested |
-| `5e6e8e38` | a | mana | with a multicolored exiled card, you choose one of its colors each time you activate this mana ability | untested |
-| `78edf710` | a | mana | this mana ability can never produce colorless mana, even from a colorless exiled card | untested |
+| `8827464d` | a | mana | with no exiled card, or a colorless exiled card, this mana ability adds no mana at all | `rulings_mana2::chrome_mox_makes_one_mana_of_an_exiled_cards_colours_never_colorless_cr_106_1b_702_114` |
+| `5e6e8e38` | a | mana | with a multicolored exiled card, you choose one of its colors each time you activate this mana ability | `rulings_mana2::chrome_mox_makes_one_mana_of_an_exiled_cards_colours_never_colorless_cr_106_1b_702_114` |
+| `78edf710` | a | mana | this mana ability can never produce colorless mana, even from a colorless exiled card | `rulings_mana2::chrome_mox_makes_one_mana_of_an_exiled_cards_colours_never_colorless_cr_106_1b_702_114` |
 
 ### Gleemox
 
@@ -2417,9 +2417,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `91e69158` | a | mana | with no qualifying legendary permanents controlled, this mana ability can still be activated but adds no mana | untested |
-| `7376b740` | a | mana | if qualifying permanents are all colorless, this ability can activate but adds no mana | untested |
-| `1b60b365` | a | mana | this mana ability adds only one mana of a chosen qualifying color, not one of each qualifying color | untested |
+| `91e69158` | a | mana | with no qualifying legendary permanents controlled, this mana ability can still be activated but adds no mana | `cards_m4b1::mox_amber_makes_colours_of_legends` |
+| `7376b740` | a | mana | if qualifying permanents are all colorless, this ability can activate but adds no mana | `rulings_mana2::mox_amber_makes_one_mana_of_one_legends_colour_none_from_colorless_legends_cr_106_1b` |
+| `1b60b365` | a | mana | this mana ability adds only one mana of a chosen qualifying color, not one of each qualifying color | `rulings_mana2::mox_amber_makes_one_mana_of_one_legends_colour_none_from_colorless_legends_cr_106_1b` |
 
 ### Mox Diamond
 
@@ -2592,13 +2592,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `69809137` | c | NR | changing a spells total cost doesnt raise the cap on how much this tap-instead-of-mana payment can cover [part 3, was a/mana: no cube effect raises an activation cost, and Zirda's reduction leaves the waterbend cap above the cost] | not reachable with the cube's cards |
 | `f467488f` | a | stack | exiling a spell this way removes it from the stack unresolved; its not countered, so it works on uncounterables | `rulings_faces::aang_airbends_a_spell_that_cant_be_countered_cr_101_2` |
 | `f402e1f3` | a | mana | this tap-for-generic-mana payment is capped at the generic mana amount in its own cost component | `cards_m7c_tail2::aang_waterbends_with_creatures_and_artifacts_to_transform` |
-| `5a445906` | a | mana | tapping/saccing an artifact for its own mana ability during casting removes it from use for this other payment method | untested |
-| `0695134e` | a | mana | casting an X spell via this effect forces you to choose X as 0 | untested |
+| `5a445906` | a | mana | tapping/saccing an artifact for its own mana ability during casting removes it from use for this other payment method | `rulings_mana2::waterbend_taps_any_untapped_artifact_or_creature_but_not_one_tapped_for_mana_cr_601_2g` |
+| `0695134e` | a | mana | casting an X spell via this effect forces you to choose X as 0 | `rulings_mana2::x_is_zero_when_cast_without_paying_its_mana_cost_or_put_onto_the_battlefield_cr_107_3b` |
 | `f3306d74` | a | zones | lands exiled by this effect can't be played from exile at all | `rulings_zones2::airbent_lands_and_tokens_cant_be_cast_from_exile_cr_305_1_111_7` |
 | `962ca2f6` | a | mana | using this alternative cost forbids other alternative costs but still requires mandatory additional costs | `cards_m7c_tail2::aang_airbends_a_spell_its_owner_may_recast_for_two` |
 | `96856673` | a | mana | this exile keyword lets each owner cast their card later from exile for a fixed alternative cost | `cards_m7c_tail2::aang_airbends_a_spell_its_owner_may_recast_for_two` |
 | `9e31018b` | a | zones | tokens exiled by this effect cease to exist and can never be cast from there | `rulings_zones2::airbent_lands_and_tokens_cant_be_cast_from_exile_cr_305_1_111_7` |
-| `9257e4eb` | a | mana | any untapped creature or artifact can be tapped for this cost, even without continuous control since last turn | untested |
+| `9257e4eb` | a | mana | any untapped creature or artifact can be tapped for this cost, even without continuous control since last turn | `rulings_mana2::waterbend_taps_any_untapped_artifact_or_creature_but_not_one_tapped_for_mana_cr_601_2g` |
 
 ### Teferi, Time Raveler
 
@@ -2684,7 +2684,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `49a75f69` | c | NR | 'a Blood token' means any artifact token with the Blood subtype, even one that gained other subtypes too [part 3, was a/zones: no cube effect gives a Blood token another subtype] | not reachable with the cube's cards |
 | `be55862c` | c | NR | 'whenever you sacrifice a Blood token' triggers no matter why that token was sacrificed [part 3, was a/triggers: no cube card triggers on sacrificing a Blood token] | not reachable with the cube's cards |
-| `98855f29` | a | mana | an X value referenced by this ability is calculated only once, as it resolves | untested |
+| `98855f29` | a | mana | an X value referenced by this ability is calculated only once, as it resolves | `rulings_mana2::values_an_ability_counts_are_counted_once_as_it_resolves_cr_608_2h` |
 | `1785126b` | c | NR | needs a second ability requiring sacrifice of a Blood token specifically, not in cube | not reachable with the cube's cards |
 
 ### Carnage Interpreter
@@ -2742,8 +2742,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3a28a872` | a | mana | a domain-style ability counts distinct basic land types among lands you control, not the number of lands | untested |
-| `59274c44` | a | mana | only Plains, Island, Swamp, Mountain, and Forest count as basic land types for a domain-style ability | untested |
+| `3a28a872` | a | mana | a domain-style ability counts distinct basic land types among lands you control, not the number of lands | `rulings_mana2::domain_counts_basic_land_types_not_lands_cr_702_140` |
+| `59274c44` | a | mana | only Plains, Island, Swamp, Mountain, and Forest count as basic land types for a domain-style ability | `rulings_mana2::domain_counts_basic_land_types_not_lands_cr_702_140` |
 
 ### Wrenn and Six
 
@@ -2762,7 +2762,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `373235a1` | a | mana | a spell's mana value comes only from its mana cost, ignoring any alternative costs, additional costs, or cost changes | untested |
+| `373235a1` | a | mana | a spell's mana value comes only from its mana cost, ignoring any alternative costs, additional costs, or cost changes | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `5a231246` | a | zones | an escaped non-permanent returns to GY after resolving; a permanent enters BF, returns to GY on death, re-escapes | `rulings_zones2::escaped_spells_return_to_the_graveyard_and_can_escape_again_cr_702_138` |
 | `acd60f05` | a | stack | a cascade-style trigger fires on cast and resolves first, stacking any cast card above the source spell | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
 | `8d21f1db` | c | NR | a cascade-style effect requires the cast spell, not just the exiled card, to beat the sources mana value [part 3, was a/mana: no cube card's castable face or half has a higher mana value than the card it is in exile] | not reachable with the cube's cards |
@@ -2770,12 +2770,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `259e8644` | a | zones | if a card has multiple permissions to cast it from the graveyard, you choose one to apply; the rest do nothing | `rules_shortcuts::cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses` |
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `8a83c9d0` | a | triggers | if a spell with a cascade-style trigger is countered, the triggered ability still resolves normally | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
-| `01ac337a` | a | mana | casting an exiled X spell without paying its mana cost forces X to be 0 | untested |
-| `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
+| `01ac337a` | a | mana | casting an exiled X spell without paying its mana cost forces X to be 0 | `rulings_mana2::x_is_zero_when_cast_without_paying_its_mana_cost_or_put_onto_the_battlefield_cr_107_3b` |
+| `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `75e9fc66` | a | mana | casting via an escape-style permission forbids other alternative costs but still requires mandatory additional costs | `rules_shortcuts::cr_601_2b_breach_escape_with_the_cards_own_additional_cost` |
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
-| `6187a75b` | a | mana | a split cards mana value is both halves combined; a cascade-style effect still only casts one half | untested |
-| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
+| `6187a75b` | a | mana | a split cards mana value is both halves combined; a cascade-style effect still only casts one half | `rulings_mana2::cascade_sees_a_split_cards_combined_mana_value_and_casts_one_half_cr_709_4_702_85a` |
+| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `4f3bb425` | a | triggers | a cascade-style ability's exile step is mandatory; only casting the final exiled card is optional | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
 | `d4aa6557` | a | zones | a cascade-style ability exiles its cards face up, visible to every player | `rulings_zones2::robber_laelia_and_cascade_exile_face_up_for_both_players_to_see_cr_406_3` |
 
@@ -2800,16 +2800,16 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c90ba9cf` | a | stack | an illegal target at resolution means this ability does nothing, so no counters get added | `rulings_stack3::abilities_whose_target_is_gone_do_none_of_their_other_effects_cr_608_2b` |
-| `252cd557` | a | mana | removing a counter is this cost; pre-existing lethal damage destroys it before the abilitys own bonus applies | untested |
+| `252cd557` | a | mana | removing a counter is this cost; pre-existing lethal damage destroys it before the abilitys own bonus applies | `rulings_mana2::arwen_with_lethal_damage_dies_once_her_counter_is_removed_as_the_cost_cr_602_2_704_5g` |
 
 ### Damn
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c1c20030` | a | protection | a non-targeting overload-cast version of a spell can still hit hexproof or protected permanents | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
-| `68a438a9` | a | mana | casting a spell 'without paying its mana cost' forbids substituting the overload cost instead | untested |
+| `68a438a9` | a | mana | casting a spell 'without paying its mana cost' forbids substituting the overload cost instead | `rulings_mana2::a_free_cast_allows_no_alternative_cost_but_needs_mandatory_additional_costs_cr_118_9a_601_2b` |
 | `7297f704` | a | mana | an overload spell has one target if cast normally, but no targets if its overload cost is paid | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
-| `b7498104` | a | mana | total cost = mana/alt cost (e.g. overload) + increases - reductions; mana value unaffected | untested |
+| `b7498104` | a | mana | total cost = mana/alt cost (e.g. overload) + increases - reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Tidehollow Sculler
 
@@ -2827,8 +2827,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `0ede9b79` | a | zones | a flashback-cast spell is always exiled after, whether it resolves, is countered, or leaves some other way | `rulings_triggers2::a_flashback_spell_countered_or_remanded_is_exiled_cr_702_34a` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `64b09987` | a | stack | a card that gains flashback while in your graveyard on your turn can be cast that turn before any other player acts | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
-| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
-| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | untested |
+| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
+| `c7024d04` | a | mana | total cost = base/alt (e.g. flashback) cost + increases, then reductions; mana value unaffected | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled` |
 | `12673ccc` | a | zones | you can flashback a card even if it reached the graveyard without ever being cast | `cards_m7a_zones2::cr_702_34_lingering_souls_flashback_from_the_graveyard_then_exiled` |
 | `de6aa02a` | a | stack | flashback still follows the card's normal timing restrictions (e.g. sorcery speed for sorceries) | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
@@ -2839,7 +2839,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `a2e75b69` | a | other | before shuffling your library, you may reveal one companion from outside the game if your deck meets its condition | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
-| `90a8974d` | a | mana | for a spell with X in its cost, the mana value uses whatever value was chosen for X at cast | untested |
+| `90a8974d` | a | mana | for a spell with X in its cost, the mana value uses whatever value was chosen for X at cast | `rulings_mana2::lurrus_uses_the_x_chosen_for_the_spells_mana_value_cr_107_3_202_3e` |
 | `f103228a` | a | mana | a card in a player's deck with X in its mana cost treats X as 0 | `rules_m8a::cr_702_139a_lurrus_condition_each_permanent_mana_value_2_or_less` |
 | `5b5e7097` | a | stack | a permanent card hitting your graveyard on your main phase with an empty stack gives you priority to cast it first | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `b4178eed` | a | other | if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
@@ -2942,8 +2942,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `7c1cc9dc` | a | stack | targeting an uncounterable spell with a counter effect still works, just failing to counter it | `rulings_stack3::reprieve_returns_an_uncounterable_spell_and_mana_drain_still_gives_its_mana_cr_101_2` |
-| `8044d61d` | a | mana | a permanent with X in its mana cost treats X as 0 | untested |
-| `2080ede6` | a | mana | a token that isn't a copy of anything has mana value 0; a token that is a copy shares that object's mana cost | untested |
+| `8044d61d` | a | mana | a permanent with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
+| `2080ede6` | a | mana | a token that isn't a copy of anything has mana value 0; a token that is a copy shares that object's mana cost | `rulings_mana2::a_tokens_mana_value_is_zero_unless_it_copies_something_cr_202_3d_707_2` |
 | `dbbd77b1` | a | protection | ward still lets you pay its cost when targeting; this spells own cant-be-countered clause holds even if you dont pay | `rulings_protection2::two_wards_each_trigger_and_one_unpaid_counters_and_abrupt_decay_ignores_ward_cr_702_21a` |
 
 ### Pillage the Bog
@@ -2954,14 +2954,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `5ff99a3f` | c | NR | casting a plotted X card without paying its mana cost forces X to be 0 [part 3, was a/mana: Pillage the Bog is the cube's only card with plot and has no {X}] | not reachable with the cube's cards |
 | `2b26e4d4` | a | mana | casting a plotted card free forbids other alt costs but still needs any mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `eb326c78` | a | mana | a plot-style keyword pays a cost at sorcery speed to exile a card from hand, making it plotted | `cards_m7d::pillage_the_bog_plots_then_casts_free_on_a_later_turn_cr702_170` |
-| `4fb42bfe` | a | mana | an X value referenced by this ability is calculated only once, as it resolves | untested |
+| `4fb42bfe` | a | mana | an X value referenced by this ability is calculated only once, as it resolves | `rulings_mana2::values_an_ability_counts_are_counted_once_as_it_resolves_cr_608_2h` |
 | `8d9b640e` | a | zones | a plotted card can't be cast the turn it became plotted, only on a later turn, for free, at sorcery speed | `cards_m7d::pillage_the_bog_plots_then_casts_free_on_a_later_turn_cr702_170` |
 
 ### Squandered Resources
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a755e0f5` | a | mana | you can sacrifice a land that produces no mana to this ability; you simply get no mana from doing so | untested |
+| `a755e0f5` | a | mana | you can sacrifice a land that produces no mana to this ability; you simply get no mana from doing so | `rulings_mana2::squandered_resources_gets_no_mana_from_a_land_that_makes_none_cr_605_1a` |
 
 ### Witherbloom Apprentice
 
@@ -2977,7 +2977,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0e713983` | a | mana | a permanent with X in its mana cost treats X as 0 | untested |
+| `0e713983` | a | mana | a permanent with X in its mana cost treats X as 0 | `rulings_mana2::x_is_zero_on_the_battlefield_and_in_a_graveyard_whatever_x_was_paid_cr_107_3b` |
 
 ### Alpha Deathclaw
 
@@ -3019,7 +3019,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
 | `0d9e6436` | a | triggers | this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically | `rulings_triggers3::deathclaw_gone_before_monstrosity_resolves_doesnt_trigger_and_phlage_not_escaped_is_sacrificed_cr_701_37_702_138` |
 | `8e644e8c` | a | triggers | this permanent's second ability triggers on entering the battlefield regardless of whether it escaped to get there | `rulings_triggers3::deathclaw_gone_before_monstrosity_resolves_doesnt_trigger_and_phlage_not_escaped_is_sacrificed_cr_701_37_702_138` |
-| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
+| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Zirda, the Dawnwaker
 
@@ -3104,7 +3104,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `75e9fc66` | a | mana | casting via an escape-style permission forbids other alternative costs but still requires mandatory additional costs | `rules_shortcuts::cr_601_2b_breach_escape_with_the_cards_own_additional_cost` |
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
-| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
+| `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `5aaccf2e` | a | zones | putting a land onto the battlefield this way isnt playing a land, so it can happen off-turn or land-drop-free | `rulings_zones2::uros_land_isnt_a_land_play_cr_305_2_305_4` |
 | `655d544a` | a | triggers | this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically | `rulings_triggers2::uro_put_onto_the_battlefield_is_sacrificed_and_its_enter_ability_triggers_cr_603_6a` |
 | `1b138927` | a | triggers | this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there | `rulings_triggers2::uro_put_onto_the_battlefield_is_sacrificed_and_its_enter_ability_triggers_cr_603_6a` |
@@ -3123,7 +3123,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `47a83114` | a | mana | a permanent may be sacrificed to pay the cost of its own ability | untested |
+| `47a83114` | a | mana | a permanent may be sacrificed to pay the cost of its own ability | `rulings_mana2::thopter_foundry_may_sacrifice_itself_to_its_own_ability_cr_602_2` |
 
 ### Raffine, Scheming Seer
 
@@ -3421,10 +3421,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `5b2bbb6a` | a | combat | if an exerted permanent is already untapped by the next untap step, its skip-untap effect simply expires | `rulings_combat::an_exerted_land_untapped_before_the_next_untap_step_untaps_normally_after_it_cr_701_39b` |
-| `969ce586` | a | mana | mana from this source spent on a noncreature spell that later becomes a creature doesn't give that creature haste | untested |
-| `9f8d1cca` | a | mana | mana from this source spent on a noncreature spell that creates tokens doesn't give those tokens haste | untested |
-| `ce428cbf` | a | mana | mana from this source spent on any part of a creature spell's cost grants that creature haste until end of turn | untested |
-| `f7ca85a0` | a | mana | splitting mana from this source across two different creature spells grants haste to both resulting creatures | untested |
+| `969ce586` | a | mana | mana from this source spent on a noncreature spell that later becomes a creature doesn't give that creature haste | `rulings_mana2::arena_of_glory_mana_gives_haste_to_creature_spells_only_cr_106_6` |
+| `9f8d1cca` | a | mana | mana from this source spent on a noncreature spell that creates tokens doesn't give those tokens haste | `rulings_mana2::arena_of_glory_mana_gives_haste_to_creature_spells_only_cr_106_6` |
+| `ce428cbf` | a | mana | mana from this source spent on any part of a creature spell's cost grants that creature haste until end of turn | `rulings_mana2::arena_of_glory_mana_gives_haste_to_creature_spells_only_cr_106_6` |
+| `f7ca85a0` | a | mana | splitting mana from this source across two different creature spells grants haste to both resulting creatures | `rulings_mana2::arena_of_glory_mana_gives_haste_to_creature_spells_only_cr_106_6` |
 | `27c0d773` | c | NR | a temporarily-stolen, exerted permanent untaps on its original owner's untap step once control reverts to them [part 3, was a/combat: no cube effect gains control of a permanent until end of turn] | not reachable with the cube's cards |
 | `c2ce9071` | a | mana | mana from this source can be spent on anything, not just creature spells | `cards_m7d::arena_of_glory_haste_mana_on_a_noncreature_spell_cr106_6` |
 | `5191fad1` | c | NR | this land needs you to already control the matching basic type (not one entering alongside) to be untapped [part 3, was a/replacement: no cube effect puts a Mountain and Arena of Glory onto the battlefield at once] | not reachable with the cube's cards |
@@ -3468,7 +3468,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `3c582a02` | c | NR | mana from this source can't be used to pay echo costs [part 3, was a/mana: no cube card has echo] | not reachable with the cube's cards |
 | `b63811a7` | c | NR | mana from this source may be used to pay additional costs like kicker [part 3, was a/mana: no cube artifact spell has an additional cost] | not reachable with the cube's cards |
-| `5260a564` | a | mana | mana from this source can't be used to pay costs added to a spell after it was initially cast | untested |
+| `5260a564` | a | mana | mana from this source can't be used to pay costs added to a spell after it was initially cast | `rulings_mana2::mishras_workshop_mana_cant_pay_a_cost_imposed_after_the_cast_cr_106_6` |
 | `2bccef6e` | c | NR | mana from this source may be spent on costs written in the spell's own text [part 3, was a/mana: no cube artifact spell has a cost in its own text beyond its mana cost] | not reachable with the cube's cards |
 
 ### Otawara, Soaring City
@@ -3512,7 +3512,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `4f70a7ab` | a | zones | a land that's also a Saga still gets sacrificed after its final chapter ability resolves | `cards_m7b_faces3::urzas_saga_chapters_cr_714` |
 | `68a587c8` | a | other | a permanent gains an ability from its early chapters and keeps that ability for as long as it's on the battlefield | `cards_m7b_faces3::urzas_saga_chapters_cr_714` |
 | `4d7a6d3a` | b | DEF | a land card can only ever be played as a land, never cast as a spell [part 3, was a/zones: a land card is played, never cast; a definition] | a definition, no behaviour of its own |
-| `c8a74bc2` | a | mana | a mana-cost-based search is restricted to the exact printed mana cost symbols, not just a matching mana value | untested |
+| `c8a74bc2` | a | mana | a mana-cost-based search is restricted to the exact printed mana cost symbols, not just a matching mana value | `rulings_mana2::urzas_saga_finds_a_mana_cost_of_0_or_1_not_a_mana_value_cr_714_202_1` |
 
 ## Cards without rulings (171)
 

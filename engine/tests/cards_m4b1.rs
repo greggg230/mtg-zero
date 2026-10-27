@@ -304,6 +304,7 @@ fn zuran_orb_voltaic_key_and_aether_spellbomb() {
 
 #[test]
 fn mox_amber_makes_colours_of_legends() {
+    // ruling: 91e69158
     let g = scen().battlefield(0, &["Mox Amber", "Test Bear"]).at(Step::Main1, 0).start();
     assert!(!g.can_pay(0, &ManaCost::parse("{1}").unwrap()), "no legendary creature or planeswalker");
     let g = scen().battlefield(0, &["Mox Amber", "Test Legend"]).at(Step::Main1, 0).start();

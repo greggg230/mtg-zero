@@ -37,6 +37,9 @@ pub(crate) mod route {
     pub const LURRUS: u8 = 6;
     /// An effect's permission for this card (its only route).
     pub const EFFECT: u8 = 7;
+    /// A granted flashback (its mana cost) besides the card's printed one
+    /// (CR 702.34a: either flashback cost may be paid).
+    pub const FLASHBACK_MANA: u8 = 8;
 }
 
 /// A way to cast a graveyard card (`route::*`), with the permanent whose
@@ -261,7 +264,7 @@ impl Game {
         // 18).
         let delved = self.delve_classes(c, cls);
         let cls = &delved[..];
-        let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls));
+        let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls, crate::game::CastFrom::Hand));
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let extras = self.spree_extras(c, p);
         // `extra`: the mana of additional costs announced (CR 601.2f: added
@@ -472,6 +475,9 @@ impl Game {
         if def.flashback.is_some() || granted {
             out.push(Route { code: route::FLASHBACK, granter: None });
         }
+        if def.flashback.is_some() && granted && def.flashback != Some(def.cost) {
+            out.push(Route { code: route::FLASHBACK_MANA, granter: None });
+        }
         if self.gy_play_now(p) {
             out.push(Route { code: route::WILL, granter: None });
         }
@@ -512,6 +518,7 @@ impl Game {
         use crate::game::CastFrom;
         match r.code {
             route::FLASHBACK => CastFrom::Flashback,
+            route::FLASHBACK_MANA => CastFrom::FlashbackMana,
             route::WILL => CastFrom::Permission { free: false, any_mana: false },
             route::ESCAPE => CastFrom::Escape,
             route::RETRACE => CastFrom::Retrace,
@@ -596,22 +603,12 @@ impl Game {
             CastFrom::Hand => with(def.cost),
             // "The flashback cost is equal to its mana cost" when granted.
             CastFrom::Flashback => with(def.flashback.unwrap_or(def.cost)),
+            CastFrom::FlashbackMana => with(def.cost),
             CastFrom::Escape => with(def.escape.as_ref().map_or(def.cost, |e| e.0)),
             // "Without paying its mana cost" (an alternative cost of no
             // mana, CR 118.9; increases still apply, 601.2f).
             CastFrom::Permission { free: true, .. } => with(Default::default()),
-            CastFrom::Permission { free: false, any_mana: true } => {
-                // "Spend mana as though it were mana of any color" (CR
-                // 609.4b): every coloured, hybrid and Phyrexian symbol is
-                // paid by any mana ({C} stays {C}).
-                let mut c = with(def.cost);
-                let colored: u8 = c.pips[..5].iter().sum::<u8>() + c.hybrid.iter().sum::<u8>() + c.phyrexian.iter().sum::<u8>();
-                c.generic = c.generic.saturating_add(colored);
-                c.pips[..5].fill(0);
-                c.hybrid = Default::default();
-                c.phyrexian = Default::default();
-                c
-            }
+            CastFrom::Permission { free: false, any_mana: true } => any_colour(with(def.cost)),
             CastFrom::Permission { .. } => with(def.cost),
             CastFrom::Retrace => with(def.cost),
             // "The mayhem cost is equal to its mana cost" (an alternative
@@ -685,12 +682,54 @@ impl Game {
         (0..def.additional.len()).any(|k| self.db.merged_cost(me, route, k as u8).is_some())
     }
 
+    /// May a spell cast the way `from` says be cast for one of its own
+    /// alternative costs (CR 118.9, 118.9a: one alternative cost at most)?
+    /// From hand, and with a permission to cast the card for its costs (an
+    /// effect's "you may cast" or "play that card", Elite Spellbinder's,
+    /// Lurrus's or Serra Paragon's permission, retrace, which adds a cost):
+    /// yes (rulings eb35fd18, 9950a418). Flashback, escape, mayhem,
+    /// miracle, airbending, Bolas's Citadel's life and "without paying its
+    /// mana cost" are alternative costs themselves: no.
+    pub(crate) fn alt_allowed(from: crate::game::CastFrom) -> bool {
+        use crate::game::CastFrom;
+        matches!(
+            from,
+            CastFrom::Hand | CastFrom::Permission { free: false, .. } | CastFrom::Taxed(_) | CastFrom::Paragon | CastFrom::Retrace
+        )
+    }
+
     /// Can `p` cast `card` (not in hand) the way `from` says now?
     pub(crate) fn castable_via(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, classes: &[crate::pay::Class], sorcery_ok: bool) -> bool {
         let def = self.def_of(card);
         if !self.cast_timing_ok(p, card, sorcery_ok) {
             return false;
         }
+        // For one of its alternative costs (CR 118.9; the mana cost may be
+        // payable too: asked on casting, `cast_alt`).
+        let alt_ok = !def.alt_costs.is_empty()
+            && Self::alt_allowed(from)
+            && (0..def.alt_costs.len()).any(|k| self.alt_payable(p, card, k, classes, from));
+        if !(alt_ok || self.route_payable(p, card, from, classes)) {
+            return false;
+        }
+        // Overloaded (an alternative cost), no target is needed; otherwise
+        // an overload spell's own target is.
+        let spell = match &def.spell {
+            Some(ab) if def.overload && !alt_ok => ab.modes.as_ref().map(|m| &m.list[0]),
+            Some(_) if def.overload => return true,
+            other => other.as_ref(),
+        };
+        match spell {
+            None => true,
+            Some(ab) => self.spell_targets_available(ab, p, card),
+        }
+    }
+
+    /// Can `p` pay the cost of casting `card` (not in hand) the way `from`
+    /// says (its mana cost or the route's cost, not an alternative cost of
+    /// the card's own)?
+    pub(crate) fn route_payable(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, classes: &[crate::pay::Class]) -> bool {
+        let def = self.def_of(card);
         // Improvise (CR 702.126).
         let with_artifacts;
         let classes = if def.improvise {
@@ -720,22 +759,9 @@ impl Game {
             }
         };
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
-        let ok = match self.spree_extras(card, p) {
+        match self.spree_extras(card, p) {
             Some(extras) => extras.iter().any(|x| paid(x)),
             None => paid(&Default::default()),
-        };
-        if !ok {
-            return false;
-        }
-        // Not from hand, an overload spell can't be overloaded (one
-        // alternative cost at most, 118.9a): its own target is needed.
-        let spell = match &def.spell {
-            Some(ab) if def.overload => ab.modes.as_ref().map(|m| &m.list[0]),
-            other => other.as_ref(),
-        };
-        match spell {
-            None => true,
-            Some(ab) => self.spell_targets_available(ab, p, card),
         }
     }
 
@@ -824,9 +850,23 @@ impl Game {
                 most += 1;
             }
         } else if !free {
-            // CR 601.2f: X is part of the mana cost, before reductions.
+            // CR 601.2f: X is part of the mana cost, before reductions. Cast
+            // with a permission for a mana value n or less (Lurrus, Serra
+            // Paragon), no more than keeps the spell's mana value n (202.3e:
+            // X counts on the stack; ruling 90a8974d).
+            let r = self.obj_ref(card);
+            let limit = match self.marks.iter().find_map(|&(o, m)| match m {
+                crate::game::Mark::MvCap(n) if o == r => Some(n),
+                _ => None,
+            }) {
+                Some(n) => {
+                    let d = self.def_of(card);
+                    (n.saturating_sub(d.mana_value()) / d.x_pips.max(1)).min((act::NUMBER_N - 1) as u8)
+                }
+                None => (act::NUMBER_N - 1) as u8,
+            };
             let mut tmp = item.clone();
-            while most < (act::NUMBER_N - 1) as u8 {
+            while most < limit {
                 tmp.x = most + 1;
                 if !self.can_pay_spell(card, &tmp, &self.total_mana(card, &tmp)) {
                     break;
@@ -1565,7 +1605,7 @@ impl Game {
         let extra = self.extra_costs(item).plus(more);
         match item.alt {
             0 => self.route_mana_plus(card, p, item.from, &extra),
-            k => self.cost_with(card, p, self.def_of(card).alt_costs[k as usize - 1].mana.plus(&extra)),
+            k => self.alt_mana_via(card, p, item.from, k as usize - 1, &extra),
         }
     }
 
@@ -1694,11 +1734,15 @@ impl Game {
         self.ask(Task::Divide { id }, p, DecisionKind::DivideDamage, opts);
     }
 
-    /// Can `p` cast `card` for alternative cost `k` now (its condition,
-    /// its mana plus taxes, and the rest of it)?
-    pub(crate) fn alt_payable(&self, p: PlayerId, card: CardIdx, k: usize, classes: &[crate::pay::Class]) -> bool {
+    /// Can `p` cast `card` for alternative cost `k` now, cast the way
+    /// `from` says (its condition, its mana plus taxes, and the rest of it;
+    /// with retrace, its land discard too)? Warp only from hand.
+    pub(crate) fn alt_payable(&self, p: PlayerId, card: CardIdx, k: usize, classes: &[crate::pay::Class], from: crate::game::CastFrom) -> bool {
         let a = &self.def_of(card).alt_costs[k];
         if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
+            return false;
+        }
+        if a.warp && from != crate::game::CastFrom::Hand {
             return false;
         }
         if a.bestow && !self.def_of(card).bestowed {
@@ -1713,23 +1757,54 @@ impl Game {
             if !g.db.def(face).spell.as_ref().is_some_and(|ab| g.spell_targets_available(ab, p, card)) {
                 return false;
             }
-            return g.alt_payable(p, card, k, classes);
+            return g.alt_payable(p, card, k, classes, from);
         }
         if a.only_if.as_ref().is_some_and(|c| !self.cond_holds(c, p)) {
             return false;
         }
+        let Some(rest) = self.alt_rest(card, from, k) else { return false };
         if a.emerge.is_some() {
-            return !self.emerge_options(p, card, k, classes).is_empty();
+            return !self.emerge_options(p, card, k, classes, from).is_empty();
         }
-        let mana = self.alt_mana(card, p, k);
+        let mana = self.alt_mana_via(card, p, from, k, &Default::default());
         // (A card cast from hand is on the stack while its cost is paid.)
-        self.cost_payable(p, card, &a.cost, &mana, classes, Some(card))
+        self.cost_payable(p, card, rest, &mana, classes, Some(card))
     }
 
-    /// The mana of alternative cost `k` with the cost increases and
-    /// reductions (CR 601.2f, 118.9d: both apply to an alternative cost).
-    pub(crate) fn alt_mana(&self, card: CardIdx, p: PlayerId, k: usize) -> crate::mana::ManaCost {
-        self.cost_with(card, p, self.def_of(card).alt_costs[k].mana)
+    /// The non-mana part of alternative cost `k` of `card` cast the way
+    /// `from` says: its own, with retrace's land discard as one cost
+    /// (`CardDb::merged_cost`; `None`: the two can't be one cost).
+    pub(crate) fn alt_rest(&self, card: CardIdx, from: crate::game::CastFrom, k: usize) -> Option<&'static crate::db::Cost> {
+        let db: &'static crate::db::CardDb = self.db;
+        let def = db.def(self.objs[card.i()].def);
+        if from == crate::game::CastFrom::Retrace {
+            db.merged_cost(self.objs[card.i()].def, crate::db::RETRACE_ROUTE, crate::db::ALT_OPTION + k as u8)
+        } else {
+            Some(&def.alt_costs[k].cost)
+        }
+    }
+
+    /// The mana of alternative cost `k` (and `extra`, additional costs
+    /// announced) with the cost increases and reductions (CR 601.2f, 118.9d:
+    /// both apply to an alternative cost), cast the way `from` says: Elite
+    /// Spellbinder's {2} more; Robber of the Rich's mana of any colour.
+    pub(crate) fn alt_mana_via(
+        &self,
+        card: CardIdx,
+        p: PlayerId,
+        from: crate::game::CastFrom,
+        k: usize,
+        extra: &crate::mana::ManaCost,
+    ) -> crate::mana::ManaCost {
+        let mut base = self.def_of(card).alt_costs[k].mana.plus(extra);
+        if let crate::game::CastFrom::Taxed(n) = from {
+            base = base.plus(&crate::mana::ManaCost { generic: n, ..Default::default() });
+        }
+        let c = self.cost_with(card, p, base);
+        match from {
+            crate::game::CastFrom::Permission { any_mana: true, .. } => any_colour(c),
+            _ => c,
+        }
     }
 
     /// Can `p` cast `card` for its mana cost (with its additional cost, if
@@ -1781,15 +1856,20 @@ impl Game {
                 let classes = self.mana_classes(p, None);
                 let mut opts = Vec::new();
                 let def = self.def_of(card);
+                let from = item.from;
                 let plain_targets = !def.overload
                     || def.spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| {
                         self.targets_available(&m.list[0], p, Some(self.obj_ref(card)))
                     });
-                if plain_targets && self.normal_payable(p, card, &classes) {
+                let plain = match from {
+                    crate::game::CastFrom::Hand => self.normal_payable(p, card, &classes),
+                    _ => self.route_payable(p, card, from, &classes),
+                };
+                if plain_targets && plain {
                     opts.push(Opt { action: act::NUMBER, choice: Choice::Number(0) });
                 }
                 for k in 0..self.def_of(card).alt_costs.len() {
-                    if self.alt_payable(p, card, k, &classes) {
+                    if self.alt_payable(p, card, k, &classes, from) {
                         opts.push(Opt { action: act::NUMBER + 1 + k as u16, choice: Choice::Number(k as u8 + 1) });
                     }
                 }
@@ -1842,7 +1922,7 @@ impl Game {
         let r = self.obj_ref(card);
         let origin = self.objs[card.i()].zone;
         let exile_after = self.objs[card.i()].zone == Zone::Graveyard
-            && from != crate::game::CastFrom::Flashback
+            && !matches!(from, crate::game::CastFrom::Flashback | crate::game::CastFrom::FlashbackMana)
             && self.permissions.iter().any(|pm| pm.card == r && pm.kind == crate::game::PermKind::CastThenExile && self.permission_ok(pm, p));
         self.move_card_to_stack(card, p);
         if exile_after {
@@ -1852,12 +1932,19 @@ impl Game {
             self.objs[card.i()].def = f;
         }
         self.note(|g| format!("P{p} casts {} ({from:?})", g.name(card)));
+        if let Some(src) = paragon.filter(|_| self.def_of(card).x_pips > 0) {
+            // The permission's mana value limit holds for the spell with X
+            // (CR 202.3e): the X announced keeps it (`choose_x`).
+            let r = self.obj_ref(card);
+            let cap = self.abilities(src).gy_play_mv;
+            self.marks.push((r, crate::game::Mark::MvCap(cap)));
+        }
         if let Some((def, slot)) = paragon.and_then(|src| self.use_paragon(src)) {
             // (The card is on the stack: the spell is marked.)
             let r = self.obj_ref(card);
             self.marks.push((r, crate::game::Mark::GrantOnEnter { def, slot }));
         }
-        if from == crate::game::CastFrom::Flashback {
+        if matches!(from, crate::game::CastFrom::Flashback | crate::game::CastFrom::FlashbackMana) {
             self.objs[card.i()].flashback = true;
         }
         let id = self.new_stack_id();
@@ -1934,8 +2021,9 @@ impl Game {
             self.agenda.push(Task::ChooseModes { id }); // CR 601.2b, 700.2a
         }
         // CR 118.9a: one alternative cost at most (flashback, escape and
-        // "without paying its mana cost" are alternative costs).
-        if !self.def_of(card).alt_costs.is_empty() && from == crate::game::CastFrom::Hand {
+        // "without paying its mana cost" are alternative costs; a
+        // permission to cast a card for its costs allows one: `alt_allowed`).
+        if !self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) {
             self.agenda.push(Task::CastAlt { id }); // CR 601.2b
         }
     }
@@ -2137,7 +2225,8 @@ impl Game {
             };
             let mut pm = PayMana::new(p, cost);
             pm.improvise = def.improvise;
-            pm.keep = Self::keep_for(card, &def.alt_costs[k].cost, None);
+            let rest = self.alt_rest(card, item.from, k).unwrap_or(&def.alt_costs[k].cost);
+            pm.keep = Self::keep_for(card, rest, None);
             pm.keep.allow = self.spend_allow(card);
             pm.keep.spell = Some(card);
             if let Some(r) = emerge {
@@ -2592,4 +2681,16 @@ fn ability_ok(f: &Filter, s: &StackItem) -> bool {
         Filter::Or(v) => v.iter().any(|x| ability_ok(x, s)),
         _ => false,
     }
+}
+
+/// "Spend mana as though it were mana of any color" (CR 609.4b): every
+/// coloured, hybrid and Phyrexian symbol of `c` is paid by any mana ({C}
+/// stays {C}).
+pub(crate) fn any_colour(mut c: crate::mana::ManaCost) -> crate::mana::ManaCost {
+    let colored: u8 = c.pips[..5].iter().sum::<u8>() + c.hybrid.iter().sum::<u8>() + c.phyrexian.iter().sum::<u8>();
+    c.generic = c.generic.saturating_add(colored);
+    c.pips[..5].fill(0);
+    c.hybrid = Default::default();
+    c.phyrexian = Default::default();
+    c
 }

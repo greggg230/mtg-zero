@@ -306,15 +306,54 @@ impl Game {
     /// Could `p` cast `card` (in exile) now without paying its mana cost,
     /// during the resolution of an effect that lets them (CR 608.2g)?
     pub(crate) fn can_cast_free_now(&self, p: PlayerId, card: CardIdx) -> bool {
-        if self.def_of(card).is(types::LAND) || !self.may_cast_spells(p) {
-            return false;
-        }
-        if self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
-            return false;
+        self.faces_castable_now(p, card, true) != 0
+    }
+
+    /// The faces of `card` (in exile or a graveyard) `p` could cast now,
+    /// during the resolution of an effect that lets them (CR 608.2g),
+    /// without paying its mana cost (`free`) or for its costs: `FACE_CAST`
+    /// for its front (a split card's left half), `OTHER_CAST` for its other
+    /// spell face (a split card's right half, an Adventure: CR 709.3,
+    /// 715.3; ruling 6187a75b). Only the face cast is evaluated.
+    pub(crate) fn faces_castable_now(&self, p: PlayerId, card: CardIdx, free: bool) -> u8 {
+        if !self.may_cast_spells(p) || self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
+            return 0;
         }
         let classes = self.mana_classes(p, None);
-        let from = crate::game::CastFrom::Permission { free: true, any_mana: false };
-        self.castable_via(p, card, from, &classes, true)
+        let from = crate::game::CastFrom::Permission { free, any_mana: false };
+        let def = self.def_of(card);
+        let face_ok = |face: DefId| {
+            if self.db.def(face).is(types::LAND) {
+                return false;
+            }
+            let mut g = self.clone();
+            g.objs[card.i()].def = face;
+            g.castable_via(p, card, from, &classes, true)
+        };
+        let front = match def.halves {
+            Some((left, _)) => face_ok(left),
+            None => !def.is(types::LAND) && self.castable_via(p, card, from, &classes, true),
+        };
+        let other = match def.other_face() {
+            Some(face) => face_ok(face),
+            None => false,
+        };
+        (if front { FACE_CAST } else { 0 }) | (if other { OTHER_CAST } else { 0 })
+    }
+
+    /// Begin casting `card` with the permission just given (during a
+    /// resolution): either face when both can be cast (`ChooseFace`), else
+    /// the one that can (`faces_castable_now`).
+    pub(crate) fn begin_cast_either_face(&mut self, p: PlayerId, card: CardIdx, free: bool) {
+        let mask = self.faces_castable_now(p, card, free);
+        if mask == FACE_CAST | OTHER_CAST {
+            self.agenda.push(crate::flow::Task::ChooseFace { p, card, mask });
+        } else if mask == OTHER_CAST {
+            let face = self.other_face(card).expect("a card with another face");
+            self.begin_cast_face(p, card, Some(face));
+        } else {
+            self.begin_cast(p, card);
+        }
     }
 
     /// "You have no maximum hand size" (CR 402.2): a permanent or emblem of

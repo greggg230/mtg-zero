@@ -174,7 +174,7 @@ impl Game {
                     f.picked = vec![top];
                 }
                 let card = f.picked[0];
-                if self.objs[card.i()].zone != Zone::Exile || !self.can_cast_now(p, card) {
+                if self.objs[card.i()].zone != Zone::Exile || self.faces_castable_now(p, card, false) == 0 {
                     f.picked.clear();
                     return Flow::Next;
                 }
@@ -533,7 +533,7 @@ impl Game {
             turn: Some(self.turn.number),
             kind: crate::game::PermKind::Play { free: true, cast_only: true, any_mana: false, attacked_subtype: None },
         });
-        self.begin_cast(p, card);
+        self.begin_cast_either_face(p, card, true);
     }
 
     /// Cast `card` from exile now (an effect lets `p` do so as it
@@ -546,7 +546,7 @@ impl Game {
             turn: Some(self.turn.number),
             kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None },
         });
-        self.begin_cast(p, card);
+        self.begin_cast_either_face(p, card, false);
     }
 
     /// The queued outcome of a die roll by `p` (`force_chance`), if the next

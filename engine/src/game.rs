@@ -127,6 +127,10 @@ pub enum CastFrom {
     /// From a graveyard for its flashback cost (printed, or granted: its
     /// mana cost).
     Flashback,
+    /// From a graveyard for a granted flashback cost equal to its mana cost
+    /// (Snapcaster Mage) when the card has a printed flashback too: either
+    /// may be paid (CR 702.34a; ruling a92b37a5).
+    FlashbackMana,
     /// From its owner's graveyard for its escape cost.
     Escape,
     /// With a permission (from exile): for its mana cost, without paying
@@ -764,6 +768,10 @@ pub enum Mark {
     GrantOnEnter { def: DefId, slot: u8 },
     /// Its "once during each of your turns" was used in turn n.
     UsedTurn(u16),
+    /// This spell was cast with a permission for a spell with mana value n
+    /// or less (Serra Paragon, Lurrus): X is announced so that it stays so
+    /// (CR 202.3e, 601.2b; ruling 90a8974d).
+    MvCap(u8),
     /// It has been harnessed (The Mind Stone).
     Harnessed,
     /// Its boast ability was activated in turn n (CR 702.142a).

@@ -1713,6 +1713,10 @@ pub struct CardDb {
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
 pub(crate) const RETRACE_ROUTE: DefId = DefId::MAX;
 
+/// `CardDb::merged_cost`'s option for alternative cost k: `ALT_OPTION + k`
+/// (retrace's land discard and the alternative cost's rest as one cost).
+pub(crate) const ALT_OPTION: u8 = 0x80;
+
 /// Two costs paid as one (a granted escape or retrace with a card's own
 /// additional cost, CR 601.2b): `None` when the engine's single cost can't
 /// say both (two different discards, two sacrifices; at most one of the
@@ -1856,7 +1860,17 @@ impl CardDb {
         let retrace = Cost { discard: 1, discard_filter: Some(Filter::Type(types::LAND)), ..Default::default() };
         let mut merged = Vec::new();
         for (i, d) in db.defs.iter().enumerate() {
-            if d.additional.is_empty() || d.is(types::LAND) {
+            if d.is(types::LAND) {
+                continue;
+            }
+            // Retrace with an alternative cost (CR 702.81a: retrace adds a
+            // cost; 118.9).
+            for (k, a) in d.alt_costs.iter().enumerate() {
+                if let Some(c) = merge_costs(&retrace, &a.cost) {
+                    merged.push((i as DefId, RETRACE_ROUTE, ALT_OPTION + k as u8, c));
+                }
+            }
+            if d.additional.is_empty() {
                 continue;
             }
             for (k, o) in d.additional.iter().enumerate() {

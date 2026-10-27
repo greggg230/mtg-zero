@@ -669,11 +669,18 @@ impl Game {
 
     /// The permanents `p` could sacrifice to cast `card` with its emerge
     /// alternative cost `k`: those leaving the reduced cost payable.
-    pub(crate) fn emerge_options(&self, p: PlayerId, card: CardIdx, k: usize, classes: &[crate::pay::Class]) -> Vec<CardIdx> {
+    pub(crate) fn emerge_options(
+        &self,
+        p: PlayerId,
+        card: CardIdx,
+        k: usize,
+        classes: &[crate::pay::Class],
+        from: crate::game::CastFrom,
+    ) -> Vec<CardIdx> {
         let a = &self.def_of(card).alt_costs[k];
         let Some(filter) = &a.emerge else { return Vec::new() };
         let s = crate::db::SacCost { filter: filter.clone(), n: 1, another: false };
-        let mana = self.alt_mana(card, p, k);
+        let mana = self.alt_mana_via(card, p, from, k, &Default::default());
         let keep = crate::pay::Keep { allow: self.spend_allow(card), ..Default::default() };
         self.sacrifice_candidates(p, card, &s)
             .into_iter()
@@ -711,9 +718,10 @@ impl Game {
             Some(other) => unreachable!("emerge answer {other:?}"),
             None => {
                 let k = self.stack[pos].alt as usize - 1;
+                let from = self.stack[pos].from;
                 let classes = self.mana_classes(p, None);
                 let opts: Vec<Opt> = self
-                    .emerge_options(p, card, k, &classes)
+                    .emerge_options(p, card, k, &classes, from)
                     .into_iter()
                     .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                     .collect();
