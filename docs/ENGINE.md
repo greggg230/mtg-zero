@@ -2644,6 +2644,20 @@ Readout:
   runs with `eval_every` 2 (the user's decision, 10-26; resumed 12:40): the yardsticks and Elo
   every second iteration, Elo against checkpoints k-2 and k-4. Iteration 11's Elo phase first
   plays the pairs this spacing lacks (4-0, 6-2, 8-4, 10-6), once.
+* **mtg4 went NaN at iteration 30** (10-27): one training step returned NaN losses (bfloat16
+  autocast on CUDA, grad clip 5; the trigger is unknown, that iteration's shard had been rotated
+  out), `iter_0030.pt` was saved with all 93 float tensors NaN (`iter_0029.pt` clean, max |w|
+  1.23) and the run went on for 10 iterations of turn-capped games, NaN targets and drawn Elo
+  matches. From zero-core 681ba8d (pinned on m8e-nanpin) the non-finite guard (zero-core
+  docs/az.md 4.1) fails the run instead: a NaN / inf in a shard's x / pi / z / q / sc after the
+  float16 cast (written: quarantined to `<run>/debug/*.bad.npz`; loaded: the window refuses the
+  shard), in a training step's losses or gradient norm (before `optimizer.step()`; the batch and
+  its shard rows go to `<run>/debug/nonfinite_iter_NNNN_step_SSSS.pt`) or in a checkpoint is a
+  `NonFinite` crash (exit 1, `run aborted: NonFinite: ...` in log.txt); the supervisor restarts
+  it like any crash, so a deterministic cause repeats once per replayed iteration. Checked on
+  `mtg-smoke` (an injected 1e6 feature, a NaN value logit: both fail with the message; no
+  injection: the iteration completes, CPU and CUDA training). Cost on a real shard (65,536 rows x
+  33,652 features, 4.4 GB): about 0.7 s per write and per load.
 
 ## 23. Threats first: layers, counters, generic triggers, other zones (M7a)
 
