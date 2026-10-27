@@ -938,16 +938,23 @@ fn measure() {
         }
         let enc_us = t0.elapsed().as_secs_f64() * 1e6 / (reps * st.len()) as f64;
         let mut zrng = zr(1);
-        let t0 = std::time::Instant::now();
         let mut sink = 0usize;
-        for _ in 0..reps {
-            for g in &st {
-                let mut w = g.clone();
-                w.determinize(g.to_move().unwrap(), &mut zrng);
-                sink += w.rest().len();
+        let mut det = [0.0f64; 2];
+        let mut det_n = [0usize; 2];
+        for phase in 0..2 {
+            let sub: Vec<&TeamDraftAz> = st.iter().filter(|g| (g.phase() != Phase::Draft) as usize == phase).collect();
+            let t0 = std::time::Instant::now();
+            for _ in 0..reps {
+                for g in &sub {
+                    let mut w = (*g).clone();
+                    w.determinize(g.to_move().unwrap(), &mut zrng);
+                    sink += w.rest().len();
+                }
             }
+            det[phase] = t0.elapsed().as_secs_f64() * 1e6 / (reps * sub.len().max(1)) as f64;
+            det_n[phase] = sub.len();
         }
-        let det_us = t0.elapsed().as_secs_f64() * 1e6 / (reps * st.len()) as f64;
+        let det_us = format!("draft {:.2} us ({} states), deckbuilding {:.2} us ({} states)", det[0], det_n[0], det[1], det_n[1]);
         let t0 = std::time::Instant::now();
         for _ in 0..reps {
             for g in &st {
@@ -957,7 +964,7 @@ fn measure() {
         }
         let clone_us = t0.elapsed().as_secs_f64() * 1e6 / (reps * st.len()) as f64;
         println!(
-            "{players} seats: encode {enc_us:.2} us (zeroing excluded: {} floats), clone {clone_us:.2} us, clone + determinize {det_us:.2} us ({} states) [{sink}]",
+            "{players} seats: encode {enc_us:.2} us (zeroing excluded: {} floats), clone {clone_us:.2} us, clone + determinize: {det_us} ({} states) [{sink}]",
             NUM_FEATURES,
             st.len()
         );

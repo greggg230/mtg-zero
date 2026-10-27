@@ -948,7 +948,13 @@ impl TeamDraftAz {
                 let mut b = Build::new(order);
                 let finished = self.phase == Phase::Done || o < self.builder;
                 if finished {
-                    heuristic_build(cube, &mut b);
+                    // The heuristic deck of the part of its pool the viewer
+                    // knows (the same in every world: nothing of the real deck),
+                    // its unseen first picks in the sideboard.
+                    let fp = self.first_picks(o);
+                    let known: Vec<u16> = b.order.iter().copied().filter(|c| fp.binary_search(c).is_err()).collect();
+                    let deck = heuristic_deck(cube, &known);
+                    set_build(cube, &mut b, &deck);
                 }
                 // (An opponent building now restarts: its decisions are
                 // hidden; one not yet building has only its order.)
@@ -1201,8 +1207,39 @@ pub fn build_order(cube: &DraftCube, pool: &[u16]) -> Vec<u16> {
 /// build: the deck redrawn for an opponent who has built (its deck is
 /// hidden), and the `consensus` bot's deck.
 pub fn heuristic_build(cube: &DraftCube, b: &mut Build) {
-    let pool: Vec<DefId> = b.order.iter().map(|&c| cube.def_of(c)).collect();
-    let (deck, _) = pools::build_deck(cube.db, &pool, &DeckGen::default());
+    let deck = heuristic_deck(cube, &b.order);
+    set_build(cube, b, &deck);
+}
+
+/// `pools::build_deck`'s deck of a pool (identities, any order), memoised
+/// per thread: `determinize` asks it for the same known pools in every
+/// world of a search.
+pub fn heuristic_deck(cube: &DraftCube, pool: &[u16]) -> std::sync::Arc<[DefId]> {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static MEMO: RefCell<HashMap<Vec<u16>, std::sync::Arc<[DefId]>>> = RefCell::new(HashMap::new());
+    }
+    let mut key = pool.to_vec();
+    key.sort_unstable();
+    if let Some(d) = MEMO.with(|m| m.borrow().get(&key).cloned()) {
+        return d;
+    }
+    let defs: Vec<DefId> = key.iter().map(|&c| cube.def_of(c)).collect();
+    let (deck, _) = pools::build_deck(cube.db, &defs, &DeckGen::default());
+    let deck: std::sync::Arc<[DefId]> = deck.into();
+    MEMO.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 4096 {
+            m.clear();
+        }
+        m.insert(key, deck.clone());
+    });
+    deck
+}
+
+/// A finished build holding `deck` (its pool cards in, its basic lands).
+fn set_build(cube: &DraftCube, b: &mut Build, deck: &[DefId]) {
     b.inn = 0;
     for (i, &c) in b.order.iter().enumerate() {
         if deck.contains(&cube.def_of(c)) {
