@@ -690,6 +690,34 @@ fn ir_values_that_disagree_with_the_oracle_shape_are_blockers() {
 }
 
 #[test]
+fn costs_the_cast_cant_pay_together_are_blockers_cr_601_2b_601_2f() {
+    // The total cost is the mana cost or an alternative cost plus every
+    // additional cost (CR 601.2b, 601.2f). The engine pays an alternative
+    // cost's rest alone and a printed escape's exile alone (ENGINE.md
+    // 40.9): a card with such costs together is not supported, and says
+    // why. Snuff Out with "as an additional cost, discard a card"; Three
+    // Steps Ahead with an alternative cost of {1} (spree's mode costs are
+    // additional costs, 702.172a); From the Catacombs (escape) with the
+    // discard.
+    let discard = serde_json::json!([{"$t": "AdditionalCostOption", "kind": "discard", "amount": 1}]);
+    for (name, field, value, blocker) in [
+        ("Snuff Out", "additional_cost_options", discard.clone(), "CardPrinting.alternative_costs(with additional costs)"),
+        (
+            "Three Steps Ahead",
+            "alternative_costs",
+            serde_json::json!([{"$t": "AlternativeCost", "mana": "{1}"}]),
+            "CardPrinting.alternative_costs(with additional costs)",
+        ),
+        ("From the Catacombs", "additional_cost_options", discard.clone(), "CardPrinting.escape_cost(with additional costs)"),
+    ] {
+        assert!(CardDb::cube().expect_id(name).is_ok(), "{name} is supported as printed");
+        let db = db_with_edit(name, |p| p[field] = value.clone());
+        let err = db.expect_id(name).unwrap_err();
+        assert!(err.contains(blocker), "{name}: {err}");
+    }
+}
+
+#[test]
 fn a_new_ir_field_value_is_a_blocker() {
     // A supported card with one unsupported flag set is no longer supported.
     let mut cards = engine::db::load_cube_document().cards;

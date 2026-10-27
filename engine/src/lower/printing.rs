@@ -1383,8 +1383,18 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         Some(other) => l.unsupported(format!("CardPrinting.free_cast_condition({})", other.tag())),
     }
-    if !alt_costs.is_empty() && !additional.is_empty() {
+    // The cast pays an alternative cost's rest alone (`Game::alt_payable`,
+    // `cast_pay`, `item_cost`), and a printed escape cost's exile alone
+    // (`Game::route_extra`): with additional costs of the card's own, the
+    // kicker's, buyback's or spree's mode costs (CR 601.2b, 601.2f, 702.172a:
+    // the total cost is both), not supported. No cube card has either
+    // (ENGINE.md 40.9).
+    let spree = spell.as_ref().and_then(|ab| ab.modes.as_ref()).is_some_and(|m| !m.costs.is_empty());
+    if !alt_costs.is_empty() && (!additional.is_empty() || spree) {
         l.unsupported("CardPrinting.alternative_costs(with additional costs)");
+    }
+    if escape.is_some() && !additional.is_empty() {
+        l.unsupported("CardPrinting.escape_cost(with additional costs)");
     }
     let discounts = lower_discounts(l, cost_reductions);
     // (A reduction applies to an alternative cost too, CR 601.2f, 118.9d:
