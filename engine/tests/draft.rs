@@ -800,7 +800,8 @@ fn layout_json_is_checked_in() {
 /// 3v3 and 1v1): the invariants after every action; every ~40 actions
 /// `determinize` for the decider and another viewer (knowledge, features,
 /// options, invariants); at one decision of every 8th event every offered
-/// option completes the event; the event resolved with random results.
+/// option completes the event; the event resolved with random results (every
+/// 50th by heuristic-played matches).
 #[test]
 fn fuzz_random_events() {
     let events: u64 = std::env::var("DRAFT_FUZZ").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
@@ -808,6 +809,7 @@ fn fuzz_random_events() {
     let mut zrng = zr(0xF022);
     let (mut steps, mut worlds, mut options_done, mut searched) = (0u64, 0u64, 0u64, [0u64; 2]);
     let mut team_wins = [0u64; 3];
+    let mut heuristic_matches = 0u64;
     let t0 = std::time::Instant::now();
     for e in 0..events {
         let players = [8usize, 4, 8, 2, 8, 6][e as usize % 6];
@@ -861,8 +863,14 @@ fn fuzz_random_events() {
         steps += i;
         assert!(g.deferred());
         let n = g.matches().unwrap().len();
-        let res: Vec<[f32; 2]> = (0..n).map(|_| [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]][rng.below(3) as usize]).collect();
-        g.resolve(&res).unwrap();
+        if e % 50 == 7 {
+            // Random decks are playable: the heuristic plays the event's matches.
+            let res = draft_bots::resolve_with_heuristic(&mut g, e).unwrap_or_else(|err| panic!("event {e}: {err}"));
+            heuristic_matches += res.len() as u64;
+        } else {
+            let res: Vec<[f32; 2]> = (0..n).map(|_| [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]][rng.below(3) as usize]).collect();
+            g.resolve(&res).unwrap();
+        }
         let r = g.result();
         assert!((r.iter().sum::<f32>() - 1.0).abs() < 1e-5);
         team_wins[match g.outcome().unwrap().team[0] {
@@ -872,7 +880,7 @@ fn fuzz_random_events() {
         }] += 1;
     }
     println!(
-        "{events} events, {steps} actions, searched picks {} deckbuilding {}, {worlds} worlds, {options_done} options completed, \
+        "{events} events, {steps} actions, searched picks {} deckbuilding {}, {worlds} worlds, {options_done} options completed, {heuristic_matches} heuristic-played matches, \
          team A wins / losses / draws {team_wins:?}, {:.1} s",
         searched[0],
         searched[1],

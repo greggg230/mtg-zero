@@ -23,7 +23,7 @@ def nf():
 
 def test_engine_module_registers_the_games():
     from mtgz import _engine as E
-    assert G.engine() is E and E.game_names() == ['toy', 'mtg']
+    assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft']
     info = G.info('mtg')
     assert info['num_actions'] == 1024 and info['num_features'] == 33652
     assert info['min_players'] == info['max_players'] == 2
