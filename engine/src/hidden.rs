@@ -631,22 +631,20 @@ impl Game {
         self.players[owner as usize].sideboard = sideboard;
     }
 
-    /// The identities of `slots` (all of them, `pool`) are dealt so each
-    /// cloud's listed identities land in its domain: uniform over the
-    /// assignments consistent with the clouds (listed cards placed in their
-    /// domain at random, the rest of the pool over every remaining place).
-    fn resample_with_clouds(
-        &mut self,
+    /// What the clouds of (`viewer`, `owner`) place among `owner`'s hidden
+    /// cards `slots` (`determinize`'s deal, and the hidden pool's sampled
+    /// deck, ENGINE.md 36.11): per slot the cloud whose domain holds it, and
+    /// per cloud its listed identities less those of the `pinned` cards in
+    /// its domain (exactly known for this pass), at most as many as its
+    /// domain's slots.
+    pub(crate) fn cloud_needs(
+        &self,
         viewer: PlayerId,
         owner: PlayerId,
         slots: &[CardIdx],
         pinned: &[CardIdx],
-        mut pool: Vec<DefId>,
-        rng: &mut Rng,
-    ) {
-        pool.sort_unstable();
-        let clouds: Vec<Cloud> =
-            self.clouds.iter().filter(|k| k.viewer == viewer && k.owner == owner).cloned().collect();
+    ) -> (Vec<Option<usize>>, Vec<Vec<DefId>>) {
+        let clouds: Vec<&Cloud> = self.clouds.iter().filter(|k| k.viewer == viewer && k.owner == owner).collect();
         // Per slot: the cloud whose domain holds it.
         let home: Vec<Option<usize>> = slots
             .iter()
@@ -667,11 +665,31 @@ impl Game {
             }
             let room = home.iter().filter(|&&h| h == Some(ki)).count();
             need.truncate(room);
-            for &d in &need {
+            needs.push(need);
+        }
+        (home, needs)
+    }
+
+    /// The identities of `slots` (all of them, `pool`) are dealt so each
+    /// cloud's listed identities land in its domain: uniform over the
+    /// assignments consistent with the clouds (listed cards placed in their
+    /// domain at random, the rest of the pool over every remaining place).
+    fn resample_with_clouds(
+        &mut self,
+        viewer: PlayerId,
+        owner: PlayerId,
+        slots: &[CardIdx],
+        pinned: &[CardIdx],
+        mut pool: Vec<DefId>,
+        rng: &mut Rng,
+    ) {
+        pool.sort_unstable();
+        let (home, needs) = self.cloud_needs(viewer, owner, slots, pinned);
+        for need in &needs {
+            for &d in need {
                 let ok = take_one(&mut pool, d);
                 debug_assert!(ok, "cloud identity {d} not in the pool");
             }
-            needs.push(need);
         }
         rng.shuffle(&mut pool);
         let mut free = pool.into_iter();

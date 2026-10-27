@@ -193,11 +193,13 @@ pub(crate) struct Knowledge {
     /// The identities of non-deck cards among `slots` (a companion put into
     /// the hand and shuffled away, ...): dealt again with the deck's.
     pub extras: Vec<DefId>,
-    /// The deck's cards the viewer knows are in it (`known` and its clouds'
-    /// identities, less those of `extras`; the match adds what the owner
-    /// revealed this game), sorted. (Pinned cards, kept by `determinize`
-    /// while their owner pays, count as known: another viewer than the
-    /// decider only, ENGINE.md 10.)
+    /// The deck's cards the viewer knows are in it (`known` and the
+    /// identities its clouds place among `slots`, less those of `extras`;
+    /// the match adds what the owner revealed this game), sorted. (Pinned
+    /// cards, kept by `determinize` while their owner pays, count as known:
+    /// another viewer than the decider only, ENGINE.md 10; a pinned card in
+    /// a cloud's domain counts for its own identity there, as
+    /// `Game::cloud_needs` deals it, not twice.)
     pub required: Vec<DefId>,
 }
 
@@ -233,7 +235,7 @@ fn deck_range(sizes: [usize; 2], p: PlayerId) -> std::ops::Range<usize> {
 
 pub(crate) fn knowledge(g: &Game, viewer: PlayerId, owner: PlayerId, sizes: [usize; 2]) -> Knowledge {
     let db = g.db();
-    let (slots, _pinned) = g.hidden_slots(viewer, owner);
+    let (slots, pinned) = g.hidden_slots(viewer, owner);
     let range = deck_range(sizes, owner);
     let mut in_slots = vec![false; g.objs.len()];
     for &c in &slots {
@@ -252,8 +254,8 @@ pub(crate) fn knowledge(g: &Game, viewer: PlayerId, owner: PlayerId, sizes: [usi
     let mut extras: Vec<DefId> = slots.iter().filter(|c| !range.contains(&c.i())).map(|&c| card_of(g, c)).collect();
     extras.sort_unstable();
     let mut required = known.clone();
-    for k in g.clouds.iter().filter(|k| k.viewer == viewer && k.owner == owner) {
-        required.extend(k.defs.iter().map(|&d| db.def(d).card_def(d)));
+    for need in g.cloud_needs(viewer, owner, &slots, &pinned).1 {
+        required.extend(need.iter().map(|&d| db.def(d).card_def(d)));
     }
     required.sort_unstable();
     for &x in &extras {
