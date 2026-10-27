@@ -2618,6 +2618,36 @@ game fails the run) with `MTGZ_SUPERVISE_STALL=3600`):
 (Fit after iteration 10, 10-26 12:39; random 390 in mtg4's fit; random vs the heuristic 1 / 100
 matches. Resumed at 12:40 with `eval_every` 2, below.)
 
+**mtg4, iterations 11-40.** From iteration 11 `eval_every` 2: the yardsticks and Elo on even
+iterations only. Re-pinned twice, each time stopped after an iteration and resumed from its
+checkpoint with the same settings: iteration 13 onwards (10-26 15:34) on run-48ccbb9 (M8d part
+2's 7 engine fixes, 38), iteration 21 onwards (19:33) on run-739abd8 (part 3's 10, 39). It
+finished its 40 iterations at 05:08 on 10-27, 27 hours after launch, but it collapsed at
+iteration 30 (below). Evaluated iterations:
+
+| Iter | Matches (cum.) | Samples | Leaves / s | Decisions / match | Minor / match | Turns / match | Target H/ln n | Policy / value loss, value acc. | vs heuristic (100 matches) | vs random (50 matches) | Elo (final fit) | Minutes (sp / train / eval / elo) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|
+| 12 | 7,200 | 69,829 | 8,413 | 485 | 21 | 54.1 | 0.71 | 0.959 / 0.671 / 0.83 | 8.0% +-2.7 | 61% | 552 +-63 | 15.6 / 1.5 / 9.1 / 22.7 |
+| 14 | 8,400 | 63,905 | 10,603 | 446 | 22 | 51.8 | 0.71 | 0.956 / 0.672 / 0.84 | 15.0% +-3.6 | 70% | 664 +-60 | 10.6 / 1.5 / 10.8 / 25.2 |
+| 16 | 9,600 | 63,781 | 10,861 | 447 | 20 | 50.2 | 0.70 | 0.947 / 0.669 / 0.86 | 14.0% +-3.5 | 86% | 687 +-59 | 10.2 / 1.4 / 9.0 / 16.8 |
+| 18 | 10,800 | 55,581 | 7,053 | 391 | 22 | 46.5 | 0.70 | 0.934 / 0.667 / 0.87 | 17.0% +-3.8 | 91% | 736 +-57 | 14.6 / 1.3 / 10.0 / 27.5 |
+| 20 | 12,000 | 53,596 | 6,806 | 377 | 21 | 45.8 | 0.70 | 0.920 / 0.664 / 0.88 | 12.0% +-3.2 | 88% | 713 +-57 | 13.8 / 1.2 / 9.3 / 12.3 |
+| 22 | 13,200 | 51,339 | 11,202 | 361 | 18 | 44.1 | 0.69 | 0.904 / 0.660 / 0.89 | 23.0% +-4.2 | 88% | 757 +-56 | 8.2 / 1.6 / 8.1 / 16.6 |
+| 24 | 14,400 | 50,346 | 11,174 | 356 | 21 | 45.1 | 0.66 | 0.891 / 0.657 / 0.88 | 16.0% +-3.7 | 92% | 790 +-55 | 8.4 / 1.1 / 9.0 / 10.6 |
+| 26 | 15,600 | 46,355 | 11,169 | 330 | 21 | 42.6 | 0.66 | 0.875 / 0.653 / 0.87 | 28.0% +-4.5 | 86% | 775 +-58 | 8.2 / 1.5 / 8.3 / 11.5 |
+| 28 | 16,801 | 50,396 | 11,189 | 358 | 22 | 43.2 | 0.65 | 0.861 / 0.651 / 0.86 | 29.0% +-4.5 | 98% | 857 +-60 | 8.4 / 1.2 / 9.0 / 11.9 |
+| 30 | 18,001 | 53,535 | 6,763 | 380 | 23 | 44.8 | 0.66 | NaN / NaN / 0.53 | 2.0% +-1.4 | 4% | -31 +-122 | 15.8 / 1.2 / 5.1 / 19.0 |
+| 32 | 19,201 | 130,369 | 12,439 | 872 | 0 | 173.6 | 0.05 | NaN / NaN / 0.67 | 2.0% +-1.4 | 0% | -76 +-117 | 17.1 / 3.1 / 6.9 / 18.5 |
+| 34 | 20,401 | 117,369 | 11,845 | 788 | 0 | 180.0 | 0.00 | NaN / NaN / 0.82 | 2.0% +-1.4 | 0% | -81 +-112 | 17.9 / 2.8 / 6.0 / 23.0 |
+| 36 | 21,601 | 116,983 | 12,021 | 777 | 0 | 180.0 | 0.00 | NaN / NaN / 0.92 | 1.0% +-1.0 | 4% | -90 +-113 | 17.3 / 2.6 / 6.6 / 23.1 |
+| 38 | 22,801 | 115,850 | 12,018 | 774 | 0 | 180.0 | 0.00 | NaN / NaN / 1.00 | 1.0% +-1.0 | 0% | -108 +-121 | 18.1 / 2.7 / 5.4 / 24.7 |
+| 40 | 24,001 | 111,117 | 11,939 | 739 | 0 | 180.0 | 0.00 | NaN / NaN / 1.00 | 0.0% +-0.0 | 3% | -111 +-132 | 18.0 / 2.5 / 5.0 / 21.3 |
+
+(Fit after iteration 40; random 431 in it. The rows of iterations 0-10 above keep the fit after
+iteration 10. Iteration 11 played no yardsticks and spent 100 minutes on the one-time Elo
+catch-up. Iteration 30's self-play is still checkpoint 29's (clean) and its training is the step
+that went NaN; from iteration 31 on every number comes from a NaN network.)
+
 Readout:
 
 * **mtg3 is the first run that improves against the heuristic**: 9% at iteration 0 to 51% over
@@ -2644,11 +2674,25 @@ Readout:
   runs with `eval_every` 2 (the user's decision, 10-26; resumed 12:40): the yardsticks and Elo
   every second iteration, Elo against checkpoints k-2 and k-4. Iteration 11's Elo phase first
   plays the pairs this spacing lacks (4-0, 6-2, 8-4, 10-6), once.
+* **mtg4 kept improving until it collapsed.** Against the heuristic, the evaluated iterations
+  average 13.2% of matches over 12-20 and 24.0% over 22-28, peaking at 29% at iteration 28 (the
+  best checkpoint: Elo 857 in the final fit, random 431); against random 79% and 91% (98% at
+  28). By the formula above, 24-29% of matches is p ~ 32-36% per game, close to mtg3's 33% over
+  its iterations 11-20 (same caveats). The policy loss fell throughout (0.962 at 11 to 0.861 at
+  29), the targets sharpened (H/ln n 0.73 -> 0.66) and matches got shorter (54 -> 43 turns, 485
+  -> 358 searched decisions).
+* **Cost with `eval_every` 2**: from iteration 21 a pair of iterations took about 40 minutes (the
+  odd one 9-14: self-play 8, training 1-2; the even one 29-35, of which yardsticks 8-9 and Elo
+  11-17), so evaluation still took about half. Self-play fell to 6.3-8.4k leaves/s (from ~11k) at
+  iterations 12 and 18-20 while the re-pins' search smokes ran beside it.
 * **mtg4 went NaN at iteration 30** (10-27): one training step returned NaN losses (bfloat16
   autocast on CUDA, grad clip 5; the trigger is unknown, that iteration's shard had been rotated
   out), `iter_0030.pt` was saved with all 93 float tensors NaN (`iter_0029.pt` clean, max |w|
   1.23) and the run went on for 10 iterations of turn-capped games, NaN targets and drawn Elo
-  matches. From zero-core 681ba8d (pinned on m8e-nanpin) the non-finite guard (zero-core
+  matches: from iteration 31 self-play matches grew to 133.9 and then 180 turns (the cap, from
+  iteration 33), with no minor decisions and the target entropy at 0, the samples per iteration
+  doubled (~115k: ~46 GB of shards for iterations 35-40) and the value-accuracy column climbed to
+  1.00 on NaN outputs (meaningless). The watchdog saw only a clean exit. From zero-core 681ba8d (pinned in 83cc116) the non-finite guard (zero-core
   docs/az.md 4.1) fails the run instead: a NaN / inf in a shard's x / pi / z / q / sc after the
   float16 cast (written: quarantined to `<run>/debug/*.bad.npz`; loaded: the window refuses the
   shard), in a training step's losses or gradient norm (before `optimizer.step()`; the batch and
