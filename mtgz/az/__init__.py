@@ -27,6 +27,7 @@ import os
 from zero.package import GamePackage, register
 
 from .evaldecks import eval_spec
+from .mac import RunCommitRemote
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -102,4 +103,12 @@ PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT}, dashboard_port=5340, hub_id='mtg_zero', env_prefix='MTGZ',
     presets=PRESETS, tokens={'mtg': LAYOUT, 'team_draft': LAYOUT_DRAFT}, eval_specs={'mtg': eval_spec},
+    # remote evaluation (run setting eval_remote='mac', zero.remote; docs/ENGINE.md 44): the MacBook
+    # (M4 Max, 16 cores, no CUDA) evaluates with exactly the run's code: its checkout
+    # ~/mtg-zero-wt/run-<sha12> of the commit of the run's checkout (`bash tools/mac.sh
+    # --eval-checkout` there), checked when the run starts and before every evaluation (mtgz/az/mac.py)
+    remotes={'mac': RunCommitRemote(ROOT, host='greggkeithley@100.95.248.116', home='/Users/greggkeithley',
+                                    python='/Users/greggkeithley/.venvs/dominion-zero/bin/python',
+                                    workdir='/Users/greggkeithley/mtgz-remote',
+                                    overrides={'infer_device': 'cpu', 'train_device': 'cpu', 'threads': 12})},
 ))
