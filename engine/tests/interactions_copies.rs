@@ -224,3 +224,51 @@ fn a_token_copy_of_a_face_down_creature_is_a_face_up_nameless_2_2_cr_707_2_708_2
     assert!(!face_up, "nothing turns the token face up: {}", opts(&g));
     assert!(g.is_face_down(fd), "the original stays face down");
 }
+
+#[test]
+fn a_token_copy_of_a_nightbound_permanent_is_double_faced_and_turns_at_day_cr_707_8a_702_145f() {
+    // docs/interactions.md A x P. Reading of the current CR (2026-09-25):
+    // CR 707.8a makes a token copy of a double-faced permanent a
+    // double-faced token with both faces, entering with the copied
+    // permanent's face up; 712.9 lets a permanent represented by a
+    // double-faced token transform; 702.145e-f: nightbound transforms it
+    // as it becomes day. (702.145b's "enters transformed" needs a
+    // double-faced *card*, but at night a daybound permanent is never
+    // front face up to be copied, 702.145c, so a token copy of it enters
+    // back face up by 707.8a anyway.)
+    // Night: P0 casts two Bolts in turn 3; in its end step Reflection of
+    // Kiki-Jiki copies Frenzied Trapbreaker (sacrificed at the next end
+    // step, P1's). The token is Frenzied Trapbreaker; at P1's untap it
+    // becomes day and the token, like the card, transforms to Outland
+    // Liberator.
+    const FABLE: &str = "Fable of the Mirror-Breaker // Reflection of Kiki-Jiki";
+    const LIBERATOR: &str = "Outland Liberator // Frenzied Trapbreaker";
+    let mut g = scen()
+        .battlefield(0, &[FABLE, LIBERATOR, "Mountain", "Mountain", "Mountain"])
+        .transformed(0, FABLE)
+        .transformed(0, LIBERATOR)
+        .hand(0, &["Lightning Bolt", "Lightning Bolt"])
+        .day(Some(false))
+        .at(Step::Main1, 0)
+        .start();
+    let r = bf(&g, 0, "Reflection of Kiki-Jiki");
+    let l = bf(&g, 0, "Frenzied Trapbreaker");
+    for _ in 0..2 {
+        let b = g.card(0, "Lightning Bolt", Zone::Hand);
+        cast_targets(&mut g, b, &[player(1)]);
+    }
+    let t0 = g.turn().number;
+    quiet_until(&mut g, |g| g.turn().step == Step::End && g.stack().is_empty() && at_priority(g) && g.turn().priority == 0);
+    g.choose(Choice::Ability(r, AbilitySlot::Activated(0)));
+    let tl = g.tgt(l);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(tl)).then_some(tl));
+    let tok = tokens_named(&g, "Frenzied Trapbreaker");
+    assert_eq!(tok.len(), 1, "back face up, as the copied permanent (707.8a)\n{}", log(&g));
+    let tok = tok[0];
+    quiet_until(&mut g, |g| g.turn().number == t0 + 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.day(), Some(true), "two spells: day");
+    assert!(g.name(l).starts_with("Outland Liberator"));
+    assert_eq!(g.obj(tok).zone, Zone::Battlefield);
+    assert!(g.name(tok).starts_with("Outland Liberator"), "a double-faced token transforms (712.9, 702.145f): {}", g.name(tok));
+    assert_eq!(g.pt(tok), (2, 2));
+}

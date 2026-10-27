@@ -56,7 +56,7 @@ earlier milestones name their tests too.
 | A x M | Reflection (haste), Metamorph | `cards_m7b_copies::reflection_of_kiki_jiki_makes_a_hasty_token_copy_sacrificed_at_end_step_cr_707_9a` | tested |
 | A x N | Metamorph or Reflection copying a legend or a 0/0 | `rules_copies::a_token_copy_of_a_legend_meets_the_legend_rule_cr_704_5j`; `rulings_faces::reflection_of_kiki_jiki_copying_walking_ballista_has_x_zero_cr_107_3m` | tested |
 | A x O | Fractured Identity, Oko's exchange of a copy | **new** `interactions_zones::fractured_identity_on_a_planeswalker_*` (the token's controller) | tested |
-| A x P | Reflection copying a daybound creature at night | - | untested: whether a token copy of a daybound card is double-faced (CR 707.8a, 712.10) needs a reading of the current CR first |
+| A x P | Reflection copying a daybound creature at night | **new** (part 3) `interactions_copies::a_token_copy_of_a_nightbound_permanent_is_double_faced_and_turns_at_day_cr_707_8a_702_145f`. Reading (CR 2026-09-25): a token copy of a double-faced permanent is a double-faced token entering with the copied face up (707.8a); a permanent represented by a double-faced token can transform (712.9); nightbound turns it as it becomes day (702.145e-f). 702.145b's "enters transformed" needs a double-faced *card*, but at night a daybound permanent is never front face up to be copied (702.145c). (712.10 in this CR is about transforming into an instant or sorcery face: no cube card reaches it.) | tested |
 
 ### B: layers and ability-changing effects
 
@@ -92,7 +92,7 @@ earlier milestones name their tests too.
 | D x G | protection from a planeswalker's colour; targeting a planeswalker | `cards_m7b_walkers_audit` (any-target audit) | tested |
 | D x H | protection gained in response; Emrakul on the stack; Leovold | `rulings_protection::a_target_made_illegal_by_protection_makes_the_ability_do_nothing_cr_608_2b`, `::emrakul_on_the_stack_*`; `rules_stack::becoming_the_target_triggers_once_per_spell_cr_603_2e`; **new** `rulings_triggers2::leovold_triggers_once_per_target_of_one_spell_cr_603_2e` | tested |
 | D x M | Mother of Runes and trample; True-Name Nemesis blocking | `rulings_protection::protection_from_a_color_stops_blocks_by_that_color_and_its_damage_cr_702_16b_702_16e`, `::true_name_nemesis_*`; **new** `interactions_zones::trample_assigns_lethal_damage_to_a_protected_blocker_before_the_player_cr_702_19c_702_16e` | tested |
-| D x O | True-Name's chosen player after a control change | - | untested (no cube effect steals a creature permanently but Oko's exchange; low risk: the choice is a value of the object) |
+| D x O | True-Name's chosen player after a control change | **new** (part 3) `interactions_zones::true_name_nemesis_keeps_its_chosen_player_after_a_control_change_cr_702_16j_110_2` (Oko's exchange gives P0's Nemesis, P1 chosen, to P1: protection from its own controller) | tested |
 
 ### E: face-down
 
@@ -177,6 +177,6 @@ earlier milestones name their tests too.
 
 ## Untested cells
 
-A x P (a token copy of a daybound card at night: whether the token is double-faced, CR 707.8a and
-712.10, wants a careful reading first) and D x O (True-Name Nemesis's chosen player after a
-control change). All other pairs above are tested or not applicable.
+None. Part 3 (ENGINE.md 39) tested the last two, A x P (a token copy of a daybound card at night)
+and D x O (True-Name Nemesis's chosen player after a control change). All pairs above are tested
+or not applicable.

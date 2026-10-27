@@ -284,3 +284,47 @@ fn a_flickered_mdfc_land_face_returns_front_face_up_and_a_sorcery_cant_enter_cr_
     to_end_step(&mut g);
     assert_eq!(g.obj(s).zone, Zone::Exile, "{}", log(&g));
 }
+
+#[test]
+fn true_name_nemesis_keeps_its_chosen_player_after_a_control_change_cr_702_16j_110_2() {
+    // docs/interactions.md D x O. "As True-Name Nemesis enters, choose a
+    // player. True-Name Nemesis has protection from the chosen player."
+    // The choice is made once, as it enters (614.12), and stays with the
+    // object (only a new object chooses anew, 400.7). P0's Nemesis (P1
+    // chosen) goes to P1 by Oko's exchange: it now has protection from its
+    // own controller; P1's Lightning Bolt can't target it, P0's can.
+    let mut g = scen()
+        .battlefield(0, &[OKO, "Island", "Island", "Island", "Mountain"])
+        .counters(0, OKO, Counter::Loyalty, 7)
+        .hand(0, &["True-Name Nemesis", "Lightning Bolt"])
+        .battlefield(1, &["Test Bear", "Mountain"])
+        .hand(1, &["Lightning Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let tnn = g.card(0, "True-Name Nemesis", Zone::Hand);
+    g.choose(Choice::Cast(tnn));
+    resolve_with(&mut g, |g| g.has_option(player(1)).then(|| player(1)));
+    assert_eq!(g.obj(tnn).chosen_player, Some(1));
+    let oko = bf(&g, 0, OKO);
+    let bear = bf(&g, 1, "Test Bear");
+    g.choose(Choice::Ability(oko, AbilitySlot::Activated(2)));
+    resolve_with(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) if g.has_option(g.tgt(tnn)) => Some(g.tgt(tnn)),
+        Some(DecisionKind::Target) => Some(g.tgt(bear)),
+        _ => None,
+    });
+    assert_eq!(g.obj(tnn).controller, 1, "{}", log(&g));
+    assert_eq!(g.obj(bear).controller, 0);
+    assert_eq!(g.obj(tnn).chosen_player, Some(1), "the choice stays with the object");
+    let b0 = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b0));
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    assert!(g.has_option(g.tgt(tnn)), "P0 may target it now: {}", opts(&g));
+    g.choose(player(1));
+    resolve(&mut g);
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    let b1 = g.card(1, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(b1));
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    assert!(!g.has_option(g.tgt(tnn)), "protection from its own controller: {}", opts(&g));
+}
