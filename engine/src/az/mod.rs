@@ -15,9 +15,16 @@
 //! * Decks: `decks.rs` (random two-colour decks per game, or the fixed
 //!   evaluation set, or given lists).
 //! * Bots: `random` (zero-core) and `heuristic` (`bots.rs`).
+//!
+//! The game `team_draft` (DESIGN.md 2.3, ENGINE.md 41): `draft.rs` (the event,
+//! deckbuilding, the deferred terminal), `draft_encode.rs` (layout
+//! `draft_v1`), `draft_bots.rs` (`consensus`, heuristic-played matches).
 
 pub mod bots;
 pub mod decks;
+pub mod draft;
+pub mod draft_bots;
+pub mod draft_encode;
 pub mod encode;
 pub mod identity;
 pub mod matches;
