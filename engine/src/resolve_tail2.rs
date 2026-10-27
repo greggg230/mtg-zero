@@ -280,32 +280,51 @@ impl Game {
             }
             Ext::MayCastFromGraveyardNow { filter, exile } => {
                 let p = f.controller;
+                // After the cast (`f.i` 1, the card in `f.picked`): "if an
+                // instant or sorcery spell cast this way would be put into
+                // your graveyard, exile it instead" — the spell's type, the
+                // face it was cast with (an Adventure, CR 715.3b).
+                if f.i == 1 {
+                    if let Some(&c) = f.picked.first() {
+                        if *exile && self.objs[c.i()].zone == Zone::Stack && self.def_of(c).is(types::INSTANT | types::SORCERY) {
+                            self.gy_exile.push(c);
+                        }
+                    }
+                    f.picked.clear();
+                    return Flow::Next;
+                }
+                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         // The rest of the effect waits for the cast (CR
                         // 608.2g).
                         let mut back = f.clone();
-                        back.pc += 1;
-                        back.i = 0;
+                        back.i = 1;
                         back.floor = 0;
                         back.picked.clear();
+                        back.picked.push(c);
                         self.agenda.push(Task::Run(back));
                         let r = self.obj_ref(c);
-                        let kind = if *exile && self.def_of(c).is(types::INSTANT | types::SORCERY) {
-                            crate::game::PermKind::CastThenExile
-                        } else {
-                            crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None }
-                        };
+                        let kind = crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None };
                         self.permissions.push(crate::game::Permission { card: r, player: p, turn: Some(self.turn.number), kind });
-                        self.begin_cast(p, c);
+                        // A spell, not a card: an adventurer card may be
+                        // cast as its Adventure (an instant or sorcery
+                        // spell), and which is the player's choice (CR
+                        // 715.3, 601.2a; ruling d26ce62d).
+                        let front = self.card_matches(filter, c, &ctx) && self.can_cast_now(p, c);
+                        let face = self.gy_spell_face_now(p, c, filter, &ctx);
+                        match (front, face) {
+                            (true, Some(_)) => self.agenda.push(Task::ChooseFace { p, card: c, mask: crate::decision::FACE_CAST | crate::decision::OTHER_CAST }),
+                            (false, Some(d)) => self.begin_cast_face(p, c, Some(d)),
+                            _ => self.begin_cast(p, c),
+                        }
                         Flow::Suspend
                     }
                     Some(_) => Flow::Next,
                     None => {
-                        let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
                         let cands: Vec<CardIdx> = self
                             .graveyard_cards(p)
-                            .filter(|&c| self.card_matches(filter, c, &ctx) && self.can_cast_now(p, c))
+                            .filter(|&c| (self.card_matches(filter, c, &ctx) && self.can_cast_now(p, c)) || self.gy_spell_face_now(p, c, filter, &ctx).is_some())
                             .collect();
                         if cands.is_empty() {
                             return Flow::Next;
@@ -319,6 +338,19 @@ impl Game {
             }
             other => unreachable!("not a tail-2 op: {other:?}"),
         }
+    }
+
+    /// The other face (an Adventure, an MDFC's spell face) graveyard card
+    /// `c` may be cast with now as a spell matching `filter` (CR 715.3a,
+    /// 712.11c: only that face is evaluated), if any.
+    fn gy_spell_face_now(&self, p: PlayerId, c: CardIdx, filter: &crate::db::Filter, ctx: &crate::cast::Ctx) -> Option<crate::ids::DefId> {
+        let face = self.other_face(c)?;
+        if self.db.def(face).is(types::LAND) {
+            return None;
+        }
+        let mut g = self.clone();
+        g.objs[c.i()].def = face;
+        (g.card_matches(filter, c, ctx) && g.can_cast_now(p, c)).then_some(face)
     }
 
     /// Cascade (CR 702.85a). `f.i`: 0 = exile and offer the cast; 1 = the

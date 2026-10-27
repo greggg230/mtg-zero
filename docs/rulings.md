@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1226 | 977 |
 | class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 862 | 685 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 574 | 494 |
+| a, tested (passing) | 912 | 725 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 624 | 534 |
 | a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
 | a, deferred | 0 | 0 |
-| a, untested | 364 | 292 |
+| a, untested | 314 | 252 |
 
-Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 53/123, copies 95/96, other 47/95, dfc 25/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 53/123, copies 95/96, other 47/95, dfc 65/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -86,16 +86,16 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `0c460f68` | a | other | a multi-typed permanent may be chosen under any of its types; choosing it twice adds nothing | untested |
 | `3a1f2d79` | a | dfc | a transforming DFC enters front-up by default unless told to enter/cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
-| `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | untested |
-| `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | untested |
+| `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8`; `rulings_faces2::a_sacrificed_reflection_counts_fables_mana_value_and_is_fable_in_the_graveyard_cr_712_8e` |
 | `7d9c06e2` | a | other | if a player has none of a referenced permanent type, they still choose from what they do control | untested |
 | `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | untested |
 | `47eed49e` | a | triggers | if multiple tokens are made at once, a reflexive trigger fires once per token made that way | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 | `75da186b` | a | dfc | if a DFC creature transforms via another effect, the back face walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `95347d78` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `18fa2a99` | a | zones | lands can't be chosen or sacrificed by a permanent-type-based effect even if they'd qualify | untested |
-| `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | untested |
-| `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
+| `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `b0b5c8d4` | b | MP | opponents choose sacrifice targets in turn order, each knowing earlier choices, then sac simultaneously [part 3, was a/combat: the order in which several opponents choose] | multiplayer |
 | `e5b123ca` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | `rulings_walkers2::a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_606_3` |
 | `9e9b6606` | a | triggers | a reflexive trigger's target is chosen when put on the stack, not when the activated ability triggers it | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
@@ -211,7 +211,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `43d5100f` | a | dfc | an exiled MDFC's land back face can still be played as a land by its owner | untested |
+| `43d5100f` | a | dfc | an exiled MDFC's land back face can still be played as a land by its owner | `rulings_faces2::spellbinders_exiled_mdfc_may_be_played_as_its_land_by_its_owner_cr_712_11b` |
 | `f0d7b0c7` | a | zones | playing a card let loose from exile still follows normal timing restrictions | untested |
 
 ### Enduring Innocence
@@ -297,9 +297,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `559c03e3` | c | NR | a modal DFC can never be transformed; ignore any instruction telling it to [part 3, was a/dfc: no cube effect tries to transform an MDFC or put one onto the battlefield transformed (the rule changed since; Norman Osborn's own transform is tested)] | not reachable with the cube's cards |
 | `e5e7f31f` | a | dfc | choosing among a group of cards to play/cast lets you pick either face of a qualifying MDFC | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
 | `62d54d14` | a | dfc | 'play' a specific MDFC lets you choose either face; 'cast' it specifically forbids playing it as a land | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
-| `ab202931` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | untested |
-| `23bfbbce` | a | dfc | an MDFC's mana value is the up face's on stack/battlefield, always the front face elsewhere | untested |
-| `24e3281b` | a | dfc | legality of playing an MDFC considers only the face being played, ignoring the other | untested |
+| `ab202931` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | `rulings_faces2::putting_an_mdfc_onto_the_battlefield_sees_only_its_front_face_cr_712_14` |
+| `23bfbbce` | a | dfc | an MDFC's mana value is the up face's on stack/battlefield, always the front face elsewhere | `rulings_faces2::an_mdfcs_mana_value_is_the_up_faces_in_play_and_the_fronts_elsewhere_cr_712_8f` |
+| `24e3281b` | a | dfc | legality of playing an MDFC considers only the face being played, ignoring the other | `rulings_faces2::playing_an_mdfc_checks_only_the_face_being_played_cr_712_11` |
 
 ### Solitude
 
@@ -439,7 +439,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `f1bf85a9` | a | dfc | exiling zero creatures still incubates for 0, making a token with no counters that can still transform | untested |
+| `f1bf85a9` | a | dfc | exiling zero creatures still incubates for 0, making a token with no counters that can still transform | `rulings_faces2::sunfall_with_no_creatures_incubates_zero_and_the_token_can_still_transform_cr_701_53a` |
 
 ### Portable Hole
 
@@ -467,7 +467,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `bca63806` | b | DEF | discarding the required card is itself part of the activation cost [part 3, was a/mana: the discard is part of the channel cost; a definition] | a definition, no behaviour of its own |
 | `8ba35794` | a | triggers | if the source leaves before its exile ability resolves, the target is never exiled | `cards_m7b_tests_edges::cr_610_3c_touch_the_spirit_realm_gone_before_its_trigger_resolves_exiles_nothing` |
 | `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | `rulings_protection2::luminarch_may_target_itself_and_channel_isnt_offered_without_a_target_cr_115_1_602_1` |
-| `d07fb867` | a | dfc | a DFC exiled and later returned to the battlefield by this effect comes back front-face up | untested |
+| `d07fb867` | a | dfc | a DFC exiled and later returned to the battlefield by this effect comes back front-face up | `rulings_faces2::a_reflection_exiled_by_touch_the_spirit_realms_channel_returns_as_fable_cr_712_14` |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
 
 ### Leyline Binding
@@ -486,14 +486,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3a1f2d79` | a | dfc | a transforming DFC enters front-up by default unless told to enter/cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
-| `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | untested |
-| `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | untested |
+| `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8`; `rulings_faces2::a_sacrificed_reflection_counts_fables_mana_value_and_is_fable_in_the_graveyard_cr_712_8e` |
 | `3e825920` | c | NR | multiple hand-size-affecting effects apply in timestamp order [part 3, was a/other: no other cube effect changes a maximum hand size] | not reachable with the cube's cards |
 | `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | untested |
 | `3888033e` | a | dfc | if forced to transform via another effect, the resulting walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `95347d78` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
-| `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | untested |
-| `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
+| `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `fee44c31` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | `rulings_walkers2::a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_606_3` |
 
 ### Bilbo, Thief in the Night
@@ -502,7 +502,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `5d366152` | a | mana | a cost reduction that targets generic mana can't reduce colored mana requirements | `cards_m7c_tail2::bilbo_reduces_spells_cast_from_outside_the_hand_cr601_2f` |
 | `c220d94b` | a | mana | total cost = base/alt cost + increases, then reductions; mana value is unaffected by total cost paid | untested |
-| `d26ce62d` | a | dfc | casting an Adventure from the graveyard: if it resolves you can cast the permanent later, if not you cant | untested |
+| `d26ce62d` | a | dfc | casting an Adventure from the graveyard: if it resolves you can cast the permanent later, if not you cant | `rulings_faces2::bilbo_casts_an_adventure_from_the_graveyard_resolved_it_may_be_cast_later_countered_not_cr_715_4` |
 
 ### Faerie Mastermind
 
@@ -516,19 +516,19 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `d8700ef8` | a | dfc | a DFC that enters via its front face's own ability still enters with loyalty counters as normal | `cards_m7b_faces::jace_loots_and_flips_with_five_cards_in_the_graveyard_cr_712_14a` |
 | `7d989429` | a | dfc | a transforming DFC enters front-up by default unless told to enter/cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
-| `f8573515` | a | dfc | only the currently-up face's characteristics apply on the battlefield; elsewhere only the front face matters | untested |
+| `f8573515` | a | dfc | only the currently-up face's characteristics apply on the battlefield; elsewhere only the front face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `5653e6a4` | a | facedown | a manifested DFC is a face-down vanilla 2/2, cant transform face down, and flips up by paying its fronts mana cost | `rulings_facedown::a_manifested_double_faced_card_turns_face_up_front_face_up_cr_701_40e` |
 | `95b53341` | a | stack | casting a card from exile via a transform-back ability still follows normal timing rules for its card type | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
 | `703251e7` | a | zones | if an exile-and-cast-later permission isn't used that turn, the card just stays in exile | untested |
 | `b83c13f9` | a | dfc | if forced to transform via another effect, the resulting walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `527934db` | a | triggers | this graveyard-size check fires right after a discard, not whenever the graveyard later reaches that size | `rulings_walkers::jace_transformed_in_the_upkeep_activates_loyalty_only_in_a_main_phase_cr_606_3` |
-| `29c3ea17` | a | dfc | a transforming DFC's planeswalker back face can't be cast directly | untested |
+| `29c3ea17` | a | dfc | a transforming DFC's planeswalker back face can't be cast directly | `rulings_faces2::jaces_back_face_cant_be_cast_and_two_jaces_one_per_face_coexist_cr_712_11a` |
 | `74e8317e` | a | zones | exile-on-cast-from-GY only applies if cast from GY and it returns there; a hidden-zone detour loses track of it | `cards_m7b_faces::jace_minus_three_spell_countered_to_hand_is_not_exiled` |
-| `1155292d` | a | dfc | the mana value of a DFC not on the battlefield is its front face's mana value | untested |
+| `1155292d` | a | dfc | the mana value of a DFC not on the battlefield is its front face's mana value | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `14835878` | a | walkers | a planeswalker's loyalty ability can be activated the turn it enters, but only at sorcery speed | `rulings_walkers::jace_transformed_in_the_upkeep_activates_loyalty_only_in_a_main_phase_cr_606_3` |
 | `c416be01` | c | NR | discarding a card to satisfy a graveyard-size-check ability can't itself count toward that same check [part 3, was a/triggers: no cube card has madness] | not reachable with the cube's cards |
 | `7621bfed` | a | dfc | a DFC's back face has no mana cost; its mana value still equals the front face's, and its color indicator sets its color | `cards_m7b_faces::jace_loots_and_flips_with_five_cards_in_the_graveyard_cr_712_14a` |
-| `004fe294` | a | dfc | you can have two objects of the same DFC on the battlefield at once, one on each face | untested |
+| `004fe294` | a | dfc | you can have two objects of the same DFC on the battlefield at once, one on each face | `rulings_faces2::jaces_back_face_cant_be_cast_and_two_jaces_one_per_face_coexist_cr_712_11a` |
 
 ### Malcolm, Alluring Scoundrel
 
@@ -546,20 +546,20 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `56f9c956` | a | dfc | a modal DFC can be transformed if its other face has a permanent type; otherwise the instruction fails | `cards_m7b_faces4::norman_osborn_transforms_into_green_goblin_and_green_goblin_is_castable` |
 | `7c5ccf73` | b | PRINT | DFC face icons (triangle vs double triangle) are print/frame markers | printing, wording, reminder text |
-| `eea821be` | a | dfc | only the currently-up face's characteristics apply while on the stack or battlefield | untested |
+| `eea821be` | a | dfc | only the currently-up face's characteristics apply while on the stack or battlefield | `rulings_faces2::an_mdfcs_mana_value_is_the_up_faces_in_play_and_the_fronts_elsewhere_cr_712_8f` |
 | `7a46be96` | b | DEF | a cost reducer doesnt grant graveyard-casting permission; it only cuts cost once another effect allows it [part 3, was a/mana: a cost reduction grants no permission to cast; a definition] | a definition, no behaviour of its own |
 | `7536ad72` | a | mana | a cost reduction tied to a specific color only reduces that spell's generic mana component | `cards_m7b_faces4::green_goblin_makes_spells_cast_from_your_graveyard_cheaper` |
 | `8eb07966` | a | triggers | a named creature still connives via its ability even if it has since left the battlefield | `rulings_triggers3::abilities_whose_source_left_use_its_last_known_values_cr_608_2h` |
 | `b0d988d8` | a | dfc | choosing among a group of cards to play/cast lets you pick either face of a qualifying modal DFC | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
-| `8bd16ad8` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | untested |
+| `8bd16ad8` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | `rulings_faces2::putting_an_mdfc_onto_the_battlefield_sees_only_its_front_face_cr_712_14` |
 | `6d8a93b1` | c | NR | choosing a card name can be either face's name of a modal DFC; a linked ability then considers only that chosen name [part 3, was a/dfc: the cube's naming cards (Demonic Consultation, Tamiyo, Collector of Tales) look at cards outside the stack, where another face's name never matches; naming it is naming a card that isn't there (tested)] | not reachable with the cube's cards |
 | `12cec5e6` | a | other | if no card can be discarded (empty hand, can't draw), the conniving creature gets no counter | untested |
 | `78c4509d` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `b5fe5fd5` | a | stack | once a connive ability starts resolving, it's atomic; no responses until it's done | `rulings_stack3::explore_connive_and_cori_steels_attach_choice_happen_within_one_resolution_cr_608_2` |
 | `6fb8d9de` | b | PRINT | reminder text referencing the other DFC face has no rules effect | printing, wording, reminder text |
-| `9671ede4` | a | dfc | a modal DFC's mana value depends on which face is being considered, unlike a transforming DFC | untested |
-| `819a55be` | a | dfc | legality of playing a modal DFC considers only the characteristics of the face being played | untested |
-| `02e23d1b` | a | dfc | while not on the stack or battlefield, a modal DFC's front face is the only one that matters | untested |
+| `9671ede4` | a | dfc | a modal DFC's mana value depends on which face is being considered, unlike a transforming DFC | `rulings_faces2::an_mdfcs_mana_value_is_the_up_faces_in_play_and_the_fronts_elsewhere_cr_712_8f` |
+| `819a55be` | a | dfc | legality of playing a modal DFC considers only the characteristics of the face being played | `rulings_faces2::playing_an_mdfc_checks_only_the_face_being_played_cr_712_11` |
+| `02e23d1b` | a | dfc | while not on the stack or battlefield, a modal DFC's front face is the only one that matters | `rulings_faces2::an_mdfcs_mana_value_is_the_up_faces_in_play_and_the_fronts_elsewhere_cr_712_8f` |
 
 ### Snapcaster Mage
 
@@ -642,17 +642,17 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `266aee1f` | a | dfc | an Adventure card uses only its base characteristics in every zone except while on the stack as the Adventure spell | untested |
+| `266aee1f` | a | dfc | an Adventure card uses only its base characteristics in every zone except while on the stack as the Adventure spell | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
 | `22d0dd32` | c | NR | 'has an Adventure' means a card with that alternative characteristic set, even if unused or never cast that way [part 3, was a/dfc: no cube card refers to a card that has an Adventure] | not reachable with the cube's cards |
 | `5d19b09e` | a | mana | casting a card as an Adventure isn't itself an alternative cost; alt-cost-granting effects may still apply to it | untested |
 | `c5e2c49b` | a | dfc | an Adventure spell is exiled, not binned, on resolving so you can cast the permanent later; a fizzled one isnt exiled | `rulings_faces::a_countered_adventure_goes_to_the_graveyard_without_the_permission_cr_715_4` |
 | `13492141` | a | dfc | a card reaching exile any other way doesn't grant permission to play it with its Adventure permanent characteristics | `rulings_faces::a_countered_adventure_goes_to_the_graveyard_without_the_permission_cr_715_4` |
-| `9a1260e0` | a | dfc | a copy of an Adventure spell is exiled on resolving and then ceases to exist, so it can't be cast as the permanent | untested |
+| `9a1260e0` | a | dfc | a copy of an Adventure spell is exiled on resolving and then ceases to exist, so it can't be cast as the permanent | `rulings_faces2::a_copy_of_an_adventure_ceases_to_exist_and_only_the_card_may_be_cast_later_cr_715_4` |
 | `699f170c` | c | NR | choosing a card name can select a modal/Adventure card's alternative name [part 3, was a/dfc: the cube's naming cards look at cards outside the stack, where an Adventure's name never matches; naming it is naming a card that isn't there] | not reachable with the cube's cards |
 | `93a8a393` | c | NR | an effect looking for a card 'that has an Adventure' won't find one currently on the stack as the Adventure spell [part 3, was a/dfc: no cube card refers to a card that has an Adventure] | not reachable with the cube's cards |
 | `ca262086` | a | dfc | a copy of an object with an Adventure also has the Adventure, but loses that ability to cast it once it changes zones | `cards_m7b_copies::a_copy_leaving_the_battlefield_is_its_card_again_cr_400_7` |
-| `4b8b633b` | a | dfc | casting a card as its Adventure checks legality using only the Adventure's alternative characteristics | untested |
-| `ee323737` | a | dfc | playing a card as its Adventure uses only the alternative characteristics; it reverts to normal once it leaves the stack | untested |
+| `4b8b633b` | a | dfc | casting a card as its Adventure checks legality using only the Adventure's alternative characteristics | `rulings_faces2::an_adventure_needs_its_own_legal_target_to_be_cast_cr_715_3a` |
+| `ee323737` | a | dfc | playing a card as its Adventure uses only the alternative characteristics; it reverts to normal once it leaves the stack | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
 | `5b5ff3d6` | a | zones | playing a card from exile (e.g. an Adventure permanent) still follows its normal timing restrictions | untested |
 
 ### Emry, Lurker of the Loch
@@ -948,9 +948,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `7466b29b` | a | stack | returning a spell to hand removes it from the stack without countering it, working even on uncounterable spells | `rulings_faces::sink_into_stupor_returns_a_spell_that_cant_be_countered_cr_101_2` |
 | `e5e7f31f` | a | dfc | choosing among a group of cards to play/cast lets you pick either face of a qualifying MDFC | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
 | `62d54d14` | a | dfc | 'play' a specific MDFC lets you choose either face; 'cast' it specifically forbids playing it as a land | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
-| `ab202931` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | untested |
-| `23bfbbce` | a | dfc | an MDFC's mana value is the up face's on stack/battlefield, always the front face elsewhere | untested |
-| `24e3281b` | a | dfc | legality of playing an MDFC considers only the face being played, ignoring the other | untested |
+| `ab202931` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | `rulings_faces2::putting_an_mdfc_onto_the_battlefield_sees_only_its_front_face_cr_712_14` |
+| `23bfbbce` | a | dfc | an MDFC's mana value is the up face's on stack/battlefield, always the front face elsewhere | `rulings_faces2::an_mdfcs_mana_value_is_the_up_faces_in_play_and_the_fronts_elsewhere_cr_712_8f` |
+| `24e3281b` | a | dfc | legality of playing an MDFC considers only the face being played, ignoring the other | `rulings_faces2::playing_an_mdfc_checks_only_the_face_being_played_cr_712_11` |
 
 ### Force of Will
 
@@ -1084,13 +1084,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `3d923737` | a | dfc | a transforming DFC enters front-up by default unless told to enter/cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
 | `efbce0fd` | a | copies | a token copy of a DFC is itself double-faced, matching the source's current face, and can still transform | untested |
-| `ec269542` | a | dfc | only the currently-up face's characteristics apply on the battlefield; the other face is ignored | untested |
-| `165eb81a` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | untested |
+| `ec269542` | a | dfc | only the currently-up face's characteristics apply on the battlefield; the other face is ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `165eb81a` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `7f9205e7` | a | triggers | if this dies exactly as it deals damage, its death trigger fires, but LKI means it wont untap or transform anymore | `rulings_triggers3::reanimates_life_loss_comes_first_and_cecil_dying_as_it_deals_damage_still_triggers_cr_603_10_704_5a` |
 | `bae0f4a4` | c | NR | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone [part 3, was a/zones: Cecil transforms in place; no cube effect puts a single-faced copy of it onto the battlefield transformed] | not reachable with the cube's cards |
 | `05383bc0` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
-| `4c2dcef3` | a | dfc | a DFC's back face usually has a color indicator that defines its color | untested |
-| `bb602230` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
+| `4c2dcef3` | a | dfc | a DFC's back face usually has a color indicator that defines its color | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `bb602230` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 
 ### Caustic Bronco
 
@@ -1529,15 +1529,15 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `442dc321` | a | dfc | an Adventure card uses only its base characteristics in every zone except while cast as the Adventure spell on the stack | untested |
+| `442dc321` | a | dfc | an Adventure card uses only its base characteristics in every zone except while cast as the Adventure spell on the stack | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
 | `5d19b09e` | a | mana | casting a card as an Adventure isn't itself an alternative cost; alt-cost-granting effects may still apply to it | untested |
 | `c29e2fc3` | a | dfc | an Adventure spell is exiled, not binned, on resolving so you can cast the permanent later; a fizzled one isnt exiled | `rulings_faces::a_countered_adventure_goes_to_the_graveyard_without_the_permission_cr_715_4` |
-| `571ea1ea` | a | dfc | a card reaching exile any other way doesn't grant permission to cast it as its Adventure permanent | untested |
-| `5d8546ba` | a | dfc | a copy of an Adventure spell is exiled on resolving and then ceases to exist, so the copy can't be cast as the permanent | untested |
+| `571ea1ea` | a | dfc | a card reaching exile any other way doesn't grant permission to cast it as its Adventure permanent | `rulings_faces2::an_adventurer_card_exiled_another_way_gives_no_permission_cr_715_4` |
+| `5d8546ba` | a | dfc | a copy of an Adventure spell is exiled on resolving and then ceases to exist, so the copy can't be cast as the permanent | `rulings_faces2::a_copy_of_an_adventure_ceases_to_exist_and_only_the_card_may_be_cast_later_cr_715_4` |
 | `699f170c` | c | NR | choosing a card name can select a modal/Adventure card's alternative name [part 3, was a/dfc: the cube's naming cards look at cards outside the stack, where an Adventure's name never matches; naming it is naming a card that isn't there] | not reachable with the cube's cards |
 | `ca262086` | a | dfc | a copy of an object with an Adventure also has the Adventure, but loses that ability to cast it once it changes zones | `cards_m7b_copies::a_copy_leaving_the_battlefield_is_its_card_again_cr_400_7` |
-| `abf4aaa4` | a | dfc | casting a card as its Adventure checks legality using only the Adventure's alternative characteristics | untested |
-| `99a330f8` | a | dfc | while cast as its Adventure, a card uses only the alternative characteristics; it reverts once it leaves the stack | untested |
+| `abf4aaa4` | a | dfc | casting a card as its Adventure checks legality using only the Adventure's alternative characteristics | `rulings_faces2::an_adventure_needs_its_own_legal_target_to_be_cast_cr_715_3a` |
+| `99a330f8` | a | dfc | while cast as its Adventure, a card uses only the alternative characteristics; it reverts once it leaves the stack | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
 | `7ddcc330` | a | zones | casting the permanent later from exile still follows its normal timing restrictions | untested |
 
 ### Fear of Missing Out
@@ -1597,7 +1597,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `08172cc2` | a | triggers | this cast-permission keeps applying on later turns if the source leaves, as long as its condition is met again | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `69d95378` | a | combat | when a creature attacks a planeswalker, that planeswalker's controller counts as the defending player | untested |
 | `bcb139f0` | a | triggers | a comparative trigger condition is checked at trigger time and again at resolution; in-between doesnt matter | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
-| `dca8fc68` | a | dfc | stealing and casting an Adventure card this way lets you, not its owner, cast the permanent later | untested |
+| `dca8fc68` | a | dfc | stealing and casting an Adventure card this way lets you, not its owner, cast the permanent later | `rulings_faces2::an_adventure_cast_with_robber_of_the_rich_lets_robbers_controller_cast_the_creature_cr_715_4` |
 | `03c107f1` | b | MP | multiplayer: a player leaving the game and the cards/permanents they own leaving with them | multiplayer |
 | `0614c7a7` | a | zones | letting you cast an exiled card doesn't change its normal timing restrictions | untested |
 | `c92140df` | a | zones | a card exiled by this effect is exiled face up | untested |
@@ -1611,7 +1611,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `931f5f75` | a | combat | a creature entering already attacking was never declared an attacker, so its boast ability is unusable that turn | untested |
 | `909ac1ac` | a | combat | a boast-style ability can be activated only once per turn even with extra combat phases and multiple attacks | untested |
 | `d980af0c` | c | NR | gaining control of an attacker after it attacked still lets you use its unused boast-style ability that turn [part 3, was a/combat: no cube effect gains control of an attacking creature during the opponent's turn] | not reachable with the cube's cards |
-| `22f30094` | a | dfc | a DFC's back face has no mana cost; its mana value still equals the front face's | untested |
+| `22f30094` | a | dfc | a DFC's back face has no mana cost; its mana value still equals the front face's | `rulings_faces2::a_sacrificed_reflection_counts_fables_mana_value_and_is_fable_in_the_graveyard_cr_712_8e` |
 
 ### Death-Greeter's Champion
 
@@ -1872,9 +1872,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `47775ed7` | a | dfc | putting a DFC onto the battlefield uses its front face; if that face cant legally enter, it doesnt enter | `interactions_zones::a_flickered_mdfc_land_face_returns_front_face_up_and_a_sorcery_cant_enter_cr_712_14_307_4` |
 | `7afb4bdb` | a | stack | an illegal target just gets no damage; the original division still applies fully to the remaining legal one | `rulings_stack2::shatterskull_smashing_an_illegal_target_gets_nothing_the_other_its_share_cr_608_2b` |
 | `78c4509d` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
-| `a3b82184` | a | dfc | a modal DFCs mana value depends on which face is considered, unlike a transforming DFC | untested |
+| `a3b82184` | a | dfc | a modal DFCs mana value depends on which face is considered, unlike a transforming DFC | `rulings_faces2::an_mdfcs_mana_value_is_the_up_faces_in_play_and_the_fronts_elsewhere_cr_712_8f` |
 | `3429f2bd` | b | PRINT | modal DFC face icons (single vs double triangle) are print/frame markers | printing, wording, reminder text |
-| `819a55be` | a | dfc | legality of playing a modal DFC considers only the characteristics of the face being played | untested |
+| `819a55be` | a | dfc | legality of playing a modal DFC considers only the characteristics of the face being played | `rulings_faces2::playing_an_mdfc_checks_only_the_face_being_played_cr_712_11` |
 | `f85041f1` | a | stack | damage for this spell is divided as it's cast, not at resolution, with each of two chosen targets getting at least 1 | `rulings_stack2::shatterskull_smashing_an_illegal_target_gets_nothing_the_other_its_share_cr_608_2b` |
 
 ### Suplex
@@ -1925,16 +1925,16 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `c8da9e36` | a | dfc | a transforming DFC enters front-up by default unless told to enter or be cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
 | `7409fd1a` | a | triggers | ETB and enters-with abilities of a copied creature trigger normally for the token it becomes | `rulings_copies2::reflections_token_has_the_copied_creatures_enter_ability_cr_707_4_603_6a` |
-| `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | untested |
-| `4d5c3fbb` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | untested |
+| `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `4d5c3fbb` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `d1d85157` | a | replacement | if a doubling effect makes this create multiple tokens, every one gets sacrificed by its end-step clause | `rulings_replacement2::elspeth_doubles_reflections_token_and_each_is_sacrificed_at_the_end_step_cr_614_1a_603_7` |
 | `3f6b90f2` | a | copies | copying a token that isn't itself copying something uses that token's original stated characteristics | `rulings_copies2::reflection_copying_a_token_uses_what_made_it_cr_707_2_111_4` |
 | `b30727cf` | a | copies | copying something that's itself copying another thing makes the new token use that other thing's copiable values | `rulings_copies2::reflection_copying_a_metamorph_copying_a_bear_makes_that_bear_cr_707_9b` |
 | `6c4f38f7` | a | copies | copying the created token copies the underlying card plus haste, but not its forced end-step sacrifice | `rulings_faces::a_copy_of_the_reflection_token_has_haste_and_isnt_sacrificed_cr_707_9b` |
 | `602bf769` | a | mana | a copied creature with X in its mana cost treats X as 0 | `rulings_faces::reflection_of_kiki_jiki_copying_walking_ballista_has_x_zero_cr_107_3m` |
 | `d1aaefa0` | c | NR | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its previous zone [part 3, was a/zones: Fable is a Saga, which no cube copy effect can copy, so no single-faced copy of it reaches chapter III] | not reachable with the cube's cards |
-| `8dff2c25` | a | dfc | a transforming DFC's back face usually has a color indicator that defines its color | untested |
-| `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | untested |
+| `8dff2c25` | a | dfc | a transforming DFC's back face usually has a color indicator that defines its color | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
+| `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `40a8e390` | a | copies | copies only whats printed plus haste; skips tap state, counters, attachments, and non-copy changes | `rulings_copies2::reflection_copies_neither_counters_nor_attachments_nor_tapped_state_cr_707_2` |
 
 ### Sneak Attack
@@ -2073,7 +2073,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `912d01f2` | a | triggers | a creature can't become prepared a second time simultaneously; a redundant trigger doesn't create a second exiled copy | `rulings_copies2::emeritus_already_prepared_isnt_prepared_again_cr_722_3a` |
 | `513b768f` | c | NR | a creature without an associated alternate spell can never become 'prepared' [part 3, was a/other: Emeritus of Abundance is the cube's only card with a prepare spell] | not reachable with the cube's cards |
-| `1a88f316` | a | dfc | a card with this alternate spell is just its base creature card except while cast as that alternate spell | untested |
+| `1a88f316` | a | dfc | a card with this alternate spell is just its base creature card except while cast as that alternate spell | `rulings_faces2::a_preparation_card_is_a_creature_card_everywhere_and_casts_only_as_one_cr_722_1` |
 | `4afe6989` | a | dfc | becoming prepared exiles a copy of the alternate spell, castable while prepared; casting it ends being prepared | `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
 | `30549a2b` | a | copies | being prepared isnt copiable, so a copy of a prepared creature isnt prepared but keeps the alt characteristics | `rulings_copies2::being_prepared_isnt_copiable_cr_722_2b_707_2` |
 | `a5afe2a8` | c | NR | casting the exiled alternate-spell copy isnt an alt cost itself, so alt-cost effects may still apply [part 3, was a/mana: no cube effect offers an alternative cost for a prepare copy cast from exile] | not reachable with the cube's cards |
@@ -2085,7 +2085,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `c6772882` | c | NR | an unprepare effect ends being prepared and voids the exiled alternate-spell copy; a no-op if not prepared [part 3, was a/replacement: no cube effect makes a creature unprepared (only casting the prepared spell, tested)] | not reachable with the cube's cards |
 | `8c23b69e` | c | NR | choosing a card name may select this kind of alternate spell's name [part 3, was a/dfc: the cube's naming cards look at cards outside the stack, where a prepare spell's name never matches; naming it is naming a card that isn't there] | not reachable with the cube's cards |
 | `341b5cd9` | a | other | only the current controller of a prepared creature may cast its exiled alt-spell copy, regardless of owner | `rulings_copies2::only_the_prepared_creatures_controller_may_cast_its_copy_cr_722_3c` |
-| `81739185` | a | dfc | a card with this kind of alternate spell can only be cast with its base characteristics, unless it's prepared | untested |
+| `81739185` | a | dfc | a card with this kind of alternate spell can only be cast with its base characteristics, unless it's prepared | `rulings_faces2::a_preparation_card_is_a_creature_card_everywhere_and_casts_only_as_one_cr_722_1` |
 | `94077065` | a | copies | copies in non-stack zones normally cease to exist via SBA, but an exiled alternate-spell copy is an exception | `cards_m7b_copies2::emeritus_of_abundance_enters_prepared_and_casts_its_regrowth_copy_cr_722_3` |
 
 ### Endurance
