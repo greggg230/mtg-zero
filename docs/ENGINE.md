@@ -1198,12 +1198,12 @@ they isolate one keyword or trigger each.
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
-| `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b); sideboarded decks are legal and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
-| `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes holding every card the viewer knows (in games and between games); the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
+| `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b; decks of 5-7 cards and of exactly 6, `PASS` only at a legal size); a pool's deck is sideboarded to exactly 40 cards (section 42: every 40-card deck of generated, evaluation and M8a pools by its canonical path, the two extremes, no 39- or 41-card deck, `PASS` only at 40, the heuristic's answers legal from any point); a spec decklist of another size keeps its size; sideboarded decks are legal (40 cards) and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
+| `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge, waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
 | `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c). Part 3 (section 39.5): the last two cells, a token copy of a nightbound permanent (`interactions_copies.rs`: 707.8a, 702.145f) and True-Name Nemesis's chosen player after Oko's exchange (`interactions_zones.rs`: 702.16j, 110.2) |
 | `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5) |
-| `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (40-60 cards, at most 31 of a basic, deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), both deck bounds reachable, the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`), measurements (`--ignored`: `measure`); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v1` |
+| `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), both extremes reachable (40 basic lands, 31 of a type; 40 pool cards with the rest of the pool forced out and every count forced to 0; a card into a full deck an error), every 40-card deck of a two-card pool reachable exactly once (487,676 decks), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`), measurements (`--ignored`: `measure`); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v1` |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
@@ -5205,7 +5205,7 @@ existing presets, tests and digests) or `"bo3"`.
 | who chooses who takes the first turn | CR 103.1: in the first game of a match the players may use any agreed method; in a match of several games the loser of the previous game chooses; if the previous game was a draw, the player who made the choice in it chooses again | game 1: `GameSpec.chooser` = the spec's `chooser` or a player chosen at random (M8a); a later game: `Some(loser)`, after a draw `Some(previous chooser)` |
 | when the match ends | the user's decision (DESIGN.md 0): a player has won two games, or three games have been played; a drawn game counts as a game; a match can be a draw | `MatchState::end_game` after every game; `wins`, `draws`, `results` (per game: 1 + winner, 3 = drawn) |
 | the result | | 1 / 0 to the player with more game wins, 0.5 each on equal wins (1-1-1, 0-0 with three draws, 1-0 with two draws is a win) |
-| between games | CR 100.4 (the sideboard), 100.4b (limited: the rest of the pool), 100.2b (a limited deck has at least 40 cards; any number of basic lands) | sideboarding (36.2), then the next game with the chosen decks and the rest of the pools as sideboards, chooser as above |
+| between games | CR 100.4 (the sideboard), 100.4b (limited: the rest of the pool), 100.2b (a limited deck has at least 40 cards; any number of basic lands); a deck built from a pool is exactly 40 cards (the user's format restriction, section 42) | sideboarding (36.2), then the next game with the chosen decks and the rest of the pools as sideboards, chooser as above |
 
 The Magic Tournament Rules play on after a drawn game until a player has two wins or the round's
 time runs out (then the player with more game wins wins); stopping after three games is the
@@ -5229,7 +5229,8 @@ number). A deck is a count per entry. Players sideboard one after the other, the
 chooser first (the first one's choice hidden from the second, and resampled by the second's
 `determinize`: 36.11); each player's decisions:
 
-* `Sideboard`: `PASS` = done (offered when the deck has `min_deck..=max_deck` cards), or `LIBRARY`
+* `Sideboard`: `PASS` = done (offered when the deck has `min_deck..=max_deck` cards: exactly 40
+  for a pool's deck, section 42), or `LIBRARY`
   + k = change entry k, for k after the last entry changed (increasing list order). A single card
   (one copy in the pool) goes in or out at once; a basic land or a card with several copies is
   followed by
@@ -5239,16 +5240,19 @@ An option is offered only when a legal deck stays reachable (the entries after i
 their counts or take any count up to their copies), so no sequence dead-ends. **Every legal deck is
 reachable in exactly one way**: the entries it changes, in list order, with their new counts, then
 `PASS` (an entry is changed at most once, to a different count). Keeping the deck is one decision;
-a swap of two cards three; a basic land count two. A sideboarding is at most 1 + (single entries)
-+ 2 x (other entries) decisions (k increases every time), and a random player makes ~7 per
-sideboarding (fuzzing, 36.8). Bounds: a deck has at least 40 cards (100.2b; or the first deck's
-size when that is smaller: spec decklists in tests) and at most `MAX_DECK` = 60 (or the first
-deck's size when larger; no rule caps a deck: an engine bound so the decisions stay finite), a
-count at most 31 (`NUMBER`'s range); a pool list has at most 64 entries (`LIBRARY`'s range: 59
-different cards and the basics; a bigger pool is an error in best-of-three). Test:
-`cr_100_2b_sideboarding_reaches_every_legal_deck_exactly_once` searches every decision sequence
-of a small list (three cards, one with two copies, two basics; decks of 5..7) and finds each of
-the 180 legal decks once, from three starting decks.
+a swap of two single cards three; a card for basic lands three or four; basic lands of one type
+for another four. A sideboarding is at most 1 + (single entries) + 2 x (other entries) decisions
+(k increases every time), and a random player made ~7 per sideboarding with decks of 40-60 cards
+(fuzzing, 36.8), ~7.6 at exactly 40 (section 42). Bounds (section 42, 2026-10-27): a deck keeps
+the first deck's size, `MatchPool::min_deck` = `max_deck`: exactly 40 for every deck built from a
+pool (the deckbuilder's, M8a's generated decks, a drafted one), a spec decklist's own size in
+tests (until then: at least 40, 100.2b, or the first deck's size when smaller, and at most 60 or
+the first deck's size when larger); a count at most 31 (`NUMBER`'s range); a pool list has at
+most 64 entries (`LIBRARY`'s range: 59 different cards and the basics; a bigger pool is an error
+in best-of-three). Test: `cr_100_2b_sideboarding_reaches_every_legal_deck_exactly_once` searches
+every decision sequence of a small list (three cards, one with two copies, two basics) and finds
+each legal deck once, from three starting decks: the 180 decks of 5..7 cards, and with bounds
+6..=6 the 60 decks of exactly 6.
 
 Both decks chosen, the next game begins (`Game::with_sideboards`: the decks, the pools' other
 cards as sideboards, `chooser`). The companion is revealed from the new sideboard if the new deck
@@ -5302,7 +5306,8 @@ one deck in four for a companion. Team drafting (M6) replaces generated pools.
 ### 36.5 Bots
 
 The heuristic keeps its deck (`bots::sideboard`: `PASS`, always legal at a player's first
-sideboarding decision since the last game's deck is legal; the first legal option otherwise),
+sideboarding decision since the last game's deck is legal, 40 cards; the first legal option
+otherwise, which ends at a legal deck since every option completes),
 plays first and reveals companions as in M8a. zero-core's `random` picks uniformly among the
 options (a random walk over the list, ending since k increases).
 
@@ -5454,7 +5459,7 @@ exactly.
    one of them). A heuristic prior close to how the generator marks first picks (three of the
    pool's main-colour spells); to be replaced by one learned from drafts once team drafting
    exists. The sampled pool is the known part plus the seen and drawn first picks (marked as
-   first picks), with the real pool's deck bounds.
+   first picks), with the real pool's deck bounds (40..=40 for a pool's deck, section 42).
 2. **The deck.** It holds the required cards (their deck cards the viewer knows exactly, by their
    own card: not a copy effect's identity, not a face; its clouds' identities; what they
    revealed this game; a revealed companion is not a deck card), has the public size N and
@@ -5464,8 +5469,10 @@ exactly.
    game. A revealed companion stays in the sideboard and every other card passes its condition
    (Lurrus, Zirda: card by card; Lutri: one copy per name). The N - M basic lands: the required
    ones, the rest uniformly among the basic land types of the deck's colours that are below the
-   count cap (31, `MAX_COUNT`), then among any type below it (a 60-card deck of 34 basic lands in
-   one colour pair is legal: runs/mtg4 stalled on it before this, `a_deck_of_basic_lands_up_to_the_cap_is_sampled`). (If no deck fits,
+   count cap (31, `MAX_COUNT`), then among any type below it (runs/mtg4 stalled before this on a
+   60-card deck of 34 basic lands in one colour pair, legal then; since section 42 a pool's deck
+   is 40 cards, whose basic lands always fit in two colours, and
+   `a_deck_of_basic_lands_up_to_the_cap_is_sampled` stuffs 40 basic lands, 31 of a type). (If no deck fits,
    which needs first picks crowding out the cards a revealed companion allows, the first picks
    are drawn again among cards the condition allows, then the condition is dropped; the fuzzer
    checks every sampled deck against a revealed companion and never saw it broken.)
@@ -6293,10 +6300,12 @@ card is a single option (zero-core plays it without a search). After the draft e
 builds: for each pool card in its **build order** (spells by colour group W, U, B, R, G,
 multicolour, colourless, then mana value, then identity; then lands by identity) its identity (in
 the deck) or `OUT` = 768 (in the sideboard); then the Plains, Island, Swamp, Mountain and Forest
-counts, `COUNT + n` (800 + n), each limited to keep a deck of 40-60 cards reachable with at most
-31 of a type (`Build::count_range`). Every legal deck is reachable once; a seat's build is 50
-decisions. After the last seat's Forest count the event is at its **deferred terminal**:
-`to_move()` is `None`, `deferred()` is true, `matches()` / `deferred_payload()` give the
+counts, `COUNT + n` (800 + n), each limited to keep a deck of exactly 40 cards reachable with at
+most 31 of a type (`Build::count_range`; section 42: until then 40-60 cards); once the deck holds
+40 pool cards the rest of the pool is forced `OUT` (a single option, `Build::room`), and the
+Forest count is always forced. Every legal deck is reachable once; a seat's build is 50
+decisions, single options included. After the last seat's Forest count the event is at its
+**deferred terminal**: `to_move()` is `None`, `deferred()` is true, `matches()` / `deferred_payload()` give the
 matches, `resolve(results)` / `resolve_json` take them (each match's A and B result: 1/0, 0/1 or
 0.5/0.5) and set the outcome: per seat the team's 1 / 0 / 0.5 divided by `T` (zero-core's result
 vector sums to 1), margin = (team match wins - opponent match wins) / matches, score = the team's
@@ -6402,7 +6411,7 @@ plays it with the heuristic bot on both sides (`bots::sideboard` between games),
 |---|---:|---:|
 | random-action events per second | 9,400-12,800 | 25,300-26,600 |
 | actions per event | 760 (360 picks, 400 deckbuilding) | 380 |
-| searched picks / deckbuilding decisions per event (two options or more) | 336 / 395.4 | 168 / 197.7 |
+| searched picks / deckbuilding decisions per event (two options or more) | 336 / 395.4 (387.0 at exactly 40 cards, section 42) | 168 / 197.7 (193.5) |
 | `encode` (14,488 floats; the caller's zeroing not counted) | 3.5-4.6 us | 2.6-3.9 us |
 | clone | 0.27-0.36 us | 0.23-0.25 us |
 | clone + `determinize`, draft states | 4.1 us | 3.7 us |
@@ -6415,11 +6424,13 @@ deckbuilding decision 2 (cards) or up to 32 (basic counts).
 
 ### 41.6 Tests
 
-`engine/tests/draft.rs` (22 tests and `measure`; section 15's row):
+`engine/tests/draft.rs` (22 tests and `measure`; 23 since section 42; section 15's row):
 `packs_are_seeded_disjoint_and_full`, `seats_alternate_and_every_pass_goes_to_an_opponent`,
 `picks_are_the_pack_and_illegal_actions_are_errors`, `every_pool_has_45_cards_and_decks_are_legal`
 (and `consensus` builds `pools::build_deck`'s deck), `deckbuilding_reaches_every_legal_deck_shape...`
-(40 basic lands; 60 cards with 31 of a basic), `pairings_are_rotations_of_a_latin_square` (40
+(40 basic lands; 60 cards with 31 of a basic; replaced in section 42 by
+`deckbuilding_makes_exactly_40_cards_from_either_extreme` and
+`every_40_card_deck_is_reachable_exactly_once`), `pairings_are_rotations_of_a_latin_square` (40
 events; 1v1, 2v2, 3v3, `rounds`), `after_the_draft_a_team_knows_every_card_but_the_opposing_first_picks`
 (1v1, 2v2, 4v4: the known cells, the team's cards, the `KEY_TEAM` count; during the draft a seat
 knows only its own picks exactly), `determinize_keeps_what_the_viewer_knows` (684 checks at the
@@ -6478,3 +6489,168 @@ search smoke was not run: nothing on the `mtg` path changed.
   for `team_draft`.
 * Limitations kept: forced keys replay openings only (arrivals in flight and team keys fall back,
   as revelations); the opponents' decks in a viewer's world are the heuristic deckbuilder's.
+
+## 42. Forty-card decks (M6)
+
+Branch `m6-deck40` (from main at 0054b32). **The rule** (the user's decision of 2026-10-27): a
+limited deck built from a pool is always exactly 40 cards. CR 100.2b makes 40 only the minimum of
+a limited deck (with any number of basic lands added, 100.4b), so exactly 40 is a format
+restriction of ours, chosen by the user, not a rule of the CR; a 40-card deck meets the CR's
+minimum. It applies wherever a deck is built from a pool: `team_draft`'s deckbuilding (41) and
+the `mtg` game's sideboarding between the games of a best-of-three (36.2). Layout v4 (frozen,
+33,652 floats), `NUM_ACTIONS` and every action id are unchanged, and so is layout `draft_v1`
+(14,488 floats; `layout_json_is_checked_in` passes without rewriting the file): the change only
+restricts which options are offered.
+
+### 42.1 `team_draft` (`engine/src/az/draft.rs`)
+
+| What | Before | Now |
+|---|---|---|
+| the bound | `DECK_MIN..=DECK_MAX` = 40..=60 (`matches::MIN_DECK`, `MAX_DECK`) | `DECK_SIZE` = 40 (`decks::DECK_SIZE`) |
+| a pool card (build order) | its identity (in) or `OUT`, always both | both while the deck holds fewer than 40 pool cards (`Build::room`); then `[OUT]`, a single option (zero-core plays it without a search, as a pack's last card); an in for a full deck is an error |
+| a basic count (`Build::count_range`) | lo = max(0, 40 - before - 31 x types after), hi = min(31, 60 - before) | hi = min(31, 40 - before): the Forest count is always forced (lo = hi), and once the deck holds 40 cards every later count is forced to 0 |
+| the invariants | a finished deck has 40-60 cards | at most 40 pool cards and 40 cards at any time, a finished deck exactly 40 |
+
+**Every legal deck is reachable in exactly one way**: a legal deck is a set of at most 40 pool
+cards plus basic lands making 40, at most 31 of a type; its path puts its cards in and the others
+out (an in is offered while fewer than 40 are in, and its cards are at most 40) and then takes its
+counts, each within the range (the types after a count can hold the rest: 40 - before - (its
+count) <= 31 x types after; and the count is at most 40 - before). Tested exhaustively on a
+two-card pool (all 487,676 decks once, none other) and at the extremes of a 45-card pool.
+
+**Decision counts.** A seat still makes 50 decisions (45 pool cards, 5 counts; single options
+included), a 4v4 event 400 and 760 actions in all. Searched decisions (two options or more) in
+random events (`measure`): 4v4 387.0 deckbuilding decisions per event (395.4 before: the Forest
+count is now always forced, 8 per event), 2v2 193.5 (197.7); picks unchanged (336, 168). In the
+draft fuzz (`DRAFT_FUZZ=20000`) 5,804,002 searched deckbuilding decisions (5.93 million before).
+A random seat rarely fills its deck with pool cards (22.5 in on average), so the forced `OUT`
+appears mostly with built decks: a deck of 40 pool cards from a 45-card pool forces the last five.
+
+**Bots and worlds.** `consensus` builds `pools::build_deck`'s deck, 23 spells and 17 lands = 40
+by construction (`decks::DECK_SIZE`; `pools_and_the_deckbuilder` checks 200 pools), so its plan is
+always legal; it now checks that its planned card is offered. In a viewer's world an opponent who
+has built gets the heuristic deck of its known pool (41.2): 40 cards too. zero-core's `random`
+picks among the offered options, so its decks are 40.
+
+### 42.2 Sideboarding in `mtg` (`engine/src/az/matches.rs`)
+
+`MatchPool::new` sets `min_deck` = `max_deck` = the first deck's size (before: 40, or the first
+deck's size when smaller, to 60, or the first deck's size when larger). Every first deck built
+from a pool has 40 cards: the deckbuilder's (`pools::build_deck`, generated and evaluation pools,
+36.4), M8a's generated decks with their 7-card sideboards (`decks::generate_pool`), and a drafted
+deck (42.1). So for every deck from a pool:
+
+* `PASS` (done) is offered only when the deck holds 40 cards; at a player's first sideboarding
+  decision the last game's deck is 40, so keeping it is one decision, as before.
+* Every swap path back to 40 stays reachable, by the existing range rule (36.2): an entry is
+  offered only when a deck in bounds stays reachable with the later entries free, and the later
+  entries (each 0..=its copies, basic lands 0..=31) can sum to any number up to their total. A
+  swap of two single cards is three decisions, a card for basic lands three or four, basic lands
+  of one type for another four. Every legal deck is still reached in exactly one way.
+* A spec decklist of tests (a fixed decklist, `"decks": {"p0": ...}`) of another size keeps its
+  own size exactly (as 36.2's "or the first deck's size" kept it within the bounds); a drafted
+  deck passed as a spec (DESIGN.md 2.3.6) is 40 and stays 40.
+
+`matches::MIN_DECK` and `MAX_DECK` are gone (60 was an engine bound, no rule). The heuristic bot
+(`bots::sideboard`) keeps its deck (`PASS` at the first decision, legal since the deck is 40) and
+answers any other sideboarding decision with its first legal option, which completes at 40.
+
+**Sideboarding decisions per match** (`fuzz_random_matches`, random players, `FUZZ_GAMES=20000
+FUZZ_MATCHES=2000`): main 41,895 decisions in 1,999 matches (match 1202 fails on main, 42.7),
+6,322 sideboardings: 6.63 per sideboarding, 20.96 per match; this branch 47,810 in 2,000
+matches, 6,278 sideboardings: 7.62 per sideboarding, 23.9 per match. A random walk can stop only
+at 40 cards now, so it changes more entries before it stops (decks changed: 6,195 and 6,142 of
+the sideboardings). `FUZZ_POOL=interactions` (decks with copies of a card): main 41,851 in 2,000
+matches, 6,314 sideboardings: 6.63 per sideboarding, 20.9 per match; this branch 43,030 in 2,000
+matches, 6,254 sideboardings: 6.88 per sideboarding, 21.5 per match. The heuristic's sideboarding
+is one decision (`PASS`), as before; zero-core searches the network's.
+
+### 42.3 The hidden pool (`engine/src/az/sample.rs`, ENGINE.md 36.11)
+
+The sampled opponent deck has the public size N, which is the real deck's (40), and the sampled
+pool takes the real pool's bounds (40..=40), so sideboarding in a world keeps 40 as in the real
+match; between games the first sideboarder's deck, hidden from the second, becomes the sampled
+last deck (40). The basic lands' fallback (a type at the count cap of 31, then any type; added
+when runs/mtg4 built a 60-card deck of 34 basic lands) stays for spec decklists: a 40-card deck's
+basic lands always fit in the deck's two colours (62 >= 40). Tested: every sampled deck in
+`sampled_decks_hold_what_the_viewer_knows` is 40 with bounds 40..=40 (and the first sideboarder's
+sampled choice 40); `a_deck_of_basic_lands_up_to_the_cap_is_sampled` now stuffs 40 basic lands, 31
+of a type, and every world of the other player holds a deck of the real size.
+
+**Found on the way** (pre-existing, fixed in its own commit): the interaction fuzz (match 1454
+on this branch) reached a world with no deck, "no deck of 40 cards (36 from the pool) holds what
+P1 knows of P0's". While P0 cast Force of Will (whose alternative cost exiles a blue card from
+hand), P0's blue hand cards were pinned (kept by `determinize`, so known exactly for the pass), and one of
+them, Spell Pierce, was also an identity of P1's cloud over P0's hand: `sample::knowledge` added
+it twice to the cards the deck must hold (known, and the cloud's identities), more copies than
+the pool has. `Game::determinize` already took a pinned card's identity out of its cloud's needs
+(`resample_with_clouds`); that computation is now `Game::cloud_needs`, shared by the deal and by
+`sample::knowledge`, so the sampled deck holds exactly what the deal will place. Main's random
+path does not reach such a state in 2,000 interaction matches; the digests are unchanged (the
+deal is the same code).
+
+### 42.4 Companions (ENGINE.md 35)
+
+A companion is outside the deck: it stays in the sideboard (the rest of the pool), is revealed
+when the 40-card deck fulfills its condition, and, put into the hand by its special action, is in
+the game without being a deck card (the deck's counts stay 40; `sample::game_cards` lists it
+apart). Nothing changes: a companion never counts toward the 40, and in `team_draft` a companion
+put in the deck is an ordinary card, one of the 40.
+
+### 42.5 Tests
+
+* `engine/tests/draft.rs` (23 tests and `measure`): `every_pool_has_45_cards_and_decks_are_legal`
+  (every deck exactly 40); `deckbuilding_makes_exactly_40_cards_from_either_extreme` (45-card pools:
+  every card out and the smallest counts, 0 0 0 9 31, or the largest, 31 9 0 0 0, with the Forest
+  count forced; every card in: the last five forced `OUT`, every count forced 0; three out then
+  every card in: the last two forced; a card into a full deck an error), replacing
+  `deckbuilding_reaches_every_legal_deck_shape...`; `every_40_card_deck_is_reachable_exactly_once`
+  (a two-card pool: 487,676 decks, each once, 535,296 decisions of which 490,618 single options).
+* `engine/tests/rules_m8b.rs` (14): `cr_100_2b_sideboarding_reaches_every_legal_deck_exactly_once`
+  also with exact bounds (6..=6: the 60 decks of 6 cards from three starts) and `PASS` only at a
+  legal size; `a_pool_deck_is_sideboarded_to_exactly_40_cards` (random, evaluation and M8a specs,
+  8 matches each, both players: bounds 40..=40; 24 targets each, random 40-card decks and the
+  extremes, 40 pool cards and no basic land or 31 + 9 basic lands, reached by their canonical
+  path; one card more or fewer reached by none; 960 random walks, half finished by the heuristic
+  from a random point, `PASS` offered exactly at 40, every walk ending at 40: 7.9 decisions per
+  walk); `a_spec_decklist_keeps_its_size` (36 and 44 cards); `sideboarded_decks_are_legal...`
+  (40 cards).
+* `engine/tests/rules_m8b_hidden.rs`: sampled decks 40 (above); the basic-land stuffing.
+* `engine/tests/fuzz.rs`: every later game's decks are 40 with bounds 40..=40.
+
+### 42.6 Checks
+
+Every engine test binary but `az` (`cargo test --release -p engine --no-fail-fast --lib --test
+<every file of engine/tests but az>`; 96 binaries: the library and 95 test files): 1,353 passed
+(main's 1,350 and 3 new: `draft.rs` 22 -> 23, `rules_m8b.rs` 12 -> 14), 0 failed, 12 ignored (as
+before). Behaviour digests (`cargo test --release -p engine --test digest -- --ignored`): combined
+digest 12642107250032a7, main's (best-of-one is untouched, and the deal shared in 42.3 is the same
+code). `FUZZ_GAMES=20000 FUZZ_MATCHES=2000`: no failure, 267 s (20,000 games, 214.0 decisions per
+game, 5,651,655 options completed: the games are main's; 2,000 matches, 5,139 games, 1,139 of
+three, 1,491 drawn, 426.4 decisions per match, 47,810 sideboarding decisions, 6,142 decks changed,
+42,766 sampled worlds). `FUZZ_POOL=interactions FUZZ_GAMES=20000 FUZZ_MATCHES=2000`: no failure,
+310 s (20,000 games, 206.2 decisions per game, 5,425,503 options completed; 2,000 matches, 5,127
+games, 1,127 of three, 43,030 sideboarding decisions, 44,548 sampled worlds). `DRAFT_FUZZ=20000`:
+no failure, 137 s (20,000 events, 11.4 million actions, 5,040,000 searched picks and 5,804,002
+searched deckbuilding decisions, 573,334 worlds, 12,534 offered options played to the end of their
+event, 1,866 heuristic-played matches). `bash tools/build_py.sh`, `python -m pytest -q tests`: 24
+passed. `python tools/search_smoke.py --specs match,match_eval --seeds 0-1`: 0 failed
+of 4 configurations, 1,056 s (match 307-381 s: 800 matches, 766,218 decisions, 20.3 million
+simulations; match_eval 172-184 s: 800 matches, 723,239 decisions, 19.1 million simulations).
+(Times on the desktop loaded by runs/mtg5 and other builds.)
+
+### 42.7 Left and uncertain
+
+* A spec decklist of another size than 40 keeps exactly its size (the reading of "keep their own
+  size" taken here); a range between its size and 40 would be the other reading.
+* Main (0054b32) fails `FUZZ_GAMES=20000 FUZZ_MATCHES=2000` in the default mode at match 1202
+  (`FUZZ_FIRST=1202 FUZZ_MATCHES=1`; past the 1,000 matches `FUZZ_GAMES=20000` alone plays): in
+  game 2, turn 22, P0 casts Crabomination for emerge, and after its mana `PayCosts` asks a
+  `DiscardCost` with no options (`flow.rs`: "DiscardCost with no options"): the cast's cost
+  (`item_cost`) holds a discard of one land card (`Filter::Type(LAND)`), which Crabomination's
+  costs don't have, with only The One Ring in hand. A game-engine fault (a cost mix-up to
+  investigate), not fixed here; this branch's random sideboarding differs from game 2 on, so its
+  fuzz does not reach that state.
+* Section 36's measurements (36.2's "~7 per sideboarding", 36.8, 36.11) and section 41's (41.5,
+  41.7) were taken with 40-60-card decks and are kept as written, with this section's numbers next
+  to them where they changed.
