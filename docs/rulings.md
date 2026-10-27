@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1226 | 977 |
 | class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1010 | 796 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 717 | 600 |
-| a, tested only by an earlier test (Oracle or rules) | 293 | 196 |
+| a, tested (passing) | 1051 | 835 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 757 | 638 |
+| a, tested only by an earlier test (Oracle or rules) | 294 | 197 |
 | a, deferred | 0 | 0 |
-| a, untested | 216 | 181 |
+| a, untested | 175 | 142 |
 
-Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 79/173, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -126,7 +126,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `5ef445cd` | c | NR | reconfigure attaching isn't an 'equip ability' for cards that care about equipping [part 3, was a/other: no cube card cares about equip abilities as such] | not reachable with the cube's cards |
 | `f76d59c9` | a | replacement | an Equipment creature can never become attached to itself; such an attempt does nothing | `cards_m7d::lion_sash_grows_and_reconfigures_cr702_151` |
 | `35466139` | a | other | a reconfigure Equipment can be attached by other effects too, not just its own ability | untested |
-| `dde8305d` | a | combat | an attached Equipment doesn't share the tapped state of the creature it's attached to | untested |
+| `dde8305d` | a | combat | an attached Equipment doesn't share the tapped state of the creature it's attached to | `rulings_combat::an_equipment_doesnt_tap_with_the_creature_it_equips_cr_301_5` |
 | `a2560fad` | a | replacement | when a reconfigure Equipment stops being a creature, enchant-creature Auras/Equipment on it unattach | `rulings_replacement2::reconfiguring_lion_sash_onto_a_creature_unattaches_its_equipment_cr_702_151b_704_5n` |
 | `cff2c1c6` | a | copies | attaching a reconfigure Equipment makes it stop being a creature (and lose creature subtypes) until unattached | `cards_m7d::lion_sash_grows_and_reconfigures_cr702_151` |
 | `576a8296` | a | replacement | if a reconfigured permanent is somehow still a creature once attached, it immediately unattaches | `rulings_replacement2::an_attached_equipment_made_a_creature_by_does_machines_becomes_unattached_cr_301_5c_704_5n` |
@@ -169,18 +169,18 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c97738b6` | a | combat | tokens entering already attacking were never 'declared' attackers, so attack-triggers don't fire | untested |
-| `9d3f1a8a` | a | combat | each token chooses its own attack target independently, needn't match the others | untested |
+| `c97738b6` | a | combat | tokens entering already attacking were never 'declared' attackers, so attack-triggers don't fire | `rulings_combat::creatures_put_onto_the_battlefield_attacking_dont_trigger_attack_abilities_cr_508_4` |
+| `9d3f1a8a` | a | combat | each token chooses its own attack target independently, needn't match the others | `rulings_combat::each_creature_put_onto_the_battlefield_attacking_chooses_what_it_attacks_cr_508_4` |
 
 ### Adeline, Resplendent Cathar
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `d1f9751e` | a | combat | tokens entering already attacking don't count as declared attackers for other triggers | untested |
+| `d1f9751e` | a | combat | tokens entering already attacking don't count as declared attackers for other triggers | `rulings_combat::creatures_put_onto_the_battlefield_attacking_dont_trigger_attack_abilities_cr_508_4` |
 | `ab682fd6` | a | triggers | attacking with any creature triggers the ability, even if the source itself isn't attacking | `rulings_triggers3::whenever_you_attack_triggers_without_its_source_attacking_cr_508_3a` |
 | `c264835f` | a | copies | a power-defining ability works in every zone, and counts its own source while on the battlefield | `rulings_copies3::power_defining_abilities_work_in_every_zone_and_count_types_not_cards_cr_604_3` |
 | `89ee123a` | b | MP | the per-opponent token trigger makes a token for every qualifying opponent, not just attacked ones [part 3, was a/combat: one token per opponent; two-player games have one] | multiplayer |
-| `bdd4c462` | a | combat | you choose whether each created token attacks that opponent directly or a planeswalker they control | untested |
+| `bdd4c462` | a | combat | you choose whether each created token attacks that opponent directly or a planeswalker they control | `rulings_combat::each_creature_put_onto_the_battlefield_attacking_chooses_what_it_attacks_cr_508_4` |
 
 ### Anointed Peacekeeper
 
@@ -1105,7 +1105,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `63a507fc` | a | mana | a revealed card with X in its mana cost treats X as 0 | untested |
 | `c140aa06` | b | DEF | you may activate a saddle ability even on a permanent that's already saddled [part 3, was a/other: saddling again is allowed and changes nothing; a definition] | a definition, no behaviour of its own |
 | `e2e6c94c` | a | combat | saddle N: tap other creatures with total power N to become saddled until end of turn, sorcery speed only | `cards_m7c_tail3::caustic_bronco_saddled_makes_the_opponent_lose_cr702_171` |
-| `cfd9220f` | a | combat | being saddled is just a state, not an ability; it lasts until end of turn or until the creature leaves the battlefield | untested |
+| `cfd9220f` | a | combat | being saddled is just a state, not an ability; it lasts until end of turn or until the creature leaves the battlefield | `rulings_combat::caustic_bronco_stays_saddled_until_the_turn_ends_cr_702_171b` |
 
 ### Dark Confidant
 
@@ -1409,7 +1409,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0333f482` | a | combat | a noncreature-turned-creature needs continuous control since turn start to attack or tap, not creature-status time | untested |
+| `0333f482` | a | combat | a noncreature-turned-creature needs continuous control since turn start to attack or tap, not creature-status time | `rulings_combat::a_permanent_made_a_creature_attacks_and_taps_only_if_controlled_since_the_turn_began_cr_302_6` |
 | `d9bc4e52` | a | mana | off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it | untested |
 | `b83b7a27` | c | NR | a split card has two names; choosing a card name picks only one of them [part 3, was a/other: the cube's naming cards look at cards outside the stack, where a split card has both names together] | not reachable with the cube's cards |
 | `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | `rulings_zones2::a_split_card_is_one_card_when_discarded_cr_709_4` |
@@ -1521,7 +1521,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `d7de1c3d` | a | copies | a creature that enters as or becomes a copy of a dashed creature doesn't gain haste and won't bounce to hand later | `rulings_copies3::a_copy_of_a_dashed_ragavan_has_no_haste_and_isnt_returned_cr_702_109a_707_2` |
 | `4f0780ad` | a | mana | paying a dash-style cost is still a normal cast: responsive, counterable, only when castable anyway | untested |
 | `d96d165d` | a | triggers | a dash-style return-to-hand trigger only works if the creature is still on the battlefield when that trigger resolves | `rulings_triggers3::revolt_counts_any_permanent_leaving_and_dash_returns_only_a_creature_still_there_cr_702_109a` |
-| `7929f582` | a | combat | a dash-style effect doesn't force the creature to attack unless something else says so | untested |
+| `7929f582` | a | combat | a dash-style effect doesn't force the creature to attack unless something else says so | `rulings_combat::a_dashed_creature_doesnt_have_to_attack_cr_702_109a` |
 | `b5df7fc5` | a | zones | casting an exiled card this way still needs its full costs and timing; you cant play an exiled land | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
 | `421327a3` | a | zones | a Treasure-creating exile effect still makes the token even if the affected library has no cards left to exile | `rulings_zones2::ragavan_makes_its_treasure_even_with_nothing_to_exile_cr_609_3` |
 
@@ -1595,7 +1595,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `edc91fad` | a | zones | an effect that lets you 'cast' a card doesn't let you play lands with it | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
 | `9b682c79` | a | zones | casting a card from exile removes it from exile, so you can't cast it again from there | `rulings_zones2::a_card_cast_with_a_permission_that_comes_back_is_a_new_object_without_it_cr_400_7` |
 | `08172cc2` | a | triggers | this cast-permission keeps applying on later turns if the source leaves, as long as its condition is met again | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
-| `69d95378` | a | combat | when a creature attacks a planeswalker, that planeswalker's controller counts as the defending player | untested |
+| `69d95378` | a | combat | when a creature attacks a planeswalker, that planeswalker's controller counts as the defending player | `rulings_combat::robber_attacking_a_planeswalker_reads_its_controller_as_the_defending_player_cr_506_2` |
 | `bcb139f0` | a | triggers | a comparative trigger condition is checked at trigger time and again at resolution; in-between doesnt matter | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `dca8fc68` | a | dfc | stealing and casting an Adventure card this way lets you, not its owner, cast the permanent later | `rulings_faces2::an_adventure_cast_with_robber_of_the_rich_lets_robbers_controller_cast_the_creature_cr_715_4` |
 | `03c107f1` | b | MP | multiplayer: a player leaving the game and the cards/permanents they own leaving with them | multiplayer |
@@ -1608,8 +1608,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3d058a75` | a | combat | a boast-style ability can activate any time after its creature attacks, through end step or even cleanup rarely | `cards_m7c_tail2::broadside_bombardiers_boasts_once_after_attacking_cr702_142a` |
-| `931f5f75` | a | combat | a creature entering already attacking was never declared an attacker, so its boast ability is unusable that turn | untested |
-| `909ac1ac` | a | combat | a boast-style ability can be activated only once per turn even with extra combat phases and multiple attacks | untested |
+| `931f5f75` | a | combat | a creature entering already attacking was never declared an attacker, so its boast ability is unusable that turn | `rulings_combat::boast_cant_be_activated_by_a_creature_put_onto_the_battlefield_attacking_cr_702_142a_508_4` |
+| `909ac1ac` | a | combat | a boast-style ability can be activated only once per turn even with extra combat phases and multiple attacks | `rulings_combat::boast_once_a_turn_even_attacking_in_two_combats_cr_702_142a_500_8` |
 | `d980af0c` | c | NR | gaining control of an attacker after it attacked still lets you use its unused boast-style ability that turn [part 3, was a/combat: no cube effect gains control of an attacking creature during the opponent's turn] | not reachable with the cube's cards |
 | `22f30094` | a | dfc | a DFC's back face has no mana cost; its mana value still equals the front face's | `rulings_faces2::a_sacrificed_reflection_counts_fables_mana_value_and_is_fable_in_the_graveyard_cr_712_8e` |
 
@@ -1627,7 +1627,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8a2d01a9` | a | combat | a token entering already attacking was never declared an attacker, so attack-triggers skip it | untested |
+| `8a2d01a9` | a | combat | a token entering already attacking was never declared an attacker, so attack-triggers skip it | `rulings_combat::creatures_put_onto_the_battlefield_attacking_dont_trigger_attack_abilities_cr_508_4` |
 | `d9901593` | b | CMD | a commander-control check is satisfied by controlling either of two commanders | Commander |
 | `cea0ea66` | c | NR | a 'can't attack' effect only stops declaration as an attacker, not a token entering the battlefield already attacking [part 3, was a/combat: no cube effect says a creature can't attack] | not reachable with the cube's cards |
 | `549fab62` | b | CMD | both commanders start in the command zone, with the rest of a larger deck becoming the library | Commander |
@@ -1643,7 +1643,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `f03fa9d5` | b | CMD | a commander stays your commander even if it stops qualifying as one during the game | Commander |
 | `35aab107` | b | CMD | two commanders are tracked separately for commander tax and for the 21-combat-damage loss condition | Commander |
 | `bafd9cea` | b | CMD | you can choose two commanders that share the same color or colors | Commander |
-| `7a850527` | a | combat | you choose the player or planeswalker a created attacking token is attacking | untested |
+| `7a850527` | a | combat | you choose the player or planeswalker a created attacking token is attacking | `rulings_combat::each_creature_put_onto_the_battlefield_attacking_chooses_what_it_attacks_cr_508_4` |
 
 ### Laelia, the Blade Reforged
 
@@ -1890,7 +1890,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `2e168182` | a | stack | a copy of this modal spell may get new targets from the copying effect, but never new modes | `rulings_stack2::lutris_copy_of_a_modal_spell_has_the_same_modes_cr_707_10` |
 | `ff410448` | a | protection | a mode needing a target is only choosable with a legal target available; repeat selections may reuse or change it | `rulings_protection2::a_mode_needing_a_target_is_offered_only_with_one_and_may_repeat_it_cr_700_2a` |
 | `d6bf1964` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
-| `9403db83` | a | combat | choosing the same damage mode repeatedly makes separate damage events, each subject to its own prevention effects | untested |
+| `9403db83` | a | combat | choosing the same damage mode repeatedly makes separate damage events, each subject to its own prevention effects | `rulings_combat::a_mode_chosen_three_times_deals_damage_three_times_cr_700_2d_120_3` |
 | `a01ce385` | a | other | modes always run in written order; a repeated modes relative order is chosen as you cast the spell | `cards_m4b2::fiery_confluence_repeats_modes_in_non_decreasing_order` |
 | `9da53bfb` | a | stack | no player may cast spells or activate abilities between the modes of one resolving spell | `rulings_stack3::no_player_can_act_in_the_middle_of_a_resolution_cr_608_2` |
 | `3719f25f` | b | DEF | modes for this modal spell are chosen as you cast it and can't be changed afterward [part 3, was a/mana: modes are chosen while casting; a definition] | a definition, no behaviour of its own |
@@ -1963,7 +1963,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `8d6c08d2` | a | combat | a creature attacks alone only if it's the sole creature declared as an attacker in the declare attackers step | untested |
+| `8d6c08d2` | a | combat | a creature attacks alone only if it's the sole creature declared as an attacker in the declare attackers step | `rulings_combat::a_creature_attacks_alone_only_if_declared_alone_cr_702_83b` |
 
 ### Noble Hierarch
 
@@ -1971,7 +1971,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `8f207d3f` | a | combat | declaring exactly one attacker triggers every exalted-style ability you control, even one on the attacker itself | `rules_layers::cr_702_83_exalted_and_702_91_battle_cry` |
 | `76a52a2d` | b | MP | Two-Headed Giant: 'attacks alone' is judged across your whole team, affecting whose exalted-style abilities trigger | multiplayer |
-| `2de2fb41` | a | combat | a creature that enters already attacking was never declared an attacker, so it's ignored for exalted-style triggers | untested |
+| `2de2fb41` | a | combat | a creature that enters already attacking was never declared an attacker, so it's ignored for exalted-style triggers | `rulings_combat::creatures_put_onto_the_battlefield_attacking_dont_trigger_attack_abilities_cr_508_4` |
 | `f6fa64c4` | a | combat | exalted-style abilities need exactly one attacker total; splitting targets or losing one mid-combat disqualifies it | `rules_layers::cr_702_83_exalted_and_702_91_battle_cry` |
 
 ### Badgermole Cub
@@ -2120,9 +2120,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `1d87aaa2` | c | NR | if not forced to attack a specific player but still able, you may attack elsewhere or not attack at all [part 3, was a/combat: Ursine Monstrosity's requirement has no cost, so it's never "not forced but able"] | not reachable with the cube's cards |
 | `ccae9ec2` | a | zones | if a required mill can't happen, the rest of the ability's instructions still get followed | `rulings_zones2::ursine_monstrosity_with_nothing_to_mill_still_does_the_rest_cr_701_13b` |
 | `c298a763` | a | triggers | an attack-triggered ability fires at each of multiple combat phases in a turn, ignoring choices made in earlier phases | `rulings_triggers3::ursine_triggers_at_each_combat_with_no_main_phase_between_and_persist_returns_apnap_cr_506_1_603_3b` |
-| `7bf7bcc3` | a | combat | a must-attack creature is excused if tapped, cant-attack, or lacks haste+continuous control; its cost isnt forced | untested |
+| `7bf7bcc3` | a | combat | a must-attack creature is excused if tapped, cant-attack, or lacks haste+continuous control; its cost isnt forced | `rulings_combat::must_attack_is_excused_when_it_cant_and_means_the_player_not_a_planeswalker_cr_508_1d` |
 | `d8d3cb67` | b | DEF | card types are artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery; no super/subtypes [part 3, was a/other: the list of card types; a definition] | a definition, no behaviour of its own |
-| `dbf6f20e` | a | combat | a 'must attack a player' effect requires attacking that player directly, not a planeswalker or battle they control | untested |
+| `dbf6f20e` | a | combat | a 'must attack a player' effect requires attacking that player directly, not a planeswalker or battle they control | `rulings_combat::must_attack_is_excused_when_it_cant_and_means_the_player_not_a_planeswalker_cr_508_1d` |
 
 ### Baloth Prime
 
@@ -2458,7 +2458,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `78a2ab04` | a | combat | preventing a block only works before blockers are declared; it cant undo an already-declared block | untested |
+| `78a2ab04` | a | combat | preventing a block only works before blockers are declared; it cant undo an already-declared block | `rulings_combat::blocks_declared_stand_unblockable_cant_block_and_menace_afterwards_cr_509_1h_506_4` |
 
 ### Sensei's Divining Top
 
@@ -2478,7 +2478,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `402f58a3` | a | combat | a creature that loses haste before attacking cant attack that turn, so one haste Equipment cant enable two attackers | untested |
+| `402f58a3` | a | combat | a creature that loses haste before attacking cant attack that turn, so one haste Equipment cant enable two attackers | `rulings_combat::haste_lost_before_attacking_means_no_attack_one_greaves_for_one_new_creature_cr_302_6` |
 | `4c667be8` | a | other | Equipment cant be simply unequipped; attached to your only creature, it cant move until you have another to attach to | untested |
 
 ### Pentad Prism
@@ -2492,13 +2492,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3a81a6c3` | a | mana | any untapped creature you control can pay a crew cost, even one you only just gained control of | untested |
+| `3a81a6c3` | a | mana | any untapped creature you control can pay a crew cost, even one you only just gained control of | `rulings_combat::a_vehicle_must_be_a_creature_as_attackers_or_blockers_are_declared_and_follows_creature_rules_cr_301_7_302_6` |
 | `e863d618` | b | DEF | creatures that crew a Vehicle aren't attached to it, so effects targeting the Vehicle don't affect them [part 3, was a/other: crew creates no link between the creatures and the Vehicle; a definition] | a definition, no behaviour of its own |
 | `429c5474` | a | copies | a Vehicle has a printed power/toughness but isnt a creature until something makes it one, using that value | `cards_m7a_x::cr_702_122_crew_taps_creatures_with_enough_power_and_the_copter_loots` |
-| `bfeae3be` | a | combat | a Vehicle needs to be a creature by declare attackers/blockers to join combat, capping its crew timing | untested |
+| `bfeae3be` | a | combat | a Vehicle needs to be a creature by declare attackers/blockers to join combat, capping its crew timing | `rulings_combat::a_vehicle_must_be_a_creature_as_attackers_or_blockers_are_declared_and_follows_creature_rules_cr_301_7_302_6` |
 | `1bccbeb4` | a | copies | a copy of a Vehicle is never a creature, even if the Vehicle it's copying currently is one | `rulings_copies3::a_copy_of_a_crewed_copter_isnt_a_creature_and_a_crewed_copter_has_no_creature_type_cr_707_2_301_7` |
 | `ea843c44` | a | copies | an effect that turns a Vehicle into a creature with a specific power/toughness overwrites its printed power/toughness | `rulings_copies3::does_machines_and_tezzerets_emblem_make_a_copter_a_0_0_robot_that_crewing_doesnt_restore_cr_613_4b` |
-| `8de9353a` | a | combat | once a Vehicle becomes a creature, it follows all the normal rules for artifact creatures, including summoning sickness | untested |
+| `8de9353a` | a | combat | once a Vehicle becomes a creature, it follows all the normal rules for artifact creatures, including summoning sickness | `rulings_combat::a_vehicle_must_be_a_creature_as_attackers_or_blockers_are_declared_and_follows_creature_rules_cr_301_7_302_6` |
 | `db2bccf4` | a | stack | once a crew ability is announced, it's atomic; no one can stop it by changing or removing the tapped creatures | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
 | `65d7c435` | a | copies | Vehicle is an artifact type, not a creature type, so a crewed Vehicle has no inherent creature type | `rulings_copies3::a_copy_of_a_crewed_copter_isnt_a_creature_and_a_crewed_copter_has_no_creature_type_cr_707_2_301_7` |
 | `526a6c5c` | a | triggers | a Vehicle becoming a creature isn't a permanent entering the battlefield, so ETB-creature triggers don't fire for it | `rulings_triggers3::laelia_an_opponents_exile_counts_and_rockets_destroyed_draw_and_a_crewed_copter_doesnt_enter_cr_603_2_603_6a` |
@@ -2646,16 +2646,16 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `eed15a5f` | a | combat | a creature entering attacking via ninjutsu was never declared an attacker, so attack-triggers skip it | untested |
+| `eed15a5f` | a | combat | a creature entering attacking via ninjutsu was never declared an attacker, so attack-triggers skip it | `rulings_combat::a_ninja_put_onto_the_battlefield_attacking_wasnt_declared_cr_508_4_702_49c` |
 | `34862bd0` | a | stack | ninjutsu activation reveals card and bounces attacker; creature enters only at resolution, not if it leaves hand | `rulings_stack::ninjutsu_the_ninja_enters_only_as_the_ability_resolves_cr_702_49a` |
 | `a4335d8f` | b | MP | this ability still counts an opponent who lost life this turn, even if that player has since lost the game [part 3, was a/triggers: a player who lost the game ends a two-player game] | multiplayer |
-| `68e1969c` | a | combat | with first/double strike present, ninjutsu-entering creatures still deal damage in the regular damage step | untested |
-| `5a72d756` | a | combat | a ninjutsu creature attacks the same target the bounced creature did, unlike the normal controllers-choice rule | untested |
+| `68e1969c` | a | combat | with first/double strike present, ninjutsu-entering creatures still deal damage in the regular damage step | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
+| `5a72d756` | a | combat | a ninjutsu creature attacks the same target the bounced creature did, unlike the normal controllers-choice rule | `cards_m7b_walkers::kaito_ninjutsu_returns_an_unblocked_attacker_and_attacks_in_its_place` |
 | `f36cad96` | a | other | a 'lost life this turn' check cares only about whether a loss happened, not the net change to the life total | untested |
 | `f0224bc7` | a | walkers | this makes the source stop being a planeswalker on your turn while it has loyalty; loyalty abilities still work | `rules_walkers::cr_205_1a_kaito_is_a_creature_not_a_planeswalker_on_his_turn_and_damage_is_marked`; `rulings_walkers::kaito_as_a_creature_is_dealt_damage_not_loyalty_loss_cr_306_8` |
 | `340468b6` | a | replacement | stun counters create one replacement effect that removes a counter instead of letting the permanent untap | `rules_layers::cr_122_1d_stun_counters_and_502_3_doesnt_untap` |
-| `666134f3` | a | combat | ninjutsu can trigger across several combat steps, but waiting past declare blockers usually misses the damage step | untested |
-| `ec3f111d` | a | combat | ninjutsu can only activate after blockers are declared, since attackers are neither blocked nor unblocked before | untested |
+| `666134f3` | a | combat | ninjutsu can trigger across several combat steps, but waiting past declare blockers usually misses the damage step | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
+| `ec3f111d` | a | combat | ninjutsu can only activate after blockers are declared, since attackers are neither blocked nor unblocked before | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
 
 ### Superior Spider-Man
 
@@ -2668,15 +2668,15 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `6995549f` | a | combat | a creature entering attacking via ninjutsu was never declared an attacker, so attack-triggers skip it | untested |
+| `6995549f` | a | combat | a creature entering attacking via ninjutsu was never declared an attacker, so attack-triggers skip it | `rulings_combat::a_ninja_put_onto_the_battlefield_attacking_wasnt_declared_cr_508_4_702_49c` |
 | `2826b2c6` | a | zones | exiled cards you don't cast simply remain in exile | `cards_m7b_stack3::fallen_shinobi_permission_ends_with_the_turn` |
 | `df42df1d` | a | stack | ninjutsu activation reveals card and bounces attacker; creature enters only at resolution, not if it leaves hand | `rulings_stack::ninjutsu_the_ninja_enters_only_as_the_ability_resolves_cr_702_49a` |
 | `9b682c79` | a | zones | casting a card from exile removes it from exile, so you can't cast it again from there | `rulings_zones2::a_card_cast_with_a_permission_that_comes_back_is_a_new_object_without_it_cr_400_7` |
 | `93cdcc40` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
-| `7ad97095` | a | combat | with first/double strike present, ninjutsu-entering creatures still deal damage in the regular damage step | untested |
-| `d4961537` | a | combat | a ninjutsu creature attacks the same target the bounced creature did, unlike the normal controllers-choice rule | untested |
-| `350567b9` | a | combat | ninjutsu can trigger across several combat steps, but waiting past declare blockers usually misses the damage step | untested |
-| `ec3f111d` | a | combat | ninjutsu can only activate after blockers are declared, since attackers are neither blocked nor unblocked before | untested |
+| `7ad97095` | a | combat | with first/double strike present, ninjutsu-entering creatures still deal damage in the regular damage step | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
+| `d4961537` | a | combat | a ninjutsu creature attacks the same target the bounced creature did, unlike the normal controllers-choice rule | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
+| `350567b9` | a | combat | ninjutsu can trigger across several combat steps, but waiting past declare blockers usually misses the damage step | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
+| `ec3f111d` | a | combat | ninjutsu can only activate after blockers are declared, since attackers are neither blocked nor unblocked before | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
 
 ### Bloodtithe Harvester
 
@@ -2693,7 +2693,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `dd442884` | b | DEF | Clue is only ever an artifact type, never a creature or land type | a definition, no behaviour of its own |
 | `97855840` | c | NR | needs a second ability that references Clue generically (e.g. Alquist Proft), not in cube | not reachable with the cube's cards |
-| `992f009b` | a | combat | gaining menace after already being blocked doesn't retroactively unblock the attacker | untested |
+| `992f009b` | a | combat | gaining menace after already being blocked doesn't retroactively unblock the attacker | `rulings_combat::blocks_declared_stand_unblockable_cant_block_and_menace_afterwards_cr_509_1h_506_4` |
 | `7603f467` | c | NR | 'whenever you sacrifice a Clue' triggers for any reason you sacrifice one, not just via its own activated ability [part 3, was a/triggers: no cube card triggers on sacrificing a Clue] | not reachable with the cube's cards |
 | `1ac94022` | c | NR | an investigate ability with a target that becomes illegal at resolution doesn't resolve, so no Clue is created [part 3, was a/stack: the cube's investigate abilities (Forensic Gadgeteer, Carnage Interpreter, Thraben Inspector) have no targets] | not reachable with the cube's cards |
 | `ae44711b` | c | NR | needs a second Clue-sacrifice cost (e.g. Alquist Proft) not in cube | not reachable with the cube's cards |
@@ -2783,7 +2783,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `45eda9dd` | a | combat | a token entering already attacking was never declared an attacker, so attack-triggers skip it | untested |
+| `45eda9dd` | a | combat | a token entering already attacking was never declared an attacker, so attack-triggers skip it | `rulings_combat::creatures_put_onto_the_battlefield_attacking_dont_trigger_attack_abilities_cr_508_4` |
 | `7745b178` | a | combat | you choose what the newly created attacking creature is attacking independently of other attackers | `rules_walkers::cr_508_4_a_creature_put_onto_the_battlefield_attacking_chooses_what_it_attacks` |
 
 ### Figure of Fable
@@ -3026,7 +3026,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `ca9bf5c4` | b | DEF | activated abilities use a colon; some keyword abilities like cycling are activated too, shown in reminder text [part 3, was a/other: activated abilities have colons; a definition] | a definition, no behaviour of its own |
-| `f21fe774` | a | combat | using an unblock ability on an already-blocked creature doesnt remove it from combat or unblock what it hit | untested |
+| `f21fe774` | a | combat | using an unblock ability on an already-blocked creature doesnt remove it from combat or unblock what it hit | `rulings_combat::blocks_declared_stand_unblockable_cant_block_and_menace_afterwards_cr_509_1h_506_4` |
 | `252f0b38` | b | DEF | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] | a definition, no behaviour of its own |
 | `a2e75b69` | a | other | before shuffling your library, you may reveal one companion from outside the game if your deck meets its condition | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
 | `92589f1d` | a | mana | a generic cost reduction cant touch colored costs, and wont reduce an already one-or-zero-mana activation further | `cards_m7c_tail2::zirda_reduces_activation_costs_by_two_leaving_one_mana_cr601_2f` |
@@ -3173,10 +3173,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3d047ce6` | a | combat | an animated land's summoning sickness depends on when you gained control of it, not on when it became a creature | untested |
+| `3d047ce6` | a | combat | an animated land's summoning sickness depends on when you gained control of it, not on when it became a creature | `rulings_combat::a_permanent_made_a_creature_attacks_and_taps_only_if_controlled_since_the_turn_began_cr_302_6` |
 | `e43b1205` | a | triggers | a land becoming a creature doesn't count as a creature entering the battlefield, so ETB-creature triggers don't fire | `rulings_triggers2::celestial_colonnade_becoming_a_creature_doesnt_enter_cr_603_6a` |
 | `1b90fed1` | c | NR | if this creature-land needs to pay a mana cost to attack, it may tap itself for that mana and still attack [part 3, was a/combat: no cube card makes attacking cost mana] | not reachable with the cube's cards |
-| `90f93ad0` | a | combat | tapping an attacking creature-land for mana afterward doesn't remove it from combat | untested |
+| `90f93ad0` | a | combat | tapping an attacking creature-land for mana afterward doesn't remove it from combat | `rulings_combat::an_attacking_colonnade_tapped_for_mana_stays_in_combat_cr_506_4` |
 
 ### Hallowed Fountain
 
@@ -3204,7 +3204,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3d047ce6` | a | combat | an animated land's summoning sickness depends on when you gained control of it, not on when it became a creature | untested |
+| `3d047ce6` | a | combat | an animated land's summoning sickness depends on when you gained control of it, not on when it became a creature | `rulings_combat::a_permanent_made_a_creature_attacks_and_taps_only_if_controlled_since_the_turn_began_cr_302_6` |
 | `e43b1205` | a | triggers | a land becoming a creature doesn't count as a creature entering the battlefield, so ETB-creature triggers don't fire | `rulings_triggers2::celestial_colonnade_becoming_a_creature_doesnt_enter_cr_603_6a` |
 
 ### Darkslick Shores
@@ -3401,7 +3401,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `4a5ce741` | a | triggers | if this becomes a creature via another effect, its own attack-triggered ability still fires when it attacks | `rulings_triggers3::a_land_animated_by_another_effect_still_has_its_attack_trigger_cr_603_2` |
-| `cdbf63ec` | a | combat | without continuous control since turn start, a newly-creature permanent cant attack or tap for mana that turn | untested |
+| `cdbf63ec` | a | combat | without continuous control since turn start, a newly-creature permanent cant attack or tap for mana that turn | `rulings_combat::a_permanent_made_a_creature_attacks_and_taps_only_if_controlled_since_the_turn_began_cr_302_6` |
 
 ### Tropical Island
 
@@ -3420,7 +3420,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `5b2bbb6a` | a | combat | if an exerted permanent is already untapped by the next untap step, its skip-untap effect simply expires | untested |
+| `5b2bbb6a` | a | combat | if an exerted permanent is already untapped by the next untap step, its skip-untap effect simply expires | `rulings_combat::an_exerted_land_untapped_before_the_next_untap_step_untaps_normally_after_it_cr_701_39b` |
 | `969ce586` | a | mana | mana from this source spent on a noncreature spell that later becomes a creature doesn't give that creature haste | untested |
 | `9f8d1cca` | a | mana | mana from this source spent on a noncreature spell that creates tokens doesn't give those tokens haste | untested |
 | `ce428cbf` | a | mana | mana from this source spent on any part of a creature spell's cost grants that creature haste until end of turn | untested |

@@ -809,8 +809,7 @@ fn intis_exiled_card_is_played_with_its_timing_and_costs_cr_601_3_307_1() {
     let island = bf(&g, 0, "Island");
     g.choose(Choice::Cast(pre));
     resolve(&mut g);
-    assert!(g.obj(island).tapped, "its cost paid
-{}", log(&g));
+    assert!(g.obj(island).tapped, "its cost paid\n{}", log(&g));
 }
 
 #[test]
@@ -1432,11 +1431,9 @@ fn ajanis_minus_four_never_chooses_or_sacrifices_a_land_cr_701_21a() {
         }
         _ => None,
     });
-    assert!(g.is_creature(tp), "animated
-{}", log(&g));
+    assert!(g.is_creature(tp), "animated\n{}", log(&g));
     assert!(!tar_offered.get(), "a land can't be chosen");
-    assert_eq!(g.obj(tp).zone, Zone::Battlefield, "nor sacrificed
-{}", log(&g));
+    assert_eq!(g.obj(tp).zone, Zone::Battlefield, "nor sacrificed\n{}", log(&g));
     assert_eq!(g.obj(bear).zone, Zone::Battlefield);
     assert_eq!(g.obj(ring).zone, Zone::Battlefield);
     assert_eq!(g.count_in(1, "Mind Stone", Zone::Graveyard), 1);

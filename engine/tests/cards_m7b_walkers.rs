@@ -523,6 +523,7 @@ const KAITO: &str = "Kaito, Bane of Nightmares";
 
 #[test]
 fn kaito_ninjutsu_returns_an_unblocked_attacker_and_attacks_in_its_place() {
+    // ruling: 5a72d756
     let mut g = scen()
         .battlefield(0, &["Test Bear", "Island", "Swamp", "Swamp"])
         .hand(0, &[KAITO])
