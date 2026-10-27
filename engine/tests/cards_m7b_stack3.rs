@@ -347,8 +347,11 @@ fn fallen_shinobi_permission_ends_with_the_turn() {
     attack_with(&mut g, &[fs]);
     g.drive_until(|g| g.turn().active == 1 && at_priority(g));
     g.drive_until(|g| g.turn().active == 0 && g.turn().step == Step::Main1 && at_priority(g));
+    // ruling: 2826b2c6
+    // Not cast: it remains in exile (`card` finds it there), unplayable.
     let giant = g.card(1, "Test Giant", Zone::Exile);
     assert!(!g.has_option(Choice::Cast(giant)));
+    assert_eq!(g.count_in(1, "Forest", Zone::Exile), 1);
 }
 
 /// P0 makes an Eldrazi Spawn ("Sacrifice this token: Add {C}") with

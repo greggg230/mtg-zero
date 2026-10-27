@@ -151,8 +151,12 @@ fn chandra_plus_one_deals_two_when_the_card_is_not_cast() {
             }
             _ => None,
         });
+        // ruling: dcd6db69
+        // "Cast" plays no land: the Island stays exiled, unplayable.
         assert_eq!(g.count_in(0, top, Zone::Exile), 1);
         assert_eq!(g.life(1), 18);
+        let c = g.card(0, top, Zone::Exile);
+        assert!(!g.has_option(Choice::Play(c)) && !g.has_option(Choice::Cast(c)));
     }
 }
 

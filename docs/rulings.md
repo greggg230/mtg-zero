@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1226 | 977 |
 | class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 913 | 726 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 625 | 535 |
-| a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
+| a, tested (passing) | 1010 | 796 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 717 | 600 |
+| a, tested only by an earlier test (Oracle or rules) | 293 | 196 |
 | a, deferred | 0 | 0 |
-| a, untested | 313 | 251 |
+| a, untested | 216 | 181 |
 
-Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 53/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -89,11 +89,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8`; `rulings_faces2::a_sacrificed_reflection_counts_fables_mana_value_and_is_fable_in_the_graveyard_cr_712_8e` |
 | `7d9c06e2` | a | other | if a player has none of a referenced permanent type, they still choose from what they do control | untested |
-| `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | untested |
+| `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | `rulings_zones2::a_single_faced_copy_of_ajani_exiled_to_return_transformed_stays_in_exile_cr_701_27c` |
 | `47eed49e` | a | triggers | if multiple tokens are made at once, a reflexive trigger fires once per token made that way | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 | `75da186b` | a | dfc | if a DFC creature transforms via another effect, the back face walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `95347d78` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
-| `18fa2a99` | a | zones | lands can't be chosen or sacrificed by a permanent-type-based effect even if they'd qualify | untested |
+| `18fa2a99` | a | zones | lands can't be chosen or sacrificed by a permanent-type-based effect even if they'd qualify | `rulings_zones2::ajanis_minus_four_never_chooses_or_sacrifices_a_land_cr_701_21a` |
 | `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `cba16ce1` | a | dfc | a transforming DFC's mana value is always its front face's, regardless of which face is up | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `b0b5c8d4` | b | MP | opponents choose sacrifice targets in turn order, each knowing earlier choices, then sac simultaneously [part 3, was a/combat: the order in which several opponents choose] | multiplayer |
@@ -144,7 +144,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `35f3a5dc` | a | zones | blink exile: Auras go to graveyard, Equipment unattaches and stays, counters cease; returnee is a new object | untested |
+| `35f3a5dc` | a | zones | blink exile: Auras go to graveyard, Equipment unattaches and stays, counters cease; returnee is a new object | `rulings_zones2::exiled_permanents_lose_auras_equipment_and_counters_and_return_as_new_objects_cr_400_7`; `rulings_zones2::phelias_exile_returns_a_new_object_under_its_owners_control_without_its_counters_cr_400_7` |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
 | `d29b2c9d` | a | triggers | a returning permanent's beginning-of-end-step triggers don't fire that turn (missed window) | `rulings_triggers3::delayed_returns_happen_without_their_source_and_a_returned_permanent_misses_this_end_step_cr_603_7` |
 | `e0df1cea` | b | DEF | flavor-only ruling, no rules content | a definition, no behaviour of its own |
@@ -212,7 +212,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `43d5100f` | a | dfc | an exiled MDFC's land back face can still be played as a land by its owner | `rulings_faces2::spellbinders_exiled_mdfc_may_be_played_as_its_land_by_its_owner_cr_712_11b` |
-| `f0d7b0c7` | a | zones | playing a card let loose from exile still follows normal timing restrictions | untested |
+| `f0d7b0c7` | a | zones | playing a card let loose from exile still follows normal timing restrictions | `rulings_zones2::an_owners_permission_to_cast_an_exiled_card_keeps_its_timing_spellbinder_and_adventures_cr_601_3_715_4` |
 
 ### Enduring Innocence
 
@@ -227,7 +227,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `35f3a5dc` | a | zones | blink exile: Auras go to graveyard, Equipment unattaches and stays, counters cease; returnee is a new object | untested |
+| `35f3a5dc` | a | zones | blink exile: Auras go to graveyard, Equipment unattaches and stays, counters cease; returnee is a new object | `rulings_zones2::exiled_permanents_lose_auras_equipment_and_counters_and_return_as_new_objects_cr_400_7`; `rulings_zones2::phelias_exile_returns_a_new_object_under_its_owners_control_without_its_counters_cr_400_7` |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
 | `d29b2c9d` | a | triggers | a returning permanent's beginning-of-end-step triggers don't fire that turn (missed window) | `rulings_triggers3::delayed_returns_happen_without_their_source_and_a_returned_permanent_misses_this_end_step_cr_603_7` |
 | `2cf497b2` | a | triggers | a delayed end-step return trigger still fires even once its source has left the battlefield | `rulings_triggers2::flickerwisp_gone_its_exiled_permanent_still_returns_at_the_end_step_cr_603_7` |
@@ -266,7 +266,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `408732b7` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist | untested |
+| `408732b7` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist | `rulings_zones2::exiled_permanents_lose_auras_equipment_and_counters_and_return_as_new_objects_cr_400_7` |
 | `6d79b5c1` | a | triggers | the monarch carries two built-in triggers: draw at end step, and passing on combat damage dealt to it | `rules_shortcuts::cr_724_2_the_monarchs_end_step_draw_uses_the_stack`; `rules_shortcuts::cr_724_2_combat_damage_to_the_monarch_triggers_per_creature` |
 | `078cc0d2` | a | zones | an exiled creature token ceases to exist instead of ever returning | `rulings_triggers2::palace_jailer_exiling_a_token_it_ceases_to_exist_cr_111_7` |
 | `867620c4` | a | triggers | if you're not monarch when the delayed exile trigger resolves, it stays exiled until an opponent becomes monarch | `rulings_triggers3::palace_jailers_exile_lasts_until_an_opponent_becomes_monarch_even_if_p0_isnt_monarch_now_cr_724_610_3` |
@@ -351,7 +351,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `546924df` | a | stack | an illegal target at resolution means the spell doesn't resolve and no search happens | `rulings_stack3::removal_whose_target_is_gone_does_none_of_its_other_effects_cr_608_2b` |
-| `cf14fa1b` | a | zones | the affected player isn't required to search; declining means no shuffle either | untested |
+| `cf14fa1b` | a | zones | the affected player isn't required to search; declining means no shuffle either | `rulings_zones2::path_to_exiles_search_may_be_declined_and_then_the_library_isnt_shuffled_cr_701_19b` |
 
 ### Swords to Plowshares
 
@@ -445,7 +445,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `9398525c` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease, new object on return | untested |
+| `9398525c` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease, new object on return | `rulings_zones2::exiled_permanents_lose_auras_equipment_and_counters_and_return_as_new_objects_cr_400_7` |
 | `f8e77455` | a | triggers | if the source leaves before its exile ability resolves, the target is never exiled | `rulings_triggers::portable_hole_gone_before_its_ability_resolves_exiles_nothing_cr_610_3c` |
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
 | `aff80611` | a | replacement | an exiled Auras owner picks what it reattaches to, untargeted, but bound by its enchant restriction | `rulings_replacement2::portable_hole_returning_animate_dead_lets_its_owner_choose_what_it_enchants_cr_303_4f` |
@@ -463,7 +463,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `9398525c` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease, new object on return | untested |
+| `9398525c` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease, new object on return | `rulings_zones2::exiled_permanents_lose_auras_equipment_and_counters_and_return_as_new_objects_cr_400_7` |
 | `bca63806` | b | DEF | discarding the required card is itself part of the activation cost [part 3, was a/mana: the discard is part of the channel cost; a definition] | a definition, no behaviour of its own |
 | `8ba35794` | a | triggers | if the source leaves before its exile ability resolves, the target is never exiled | `cards_m7b_tests_edges::cr_610_3c_touch_the_spirit_realm_gone_before_its_trigger_resolves_exiles_nothing` |
 | `5edd9028` | a | protection | an ability that requires a target can't be activated without one, even just to pay its cost | `rulings_protection2::luminarch_may_target_itself_and_channel_isnt_offered_without_a_target_cr_115_1_602_1` |
@@ -474,7 +474,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `429a116f` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist | untested |
+| `429a116f` | a | zones | blink-style exile: Auras to graveyard, Equipment unattaches and stays, counters cease to exist | `rulings_zones2::exiled_permanents_lose_auras_equipment_and_counters_and_return_as_new_objects_cr_400_7` |
 | `0f86b94f` | a | triggers | if the source leaves before its ETB ability resolves, the target permanent won't be exiled | `rulings_triggers2::leyline_binding_gone_before_its_enter_ability_resolves_exiles_nothing_cr_610_3c` |
 | `ac3bb678` | a | zones | a token exiled this way ceases to exist instead of returning | `rulings_triggers2::palace_jailer_exiling_a_token_it_ceases_to_exist_cr_111_7` |
 | `86da9a0c` | b | MP | multiplayer: exiled card returns if the exiling permanent's owner leaves the game | multiplayer |
@@ -489,7 +489,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8`; `rulings_faces2::a_sacrificed_reflection_counts_fables_mana_value_and_is_fable_in_the_graveyard_cr_712_8e` |
 | `3e825920` | c | NR | multiple hand-size-affecting effects apply in timestamp order [part 3, was a/other: no other cube effect changes a maximum hand size] | not reachable with the cube's cards |
-| `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | untested |
+| `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | `rulings_zones2::a_single_faced_copy_of_ajani_exiled_to_return_transformed_stays_in_exile_cr_701_27c` |
 | `3888033e` | a | dfc | if forced to transform via another effect, the resulting walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `95347d78` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `177cd810` | a | dfc | a DFC's back face usually has a color indicator; colorless back faces (e.g. lands) don't | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
@@ -519,7 +519,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `f8573515` | a | dfc | only the currently-up face's characteristics apply on the battlefield; elsewhere only the front face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `5653e6a4` | a | facedown | a manifested DFC is a face-down vanilla 2/2, cant transform face down, and flips up by paying its fronts mana cost | `rulings_facedown::a_manifested_double_faced_card_turns_face_up_front_face_up_cr_701_40e` |
 | `95b53341` | a | stack | casting a card from exile via a transform-back ability still follows normal timing rules for its card type | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
-| `703251e7` | a | zones | if an exile-and-cast-later permission isn't used that turn, the card just stays in exile | untested |
+| `703251e7` | a | zones | if an exile-and-cast-later permission isn't used that turn, the card just stays in exile | `rulings_zones2::an_unused_permission_ends_and_the_card_stays_where_it_is_cr_611_2a` |
 | `b83c13f9` | a | dfc | if forced to transform via another effect, the resulting walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
 | `527934db` | a | triggers | this graveyard-size check fires right after a discard, not whenever the graveyard later reaches that size | `rulings_walkers::jace_transformed_in_the_upkeep_activates_loyalty_only_in_a_main_phase_cr_606_3` |
 | `29c3ea17` | a | dfc | a transforming DFC's planeswalker back face can't be cast directly | `rulings_faces2::jaces_back_face_cant_be_cast_and_two_jaces_one_per_face_coexist_cr_712_11a` |
@@ -538,7 +538,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `550a74ab` | a | mana | casting a spell with X without paying its mana cost forces X to be 0 | untested |
 | `ad951704` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `92f52ee7` | a | stack | casting a spell as part of an ability's resolution happens immediately, ignoring normal timing permissions | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
-| `c86d4e2f` | a | zones | you may not play land cards discarded by this kind of effect | untested |
+| `c86d4e2f` | a | zones | you may not play land cards discarded by this kind of effect | `rulings_zones2::malcolm_cant_play_a_discarded_land_cr_305_1` |
 
 ### Norman Osborn // Green Goblin
 
@@ -653,18 +653,18 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `ca262086` | a | dfc | a copy of an object with an Adventure also has the Adventure, but loses that ability to cast it once it changes zones | `cards_m7b_copies::a_copy_leaving_the_battlefield_is_its_card_again_cr_400_7` |
 | `4b8b633b` | a | dfc | casting a card as its Adventure checks legality using only the Adventure's alternative characteristics | `rulings_faces2::an_adventure_needs_its_own_legal_target_to_be_cast_cr_715_3a` |
 | `ee323737` | a | dfc | playing a card as its Adventure uses only the alternative characteristics; it reverts to normal once it leaves the stack | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
-| `5b5ff3d6` | a | zones | playing a card from exile (e.g. an Adventure permanent) still follows its normal timing restrictions | untested |
+| `5b5ff3d6` | a | zones | playing a card from exile (e.g. an Adventure permanent) still follows its normal timing restrictions | `rulings_zones2::an_owners_permission_to_cast_an_exiled_card_keeps_its_timing_spellbinder_and_adventures_cr_601_3_715_4` |
 
 ### Emry, Lurker of the Loch
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `b2c5a21b` | a | zones | casting a card from the graveyard makes it a new object; it cant be recast if it returns there that turn | untested |
+| `b2c5a21b` | a | zones | casting a card from the graveyard makes it a new object; it cant be recast if it returns there that turn | `rulings_zones2::a_card_cast_with_a_permission_that_comes_back_is_a_new_object_without_it_cr_400_7` |
 | `4097b21c` | c | NR | targeting an artifact land to let you cast it still doesnt let you play it, since cast-permission excludes lands [part 3, was a/zones: the cube has no artifact land] | not reachable with the cube's cards |
 | `4f616c51` | a | stack | once casting is announced, no responses are allowed until its fully paid for, including cost reductions | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
 | `8f8116e7` | a | mana | a cost-reduction ability that reduces generic mana leaves colored mana costs untouched | untested |
 | `a5f46a35` | a | mana | total cost = base/alt cost + increases, then reductions; mana value unaffected by total cost paid | untested |
-| `6d4a6721` | a | zones | casting an artifact card via another card's permission still follows normal timing restrictions unless it has flash | untested |
+| `6d4a6721` | a | zones | casting an artifact card via another card's permission still follows normal timing restrictions unless it has flash | `rulings_zones2::cards_cast_or_played_from_a_graveyard_keep_their_timing_cr_601_3_307_1_305_2` |
 | `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | untested |
 
 ### Forensic Gadgeteer
@@ -726,7 +726,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `aded29b5` | a | zones | a token exiled this way ceases to exist instead of ever returning | `cards_m7b_tests_edges::phelia_exiling_a_token_does_not_return_it` |
-| `d395b444` | a | zones | blink-style exile: the returnee is a new object; Auras hit the graveyard, Equipment unattaches, counters vanish | untested |
+| `d395b444` | a | zones | blink-style exile: the returnee is a new object; Auras hit the graveyard, Equipment unattaches, counters vanish | `rulings_zones2::exiled_permanents_lose_auras_equipment_and_counters_and_return_as_new_objects_cr_400_7`; `rulings_zones2::displacer_kittens_flicker_returns_a_new_object_without_its_aura_equipment_or_counters_cr_400_7` |
 
 ### Phyrexian Metamorph
 
@@ -757,9 +757,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `d2f219ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | untested |
-| `751982e2` | a | zones | if an exiled card made playable by an ability isn't played, it simply remains in exile | untested |
+| `751982e2` | a | zones | if an exiled card made playable by an ability isn't played, it simply remains in exile | `rulings_zones2::an_unused_permission_ends_and_the_card_stays_where_it_is_cr_611_2a` |
 | `e32a9bac` | a | copies | a count-based power/toughness-setting ability counts its own source, guaranteeing at least a 1/1 | `cards_m7d::urza_construct_token_and_a_sick_artifact_creature_pay_cr302_6` |
-| `a32fb196` | a | zones | letting you cast/play an exiled card doesn't change its normal timing restrictions for its card type | untested |
+| `a32fb196` | a | zones | letting you cast/play an exiled card doesn't change its normal timing restrictions for its card type | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
 | `c2b769e4` | a | mana | this mana costs tap can be any untapped artifact you control, even one lacking continuous control, with no side effect | `cards_m7d::urza_construct_token_and_a_sick_artifact_creature_pay_cr302_6` |
 
 ### Feywild Caretaker
@@ -789,7 +789,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `35e7caab` | a | zones | a cards-entering-library trigger only fires from elsewhere, not from scrying, surveilling, or reordering | untested |
+| `35e7caab` | a | zones | a cards-entering-library trigger only fires from elsewhere, not from scrying, surveilling, or reordering | `rulings_zones2::wan_shi_tong_triggers_on_cards_put_into_a_library_from_elsewhere_not_on_a_scry_or_reorder_cr_701_22_603_2` |
 
 ### Kappa Cannoneer
 
@@ -810,7 +810,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `80ee1489` | a | zones | if the targeted player has no cards in hand, nothing shuffles in; their library stays empty until theyd draw | untested |
+| `80ee1489` | a | zones | if the targeted player has no cards in hand, nothing shuffles in; their library stays empty until theyd draw | `rulings_zones2::jace_ultimate_on_an_empty_hand_leaves_the_library_empty_and_the_player_loses_only_on_a_draw_cr_704_5b` |
 | `c83041cc` | a | stack | a draw-some-put-back ability resolves atomically; no player may act between the draw and the putting back | `rulings_stack3::no_player_can_act_in_the_middle_of_a_resolution_cr_608_2` |
 
 ### Jace, Wielder of Mysteries
@@ -1008,7 +1008,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `98bf27cb` | a | mana | if the found replacement costs the same or less than what was sacrificed, it enters with no extra cost paid | untested |
 | `109a1e64` | b | DEF | the found permanent enters as the spell resolves, which doesn't count as casting it [part 3, was a/stack: Transmute Artifact puts the card onto the battlefield, which is never a cast; a definition] | a definition, no behaviour of its own |
 | `ec89adc7` | b | DEF | this effect can't be used to sacrifice more than one artifact [part 3, was a/zones: Transmute Artifact says "an artifact"; a definition] | a definition, no behaviour of its own |
-| `81386b1f` | a | zones | the sacrifice is an effect at resolution, not a cost, so a countered spell requires sacrificing nothing | untested |
+| `81386b1f` | a | zones | the sacrifice is an effect at resolution, not a cost, so a countered spell requires sacrificing nothing | `rulings_zones2::transmute_artifacts_sacrifice_is_an_effect_so_a_countered_transmute_sacrifices_nothing_cr_608_2` |
 
 ### Timetwister
 
@@ -1227,7 +1227,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `2e4566d6` | a | mana | an artifacts mana value is its printed cost only (exceptions: DFC backs, melds, copies); X and no symbols both mean 0 | untested |
 | `62210dab` | a | mana | the colored mana portion of an emerge cost can't be reduced | untested |
-| `33c73fb6` | a | zones | an exile-then-maybe-cast ability can't be used to play land cards; unchosen or unplayable cards just stay exiled | untested |
+| `33c73fb6` | a | zones | an exile-then-maybe-cast ability can't be used to play land cards; unchosen or unplayable cards just stay exiled | `rulings_zones2::crabominations_cast_plays_no_land_and_the_cards_not_cast_stay_exiled_cr_305_1_406_6` |
 | `e4babdad` | a | mana | emerge from artifact lets you sacrifice an artifact instead of a creature, otherwise working just like emerge | `cards_m7d::crabomination_emerges_and_casts_an_exiled_card_free_cr702_119` |
 | `f9ebf9d5` | a | mana | casting free forbids other alt costs but still requires any mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
 | `b2be720c` | a | stack | once you begin casting with emerge, it's atomic; no one can remove the permanent you intend to sacrifice | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
@@ -1286,7 +1286,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `44d6591f` | b | DEF | this effect only ever affects its own controller and has no targets, so it can't be redirected to an opponent [part 3, was a/other: Demonic Consultation has no target; a definition] | a definition, no behaviour of its own |
 | `3e8af7d2` | b | DEF | you must name a card that's an actual, real Magic card [part 3, was a/zones: the engine names cards by their definitions, which are real cards; a definition] | a definition, no behaviour of its own |
-| `d81b7805` | a | zones | failing to find the named card exiles your whole library; you lose only the next time youd draw from it | untested |
+| `d81b7805` | a | zones | failing to find the named card exiles your whole library; you lose only the next time youd draw from it | `cards_m7c_tail::demonic_consultation_names_exiles_six_then_reveals_until_the_name_cr701_20a` |
 | `d1cf4160` | a | stack | the named card isn't locked in until the spell actually resolves | `rulings_stack3::no_player_can_act_in_the_middle_of_a_resolution_cr_608_2` |
 
 ### Fatal Push
@@ -1296,7 +1296,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `adbe4a9a` | a | stack | a removal spell with a mana-value restriction can target anything; the restriction is checked only at resolution | `rulings_stack::fatal_push_may_target_any_creature_and_checks_its_mana_value_on_resolution_cr_608_2b` |
 | `aafa61cb` | a | mana | a battlefield creature with X in its mana cost treats X as 0 | untested |
 | `7995d7c4` | a | triggers | a revolt-style condition doesn't care how, why, or by whom a permanent left, or where it went | `rulings_triggers3::revolt_counts_any_permanent_leaving_and_dash_returns_only_a_creature_still_there_cr_702_109a` |
-| `94a79602` | a | zones | a token leaving the battlefield still satisfies a revolt-style condition | untested |
+| `94a79602` | a | zones | a token leaving the battlefield still satisfies a revolt-style condition | `rulings_zones2::fatal_push_revolt_counts_a_token_leaving_the_battlefield_cr_111_7` |
 
 ### Rain of Filth
 
@@ -1412,7 +1412,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `0333f482` | a | combat | a noncreature-turned-creature needs continuous control since turn start to attack or tap, not creature-status time | untested |
 | `d9bc4e52` | a | mana | off the stack, a split cards mana value is both halves combined, so low-MV searches wont find it | untested |
 | `b83b7a27` | c | NR | a split card has two names; choosing a card name picks only one of them [part 3, was a/other: the cube's naming cards look at cards outside the stack, where a split card has both names together] | not reachable with the cube's cards |
-| `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | untested |
+| `7892efbd` | a | zones | a split card is a single card for counting purposes, like how many cards are discarded or sorceries in a graveyard | `rulings_zones2::a_split_card_is_one_card_when_discarded_cr_709_4` |
 | `7a9df48b` | c | NR | a spell-casting effect with set characteristics only sees the half of a split card being cast [part 3, was a/dfc: no cube effect casts a spell by mana value or another characteristic where Life's and Death's halves differ (cascade checks the card, then either half fits)] | not reachable with the cube's cards |
 | `ae909e09` | a | copies | a copy of one half of a split card remains that same half | `rulings_copies3::lutris_copy_of_an_alternative_cost_spell_and_of_a_split_half_cr_707_10` |
 | `64340627` | a | copies | a land that becomes a creature keeps all its other supertypes, types, subtypes, and abilities | `cards_m7b_faces4::life_makes_your_lands_one_one_creatures_until_end_of_turn` |
@@ -1443,7 +1443,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `5e36ae3b` | a | other | retaking the initiative while already holding it doesn't grant a second designation | `rules_initiative::taking_the_initiative_again_ventures_again_cr_725_2` |
-| `fd5ee67c` | a | zones | after this resolves it returns to the graveyard, where escape can be used again, needing fresh cards to exile | untested |
+| `fd5ee67c` | a | zones | after this resolves it returns to the graveyard, where escape can be used again, needing fresh cards to exile | `rulings_zones2::escaped_spells_return_to_the_graveyard_and_can_escape_again_cr_702_138` |
 | `6c69604c` | a | zones | an escape-style permission changes how you may cast a card from the graveyard, not when you may do so | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `259e8644` | a | zones | if a card has multiple permissions to cast it from the graveyard, you choose one to apply; the rest do nothing | `rules_shortcuts::cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses` |
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
@@ -1522,8 +1522,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `4f0780ad` | a | mana | paying a dash-style cost is still a normal cast: responsive, counterable, only when castable anyway | untested |
 | `d96d165d` | a | triggers | a dash-style return-to-hand trigger only works if the creature is still on the battlefield when that trigger resolves | `rulings_triggers3::revolt_counts_any_permanent_leaving_and_dash_returns_only_a_creature_still_there_cr_702_109a` |
 | `7929f582` | a | combat | a dash-style effect doesn't force the creature to attack unless something else says so | untested |
-| `b5df7fc5` | a | zones | casting an exiled card this way still needs its full costs and timing; you cant play an exiled land | untested |
-| `421327a3` | a | zones | a Treasure-creating exile effect still makes the token even if the affected library has no cards left to exile | untested |
+| `b5df7fc5` | a | zones | casting an exiled card this way still needs its full costs and timing; you cant play an exiled land | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
+| `421327a3` | a | zones | a Treasure-creating exile effect still makes the token even if the affected library has no cards left to exile | `rulings_zones2::ragavan_makes_its_treasure_even_with_nothing_to_exile_cr_609_3` |
 
 ### Embereth Shieldbreaker // Battle Display
 
@@ -1538,7 +1538,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `ca262086` | a | dfc | a copy of an object with an Adventure also has the Adventure, but loses that ability to cast it once it changes zones | `cards_m7b_copies::a_copy_leaving_the_battlefield_is_its_card_again_cr_400_7` |
 | `abf4aaa4` | a | dfc | casting a card as its Adventure checks legality using only the Adventure's alternative characteristics | `rulings_faces2::an_adventure_needs_its_own_legal_target_to_be_cast_cr_715_3a` |
 | `99a330f8` | a | dfc | while cast as its Adventure, a card uses only the alternative characteristics; it reverts once it leaves the stack | `rulings_faces2::an_adventurer_card_has_its_alternative_characteristics_only_on_the_stack_cr_715_3` |
-| `7ddcc330` | a | zones | casting the permanent later from exile still follows its normal timing restrictions | untested |
+| `7ddcc330` | a | zones | casting the permanent later from exile still follows its normal timing restrictions | `rulings_zones2::an_owners_permission_to_cast_an_exiled_card_keeps_its_timing_spellbinder_and_adventures_cr_601_3_715_4` |
 
 ### Fear of Missing Out
 
@@ -1571,7 +1571,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `30e98d6a` | a | triggers | no target is chosen when the first ability triggers; a reflexive trigger gets its own targets when it's put on the stack | `cards_m7c_tail3::inti_discard_then_reflexive_counter_cr603_12_and_play_until_your_next_end_step` |
-| `a4ed176d` | a | zones | cards played via this effect still require paying all their costs and following normal timing rules | untested |
+| `a4ed176d` | a | zones | cards played via this effect still require paying all their costs and following normal timing rules | `rulings_zones2::intis_exiled_card_is_played_with_its_timing_and_costs_cr_601_3_307_1` |
 
 ### Ivora, Insatiable Heir
 
@@ -1592,16 +1592,16 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `edc91fad` | a | zones | an effect that lets you 'cast' a card doesn't let you play lands with it | untested |
-| `9b682c79` | a | zones | casting a card from exile removes it from exile, so you can't cast it again from there | untested |
+| `edc91fad` | a | zones | an effect that lets you 'cast' a card doesn't let you play lands with it | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
+| `9b682c79` | a | zones | casting a card from exile removes it from exile, so you can't cast it again from there | `rulings_zones2::a_card_cast_with_a_permission_that_comes_back_is_a_new_object_without_it_cr_400_7` |
 | `08172cc2` | a | triggers | this cast-permission keeps applying on later turns if the source leaves, as long as its condition is met again | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `69d95378` | a | combat | when a creature attacks a planeswalker, that planeswalker's controller counts as the defending player | untested |
 | `bcb139f0` | a | triggers | a comparative trigger condition is checked at trigger time and again at resolution; in-between doesnt matter | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
 | `dca8fc68` | a | dfc | stealing and casting an Adventure card this way lets you, not its owner, cast the permanent later | `rulings_faces2::an_adventure_cast_with_robber_of_the_rich_lets_robbers_controller_cast_the_creature_cr_715_4` |
 | `03c107f1` | b | MP | multiplayer: a player leaving the game and the cards/permanents they own leaving with them | multiplayer |
-| `0614c7a7` | a | zones | letting you cast an exiled card doesn't change its normal timing restrictions | untested |
-| `c92140df` | a | zones | a card exiled by this effect is exiled face up | untested |
-| `7d258f4b` | a | zones | you can cast the exiled card regardless of the attackers current combat or battlefield status | untested |
+| `0614c7a7` | a | zones | letting you cast an exiled card doesn't change its normal timing restrictions | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
+| `c92140df` | a | zones | a card exiled by this effect is exiled face up | `rulings_zones2::robber_laelia_and_cascade_exile_face_up_for_both_players_to_see_cr_406_3` |
+| `7d258f4b` | a | zones | you can cast the exiled card regardless of the attackers current combat or battlefield status | `rulings_zones2::robbers_card_can_be_cast_after_robber_left_the_battlefield_cr_611_2a` |
 
 ### Broadside Bombardiers
 
@@ -1649,12 +1649,12 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `551aa933` | a | zones | cards exiled by this effect are exiled face up | untested |
+| `551aa933` | a | zones | cards exiled by this effect are exiled face up | `rulings_zones2::robber_laelia_and_cascade_exile_face_up_for_both_players_to_see_cr_406_3` |
 | `1178d637` | a | triggers | an 'exile cards until some event' effect exiles them one at a time, so a watching trigger fires once per card | `rulings_triggers2::laelia_cascade_exiles_one_card_at_a_time_one_trigger_each_cr_702_85a_603_2c` |
-| `1e2502fc` | a | zones | playing a card from exile makes it a new object; if it returns to exile later, you can't play it again | untested |
+| `1e2502fc` | a | zones | playing a card from exile makes it a new object; if it returns to exile later, you can't play it again | `rulings_zones2::a_card_cast_with_a_permission_that_comes_back_is_a_new_object_without_it_cr_400_7` |
 | `a898c85e` | a | triggers | this trigger doesn't care which player exiled the cards or from which zone, including via delve | `rulings_triggers3::laelia_an_opponents_exile_counts_and_rockets_destroyed_draw_and_a_crewed_copter_doesnt_enter_cr_603_2_603_6a` |
 | `cefea9b0` | a | triggers | this trigger fires once per exiling event, no matter how many cards were exiled simultaneously | `rules_shortcuts::cr_603_2c_laelia_triggers_once_per_exile_event` |
-| `8e48cc76` | a | zones | playing a card exiled this way still follows normal timing restrictions, including needing an available land play | untested |
+| `8e48cc76` | a | zones | playing a card exiled this way still follows normal timing restrictions, including needing an available land play | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
 | `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | untested |
 
 ### Screaming Nemesis
@@ -1684,7 +1684,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `903365a8` | a | triggers | a graveyard-size-gated ability checks the count both when it triggers and again at resolution, failing either check | `rulings_triggers3::conditions_on_trigger_and_resolution_robber_tersa_caves_magda_cr_603_4` |
-| `1e4d5a35` | a | zones | cards played this way still require paying all costs and following normal timing rules, including land-play availability | untested |
+| `1e4d5a35` | a | zones | cards played this way still require paying all costs and following normal timing rules, including land-play availability | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
 
 ### Caves of Chaos Adventurer
 
@@ -1758,7 +1758,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `dcd6db69` | a | zones | cast doesnt let you play a land; an exiled land card fails this way and triggers the fallback effect | untested |
+| `dcd6db69` | a | zones | cast doesnt let you play a land; an exiled land card fails this way and triggers the fallback effect | `cards_m7b_walkers::chandra_plus_one_deals_two_when_the_card_is_not_cast` |
 | `3c21533f` | a | triggers | an emblem's own ability resolves before the spell that caused its creation, even if that spell is later countered | `rulings_triggers::chandras_emblem_trigger_resolves_even_if_the_spell_is_countered_cr_603_3` |
 | `d4e8981b` | a | stack | casting from exile during resolution skips type-timing rules, but other stated restrictions still apply | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
 | `cdf038bc` | b | MP | Two-Headed Giant: a fixed total damage amount is dealt to the opposing team | multiplayer |
@@ -1819,7 +1819,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `282f09bb` | b | DEF | graveyard card types: artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery only [part 3, was a/other: the list of card types; a definition] | a definition, no behaviour of its own |
-| `009c63c0` | a | zones | a graveyard-size check happens as the spell resolves, before the spell itself has reached the graveyard | untested |
+| `009c63c0` | a | zones | a graveyard-size check happens as the spell resolves, before the spell itself has reached the graveyard | `rulings_zones2::unholy_heat_counts_the_graveyard_without_itself_cr_608_2h` |
 
 ### Through the Breach
 
@@ -1908,7 +1908,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a7269192` | a | zones | a non-permanent escaped spell returns to GY after resolving; a permanent enters BF and returns to GY only when it dies | untested |
+| `a7269192` | a | zones | a non-permanent escaped spell returns to GY after resolving; a permanent enters BF and returns to GY only when it dies | `rulings_zones2::escaped_spells_return_to_the_graveyard_and_can_escape_again_cr_702_138` |
 | `6c69604c` | a | zones | an escape-style permission changes how you may cast a card from the graveyard, not when you may do so | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `259e8644` | a | zones | if a card has multiple permissions to cast it from the graveyard, you choose one to apply; the rest do nothing | `rules_shortcuts::cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses` |
 | `f0b4b359` | c | NR | a card with no mana cost has an unpayable escape cost, so it can't be cast that way [part 3, was a/mana: every cube nonland card has a mana cost] | not reachable with the cube's cards |
@@ -2111,14 +2111,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a276cb65` | a | zones | a countered cast-from-graveyard spell returns there, where that permission can be used on it again | untested |
+| `a276cb65` | a | zones | a countered cast-from-graveyard spell returns there, where that permission can be used on it again | `rulings_zones2::retraced_spells_resolved_or_countered_return_to_the_graveyard_and_can_be_retraced_again_cr_702_81a` |
 
 ### Ursine Monstrosity
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `1d87aaa2` | c | NR | if not forced to attack a specific player but still able, you may attack elsewhere or not attack at all [part 3, was a/combat: Ursine Monstrosity's requirement has no cost, so it's never "not forced but able"] | not reachable with the cube's cards |
-| `ccae9ec2` | a | zones | if a required mill can't happen, the rest of the ability's instructions still get followed | untested |
+| `ccae9ec2` | a | zones | if a required mill can't happen, the rest of the ability's instructions still get followed | `rulings_zones2::ursine_monstrosity_with_nothing_to_mill_still_does_the_rest_cr_701_13b` |
 | `c298a763` | a | triggers | an attack-triggered ability fires at each of multiple combat phases in a turn, ignoring choices made in earlier phases | `rulings_triggers3::ursine_triggers_at_each_combat_with_no_main_phase_between_and_persist_returns_apnap_cr_506_1_603_3b` |
 | `7bf7bcc3` | a | combat | a must-attack creature is excused if tapped, cant-attack, or lacks haste+continuous control; its cost isnt forced | untested |
 | `d8d3cb67` | b | DEF | card types are artifact, battle, creature, enchantment, instant, kindred, land, planeswalker, sorcery; no super/subtypes [part 3, was a/other: the list of card types; a definition] | a definition, no behaviour of its own |
@@ -2135,7 +2135,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `76c89b3d` | c | NR | an ability letting you play graveyard lands doesnt let you activate their other abilities, like cycling [part 3, was a/zones: no cube land card has an ability that works from a graveyard (cycling or otherwise)] | not reachable with the cube's cards |
-| `84c13ea1` | a | zones | playing lands from another zone via this effect keeps normal timing: once per turn, main phase, empty stack | untested |
+| `84c13ea1` | a | zones | playing lands from another zone via this effect keeps normal timing: once per turn, main phase, empty stack | `rulings_zones2::cards_cast_or_played_from_a_graveyard_keep_their_timing_cr_601_3_307_1_305_2` |
 | `df961cd2` | c | NR | multiple effects granting extra land plays per turn stack cumulatively with each other [part 3, was a/zones: the cube's other extra-land effect is Fastbond (any number), so no two "one additional land" effects add up] | not reachable with the cube's cards |
 
 ### Leatherhead, Swamp Stalker
@@ -2219,7 +2219,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `cc1b356f` | c | NR | persist still works even if the creature stops being a creature before it would die [part 3, was a/other: no cube effect makes Woodfall Primus stop being a creature] | not reachable with the cube's cards |
 | `fdcd2e1f` | c | NR | persist uses last-known counters right before leaving the battlefield, so a lingering +1/+1 counter blocks its return [part 3, was a/triggers: no cube card puts -1/-1 counters on a persist creature except lethal infect damage, which leaves it with -1/-1 counters either way] | not reachable with the cube's cards |
 | `28deec8d` | c | NR | multiple instances of persist on one permanent each trigger separately, but only the first to resolve has any effect [part 3, was a/triggers: no cube effect gives a creature a second persist] | not reachable with the cube's cards |
-| `15f83ca8` | a | zones | a token with no -1/-1 counters that has persist still triggers on death, but ceases to exist and can't return | untested |
+| `15f83ca8` | a | zones | a token with no -1/-1 counters that has persist still triggers on death, but ceases to exist and can't return | `rulings_zones2::a_token_with_persist_dies_and_triggers_but_cant_return_cr_111_7_702_79a` |
 | `54494365` | a | triggers | simultaneous persist deaths stack active-player triggers first, then others; the last one stacked resolves first | `rulings_triggers3::persist_triggers_go_on_the_stack_apnap_so_the_nonactive_players_creature_returns_first_cr_603_3b` |
 | `6363d351` | a | triggers | persist triggers on hitting the graveyard, using last-known info to check for a -1/-1 counter | `cards_m7a_threats2::cr_702_79_woodfall_primus_persists_once` |
 | `e7319af2` | a | zones | a permanent returned by persist is a new object with no memory of its previous existence | `cards_m7a_threats2::cr_702_79_woodfall_primus_persists_once` |
@@ -2336,10 +2336,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `3f63bb36` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | untested |
+| `3f63bb36` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
 | `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `892b7ab2` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
-| `07bd45b4` | a | zones | exiled cards you don't play via this effect simply remain in exile | untested |
+| `07bd45b4` | a | zones | exiled cards you don't play via this effect simply remain in exile | `cards_m7a_zones2::golos_exiles_three_to_play_free_this_turn_a_land_uses_the_land_drop` |
 
 ### Blightsteel Colossus
 
@@ -2384,7 +2384,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `3c753455` | a | mana | casting an X spell without paying its mana cost forces you to choose X as 0 | `rulings_casts::citadel_an_x_spell_from_the_top_has_x_zero_and_costs_no_life_cr_107_3b` |
 | `276611ee` | a | mana | casting 'without paying its mana cost' forbids alternative costs but still requires mandatory additional costs | `rulings_casts::etali_no_alternative_cost_but_mandatory_additional_costs_cr_118_9a_601_2f` |
-| `8d32d60f` | a | zones | spells cast via this granted permission still follow their normal timing restrictions | untested |
+| `8d32d60f` | a | zones | spells cast via this granted permission still follow their normal timing restrictions | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
 
 ### Chrome Mox
 
@@ -2541,7 +2541,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `8c728893` | c | NR | an ability letting you play graveyard lands doesnt let you activate their other abilities, like cycling [part 3, was a/zones: no cube land card has an ability that works from a graveyard (cycling or otherwise)] | not reachable with the cube's cards |
-| `c96d5ecf` | a | zones | playing lands from another zone via this effect keeps normal timing: once per turn, main phase, empty stack | untested |
+| `c96d5ecf` | a | zones | playing lands from another zone via this effect keeps normal timing: once per turn, main phase, empty stack | `rulings_zones2::cards_cast_or_played_from_a_graveyard_keep_their_timing_cr_601_3_307_1_305_2` |
 
 ### Nettlecyst
 
@@ -2573,7 +2573,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a16cbfa9` | a | zones | cards exiled this way can't be looked at until they return to hand | untested |
+| `a16cbfa9` | a | zones | cards exiled this way can't be looked at until they return to hand | `cards_m7c_tail3::memory_jar_hands_face_down_then_back_at_the_end_step_cr406_3` |
 
 ### Coveted Jewel
 
@@ -2594,10 +2594,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `f402e1f3` | a | mana | this tap-for-generic-mana payment is capped at the generic mana amount in its own cost component | `cards_m7c_tail2::aang_waterbends_with_creatures_and_artifacts_to_transform` |
 | `5a445906` | a | mana | tapping/saccing an artifact for its own mana ability during casting removes it from use for this other payment method | untested |
 | `0695134e` | a | mana | casting an X spell via this effect forces you to choose X as 0 | untested |
-| `f3306d74` | a | zones | lands exiled by this effect can't be played from exile at all | untested |
+| `f3306d74` | a | zones | lands exiled by this effect can't be played from exile at all | `rulings_zones2::airbent_lands_and_tokens_cant_be_cast_from_exile_cr_305_1_111_7` |
 | `962ca2f6` | a | mana | using this alternative cost forbids other alternative costs but still requires mandatory additional costs | `cards_m7c_tail2::aang_airbends_a_spell_its_owner_may_recast_for_two` |
 | `96856673` | a | mana | this exile keyword lets each owner cast their card later from exile for a fixed alternative cost | `cards_m7c_tail2::aang_airbends_a_spell_its_owner_may_recast_for_two` |
-| `9e31018b` | a | zones | tokens exiled by this effect cease to exist and can never be cast from there | untested |
+| `9e31018b` | a | zones | tokens exiled by this effect cease to exist and can never be cast from there | `rulings_zones2::airbent_lands_and_tokens_cant_be_cast_from_exile_cr_305_1_111_7` |
 | `9257e4eb` | a | mana | any untapped creature or artifact can be tapped for this cost, even without continuous control since last turn | untested |
 
 ### Teferi, Time Raveler
@@ -2629,8 +2629,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `2e75e441` | a | zones | with five or fewer library cards, you can keep paying life to loop through seeing the same cards again | untested |
-| `89452e23` | a | zones | declining to pay life shuffles the rest of the library, then returns the same five cards to the top in a chosen order | untested |
+| `2e75e441` | a | zones | with five or fewer library cards, you can keep paying life to loop through seeing the same cards again | `rulings_zones2::lim_duls_vault_with_five_cards_shows_them_again_and_paying_nothing_shuffles_the_rest_cr_401_4` |
+| `89452e23` | a | zones | declining to pay life shuffles the rest of the library, then returns the same five cards to the top in a chosen order | `rulings_zones2::lim_duls_vault_with_five_cards_shows_them_again_and_paying_nothing_shuffles_the_rest_cr_401_4` |
 | `582d92bc` | a | zones | this is a repeatable look-five/keep-or-bottom-and-pay-life loop that ends once you choose to keep the cards on top | `cards_m7c_tail::lim_duls_vault_pays_life_to_dig_then_stacks_the_top_cr119_4` |
 
 ### Ertai Resurrected
@@ -2669,10 +2669,10 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `6995549f` | a | combat | a creature entering attacking via ninjutsu was never declared an attacker, so attack-triggers skip it | untested |
-| `2826b2c6` | a | zones | exiled cards you don't cast simply remain in exile | untested |
+| `2826b2c6` | a | zones | exiled cards you don't cast simply remain in exile | `cards_m7b_stack3::fallen_shinobi_permission_ends_with_the_turn` |
 | `df42df1d` | a | stack | ninjutsu activation reveals card and bounces attacker; creature enters only at resolution, not if it leaves hand | `rulings_stack::ninjutsu_the_ninja_enters_only_as_the_ability_resolves_cr_702_49a` |
-| `9b682c79` | a | zones | casting a card from exile removes it from exile, so you can't cast it again from there | untested |
-| `93cdcc40` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | untested |
+| `9b682c79` | a | zones | casting a card from exile removes it from exile, so you can't cast it again from there | `rulings_zones2::a_card_cast_with_a_permission_that_comes_back_is_a_new_object_without_it_cr_400_7` |
+| `93cdcc40` | a | zones | letting you play exiled cards doesn't change their normal timing restrictions | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
 | `7ad97095` | a | combat | with first/double strike present, ninjutsu-entering creatures still deal damage in the regular damage step | untested |
 | `d4961537` | a | combat | a ninjutsu creature attacks the same target the bounced creature did, unlike the normal controllers-choice rule | untested |
 | `350567b9` | a | combat | ninjutsu can trigger across several combat steps, but waiting past declare blockers usually misses the damage step | untested |
@@ -2749,7 +2749,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0bcbef41` | a | zones | a retrace spell that resolves or is countered goes back to the graveyard, where retrace can be used on it again | untested |
+| `0bcbef41` | a | zones | a retrace spell that resolves or is countered goes back to the graveyard, where retrace can be used on it again | `rulings_zones2::retraced_spells_resolved_or_countered_return_to_the_graveyard_and_can_be_retraced_again_cr_702_81a` |
 
 ### Minsc & Boo, Timeless Heroes
 
@@ -2763,7 +2763,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `373235a1` | a | mana | a spell's mana value comes only from its mana cost, ignoring any alternative costs, additional costs, or cost changes | untested |
-| `5a231246` | a | zones | an escaped non-permanent returns to GY after resolving; a permanent enters BF, returns to GY on death, re-escapes | untested |
+| `5a231246` | a | zones | an escaped non-permanent returns to GY after resolving; a permanent enters BF, returns to GY on death, re-escapes | `rulings_zones2::escaped_spells_return_to_the_graveyard_and_can_escape_again_cr_702_138` |
 | `acd60f05` | a | stack | a cascade-style trigger fires on cast and resolves first, stacking any cast card above the source spell | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
 | `8d21f1db` | c | NR | a cascade-style effect requires the cast spell, not just the exiled card, to beat the sources mana value [part 3, was a/mana: no cube card's castable face or half has a higher mana value than the card it is in exile] | not reachable with the cube's cards |
 | `6c69604c` | a | zones | an escape-style permission changes how you may cast a card from the graveyard, not when you may do so | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
@@ -2777,7 +2777,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `6187a75b` | a | mana | a split cards mana value is both halves combined; a cascade-style effect still only casts one half | untested |
 | `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
 | `4f3bb425` | a | triggers | a cascade-style ability's exile step is mandatory; only casting the final exiled card is optional | `rulings_stack3::cascade_resolves_first_even_with_its_spell_countered_and_its_exiling_isnt_optional_cr_702_85a` |
-| `d4aa6557` | a | zones | a cascade-style ability exiles its cards face up, visible to every player | untested |
+| `d4aa6557` | a | zones | a cascade-style ability exiles its cards face up, visible to every player | `rulings_zones2::robber_laelia_and_cascade_exile_face_up_for_both_players_to_see_cr_406_3` |
 
 ### Raph & Mikey, Troublemakers
 
@@ -2847,14 +2847,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `d2cef7ee` | c | NR | gaining control of a new copy in the same turn, after already using ones effect, lets you use the new ones too [part 3, was a/other: Lurrus is legendary and the cube has one] | not reachable with the cube's cards |
 | `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `bd8a17c9` | a | other | this companion's deckbuilding condition doesn't restrict the mana value of instants and sorceries in your starting deck | `rules_m8a::cr_702_139a_lurrus_condition_each_permanent_mana_value_2_or_less` |
-| `a6bfcffb` | a | zones | this cast-from-graveyard permission doesn't let you play land cards | untested |
+| `a6bfcffb` | a | zones | this cast-from-graveyard permission doesn't let you play land cards | `rulings_zones2::cards_cast_or_played_from_a_graveyard_keep_their_timing_cr_601_3_307_1_305_2` |
 | `b3fcd7f8` | c | NR | losing control of this source mid-cast doesnt stop you finishing the cast through its permission [part 3, was a/stack: nothing can change control of Lurrus while a spell is being cast (only mana abilities can be activated then)] | not reachable with the cube's cards |
 | `a037c9c9` | a | stack | paying the fixed cost to hand a companion is a special action, no stack, unresponsive; you may cast it right after | `rules_m8a::cr_116_2g_the_companion_special_action` |
 | `cd304617` | b | TRN | this companion condition only restricts deck contents, creating no ban on pairing it with other cards [part 3, was a/other: deck construction] | tournament / deck construction |
 | `3ded9c78` | b | DEF | a companion's other abilities only function while it's on the battlefield, not while it's outside the game [part 3, was a/other: a companion's other abilities work only on the battlefield; a definition] | a definition, no behaviour of its own |
 | `22273157` | b | TRN | this companion's deckbuilding condition applies only to your starting deck, not your sideboard [part 3, was a/other: deck construction] | tournament / deck construction |
 | `5ff2b705` | b | CMD | Commander-only: one companion per deck, and the commander itself counts toward its deckbuilding condition | Commander |
-| `2deb11e0` | a | zones | a spell cast from the graveyard via this permission still follows its normal timing restrictions | untested |
+| `2deb11e0` | a | zones | a spell cast from the graveyard via this permission still follows its normal timing restrictions | `rulings_zones2::cards_cast_or_played_from_a_graveyard_keep_their_timing_cr_601_3_307_1_305_2` |
 | `90a51faf` | a | mana | you must still pay this spells costs, though an available alt cost like mutate may substitute | `cards_m7c_tail2::lurrus_casts_one_permanent_of_mana_value_two_or_less_from_the_graveyard_each_turn` |
 | `aa67eb2c` | a | other | a companion begins the game outside the game rather than in your starting deck | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
 | `5a3cfad1` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
@@ -2866,9 +2866,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `96109749` | a | zones | with fewer library cards than usual, this multi-step sorting ability just does what it can with whats there | untested |
-| `9a50f5e0` | a | zones | playing an exiled card this turn still requires paying its costs and following its normal timing restrictions | untested |
-| `2b2a5f1d` | a | zones | an unplayed exiled card stays exiled for good, not just for the rest of that turn | untested |
+| `96109749` | a | zones | with fewer library cards than usual, this multi-step sorting ability just does what it can with whats there | `rulings_zones2::expressive_iteration_with_two_cards_does_what_it_can_in_order_cr_609_3` |
+| `9a50f5e0` | a | zones | playing an exiled card this turn still requires paying its costs and following its normal timing restrictions | `rulings_zones2::cards_exiled_by_urza_golos_ugin_and_expressive_iteration_keep_their_timing_cr_601_3_307_1_305_2` |
+| `2b2a5f1d` | a | zones | an unplayed exiled card stays exiled for good, not just for the rest of that turn | `rulings_zones2::an_unused_permission_ends_and_the_card_stays_where_it_is_cr_611_2a` |
 
 ### Traumatic Critique
 
@@ -3011,7 +3011,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `5a231246` | a | zones | an escaped non-permanent returns to GY after resolving; a permanent enters BF, returns to GY on death, re-escapes | untested |
+| `5a231246` | a | zones | an escaped non-permanent returns to GY after resolving; a permanent enters BF, returns to GY on death, re-escapes | `rulings_zones2::escaped_spells_return_to_the_graveyard_and_can_escape_again_cr_702_138` |
 | `6c69604c` | a | zones | an escape-style permission changes how you may cast a card from the graveyard, not when you may do so | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `259e8644` | a | zones | if a card has multiple permissions to cast it from the graveyard, you choose one to apply; the rest do nothing | `rules_shortcuts::cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses` |
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
@@ -3098,14 +3098,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a7269192` | a | zones | a non-permanent escaped spell returns to GY after resolving; a permanent enters BF and returns to GY only when it dies | untested |
+| `a7269192` | a | zones | a non-permanent escaped spell returns to GY after resolving; a permanent enters BF and returns to GY only when it dies | `rulings_zones2::escaped_spells_return_to_the_graveyard_and_can_escape_again_cr_702_138` |
 | `6c69604c` | a | zones | an escape-style permission changes how you may cast a card from the graveyard, not when you may do so | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `259e8644` | a | zones | if a card has multiple permissions to cast it from the graveyard, you choose one to apply; the rest do nothing | `rules_shortcuts::cr_601_2a_flashback_or_yawgmoths_will_the_player_chooses` |
 | `8e380ea1` | a | stack | a card with escape put into your graveyard during your turn can be cast right away, before an opponent gets to act | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `75e9fc66` | a | mana | casting via an escape-style permission forbids other alternative costs but still requires mandatory additional costs | `rules_shortcuts::cr_601_2b_breach_escape_with_the_cards_own_additional_cost` |
 | `d4f53c05` | a | stack | beginning to cast with an escape-style cost moves it to the stack at once; nothing else can happen until done | `rulings_stack3::casting_and_paying_is_never_interrupted_cr_601_2` |
 | `b02c5786` | a | mana | total cost = base/alt cost (e.g. escape) + increases, then reductions; mana value is unaffected regardless | untested |
-| `5aaccf2e` | a | zones | putting a land onto the battlefield this way isnt playing a land, so it can happen off-turn or land-drop-free | untested |
+| `5aaccf2e` | a | zones | putting a land onto the battlefield this way isnt playing a land, so it can happen off-turn or land-drop-free | `rulings_zones2::uros_land_isnt_a_land_play_cr_305_2_305_4` |
 | `655d544a` | a | triggers | this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically | `rulings_triggers2::uro_put_onto_the_battlefield_is_sacrificed_and_its_enter_ability_triggers_cr_603_6a` |
 | `1b138927` | a | triggers | this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there | `rulings_triggers2::uro_put_onto_the_battlefield_is_sacrificed_and_its_enter_ability_triggers_cr_603_6a` |
 
@@ -3139,7 +3139,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `667bfc29` | b | DEF | an exhaust-style ability can be activated any time you could normally activate an ability [part 3, was a/other: an exhaust ability is activated like any other; a definition] | a definition, no behaviour of its own |
 | `03983021` | c | NR | a trigger for activating an exhaust-style ability resolves before that exhaust ability itself does [part 3, was a/triggers: no cube card triggers on activating an exhaust ability] | not reachable with the cube's cards |
-| `fb4b130d` | a | zones | once activated, if its source leaves and returns, the new objects exhaust ability can fire again | untested |
+| `fb4b130d` | a | zones | once activated, if its source leaves and returns, the new objects exhaust ability can fire again | `rulings_zones2::a_flickered_loot_is_a_new_object_whose_exhaust_abilities_can_be_activated_again_cr_400_7_702_177` |
 
 ### Aragorn, King of Gondor
 
@@ -3167,7 +3167,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `b248e1c5` | b | PRINT | a publication-date commentary about how unlikely a particular interaction is | printing, wording, reminder text |
-| `8b54ef2f` | a | zones | a multi-type revealed card can go to hand under any one type, chosen independently per card | untested |
+| `8b54ef2f` | a | zones | a multi-type revealed card can go to hand under any one type, chosen independently per card | `rulings_zones2::atraxa_takes_a_card_with_two_types_as_either_type_cr_205_2a` |
 
 ### Celestial Colonnade
 
@@ -3182,9 +3182,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Seachrome Coast
 
@@ -3197,7 +3197,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Creeping Tar Pit
@@ -3218,7 +3218,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Watery Grave
@@ -3226,7 +3226,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Badlands
 
@@ -3234,7 +3234,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `ccb774e6` | c | NR | changing a dual lands types fully replaces both; changing just one type via text leaves the other type intact [part 3, was a/copies: no cube card changes a land's types or text] | not reachable with the cube's cards |
 | `576821b5` | a | zones | a dual land keeps both of its basic land types even while in the graveyard, library, or any other zone | `cards_m7b_tests_lands::fetch_lands_find_a_land_card_with_one_of_their_two_types_for_one_life` |
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Blackcleave Cliffs
@@ -3248,9 +3248,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Copperline Gorge
 
@@ -3264,13 +3264,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Taiga
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Razorverge Thicket
@@ -3284,16 +3284,16 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Temple Garden
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `81d5d41d` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `81d5d41d` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Concealed Courtyard
 
@@ -3307,13 +3307,13 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Scrubland
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Spirebluff Canal
@@ -3327,22 +3327,22 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Volcanic Island
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Bayou
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Blooming Marsh
@@ -3357,9 +3357,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `e20baeb2` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Inspiring Vantage
 
@@ -3372,7 +3372,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Sacred Foundry
@@ -3380,7 +3380,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Botanical Sanctum
 
@@ -3394,7 +3394,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `c355f025` | a | replacement | paying an optional life cost on a land that would enter tapped anyway doesn't stop it from entering tapped | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | untested |
+| `fa3e7a03` | a | zones | a dual land has two basic types without being basic, so basic-finders miss it but basic-type effects still work | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 
 ### Restless Vinestalk
 
@@ -3407,7 +3407,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | untested |
+| `1e872694` | a | zones | a dual land has basic types without being basic, so basic-affecting effects skip it, type-based ones apply | `rulings_zones2::dual_lands_have_basic_land_types_but_arent_basic_cr_205_3i_205_4a` |
 | `2ad14f7c` | a | mana | a dual land has the mana abilities of both of its basic land types | `cards_m7b_tests_lands::dual_lands_tap_for_either_of_their_two_basic_land_types` |
 
 ### Abandoned Air Temple

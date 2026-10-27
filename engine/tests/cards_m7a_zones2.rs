@@ -274,6 +274,8 @@ fn golos_exiles_three_to_play_free_this_turn_a_land_uses_the_land_drop() {
     let t0 = g.turn().number;
     quiet_until(&mut g, |g| g.turn().number > t0 && at_priority(g));
     assert!(!g.has_option(Choice::Cast(bolt)), "this turn only");
+    // ruling: 07bd45b4
+    assert_eq!(g.obj(bolt).zone, Zone::Exile, "not played: it remains in exile");
 }
 
 #[test]

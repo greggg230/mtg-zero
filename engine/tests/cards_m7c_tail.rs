@@ -449,6 +449,15 @@ fn demonic_consultation_names_exiles_six_then_reveals_until_the_name_cr701_20a()
     g.drive_until(at_priority);
     assert!(g.player(0).library.is_empty());
     assert_eq!(g.exile_zone().len(), 18);
+    // ruling: d81b7805
+    // No loss yet: P0 loses only as it next draws (its draw step).
+    assert!(!g.is_over(), "an empty library loses only on a draw");
+    let t = g.turn().number;
+    quiet_until(&mut g, |g| g.is_over() || g.turn().number == t + 1 && g.turn().step == Step::Main1);
+    assert!(!g.is_over(), "P1's turn: P0 hasn't drawn");
+    quiet_until(&mut g, |g| g.is_over());
+    assert_eq!(g.outcome().and_then(|o| o.winner), Some(1), "P0's draw from the empty library");
+    assert_eq!(g.turn().number, t + 2);
 }
 
 // ---- Balance ---------------------------------------------------------------

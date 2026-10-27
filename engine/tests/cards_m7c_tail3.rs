@@ -1353,6 +1353,9 @@ fn headliner_scarlett_exiles_face_down_and_may_play_it_this_turn_cr406_3() {
 /// way."
 #[test]
 fn memory_jar_hands_face_down_then_back_at_the_end_step_cr406_3() {
+    // ruling: a16cbfa9
+    // The cards are exiled face down (hidden, unplayable) until they
+    // return; their owner remembers its own former hand (ENGINE.md 40.4).
     let mut g = scen()
         .battlefield(0, &["Memory Jar"])
         .hand(0, &["Lightning Bolt", "Test Bear"])
