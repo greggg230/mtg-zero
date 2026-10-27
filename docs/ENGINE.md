@@ -6252,3 +6252,229 @@ of three, 41,851 sideboarding decisions, 44,694 sampled worlds); `bash tools/bui
 (random 71-72 s; match 178-192 s: 800 games, 765,206 decisions, 20.3 million simulations); `python
 tools/rulings_doc.py --check` passes; `python tools/untested_cards.py`: 0 of 546; `python -m pytest
 -q tests`: 20 passed.
+
+## 41. Team draft (M6 part 1)
+
+Branch `m6-team-draft` (from main at 1f6ccf4): the design of M6, team cube drafting end to end
+(DESIGN.md 2.3, 5.1, 7.1: the user's decisions of 2026-10-27, full co-training, 4v4 PowerLSV,
+learned deckbuilding), and its first part: the zero-core game `team_draft` in Rust. zero-core is
+unchanged (its deferred hook and the co-training loop are part 2); the `mtg` game is unchanged
+(layout v4, behaviour digests 7721970fa2b16be2).
+
+### 41.1 What was built
+
+| File | What |
+|---|---|
+| `engine/src/az/draft.rs` | `TeamDraftAz` (the game), `DraftSpec`, `Event` (seats, packs, passes), `Build` (one seat's deckbuilding), `MatchSetup` / `MatchPlayer` (the deferred matches), `EventOutcome`; `determinize` (`redraw`), keys, `force_chance`, invariants |
+| `engine/src/az/draft_encode.rs` | layout `draft_v1` (`encode`, `layout_json`) |
+| `engine/src/az/draft_bots.rs` | the `consensus` drafter, the M1 pick strength, the test-only heuristic-played matches (`play_matches_heuristic`, `resolve_with_heuristic`, `match_game`) |
+| `py/src/lib.rs` | `"team_draft" => engine::az::draft::TeamDraftAz` next to `mtg` |
+| `mtgz/az/__init__.py`, `mtgz/az/layout_draft_v1.json` | the layout registered for the token network (`tokens['team_draft']`), the default spec `{}`; no preset (its matches need part 2) |
+| `engine/tests/draft.rs`, `tests/test_team_draft.py` | 41.6 |
+
+**The event** (DESIGN.md 2.3.1). Players = `2T` seats (1v1 to 4v4; `MIN_PLAYERS` 2, `MAX_PLAYERS`
+8), seat `s` in team `s % 2`. The draftable cube is the cube IR's 546 cards less the five basic
+lands, 541, each looked up by name in the engine's card table (`draft::cube()`: an unsupported
+card is an error; the identity of each card is checked against `identity.rs`). The game seed
+shuffles the 541; pack `p` = round `p / 2T`, opener `p % 2T`, is the next `pack_size` cards
+(sorted), the rest is never drafted (`rest`). `Event::seat_at(p, t)` / `pack_at(s, r, t)`: round
+0 and 2 pass left (to `s + 1`), round 1 right. The spec: `{"rounds", "packs" (1-3), "pack_size"
+(2-15), "max_turns", "format"}` (the last two the matches'); unknown keys are errors; `rounds`
+defaults to `min(T, 3)` and is at most `T`.
+
+**A pack is its removal order**: `order[p * size + t]` is the card taken at pick `t`; from
+`taken[p]` on, the cards still in the pack, kept sorted (a pick rotates the chosen card to
+position `taken`). A seat's pool, first picks and every view follow from it; a pick is legal iff
+the card is in the pack, so every arrangement of the array is a legal draft history.
+
+**Decisions.** A pick: the identities in the decider's pack (`0..767`; ENGINE.md 22.2). Seats
+pick in order `0..2T-1` within a pick round; after the last one the packs pass. A pack's last
+card is a single option (zero-core plays it without a search). After the draft each seat in turn
+builds: for each pool card in its **build order** (spells by colour group W, U, B, R, G,
+multicolour, colourless, then mana value, then identity; then lands by identity) its identity (in
+the deck) or `OUT` = 768 (in the sideboard); then the Plains, Island, Swamp, Mountain and Forest
+counts, `COUNT + n` (800 + n), each limited to keep a deck of 40-60 cards reachable with at most
+31 of a type (`Build::count_range`). Every legal deck is reachable once; a seat's build is 50
+decisions. After the last seat's Forest count the event is at its **deferred terminal**:
+`to_move()` is `None`, `deferred()` is true, `matches()` / `deferred_payload()` give the
+matches, `resolve(results)` / `resolve_json` take them (each match's A and B result: 1/0, 0/1 or
+0.5/0.5) and set the outcome: per seat the team's 1 / 0 / 0.5 divided by `T` (zero-core's result
+vector sums to 1), margin = (team match wins - opponent match wins) / matches, score = the team's
+match wins. **`result()` and `margin()` panic while the matches are pending**: zero-core (before
+part 2) would read the terminal as a real one, so a driver or a search that reaches it stops
+with "search worker panicked: team_draft: the event's matches have not been played (a deferred
+result ...)" (tested) instead of training on a made-up value.
+
+**The matches** (`matches()`): the rotations of the Latin square (`rotations`: `rounds` distinct
+of the `T`, drawn from the game seed; hidden: nothing encodes them, `determinize` redraws them),
+round by round, A player `i` (seat `2i`) against B player `(i + d) mod T` (seat `2((i + d) mod
+T) + 1`), the A player as `mtg` seat 0; per player its deck and sideboard (definitions, basic
+lands repeated), its 3 first picks and `elsewhere` (what its team saw that is not in the
+opponent's known pool: 4v4 306 cards); the match seed from the event. `deferred_payload()` is
+the same as JSON with card names.
+
+### 41.2 The information model
+
+`TeamDraftAz::knowing(viewer)`: the seats whose observations the viewer has, itself during the
+draft and its team after it. `views(p, mask)`: the picks at which those seats held pack `p` (a
+pack in the current round only up to the current pick: every seat sees its pack when the pick
+round starts, before it picks). `knowledge(mask)`: per view, the pack's contents then and the
+pick made then: what the viewer knows, canonically. `known_cells(mask)`: the cells whose card is
+known exactly (a view's own pick, the one cell between two views two picks apart, a pack's last
+cell after a view at the second-to-last pick); after the draft, for a team, every cell but the
+opposing openers' first picks (tested for 1v1, 2v2, 4v4: the first-picks rule, DESIGN.md 2.3.2).
+
+**`determinize(viewer)`** (`redraw`): the cells before the knowing seats' first view of a pack and
+every cell of a pack they have not seen, with the undrafted cards, get the unseen cards again (a
+partial Fisher-Yates over those cards); the cells between two views and after the last view are
+permuted (which seat took which card, which cards are still there); the unpicked parts are
+sorted again. After the draft, each opponent's build order follows its redrawn pool; an opponent
+who has built gets the heuristic deckbuilder's deck of the part of its pool the viewer knows
+(`heuristic_deck`: `pools::build_deck` of the pool less the first picks, memoised per thread: the
+same in every world, so nothing of the real deck enters a world; its redrawn first picks go to the
+sideboard; nothing the viewer sees depends on that deck), one building now restarts (only another
+viewer than the decider sees that state), one not yet building has its order. The pairings and the match seed are redrawn; the viewer becomes the
+observer. The viewer's knowledge, its encoding, `to_move` and, for the decider, the legal
+actions never change (tested at every check). The redraw is uniform over the unseen cards (an
+opener's first pick is, in such a world, an average card: DESIGN.md 2.3.10 question 10).
+
+**Keys.** `KEY_SEE(seat, identity)` (kind 16): when the packs reach their seats (at every pick
+round, the openings included), one per card of each seat's pack, sorted; `KEY_TEAM(team, pack
+<< 24 | pick << 16 | identity)` (kind 17): at the end of the draft, every cell the team knows
+(4v4: 348 per team). After `determinize(viewer)` a seat's or team's private keys are one key
+with the payload `HIDDEN` (the counts are public: pack sizes, seating), as the `mtg` game masks
+private reveals (section 10). Deckbuilding and the pairings emit no key (a deck choice is an
+action on the path; the encoding shows a viewer only its team's decks). Real play (no observer)
+emits every key: 112-120 per pick round in 4v4, 696 at the draft's end.
+
+**`force_chance`**: queued keys are consumed one per emitted key, in order. An opening
+(`KEY_SEE` at pick 0) takes the forced cards for a seat's new pack before any key is emitted:
+a forced card is swapped in from a place nobody has seen (the undrafted cards, a pack of this or
+a later round) or, for the observer, from any cell it has not seen; the card swapped out is the
+pack's smallest card that is not forced. A card the world cannot give (one the observer has seen)
+falls back. Arrivals of packs in flight (a revelation of other seats' picks), team keys and
+`HIDDEN` keys fall back. Measured: the observer's own opening replays in every forced world (80
+of 80); whole transitions also show the last card of a pack in flight, so 23 of 80 transitions
+reproduce all their keys.
+
+### 41.3 Encoding: layout `draft_v1` (14,488 floats)
+
+| Block | Offset | Floats | What |
+|---|---:|---:|---|
+| globals (`gl::*`) | 0 | 64 | phase (draft, deckbuilding, deferred terminal, resolved); round (one-hot 3), pick / 15, picks left / 15, left / right; team size (one-hot 4); my index in my team (one-hot 4), my team is B; I, a teammate or an opponent decides; my pool / 45, my pack / 15; my pool's nonland cards by colour and colourless / 15; my deck so far: coloured pips / 20, lands / 20, curve 0..7+ / 10, size / 40, basics / 20; deciding a card, the basic type (one-hot 5); options / 32; build position / 45; seats built / 8; packs / 3, pack size / 15, rounds / 3 |
+| pack | 64 | 15 x 68 | my current pack, sorted: card code (64), present, an option of my decision, my view number of this pack / 4, spare |
+| pool | 1,084 | 45 x 76 | my picks in pick order: card code, present, round (one-hot 3), pick / 15, a first pick, in the deck, out, the card decided now, an option now, build position / 45, a companion the deck so far fulfills, spare |
+| bags (`bag::*`) | 4,504 | 13 x 768 | identities x 0.25: taken by others between two of my views, passed with their fate unknown (after my last view), wheeled (there again at my next view); after the draft my teammates' pools (seat order after me) and decks (the cards in, the basics), the opponents' pools less their first picks (seat order from my left) |
+
+The card code: the identity's digits (16, 8, 8; vocabulary 1024, `mtg`'s) and a 32-float
+descriptor from the card's definition (types with planeswalker, colours, colourless nonland,
+mana value / 8, coloured pips / 3 counting hybrid and Phyrexian, hybrid-or-Phyrexian, power and
+toughness / 8, legendary, companion, the colours a land makes or fetches and colourless mana, a
+fetch land, interaction: `decks::interacts`). `layout_draft_v1.json`: version 1, the two segments
+(present flag at 64, identity at 0, no `[base, stride]` actions, `id_actions: 0`), one bag entry
+of 13 x 768, `cards` (the name of each identity). `id_actions` (a slot scores the action of its
+card's identity: the pick, or putting the card in the deck) is part 2's `TokenNet` addition; the
+pinned core ignores the key, so today every action is scored from the pooled state (tested: the
+token network reads the layout on real positions and answers a driver's leaf batch).
+
+### 41.4 The bots and the heuristic-played matches
+
+`consensus` (`bot_names()`): the legal card with the highest M1 human pick strength
+(`cubecobra_bt_strength` of `data/powerlsv_card_values.json`, compiled in; every draftable card
+has one; ties: the lowest identity), and the heuristic deckbuilder's deck (`heuristic_build`; the
+count nearest the plan's among the legal ones). A yardstick only (DESIGN.md 0). `random` is
+zero-core's (random picks and a random legal deck).
+
+`draft_bots::play_matches_heuristic(event, seed)` builds each match as an `mtg` match
+(`match_game`: `Game::with_sideboards` + `MatchState::new` with the drafted decks, sideboards and
+the real first picks; best-of-three hides the decks and the first picks as ENGINE.md 36.11) and
+plays it with the heuristic bot on both sides (`bots::sideboard` between games), synchronously;
+`resolve_with_heuristic` resolves the event with it. For tests and possibly a cheap yardstick
+(DESIGN.md 2.3.8), never the training path. It needs no change to `mtg`: the part-3 spec keys
+(`pN_first_picks`, `pN_elsewhere`, DESIGN.md 2.3.6) replace it in training.
+
+### 41.5 Measurements
+
+`cargo test --release -p engine --test draft measure -- --ignored --nocapture --test-threads=1`
+(one thread; the desktop loaded by mtg5 and another agent's builds: two runs, their range):
+
+| | 4v4 | 2v2 |
+|---|---:|---:|
+| random-action events per second | 9,400-12,800 | 25,300-26,600 |
+| actions per event | 760 (360 picks, 400 deckbuilding) | 380 |
+| searched picks / deckbuilding decisions per event (two options or more) | 336 / 395.4 | 168 / 197.7 |
+| `encode` (14,488 floats; the caller's zeroing not counted) | 3.5-4.6 us | 2.6-3.9 us |
+| clone | 0.27-0.36 us | 0.23-0.25 us |
+| clone + `determinize`, draft states | 4.1 us | 3.7 us |
+| clone + `determinize`, deckbuilding states | 11.1 us (33 us before the opponents' decks were memoised) | 10.1 us |
+| the 12 (4) matches played by the heuristic, random drafts | 0.023-0.035 s per event, 30.2 games | 0.008-0.009 s, 10.2 games |
+
+An action costs ~0.1 us (an `mtg` decision 7-13 us), so the draft's search cost is the network's:
+the budget of DESIGN.md 2.3.9 counts leaves. A searched pick has 2-15 options (8.5 on average), a
+deckbuilding decision 2 (cards) or up to 32 (basic counts).
+
+### 41.6 Tests
+
+`engine/tests/draft.rs` (22 tests and `measure`; section 15's row):
+`packs_are_seeded_disjoint_and_full`, `seats_alternate_and_every_pass_goes_to_an_opponent`,
+`picks_are_the_pack_and_illegal_actions_are_errors`, `every_pool_has_45_cards_and_decks_are_legal`
+(and `consensus` builds `pools::build_deck`'s deck), `deckbuilding_reaches_every_legal_deck_shape...`
+(40 basic lands; 60 cards with 31 of a basic), `pairings_are_rotations_of_a_latin_square` (40
+events; 1v1, 2v2, 3v3, `rounds`), `after_the_draft_a_team_knows_every_card_but_the_opposing_first_picks`
+(1v1, 2v2, 4v4: the known cells, the team's cards, the `KEY_TEAM` count; during the draft a seat
+knows only its own picks exactly), `determinize_keeps_what_the_viewer_knows` (684 checks at the
+default scale, 3,164 at `DRAFT_SCALE=5`: the decider and a random other viewer; knowledge, picks,
+encoding, `to_move`, the decider's options, teammates' pools and builds; every world redraws some
+pool), `equal_keys_mean_equal_features` (5,267 comparisons; 29,147 at scale 5),
+`keys_are_masked_for_the_observer`, `clone_continues_identically`,
+`force_chance_replays_the_viewers_openings` (80 of 80, 400 of 400 at scale 5; whole transitions 23
+and 116), `forced_keys_are_consumed_in_order_and_impossible_ones_fall_back`,
+`the_heuristic_matches_resolve_an_event` (1v1, 2v2, 4v4: consensus team A against random team B
+won 10-2, 4-0, 1-0), `the_result_is_unknown_while_the_matches_are_pending`,
+`resolve_checks_its_results`, `the_payload_describes_every_match`,
+`encoding_slots_hold_the_pack_and_the_picks`, `the_bots`, `spec_parsing`,
+`layout_json_is_checked_in` (`MTGZ_WRITE_LAYOUT=1` rewrites `mtgz/az/layout_draft_v1.json`),
+`fuzz_random_events` (`DRAFT_FUZZ=n`, default 200: 4v4, 2v2, 3v3 and 1v1 events of random actions;
+the legal actions sorted and in range, the invariants after every action (every card once,
+`taken` per pack, sorted packs, builds and decks); every ~40 actions `determinize` for the decider
+and a random viewer (knowledge, encoding, `to_move`, options, invariants; one world in eight
+played to its terminal); at one decision of every 8th event every option completes the event;
+every event resolved, every 50th with heuristic-played matches).
+
+`tests/test_team_draft.py` (pytest, 4): the game's info and spec errors; a 4v4 and a 2v2 event
+through the bindings (actions sorted, features finite, `determinize` keeping the decider's options
+and features, 760 / 380 actions); the result refused at the deferred terminal; a driver that reaches
+it fails ("search worker panicked: team_draft: the event's matches have not been played ...");
+zero-core's token network reading `layout_draft_v1.json` (the pack slots' identities are the pick
+actions) and answering a 8-seat driver's leaf batch. `tests/test_mtg_az.py`: the module registers
+`toy`, `mtg` and `team_draft`.
+
+### 41.7 Checks
+
+Every engine test binary but `az` (`cargo test --release -p engine --no-fail-fast --lib --test
+<every file of engine/tests but az>`; 92 binaries: the library and 91 test files): 1,230 passed
+(main's 1,208 and the 22 new), 0 failed, 12 ignored (main's 11 and `measure`). Behaviour digests
+(`cargo test --release -p engine --test digest -- --ignored`): combined digest 7721970fa2b16be2,
+unchanged (the `mtg` game is untouched: no file of its path changed but the module list in
+`az/mod.rs`). `bash tools/build_py.sh` (games `toy`, `mtg`, `team_draft`) and `python -m pytest -q
+tests`: 24 passed (main's 20 and the 4 of `test_team_draft.py`). The draft fuzz at scale
+(`DRAFT_FUZZ=20000`): no failure, 101 s (one thread): 20,000 events (4v4, 2v2, 3v3, 1v1), 11.4
+million actions, 5.04 million searched picks and 5.93 million searched deckbuilding decisions,
+573,334 determinized worlds checked, 13,893 offered options played to the end of their event,
+1,866 matches played by the heuristic (every 50th event), team A won 8,163, lost 8,136, drew
+3,701 (random results elsewhere). `DRAFT_SCALE=5`: the sampled-state tests pass (above). The
+search smoke was not run: nothing on the `mtg` path changed.
+
+### 41.8 Open questions and what is left
+
+* The ten open questions of DESIGN.md 2.3.10 (deckbuilding in `team_draft` or as game-1
+  sideboarding in `mtg`; the first-picks reading; team values and `team_size`; the margin; 2v2
+  rounds; the first-pick prior of drafted matches; the play network's start; throughput against
+  signal; the draft evaluation's play agent; the uniform determinization).
+* Part 2 (zero-core): `deferred` / `deferred_payload` / `resolve` / `team_size` in the trait
+  (today inherent methods of `TeamDraftAz`), the search leaf at a deferred terminal, the driver's
+  parking and queued setups, `TokenNet`'s `id_actions`, the co-training loop.
+* Part 3: the `mtg` spec keys for drafted matches, the presets, the yardsticks, the search smoke
+  for `team_draft`.
+* Limitations kept: forced keys replay openings only (arrivals in flight and team keys fall back,
+  as revelations); the opponents' decks in a viewer's world are the heuristic deckbuilder's.

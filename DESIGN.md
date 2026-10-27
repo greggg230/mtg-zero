@@ -306,7 +306,7 @@ in; measurements (events per second of random drafts, encode, determinize).
   `data/powerlsv_card_values.json`; ties by identity) and builds the heuristic deckbuilder's
   deck (`pools::build_deck`). The AI team must beat it in real matches.
 * **Cheap and frequent**: the matches of draft evaluations played by the heuristic bot (a 4v4
-  event's 12 matches take ~0.1 s on one thread); **true but costly**: played by the current play
+  event's 12 matches, ~30 games, take 0.02-0.04 s on one thread); **true but costly**: played by the current play
   network (every few iterations).
 * Curiosity only: the draft network's top-1 agreement with held-out human picks (M1 baselines:
   random 21.9%, strongest card 42.3%), never optimised.
@@ -320,14 +320,15 @@ matches grew from 339 to 595 searched decisions), **17.1k-20.9k leaves per match
 leaves/s; training 29-79 s; evaluation (every 2nd iteration) 600 s against the yardsticks and
 1,052 s of Elo matches.
 
-A 4v4 event (part-1 fuzz, ENGINE.md 41): 336 searched picks (24 single-option) and 400 deckbuilding
-decisions. Proposal:
+A 4v4 event (measured in part 1, ENGINE.md 41.5): 360 picks, 336 of them searched (a pack's last card
+is a single option), and 400 deckbuilding decisions, 395 of them searched (a basic count is sometimes
+forced). Proposal:
 
 | | Simulations (full / fast, p_full 0.25) | Leaves per event | mtg-leaf equivalents |
 |---|---|---:|---:|
 | picks | 64 / 16 (mean 28) | 9.4k | |
-| deckbuilding | 32 / 8 (mean 14) | 5.6k | |
-| draft total | | 15.0k | ~30k (a draft position has 31-47 tokens, `mtg`'s ~21: ~2x per leaf at the same width) |
+| deckbuilding | 32 / 8 (mean 14) | 5.5k | |
+| draft total | | 14.9k | ~30k (a draft position has 31-47 tokens, `mtg`'s ~21: ~2x per leaf at the same width) |
 | 12 matches (mtg-4's search) | 64 / 16 | 205k-250k | 205k-250k |
 
 * **GPU split**: the draft is ~11-13% of the GPU's leaves, the matches ~87-89%.
