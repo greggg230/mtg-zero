@@ -19,13 +19,13 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | class a | 1226 | 977 |
 | class b | 199 | 150 |
 | class c | 182 | 133 |
-| a, tested (passing) | 912 | 725 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 624 | 534 |
+| a, tested (passing) | 913 | 726 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 625 | 535 |
 | a, tested only by an earlier test (Oracle or rules) | 288 | 191 |
 | a, deferred | 0 | 0 |
-| a, untested | 314 | 252 |
+| a, untested | 313 | 251 |
 
-Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 53/123, copies 95/96, other 47/95, dfc 65/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 78/173, triggers 139/139, stack 126/126, zones 53/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 14/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -1083,7 +1083,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3d923737` | a | dfc | a transforming DFC enters front-up by default unless told to enter/cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
-| `efbce0fd` | a | copies | a token copy of a DFC is itself double-faced, matching the source's current face, and can still transform | untested |
+| `efbce0fd` | a | copies | a token copy of a DFC is itself double-faced, matching the source's current face, and can still transform | `interactions_copies::a_token_copy_of_a_nightbound_permanent_is_double_faced_and_turns_at_day_cr_707_8a_702_145f` |
 | `ec269542` | a | dfc | only the currently-up face's characteristics apply on the battlefield; the other face is ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `165eb81a` | a | dfc | cast face up; the front face is used everywhere except on the battlefield, where only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `7f9205e7` | a | triggers | if this dies exactly as it deals damage, its death trigger fires, but LKI means it wont untap or transform anymore | `rulings_triggers3::reanimates_life_loss_comes_first_and_cecil_dying_as_it_deals_damage_still_triggers_cr_603_10_704_5a` |

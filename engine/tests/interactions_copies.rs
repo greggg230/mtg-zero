@@ -227,6 +227,7 @@ fn a_token_copy_of_a_face_down_creature_is_a_face_up_nameless_2_2_cr_707_2_708_2
 
 #[test]
 fn a_token_copy_of_a_nightbound_permanent_is_double_faced_and_turns_at_day_cr_707_8a_702_145f() {
+    // ruling: efbce0fd
     // docs/interactions.md A x P. Reading of the current CR (2026-09-25):
     // CR 707.8a makes a token copy of a double-faced permanent a
     // double-faced token with both faces, entering with the copied
