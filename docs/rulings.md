@@ -16,16 +16,16 @@ earlier test that checks the same point (an Oracle or rules test naming it; ENGI
 | | rulings (card, ruling) | distinct texts |
 |---|---:|---:|
 | fetched | 1607 | 1260 |
-| class a | 1226 | 977 |
-| class b | 199 | 150 |
+| class a | 1225 | 976 |
+| class b | 200 | 151 |
 | class c | 182 | 133 |
-| a, tested (passing) | 1173 | 929 |
-| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 878 | 731 |
-| a, tested only by an earlier test (Oracle or rules) | 295 | 198 |
+| a, tested (passing) | 1225 | 976 |
+| a, tested by a rulings test (`rulings_*`, `interactions_*`) | 929 | 777 |
+| a, tested only by an earlier test (Oracle or rules) | 296 | 199 |
 | a, deferred | 0 | 0 |
-| a, untested | 53 | 48 |
+| a, untested | 0 | 0 |
 
-Class a by area (distinct texts): mana 173/173, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 47/95, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
+Class a by area (distinct texts): mana 173/173, triggers 139/139, stack 126/126, zones 123/123, copies 96/96, other 94/94, dfc 65/65, replacement 59/59, combat 52/52, protection 27/27, facedown 13/13, walkers 9/9 (tested/all).
 
 ## Per card
 
@@ -84,11 +84,11 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0c460f68` | a | other | a multi-typed permanent may be chosen under any of its types; choosing it twice adds nothing | untested |
+| `0c460f68` | a | other | a multi-typed permanent may be chosen under any of its types; choosing it twice adds nothing | `rulings_other::ajanis_minus_four_lets_a_permanent_stand_for_any_of_its_types_and_skips_missing_types_cr_701_21a` |
 | `3a1f2d79` | a | dfc | a transforming DFC enters front-up by default unless told to enter/cast transformed | `interactions_zones::a_flickered_transformed_card_returns_front_face_up_cr_712_14_400_7` |
 | `22502308` | a | dfc | only the currently-up face's characteristics apply on the battlefield; other face ignored | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8` |
 | `8ca288c2` | a | dfc | front face is used in every zone but the battlefield; there only the up face matters | `rulings_faces2::a_transforming_dfc_is_its_front_face_off_the_battlefield_and_keeps_its_mana_value_cr_712_8`; `rulings_faces2::a_sacrificed_reflection_counts_fables_mana_value_and_is_fable_in_the_graveyard_cr_712_8e` |
-| `7d9c06e2` | a | other | if a player has none of a referenced permanent type, they still choose from what they do control | untested |
+| `7d9c06e2` | a | other | if a player has none of a referenced permanent type, they still choose from what they do control | `rulings_other::ajanis_minus_four_lets_a_permanent_stand_for_any_of_its_types_and_skips_missing_types_cr_701_21a` |
 | `e62216f3` | a | zones | putting a non-DFC onto the battlefield 'transformed' fails entirely; it stays in its zone | `rulings_zones2::a_single_faced_copy_of_ajani_exiled_to_return_transformed_stays_in_exile_cr_701_27c` |
 | `47eed49e` | a | triggers | if multiple tokens are made at once, a reflexive trigger fires once per token made that way | `rulings_triggers3::a_reflexive_trigger_chooses_its_target_when_put_on_the_stack_and_can_be_answered_cr_603_12` |
 | `75da186b` | a | dfc | if a DFC creature transforms via another effect, the back face walker enters with no loyalty and dies | `rules_faces::a_creature_transformed_into_a_planeswalker_has_no_loyalty_cr_306_5b_704_5i` |
@@ -125,14 +125,14 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `5ef445cd` | c | NR | reconfigure attaching isn't an 'equip ability' for cards that care about equipping [part 3, was a/other: no cube card cares about equip abilities as such] | not reachable with the cube's cards |
 | `f76d59c9` | a | replacement | an Equipment creature can never become attached to itself; such an attempt does nothing | `cards_m7d::lion_sash_grows_and_reconfigures_cr702_151` |
-| `35466139` | a | other | a reconfigure Equipment can be attached by other effects too, not just its own ability | untested |
+| `35466139` | a | other | a reconfigure Equipment can be attached by other effects too, not just its own ability | `rulings_other::lion_sash_attached_by_another_effect_or_while_tapped_isnt_a_creature_cr_702_151b` |
 | `dde8305d` | a | combat | an attached Equipment doesn't share the tapped state of the creature it's attached to | `rulings_combat::an_equipment_doesnt_tap_with_the_creature_it_equips_cr_301_5` |
 | `a2560fad` | a | replacement | when a reconfigure Equipment stops being a creature, enchant-creature Auras/Equipment on it unattach | `rulings_replacement2::reconfiguring_lion_sash_onto_a_creature_unattaches_its_equipment_cr_702_151b_704_5n` |
 | `cff2c1c6` | a | copies | attaching a reconfigure Equipment makes it stop being a creature (and lose creature subtypes) until unattached | `cards_m7d::lion_sash_grows_and_reconfigures_cr702_151` |
 | `576a8296` | a | replacement | if a reconfigured permanent is somehow still a creature once attached, it immediately unattaches | `rulings_replacement2::an_attached_equipment_made_a_creature_by_does_machines_becomes_unattached_cr_301_5c_704_5n` |
-| `05fbac90` | a | other | if an attached reconfigure Equipment loses its abilities, it still stays a noncreature until unattached | untested |
+| `05fbac90` | a | other | if an attached reconfigure Equipment loses its abilities, it still stays a noncreature until unattached | `rulings_other::lion_sash_attached_by_another_effect_or_while_tapped_isnt_a_creature_cr_702_151b` |
 | `fd9f18ea` | a | other | reconfigure is two activated abilities (attach, unattach), both sorcery-speed only | `cards_m7d::lion_sash_unattaches_as_a_sorcery_cr702_151a` |
-| `19d3529a` | a | other | a tapped Equipment can still reconfigure and attach; attaching doesn't untap it | untested |
+| `19d3529a` | a | other | a tapped Equipment can still reconfigure and attach; attaching doesn't untap it | `rulings_other::lion_sash_attached_by_another_effect_or_while_tapped_isnt_a_creature_cr_702_151b` |
 
 ### Luminarch Aspirant
 
@@ -188,7 +188,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `a6040722` | b | DEF | activated (incl. keyword) abilities use a colon; a tax/hoser on activated abilities leaves triggered ones alone [part 3, was a/other: activated abilities have colons; triggered ones don't; a definition] | a definition, no behaviour of its own |
 | `252f0b38` | b | DEF | a mana ability is one that produces mana on resolution, not one costing mana to activate [part 3, was a/mana: what a mana ability is; a definition] | a definition, no behaviour of its own |
-| `93ee06dd` | a | other | a naming ability that affects cards applies in every zone, not just one | untested |
+| `93ee06dd` | a | other | a naming ability that affects cards applies in every zone, not just one | `rulings_other::anointed_peacekeepers_tax_applies_to_a_named_card_cast_from_a_graveyard_cr_601_2f` |
 | `90d8b0d0` | b | MP | an ability applying to 'opponents' generally applies to all opponents, not just one you interacted with [part 3, was a/other: all opponents] | multiplayer |
 | `2a160983` | b | DEF | you may name any card, even one without an activated ability, not just ones you've seen [part 3, was a/other: the engine lets the Peacekeeper name any card definition; a definition] | a definition, no behaviour of its own |
 | `abac3051` | b | DEF | you can't name a token's name unless it duplicates an actual card's name [part 3, was a/other: tokens aren't cards to name; a definition] | a definition, no behaviour of its own |
@@ -197,9 +197,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `0e494778` | a | other | a once-per-turn cast-restriction static ability checks the whole turn, even retroactively, incl. own casts | untested |
+| `0e494778` | a | other | a once-per-turn cast-restriction static ability checks the whole turn, even retroactively, incl. own casts | `rulings_other::archon_of_emeria_counts_spells_cast_this_turn_including_itself_and_countered_ones_cr_101_2` |
 | `e0fa70ce` | a | replacement | an enters-tapped-unless-condition land still enters tapped if a separate effect forces it, even if met | `rulings_replacement2::archon_of_emeria_taps_an_opponents_fast_land_or_paid_shock_land_anyway_cr_614_12` |
-| `5153b574` | a | other | a once-per-turn cast restriction still applies even if the earlier spell was countered | untested |
+| `5153b574` | a | other | a once-per-turn cast restriction still applies even if the earlier spell was countered | `rulings_other::archon_of_emeria_counts_spells_cast_this_turn_including_itself_and_countered_ones_cr_101_2` |
 
 ### Clarion Conqueror
 
@@ -365,7 +365,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `608e8ab7` | c | NR | a named creature still explores via its ability even if it has since left the battlefield [part 3, was a/triggers: every cube explore names its creature as a target (Map tokens, Seasoned Dungeoneer), so a creature gone is an illegal target] | not reachable with the cube's cards |
 | `03aef98a` | a | other | explore: reveal top card; land goes to hand, otherwise get a +1/+1 counter and choose to keep or bin it | `cards_m7a::explore_cr_701_44_a_land_goes_to_hand_otherwise_a_counter` |
-| `bf9c2cf4` | a | other | if no card is revealed (empty library), the exploring creature still gets a +1/+1 counter | untested |
+| `bf9c2cf4` | a | other | if no card is revealed (empty library), the exploring creature still gets a +1/+1 counter | `rulings_other::exploring_with_an_empty_library_puts_a_counter_cr_701_44a` |
 | `cc77d340` | c | NR | even a noncreature permanent can explore if an effect instructs it to [part 3, was a/other: every cube explore names a creature as its target] | not reachable with the cube's cards |
 | `3311656f` | c | NR | describes the Map token, which no cube card creates | not reachable with the cube's cards |
 | `ee85216a` | a | stack | once an explore ability starts resolving, no player can act until it finishes | `rulings_stack3::explore_connive_and_cori_steels_attach_choice_happen_within_one_resolution_cr_608_2` |
@@ -392,7 +392,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `09936adc` | a | stack | an illegal target at resolution means the spell doesn't resolve and no life is gained | `rulings_stack3::removal_whose_target_is_gone_does_none_of_its_other_effects_cr_608_2b` |
 | `1f35b259` | a | zones | if the owner's library is empty, the creature becomes the only card in it | `rulings_triggers2::oust_into_an_empty_library_and_second_from_the_top_cr_401_4` |
 | `cd7798a0` | a | zones | if the library has cards, the creature goes directly under the top card, not shuffled in | `rulings_triggers2::oust_into_an_empty_library_and_second_from_the_top_cr_401_4` |
-| `259ab0fd` | a | other | the creature's controller, not its owner, is the one who gains the life | untested |
+| `259ab0fd` | a | other | the creature's controller, not its owner, is the one who gains the life | `rulings_other::oust_gives_the_life_to_the_creatures_controller_and_oko_leaves_auras_and_equipment_cr_110_2` |
 
 ### Prismatic Ending
 
@@ -411,7 +411,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `408d5ec3` | a | protection | an effect with no targets can still affect permanents that can't be targeted, like shroud/protection | `rulings_protection2::balance_overload_and_votes_reach_a_creature_with_protection_from_their_player_cr_702_16b` |
-| `fe4ee6d9` | a | other | a multi-step spell counts each category after the previous step resolves, so earlier sacrifices don't recount | untested |
+| `fe4ee6d9` | a | other | a multi-step spell counts each category after the previous step resolves, so earlier sacrifices don't recount | `rulings_other::balance_counts_creatures_after_the_lands_were_sacrificed_cr_608_2c` |
 | `476f3637` | b | DEF | a turn-order keep/sacrifice choice reveals each player's choice to later choosers, resolves simultaneously per step [part 3, was a/other: the active player chooses first and both sacrifice at once; with two players nothing else follows] | a definition, no behaviour of its own |
 
 ### Winds of Abandon
@@ -455,7 +455,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `338a52df` | a | other | an Equipment stays on the battlefield when its equipped creature dies, and can be moved by paying its equip cost | untested |
+| `338a52df` | a | other | an Equipment stays on the battlefield when its equipped creature dies, and can be moved by paying its equip cost | `rulings_other::an_equipment_stays_when_its_creature_dies_and_moves_by_its_equip_ability_cr_301_5c_704_5n` |
 | `faade90a` | a | replacement | if the ability makes two tokens at once, the Equipment only attaches to one of them | `rulings_replacement2::elspeth_doubles_a_create_and_attach_token_and_the_equipment_attaches_to_one_cr_614_1a_301_5` |
 | `0a8ce7d7` | c | NR | the created token enters first, then the Equipment attaches, so ETB triggers see it before any bonus [part 3, was a/triggers: Glimmer Lens gives no power or toughness, so no trigger can tell the Rebel before and after the attachment] | not reachable with the cube's cards |
 
@@ -553,7 +553,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `b0d988d8` | a | dfc | choosing among a group of cards to play/cast lets you pick either face of a qualifying modal DFC | `rulings_faces::yawgmoths_will_lets_you_play_a_modal_double_faced_card_with_either_face_cr_712_12` |
 | `8bd16ad8` | a | dfc | putting a card with given traits onto the battlefield without casting only sees an MDFCs front face | `rulings_faces2::putting_an_mdfc_onto_the_battlefield_sees_only_its_front_face_cr_712_14` |
 | `6d8a93b1` | c | NR | choosing a card name can be either face's name of a modal DFC; a linked ability then considers only that chosen name [part 3, was a/dfc: the cube's naming cards (Demonic Consultation, Tamiyo, Collector of Tales) look at cards outside the stack, where another face's name never matches; naming it is naming a card that isn't there (tested)] | not reachable with the cube's cards |
-| `12cec5e6` | a | other | if no card can be discarded (empty hand, can't draw), the conniving creature gets no counter | untested |
+| `12cec5e6` | a | other | if no card can be discarded (empty hand, can't draw), the conniving creature gets no counter | `rulings_other::conniving_with_no_card_discarded_puts_no_counter_and_connive_x_counts_nonland_discards_cr_701_50` |
 | `78c4509d` | b | CMD | Commander color identity uses both DFC faces' mana costs/symbols/indicators | Commander |
 | `b5fe5fd5` | a | stack | once a connive ability starts resolving, it's atomic; no responses until it's done | `rulings_stack3::explore_connive_and_cori_steels_attach_choice_happen_within_one_resolution_cr_608_2` |
 | `6fb8d9de` | b | PRINT | reminder text referencing the other DFC face has no rules effect | printing, wording, reminder text |
@@ -585,7 +585,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `4760ea2e` | a | mana | hybrid and Phyrexian mana symbols do count toward devotion to their color(s) | `rulings_mana2::devotion_counts_the_mana_costs_colored_hybrid_and_phyrexian_symbols_as_the_ability_resolves_cr_700_5` |
 | `e36f6dac` | a | mana | devotion is counted as the ability resolves, using whatever permanents (incl. the source) are on the battlefield then | `rulings_mana2::devotion_counts_the_mana_costs_colored_hybrid_and_phyrexian_symbols_as_the_ability_resolves_cr_700_5` |
 | `2a173b06` | c | NR | an Aura you control that's attached to an opponent's permanent still counts toward your devotion [part 3, was a/mana: no cube Aura can be attached to an opponent's permanent (Animate Dead and Necromancy return the creature under their controller)] | not reachable with the cube's cards |
-| `cabf6b70` | a | other | if your devotion check is zero, the library search is skipped, though the win-if-empty check still happens | untested |
+| `cabf6b70` | a | other | if your devotion check is zero, the library search is skipped, though the win-if-empty check still happens | `rulings_other::thassas_oracle_with_devotion_zero_looks_at_nothing_and_wins_on_an_empty_library_cr_104_2b` |
 | `a40c5a6d` | a | mana | mana symbols in a permanent's ability text (not its cost) don't count toward devotion | `rulings_mana2::devotion_counts_the_mana_costs_colored_hybrid_and_phyrexian_symbols_as_the_ability_resolves_cr_700_5` |
 
 ### Thieving Skydiver
@@ -593,8 +593,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `bd583829` | a | replacement | if an equip-attach target is gone at resolution, the Equipment stays wherever it was, or unattached | `rulings_replacement2::thieving_skydiver_gone_before_its_trigger_resolves_leaves_the_equipment_where_it_is_cr_608_2b` |
-| `3a9c110e` | a | other | a continuous control-change effect lasts indefinitely, surviving cleanup and the source leaving the battlefield | untested |
-| `194f57a3` | a | other | a steal-and-equip ability can target an artifact you already control, attaching it to the source if it's an Equipment | untested |
+| `3a9c110e` | a | other | a continuous control-change effect lasts indefinitely, surviving cleanup and the source leaving the battlefield | `rulings_other::thieving_skydivers_control_lasts_and_it_may_take_your_own_artifact_cr_611_2a` |
+| `194f57a3` | a | other | a steal-and-equip ability can target an artifact you already control, attaching it to the source if it's an Equipment | `rulings_other::thieving_skydivers_control_lasts_and_it_may_take_your_own_artifact_cr_611_2a` |
 | `f4a1b9c8` | a | copies | a permanent entering as a copy of a kicked permanent isn't itself kicked | `rulings_copies3::a_copy_of_a_kicked_permanent_isnt_kicked_nor_a_reanimated_one_cr_702_33d_707_2` |
 | `e6ad3498` | b | DEF | paying a kicker cost is what makes a spell 'kicked', a term definition | a definition, no behaviour of its own |
 | `cef3bc5c` | a | copies | copying a kicked spell makes the copy kicked too, including any token the copy becomes | `rulings_copies3::lutris_copy_of_a_kicked_spell_is_kicked_cr_707_10_702_33` |
@@ -801,7 +801,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `a549c65a` | a | other | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | untested |
+| `a549c65a` | a | other | a forced multi-draw becomes one draw if you havent drawn yet that turn; an optional draw cant be taken at all | `rulings_other::narset_turns_a_multi_card_draw_into_one_if_none_drawn_this_turn_cr_121_2` |
 | `f872e80b` | a | other | a draw-restricting ability 'sees' draws from earlier in the turn it enters but can't retroactively undo them | `rulings_triggers3::draw_limits_and_draw_counters_see_draws_before_their_source_entered_cr_121_2` |
 | `64a8b100` | a | replacement | another replacement effect cant replace a disallowed draw; but a replaced draw didnt happen for this limit | `rulings_replacement2::a_draw_hullbreacher_replaced_doesnt_count_for_narset_or_leovold_cr_614_6`; `rulings_replacement2::a_draw_narset_or_leovold_disallows_cant_be_replaced_by_hullbreacher_cr_614_6_121_2` |
 | `1a963653` | a | other | opponents affected by a one-draw-per-turn restriction have any further draws that turn simply ignored | `cards_m7b_walkers2::narset_each_opponent_draws_at_most_one_card_each_turn` |
@@ -937,7 +937,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `7614aeed` | a | stack | a draw-two-discard-two spell resolves atomically; no player may act between the draw and the discard | `rulings_stack3::no_player_can_act_in_the_middle_of_a_resolution_cr_608_2` |
-| `beb67500` | a | other | you choose which lands to untap as the spell resolves; they aren't targeted and needn't be yours | untested |
+| `beb67500` | a | other | you choose which lands to untap as the spell resolves; they aren't targeted and needn't be yours | `rulings_other::frantic_search_untaps_lands_it_doesnt_target_including_an_opponents_cr_115_10` |
 
 ### Sink into Stupor // Soporific Springs
 
@@ -984,7 +984,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `2cb44a57` | b | DEF | you choose how to pay each Phyrexian mana symbol at the same time as choosing modes or an X value [part 3, was a/mana: when the Phyrexian payment is chosen; the engine asks it while casting] | a definition, no behaviour of its own |
 | `cab93df4` | a | mana | you can't pay the life portion of Phyrexian mana if you're at 1 life or less | `rulings_mana::phyrexian_mana_cant_be_paid_with_life_you_dont_have_cr_119_4` |
 | `0a14c78b` | b | DEF | Phyrexian mana isn't a color of its own, and players can't produce it as mana [part 3, was a/mana: Phyrexian mana isn't a colour; a definition] | a definition, no behaviour of its own |
-| `98549dec` | a | other | the affected player may have an empty hand; the draw still happens regardless | untested |
+| `98549dec` | a | other | the affected player may have an empty hand; the draw still happens regardless | `rulings_other::hand_reveals_and_discards_targeting_yourself_or_an_empty_hand_cr_701_20b` |
 | `5c4578c4` | a | mana | each Phyrexian mana symbol counts as 1 toward a card's mana value | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 
 ### Ponder
@@ -997,7 +997,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `066e2812` | a | other | multiple extra-turn effects are taken in reverse of the order they resolved, most recent first | untested |
+| `066e2812` | a | other | multiple extra-turn effects are taken in reverse of the order they resolved, most recent first | `rulings_other::extra_turns_are_taken_most_recent_first_cr_500_7` |
 
 ### Transmute Artifact
 
@@ -1033,7 +1033,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `066e2812` | a | other | multiple extra-turn effects are taken in reverse of the order they resolved, most recent first | untested |
+| `066e2812` | a | other | multiple extra-turn effects are taken in reverse of the order they resolved, most recent first | `rulings_other::extra_turns_are_taken_most_recent_first_cr_500_7` |
 
 ### Echo of Eons
 
@@ -1051,7 +1051,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `beb67500` | a | other | you choose which lands to untap as the spell resolves; they aren't targeted and needn't be yours | untested |
+| `beb67500` | a | other | you choose which lands to untap as the spell resolves; they aren't targeted and needn't be yours | `rulings_other::frantic_search_untaps_lands_it_doesnt_target_including_an_opponents_cr_115_10` |
 
 ### Treasure Cruise
 
@@ -1153,7 +1153,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `33154328` | a | other | an ability can be activated even if its source is already tapped | untested |
+| `33154328` | a | other | an ability can be activated even if its source is already tapped | `rulings_other::iron_shield_elf_activates_while_tapped_cr_602_1` |
 
 ### Orcish Bowmasters
 
@@ -1332,7 +1332,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `280ed0d1` | a | triggers | a delayed exile trigger only exiles the card if it's still on the battlefield when the trigger condition checks | `rulings_triggers2::shallow_grave_exiles_only_the_creature_still_on_the_battlefield_cr_603_7_400_7` |
-| `36b545c9` | a | other | a granted haste effect only lasts until end of turn, even if the creature somehow survives to a later turn | untested |
+| `36b545c9` | a | other | a granted haste effect only lasts until end of turn, even if the creature somehow survives to a later turn | `rulings_other::corpse_dances_haste_ends_with_the_turn_cr_611_2a` |
 
 ### Dismember
 
@@ -1361,7 +1361,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `695c629c` | a | other | targeting yourself with a hand-reveal spell still forces you to reveal your entire hand | untested |
+| `695c629c` | a | other | targeting yourself with a hand-reveal spell still forces you to reveal your entire hand | `rulings_other::hand_reveals_and_discards_targeting_yourself_or_an_empty_hand_cr_701_20b` |
 
 ### Reanimate
 
@@ -1377,7 +1377,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `311524ab` | a | other | you still lose the life even if the target has no nonland cards to discard | untested |
+| `311524ab` | a | other | you still lose the life even if the target has no nonland cards to discard | `rulings_other::hand_reveals_and_discards_targeting_yourself_or_an_empty_hand_cr_701_20b` |
 
 ### Unearth
 
@@ -1465,7 +1465,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `13cb7898` | a | other | once a limited counter resource runs dry, the permanent stays but its tied ability can never fire again | untested |
+| `13cb7898` | a | other | once a limited counter resource runs dry, the permanent stays but its tied ability can never fire again | `rulings_other::wishclaw_talisman_without_wish_counters_stays_and_cant_be_activated_cr_118_3` |
 | `4eb291a4` | b | MP | you choose which opponent gains control of the stolen permanent while the ability resolves [part 3, was a/other: which opponent] | multiplayer |
 
 ### Bolas's Citadel
@@ -1635,7 +1635,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `29633b54` | a | copies | power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
 | `cdd6186e` | a | triggers | the source doesn't need to be among the attacking creatures for its attack-triggered ability to fire | `rulings_triggers3::whenever_you_attack_triggers_without_its_source_attacking_cr_508_3a` |
 | `4af60889` | c | NR | a base power/toughness-setting ability overwrites earlier ones, and is itself overwritten by any later one [part 3, was a/copies: Gut has no P/T-setting ability; the set-order rule is tested with Figure of Destiny and Oko (4af60889's Halsin)] | not reachable with the cube's cards |
-| `06cb2c7b` | a | other | if a creature becomes an artifact, it becomes eligible to be sacrificed to its own artifact-sacrificing ability | untested |
+| `06cb2c7b` | a | other | if a creature becomes an artifact, it becomes eligible to be sacrificed to its own artifact-sacrificing ability | `rulings_other::gut_made_an_artifact_may_sacrifice_itself_to_its_own_ability_cr_701_21a` |
 | `168c1f9f` | b | CMD | Commander rules for how a Background interacts with 'your commander' references | Commander |
 | `8ff08460` | b | CMD | with two commanders, an effect referencing 'your commander' lets you choose which one it affects | Commander |
 | `0252bf65` | b | CMD | a Background's ability applies to every commander creature you own, if you have more than one | Commander |
@@ -1671,7 +1671,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `e165be5b` | a | other | with fewer than two cards in hand, you discard your whole hand and still draw two cards afterward | untested |
+| `e165be5b` | a | other | with fewer than two cards in hand, you discard your whole hand and still draw two cards afterward | `rulings_other::seasoned_pyromancer_with_one_card_discards_it_and_draws_two_cr_701_9` |
 
 ### Simian Spirit Guide
 
@@ -1763,7 +1763,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `d4e8981b` | a | stack | casting from exile during resolution skips type-timing rules, but other stated restrictions still apply | `rulings_stack3::spells_cast_during_a_resolution_ignore_timing_and_later_casts_follow_it_cr_608_2g` |
 | `cdf038bc` | b | MP | Two-Headed Giant: a fixed total damage amount is dealt to the opposing team | multiplayer |
 | `c85087fd` | a | walkers | loyalty abilities arent mana abilities; they use the stack, are respondable, and follow the once-per-turn rule | `rulings_walkers::chandras_mana_ability_is_a_loyalty_ability_on_the_stack_cr_606_605_1a` |
-| `3c8289db` | a | other | an emblem created this way is colorless, so the damage it deals is from a colorless source | untested |
+| `3c8289db` | a | other | an emblem created this way is colorless, so the damage it deals is from a colorless source | `rulings_other::chandras_emblem_is_a_colorless_source_cr_114_4_105_2c` |
 | `9950a418` | a | mana | casting the exiled card still requires paying its costs, and alternative costs like emerge may be used | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b` |
 
 ### Burst Lightning
@@ -1901,7 +1901,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `81bbe983` | a | replacement | if a doubling effect makes two Monks from this trigger, this Equipment attaches to only one of them | `rulings_replacement2::elspeth_doubles_a_create_and_attach_token_and_the_equipment_attaches_to_one_cr_614_1a_301_5` |
 | `379a1727` | a | stack | no actions are allowed between creating the Monk token and choosing whether to attach the Equipment to it | `rulings_stack3::explore_connive_and_cori_steels_attach_choice_happen_within_one_resolution_cr_608_2` |
-| `110f09f6` | a | other | a flurry-style count includes spells cast before the permanent entered, so an early cast still counts toward later ones | untested |
+| `110f09f6` | a | other | a flurry-style count includes spells cast before the permanent entered, so an early cast still counts toward later ones | `rulings_other::flurry_counts_spells_cast_before_the_cutter_cr_702_183a` |
 | `2bb24717` | a | triggers | the created Monk token enters as a 1/1, so ETB-power triggers see a 1/1 before any static effect changes that | `rulings_triggers3::sword_of_the_meek_sees_static_1_1s_and_is_returned_whatever_changes_after_cr_603_6a` |
 
 ### Underworld Breach
@@ -1941,7 +1941,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `921387ce` | a | other | you only sacrifice the creature if you still control it; if it left and returned as a new object, you don't sacrifice it | untested |
+| `921387ce` | a | other | you only sacrifice the creature if you still control it; if it left and returned as a new object, you don't sacrifice it | `rulings_other::sneak_attack_doesnt_sacrifice_a_creature_that_left_and_came_back_cr_400_7` |
 
 ### Delighted Halfling
 
@@ -2101,7 +2101,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `608e8ab7` | c | NR | a named creature still explores via its ability even if it has since left the battlefield [part 3, was a/triggers: every cube explore names its creature as a target (Map tokens, Seasoned Dungeoneer), so a creature gone is an illegal target] | not reachable with the cube's cards |
 | `03aef98a` | a | other | explore: reveal top card; land goes to hand, otherwise get a +1/+1 counter and choose to keep or bin it | `cards_m7a::explore_cr_701_44_a_land_goes_to_hand_otherwise_a_counter` |
-| `bf9c2cf4` | a | other | if no card is revealed (empty library), the exploring creature still gets a +1/+1 counter | untested |
+| `bf9c2cf4` | a | other | if no card is revealed (empty library), the exploring creature still gets a +1/+1 counter | `rulings_other::exploring_with_an_empty_library_puts_a_counter_cr_701_44a` |
 | `cc77d340` | c | NR | even a noncreature permanent can explore if an effect instructs it to [part 3, was a/other: every cube explore names a creature as its target] | not reachable with the cube's cards |
 | `3311656f` | c | NR | describes the Map token, which no cube card creates | not reachable with the cube's cards |
 | `ee85216a` | a | stack | once an explore ability starts resolving, no player can act until it finishes | `rulings_stack3::explore_connive_and_cori_steels_attach_choice_happen_within_one_resolution_cr_608_2` |
@@ -2155,7 +2155,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `c026cdc4` | a | other | if the affected opponent controls no planeswalkers, this ability's extra effect simply does nothing | untested |
+| `c026cdc4` | a | other | if the affected opponent controls no planeswalkers, this ability's extra effect simply does nothing | `rulings_other::questing_beasts_trigger_does_nothing_without_a_planeswalker_cr_603_3d` |
 | `6ab1199e` | c | NR | once a strong enough blocker has blocked, later shrinking its power doesnt retroactively unblock the attacker [part 3, was a/combat: no cube effect lowers a blocking creature's power at instant speed] | not reachable with the cube's cards |
 | `c894eeb5` | b | DEF | this 'damage can't be prevented' effect only overrides effects that specifically use the word 'prevent' [part 3, was a/combat: only "prevent" effects are stopped; a definition (the cube has no other damage-changing effect)] | a definition, no behaviour of its own |
 | `908a2924` | c | NR | damage this ability deals directly to a planeswalker isn't combat damage, even though the ability is combat-related [part 3, was a/combat: no cube card treats combat and noncombat damage to a planeswalker differently] | not reachable with the cube's cards |
@@ -2296,8 +2296,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `fbba272e` | a | other | putting a land onto the battlefield via a spell or ability's effect doesn't trigger this card's extra-land-play damage | untested |
-| `892e2be5` | a | other | taking damage for an extra land play only triggers via the actual play-a-land action, however it was enabled | untested |
+| `fbba272e` | a | other | putting a land onto the battlefield via a spell or ability's effect doesn't trigger this card's extra-land-play damage | `rulings_other::fastbond_deals_damage_for_lands_played_not_put_onto_the_battlefield_cr_305_1` |
+| `892e2be5` | a | other | taking damage for an extra land play only triggers via the actual play-a-land action, however it was enabled | `rulings_other::fastbond_deals_damage_for_lands_played_not_put_onto_the_battlefield_cr_305_1` |
 
 ### Oath of Druids
 
@@ -2311,7 +2311,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `27f2af67` | a | mana | a cost written as {X}{X} means paying double the chosen X, so X=3 costs {6} | `cards_m7a_x::walking_ballista_enters_with_x_counters_and_removes_them_to_ping` |
-| `f730efa6` | a | other | existing damage or toughness loss caps how many times a counter-removing ability fires before SBA destroys it | untested |
+| `f730efa6` | a | other | existing damage or toughness loss caps how many times a counter-removing ability fires before SBA destroys it | `rulings_other::walking_ballistas_damage_limits_its_removals_cr_704_5f_602_2` |
 
 ### Painter's Servant
 
@@ -2437,9 +2437,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `256006dc` | a | other | this untap ability can legally target a land that's already untapped | untested |
+| `256006dc` | a | other | this untap ability can legally target a land that's already untapped | `rulings_other::candelabra_targets_untapped_lands_and_an_opponents_cr_115_1` |
 | `450c2022` | a | stack | this isn't a mana ability; it's a normal ability that resolves on the stack, untapping its targets during resolution | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
-| `9e0e545b` | a | other | this untap ability may target lands you don't control | untested |
+| `9e0e545b` | a | other | this untap ability may target lands you don't control | `rulings_other::candelabra_targets_untapped_lands_and_an_opponents_cr_115_1` |
 
 ### Expedition Map
 
@@ -2451,7 +2451,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `ac790121` | a | other | if both milled cards are colorless, a share-a-color repeat condition fails and the effect doesn't repeat | untested |
+| `ac790121` | a | other | if both milled cards are colorless, a share-a-color repeat condition fails and the effect doesn't repeat | `rulings_other::grindstone_doesnt_repeat_for_two_colorless_cards_cr_105_2c` |
 | `f2096b7a` | a | zones | this mill-and-repeat effect can continue indefinitely as long as each pair of milled cards shares a color | `cards_m7a_misc::grindstone_repeats_while_the_two_milled_cards_share_a_colour` |
 
 ### Manifold Key
@@ -2479,7 +2479,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `402f58a3` | a | combat | a creature that loses haste before attacking cant attack that turn, so one haste Equipment cant enable two attackers | `rulings_combat::haste_lost_before_attacking_means_no_attack_one_greaves_for_one_new_creature_cr_302_6` |
-| `4c667be8` | a | other | Equipment cant be simply unequipped; attached to your only creature, it cant move until you have another to attach to | untested |
+| `4c667be8` | a | other | Equipment cant be simply unequipped; attached to your only creature, it cant move until you have another to attach to | `rulings_other::shroud_from_lightning_greaves_keeps_other_equipment_off_your_only_creature_cr_702_18a` |
 
 ### Pentad Prism
 
@@ -2521,7 +2521,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `b9d3a261` | a | other | a skip-turn choice is made as the turn begins, only if tapped then; a skipped source untaps before next turn starts | `cards_m7c_tail::time_vault_skips_a_turn_to_untap_cr614_10_and_taps_for_an_extra_turn_cr500_7` |
 | `f801fa4a` | b | DEF | this ability's wording prevents repeatedly activating it to skip more than one turn at a time [part 3, was a/other: Time Vault's untap needs a turn skipped, one at a time; a definition] | a definition, no behaviour of its own |
-| `066e2812` | a | other | multiple extra-turn effects are taken in reverse of the order they resolved, most recent first | untested |
+| `066e2812` | a | other | multiple extra-turn effects are taken in reverse of the order they resolved, most recent first | `rulings_other::extra_turns_are_taken_most_recent_first_cr_500_7` |
 
 ### Basalt Monolith
 
@@ -2548,9 +2548,9 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
 | `3ff80682` | c | NR | a permanent that's both an artifact and an enchantment is only counted once toward a type-counting bonus [part 3, was a/copies: the cube has no permanent that's both an artifact and an enchantment] | not reachable with the cube's cards |
-| `745c7726` | a | other | if a living-weapon token is destroyed, its Equipment stays on the battlefield like any other Equipment would | untested |
+| `745c7726` | a | other | if a living-weapon token is destroyed, its Equipment stays on the battlefield like any other Equipment would | `rulings_other::an_equipment_stays_when_its_creature_dies_and_moves_by_its_equip_ability_cr_301_5c_704_5n` |
 | `f9096d07` | a | replacement | if a doubling effect makes two living-weapon tokens, the Equipment attaches to one; the other dies unless boosted | `rulings_replacement2::elspeth_doubles_a_create_and_attach_token_and_the_equipment_attaches_to_one_cr_614_1a_301_5` |
-| `b88fdb37` | a | other | moving a living-weapon Equipment via its equip cost leaves the unequipped token to die to SBA unless boosted | untested |
+| `b88fdb37` | a | other | moving a living-weapon Equipment via its equip cost leaves the unequipped token to die to SBA unless boosted | `rulings_other::an_equipment_stays_when_its_creature_dies_and_moves_by_its_equip_ability_cr_301_5c_704_5n` |
 | `bc0bcd33` | a | replacement | a living-weapon token enters as 0/0 and the Equipment attaches before SBA could kill it, so ETB triggers see a 0/0 | `rulings_replacement2::a_nettlecyst_germ_enters_as_a_0_0_so_sword_of_the_meek_doesnt_trigger_cr_603_6a` |
 | `32385cc4` | b | PRINT | an errata changed the living-weapon token's name across all cards with the ability, a wording/printing update | printing, wording, reminder text |
 
@@ -2651,7 +2651,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a4335d8f` | b | MP | this ability still counts an opponent who lost life this turn, even if that player has since lost the game [part 3, was a/triggers: a player who lost the game ends a two-player game] | multiplayer |
 | `68e1969c` | a | combat | with first/double strike present, ninjutsu-entering creatures still deal damage in the regular damage step | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
 | `5a72d756` | a | combat | a ninjutsu creature attacks the same target the bounced creature did, unlike the normal controllers-choice rule | `cards_m7b_walkers::kaito_ninjutsu_returns_an_unblocked_attacker_and_attacks_in_its_place` |
-| `f36cad96` | a | other | a 'lost life this turn' check cares only about whether a loss happened, not the net change to the life total | untested |
+| `f36cad96` | a | other | a 'lost life this turn' check cares only about whether a loss happened, not the net change to the life total | `rulings_other::kaitos_zero_counts_an_opponent_who_lost_life_even_if_they_gained_more_cr_119_3` |
 | `f0224bc7` | a | walkers | this makes the source stop being a planeswalker on your turn while it has loyalty; loyalty abilities still work | `rules_walkers::cr_205_1a_kaito_is_a_creature_not_a_planeswalker_on_his_turn_and_damage_is_marked`; `rulings_walkers::kaito_as_a_creature_is_dealt_damage_not_loyalty_loss_cr_306_8` |
 | `340468b6` | a | replacement | stun counters create one replacement effect that removes a counter instead of letting the permanent untap | `rules_layers::cr_122_1d_stun_counters_and_502_3_doesnt_untap` |
 | `666134f3` | a | combat | ninjutsu can trigger across several combat steps, but waiting past declare blockers usually misses the damage step | `rulings_combat::ninjutsu_after_blockers_in_the_first_strike_step_or_after_damage_cr_702_49_510_4` |
@@ -2710,7 +2710,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `ac9d14f8` | a | other | a modal spell's chosen effects are always carried out in the order printed on the card | untested |
+| `ac9d14f8` | a | other | a modal spell's chosen effects are always carried out in the order printed on the card | `rulings_other::a_modal_spells_modes_happen_in_printed_order_cr_700_2` |
 | `4b30736a` | a | stack | a copy of this modal spell may get new targets from the copying effect, but never new modes | `rulings_stack3::two_modes_of_collective_brutality_may_target_the_same_opponent_and_lutris_kolaghans_copy_keeps_its_modes_cr_700_2d_707_10c` |
 | `61ed8f24` | a | stack | if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal | `rulings_stack3::modal_spells_with_every_target_gone_do_nothing_and_with_one_left_do_the_rest_cr_608_2b` |
 | `0bcfa967` | a | protection | a mode needing a target is only choosable if a legal target exists; unchosen modes ignore targeting | `rulings_protection2::a_mode_needing_a_target_is_offered_only_with_one_and_may_repeat_it_cr_700_2a` |
@@ -2720,7 +2720,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `03b4df6c` | a | other | if some chosen permanents are indestructible and others aren't, a random one of the non-indestructible ones is destroyed | untested |
+| `03b4df6c` | b | MP | if some chosen permanents are indestructible and others aren't, a random one of the non-indestructible ones is destroyed [part 4, was a/other: in a two-player game Chaos Defiler chooses one permanent (one opponent), so there is no set of chosen permanents to pick from at random] | multiplayer |
 
 ### Manamorphose
 
@@ -2793,7 +2793,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `5bbf98e3` | a | copies | this ability's effect overwrites the creature's existing creature types entirely, rather than adding to them | `cards_m7b_tests_creatures::figure_of_fable_levels_up_scout_soldier_avatar` |
 | `bfa9cd25` | a | copies | these effects last until the game ends, the source leaves, or a later effect changes the same trait | `cards_m7b_tests_creatures::figure_of_fable_levels_up_scout_soldier_avatar` |
 | `3cebd2ad` | a | copies | this overwrites only pre-existing P/T-setting effects, not modifying or later-made ones; switch effects apply last | `rulings_copies3::a_figures_set_pt_doesnt_override_counters_cr_613_4c` |
-| `bc6af43b` | a | other | these abilities work regardless of current creature type; each checks the type at resolution and fizzles if wrong | untested |
+| `bc6af43b` | a | other | these abilities work regardless of current creature type; each checks the type at resolution and fizzles if wrong | `cards_m7b_tests_creatures::figure_of_fable_levels_up_scout_soldier_avatar` |
 
 ### Arwen, Mortal Queen
 
@@ -2843,7 +2843,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `f103228a` | a | mana | a card in a player's deck with X in its mana cost treats X as 0 | `rules_m8a::cr_702_139a_lurrus_condition_each_permanent_mana_value_2_or_less` |
 | `5b5e7097` | a | stack | a permanent card hitting your graveyard on your main phase with an empty stack gives you priority to cast it first | `rulings_stack3::a_card_put_into_your_graveyard_during_your_turn_can_be_cast_before_the_opponent_acts_cr_117_3b` |
 | `b4178eed` | a | other | if multiple players reveal companions, the starting player goes first, then turn order; declining is permanent | `rules_m8a::cr_103_2b_companions_in_turn_order_and_at_most_one` |
-| `5f5f59d3` | a | other | this restriction skips a permanent spell cast from the graveyard via another permission; you can cast one more | untested |
+| `5f5f59d3` | a | other | this restriction skips a permanent spell cast from the graveyard via another permission; you can cast one more | `rulings_other::lurrus_stays_unused_when_another_permission_casts_from_the_graveyard_cr_601_2a` |
 | `d2cef7ee` | c | NR | gaining control of a new copy in the same turn, after already using ones effect, lets you use the new ones too [part 3, was a/other: Lurrus is legendary and the cube has one] | not reachable with the cube's cards |
 | `a4cb7594` | a | mana | while companion is revealed, pay a fixed cost at sorcery speed to put it in hand; then acts as a normal card | `rulings_stack3::class_levels_and_candelabra_use_the_stack_plot_and_the_companion_dont_cr_602_2_116_2` |
 | `bd8a17c9` | a | other | this companion's deckbuilding condition doesn't restrict the mana value of instants and sorceries in your starting deck | `rules_m8a::cr_702_139a_lurrus_condition_each_permanent_mana_value_2_or_less` |
@@ -3082,7 +3082,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 |---|---|---|---|---|
 | `13ea38a2` | a | combat | damage stays marked until cleanup, so nonlethal damage can turn lethal if toughness drops later that turn | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
 | `b08d1e13` | a | copies | power/toughness-modifying effects and counters apply to a creature no matter when they started affecting it | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
-| `565d48d8` | a | other | gaining control of a permanent doesnt give control of its Auras/Equipment, and doesnt unattach a gained Equipment | untested |
+| `565d48d8` | a | other | gaining control of a permanent doesnt give control of its Auras/Equipment, and doesnt unattach a gained Equipment | `rulings_other::oust_gives_the_life_to_the_creatures_controller_and_oko_leaves_auras_and_equipment_cr_110_2` |
 | `22120a2e` | a | stack | if either permanent in a swap effect is an illegal target at resolution, the swap doesn't happen | `rulings_stack3::abilities_whose_target_is_gone_do_none_of_their_other_effects_cr_608_2b` |
 | `31ae0455` | a | copies | if the affected creature gains a new ability after this effect resolves, it keeps that new ability | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
 | `32bd2f57` | a | copies | this can target a temporarily-artifact/creature permanent, and the effect outlasts that temporary status ending | `rulings_copies3::okos_elk_set_base_3_3_counters_and_later_abilities_still_apply_and_it_lasts_cr_613_4_611_2` |
@@ -3129,8 +3129,8 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `18c98b5c` | a | other | a connive X-style ability draws X and discards X, then adds counters equal to the nonland cards discarded that way | untested |
-| `12cec5e6` | a | other | if no card can be discarded (empty hand, can't draw), the conniving creature gets no counter | untested |
+| `18c98b5c` | a | other | a connive X-style ability draws X and discards X, then adds counters equal to the nonland cards discarded that way | `rulings_other::conniving_with_no_card_discarded_puts_no_counter_and_connive_x_counts_nonland_discards_cr_701_50` |
+| `12cec5e6` | a | other | if no card can be discarded (empty hand, can't draw), the conniving creature gets no counter | `rulings_other::conniving_with_no_card_discarded_puts_no_counter_and_connive_x_counts_nonland_discards_cr_701_50` |
 | `b5fe5fd5` | a | stack | once a connive ability starts resolving, it's atomic; no responses until it's done | `rulings_stack3::explore_connive_and_cori_steels_attach_choice_happen_within_one_resolution_cr_608_2` |
 
 ### Loot, the Pathfinder
@@ -3482,7 +3482,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 
 | ruling | class | area / reason | point | test |
 |---|---|---|---|---|
-| `68db9ec9` | a | other | it doesnt matter which library meets this size condition, and you never need to specify which one | untested |
+| `68db9ec9` | a | other | it doesnt matter which library meets this size condition, and you never need to specify which one | `rulings_other::shelldock_isle_counts_any_library_cr_702_75a` |
 | `4ff60fbf` | a | facedown | hideaway-style: look at top library cards, exile one face down with a look-permission, bottom the rest randomly | `cards_m7c_tail3::shelldock_isle_hideaway_then_cast_free_cr702_75a` |
 | `a3006007` | c | NR | anyone whos ever controlled a hideaway-style permanent since it exiled a card may look at that card [part 3, was a/facedown: no cube effect changes control of a land] | not reachable with the cube's cards |
 | `63e22938` | b | DEF | a hideaway-style keyword puts the unchosen cards on the bottom in random order, not the players choice [part 3, was a/zones: the rest go to the bottom in a random order, no choice; a definition] | a definition, no behaviour of its own |

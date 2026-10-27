@@ -54,6 +54,7 @@ permission) and a consumer can go wrong with it.
 | 16 | Forth Eorlingas! | "one or more" as once per turn | the this-turn trigger "whenever one or more creatures you control deal combat damage to one or more players" with `once_per_turn: true` | a trigger per combat damage step ("one or more": `OneOrMoreBatch`), no once-per-turn limit | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to one or more players" entry, ~line 1050) | fixed (8ea9fcca), supported | confirmed |
 | 17 | Green Sun's Zenith | instruction as a replacement | "Shuffle Green Sun's Zenith into its owner's library" as a self static `ReplacementEffect(would_go_to_graveyard, Replace(library))` (from anywhere) | the last instruction of the spell's effect (only as it resolves) | `cards/parser/spell_builder.py` (`_SELF_SHUFFLE_GSZ_RE`, `_detect_shuffle_self_statics`, ~line 430) | fixed (8ea9fcca), supported | confirmed |
 | 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | fixed (8ea9fcca), supported | confirmed |
+| 19 | Gut, True Soul Zealot | qualifier widened | `SacrificeAPermanent { another: true, permanent_filter: ObjectOr(IsCreature, IsArtifact) }` for "sacrifice another creature or an artifact" | "another" on the creature only (an artifact may be Gut itself) | the "sacrifice another ..." phrase parser (`IfYouDo` / `MayDo`) | worked around (the label read) | confirmed |
 
 ## Confirmed defects
 
@@ -334,6 +335,27 @@ battlefield, draw a card."
   Its mana ability's `amount: 0` with `amount_is_x` (entry 10) and the {X} in a mana ability's
   cost are not lowered either.
 * Fixed in mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca: `event: dies` (entry 15's fix). Wizard's Rockets is supported: its {X} mana ability is lowered too, reading entry 10's `amount: 0` beside `amount_is_x` (ENGINE.md 32; `tests/cards_m7c_tail3.rs`).
+
+### J. "Another" spread over an "or" (M8d part 4)
+
+**19. Gut, True Soul Zealot.** Oracle: "Whenever you attack, you may sacrifice another creature or
+an artifact. If you do, create a 4/1 black Skeleton creature token with menace that's tapped and
+attacking."
+
+* IR: `SacrificeAPermanent { another: true, label: "another creature or an artifact",
+  permanent_filter: ObjectOr(IsCreature, IsArtifact) }`: read as written, `another` excludes Gut
+  from both kinds.
+* Should be: "another" qualifies "creature" only; "an artifact" may be Gut itself when it is one
+  (ruling 06cb2c7b: "If Gut somehow becomes an artifact, you may sacrifice it to its own
+  ability"). E.g. `permanent_filter: ObjectOr(ObjectAnd(IsCreature, Another), IsArtifact)` and
+  `another: false`.
+* Source: the parser of "sacrifice another <phrase>" (the `another` flag set for the whole
+  phrase).
+* Fix: scope `another` to the noun phrase it precedes when the phrase is "another X or a/an Y".
+* Engine: worked around in the lowering (`lower/effect_ext.rs`, `SacrificeAPermanent`): with
+  `another` and a label "... or a ..." / "... or an ...", only the first part of the `Or` excludes
+  the source (M8d part 4; `tests/rulings_other.rs::gut_made_an_artifact_may_sacrifice_itself_to_its_own_ability_cr_701_21a`,
+  a Phyrexian Metamorph copying Gut). Gut is the only cube card with this shape.
 
 ## Suspected defects (representational)
 

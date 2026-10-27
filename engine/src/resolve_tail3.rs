@@ -223,7 +223,15 @@ impl Game {
                 if let (Some(&e), Some(&h)) = (eq.first(), host.first()) {
                     let q = self.damage_source_of(e);
                     let equipment = self.has_subtype(e, self.db.subtype_id("Equipment").unwrap_or(u16::MAX));
-                    if equipment && !self.is_creature(e) && self.is_creature(h) && e != h && !self.protected_from(h, &q) {
+                    // CR 301.5c: an Equipment that's also a creature can't
+                    // equip unless it has reconfigure (Lion Sash: any effect
+                    // may attach it; ruling 35466139).
+                    if equipment
+                        && (!self.is_creature(e) || self.def_of(e).reconfigure)
+                        && self.is_creature(h)
+                        && e != h
+                        && !self.protected_from(h, &q)
+                    {
                         let hr = self.obj_ref(h);
                         self.objs[e.i()].attached = Some(hr);
                         self.attached_timestamp(e);

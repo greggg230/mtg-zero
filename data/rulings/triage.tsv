@@ -1044,7 +1044,7 @@ ac9d14f8	a	other	a modal spell's chosen effects are always carried out in the or
 61ed8f24	a	stack	if all targets across chosen modes go illegal, the spell fails; partial fizzle if some remain legal
 0bcfa967	a	protection	a mode needing a target is only choosable if a legal target exists; unchosen modes ignore targeting
 4ba4f68d	a	mana	you choose exactly two different modes as you cast this spell, locked in once chosen
-03b4df6c	a	other	if some chosen permanents are indestructible and others aren't, a random one of the non-indestructible ones is destroyed
+03b4df6c	b	MP	if some chosen permanents are indestructible and others aren't, a random one of the non-indestructible ones is destroyed [part 4, was a/other: in a two-player game Chaos Defiler chooses one permanent (one opponent), so there is no set of chosen permanents to pick from at random]
 585b5241	b	DEF	you choose which color(s) of mana to add before drawing the resulting card [part 3, was a/mana: the colours are chosen before the draw; the engine asks them first]
 b2b3d893	a	replacement	ravenous puts its counters on as the creature enters, not after; entering triggers see the counters
 6c7670da	c	NR	a copied ravenous permanent spell keeps X, and its resulting token enters with X counters [part 3, was a/copies: no cube effect copies a ravenous creature spell]

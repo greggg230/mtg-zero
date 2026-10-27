@@ -543,7 +543,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
                 E::SacrificeAPermanent(nodes::SacrificeAPermanent { permanent_filter, another, label }) => {
                     // "[You may] sacrifice [another] <filter>. If you do, ..."
-                    let _ = label; // display text
                     let mut f = match permanent_filter {
                         Some(p) => match super::filter::lower_pred(l, p) {
                             Some(f) => f,
@@ -552,7 +551,19 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                         None => Filter::Type(types::PERMANENT),
                     };
                     if *another {
-                        f = and(f, not(Filter::Source));
+                        // "Another creature or an artifact" (Gut): "another"
+                        // belongs to the first noun phrase only, an artifact
+                        // may be the source itself (ruling 06cb2c7b). The IR
+                        // puts `another` on the whole `ObjectOr`; its label
+                        // tells the two apart (docs/ir_defects.md 19).
+                        let split = label.contains(" or a ") || label.contains(" or an ");
+                        f = match f {
+                            Filter::Or(mut parts) if split && parts.len() == 2 => {
+                                parts[0] = and(parts[0].clone(), not(Filter::Source));
+                                Filter::Or(parts)
+                            }
+                            f => and(f, not(Filter::Source)),
+                        };
                     }
                     let at = b.op(Op::Ext(Ext::SacrificeThen { filter: f, optional, skip: 0 }));
                     lower_effect(l, b, then_action);
