@@ -665,7 +665,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `8f8116e7` | a | mana | a cost-reduction ability that reduces generic mana leaves colored mana costs untouched | `rulings_mana2::affinity_reduces_only_generic_mana_cr_702_41a_601_2f` |
 | `a5f46a35` | a | mana | total cost = base/alt cost + increases, then reductions; mana value unaffected by total cost paid | `rulings_mana2::a_spells_mana_value_is_its_mana_cost_whatever_cost_was_paid_cr_202_3_601_2f` |
 | `6d4a6721` | a | zones | casting an artifact card via another card's permission still follows normal timing restrictions unless it has flash | `rulings_zones2::cards_cast_or_played_from_a_graveyard_keep_their_timing_cr_601_3_307_1_305_2` |
-| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b` |
+| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b`; `rulings_mana2::an_alternative_cost_with_retrace_or_with_elite_spellbinders_tax_cr_118_9_702_81a_601_2f` |
 
 ### Forensic Gadgeteer
 
@@ -1655,7 +1655,7 @@ Hash: the first 8 hex digits of the SHA-1 of the ruling's text (the full text is
 | `a898c85e` | a | triggers | this trigger doesn't care which player exiled the cards or from which zone, including via delve | `rulings_triggers3::laelia_an_opponents_exile_counts_and_rockets_destroyed_draw_and_a_crewed_copter_doesnt_enter_cr_603_2_603_6a` |
 | `cefea9b0` | a | triggers | this trigger fires once per exiling event, no matter how many cards were exiled simultaneously | `rules_shortcuts::cr_603_2c_laelia_triggers_once_per_exile_event` |
 | `8e48cc76` | a | zones | playing a card exiled this way still follows normal timing restrictions, including needing an available land play | `rulings_zones2::cards_exiled_by_combat_triggers_are_played_with_their_normal_timing_cr_601_3_307_1_305_2` |
-| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b` |
+| `eb35fd18` | a | mana | a spell cast this way still requires paying all its costs, including additional and any available alternative costs | `rulings_mana2::cards_cast_from_exile_with_a_permission_may_use_alternative_costs_and_pay_additional_ones_cr_118_9_601_2b`; `rulings_mana2::an_alternative_cost_with_retrace_or_with_elite_spellbinders_tax_cr_118_9_702_81a_601_2f` |
 
 ### Screaming Nemesis
 

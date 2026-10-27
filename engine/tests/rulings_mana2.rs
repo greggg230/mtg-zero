@@ -1652,3 +1652,74 @@ fn cascade_sees_a_split_cards_combined_mana_value_and_casts_one_half_cr_709_4_70
     let forest = bf(&g, 0, "Forest");
     assert!(!g.is_creature(forest), "not Life too");
 }
+
+#[test]
+fn an_alternative_cost_with_retrace_or_with_elite_spellbinders_tax_cr_118_9_702_81a_601_2f() {
+    // ruling: eb35fd18
+    // Six's retrace adds a cost, it isn't an alternative one: Ragavan
+    // retraced (a Forest discarded) may be cast for its dash cost, and has
+    // haste. P1's Force of Will exiled by Elite Spellbinder: cast for its
+    // pitch cost plus the {2}: not with one Island, yes with two.
+    let mut g = scen()
+        .battlefield(0, &["Six", "Mountain", "Mountain"])
+        .graveyard(0, &["Ragavan, Nimble Pilferer"])
+        .hand(0, &["Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    let r = g.card(0, "Ragavan, Nimble Pilferer", Zone::Graveyard);
+    assert!(g.has_option(Choice::Cast(r)), "retrace: {}", opts(&g));
+    let alts = std::cell::Cell::new(0usize);
+    let asked = cast_recording(&mut g, Choice::Cast(r), |g| match g.kind() {
+        Some(DecisionKind::ChooseAltCost) => {
+            alts.set(g.pending_decision().unwrap().options.len());
+            Some(Choice::Number(1))
+        }
+        _ => None,
+    });
+    assert!(asked.contains(&DecisionKind::ChooseAltCost), "{asked:?}\n{}", log(&g));
+    assert_eq!(alts.get(), 2, "its mana cost or dash");
+    assert_eq!(g.count_in(0, "Forest", Zone::Graveyard), 1, "retrace's land discarded\n{}", log(&g));
+    resolve(&mut g);
+    assert_eq!(g.obj(r).zone, Zone::Battlefield, "{}", log(&g));
+    assert!(g.has_kw(r, Kw::Haste), "dashed: haste\n{}", log(&g));
+    assert_eq!(g.permanents_of(0).filter(|&c| g.obj(c).tapped).count(), 2, "{{1}}{{R}}");
+    // Elite Spellbinder and Force of Will.
+    for (islands, castable) in [(1usize, false), (2, true)] {
+        let mut g = scen()
+            .battlefield(0, &["Plains", "Plains", "Plains", "Mountain"])
+            .hand(0, &["Elite Spellbinder", "Lightning Bolt"])
+            .battlefield(1, &vec!["Island"; islands])
+            .hand(1, &["Force of Will", "Brainstorm"])
+            .at(Step::Main1, 0)
+            .start();
+        let fow = g.card(1, "Force of Will", Zone::Hand);
+        let es = g.card(0, "Elite Spellbinder", Zone::Hand);
+        g.choose(Choice::Cast(es));
+        resolve_with(&mut g, |g| match g.kind() {
+            Some(DecisionKind::Target) => Some(player(1)),
+            _ if g.has_option(Choice::Card(fow)) => Some(Choice::Card(fow)),
+            _ => None,
+        });
+        assert_eq!(g.obj(fow).zone, Zone::Exile, "{}", log(&g));
+        let b = g.card(0, "Lightning Bolt", Zone::Hand);
+        g.choose(Choice::Cast(b));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(player(1));
+        pay(&mut g);
+        g.drive_until(|g| at_priority(g) && g.turn().priority == 0);
+        g.pass();
+        assert_eq!(g.has_option(Choice::Cast(fow)), castable, "{islands} Islands: {}", opts(&g));
+        if castable {
+            let tb = g.tgt(b);
+            cast_recording(&mut g, Choice::Cast(fow), |g| match g.kind() {
+                Some(DecisionKind::ChooseAltCost) => Some(Choice::Number(1)),
+                Some(DecisionKind::Target) => Some(tb),
+                _ => None,
+            });
+            resolve(&mut g);
+            assert_eq!(g.life(1), 19, "1 life, the Bolt countered\n{}", log(&g));
+            assert_eq!(g.count_in(1, "Brainstorm", Zone::Exile), 1);
+            assert_eq!(g.permanents_of(1).filter(|&c| g.obj(c).tapped).count(), 2, "the {{2}} paid");
+        }
+    }
+}
