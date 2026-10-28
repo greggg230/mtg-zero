@@ -12,7 +12,7 @@ use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{DamageSource, Game, Pos};
 use crate::ids::{CardIdx, DefId, PlayerId, Target, Zone};
-use crate::mana::{payable_n, payable_within_n, Budget, ManaCost, ManaMask, Unit, COLORS, MADE, RESTRICTED, TYPES};
+use crate::mana::{payable_n, payable_within_n, search_exhausted, Budget, ManaCost, ManaMask, Unit, COLORS, MADE, RESTRICTED, SEARCH_NODES, TYPES};
 use crate::svec::SVec;
 
 /// The `Src` slot of an artifact tapped for improvise (CR 702.126a: not a
@@ -1016,10 +1016,18 @@ impl Game {
         let total: usize = groups.iter().map(|g| g.1 as usize).sum();
         let need = pm.cost.total() as usize + marked.len();
         let top = total.min(need.saturating_sub(chosen.len()));
-        let most = |convert: bool| {
+        // (Each spend tried is a node of the search: ENGINE.md 51.)
+        let mut nodes = SEARCH_NODES;
+        let mut most = |convert: bool| {
             for k in (floor..=top).rev() {
                 let mut found = false;
                 each_subset(groups, k, &mut SVec::new(), &mut |cnt| {
+                    nodes = nodes.checked_sub(1).unwrap_or_else(|| {
+                        search_exhausted(format_args!(
+                            "the virtual pool's spends: cost {}, groups {groups:?}, needs {marked:?}, chosen {chosen:?}, budget {budget:?}",
+                            pm.cost
+                        ))
+                    });
                     let mut ch: SVec<ManaMask, 16> = chosen.iter().copied().collect();
                     ch.extend(masks_of(groups, cnt));
                     found = cands_payable_c(&pm.cost, marked, &ch, rest, budget, convert);
@@ -1994,7 +2002,7 @@ pub(crate) struct Cands {
 /// Candidate units, inline up to 32 (ENGINE.md 17).
 type Units = SVec<Unit, 32>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Way {
     units: SVec<Unit, 4>,
     life: i32,
@@ -2161,13 +2169,34 @@ fn cands(
 }
 
 /// Can the units `a` make every unit of `b` (each of `b`'s units by its own
-/// unit of `a` whose mask holds it)? Ways have at most four units.
+/// unit of `a` whose mask holds it)? A bipartite matching by augmenting
+/// paths: a way may have any number of units (Gaea's Cradle's, one per
+/// creature, 255 at most), and the search this replaces kept the units it
+/// had used in eight bits, so past eight units it went through every
+/// permutation of them and never ended (fuzz game 10049522: an animated
+/// Cradle's 28 {G} against its own tap for Aang's waterbend; ENGINE.md 51).
 fn covers(a: &[Unit], b: &[Unit]) -> bool {
-    fn go(a: &[Unit], used: u8, b: &[Unit]) -> bool {
-        let Some((first, rest)) = b.split_first() else { return true };
-        (0..a.len()).any(|i| used & (1 << i) == 0 && first.mask & !a[i].mask == 0 && go(a, used | (1 << i), rest))
+    fn augment(j: usize, a: &[Unit], b: &[Unit], seen: &mut [bool], owner: &mut [usize]) -> bool {
+        for i in 0..a.len() {
+            if !seen[i] && b[j].mask & !a[i].mask == 0 {
+                seen[i] = true;
+                if owner[i] == usize::MAX || augment(owner[i], a, b, seen, owner) {
+                    owner[i] = j;
+                    return true;
+                }
+            }
+        }
+        false
     }
-    b.len() <= a.len() && go(a, 0, b)
+    if b.len() > a.len() {
+        return false;
+    }
+    let mut owner: SVec<usize, 8> = std::iter::repeat_n(usize::MAX, a.len()).collect();
+    let mut seen: SVec<bool, 8> = std::iter::repeat_n(false, a.len()).collect();
+    (0..b.len()).all(|j| {
+        seen.fill(false);
+        augment(j, a, b, &mut seen, &mut owner)
+    })
 }
 
 /// [`payable_within_n`] over candidates (with `marked` needs and every unit
@@ -2210,9 +2239,20 @@ fn payable_converted(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], 
 }
 
 fn ways_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], fixed: &Units, alts: &[Vec<Way>], budget: Budget) -> bool {
-    fn go(cost: &ManaCost, needs: &mut SVec<ManaMask, 8>, chosen: &[ManaMask], units: &mut Units, alts: &[Vec<Way>], b: Budget) -> bool {
+    // (`None`: the search's nodes ran out.)
+    #[allow(clippy::too_many_arguments)]
+    fn go(
+        cost: &ManaCost,
+        needs: &mut SVec<ManaMask, 8>,
+        chosen: &[ManaMask],
+        units: &mut Units,
+        alts: &[Vec<Way>],
+        b: Budget,
+        nodes: &mut u32,
+    ) -> Option<bool> {
+        *nodes = nodes.checked_sub(1)?;
         let Some((first, rest)) = alts.split_first() else {
-            return payable_within_n(cost, needs, chosen, units, b);
+            return Some(payable_within_n(cost, needs, chosen, units, b));
         };
         for w in first {
             let left = Budget { life: b.life - w.life, sac: b.sac - w.sac, tap: b.tap - w.tap };
@@ -2224,19 +2264,70 @@ fn ways_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], fixed
             if w.need != 0 {
                 needs.push(w.need);
             }
-            let ok = go(cost, needs, chosen, units, rest, left);
+            let ok = go(cost, needs, chosen, units, rest, left, nodes);
             units.truncate(len);
             needs.truncate(nl);
-            if ok {
-                return true;
+            if ok? {
+                return Some(true);
             }
         }
-        go(cost, needs, chosen, units, rest, b)
+        go(cost, needs, chosen, units, rest, b, nodes)
     }
     if alts.is_empty() {
         return payable_within_n(cost, marked, chosen, fixed, budget);
     }
     let mut units = fixed.clone();
     let mut needs: SVec<ManaMask, 8> = marked.iter().copied().collect();
-    go(cost, &mut needs, chosen, &mut units, alts, budget)
+    let mut nodes = SEARCH_NODES;
+    go(cost, &mut needs, chosen, &mut units, alts, budget, &mut nodes).unwrap_or_else(|| {
+        search_exhausted(format_args!(
+            "cost {cost}, needs {marked:?}, chosen {chosen:?}, fixed units {fixed:?}, cards with ways {alts:?}, budget {budget:?}"
+        ))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn units(masks: &[ManaMask]) -> Vec<Unit> {
+        masks.iter().map(|&m| Unit::free(m)).collect()
+    }
+
+    /// `covers` is a matching whatever the number of units (ENGINE.md 51:
+    /// the search it replaced kept its used units in eight bits and never
+    /// ended past eight: Gaea's Cradle's 28 {G}).
+    #[test]
+    fn covers_matches_any_number_of_units() {
+        const W: ManaMask = 1;
+        const G: ManaMask = 1 << 4;
+        let g = |n: usize| units(&vec![G; n]);
+        assert!(covers(&g(255), &g(255)));
+        assert!(covers(&g(28), &units(&[0])));
+        assert!(!covers(&units(&[0]), &g(28)));
+        assert!(!covers(&g(254), &g(255)));
+        let mut b = g(30);
+        b.push(Unit::free(W));
+        assert!(!covers(&g(40), &b), "no unit makes {{W}}");
+        let mut a = g(30);
+        a.push(Unit::free(W | G));
+        assert!(covers(&a, &b), "the {{W}}{{G}} unit for the {{W}}");
+        // (An augmenting path: the first {G} taken by the any-colour unit
+        // moves to a plain one.)
+        assert!(covers(&units(&[G | W, G]), &units(&[G, W])));
+        assert!(!covers(&units(&[G | W, G]), &units(&[W, W])));
+    }
+
+    /// A feasibility search past `SEARCH_NODES` is a loud failure that
+    /// prints its inputs, never an answer it did not find (ENGINE.md 51):
+    /// 21 cards each of two ways ({C} or {R}), {W} paid by none of them,
+    /// 3^21 paths.
+    #[test]
+    #[should_panic(expected = "a feasibility search visited")]
+    fn an_exhausted_feasibility_search_panics_with_its_inputs() {
+        let way = |m: ManaMask| Way { units: std::iter::once(Unit::free(m)).collect(), life: 0, sac: 0, need: 0, tap: 0 };
+        let alts: Vec<Vec<Way>> = (0..21).map(|_| vec![way(1 << 5), way(1 << 3)]).collect();
+        let cost = ManaCost::parse("{W}").unwrap();
+        ways_payable(&cost, &[], &[], &Units::new(), &alts, Budget::FREE);
+    }
 }

@@ -472,22 +472,56 @@ pub fn payable_within_n(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask]
             None => groups.push((u, 1)),
         }
     }
-    fn go(cost: &ManaCost, extra: &[ManaMask], chosen: &[ManaMask], units: &mut Vec<ManaMask>, groups: &[(Unit, u8)], b: Budget) -> bool {
-        let Some(((u, n), rest)) = groups.split_first() else { return payable_n(cost, extra, chosen, units) };
+    // (`None`: the search's nodes ran out.)
+    #[allow(clippy::too_many_arguments)]
+    fn go(
+        cost: &ManaCost,
+        extra: &[ManaMask],
+        chosen: &[ManaMask],
+        units: &mut Vec<ManaMask>,
+        groups: &[(Unit, u8)],
+        b: Budget,
+        nodes: &mut u32,
+    ) -> Option<bool> {
+        *nodes = nodes.checked_sub(1)?;
+        let Some(((u, n), rest)) = groups.split_first() else { return Some(payable_n(cost, extra, chosen, units)) };
         for take in (0..=*n).rev() {
             let Some(left) = b.take(u, take as i32) else { continue };
             let len = units.len();
             units.extend(std::iter::repeat_n(u.mask, take as usize));
-            let ok = go(cost, extra, chosen, units, rest, left);
+            let ok = go(cost, extra, chosen, units, rest, left, nodes);
             units.truncate(len);
-            if ok {
-                return true;
+            if ok? {
+                return Some(true);
             }
         }
-        false
+        Some(false)
     }
     let mut units = free;
-    go(cost, extra, chosen, &mut units, &groups, budget)
+    let mut nodes = SEARCH_NODES;
+    go(cost, extra, chosen, &mut units, &groups, budget, &mut nodes).unwrap_or_else(|| {
+        search_exhausted(format_args!(
+            "units within a budget: cost {cost}, needs {extra:?}, chosen {chosen:?}, units {available:?}, budget {budget:?}"
+        ))
+    })
+}
+
+/// The most nodes one search of a payment's feasibility visits
+/// (`payable_within_n`'s budgeted units, `pay::ways_payable` over the cards
+/// with several ways, the virtual pool's spends in `most_spent_from`).
+/// These searches are exponential in what a board can hold; the most one
+/// visited in the fuzz's games and matches is far below this (ENGINE.md
+/// 51). Past it the search stops with a panic that prints its inputs (that
+/// search's reproduction, run alone), never with an answer it did not find:
+/// a search that does not end hangs a self-play run's worker until the
+/// stall watchdog kills the run (fuzz game 10049522).
+pub(crate) const SEARCH_NODES: u32 = 1 << 24;
+
+/// A feasibility search ran out of its `SEARCH_NODES`: a loud failure.
+#[cold]
+#[inline(never)]
+pub(crate) fn search_exhausted(what: std::fmt::Arguments) -> ! {
+    panic!("pay: a feasibility search visited {SEARCH_NODES} nodes without an answer (ENGINE.md 51): {what}")
 }
 
 #[cfg(test)]

@@ -7,7 +7,9 @@
 //!   card twice and another not at all (the hidden pool's deal against a
 //!   cloud while the opponent pays);
 //! * 51.2 `ChooseGraveyardCard with no options` (an opponent's Lotus Petal
-//!   counted for "exile cards from your graveyard" and delve, CR 400.3).
+//!   counted for "exile cards from your graveyard" and delve, CR 400.3);
+//! * 51.3 a payment search that never ended (Gaea's Cradle's mana against
+//!   its own waterbend tap: a matching kept in eight bits).
 
 mod common;
 
@@ -260,4 +262,48 @@ fn cr_400_3_an_opponents_lotus_petal_does_not_feed_your_graveyard_costs() {
     h.choose(Choice::Cast(tc));
     let mut budget = 500;
     assert!(every_path_completes(&h, &mut budget) > 0);
+}
+
+// ---- 51.3: a payment search that never ended ---------------------------------
+
+/// CR 605.3a, 601.2g; Aang's waterbend (tap artifacts and creatures, each
+/// paying {1}). A card's ways to pay are folded into one when one way makes
+/// every other's mana (`pay::covers`): Gaea's Cradle animated by Nissa,
+/// Who Shakes the World, a creature, either taps for {G} per creature or for
+/// waterbend's {1}. The check matched the units of two ways with the used
+/// ones in eight bits: past eight units every permutation was tried, and
+/// with 28 creatures the castability check of Aang's ability never ended
+/// (fuzz game 10049522 ran for over 50 minutes; a self-play worker would
+/// hang its run). The check now ends at once (a bipartite matching).
+#[test]
+fn cr_605_3a_gaeas_cradle_with_many_creatures_tapped_for_waterbend_is_checked_at_once() {
+    // (In a thread of its own, against a clock: on ab02574 the checks below
+    // take minutes; here, milliseconds.)
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut names = vec!["Gaea's Cradle", "Nissa, Who Shakes the World", "Aang, Swift Savior // Aang and La, Ocean's Fury"];
+        names.extend(["Llanowar Elves"; 26]);
+        let mut g = scen().battlefield(0, &names).library(0, &["Forest"; 8]).library(1, &["Island"; 8]).at(Step::Main1, 0).start();
+        let cradle = bf(&g, 0, "Gaea's Cradle");
+        let nissa = bf(&g, 0, "Nissa, Who Shakes the World");
+        // Nissa's +1: the Cradle a 0/0 creature with three counters, haste.
+        g.choose(act(nissa, 0));
+        finish(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then(|| g.tgt(cradle)));
+        resolve_with(&mut g, |_| None);
+        assert!(g.is_creature(cradle));
+        assert_eq!(g.creatures_of(0).count(), 28);
+        // Aang's waterbend {8}: offered, and every payment path completes.
+        let aang = bf(&g, 0, "Aang, Swift Savior // Aang and La, Ocean's Fury");
+        let offered = g.has_option(act(aang, 0));
+        let mut h = g.clone();
+        h.choose(act(aang, 0));
+        let mut budget = 64;
+        let paths = every_path_completes(&h, &mut budget);
+        let _ = tx.send((offered, paths));
+    });
+    let (offered, paths) = rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the castability and payment of Aang's waterbend (28 creatures, Gaea's Cradle one of them) did not end in 30 s");
+    assert!(offered, "waterbend {{8}}");
+    assert!(paths > 0);
 }
