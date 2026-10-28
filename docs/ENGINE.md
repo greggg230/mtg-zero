@@ -7855,10 +7855,10 @@ Rust is unchanged):
   resolved (team A won 6 and 10, drew 3 and 4), 288 matches each, 16,874 and 16,911 draft
   decisions, parked records at most 11.55 and 16.52 MB.
 * **Refusals at start** in the co-training path (48.2): an uncommitted change in the run's checkout;
-  a commit without its Mac checkout (this section's docs commit, before its `--eval-checkout`): stopped at start, "eval_remote:
-  greggkeithley@100.95.248.116:/Users/greggkeithley/mtg-zero-wt/run-<sha12> is not the run's code
-  (<sha12>): ... No such file or directory" and "prepare it: in <checkout>: bash tools/mac.sh
-  --eval-checkout".
+  a commit without its Mac checkout (this section's docs commit 049564a, which has no `--eval-checkout`): stopped at start, "eval_remote:
+  greggkeithley@100.95.248.116:/Users/greggkeithley/mtg-zero-wt/run-049564aa0bfa is not the run's
+  code (049564aa0bfa): zsh:cd:1: no such file or directory: ..." and "prepare it: in <checkout>: bash
+  tools/mac.sh --eval-checkout".
 * **zero-core** (`feat/cotrain-remote` af44741): `cargo test --release` 44 passed (unchanged Rust);
   `python -m pytest tests` **110 passed** (105 and 5 new: the resolver's remote `local`, a restart
   with evaluations pending, an unreachable remote, the run's own `eval_remote` and an unknown name
