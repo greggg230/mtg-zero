@@ -34,6 +34,8 @@
 //! (best-of-three on those lists, open decklists) both use it, with every
 //! check of the default mode. The decision kinds asked are counted and
 //! printed (interaction decisions per 1,000, against the default mode's).
+//! `FUZZ_GROUPS=n` deals from the first `n` groups only: a failure recorded
+//! before a group was added gets its decks again (ENGINE.md 51).
 //! `FUZZ_POOL=drafted` (M6 part 3, ENGINE.md 45): the matches are drafted
 //! ones: a `team_draft` event (4v4 or 2v2; random picks and decks, or team A
 //! drafting and building as `consensus`) and one of its matches as the `mtg`
@@ -329,8 +331,13 @@ fn drafted_spec(seed: u64) -> engine::az::MtgSpec {
 }
 
 /// The groups' cards as ids of `db`, and `db`'s supported lands.
+/// `FUZZ_GROUPS=n`: the first `n` groups only, so a failure recorded before
+/// a group was added deals its decks again (the farm's interactions seeds
+/// at 075649c: `FUZZ_GROUPS=13`; ENGINE.md 51).
 fn interaction_pool(db: &CardDb) -> (Vec<Vec<u16>>, Vec<u16>) {
-    let groups = GROUPS
+    let n: usize = std::env::var("FUZZ_GROUPS").ok().map(|s| s.parse().expect("FUZZ_GROUPS: a number of groups")).unwrap_or(GROUPS.len());
+    assert!((1..=GROUPS.len()).contains(&n), "FUZZ_GROUPS: 1 to {}", GROUPS.len());
+    let groups = GROUPS[..n]
         .iter()
         .map(|(_, names)| names.iter().map(|n| db.expect_id(n).unwrap_or_else(|e| panic!("FUZZ_POOL group card: {e}"))).collect())
         .collect();
@@ -1104,7 +1111,9 @@ fn fuzz_random_matches() {
         stats.first_picks_changed,
         stats.decks_changed
     );
-    assert!(sb > 0 && changed > 0 && three > 0);
+    // (Over a chunk of matches; a single match's rerun, `FUZZ_MATCHES=1`,
+    // passes when the match completes: ENGINE.md 51.)
+    assert!(n < 20 || sb > 0 && changed > 0 && three > 0, "no sideboarding, changed deck or match of three");
     // (Interaction lists have no first picks: open decklists.)
     assert!(
         n < 20 || interactions_mode() || stats.first_picks_changed > stats.worlds / 4 && stats.decks_changed > stats.worlds / 4,

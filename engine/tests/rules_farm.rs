@@ -12,6 +12,8 @@
 //!   its own waterbend tap: a matching kept in eight bits);
 //! * 51.4 a world that changed its decider's encoding (Blightsteel Colossus
 //!   surveiled into the graveyard shuffled the pile still to be placed);
+//! * 51.5 "a card with another face" (passes on ab02574: fixed by its
+//!   ENGINE.md 49.6; this test is the farm's case, a split card);
 //! * 51.6 `PayMana: no way to pay {3}{U}{U}` (delve exiled the graveyard
 //!   before the mana abilities that read it, CR 601.2g-h).
 
@@ -381,6 +383,72 @@ fn cr_701_25a_a_surveiled_blightsteel_colossus_shuffles_after_the_pile_is_placed
         }
         g.check_knowledge().unwrap();
     }
+}
+
+// ---- 51.5: a split card cast from Shelldock Isle -------------------------------
+
+/// CR 709.3 (a split card is cast as one of its halves), 712.11b / 601.2a
+/// (the card is public as it is cast, whichever half): Shelldock Isle's
+/// hideaway card is exiled face down; played with the Isle, a choice of
+/// halves is asked first. A world `determinize` sampled for the other
+/// player dealt the face-down card again, a card without halves, and the
+/// other half's option panicked ("a card with another face": fuzz game
+/// 10070547 with `FUZZ_POOL=interactions` at 075649c, Life // Death). Main
+/// ab02574 reveals the card before the choice (ENGINE.md 49.6, there with
+/// an Adventure card): this test passes on it and fails on 075649c.
+#[test]
+fn cr_709_3_a_split_card_played_from_shelldock_isle_is_revealed_before_its_half_is_chosen() {
+    let mut g = scen()
+        .battlefield(0, &["Island"])
+        .battlefield(1, &["Llanowar Elves"])
+        .hand(0, &["Shelldock Isle"])
+        .graveyard(0, &["Llanowar Elves"])
+        .library(0, &["Island", "Island", "Life // Death", "Forest", "Swamp", "Swamp"])
+        .library(1, &["Island"; 8])
+        .at(Step::Main1, 0)
+        .start();
+    let isle = g.card(0, "Shelldock Isle", Zone::Hand);
+    g.choose(Choice::Play(isle));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::PutInHand));
+    let ld = g.card(0, "Life // Death", Zone::Library);
+    g.choose(Choice::Card(ld));
+    // To P0's next first main phase, passing and declining.
+    let t = g.turn().number;
+    for _ in 0..2_000 {
+        if g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(&g) {
+            break;
+        }
+        let d = g.pending_decision().expect("game running");
+        let c = match d.kind {
+            DecisionKind::Priority | DecisionKind::DeclareAttackers | DecisionKind::DeclareBlockers => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.obj(ld).zone, Zone::FaceDown, "exiled face down: {}", log(&g));
+    assert!(!g.knows(1, ld));
+    let isle = bf(&g, 0, "Shelldock Isle");
+    g.choose(act(isle, 1));
+    for _ in 0..200 {
+        match g.kind() {
+            Some(DecisionKind::ChooseFace) => break,
+            Some(DecisionKind::Priority) => g.pass(),
+            Some(DecisionKind::YesNo) => g.choose(Choice::Yes),
+            _ => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c)
+            }
+        };
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseFace), "{}", log(&g));
+    // Every world sampled for P1 keeps the card: both halves complete.
+    for s in 0..16 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        let mut budget = 200;
+        assert!(every_path_completes(&d, &mut budget) > 0, "world {s}");
+    }
+    assert!(g.knows(1, ld), "revealed before the choice");
 }
 
 // ---- 51.6: delve after the mana abilities ------------------------------------
