@@ -1195,6 +1195,7 @@ they isolate one keyword or trigger each.
 | `tests/cards_m7b_stack3.rs` | M7b part 3b: The Wondrous Wasp (611.2b), Voice of Victory (702.181a), Brain Freeze (702.40a, 707.10), Occult Epiphany (205.2a), Fallen Shinobi (and a ninjutsu payment, 601.2h), Otawara and Boseiju (602.2b), Forensic Gadgeteer |
 | `tests/rules_payment.rs` | M7e part 2 (section 34): the payment model, 14 tests, the CR in each name: 106.4 and 601.2h (the pool's mana chosen; a source's mana and the pool's together; converge counting the chosen colours; which {R} pays a creature spell), 605.3a (Loot paying Mana Leak's {3} during resolution; Pentad Prism, Arena of Glory, Wizard's Rockets while paying), 602.2b (no mana ability pays its own cost), 601.2g (Rain of Filth after Ancient Tomb's damaging tap; Squandered Resources after Mana Confluence's life; a Lotus Petal delved and exiled for Uro's escape), 601.2h (X life after the mana abilities) |
 | `tests/rules_shortcuts.rs` | M7e part 1 (section 33): the rules shortcuts removed, 27 tests, the CR in each name: 724.2 (the monarch's triggers on the stack, countered by Tidebinder, one per creature), 603.7 (Okoye's delayed trigger), 603.2c ("one or more" once per event: Laelia, Wan Shi Tong, Inti), 614.1c (entering with an effect's counters), 614.12a (Metamorph and Exhume), 608.2h (Pyrogoyf's damage as the creature last existed), 702.171a (saddle without a crew bonus), 601.2h (teamwork tapping mana creatures), 116.2b (turning face up after losing abilities), 702.8a (Necromancy's flash permission), 106.1b (exact converge), 614.1a (Mox Diamond put onto the battlefield), 616.1 (Blightsteel and Yawgmoth's Will, flashback and Dauthi Voidwalker), 601.2b (Breach's escape with Bitter Triumph's own cost), 601.2a (Paragon or Lurrus, flashback or Will, Paragon and a card with another face), 709.3 (the Citadel's split card), 613.7e (an Equipment re-attached), 613.1f (Paragon's granted trigger lost), 113.7 (a granted ward's source) |
+| `tests/rules_numbers.rs` | M6 (section 46): unbounded numbers, the mtg5 incident reproduced: 122.1 (Ouroboroid's counters past 65,535 exact, total power past 1.31 million, both encodings finite and within `FEATURE_BOUND`), 510.2 (65,537 combat damage dealt in full), 702.19b (a trampler's lethal damage to a 65,539-toughness blocker, not truncated to 16 bits); all three fail on 8307cb4 |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
@@ -1202,8 +1203,8 @@ they isolate one keyword or trigger each.
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
 | `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c). Part 3 (section 39.5): the last two cells, a token copy of a nightbound permanent (`interactions_copies.rs`: 707.8a, 702.145f) and True-Name Nemesis's chosen player after Oko's exchange (`interactions_zones.rs`: 702.16j, 110.2) |
-| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45) |
-| `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), both extremes reachable (40 basic lands, 31 of a type; 40 pool cards with the rest of the pool forced out and every count forced to 0; a card into a full deck an error), every 40-card deck of a two-card pool reachable exactly once (487,676 decks), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`), measurements (`--ignored`: `measure`); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v1` |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45); M6: every decider's encoding finite and within `FEATURE_BOUND` (games, determinized worlds, matches) and `FUZZ_POOL=exponential`, exponential boards to the turn cap (section 46.5) |
+| `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), both extremes reachable (40 basic lands, 31 of a type; 40 pool cards with the rest of the pool forced out and every count forced to 0; a card into a full deck an error), every 40-card deck of a two-card pool reachable exactly once (487,676 decks), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`; M6: the decider's encoding and every world's finite and within `FEATURE_BOUND`), measurements (`--ignored`: `measure`); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v1` |
 | `tests/draft_matches.rs` | drafted matches (section 45): the `mtg` spec of an event's match (`pN_first_picks`, `pN_elsewhere`, `seed`) plays the event's match move for move (`match_game`; 32 matches: 4v4 and 2v2, random and `consensus`-built decks, best-of-three and best-of-one), the first-pick prior is exactly the cards the viewer's team never saw (193 in 4v4, 367 in 2v2; the real first picks among them), `determinize` samples first picks from it (never the viewer's knowledge) and keeps the viewer's encoding, the spec refuses contradicting knowledge, specs without the keys are what they were; a position from a draft history is seat 0's information set (its knowledge and encoding the real event's) and a history that does not fit is an error; deckbuilding's simulations divisor; `tests/test_drafted.py` (pytest): the glue (payload -> specs, results -> `resolve`, a malformed result refused), events parked by a draft driver and resolved through a heuristic match driver, the token network's actions by identity on `draft_v1`, the human-pick yardstick on a few drafts, the co-training presets |
 | `tests/draft_deferred.rs` | `team_draft` through zero-core's deferred hook (section 43): 2v2 and 1v1 events through the self-play driver with a stand-in network (deferred terminals evaluated as leaves of no options, every event parked, a malformed result refused, resolved with heuristic-played matches, samples with the real outcome and margin), the hooks mapping the inherent methods (1v1-4v4); `--ignored`: `measure_parked_memory` |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
@@ -1245,7 +1246,11 @@ a face-down permanent's card (`ident`). M7d's IR fixes: 20,000 games over the 54
 cards, no failure (141 s; 5.6 million options completed); one fault found on the way, fixed (32.6). M7e part 1: 20,000 games over the 546 cards and
 the custom cards (three new ones), no failure (143 s; 5,664,330 options completed); one fault
 found on the way, fixed: a Mox Diamond set aside while its controller decides (33.2) failed the
-zone invariant ("card is nowhere"); the invariant now allows it with its pending task.
+zone invariant ("card is nowhere"); the invariant now allows it with its pending task. M6 (section
+46): the decider's encoding at every decision, both players' at the checkpoints (the game and every
+determinized world) have every value finite and within `encode::FEATURE_BOUND` (256);
+`FUZZ_POOL=exponential` drives exponential boards (`GROWTH`'s cards, life 1,000,000,000, attacks one
+time in four) to the class-B bounds of section 46.3.
 
 **Option completion** (M7c, branch `m7c-payfix`). Sections 6 and 18 promise that a cast, an
 activation or an alternative cost is offered only if it can be completed; the fuzzer checks it
@@ -7446,3 +7451,250 @@ parked records ~5.4 MB per event, ~350 MB for 64 events waiting.
   `zero.bench`) still do not resolve deferred games (43.5).
 * The uniform determinization (2.3.10 question 10, kept) and the heuristic first-pick prior
   (question 6, kept): both are options for later, with the run's own drafts as data.
+
+## 46. Unbounded numbers (M6)
+
+Branch `m6-bounds` (from main 8307cb4; zero-core pinned at e6166c3, unchanged). Magic has no maximum
+for counters, life, power, toughness or damage (CR 107.1, 122.1, 119, 120.3, 208), and the cube has
+cards that grow a board exponentially in a 60-turn game: Ouroboroid (at the beginning of combat, X
++1/+1 counters on each creature you control, X its power: everything doubles every turn), Bristly
+Bill ("double the number of +1/+1 counters on each creature you control", any number of times a
+turn), Scythecat Cub (doubles on its second resolution each turn), Jacked Rabbit (tokens equal to its
+power), Elspeth, Storm Slayer (twice that many tokens). The engine kept those numbers in 16 bits and
+the encoding divided them by small constants, so an exponential board became wrong numbers in the
+engine and infinities in the network's input.
+
+### 46.1 The incident
+
+Run mtg5 (preset `mtg-4`, best-of-three) aborted on 2026-10-27 at 19:59 in iteration 14: zero-core's
+non-finite guard (`python/zero/finite.py`, core docs/az.md 4.1) refused a self-play shard, "x: 67
+row(s) [55010 ...], column(s) [46, 47, 86, 87] (134 +inf)". Those are the per-player globals
+`o[22]` (total power / 20) and `o[23]` (total toughness / 20) of both sides (`g[24 + 40 * side]`).
+The shard stores x as float16 (largest finite value 65,504), so a total power above 1,310,080 became
++inf. Without the guard (run mtg4, iteration 30) an infinity like this most likely made the NaN
+training step that collapsed that run.
+
+The bad shard (`runs/mtg5/debug/iter_0014_r00_000.bad.npz`, 4.4 GB, uncompressed, read as a memory
+map) decodes with layout v4 (`mtgz/az/layout_v4.json`: the permanent slots' identity digits and
+their P/T status): one game of a best-of-three match, its rows 54,817 to 55,076, both seats, drawn (z =
+0.5, 0.5) at the 60-turn cap. One player's board: Ouroboroid, Baloth Prime and up to 15 of its Beast
+tokens, Badgermole Cub, Hexdrinker, Vaultborn Tyrant, Sylvan Safekeeper, Sylvan Caryatid, Surrak,
+Elusive Hunter, Sentinel of the Nameless City, Screaming Nemesis, Flametongue Kavu, Goblin Engineer,
+Ignoble Hierarch, Robber of the Rich, "Name Sticker" Goblin, Cogwork Librarian: 28 to 32 creatures,
+nearly all at 65,535-65,539 power (the u16 counter count saturated), total power 1,842 at turn 40,
+846,720 at turn 56 and past 1.31 million from row 55,010 (turn 56) to the end. The other player:
+Quantum Riddler, Spectacular Spider-Man, Thor, God of Thunder and 14-17 lands, at 12 then 7 life,
+never attacked to death: an iteration-14 network that doesn't attack with a board of 30 creatures
+of 65,535 power.
+
+### 46.2 The bugs
+
+* **Counts of counters were `u16`** (`Game::counters`, `lki_counters`, `entering_counters`), added
+  with `saturating_add`: past 65,535 a creature's +1/+1 counters stopped (a silent saturation:
+  Ouroboroid's 65,000 + 65,001 counters left 65,535).
+* **Casts that truncate**: a blocker's lethal damage for a trampler's assignment was
+  `toughness as u16` (65,539 toughness: lethal 3, so 65,536 damage trampled over a wall it should
+  have died to); poison from an amount was `amount as u16` (Etali, Primal Sickness dealing 65,536
+  combat damage gave no poison); the heuristic bot's "pay X life" took `x as u16` (65,536: X = 0).
+* **Clamps at 65,535**: combat damage (a 65,537-power creature dealt 65,535), marked damage, every
+  event amount ("that much": Cecil's life loss, Etali's poison, Screaming Nemesis's damage),
+  Ouroboroid's X and "remove n counters".
+* **Unchecked arithmetic** (wraps in release builds; most of it out of reach while counters stopped at
+  65,535, all of it in reach once they don't): life totals (`life -= amount`: two unblocked creatures
+  of 2^31 - 1 power take a 20-life player back to a positive life), crew, saddle and teamwork power
+  sums, Cut Down's "total power and toughness 5 or less" (power + toughness wraps negative: a huge
+  creature becomes a legal target), "life at most half the starting life" (life x 2), the mana pool
+  (`amt += n`, and its `total()` summed six `u8`s), the bot's sums of power and its scores, the
+  damage already assigned to a blocker (`u16` sums).
+* **A list the size of an amount**: the damage assignment built `(0..=left).collect()` (65,536
+  options for 65,535 damage; with wider types a 2^31-element vector).
+* **The encoding** divided every number by a constant (P/T / 8, life and total power / 20, counters /
+  4 or / 8) with no bound: 1.37 million total power is 68,280, +inf as float16.
+
+### 46.3 The engine's numbers
+
+`engine/src/num.rs` names the types and the saturating conversions; every conversion between them
+goes through it (never a bare `as` that could truncate). Each quantity is exact up to its bound and
+saturates there (class B, docs/shortcuts.md 46.1-46.6):
+
+| Quantity | Type | Exact up to | Rules |
+|---|---|---|---|
+| Counters of one kind on an object (+1/+1, -1/-1, loyalty, lore, charge, level, keyword, stun, named) | `num::Count` = `u32` | 4,294,967,295 | CR 122.1, 122.6, 306.5c, 714.3 |
+| A player's poison, energy, experience counters | `Count` | 4,294,967,295 | CR 122.1, 122.1f, 704.5c |
+| Power and toughness | `i32`, layer 7 summed in `i64` | +-2,147,483,647 | CR 208, 613.4 |
+| Life totals; life gained, lost or paid; damage dealt; an effect's amount | `i32` | +-2,147,483,647 | CR 119.3, 120.3 |
+| Marked damage, combat damage assigned, damage left to assign, an event's amount | `u32` | at least any amount | CR 120.3e, 510.1, 603.7c |
+| Mana of one type in a pool, and in a payment's virtual pool | `u8` | 255 | CR 106.4 |
+| Turn numbers (in objects: `entered`, loyalty turns, marks) | `u16` | 65,535 (`GameSpec::max_turns` checked) | engine cap |
+
+`num::count` turns an amount into counters (negative: 0, CR 107.1b), `num::count_amount` counters
+into an amount ("X is the number of counters", saturating), `num::amount` a wide sum into an amount,
+`num::unsigned` / `num::signed` amounts into and out of marked damage and events. The amount bound is
+symmetric (`-AMOUNT_MAX..=AMOUNT_MAX`), so a negation never overflows.
+
+Every change, with its rules basis:
+
+* `layers.rs`: `pt` sums its modifications (effects, statics, "+1/+1 for each", per-counter
+  bonuses, +1/+1 and -1/-1 counters) in `i64` and saturates the result (613.4); `counters_on`,
+  `counters_of`, `add_counters` (saturating), `remove_counters` take and return `Count`; a leveler's
+  ranges compare `Count`s (711).
+* `game.rs`: `Obj::damage` `u32`; `Player::{energy, poison, experience}` `Count`; `combat_dmg`
+  amounts `u32`; the counter lists `Count`; `gain_life` / `lose_life` / damage to a player through
+  `sub_life` (saturating, 119.3, 120.3a); damage to a permanent marks `num::unsigned(amount)`
+  (saturating), removes that many loyalty counters (120.3c) or puts that many -1/-1 counters (infect,
+  702.90c); poison from infect saturating (702.90b); event amounts `u32`; a planeswalker's printed
+  loyalty through `num::count` (306.5b); `Game::with_sideboards` refuses `max_turns` above 65,535.
+* `combat.rs`: combat damage is the creature's power in full (510.1a, 510.2: no 65,535 clamp); the
+  recipients' and sources' totals saturate; `lethal_needed` is `u32` with saturating sums and the
+  toughness converted by `num::unsigned` (510.1c-d, 702.19b); `assign_damage` offers the amounts as a
+  range `lo..=hi` (the same options as before: 0..=29 exactly, the blocker's lethal damage, all the
+  rest), never a vector of `left` elements.
+* `triggers.rs`: `Event::amount`, `EvCtx::amount` `u32` (chapters, class levels, the enter note's
+  bits compare as `u32`); `copies::COPIED` `u32::MAX`.
+* `resolve.rs`: `Amount::EventAmount`, `SourceCounters` (its last known counters summed in `i64`),
+  `Experience`, `CostMvPlus` saturating; `Op::AddMana` through `ManaPool::add`.
+* `resolve_ext.rs`, `resolve_walkers.rs`, `faces.rs`, `stack_ext.rs`, `resolve_m7d.rs`,
+  `resolve_tail.rs`, `activate.rs`, `pay.rs`: every count put or removed through `num::count` or
+  `as Count` (Ouroboroid's and Walking Ballista's amounts, "remove n", connive, energy, experience,
+  loyalty costs 606.4, entering counters 614.1c, incubate's exiled count, Gemstone Mine's and Pentad
+  Prism's counters); Etali's poison saturating (122.1f); the delayed "that much" (`About::Remembered`)
+  `num::unsigned`; "+1/+1 for each" (`ApplyPtPerCount`: signs times a count, its +-999 clamp dropped:
+  exact).
+* `activate.rs`: crew, saddle and teamwork power summed in `i64` (702.122a, 702.171a, 601.2h);
+  "life at most half the starting life" in `i64`.
+* `cast.rs`: Cut Down's total power and toughness in `i64` (208.1, 115.1); storm's event amount `u32`.
+* `mana.rs`, `pay.rs`: `ManaPool::add` saturates at 255 a type and `total()` sums wide; the payment's
+  virtual pool (`vgroups`, `pool_rems`, `pick_multi`, `finish_payment`) saturates the same way; the
+  payment's life budget subtracts saturating.
+* `resolve_tail.rs`: Coalition Relic's mana (one per charge counter removed, one colour choice each,
+  counted by the frame's `u8`) is at most 254 (else the count would wrap and never end).
+* `sba.rs`: lethal damage compares `damage` and toughness in `i64` (704.5g); a Saga's chapters as
+  `Count`.
+* `az/bots.rs`: the heuristic's power, toughness, damage and loyalty arithmetic in `i64` (whether a
+  creature kills another, the incoming damage, the value of a permanent, clamped to +-2^30 so its
+  bonuses can't overflow), the counters per use as `Count`, "pay X life" clamped to the `NUMBER` range
+  before its `u16`, the damage assignment's `NUMBER + lethal` saturating.
+* `testkit.rs`: `Scenario::counters` takes a `Count`.
+
+Sizes: `size_of::<Game>()` 1,600 bytes before and after; `Obj` 64 -> 68 bytes (marked damage),
+`PendingTrigger` 28 -> 32 and `EvCtx` 20 -> 24 (the event amount), `Player` 184 (the wider counters
+fit its padding).
+
+### 46.4 Bounded features
+
+Every value `encode` writes is finite and at most `encode::FEATURE_BOUND` = 256 in magnitude,
+whatever the game state, and every value of a normal state is exactly as before.
+
+* **The transform** (`encode::squash`): `v` for |v| <= `SQUASH_FROM` = 128; beyond,
+  `sign(v) (128 + ln(1 + |v| - 128))`: continuous, slope 1 at the threshold, monotone. 2^31 power / 8
+  is 147.4; all of 192 creatures' 2^31 power / 20 is 151.7; f32::MAX 216.7; an infinity (never
+  written) 256. A NaN stays NaN (a bug, never hidden: the fuzzer and zero-core's guard refuse it).
+* **The threshold** is above every state of the behaviour digests: their largest value is 68.1 (a
+  545/545 creature of random play, P/T / 8, digest game r 424). A first threshold of 16 changed
+  three of the 2,500 digest games (r 103, 117, 424: P/T / 8 and total power / 20 between 16 and 68;
+  their behaviour without the encodings, `DIGEST_ENCODING=0`, was the same, fa5e570743119dba on
+  8307cb4 and on the branch), so it was raised before anything was re-recorded.
+  128 keeps a 1,024-power creature, 2,560 life or 2,560 total power exact.
+* **Where**: the numbers the game leaves unbounded go through `squash`: per permanent damage, power,
+  toughness (computed once, `pt`), loyalty, lore counters, blockers, attackers of a planeswalker; the
+  globals' turn, turns left, stack, waiting triggers and extra turns, and per player life, hand,
+  library, graveyard and exile sizes, turns, permanents, creatures, lands, untapped lands, total power
+  and toughness (summed in `i64`), ready creatures, artifacts, tokens, extra turns, poison, adventure
+  cards, temporary triggers, experience; the context's program counter, pile and damage left to
+  assign. Everything else is bounded by its type or an engine cap: one-hots and flags; a `u8` field
+  over a constant (mana in the pool / 4, X, times, modes, costs: at most 63.75; lands played this turn
+  as it is: 255); a slot over 32 or 8; a bag cell is 0.25 a card of one identity in one zone (at
+  most 24: the 96-permanent cap of a side; a hidden zone holds fewer cards); the match block (games,
+  wins, deck sizes); the team draft's encoding (`draft_encode.rs`: fixed event sizes, 45 picks, 40
+  cards a deck: at most 10).
+* **Cost**: a compare per squashed value (an earlier version squashed the whole vector after
+  encoding: a 33,652-float scan, +4.5 us per decision; dropped).
+
+Layout v4's dimensions and action ids are unchanged (33,652 floats); `mtgz/az/layout_v4.json` is
+unchanged.
+
+### 46.5 Invariants
+
+* `tests/fuzz.rs`: at every decision the decider's encoding (`check_encoding`), at the ~1-in-40
+  checkpoints both players' encodings of the game and of every world `determinize` samples, and in
+  matches `MtgAz`'s encoding of the decider at every decision and of every determinized world: every
+  value finite and within `FEATURE_BOUND`. It prints the encodings checked and those with a value
+  past the threshold.
+* `FUZZ_POOL=exponential`: each player's 23 spells from `GROWTH` (36 cube cards: Ouroboroid, Bristly
+  Bill, Scythecat Cub, Jacked Rabbit, Elspeth, Storm Slayer, Baloth Prime, Badgermole Cub, Hexdrinker,
+  Walking Ballista, Luminarch Aspirant, Guide of Souls, Ivora, Ajani, Forth Eorlingas!, Pest
+  Infestation, Sentinel of the Nameless City, Vaultborn Tyrant, Fanatic of Rhonas, Esika's Chariot,
+  Thundertrap Trainer, Sylvan Safekeeper, Surrak; the payoffs Swords to Plowshares, Solitude, Minsc &
+  Boo, Etali, Pyrogoyf, Batroc, Cecil, Coalition Relic, Griselbrand, Ocelot Pride, Deep-Cavern Bat,
+  Passageway Seer, The One Ring, Tezzeret), 12 Forests and 5 random lands; life 1,000,000,000 (so
+  combat with huge creatures happens and life saturates); attackers declared one time in four, so
+  most boards grow until the turn cap. It prints the largest power, counter count, marked damage and
+  life reached and, from 100 games, fails without a board past 65,535 power. Every check of the
+  default mode runs (invariants, clones, `determinize`, option completion). 100 games reach both
+  class-B bounds: power 2,147,483,647, counters 4,294,967,295, life 2,147,483,647 (marked damage
+  3,145,636).
+* `tests/draft.rs` (`DRAFT_FUZZ`): the decider's encoding at every action, and every world's.
+* `tests/rules_numbers.rs` (the reproduction): Ouroboroid's trigger on a 65,000-counter creature and
+  twenty bears (counters 130,001 and 65,001, total power 1,430,062, a turn later 260,003 and 195,003;
+  both encodings bounded), 65,537 combat damage to a 65,537-life player, and a 65,539/65,539
+  trampler blocked by a 65,535/65,539 wall (one assignment: all to the wall). On 8307cb4 all three
+  fail: counters 65,535 (not 130,001), life 2 (not 0), the assignment offers 3..=29 and "all the
+  rest" (lethal 65,539 truncated to 3); the encoding of that board there has 44 features past 64 and
+  +inf as float16 at exactly the incident's columns 46, 47 (viewer P0) and 86, 87 (P1).
+
+### 46.6 Measurements
+
+* **The reproduction** (`tests/rules_numbers.rs`) on 8307cb4 (a scratch worktree with its own target
+  dir): 3 of 3 fail as in 46.5; that board's encoding: total power 1,365,596, 44 features past 64,
+  float16 +inf at 46, 47 (viewer P0) and 86, 87 (P1). On the branch: 3 of 3 pass.
+* **Every engine test binary** on the Mac (`cargo test --release -p engine --no-fail-fast`, `az`
+  included; 99 binaries and the doctests): 1,375 passed, 0 failed, 13 ignored.
+* **Behaviour digests**: combined 12642107250032a7, main's, on the desktop and the Mac (every game
+  equal); `DIGEST_ENCODING=0` fa5e570743119dba on 8307cb4 and on the branch.
+* **Fuzz** (the Mac): default `FUZZ_GAMES=20000 FUZZ_MATCHES=2000`: 20,000 games (wins 9,991 /
+  9,972, 37 draws, 27.0 turns, 214.0 decisions on average), 5,651,655 options completed, 2,000
+  matches (5,139 games), 6,033,392 encodings checked, 549 of them with a value past 128 (random
+  play's largest creature: 10,368 power, Ouroboroid's doublings), no failure (216 s, the four tests
+  in parallel).
+  `FUZZ_POOL=interactions`: 20,000 games (10,005 / 9,940, 55 draws), 5,425,503 options, 2,000
+  matches (5,127 games), 5,882,094 encodings, 167 past 128, no failure (244 s).
+  `FUZZ_POOL=exponential FUZZ_GAMES=5000`: 5,000 games (2,117 / 2,122, 761 draws; 42.5 turns, 397.3
+  decisions), 3,862,285 options completed, largest power 2,147,483,647, counters 4,294,967,295,
+  marked damage 306,962,933, life 2,147,483,647 (both bounds reached, nothing wraps), 2,384,614
+  encodings checked (every one squashed: life starts at 10^9), no failure (889 s: option completion
+  on boards of saturated creatures). `DRAFT_FUZZ=20000`: 20,000 events, 11,400,000 actions (every
+  decider's encoding checked), 573,334 worlds, 12,534 options completed, 1,866 heuristic-played
+  matches, no failure (150 s).
+* **Python** (the Mac): `bash tools/build_py.sh`, `python -m pytest -q tests`: 28 passed;
+  `python tools/search_smoke.py --specs random,match --seeds 0-1`: 4 of 4 configurations ok (1,600
+  games, 1,094,755 decisions, 28.7 million simulations, 118 s).
+* **Size**: `size_of::<Game>()` 1,600 bytes on 8307cb4 and the branch.
+* **Speed** (the desktop while mtg5 self-plays; `tests/perf.rs` built once at 8307cb4, in its own
+  target dir, and once on the branch, run interleaved): `measure`, five runs each: random play
+  7.05-7.62 us per decision on 8307cb4 and 7.05-7.81 on the branch (841,706 decisions: the same
+  games), clone 1,387-1,822 ns and 1,335-1,628 ns, clone + `determinize` 1,863-2,399 ns and
+  1,836-2,424 ns, `determinize` alone 1,222-1,395 ns and 1,137-1,345 ns, `legal_actions` 3 ns and
+  3-6 ns.
+  `match_layer` (legal actions, clone, encode, step; 93,304 decisions), six runs each: `Game` 14.12-
+  14.79 us (mean 14.35) and 13.98-14.96 us (14.42), `MtgAz` mean 14.65 and 14.41 us: no change beyond
+  the noise. (The first version squashed the whole vector after encoding, a 33,652-float scan: 18.9-
+  19.8 us against 14.4-15.3, +4.5 us; replaced by the squash at the unbounded sites, with power and
+  toughness computed once per permanent.)
+
+### 46.7 Limits and what is left
+
+* The class-B bounds above (shortcuts.md 46.1-46.6). The exponential fuzz reaches them: a board past
+  2^31 power, or 2^32 counters, is exact no more (two saturated creatures blocking each other both
+  die; counters doubled at the bound stay there); nothing wraps, and the encoding of such a state is
+  the squash of the saturated numbers.
+* Power and toughness saturate below the counter counts (2^31 - 1 against 2^32 - 1): a creature with
+  more than 2^31 +1/+1 counters has power 2^31 - 1 (a wider P/T, `i64`, would carry `Obj::lki_power`
+  and every amount and life total with it; not needed below 2^31).
+* Mana of one type above 255 in a pool saturates (the payment model's `u8` arithmetic); the cube
+  reaches it only with two Gaea's Cradle-sized sources of one type in one step.
+* The objects of a game are at most 65,534 (`CardIdx` is `u16`; a token or copy takes a new slot):
+  `add_card` panics past it (loud).
+* Self-play shards written before this branch can hold +inf rows of such boards; the guard refuses
+  them (the bad shard stays in `runs/mtg5/debug`). A run continues on this engine with its network
+  as it is: layout v4 is unchanged and every normal state encodes bit for bit as before; only states
+  past the threshold (0.009% of the default fuzz's encodings) read differently.
