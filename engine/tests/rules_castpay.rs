@@ -305,6 +305,71 @@ fn cr_702_138a_escape_discard_must_feed_the_graveyard() {
     assert!(!g.has_option(Choice::Cast(shards)), "{:?}", g.options_desc());
 }
 
+// ---- 49.6: found by the checks -----------------------------------------------
+
+/// CR 702.75a, 712.11b, 715.3: Shelldock Isle's hideaway card is exiled face
+/// down; played with the Isle, a card whose two faces can both be cast
+/// (Brazen Borrower // Petty Theft) asks which face first, and the card is
+/// public from then on, as when the choice is made at priority. The engine
+/// asked without revealing it, so a world `determinize` sampled for the
+/// opponent dealt the face-down card again, a card without another face,
+/// and the choice of the other face panicked ("a card with another face").
+/// Found by `FUZZ_POOL=interactions` (seed 7165, with the "mana abilities x
+/// costs" group); on 01fa623 as well.
+#[test]
+fn cr_712_11b_a_face_down_card_cast_with_a_choice_of_faces_is_revealed() {
+    use engine::db::AbilitySlot;
+    use engine::rng::Rng;
+    let mut g = scen()
+        .battlefield(0, &["Island"])
+        .battlefield(1, &["Test Bear"])
+        .hand(0, &["Shelldock Isle"])
+        .library(0, &["Island", "Island", "Brazen Borrower // Petty Theft", "Test Bear", "Forest", "Swamp"])
+        .at(Step::Main1, 0)
+        .start();
+    let isle = g.card(0, "Shelldock Isle", Zone::Hand);
+    g.choose(Choice::Play(isle));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::PutInHand));
+    let bb = g.card(0, "Brazen Borrower // Petty Theft", Zone::Library);
+    g.choose(Choice::Card(bb));
+    // To P0's next first main phase, passing and declining.
+    let t = g.turn().number;
+    for _ in 0..2_000 {
+        if g.turn().number == t + 2 && g.turn().step == Step::Main1 && at_priority(&g) {
+            break;
+        }
+        let d = g.pending_decision().expect("game running");
+        let c = match d.kind {
+            DecisionKind::Priority | DecisionKind::DeclareAttackers | DecisionKind::DeclareBlockers => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    assert_eq!(g.obj(bb).zone, Zone::FaceDown, "exiled face down: {}", log(&g));
+    let isle = g.card(0, "Shelldock Isle", Zone::Battlefield);
+    g.choose(Choice::Ability(isle, AbilitySlot::Activated(1)));
+    for _ in 0..200 {
+        match g.kind() {
+            Some(DecisionKind::ChooseFace) => break,
+            Some(DecisionKind::Priority) => g.pass(),
+            Some(DecisionKind::YesNo) => g.choose(Choice::Yes),
+            _ => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c)
+            }
+        };
+    }
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseFace), "{}", log(&g));
+    // Every world sampled for P1 keeps the card: both faces complete.
+    for s in 0..16 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        let mut budget = 200;
+        assert!(every_path_completes(&d, &mut budget) > 0, "world {s}");
+    }
+    assert_eq!(g.obj(bb).known, 0b11, "revealed to both players");
+}
+
 // ---- 49.4: the agreement, fuzzed --------------------------------------------
 
 /// The cube's lands, its nonland permanents with a mana ability or a mana

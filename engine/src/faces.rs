@@ -348,6 +348,12 @@ impl Game {
     pub(crate) fn begin_cast_either_face(&mut self, p: PlayerId, card: CardIdx, free: bool) {
         let mask = self.faces_castable_now(p, card, free);
         if mask == FACE_CAST | OTHER_CAST {
+            // The card will be public either way (a spell on the stack), so
+            // it is revealed now, as at priority: a world `determinize`
+            // samples for the other player must find the same card (a
+            // hideaway card exiled face down, Shelldock Isle; ENGINE.md 10,
+            // 49).
+            self.reveal(card);
             self.agenda.push(crate::flow::Task::ChooseFace { p, card, mask });
         } else if mask == OTHER_CAST {
             let face = self.other_face(card).expect("a card with another face");
