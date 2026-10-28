@@ -8507,3 +8507,550 @@ At 567b2c3, the branch's last code (the documentation commit after it changes no
 * Only P0's main-phase priority is checked option by option; instants on the opponent's turn and in
   combat go through the same castability code and are covered by `FUZZ_POOL=interactions`' option
   completion.
+
+## 50. Keeping the Mac busy (M6)
+
+Branch `m6-macuse` (from main at 94d43c1, rebuilt on main 075649c once deckbuilding as picks was
+merged; tools, one test-harness change and docs: the engine is main's, digests 12642107250032a7).
+Beyond its remote evaluations (sections 44 and 48) the MacBook (M4 Max, 12 performance and 4
+efficiency cores, 64 GB) was mostly idle. Three uses: a measurement the M6 design needed (how noisy
+one team-draft event's outcome is, and what that says about matches per event and the draft's
+training targets, 50.1), a fuzz farm that never stops (50.2), and the design of remote self-play,
+with the Mac's self-play throughput measured (50.3).
+
+**The rule for everything here: remote evaluations come first.** zero-core's remote side takes
+one evaluation at a time per workdir with a lock directory (`zero/remote.py`: `~/mtgz-remote/.eval.lock`,
+its `owner` file "<pid> <time>"). `tools/mac_backoff.py` holds the rule: a job runs at nice 19 in a
+process group of its own and is **stopped (SIGSTOP) while a lock is held by a live owner**, then
+continued (SIGCONT); the locks watched are mtgz's and the other zero-core games' remotes on the Mac
+(`~/kbz-remote`, `~/domz-remote`: their evaluations share the cores too), or `$MTGZ_BACKOFF_LOCKS`.
+A lock whose owner died does not count (zero-core removes it at the next evaluation); one without its
+owner file yet does (being created). As a wrapper: `python tools/mac_backoff.py -- <command>`; the
+fuzz farm uses its `Governor` (SIGSTOP / SIGCONT of the jobs' groups), the noise study the cooperative
+form (it stops asking for leaf batches, so its search threads idle). A stopped job's wall clock
+runs on: a job that times itself counts only its running time. Checked live (a 75-second lock in
+`~/mtgz-remote` owned by a `sleep`): the farm's two fuzz jobs were stopped 4 s after it appeared
+(state `T`, 0% CPU) and continued when its owner died; the study's driver idled at 0% CPU and went
+on. `tools/mac.sh --pin NAME` (new): a checkout `~/mtg-zero-wt/NAME-<sha12>` at exactly this commit
+with its engine built (its own target dir), which later `mac.sh` commands never check anything out
+in: a long job started there keeps its code and its engine module while the branch's own checkout
+moves on.
+
+### 50.1 Match noise: how many matches per event?
+
+The question (the user's): does it make sense to play more than 3 matches per player per draft for
+a clearer signal? A team-draft event's outcome (ENGINE.md 41, 45: 12 best-of-three matches, 3 per
+player, 3 of the 4 Latin-square rotations; per seat the team result 1 / 0 / 0.5, the margin = (team
+match wins - opponent match wins) / 12) mixes the real difference between the two teams' decks with
+the luck of 12 matches. How much of each?
+
+**Method** (`tools/match_noise.py`; data `~/mtgz-noise/` on the Mac, the summary copied to
+`E:/mtg-zero-scratch/noise/`):
+
+* **Events**: 60 drafted 4v4 events (8 seats, 3 packs of 15, decks built: exactly zero-core's
+  driver with bot seats, parked at the deferred terminal, their payloads kept) in two regimes:
+  every seat a `random` drafter (random picks, a random legal 40-card deck: close to an untrained
+  draft network) or a `consensus` drafter (the M1 pick strength and the heuristic deckbuilder:
+  closer to a trained one). Driver seeds 1000 and 1001. Drafted at 94d43c1, before deckbuilding
+  as picks (section 47): a random drafter's deck is the old random deckbuilding's (each pool card in
+  or out, then random basic counts); `consensus`'s is the heuristic deckbuilder's either way.
+* **Replays**: each event's 12 matches, as `mtgz.az.drafted` makes them (the co-training run's
+  specs), played K times with different match seeds (replay 0 the event's own seed, replay k a
+  splitmix of it: other shuffles) and search seeds, in a queue_only rolling driver (the resolver's
+  of a co-training run). Players: **the play network** (runs/mtg5's iteration 14, 128 x 4 tokens,
+  preset mtg-4; copied to the Mac) **with mtg-4's self-play search** (64 / 16 simulations, p_full
+  0.25, minor decisions at 4, temperature for 60 decisions, root noise, completed-Q: exactly what a
+  co-training run's resolver plays), K = 4; as contrasts the heuristic bot on both sides, K = 16,
+  and the network with the same search less its temperature and root noise (`net-greedy`: the first
+  30 events of each regime, K = 2). 5,760, 23,040 and 1,440 match replays. Replays are played
+  replay by replay, so a study still running has whole replays (two already give every estimate).
+  The study ran from pinned checkouts of this branch before its rebuild on 075649c
+  (`~/mtg-zero-wt/noise-5843007ef161` and, for `net-greedy`, `noise-e6b8c262a790`: `mac.sh --pin`;
+  the engine of 94d43c1, whose `mtg` path main has not changed since: the digests; their play path
+  is the final tool's, which added the contrasts' players and the analysis' refinements); the
+  analysis is the final tool's (`tools/match_noise.py analyze` reads the results files).
+* **The numbers**, per player and regime, with x = +1 / 0 / -1 a match's result for team A:
+  one-way random effects (method of moments) at three levels: the **luck** per match sigma^2 (the
+  variance of x across replays of the same match), the **between-event** variance tau^2 of an
+  event's true per-match mean (the 12 matches' replay means, less the luck they still hold), and
+  the **within-event** spread omega^2 of the matches' true means (which player meets which), split
+  by a two-way additive fit per event (A's players' strengths less B's) into the players' strengths
+  and the pairing interactions. Then for each event label - **D** (A's match wins - B's), the
+  **margin** D / 12, the **team result** T (1 / 0.5 / 0) and each player's **own record** (its 3
+  matches' wins - losses) - its luck variance across replays, its true variance across events and
+  its **reliability** (true / (true + luck): the share of the label's variance that a replay
+  reproduces; 1 is a noiseless label), and how often two replays of an event give different team
+  results. Bootstrap over events (300 resamples): 90% intervals. **Projections** to m matches per
+  event (m / 4 rounds of Latin-square rotations; 16 = the full round robin, 4 per player; 24 = 6
+  rounds): the margin's reliability is m / (m + sigma^2 / tau^2) (Spearman-Brown: the matches'
+  luck is independent, checked: D's luck variance is 12 x the per-match luck within noise); the team
+  result's comes from a model (each event's true mean moment-matched to tau^2, its players'
+  strengths and interactions drawn with the measured variances, fixed for the event; each match
+  won, lost or drawn; D's exact distribution by convolution), which at m = 12 reproduces the
+  measured reliability within its interval. **What one replay's label tells** about the seat's true
+  own record (its expected wins - losses given the decks) and about its team's true margin: squared
+  correlations from pairs of different replays of an event (independent luck: Cov(label in replay
+  k, own record in replay k') estimates Cov(label, true own record)). **The noise-optimal matches
+  per event** (the two-stage sampling optimum: a budget spent on N events of d + m
+  match-equivalents, the error of what the events teach ~ (tau^2 + sigma^2 / m) / N, minimal at
+  **m* = sqrt(d sigma^2 / tau^2)**), with the draft's cost d in match-equivalents: 45.10's
+  measurements put an event's draft at ~12% of its GPU at 12 matches, d ~ 1.5.
+* **Checked on synthetic data** first (400 events x 4 replays with known truth: tau^2 0.070, omega^2
+  0.090, luck 0.798 -> estimated 0.065, 0.091, 0.793; margin reliability 0.479 direct against 0.495
+  from the components; team result 0.369 against the model's 0.352).
+* **Engine panics**: zero-core's driver fails on a search worker's panic (the payment panics of
+  m6-payfix: `PayMana: no way to pay {1}{R}`, `{5}{U}`, `{7}{U}`, `{6}{U}{U}` in these drafted
+  matches); the study records the match the error names (`results/<player>.failed.jsonl`), leaves it
+  out and starts a new driver for the rest. 5 of 23,040 heuristic match replays (deterministic:
+  the same match fails again), none of the 5,760 with the network.
+
+**Results** (60 events per regime; 90% intervals in brackets):
+
+| | network, random drafters | network, consensus drafters | heuristic, random drafters | heuristic, consensus drafters |
+|---|---:|---:|---:|---:|
+| events x replays (match replays) | 60 x 4.00 (2,880) | 60 x 4.00 (2,880) | 60 x 15.97 (11,496) | 60 x 15.95 (11,484) |
+| team A per match: mean x, draws | +0.031, 0.052 | -0.061, 0.033 | +0.018, 0.000 | -0.064, 0.000 |
+| luck per match sigma^2 | 0.798 | 0.849 | 0.686 | 0.766 |
+| between events tau^2 (true per-match mean) | 0.0145 | 0.0239 | 0.0651 | 0.0585 |
+| within an event omega^2 = strengths + interactions | 0.135 = 0.114 + 0.022 | 0.090 = 0.082 + 0.008 | 0.249 = 0.236 + 0.013 | 0.172 = 0.159 + 0.012 |
+| a match's P(A wins): quartiles of the true values | 0.36 / 0.49 / 0.62 | 0.34 / 0.45 / 0.57 | 0.32 / 0.51 / 0.70 | 0.31 / 0.47 / 0.63 |
+| **sigma^2 / tau^2** | **54.84** [36.94, 116.87] | **35.54** [23.96, 68.58] | **10.53** [8.16, 14.35] | **13.11** [10.19, 18.31] |
+| **m\* (d = 1 / 1.5 / 3)** | 7.41 / **9.07** [7.44, 13.24] / 12.83 | 5.96 / **7.30** [5.99, 10.14] / 10.33 | 3.25 / **3.97** [3.50, 4.64] / 5.62 | 3.62 / **4.43** [3.91, 5.24] / 6.27 |
+| 12 matches: margin reliability | 0.17 [0.07, 0.26] | 0.27 [0.14, 0.37] | 0.52 [0.44, 0.59] | 0.49 [0.41, 0.55] |
+| 12 matches: team result reliability | 0.14 [0.04, 0.24] | 0.18 [0.06, 0.30] | 0.44 [0.36, 0.51] | 0.41 [0.34, 0.49] |
+| 12 matches: two replays' team results differ | 0.57 | 0.53 | 0.44 | 0.46 |
+| own record (3 matches) reliability | 0.23 | 0.20 | 0.46 | 0.38 |
+| D's luck variance (12 x the per-match luck) | 9.83 (9.57) | 9.62 (10.19) | 8.59 (8.23) | 8.88 (9.19) |
+| 4 matches: margin / team result reliability (model) | 0.07 / 0.07 | 0.10 / 0.09 | 0.28 / 0.23 | 0.23 / 0.21 |
+| 8 matches: margin / team result reliability (model) | 0.13 / 0.11 | 0.18 / 0.15 | 0.43 / 0.34 | 0.38 / 0.31 |
+| 12 matches: margin / team result reliability (model) | 0.18 / 0.14 | 0.25 / 0.19 | 0.53 / 0.41 | 0.48 / 0.38 |
+| 16 matches: margin / team result reliability (model) | 0.23 / 0.17 | 0.31 / 0.23 | 0.60 / 0.47 | 0.55 / 0.43 |
+| 24 matches: margin / team result reliability (model) | 0.30 / 0.23 | 0.40 / 0.30 | 0.69 / 0.54 | 0.65 / 0.50 |
+| 48 matches: margin / team result reliability (model) | 0.47 / 0.35 | 0.57 / 0.42 | 0.82 / 0.66 | 0.79 / 0.62 |
+| one replay's team result: r^2 with the seat's true own record / the team's true margin | 0.03 / 0.15 | 0.08 / 0.21 | 0.14 / 0.43 | 0.17 / 0.42 |
+| one replay's margin: r^2 with the seat's true own record / the team's true margin | 0.03 / 0.18 | 0.11 / 0.30 | 0.17 / 0.52 | 0.20 / 0.50 |
+| one replay's own record: r^2 with the seat's true own record / the team's true margin | 0.23 / 0.04 | 0.20 / 0.08 | 0.46 / 0.15 | 0.38 / 0.15 |
+
+* **The network's labels are very noisy.** With the play network a match is mostly luck: sigma^2
+  0.80-0.85 per match (of at most ~1), against a between-event signal tau^2 of 0.015-0.024, so
+  sigma^2 / tau^2 = 36-55 (the heuristic: 10-13). A 12-match event's team result has a
+  reliability of **0.14-0.18** (the heuristic 0.41-0.44): replayed with other seeds, the same event
+  gives another team result **53-57%** of the time. The margin does better (0.17-0.27) but not
+  well. The matches are independent (D's luck variance is 12 x the per-match luck within noise).
+  The network is weak (mtg5's iteration 14: 5% against the heuristic): it turns the decks'
+  differences into wins far less than the heuristic does (tau^2 2.4-4.5 times smaller), while the
+  luck per match is about the same. A stronger play network should move the labels towards the
+  heuristic's numbers (an expectation: the heuristic shows what a player that converts deck quality
+  better gives).
+* **Not the self-play's own randomness**: the same search without temperature or root noise
+  (`net-greedy`, 30 events per regime x 2 replays: wide intervals, the per-match luck is the
+  usable number) has a per-match luck of 0.74-0.78 against 0.80-0.85: temperature and noise add
+  ~8%; the rest is the game (shuffles, the hidden information) and the network's play. Playing
+  the drafted matches greedily would not make the labels clean (and would take the play
+  network's exploration away).
+* **Within an event the players differ far more than the teams do**: omega^2 (0.09-0.14 for the
+  network, 0.17-0.25 for the heuristic) is 3-9 times tau^2, and 84-95% of it is the players'
+  strengths (additive in a two-way fit), the rest pairing interactions. A whole round of a
+  Latin-square rotation meets every player once, so the strengths cancel in the event's total:
+  they make its spread smaller than independent matches' would (the team result's model needs
+  them), not its mean. The true P(team A wins a match) has quartiles 0.34-0.36 / 0.45-0.49 /
+  0.57-0.62 for the network (0.31-0.32 / 0.47-0.51 / 0.63-0.70 for the heuristic).
+* **What each label tells** (one replay, squared correlation; network / heuristic): about the
+  team's true margin, the margin 0.18-0.30 / 0.50-0.52, the team result 0.15-0.21 / 0.42-0.43, the
+  own record 0.04-0.08 / 0.15; about the seat's true own record, the own record 0.20-0.23 /
+  0.38-0.46, the team result 0.03-0.08 / 0.14-0.17. The team's match difference is exactly the sum
+  of its players' own records (checked on every replay), so the own records split the margin
+  between the seats.
+
+**Recommendation: matches per event: keep 12 (3 per player); do not go to 16 or 24.** So the
+answer to the question is no: more matches per player make each label clearer, but not by enough
+to pay for themselves. The compute
+to reach a given precision, (1 + (sigma^2 / tau^2) / m)(d + m) with d = 1.5, relative to 12 matches:
+
+| matches per event | 4 | 8 | 12 | 16 | 24 | 48 |
+|---|---:|---:|---:|---:|---:|---:|
+| network, random drafters | 1.08 | 0.99 | 1 | 1.03 | 1.11 | 1.41 |
+| network, consensus drafters | 1.02 | 0.97 | 1 | 1.05 | 1.18 | 1.61 |
+| heuristic, random drafters | 0.79 | 0.87 | 1 | 1.14 | 1.45 | 2.38 |
+| heuristic, consensus drafters | 0.83 | 0.89 | 1 | 1.13 | 1.40 | 2.23 |
+
+With today's play network 8 to 16 matches cost the same within 5% (m* = 7-9): the extra matches
+of a full round robin (16) buy +23-26% margin reliability (0.18 -> 0.23, 0.25 -> 0.31) for 33% more
+matches, 24 buy +60-70% for twice the matches: the same compute spent on more events teaches the
+draft network as much or more. As the play network improves towards the heuristic's numbers, m*
+falls to ~4 and fewer matches per event (8, then 4) become the better buy, not more. Two things
+weigh against cutting below 12 now: the matches are also the play network's training data (in
+co-training they are not wasted: the formula charges them fully to the draft), and m* is for the
+draft as a whole: a decision whose deck is already fixed (deckbuilding) gains from every extra
+match. So: 12 now; revisit 8 when the play network beats the heuristic.
+
+**Recommendation: training targets.** The margin carries more information than the team result
+on every count (more reliable, 0.17-0.27 vs 0.14-0.18 at 12 matches; more correlated with the
+team's true strength, 0.18-0.30 vs 0.15-0.21): the team result throws away how much a team won by.
+Two changes are worth trying, both design decisions for the user (nothing changed here):
+1. **Value target from the margin**, not only the win / draw / loss: today the draft network's
+   value head learns the team result (blended with the search's root value, value_q 0.5) and the
+   margin only through its margin head (margin_loss_w 0.5); a value target that is a smooth
+   function of the margin (or a larger weight on the margin head) uses the better label.
+2. **Own records for deckbuilding.** A seat's deck plays only its own 3 matches, and the team's
+   match difference is exactly the sum of its players' own records: the own record is the margin's
+   share that the seat's own deck decides, and it tells 2.4-8.6 times more about the seat's own deck
+   than the team result does (0.20-0.23 vs 0.03-0.08 for the network; 2.2-3.3 times for the
+   heuristic). For deckbuilding decisions
+   (the deck is the seat's alone) the own record is the right credit; picks also shape what the
+   opponents get (every pass goes to an opponent), so they keep the team's margin. zero-core would
+   need a per-decision-class target (a game hook naming each record's target), the analogue of
+   `sims_divisor`.
+
+### 50.2 The fuzz farm (`tools/fuzz_farm.py`, `tools/fuzz_farm.sh`, `tools/fuzz_farm_status.sh`)
+
+The Mac fuzzes the latest main for ever, at nice 19, in the time the remote evaluations leave.
+
+**Where.** `~/mtgz-fuzzfarm/` on the Mac: `bin/` (the farm's code: `fuzz_farm.py` and `mac_backoff.py`
+copied there by `fuzz_farm.sh install`, so the farm never runs code it checks out), `src/` (a clone of
+the bare repo `~/mtg-zero.git`, checked out at main's head, zero-core from the mirror
+`~/mtg-zero-core.git`), the target dir `~/cargo-target/mtg-zero/fuzzfarm` (its own), `state.json`
+(the cursors, rates and totals), `status.json`, `failures/`, `logs/` (`farm.log`, `rounds.jsonl`,
+each mode's last job output in `jobs/`, the builds'), `config.json` (optional overrides, read every
+round), the control files `PAUSE` and `STOP`.
+
+**Main on the Mac.** The farm fetches `refs/heads/main` of `~/mtg-zero.git` at every round. The
+desktop puts main there with `git push mac main` (done at 94d43c1, and at 075649c once deckbuilding
+as picks was merged: the farm rebuilt and went on at its next round); `bash tools/mac.sh
+<anything>` from main's checkout also pushes it and, in addition, zero-core's pinned commit to
+the Mac's mirror, which a main that moves its pin needs (the farm's `git submodule update` fails
+otherwise: recorded as a build failure, and the farm goes on with its last build).
+
+**A round.** Fetch main; if it moved, check it out and build it (`tools/build_py.sh` for the
+search smoke, `cargo test --release -p engine --test fuzz --test draft --no-run` for the fuzz
+binaries, whose paths it keeps; a failed build is recorded as a failure, and the farm stays on its
+last build); then one chunk of every mode, `jobs` at a time (default 4), each a process group of
+its own at nice 19:
+
+| mode | command | seeds | unit |
+|---|---|---|---|
+| `games` | the fuzz binary's `fuzz_random_games` | `FUZZ_FIRST`, `FUZZ_GAMES` | games |
+| `matches` | `fuzz_random_matches` | `FUZZ_FIRST`, `FUZZ_MATCHES` | matches |
+| `interactions-games`, `interactions-matches` | the same, `FUZZ_POOL=interactions` | the same | |
+| `drafted-matches` | `fuzz_random_matches`, `FUZZ_POOL=drafted` (the drafted mode's games are the default mode's) | the same | matches |
+| `exponential-games` | `fuzz_random_games`, `FUZZ_POOL=exponential` (its matches are the default mode's) | the same | games |
+| `draft-events` | the draft binary's `fuzz_random_events` | `DRAFT_FUZZ_FIRST`, `DRAFT_FUZZ` | events |
+| `smoke-team_draft`, `smoke-team_draft_2v2`, `smoke-match`, `smoke-random` | `python tools/search_smoke.py --specs <spec> --seeds a-b --threads 4` | driver seeds | configurations (400 games or matches, or 24 events and their matches, each) |
+
+**Seeds.** Every mode has a cursor (`state.json`) that only moves forward: the fuzz modes start at
+10,000,000 (past every seed run by hand: the fuzz's defaults are 0..n, the replay tests 1000-1030 and
+2000-2012), the smokes at 1000 (the gate uses 0-15). A chunk is `[cursor, cursor + n)` with `n` the
+mode's measured rate times `chunk_s` (600 s; at least 1,000 games, 100 exponential games, 50 matches
+or events, 1 smoke seed); the cursor moves to its end when it is done. How each mode takes an offset:
+`fuzz_random_games` and `fuzz_random_matches` read `FUZZ_FIRST` (they always did: each seed's game or
+match is built from the seed alone, so a seed is the same game in any chunk); the search smoke's
+`--seeds` are driver seeds; the draft fuzz had none: its events were `0..n` on one random stream, so
+**`DRAFT_FUZZ_FIRST=f`** (engine/tests/draft.rs, the only test change) plays events `f..f+n`, each on
+random streams of its own seeded by its number, and a failing event prints `event e failed (rerun:
+DRAFT_FUZZ_FIRST=e DRAFT_FUZZ=1)`; unset, the fuzz is exactly what it was (`DRAFT_FUZZ=20000`:
+section 47.7's counts to the action, its `PayMana` match at event 8657 included; the digests are
+untouched: no engine file changed). While main has no
+`DRAFT_FUZZ_FIRST` (until this branch is merged) the farm skips `draft-events` and says so in its status.
+
+**Failures.** A fuzz chunk stops at its first failing seed; the farm reads the seed from the
+test's own rerun line (`seed s failed (rerun: ...)`, `match s failed ...`, `event s failed ...`),
+records the failure and queues the rest of the chunk from `s + 1` (at least the mode's minimum, so a
+statistical assertion over the chunk keeps its meaning). A crash without unwinding (an abort, a stack
+overflow: no rerun line) is bisected: the chunk's halves are rerun until the crashing seed is alone.
+A chunk that does not end is killed after 5 times its expected running time (at least an hour, the
+stopped time not counted) and bisected the same way, each half killed after 4 times its expected
+time plus 2 minutes, down to the seed that hangs (bisection replays seeds: the only time the farm
+does). A panic outside a seed (an assertion over the whole chunk) is recorded for the chunk. The
+draft fuzz goes on past a heuristic-played match that panics in the `mtg` engine and lists them at
+the end (section 47); the farm records each listed match as a failure of its own (its event alone
+the reproduction, with the match's spec). A search-smoke configuration that fails or hangs is
+recorded with its seed; the smoke's own watchdog is off (`--stall 1e7 --timeout 1e6`: a stopped
+process would trip it) and the farm's limit replaces it. Each failure is a file
+`failures/<id>.json`, the id the hash of its panic site and the first 120 characters of its
+message's first line with the digits masked (so the same bug at other seeds is one failure; a panic
+that dumps its state, as `PayMana`'s, differs by board after that): the kind (panic, crash, hang, build),
+the site, the message (40 lines), the modes, the count, the first and last time, up to 50 seeds with
+their commits, the reproduction (the commit, the environment and the cargo or smoke command) and the
+job's output the first three times (`<id>-<n>.log`). Failures matching `expected` (config; default
+`PayMana`, `Griselbrand`, `Green Sun's Zenith`: the payment panics branch m6-payfix fixes) are marked
+expected and counted like the others; nothing stops the farm.
+
+**Back-off.** The farm's governor (tools/mac_backoff.py) stops every running job (SIGSTOP to its
+process group) within 5 s of an evaluation taking `~/mtgz-remote/.eval.lock` (or the other games'
+locks, or `PAUSE`), starts no new job meanwhile, and continues them (SIGCONT) when it is gone;
+the jobs' running time excludes the stopped time (rates and the hang limit). The builds run under
+the same governor.
+
+**Status.** `status.json` (every 10 s): the state (running, backing off and why, building,
+paused), main's commit and subject, the round, the farm's hours, the back-offs, the running jobs,
+per mode what it fuzzed in total, per hour of its running time and per hour of the farm, its
+cursor and last chunk, and every failure. `bash tools/fuzz_farm_status.sh` (desktop) prints it over
+ssh and marks the failures first seen since the last check NEW (`--all`: every one; `--json`).
+
+**Lifetime.** A user LaunchAgent `com.mtgzero.fuzzfarm` (`~/Library/LaunchAgents/`, nothing else
+there touched): `RunAtLoad`, `KeepAlive` unless it exited cleanly (a crash restarts it after 60 s;
+`STOP` ends it for good), `Nice` 19, low-priority IO; it starts at login, so after a reboot it runs
+once the user logs in (the Mac has no automatic login: as for its other user agents, the mtg-bot
+worker and the planner) and it ends at logout (a LaunchDaemon would survive both but needs root: not
+done). A restarted farm kills the job groups its previous
+life left (`jobs.json`) and goes on from its cursors (a chunk interrupted midway is replayed from its
+start: never counted as done).
+
+**Running since 2026-10-28 02:16** (the Mac's clock; installed from this branch, reinstalled with
+the fixes of its first hours): two jobs at a time while the noise study ran, four since 04:29;
+main 94d43c1, then 075649c from its next round. Throughput per **running hour of one job** (one
+core; a search smoke's four threads), from its first ~2.5 hours with the Mac shared (the noise
+study, other agents' cargo tests, td1's first evaluations):
+
+| mode | per running hour |
+|---|---:|
+| games | 141,000 games |
+| matches | 86,000 matches |
+| interactions games / matches | 124,000 games / 79,000 matches |
+| drafted matches | 70,000 matches |
+| exponential games | under ~27,000 (a chunk of 8,374 ran past 1,100 s) |
+| draft events (this branch, `once`: 300 events in 3.4 s) | ~320,000 events |
+| smoke `team_draft` (4v4) | 530 configurations: 12,700 events and their 152,000 heuristic-played matches |
+| smoke `team_draft_2v2` | 790 configurations: 19,000 events, 76,000 matches |
+| smoke `random` | 108 configurations: 43,000 games |
+
+A round gives every mode one chunk of ~600 s of running time, so with 4 jobs and 10 modes (the
+draft fuzz skipped on main) each mode runs about a third of the time: ~45,000 games, ~27,000
+matches per hour of the farm in each of the default and interactions modes, and so on (the status's
+"per farm h" column, which also counts the hours at 2 jobs and the back-offs).
+
+**Failures found** (its first hours; every one with its reproduction in `failures/`):
+
+* **Unexpected: the hidden pool's determinization in best-of-three matches** (`engine/tests/fuzz.rs:861`,
+  `check_hidden_pool`): in a world determinized for P1, P0's cards hold **Elvish Spirit Guide twice and
+  not Jennifer Walters // The Sensational She-Hulk**, while the sampled deck has one of each (the
+  world's cards are not the sampled deck). Matches 10009649 (default mode, at 94d43c1) and 10009634
+  (`FUZZ_POOL=interactions`, at 075649c); deterministic: `FUZZ_FIRST=10009649 FUZZ_MATCHES=1 cargo
+  test --release -p engine --test fuzz fuzz_random_matches -- --exact --nocapture` (reproduced at
+  075649c). Not a payment panic; determinize's resampling of the opponent's deck (ENGINE.md 36.11)
+  with a double-faced card and a card exiled from the hand as a cost are the suspects. Untouched here.
+* **Unexpected: `ChooseGraveyardCard with no options`** (`engine/src/flow.rs:208`, from
+  `activate::pay_costs`: an activated ability whose cost takes a graveyard card was offered with
+  nothing to take), drafted match 10001565 at 075649c: `FUZZ_POOL=drafted FUZZ_FIRST=10001565
+  FUZZ_MATCHES=1 ...`. The castability-versus-payment family m6-payfix works on (its new
+  interaction group has graveyard costs), but not a `PayMana` panic: worth checking against its fix.
+* **A payment search that does not end** (the games chunk from 10,044,190 at 075649c): one game sat
+  for over 50 minutes of running time in `engine::pay::covers::go` (recursive, under
+  `can_pay_without` -> `phyrexian_feasible` -> `cands`, during the fuzz's option completion);
+  bisected by hand on the Mac to **game 10049522** (12-way splits: every other part of the chunk
+  passed in ~28 s per 2,355 games; this seed alone runs for minutes, where a game takes ~12 ms):
+  `FUZZ_FIRST=10049522 FUZZ_GAMES=1 FUZZ_LOG=1 cargo test --release -p engine --test fuzz
+  fuzz_random_games -- --exact --nocapture` does not return. A search worker meeting such a state
+  in a run stalls its group (only the supervisor's stall restart gets out). The farm, which
+  bisects hung chunks itself since its last install, will record it at its next pass over the chunk.
+* **Unexpected: `determinize changed the encoding of P1 (mover P1) at 29444: 0 -> 1`**
+  (`engine/tests/fuzz.rs:999`): a world determinized for the decider of a best-of-three match does not
+  encode as the real game for it (an information leak, or a resampled card the decider knows), match
+  10036882 with `FUZZ_POOL=interactions` at 075649c: `FUZZ_POOL=interactions FUZZ_FIRST=10036882
+  FUZZ_MATCHES=1 cargo test --release -p engine --test fuzz fuzz_random_matches -- --exact --nocapture`.
+* **Unexpected: `a card with another face`** (`engine/src/faces.rs`, `other_face(card).expect(..)` in
+  `begin_cast_either_face`: a card offered as castable by its other face has none), game 10070547
+  with `FUZZ_POOL=interactions` at 075649c: `FUZZ_POOL=interactions FUZZ_FIRST=10070547 FUZZ_GAMES=1
+  FUZZ_LOG=1 cargo test --release -p engine --test fuzz fuzz_random_games -- --exact --nocapture`.
+* **Expected (`PayMana: no way to pay ...`, `engine/src/pay.rs:1569`, m6-payfix)**: `{3}{U}{U}` (games
+  10013181), `{5}{U}` (interactions games 10019015 and matches 10018076), `{1}{B}` (the `team_draft`
+  search smoke, seed 1000: a co-training run's own path). The noise study's heuristic-played drafted
+  matches hit `{1}{R}`, `{5}{U}`, `{7}{U}` and `{6}{U}{U}` (5 matches, specs in
+  `~/mtgz-noise/failed_specs.jsonl`), and section 47's draft fuzz Griselbrand's `{4}{B}{B}{B}{B}`.
+
+**Checking it from the desktop**: `bash tools/fuzz_farm_status.sh` (the state, per mode the totals
+and rates, every failure with its reproduction, NEW since the last check; the noise study's progress
+line), `--json`, `--noise` (the study's summary). Control: `bash tools/mac.sh 'bash tools/fuzz_farm.sh
+pause|resume|stop|start|install|uninstall'`; jobs at a time: `~/mtgz-fuzzfarm/config.json`
+(`{"jobs": 4, "chunk_s": 600}` now; read every round).
+
+### 50.3 The Mac as a self-play worker (design only: nothing of it is built)
+
+**The measurement** (`python tools/match_noise.py bench --model <mtg5 iter 14> --seconds 150 ...`:
+mtg-4's self-play, generated best-of-three pools, the 128 x 4 token network with CPU inference, a
+rolling driver recording its samples, leaves per second over the phase; 150 s each from a cold start,
+the Mac shared with the noise study's heuristic phase or other agents' cargo tests, as noted):
+
+| matches in flight | search threads | groups (batch) | inference workers x torch threads | leaves/s |
+|---:|---:|---:|---:|---:|
+| 128 | 12 | 2 (64) | 3 x 4 (the remote evaluation's settings) | 7,942 * |
+| 256 | 12 | 2 (128) | 3 x 4 | 10,669 * |
+| 256 | 14 | 2 (128) | 2 x 6 | 10,809 * |
+| 256 | 12 | 4 (64) | 4 x 3 | 12,956 * |
+| 512 | 12 | 2 (256) | 3 x 4 | 13,158 * |
+| 384 | 12 | 3 (128) | 3 x 4 | 14,804 * / 10,931 ** |
+| 512 | 12 | 4 (128) | 4 x 3 | 17,474 |
+| 768 | 12 | 6 (128) | 6 x 2 | 20,262 |
+| **768** | **12** | **4 (192)** | **4 x 3** | **20,748** |
+| 768 | 16 | 6 (128) | 6 x 2 | 18,737 ** |
+| 1,024 | 12 | 8 (128) | 8 x 2 | 13,906 ** |
+
+(* nice 19 with m6-payfix's cargo tests running at normal priority; ** the Mac's load at 12-17 from
+other jobs; the rest at normal priority, load 4-11.) The CPU is far from saturated (4-6 cores busy by
+the process's CPU time): the driver is bound by batches in flight, so more groups with an inference
+worker each scale until ~6 batches.
+
+**Capacity** (`~/mtgz-noise/capbench.sh`: 1, 2 and 3 bench processes at once, each the best
+setting above, 240 s, at nice 19 with the farm paused; load 4-11): **one process
+19,390 leaves/s; two 33,036 (16,499 + 16,537); three 37,067 (3 x ~12,350)**. One driver process is
+bound by its own loop (the Python thread that moves the batches), not by the cores: a second
+process nearly doubles the total, a third adds 12%. Sustained over hours (the noise study's ~2 h
+of network replays at nice 19, sharing the Mac with the fuzz farm, other agents' cargo tests and,
+for its last hour, a second study process): 14,000-16,700 leaves/s per process.
+
+**Against the desktop**: runs/mtg5's self-play (the same network size and search, 768 matches in
+flight, CUDA inference, the GPU shared with other projects) measured 6,268-11,385 leaves/s over
+iterations 1-15 (7,877 at iteration 14), 943-2,790 matches per hour (13,300-24,800 leaves per
+match). **The Mac self-plays several times faster than the desktop**: at 19,000-24,300 leaves per
+match (the noise study's 18,975 per drafted match over all 5,760; runs/mtg5's iteration 14
+self-play 24,305), one process plays **2,900-3,700 matches per hour** and two **4,900-6,300**,
+against the desktop's 943-2,790 (1,167 at iteration 14): 33,000-37,000 leaves/s against
+6,300-11,400, **3 to 6 times the desktop's self-play** (4-5 times its rate at iteration 14). Its
+evaluations (section 44) already showed the shape (inference in small batches: CPU, not MPS).
+
+**Single-game runs: remote self-play shards.** A run setting `selfplay_remote` naming a game
+package remote (the `remotes` of `eval_remote`: host, the run commit's checkout, python, workdir,
+the Mac's overrides) gives the run a second producer of iteration `i`'s samples:
+
+1. After training writes `models/iter_{i-1}.pt`, a `RemoteSelfPlay` thread of the run (zero.remote's
+   transport) ships it (6 MB) to the mirror `<workdir>/<run>.selfplay/` and starts `python -m
+   mtgz.az.remote selfplay <mirror> <i>` over ssh: `Run.selfplay` with the remote's overrides (CPU
+   inference, the measured concurrency, groups and workers), a rolling driver with no quota of its
+   own, shards written **compressed** (`np.savez_compressed`) as `data/iter_i/m00_*.npz` in the
+   mirror, through the same `ShardWriter` and its non-finite check.
+2. The desktop self-plays its quota as now. When its quota is done it tells the remote to stop
+   (a file in the mirror, or closing the session); the remote ends its phase (`end_phase`: the
+   matches in flight are dropped, as zero-core drops a phase's unfinished games), closes its shards
+   and prints one result line (matches, samples, leaves, seconds). The thread copies the shards into
+   the run's `data/iter_i/` beside `r00_*` before training starts, with a deadline (say 60 s after
+   the stop): shards not back by then are dropped and logged, so a slow, busy or offline Mac never
+   delays an iteration.
+3. Training reads the union (`window_shards` lists every shard of an iteration directory; shards
+   are self-describing npz, compressed or not); the steps follow the new samples (`reuse`), and
+   `metrics.jsonl` gets `selfplay.remote` = {matches, samples, leaves, leaves_per_s, seconds,
+   dropped}. Every sample already carries `net` (its checkpoint): `i - 1` on both machines, so the
+   data is on-policy.
+
+The quota stays the desktop's: the Mac adds a time-boxed share (whatever it finishes while the
+desktop plays its quota), so an iteration never waits for it, and an iteration with the Mac busy or
+asleep is exactly today's.
+
+**Co-training (team_draft-4v4): the Mac plays a share of the queued resolver matches.** The
+coordinator (zero/cotrain.py) turns each parked event into 12 queued `mtg` specs and takes their
+result rows back by tag, from any driver; a remote match worker is a second consumer of its queue:
+
+1. `resolver_cfg['selfplay_remote']`: a `RemoteMatches` thread keeps one ssh session to `python -m
+   mtgz.az.remote matches <mirror>` (the play network's checkpoint i-1 shipped at each iteration's
+   start), feeding it specs as JSON lines - at most `remote_inflight` (~768, the Mac's best
+   concurrency) outstanding - taken from `Coordinator.to_queue` alongside the desktop's resolver
+   driver; the remote side is a queue_only rolling driver (the measured settings) that answers each
+   finished match with its result row (by tag) and writes its samples to compressed `m00` shards.
+2. The rows come back on the session's stdout and go into the coordinator as the local driver's do
+   (an event resolves when its 12 rows are in, from either machine); the shards come back at the
+   iteration's end with the deadline of the single-game design.
+3. A match the Mac has not finished when the phase ends, or when the session breaks, is requeued
+   locally (the coordinator knows its tag): never lost, at worst played twice.
+
+**Costs.** zero-core: the remote `selfplay` and `matches` commands (`Run.selfplay` and the
+resolver's driver reused; ~250 lines over zero.remote's transport, mirror, checks), the
+`RemoteSelfPlay` / `RemoteMatches` threads with the stop, the deadline and the requeue (~300 lines:
+the co-training queue consumer is the delicate part), compressed shards in `ShardWriter` (a flag),
+metrics and the dashboard's columns; mtgz: the remote's self-play overrides. Tests: a `local`
+remote end to end (as `eval_remote`'s), a remote killed mid-phase, a missed deadline, a broken
+session's requeue. About two days with the core's smoke. **Bandwidth**: a sample is 67 KB (33,652
+features as float16; measured 1.0% non-zero) and a match ~140 samples, ~9.5 MB; the Mac's measured
+rate to the desktop is only **7.6 MB/s** (scp over the tailnet's direct LAN path), so uncompressed
+shards at the Mac's rate (35-60 GB per hour of its self-play) would saturate it; zlib level 1
+compresses them **58x** at 854 MB/s (measured on a runs/mtg5 shard), ~165 KB per match: shipping
+is then negligible.
+
+**Risks.**
+* *Staleness*: none with checkpoint i-1 shipped at the iteration's start (the Mac starts a few seconds
+  after the desktop). The simpler alternative - the Mac always one checkpoint behind, never waiting -
+  is off-policy by one iteration (the window already mixes 6-8 iterations); `net` in the samples
+  makes either visible.
+* *Determinism*: self-play is not reproducible today (rolling drivers, threads); the Mac's share
+  depends on timing and its arithmetic differs from the desktop's at float32 rounding (44.4), so a
+  run's data depends on the Mac's load. Evaluations stay comparable (fixed pools, the same players).
+* *The lock with remote evaluation*: evaluations first. Remote self-play backs off (stops) while
+  `~/mtgz-remote/.eval.lock` is held (tools/mac_backoff.py's rule): the play network's evaluation
+  every 2nd iteration takes ~9 minutes there (44.4), so the Mac's share shrinks by that much on those
+  iterations. The fuzz farm and studies must yield to remote self-play too (it would take a lock of
+  its own that `mac_backoff` honours), or both lose.
+* *Version and venv skew*: the remote checkout must be the run's commit (`RunCommitRemote`'s check,
+  reused as is); a torch upgrade in the shared venv changes rounding only.
+* *Data integrity*: the shards pass the non-finite guard on write (Mac) and on load (desktop); a
+  shard is copied under a temporary name and renamed, so a torn copy is a missing shard.
+* *Training*: more samples per iteration mean proportionally more steps at the same `reuse` (the
+  desktop's training, 2-3 minutes today, would grow with the samples) or a smaller `reuse`.
+
+**Expected gain.** Self-play is most of an iteration on the desktop; the Mac's 2-3 driver
+processes would add 3-5 times the desktop's leaves per second (less ~11% for its own evaluations,
+48.4). **Single-game runs** (runs/mtg5: 600 matches per iteration in 13-38 minutes of self-play,
+training 2-3 minutes, the evaluations already on the Mac): a desktop quota of ~150-200 matches with
+the Mac's share on top, or the same 600 matches in ~4-10 minutes: iterations ~2-3 times faster.
+**Co-training** (team_draft-4v4, 48.4: ~42 minutes per iteration on average, self-play 16-34 of
+them, the draft network's training and evaluation the rest): the Mac playing ~3/4 of the queued
+matches would bring self-play to ~5-12 minutes and the iteration to ~20-30 (~1.5-2 times the
+iterations per day; the draft network's evaluation, now the largest desktop phase after self-play,
+then matters most, 48.6). Worth building after the 4v4 run shows that its draft network learns
+(45.12): it does not change what a run computes, only how fast. A cheaper first step: the
+desktop's own self-play may be CPU-bound too (8 search threads, batches in flight), which a
+measurement like 50.3's on the desktop would show.
+
+### 50.4 Checks
+
+* The draft fuzz, rebuilt on 075649c (Mac): `DRAFT_FUZZ=20000` (the default mode) is **identical** to
+  section 47.7's run to the count (20,000 events, 9,871,224 actions, 5,040,000 searched picks,
+  4,087,506 searched deckbuilding decisions, 497,122 worlds, 37,488 options completed, team A 8,080 /
+  8,188 / 3,732, the 30,800 and 89,200 random decks' averages) and fails as it does, at the `PayMana`
+  panic of event 8657's match 0; on 94d43c1 likewise identical to 45.9's. `DRAFT_FUZZ_FIRST=10000000
+  DRAFT_FUZZ=2000`: no failure, 988,134 actions, 14 s. `cargo test --release -p engine --test draft`:
+  23 passed, 1 ignored (`measure`).
+* Behaviour digests (Mac, 94d43c1 + this branch's first commit): combined **12642107250032a7** (no
+  engine file changed).
+* `python -m pytest -q tests` (Mac): 34 passed, 1 skipped (CUDA), as main.
+* The farm, through its own job path (`fuzz_farm.py once` for every mode, at 94d43c1; then
+  `draft-events` against this branch in a throwaway farm directory and target dir, removed after):
+  every mode ran and parsed; an injected failing mode (`FUZZ_POOL=bogus`: a panic in every seed) was
+  recorded once with its site, message, seeds and reproduction and its chunk continued from the next
+  seed (restarts capped); the parsers on synthetic output (panic lines with and without a thread id,
+  rerun lines, the search smoke's lines, the draft fuzz's listed match panics). Live: its back-off
+  (above; and for td1's first real evaluation of the play network at 04:10, 165-175 s), its builds
+  of 94d43c1 and 075649c (122 and 190 s), its restarts (`install` five times: no orphaned job), the
+  failures of 50.2.
+* The analysis on synthetic data (50.1); its team-result model against the measured 12-match
+  reliabilities (0.38 / 0.41 against 0.41 / 0.44 for the heuristic; 0.19 / 0.14 against 0.18 / 0.14
+  for the network).
+
+### 50.5 Limits and open issues
+
+* **The noise study's players**: one play network (mtg5's iteration 14, weak: 5% of its matches
+  against the heuristic, 44.4's evaluation) with self-play search, and the heuristic. A stronger
+  network may convert deck quality into wins more reliably (less luck per match) or less (it
+  exploits more, and its opponent too); repeat the study with the co-training run's play network
+  at some iteration (`tools/match_noise.py play --player net --model <checkpoint>` on the same events,
+  after moving the old results aside: ~4 hours on the Mac). The drafters are bots (random and
+  `consensus`); a draft network's events will sit between them or beyond `consensus`.
+* **The projections beyond 12 matches are models**: the margin's assumes the extra matches' luck is
+  independent (checked: D's luck variance is 12 x the per-match luck within noise) and their pairings
+  balanced (whole rounds of rotations); the team result's assumes normal player strengths and
+  interactions with the measured variances (it reproduces the 12-match reliability within its
+  interval). m* uses one d for the whole draft; for deckbuilding decisions, whose deck is fixed, the
+  event-level variation is no longer noise and more matches always help.
+* **Engine panics in drafted matches**: the payment panics (m6-payfix) fail zero-core's driver; the
+  study leaves those match replays out (5 of 23,040 heuristic, 0 of 5,760 network). A co-training
+  run hitting one stops (panics fail the run, zero-core 681ba8d), so the fix matters for the 4v4 run:
+  the five heuristic-played failures reproduce deterministically (`tools/match_noise.py repro --tag
+  <tag> --player heuristic`; their specs in `~/mtgz-noise/failed_specs.jsonl`).
+* **The fuzz farm** runs at nice 19 beside everything else on the Mac (the other agents' `mac.sh`
+  tests at normal priority take the cores first); its throughput varies with them. It fuzzes main
+  only: branches are fuzzed by hand (`mac.sh`). `draft-events` waits for this branch on main. It ends
+  at logout and starts at login (no LaunchDaemon). Its search smokes use `--threads 4`; their
+  per-configuration counts (400 games, 24 events) are the gate's.
+* **Remote self-play** (50.3) is a design: nothing of it is built. The Mac's throughput was measured
+  from cold starts of a few minutes and one long steady phase; a run's Mac share also depends on the
+  other projects' remote evaluations there (`~/kbz-remote`).
+* On the Mac: `~/mtgz-noise/` (the study's events, results, summary; ~60 MB), the pinned checkout
+  `~/mtg-zero-wt/noise-5843007ef161` and its target dir, `~/mtgz-fuzzfarm/` and
+  `~/cargo-target/mtg-zero/fuzzfarm` (~3 GB), the LaunchAgent plist; `~/mtgz-remote` untouched.
