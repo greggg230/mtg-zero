@@ -15,6 +15,7 @@ use crate::db::{Cond, types, Counter, Filter, Kw, KwSet, Mod, Prot, PtCda, Scope
 use crate::game::Game;
 use crate::ids::{CardIdx, ObjRef, PlayerId, Zone};
 use crate::mana::ManaMask;
+use crate::num::Count;
 
 /// How long a continuous effect from a resolved spell or ability lasts
 /// (CR 611.2).
@@ -120,7 +121,7 @@ impl Game {
         match k {
             Cond::SourceCountersIn(kind, lo, hi) => {
                 let n = self.counters_on(s, *kind);
-                n >= *lo as u16 && hi.is_none_or(|h| n <= h as u16)
+                n >= *lo as Count && hi.is_none_or(|h| n <= h as Count)
             }
             Cond::All(v) => v.iter().all(|x| self.static_cond(s, x, ctl)),
             Cond::LinkedTypesAtLeast(_) => self.cond_holds_from(k, ctl, Some(self.obj_ref(s))),
@@ -457,8 +458,11 @@ impl Game {
         // `mods_on` order: effects, then statics); 7c summed. The statics
         // are walked once for their sets, modifications and "+1/+1 for each
         // artifact and/or enchantment you control".
+        // (Summed in i64: +1/+1 counters past 2^31 and many effects can't
+        // overflow; the result saturates at +-`num::AMOUNT_MAX`, ENGINE.md
+        // 46.)
         let mut set: Option<(u32, i32, i32)> = None;
-        let (mut dp, mut dt) = (0, 0);
+        let (mut dp, mut dt) = (0i64, 0i64);
         for e in self.effects_on(c) {
             match e.m {
                 Mod::SetPt(a, b) => {
@@ -467,8 +471,8 @@ impl Game {
                     }
                 }
                 Mod::Pt(a, b) => {
-                    dp += a;
-                    dt += b;
+                    dp += a as i64;
+                    dt += b as i64;
                 }
                 _ => {}
             }
@@ -483,19 +487,19 @@ impl Game {
                         }
                     }
                     Mod::Pt(a, b) => {
-                        dp += a;
-                        dt += b;
+                        dp += *a as i64;
+                        dt += *b as i64;
                     }
                     Mod::PtPer { filter, p: a, t: b } => {
                         let ctl = self.objs[s.i()].controller;
-                        let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as i32;
-                        dp += a * n;
-                        dt += b * n;
+                        let n = self.battlefield.iter().filter(|&&x| self.scope_matches(filter, x, ctl)).count() as i64;
+                        dp += *a as i64 * n;
+                        dt += *b as i64 * n;
                     }
                     Mod::PtPerSourceCounter { counter, p: a, t: b } => {
-                        let n = self.counters_on(s, *counter) as i32;
-                        dp += a * n;
-                        dt += b * n;
+                        let n = self.counters_on(s, *counter) as i64;
+                        dp += *a as i64 * n;
+                        dt += *b as i64 * n;
                     }
                     _ => {}
                 }
@@ -508,18 +512,18 @@ impl Game {
             if x == c {
                 match cn {
                     Counter::P1P1 => {
-                        dp += n as i32;
-                        dt += n as i32;
+                        dp += n as i64;
+                        dt += n as i64;
                     }
                     Counter::M1M1 => {
-                        dp -= n as i32;
-                        dt -= n as i32;
+                        dp -= n as i64;
+                        dt -= n as i64;
                     }
                     _ => {}
                 }
             }
         }
-        (p + dp, t + dt)
+        (crate::num::amount(p as i64 + dp), crate::num::amount(t as i64 + dt))
     }
 
     pub fn power(&self, c: CardIdx) -> i32 {
@@ -553,7 +557,7 @@ impl Game {
                 let n = self.counters_on(c, *counter);
                 ranges
                     .iter()
-                    .find(|(lo, hi, _, _)| n >= *lo as u16 && hi.is_none_or(|h| n <= h as u16))
+                    .find(|(lo, hi, _, _)| n >= *lo as Count && hi.is_none_or(|h| n <= h as Count))
                     .map_or(printed, |&(_, _, p, t)| (p, t))
             }
             PtCda::Domain => {
@@ -597,21 +601,23 @@ impl Game {
     // ---- counters (CR 122) ------------------------------------------------
 
     /// Number of counters of kind `k` on `c`.
-    pub fn counters_on(&self, c: CardIdx, k: Counter) -> u16 {
+    pub fn counters_on(&self, c: CardIdx, k: Counter) -> Count {
         self.counters.iter().find(|x| x.0 == c && x.1 == k).map_or(0, |x| x.2)
     }
 
     /// Every counter on `c`, in kind order.
-    pub fn counters_of(&self, c: CardIdx) -> Vec<(Counter, u16)> {
-        let mut v: Vec<(Counter, u16)> =
+    pub fn counters_of(&self, c: CardIdx) -> Vec<(Counter, Count)> {
+        let mut v: Vec<(Counter, Count)> =
             self.counters.iter().filter(|x| x.0 == c && x.2 > 0).map(|x| (x.1, x.2)).collect();
         v.sort();
         v
     }
 
     /// Put n counters of kind `k` on a permanent (CR 122.6), or on a card
-    /// in exile ("exile it with a silver counter on it", 122.1).
-    pub(crate) fn add_counters(&mut self, c: CardIdx, k: Counter, n: u16) {
+    /// in exile ("exile it with a silver counter on it", 122.1). The count
+    /// saturates at `Count::MAX` (CR 122.1 has no maximum; shortcuts.md
+    /// 46.1).
+    pub(crate) fn add_counters(&mut self, c: CardIdx, k: Counter, n: Count) {
         if n == 0 || !matches!(self.objs[c.i()].zone, Zone::Battlefield | Zone::Exile) {
             return;
         }
@@ -632,7 +638,7 @@ impl Game {
     }
 
     /// Remove up to n counters of kind `k`; returns how many were removed.
-    pub(crate) fn remove_counters(&mut self, c: CardIdx, k: Counter, n: u16) -> u16 {
+    pub(crate) fn remove_counters(&mut self, c: CardIdx, k: Counter, n: Count) -> Count {
         let Some(i) = self.counters.iter().position(|x| x.0 == c && x.1 == k) else { return 0 };
         let m = self.counters[i].2.min(n);
         self.counters[i].2 -= m;

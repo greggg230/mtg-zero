@@ -49,7 +49,7 @@ impl Game {
             }
             Cond::LibraryEmpty => pl.library.is_empty(),
             Cond::YourTurn => self.turn.active == p,
-            Cond::LifeAtMostHalfStart => pl.life * 2 <= self.spec.starting_life,
+            Cond::LifeAtMostHalfStart => pl.life as i64 * 2 <= self.spec.starting_life as i64,
             Cond::ControlOtherOfColor(m) => {
                 self.permanents_of(p).any(|x| self.colors_of(x) & m != 0 && Some(self.obj_ref(x)) != source)
             }
@@ -266,7 +266,7 @@ impl Game {
                 if !(sorcery_ok || instant_ok) || !self.loyalty_ready(card) {
                     return false;
                 }
-                if d < 0 && self.counters_on(card, crate::db::Counter::Loyalty) < (-(d as i32)) as u16 {
+                if d < 0 && self.counters_on(card, crate::db::Counter::Loyalty) < crate::num::count(-(d as i64)) {
                     return false;
                 }
             }
@@ -475,7 +475,7 @@ impl Game {
             }
         }
         if let Some((k, n)) = cost.remove_counters {
-            if self.counters_on(card, k) < n as u16 {
+            if self.counters_on(card, k) < n as crate::num::Count {
                 return false;
             }
         }
@@ -484,10 +484,10 @@ impl Game {
                 // Teamwork: the taps (paid first) and the mana compete.
                 let cands = self.crew_eligible(p, card);
                 let keep = Self::keep_for(card, cost, exclude);
-                if !self.crew_mana_ok(p, cost.crew as i32, &[], &cands, mana, classes, &keep) {
+                if !self.crew_mana_ok(p, cost.crew as i64, &[], &cands, mana, classes, &keep) {
                     return false;
                 }
-            } else if self.crew_power(p, card, !cost.saddle) < cost.crew as i32 {
+            } else if self.crew_power(p, card, !cost.saddle) < cost.crew as i64 {
                 return false;
             }
         }
@@ -523,7 +523,7 @@ impl Game {
         // 608.2h): an activated ability's item keeps it (`Amount::CostMvPlus`).
         if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
             if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
-                self.stack[pos].ev.amount = self.mana_value_of(c) as u16;
+                self.stack[pos].ev.amount = self.mana_value_of(c) as u32;
             }
         }
         self.begin_batch();
@@ -607,15 +607,16 @@ impl Game {
 
     /// The most power `p` can tap to crew `vehicle` (`bonus`: crew itself,
     /// where "crews Vehicles as though its power were greater" applies).
-    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx, bonus: bool) -> i32 {
+    /// (Powers are summed in i64: ENGINE.md 46.)
+    pub(crate) fn crew_power(&self, p: PlayerId, vehicle: CardIdx, bonus: bool) -> i64 {
         self.crew_eligible(p, vehicle).into_iter().map(|c| self.crew_power_of(c, bonus).max(0)).sum()
     }
 
     /// A creature's power for crewing (a Pilot crews as though its power
     /// were greater: crew only, not saddle or teamwork, CR 702.122,
     /// 702.171a).
-    pub(crate) fn crew_power_of(&self, c: CardIdx, bonus: bool) -> i32 {
-        self.power(c) + if bonus { self.abilities(c).crew_bonus } else { 0 }
+    pub(crate) fn crew_power_of(&self, c: CardIdx, bonus: bool) -> i64 {
+        self.power(c) as i64 + if bonus { self.abilities(c).crew_bonus as i64 } else { 0 }
     }
 
     /// Teamwork (a spell's "tap any number of untapped creatures you control
@@ -629,19 +630,19 @@ impl Game {
     pub(crate) fn crew_mana_ok(
         &self,
         p: PlayerId,
-        need: i32,
+        need: i64,
         tapped_in: &[CardIdx],
         cands: &[CardIdx],
         mana: &crate::mana::ManaCost,
         classes: &[crate::pay::Class],
         keep: &Keep,
     ) -> bool {
-        let have: i32 = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
+        let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, false)).sum();
         let (with_mana, plain): (Vec<CardIdx>, Vec<CardIdx>) = cands.iter().copied().partition(|&c| self.has_mana_ability(c));
-        let plain_power: i32 = plain.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
+        let plain_power: i64 = plain.iter().map(|&c| self.crew_power_of(c, false).max(0)).sum();
         let k = with_mana.len().min(10);
         for mask in 0u32..(1 << k) {
-            let extra: i32 = (0..k).filter(|i| mask >> i & 1 != 0).map(|i| self.crew_power_of(with_mana[i], false).max(0)).sum();
+            let extra: i64 = (0..k).filter(|i| mask >> i & 1 != 0).map(|i| self.crew_power_of(with_mana[i], false).max(0)).sum();
             if have + plain_power + extra < need {
                 continue;
             }
@@ -872,10 +873,10 @@ impl Game {
             // Crew (CR 702.122a): untapped creatures other than the source,
             // one decision each in increasing slot order; PASS once their
             // total power is enough. A pick must leave the total reachable.
-            let need = cost.crew as i32;
+            let need = cost.crew as i64;
             let bonus = !cost.saddle && !self.is_spell_card(card);
             let tapped_in: Vec<CardIdx> = picked[n_tap..].to_vec();
-            let have: i32 = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
+            let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
             let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
             let cands: Vec<CardIdx> = self
                 .crew_eligible(p, card)
@@ -902,7 +903,7 @@ impl Game {
                         self.crew_mana_ok(p, need, &t, &cands[k + 1..], mana, &classes, keep)
                     }
                     None => {
-                        let rest: i32 = cands[k + 1..].iter().map(|&x| self.crew_power_of(x, bonus).max(0)).sum();
+                        let rest: i64 = cands[k + 1..].iter().map(|&x| self.crew_power_of(x, bonus).max(0)).sum();
                         have + self.crew_power_of(c, bonus) + rest >= need
                     }
                 };
@@ -930,7 +931,7 @@ impl Game {
             self.move_card(c, Zone::Exile, Pos::Top);
         }
         if let Some((k, n)) = cost.remove_counters {
-            self.remove_counters(card, k, n as u16);
+            self.remove_counters(card, k, n as crate::num::Count);
         }
         // Permanents returned as a cost leave together. An attacking
         // creature returned for ninjutsu leaves what it attacked to the
@@ -976,9 +977,9 @@ impl Game {
         // counters.
         if let Some((_, src, ad)) = self.act_item(id) {
             match ad.loyalty {
-                Some(d) if d > 0 => self.add_counters(src, crate::db::Counter::Loyalty, d as u16),
+                Some(d) if d > 0 => self.add_counters(src, crate::db::Counter::Loyalty, crate::num::count(d as i64)),
                 Some(d) if d < 0 => {
-                    self.remove_counters(src, crate::db::Counter::Loyalty, (-(d as i32)) as u16);
+                    self.remove_counters(src, crate::db::Counter::Loyalty, crate::num::count(-(d as i64)));
                 }
                 _ => {}
             }

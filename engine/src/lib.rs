@@ -20,6 +20,7 @@ pub mod hidden;
 pub mod ids;
 pub mod lower;
 pub mod mana;
+pub mod num;
 mod pay;
 pub mod program;
 mod resolve;

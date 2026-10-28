@@ -195,8 +195,9 @@ pub struct ManaPool {
 }
 
 impl ManaPool {
-    pub fn total(&self) -> u8 {
-        self.amt.iter().sum()
+    /// All the pool's mana (summed wide: six types of up to 255).
+    pub fn total(&self) -> u32 {
+        self.amt.iter().map(|&n| n as u32).sum()
     }
 
     pub fn clear(&mut self) {
@@ -232,9 +233,11 @@ impl ManaPool {
         self.pay_into_for(cost, false)
     }
 
+    /// Add mana (CR 106.4). At most 255 of a type: more saturates (an
+    /// engine limit, shortcuts.md 46.4; CR 106 has no maximum).
     pub fn add(&mut self, mana: &[u8; 6]) {
         for (a, &n) in self.amt.iter_mut().zip(mana) {
-            *a += n;
+            *a = a.saturating_add(n);
         }
     }
 

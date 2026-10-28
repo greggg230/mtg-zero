@@ -144,7 +144,7 @@ impl Game {
             Ext::ExileAllCreaturesIncubate { token } => {
                 let all: Vec<CardIdx> = self.battlefield.iter().copied().filter(|&c| self.is_creature(c)).collect();
                 self.begin_batch();
-                let mut n = 0u16;
+                let mut n: crate::num::Count = 0;
                 for c in all {
                     self.move_card(c, Zone::Exile, Pos::Top);
                     // (A token ceases to exist in exile, CR 111.7: it was
@@ -189,7 +189,10 @@ impl Game {
                     None => 0,
                 };
                 self.note(|_| format!("P{p} removes {n} counter(s) for mana"));
-                f.x = n as i32;
+                // (One mana per counter, one choice each, counted by the
+                // frame's u8 `i` (1 + the mana added): at most 254 mana,
+                // about the pool's bound for a type, shortcuts.md 46.4.)
+                f.x = n.min(254) as i32;
                 f.i = 1;
                 f.floor = 0;
             }

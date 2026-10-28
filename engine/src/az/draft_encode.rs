@@ -189,7 +189,9 @@ fn bag_add(out: &mut [f32], b: usize, ident: u16, n: f32) {
 }
 
 /// Encode `g` for `viewer` into `out` (`NUM_FEATURES` floats, zeroed by the
-/// caller).
+/// caller). Every value is bounded by the event's sizes (ENGINE.md 46: at
+/// most 40 copies of a basic land in a bag, 10; 45 picks / 15 = 3), far
+/// within `encode::FEATURE_BOUND`; the draft fuzz checks it.
 pub fn encode(g: &TeamDraftAz, viewer: u8, out: &mut [f32]) {
     assert_eq!(out.len(), NUM_FEATURES);
     let cube = cube().expect("the cube was loaded");

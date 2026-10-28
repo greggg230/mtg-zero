@@ -41,6 +41,12 @@
 //! card table's index (capacity 256), which renumbers as support grows;
 //! v2 (M5b, 23,324 floats) had a 192-float context block with room for 32
 //! decision kinds.
+//! Every value is finite and bounded (M6, ENGINE.md 46): a number the game
+//! leaves unbounded (life, power, toughness, damage, counters, a zone's or a
+//! list's size, the turn: CR 107.1, 122.1) goes through [`squash`], exact
+//! within +-[`SQUASH_FROM`] (every normal state), then logarithmic; every
+//! other value is bounded by its type or an engine cap (a `u8` / 4, a bag
+//! by the 96-permanent cap); none exceeds [`FEATURE_BOUND`].
 //! "Me" is the viewer. Options of the pending decision are encoded only
 //! when the viewer decides (its own legal actions); the list block too.
 //! Everything else is public or the viewer's own knowledge, so the vector is
@@ -98,6 +104,34 @@ pub const O_GYA: usize = O_LIST + LIST * LIST_W;
 pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
 pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
 pub const NUM_FEATURES: usize = O_MATCH + MATCH;
+
+/// Features are exact within +-`SQUASH_FROM` (ENGINE.md 46): a 1,024-power
+/// creature (P/T / 8), 2,560 total power or life (/ 20), any bag. The
+/// behaviour digests' largest value is 68.1 (a 545/545 creature of random
+/// play), so none of their states changes.
+pub const SQUASH_FROM: f32 = 128.0;
+/// No feature exceeds this magnitude: beyond `SQUASH_FROM` the log adds at
+/// most ln(f32::MAX) = 88.7 (and about 24 for the engine's largest sums), and
+/// the unsquashed values are at most 255 (a `u8` as it is: lands played
+/// this turn) (the zero-core shards store features as float16, whose largest
+/// finite value is 65,504).
+pub const FEATURE_BOUND: f32 = 256.0;
+
+/// The feature transform (ENGINE.md 46): `v` within +-[`SQUASH_FROM`]; beyond,
+/// `sign(v) (SQUASH_FROM + ln(1 + |v| - SQUASH_FROM))` (continuous, slope 1
+/// at the threshold, monotone): 2^31 power / 8 is 147.4, every power summed
+/// (192 x 2^31 / 20) 151.7, f32::MAX 216.7; an infinity (never written)
+/// [`FEATURE_BOUND`]. A NaN stays NaN (a bug, never hidden: the fuzzer and
+/// zero-core's guard refuse it).
+#[inline]
+pub fn squash(v: f32) -> f32 {
+    let a = v.abs();
+    if !(a > SQUASH_FROM) {
+        return v;
+    }
+    (SQUASH_FROM + (a - SQUASH_FROM).ln_1p()).min(FEATURE_BOUND).copysign(v)
+}
+
 
 /// Offsets inside a list slot (after its card code). A decision's list:
 /// `PRESENT`, `OPTION`, `COPIES` (copies in the list / 4). Sideboarding's
@@ -589,9 +623,10 @@ impl Game {
                 let st = &mut out[o + CODE..o + PERM_W];
                 st[perm::PRESENT] = 1.0;
                 st[perm::TAPPED] = ob.tapped as u8 as f32;
-                st[perm::DAMAGE] = ob.damage as f32 / 8.0;
-                st[perm::POWER] = self.power(c) as f32 / 8.0;
-                st[perm::TOUGHNESS] = self.toughness(c) as f32 / 8.0;
+                st[perm::DAMAGE] = squash(ob.damage as f32 / 8.0);
+                let (pw, th) = self.pt(c);
+                st[perm::POWER] = squash(pw as f32 / 8.0);
+                st[perm::TOUGHNESS] = squash(th as f32 / 8.0);
                 st[perm::SICK] = (self.is_creature(c) && self.is_sick(c) && !self.has_kw(c, Kw::Haste)) as u8 as f32;
                 st[perm::ATTACKING] = ob.attacking as u8 as f32;
                 st[perm::BLOCKED] = ob.blocked as u8 as f32;
@@ -610,9 +645,8 @@ impl Game {
                     }
                 }
                 st[perm::TARGETED] = targeted.contains(&c) as u8 as f32;
-                st[perm::BLOCKERS] = self.battlefield.iter().filter(|&&x| self.objs[x.i()].blocking == Some(c)).count()
-                    as f32
-                    / 4.0;
+                st[perm::BLOCKERS] =
+                    squash(self.battlefield.iter().filter(|&&x| self.objs[x.i()].blocking == Some(c)).count() as f32 / 4.0);
                 for (k, kw) in KWS.iter().enumerate() {
                     st[perm::KEYWORDS + k] = self.has_kw(c, *kw) as u8 as f32;
                 }
@@ -620,7 +654,7 @@ impl Game {
                 st[perm::NEW] = (ob.control_since == self.turn.number) as u8 as f32;
                 st[perm::STOLEN] = (ob.controller != ob.owner) as u8 as f32;
                 let walker = self.is_type(c, types::PLANESWALKER);
-                st[perm::LOYALTY] = self.counters_on(c, crate::db::Counter::Loyalty) as f32 / 8.0;
+                st[perm::LOYALTY] = squash(self.counters_on(c, crate::db::Counter::Loyalty) as f32 / 8.0);
                 st[perm::LOYALTY_READY] = (walker && self.loyalty_ready(c)) as u8 as f32;
                 if let Some(Target::Obj(r)) = self.attack_dest(c) {
                     st[perm::ATTACKS_WALKER] = 1.0;
@@ -632,10 +666,10 @@ impl Game {
                         .iter()
                         .filter(|&&x| self.attack_dest(x) == Some(Target::Obj(self.obj_ref(c))))
                         .count();
-                    st[perm::ATTACKED_BY] = by as f32 / 4.0;
+                    st[perm::ATTACKED_BY] = squash(by as f32 / 4.0);
                 }
                 st[perm::ASKED_ATTACKER] = (asked_attacker == Some(c)) as u8 as f32;
-                st[perm::LORE] = self.counters_on(c, crate::db::Counter::Lore) as f32 / 4.0;
+                st[perm::LORE] = squash(self.counters_on(c, crate::db::Counter::Lore) as f32 / 4.0);
                 st[perm::BACK_FACE] = self.db.is_face(ob.def) as u8 as f32;
                 if self.is_copy(c) {
                     st[perm::COPY] = 1.0;
@@ -905,25 +939,25 @@ impl Game {
 
     fn encode_globals(&self, me: PlayerId, g: &mut [f32]) {
         let t = &self.turn;
-        g[0] = t.number as f32 / 50.0;
+        g[0] = squash(t.number as f32 / 50.0);
         g[1 + t.step as usize] = 1.0; // 14 steps: 1..15
         g[15] = (t.active == me) as u8 as f32;
         g[16] = (t.priority == me) as u8 as f32;
         g[17] = t.passes as f32 / 2.0;
         g[18] = (t.starting == me) as u8 as f32;
-        g[19] = self.spec.max_turns.saturating_sub(t.number) as f32 / 50.0;
-        g[20] = self.stack.len() as f32 / 8.0;
-        g[21] = self.waiting.len() as f32 / 4.0;
-        g[22] = self.extra_turns.len() as f32;
+        g[19] = squash(self.spec.max_turns.saturating_sub(t.number) as f32 / 50.0);
+        g[20] = squash(self.stack.len() as f32 / 8.0);
+        g[21] = squash(self.waiting.len() as f32 / 4.0);
+        g[22] = squash(self.extra_turns.len() as f32);
         g[23] = self.outcome.is_some() as u8 as f32;
         for (side, p) in [me, opp(me)].into_iter().enumerate() {
             let pl = &self.players[p as usize];
             let o = &mut g[24 + 40 * side..64 + 40 * side];
-            o[0] = pl.life as f32 / 20.0;
-            o[1] = pl.hand.len() as f32 / 10.0;
-            o[2] = pl.library.len() as f32 / 40.0;
-            o[3] = pl.graveyard.len() as f32 / 20.0;
-            o[4] = self.exile.iter().chain(self.face_down.iter()).filter(|&&c| self.objs[c.i()].owner == p).count() as f32 / 10.0;
+            o[0] = squash(pl.life as f32 / 20.0);
+            o[1] = squash(pl.hand.len() as f32 / 10.0);
+            o[2] = squash(pl.library.len() as f32 / 40.0);
+            o[3] = squash(pl.graveyard.len() as f32 / 20.0);
+            o[4] = squash(self.exile.iter().chain(self.face_down.iter()).filter(|&&c| self.objs[c.i()].owner == p).count() as f32 / 10.0);
             o[5] = pl.lands_played as f32;
             for k in 0..6 {
                 o[6 + k] = pl.pool.amt[k] as f32 / 4.0;
@@ -932,17 +966,19 @@ impl Game {
             o[13] = pl.kept as u8 as f32;
             o[14] = pl.drew_from_empty as u8 as f32;
             o[15] = pl.lost as u8 as f32;
-            o[16] = pl.turns as f32 / 25.0;
+            o[16] = squash(pl.turns as f32 / 25.0);
             o[17] = pl.left_battlefield as u8 as f32;
-            let (mut perms, mut creatures, mut lands, mut untapped_lands, mut power, mut tough) = (0, 0, 0, 0, 0, 0);
+            // (Power and toughness summed in i64: no maximum, ENGINE.md 46.)
+            let (mut perms, mut creatures, mut lands, mut untapped_lands, mut power, mut tough) = (0, 0, 0, 0, 0i64, 0i64);
             let (mut ready, mut artifacts, mut tokens) = (0, 0, 0);
             for c in self.permanents_of(p) {
                 perms += 1;
                 let ob = &self.objs[c.i()];
                 if self.is_creature(c) {
                     creatures += 1;
-                    power += self.power(c).max(0);
-                    tough += self.toughness(c).max(0);
+                    let (pw, th) = self.pt(c);
+                    power += pw.max(0) as i64;
+                    tough += th.max(0) as i64;
                     if !ob.tapped && (!self.is_sick(c) || self.has_kw(c, Kw::Haste)) {
                         ready += 1;
                     }
@@ -960,34 +996,35 @@ impl Game {
                     tokens += 1;
                 }
             }
-            o[18] = perms as f32 / 20.0;
-            o[19] = creatures as f32 / 10.0;
-            o[20] = lands as f32 / 10.0;
-            o[21] = untapped_lands as f32 / 10.0;
-            o[22] = power as f32 / 20.0;
-            o[23] = tough as f32 / 20.0;
-            o[24] = ready as f32 / 10.0;
-            o[25] = artifacts as f32 / 10.0;
-            o[26] = tokens as f32 / 10.0;
-            o[27] = self.extra_turns.iter().filter(|&&x| x == p).count() as f32;
+            o[18] = squash(perms as f32 / 20.0);
+            o[19] = squash(creatures as f32 / 10.0);
+            o[20] = squash(lands as f32 / 10.0);
+            o[21] = squash(untapped_lands as f32 / 10.0);
+            o[22] = squash(power as f32 / 20.0);
+            o[23] = squash(tough as f32 / 20.0);
+            o[24] = squash(ready as f32 / 10.0);
+            o[25] = squash(artifacts as f32 / 10.0);
+            o[26] = squash(tokens as f32 / 10.0);
+            o[27] = squash(self.extra_turns.iter().filter(|&&x| x == p).count() as f32);
             o[28] = pl.lost_life as u8 as f32;
             o[29] = pl.flash_sorceries as u8 as f32;
             // M7b part 2 (ENGINE.md 25).
-            o[30] = pl.poison as f32 / 10.0;
-            o[31] = self
-                .permissions
-                .iter()
-                .filter(|pm| pm.player == p && pm.kind == crate::game::PermKind::Adventure && self.live(pm.card))
-                .count() as f32
-                / 4.0;
-            o[32] = self.temp_triggers.iter().filter(|t| t.controller == p).count() as f32 / 2.0;
+            o[30] = squash(pl.poison as f32 / 10.0);
+            o[31] = squash(
+                self.permissions
+                    .iter()
+                    .filter(|pm| pm.player == p && pm.kind == crate::game::PermKind::Adventure && self.live(pm.card))
+                    .count() as f32
+                    / 4.0,
+            );
+            o[32] = squash(self.temp_triggers.iter().filter(|t| t.controller == p).count() as f32 / 2.0);
             o[33] = self.no_max_hand(p) as u8 as f32;
             // M7b part 3b (ENGINE.md 27.4).
             let (room, completed) = self.dungeon(p);
             o[glob::INITIATIVE] = self.has_initiative(p) as u8 as f32;
             o[glob::IN_DUNGEON] = room.is_some() as u8 as f32;
             o[glob::COMPLETED] = completed as f32 / 2.0;
-            o[glob::EXPERIENCE] = pl.experience as f32 / 4.0;
+            o[glob::EXPERIENCE] = squash(pl.experience as f32 / 4.0);
             // Layout v4 (ENGINE.md 35).
             o[glob::SIDEBOARD] = self.sideboard_size(p) as f32 / 15.0;
             o[glob::COMPANION] = self.companion_outside(p).is_some() as u8 as f32;
@@ -1116,9 +1153,9 @@ impl Game {
                     assert!(o < ctx::OPS);
                     x[ctx::OP + o] = 1.0;
                 }
-                x[ctx::PC] = f.pc as f32 / 32.0;
+                x[ctx::PC] = squash(f.pc as f32 / 32.0);
                 x[ctx::OP_I] = f.i as f32 / 8.0;
-                x[ctx::PILE] = f.pile.len() as f32 / 8.0;
+                x[ctx::PILE] = squash(f.pile.len() as f32 / 8.0);
             }
             Task::PayMana(pm) => {
                 // The cost being paid: the nearest task below that names it.
@@ -1134,7 +1171,7 @@ impl Game {
             Task::AsEnters { card: c } => card = Some((self.objs[c.i()].def, None, None)),
             Task::AssignDamage { att, left, .. } => {
                 card = Some((self.objs[att.i()].def, None, None));
-                x[ctx::DAMAGE_LEFT] = *left as f32 / 16.0;
+                x[ctx::DAMAGE_LEFT] = squash(*left as f32 / 16.0);
             }
             Task::ChooseTargets { req, .. } => {
                 card = frame_card(task);

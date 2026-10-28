@@ -128,7 +128,7 @@ pub struct CopyFx {
 /// not cast; "whenever you cast or copy" sees it, `TrigPred::OrCopy`). A
 /// cast spell's event amount is the number of spells cast before it this
 /// turn (storm), never this.
-pub(crate) const COPIED: u16 = u16::MAX;
+pub(crate) const COPIED: u32 = u32::MAX;
 
 /// At most this many copies a turn by "may copy this spell" effects. Chain
 /// of Smog's copies cost nothing, so players who always copy would loop
@@ -670,6 +670,6 @@ impl Game {
         let r = self.obj_ref(card);
         let tapped = self.enters_tapped(card, p);
         self.entering(card, tapped, 0);
-        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note });
+        self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
     }
 }

@@ -19,7 +19,7 @@ impl Game {
                 Flow::Next
             }
             Ext::RemoveCounters { on, counter, n } => {
-                let n = self.amount(f, *n).clamp(0, u16::MAX as i32) as u16;
+                let n = crate::num::count(self.amount(f, *n) as i64);
                 for c in self.objs_on(f, on) {
                     self.remove_counters(c, *counter, n);
                 }
@@ -349,7 +349,7 @@ impl Game {
                             slot: base + k,
                             ev: crate::triggers::EvCtx {
                                 obj: Some(r),
-                                amount: power.min(u16::MAX as i32) as u16,
+                                amount: crate::num::unsigned(power),
                                 ..Default::default()
                             },
                         });

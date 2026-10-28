@@ -32,7 +32,7 @@ fn attack(g: &mut Game, attackers: &[CardIdx]) {
     g.choose(Choice::Pass);
 }
 
-fn poison(g: &Game, p: u8) -> u16 {
+fn poison(g: &Game, p: u8) -> u32 {
     g.player(p).poison
 }
 

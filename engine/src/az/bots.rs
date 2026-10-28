@@ -505,7 +505,7 @@ fn amount_of(g: &Game, p: PlayerId, src: CardIdx, a: &Amount) -> i32 {
     match a {
         Amount::Fixed(n) => *n,
         Amount::SourcePower => g.power(src),
-        Amount::SourceCounters(k) => g.counters_on(src, *k) as i32,
+        Amount::SourceCounters(k) => crate::num::count_amount(g.counters_on(src, *k)),
         Amount::CountTypes(t) => g.permanents_of(p).filter(|&c| g.is_type(c, *t)).count() as i32,
         _ => 0,
     }
@@ -573,7 +573,7 @@ impl Heuristic {
                     .iter()
                     .filter_map(|o| match o.choice {
                         Choice::Target(Target::Obj(r)) => {
-                            let loyalty = g.counters_on(r.idx, Counter::Loyalty) as i32;
+                            let loyalty = crate::num::count_amount(g.counters_on(r.idx, Counter::Loyalty));
                             (loyalty <= power).then_some((loyalty, o.action))
                         }
                         _ => None,
@@ -720,9 +720,9 @@ impl Heuristic {
                             .max()
                             .unwrap_or(0)
                     } else {
-                        g.creatures_of(opp(p)).map(|c| g.toughness(c).max(0)).sum()
+                        crate::num::amount(g.creatures_of(opp(p)).map(|c| g.toughness(c).max(0) as i64).sum())
                     };
-                    let x = need.min(g.life(p) / 2).max(0) as u16;
+                    let x = need.min(g.life(p) / 2).clamp(0, (act::NUMBER_N - 1) as i32) as u16;
                     d.options.iter().filter(|o| o.action <= act::NUMBER + x).last().map(|o| o.action)
                 } else {
                     d.options.last().map(|o| o.action)
@@ -936,7 +936,7 @@ impl Heuristic {
         // Costs: life to spare; a permanent sacrificed or a card discarded
         // only when it is cheap to give up.
         let life_floor = if kind == Kind::Fetch { 2 } else { 8 };
-        if cost.life > 0 && g.life(p) - (cost.life as i32) < life_floor {
+        if cost.life > 0 && g.life(p).saturating_sub(cost.life as i32) < life_floor {
             return None;
         }
         if cost.discard > 0 && !(flooded && hand_lands >= cost.discard as usize) {
@@ -962,13 +962,13 @@ impl Heuristic {
             let per = self.face_damage(g, p, c, ab);
             if per > 0 {
                 let uses = if let Some((k, n)) = cost.remove_counters {
-                    g.counters_on(c, k) as i32 / n.max(1) as i32
+                    crate::num::count_amount(g.counters_on(c, k) / n.max(1) as crate::num::Count)
                 } else if let Some(s) = &cost.sacrifice {
                     g.sacrifice_candidates(p, c, s).len() as i32 / s.n.max(1) as i32
                 } else {
                     1
                 };
-                if per * uses.max(1) >= g.life(q) {
+                if per as i64 * uses.max(1) as i64 >= g.life(q) as i64 {
                     return Some((2, 3000, uses > 1));
                 }
             }
@@ -1030,7 +1030,7 @@ impl Heuristic {
                     return None;
                 }
                 if let Some((k, n)) = cost.remove_counters {
-                    if creature && (g.counters_on(c, k) as i32) <= n as i32 && rv <= Self::value(g, c) {
+                    if creature && g.counters_on(c, k) <= n as crate::num::Count && rv <= Self::value(g, c) {
                         return None;
                     }
                 }
@@ -1060,13 +1060,13 @@ impl Heuristic {
                 if w != When::Main1 || g.is_creature(c) || g.obj(c).tapped || g.is_sick(c) || self.eaten(g, c, q) {
                     return None;
                 }
-                let free: i32 = g
+                let free: i64 = g
                     .crew_eligible(p, c)
                     .into_iter()
                     .filter(|&x| g.is_sick(x) || g.power(x) <= 0 || self.eaten(g, x, q))
                     .map(|x| g.crew_power_of(x, !cost.saddle).max(0))
                     .sum();
-                if free < cost.crew as i32 {
+                if free < cost.crew as i64 {
                     return None;
                 }
                 (1, 380)
@@ -1154,7 +1154,7 @@ impl Heuristic {
     /// opposing permanent; else the biggest plus; else a zero; else a minus
     /// that does something and leaves it alive.
     fn loyalty_score(&self, g: &Game, p: PlayerId, c: CardIdx, ab: &AbilityDef, kind: Kind, d: i32) -> Option<i32> {
-        let l = g.counters_on(c, Counter::Loyalty) as i32;
+        let l = crate::num::count_amount(g.counters_on(c, Counter::Loyalty));
         let min_d = g.def_of(c).activated.iter().filter_map(|a| a.loyalty).min().unwrap_or(0) as i32;
         if d <= -5 && d == min_d {
             return Some(1000);
@@ -1230,9 +1230,9 @@ impl Heuristic {
         let creature = g.is_creature(x);
         let walker = g.is_type(x, types::PLANESWALKER);
         let left = if creature {
-            g.toughness(x) - g.obj(x).damage as i32
+            crate::num::amount(g.toughness(x) as i64 - g.obj(x).damage as i64)
         } else if walker {
-            g.counters_on(x, Counter::Loyalty) as i32
+            crate::num::count_amount(g.counters_on(x, Counter::Loyalty))
         } else {
             i32::MAX
         };
@@ -1376,9 +1376,9 @@ impl Heuristic {
     /// A permanent's worth (sacrifices; targets).
     fn value(g: &Game, c: CardIdx) -> i32 {
         let def = g.def_of(c);
-        let mut v = def.mana_value() as i32 * 2;
+        let mut v = def.mana_value() as i64 * 2;
         if g.is_creature(c) {
-            v += 2 + g.power(c) * 2 + g.toughness(c);
+            v += 2 + g.power(c) as i64 * 2 + g.toughness(c) as i64;
         }
         if def.is(types::LAND) {
             v += 3;
@@ -1386,7 +1386,8 @@ impl Heuristic {
         if g.is_token(c) {
             v -= 2;
         }
-        v
+        // (Within +-2^30: callers add small bonuses; ENGINE.md 46.)
+        v.clamp(-(1 << 30), 1 << 30) as i32
     }
 
     /// The least valuable offered permanent (a sacrifice, a permanent
@@ -1454,7 +1455,7 @@ impl Heuristic {
                                 });
                                 !removes || Self::effect_value(g, p, src, prog, rq, c) > 0
                             }
-                            None => dmg == 0 || g.toughness(c) - g.obj(c).damage as i32 <= dmg,
+                            None => dmg == 0 || g.toughness(c) as i64 - g.obj(c).damage as i64 <= dmg as i64,
                         };
                         let creature = g.is_creature(c);
                         Self::value(g, c) + if kills && creature { 20 } else if kills { 5 } else { -30 }
@@ -1496,7 +1497,7 @@ impl Heuristic {
     fn kills(g: &Game, a: CardIdx, b: CardIdx) -> bool {
         let pa = g.power(a);
         pa > 0
-            && (g.has_kw(a, Kw::Deathtouch) || pa >= g.toughness(b) - g.obj(b).damage as i32)
+            && (g.has_kw(a, Kw::Deathtouch) || pa as i64 >= g.toughness(b) as i64 - g.obj(b).damage as i64)
             && !g.has_kw(b, Kw::Indestructible)
     }
 
@@ -1508,13 +1509,13 @@ impl Heuristic {
             _ => None,
         };
         let Some(b) = b else { return d.options[0].action };
-        let incoming: i32 = g
+        let incoming: i64 = g
             .attackers()
             .iter()
             .filter(|&&a| g.blockers_of(a).is_empty() && g.attack_dest(a) == Some(Target::Player(p)))
-            .map(|&a| g.power(a).max(0) * if g.has_kw(a, Kw::DoubleStrike) { 2 } else { 1 })
+            .map(|&a| g.power(a).max(0) as i64 * if g.has_kw(a, Kw::DoubleStrike) { 2 } else { 1 })
             .sum();
-        let lethal = incoming >= g.life(p);
+        let lethal = incoming >= g.life(p) as i64;
         let mut best: Option<(i32, u16)> = None;
         for o in &d.options {
             let Choice::Card(a) = o.choice else { continue };
@@ -1527,7 +1528,7 @@ impl Heuristic {
                 (true, false) => 30,
                 (false, false) => 20,
                 (true, true) if g.def_of(a).mana_value() >= g.def_of(b).mana_value() => 10,
-                _ if lethal => 1 + g.power(a),
+                _ if lethal => g.power(a).saturating_add(1),
                 _ => -1,
             };
             best = best.max(Some((score, o.action)));
@@ -1548,7 +1549,7 @@ impl Heuristic {
         let want = g.lethal_needed(att, b);
         let lo = d.options.first()?.action;
         let hi = d.options.last()?.action;
-        Some((act::NUMBER + want).clamp(lo, hi))
+        Some((act::NUMBER as u32).saturating_add(want).clamp(lo as u32, hi as u32) as u16)
     }
 
     /// The hand card to give up: a land when flooded, else the most
@@ -1679,7 +1680,7 @@ pub mod v1 {
                         .iter()
                         .filter_map(|o| match o.choice {
                             Choice::Target(Target::Obj(r)) => {
-                                let loyalty = g.counters_on(r.idx, crate::db::Counter::Loyalty) as i32;
+                                let loyalty = crate::num::count_amount(g.counters_on(r.idx, crate::db::Counter::Loyalty));
                                 (loyalty <= power).then_some((loyalty, o.action))
                             }
                             _ => None,
@@ -1875,9 +1876,9 @@ pub mod v1 {
 
         fn value(g: &Game, c: CardIdx) -> i32 {
             let def = g.def_of(c);
-            let mut v = def.mana_value() as i32 * 2;
+            let mut v = def.mana_value() as i64 * 2;
             if g.is_creature(c) {
-                v += 2 + g.power(c) * 2 + g.toughness(c);
+                v += 2 + g.power(c) as i64 * 2 + g.toughness(c) as i64;
             }
             if def.is(types::LAND) {
                 v += 3;
@@ -1885,7 +1886,8 @@ pub mod v1 {
             if g.is_token(c) {
                 v -= 2;
             }
-            v
+            // (Within +-2^30: callers add small bonuses; ENGINE.md 46.)
+            v.clamp(-(1 << 30), 1 << 30) as i32
         }
 
         fn target(&mut self, g: &Game, d: &Decision, p: PlayerId) -> Option<u16> {
@@ -1908,7 +1910,7 @@ pub mod v1 {
                     Target::Player(_) => 5,
                     Target::Obj(r) if g.obj(r.idx).zone == Zone::Battlefield => {
                         let c = r.idx;
-                        let kills = dmg == 0 || g.toughness(c) - g.obj(c).damage as i32 <= dmg;
+                        let kills = dmg == 0 || g.toughness(c) as i64 - g.obj(c).damage as i64 <= dmg as i64;
                         let creature = g.is_creature(c);
                         Self::value(g, c) + if kills && creature { 20 } else if kills { 5 } else { -30 }
                     }
@@ -1942,7 +1944,7 @@ pub mod v1 {
         fn kills(g: &Game, a: CardIdx, b: CardIdx) -> bool {
             let pa = g.power(a);
             pa > 0
-                && (g.has_kw(a, Kw::Deathtouch) || pa >= g.toughness(b) - g.obj(b).damage as i32)
+                && (g.has_kw(a, Kw::Deathtouch) || pa as i64 >= g.toughness(b) as i64 - g.obj(b).damage as i64)
                 && !g.has_kw(b, Kw::Indestructible)
         }
 
@@ -1952,13 +1954,13 @@ pub mod v1 {
                 _ => None,
             };
             let Some(b) = b else { return d.options[0].action };
-            let incoming: i32 = g
+            let incoming: i64 = g
                 .attackers()
                 .iter()
                 .filter(|&&a| g.blockers_of(a).is_empty() && g.attack_dest(a) == Some(Target::Player(p)))
-                .map(|&a| g.power(a).max(0) * if g.has_kw(a, Kw::DoubleStrike) { 2 } else { 1 })
+                .map(|&a| g.power(a).max(0) as i64 * if g.has_kw(a, Kw::DoubleStrike) { 2 } else { 1 })
                 .sum();
-            let lethal = incoming >= g.life(p);
+            let lethal = incoming >= g.life(p) as i64;
             let mut best: Option<(i32, u16)> = None;
             for o in &d.options {
                 let Choice::Card(a) = o.choice else { continue };
@@ -1971,7 +1973,7 @@ pub mod v1 {
                     (true, false) => 30,
                     (false, false) => 20,
                     (true, true) if g.def_of(a).mana_value() >= g.def_of(b).mana_value() => 10,
-                    _ if lethal => 1 + g.power(a),
+                    _ if lethal => g.power(a).saturating_add(1),
                     _ => -1,
                 };
                 best = best.max(Some((score, o.action)));
@@ -1991,7 +1993,7 @@ pub mod v1 {
             let want = g.lethal_needed(att, b);
             let lo = d.options.first()?.action;
             let hi = d.options.last()?.action;
-            Some((act::NUMBER + want).clamp(lo, hi))
+            Some((act::NUMBER as u32).saturating_add(want).clamp(lo as u32, hi as u32) as u16)
         }
 
         fn worst_hand_card(g: &Game, d: &Decision, p: PlayerId) -> u16 {

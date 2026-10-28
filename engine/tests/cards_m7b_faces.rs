@@ -31,7 +31,7 @@ fn player(p: PlayerId) -> Choice {
     Choice::Target(Target::Player(p))
 }
 
-fn loyalty(g: &Game, c: CardIdx) -> u16 {
+fn loyalty(g: &Game, c: CardIdx) -> u32 {
     g.counters_on(c, Counter::Loyalty)
 }
 

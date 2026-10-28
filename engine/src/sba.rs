@@ -50,7 +50,7 @@ impl Game {
             let o = &self.objs[c.i()];
             if t <= 0 {
                 zero.push(c);
-            } else if (o.damage as i32 >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c) {
+            } else if (o.damage as i64 >= t as i64 || (o.deathtouched && o.damage > 0)) && !self.indestructible(c) {
                 destroyed.push(c);
             }
         }
@@ -82,7 +82,7 @@ impl Game {
             if ty & crate::db::types::CREATURE != 0 {
                 let o = &self.objs[c.i()];
                 let t = self.toughness(c);
-                if t <= 0 || ((o.damage as i32 >= t || (o.deathtouched && o.damage > 0)) && !self.indestructible(c)) {
+                if t <= 0 || ((o.damage as i64 >= t as i64 || (o.deathtouched && o.damage > 0)) && !self.indestructible(c)) {
                     return true;
                 }
             }
@@ -90,7 +90,7 @@ impl Game {
                 return true;
             }
             if ty & crate::db::types::ENCHANTMENT != 0 {
-                let ch = self.abilities(c).chapters as u16;
+                let ch = self.abilities(c).chapters as crate::num::Count;
                 if ch > 0 && self.counters_on(c, Counter::Lore) >= ch && self.finished_sagas().contains(&c) {
                     return true;
                 }

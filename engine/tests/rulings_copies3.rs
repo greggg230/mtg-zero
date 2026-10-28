@@ -987,7 +987,7 @@ fn earthbend_makes_a_colourless_land_creature_that_keeps_its_mana_ability_and_re
     // 2/2).
     let mut g = scen().battlefield(0, &["Forest", "Forest", "Forest", "Forest", "Forest"]).hand(0, &["Badgermole Cub", "Badgermole Cub"]).at(Step::Main1, 0).start();
     let forest = bf(&g, 0, "Forest");
-    for n in 1..=2u16 {
+    for n in 1..=2u32 {
         let cub = g.card(0, "Badgermole Cub", Zone::Hand);
         g.choose(Choice::Cast(cub));
         let t = g.tgt(forest);

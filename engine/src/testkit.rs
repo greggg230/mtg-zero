@@ -95,7 +95,7 @@ impl Scenario {
             }
             // A planeswalker entered with its printed loyalty (CR 306.5b).
             if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
-                self.g.add_counters(c, crate::db::Counter::Loyalty, n as u16);
+                self.g.add_counters(c, crate::db::Counter::Loyalty, crate::num::count(n as i64));
             }
         }
         self
@@ -109,7 +109,7 @@ impl Scenario {
         let back = self.g.def_of(c).back.unwrap_or_else(|| panic!("{name} has no back face"));
         self.g.set_face(c, back);
         if let (Some(n), true) = (self.g.def_of(c).loyalty, self.g.def_of(c).is(crate::db::types::PLANESWALKER)) {
-            self.g.add_counters(c, crate::db::Counter::Loyalty, n as u16);
+            self.g.add_counters(c, crate::db::Counter::Loyalty, crate::num::count(n as i64));
         }
         self
     }
@@ -144,7 +144,7 @@ impl Scenario {
     }
 
     /// Counters of a kind on `p`'s first permanent named `name`.
-    pub fn counters(mut self, p: PlayerId, name: &str, k: crate::db::Counter, n: u16) -> Self {
+    pub fn counters(mut self, p: PlayerId, name: &str, k: crate::db::Counter, n: crate::num::Count) -> Self {
         let c = self.g.find_card(p, name, Zone::Battlefield).unwrap_or_else(|| panic!("no {name} of P{p}"));
         let have = self.g.counters_on(c, k);
         self.g.remove_counters(c, k, have);

@@ -45,7 +45,7 @@ pub(crate) enum Task {
     DeclareAttackers { next: u8 },
     DeclareBlockers { i: u8 },
     CombatDamage { first: bool, att: u8 },
-    AssignDamage { att: CardIdx, j: u8, left: u16 },
+    AssignDamage { att: CardIdx, j: u8, left: u32 },
     // cleanup (CR 514)
     CleanupDiscard,
     CleanupRest,

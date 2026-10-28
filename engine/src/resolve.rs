@@ -434,7 +434,7 @@ impl Game {
         match a {
             Amount::Fixed(n) => n,
             Amount::LkiPower => f.lki.map_or(0, |l| l.0),
-            Amount::EventAmount => f.ev.amount as i32,
+            Amount::EventAmount => crate::num::signed(f.ev.amount),
             Amount::SourcePower => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
                     self.power(f.source.idx)
@@ -472,9 +472,9 @@ impl Game {
             },
             Amount::SourceCounters(k) => {
                 if self.live(f.source) && self.objs[f.source.idx.i()].zone == Zone::Battlefield {
-                    self.counters_on(f.source.idx, k) as i32
+                    crate::num::count_amount(self.counters_on(f.source.idx, k))
                 } else {
-                    self.lki_counters.iter().filter(|x| x.0 == f.source && x.1 == k).map(|x| x.2 as i32).sum()
+                    crate::num::amount(self.lki_counters.iter().filter(|x| x.0 == f.source && x.1 == k).map(|x| x.2 as i64).sum())
                 }
             }
             Amount::OpponentsLostLife => {
@@ -485,8 +485,8 @@ impl Game {
             Amount::EventTimes => ((f.ev.amount >> 1) & 0xFF) as i32,
             Amount::EventSpellTimes => self.event_spell_times(f) as i32,
             Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
-            Amount::Experience => self.players[f.controller as usize].experience as i32,
-            Amount::CostMvPlus(n) => n as i32 + f.ev.amount as i32,
+            Amount::Experience => crate::num::count_amount(self.players[f.controller as usize].experience),
+            Amount::CostMvPlus(n) => crate::num::amount(n as i64 + f.ev.amount as i64),
             Amount::EventSpellMv => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack => self.mana_value_of(r.idx) as i32,
                 Some(r) => self
@@ -567,9 +567,7 @@ impl Game {
             }
             Op::AddMana { who, mana } => {
                 if let Some(p) = self.who(f, who) {
-                    for (i, n) in mana.iter().enumerate() {
-                        self.players[p as usize].pool.amt[i] += n;
-                    }
+                    self.players[p as usize].pool.add(&mana);
                 }
                 Flow::Next
             }

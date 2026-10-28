@@ -145,7 +145,8 @@ impl Game {
                 }
             }
             Ext::PutCounters { on, counter, n } => {
-                let n = self.amount(f, *n).clamp(0, u16::MAX as i32) as u16;
+                // (Any number: Ouroboroid's X is its power, CR 122.1.)
+                let n = crate::num::count(self.amount(f, *n) as i64);
                 for c in self.objs_on(f, on) {
                     self.add_counters(c, *counter, n);
                 }
@@ -611,7 +612,7 @@ impl Game {
                         ..Default::default()
                     },
                     crate::program::About::Remembered => {
-                        crate::triggers::EvCtx { amount: f.x.max(0) as u16, ..Default::default() }
+                        crate::triggers::EvCtx { amount: crate::num::unsigned(f.x), ..Default::default() }
                     }
                     crate::program::About::EachMade => unreachable!("handled above"),
                 };
@@ -699,8 +700,9 @@ impl Game {
             }
             Ext::ApplyPtPerCount { on, filter, p, t } => {
                 let ctx = crate::cast::Ctx { controller: f.controller, source: Some(f.source) };
-                let n = self.battlefield.iter().filter(|&&c| self.card_matches(filter, c, &ctx)).count() as i32;
-                let (dp, dt) = ((*p as i32 * n).clamp(-999, 999), (*t as i32 * n).clamp(-999, 999));
+                // (p and t are signs, -1..=1: at most the battlefield's size.)
+                let n = self.battlefield.iter().filter(|&&c| self.card_matches(filter, c, &ctx)).count() as i64;
+                let (dp, dt) = (crate::num::amount(*p as i64 * n), crate::num::amount(*t as i64 * n));
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
                     self.add_effect(Affected::Obj(r), Mod::Pt(dp, dt), crate::layers::Until::EndOfTurn, f.controller);
@@ -963,7 +965,7 @@ impl Game {
                         }
                     }
                 };
-                self.add_counters(target, crate::db::Counter::P1P1, *n as u16);
+                self.add_counters(target, crate::db::Counter::P1P1, *n as crate::num::Count);
                 if !self.has_subtype(target, *subtype) {
                     let r = self.obj_ref(target);
                     let m = Mod::Types { add: 0, subtypes: vec![*subtype], replace: false };
@@ -1003,7 +1005,7 @@ impl Game {
             Ext::Monstrosity { n } => {
                 if let Some(&c) = self.objs_on(f, &On::Source).first() {
                     if !self.objs[c.i()].monstrous {
-                        self.add_counters(c, crate::db::Counter::P1P1, *n as u16);
+                        self.add_counters(c, crate::db::Counter::P1P1, *n as crate::num::Count);
                         self.objs[c.i()].monstrous = true;
                         let r = self.obj_ref(c);
                         self.event(crate::triggers::Event::obj(crate::db::EventKind::BecomesMonstrous, r));
@@ -1179,14 +1181,14 @@ impl Game {
             }
             Ext::GetEnergy { n } => {
                 let pl = &mut self.players[f.controller as usize];
-                pl.energy = pl.energy.saturating_add(*n as u16);
+                pl.energy = pl.energy.saturating_add(*n as crate::num::Count);
                 Flow::Next
             }
             Ext::PayEnergyDamage { tgt } => {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Number(k)) => {
-                        self.players[p as usize].energy -= k as u16;
+                        self.players[p as usize].energy -= k as crate::num::Count;
                         let src = self.frame_damage_source(f);
                         for t in self.targets_of(f, *tgt) {
                             self.deal_damage(src, t, k as i32);
@@ -1195,7 +1197,7 @@ impl Game {
                     }
                     Some(other) => unreachable!("energy answer {other:?}"),
                     None => {
-                        let most = self.players[p as usize].energy.min(act::NUMBER_N - 1);
+                        let most = self.players[p as usize].energy.min((act::NUMBER_N - 1) as crate::num::Count) as u16;
                         let opts = (0..=most).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
                         self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseMode, opts);
                         Flow::Suspend
@@ -1206,12 +1208,12 @@ impl Game {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Yes) => {
-                        self.players[p as usize].energy -= *n as u16;
+                        self.players[p as usize].energy -= *n as crate::num::Count;
                         Flow::Next
                     }
                     Some(_) => Flow::Jump(*skip),
                     None => {
-                        if self.players[p as usize].energy < *n as u16 {
+                        if self.players[p as usize].energy < *n as crate::num::Count {
                             return Flow::Jump(*skip);
                         }
                         let opts = vec![

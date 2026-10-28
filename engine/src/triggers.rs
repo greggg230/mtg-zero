@@ -19,13 +19,14 @@ pub(crate) enum Subj {
 }
 
 /// Something that happened (603.2), with its subjects (`EventKind`
-/// documents them) and an amount (damage dealt).
+/// documents them) and an amount (damage dealt: any amount, ENGINE.md 46;
+/// or a note's bits, `Game::put_onto_battlefield`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Event {
     pub kind: EventKind,
     pub a: Subj,
     pub b: Subj,
-    pub amount: u16,
+    pub amount: u32,
 }
 
 impl Event {
@@ -67,7 +68,7 @@ pub struct EvCtx {
     pub obj: Option<ObjRef>,
     /// The second object subject ("that creature" dealt damage).
     pub obj2: Option<ObjRef>,
-    pub amount: u16,
+    pub amount: u32,
     /// The spell or ability of the event, by stack item id (0 = none):
     /// the one that targets ("counter that spell or ability", ward).
     pub item: u32,
@@ -381,8 +382,8 @@ impl Game {
                 let host = self.objs[src.r.idx.i()].attached;
                 host.is_some_and(|h| self.live(h) && self.objs[h.idx.i()].attacking) && self.attackers().len() >= 2
             }
-            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u16,
-            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u16,
+            TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
+            TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
             TrigPred::TimesPerSubject(s, n) => match ev.subject(*s) {
                 Subj::Obj(r) => self.granted_triggered(r, src.def, src.r.inc) < *n,
                 _ => false,
@@ -391,7 +392,7 @@ impl Game {
             // The `Enters` event's note (`Game::put_onto_battlefield`).
             TrigPred::EnteredCast => ev.kind == EventKind::Enters && ev.amount & 1 != 0,
             TrigPred::EnteredPaid => ev.kind == EventKind::Enters && (ev.amount >> 1) & 0xFF != 0,
-            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && (ev.amount >> 9) & 0x3F >= *n as u16,
+            TrigPred::EnteredXAtLeast(n) => ev.kind == EventKind::Enters && (ev.amount >> 9) & 0x3F >= *n as u32,
             TrigPred::EnteredNotFromGyExile => ev.kind == EventKind::Enters && ev.amount >> 15 == 0,
             TrigPred::InGraveyard => true,
             TrigPred::SpellMvParity => match (ev.a, self.parity_of(src.r)) {

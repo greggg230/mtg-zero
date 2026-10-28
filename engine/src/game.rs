@@ -68,8 +68,9 @@ pub struct Obj {
     /// CR 613.7; refreshed when entering the battlefield.
     pub timestamp: u32,
     pub tapped: bool,
-    /// Marked damage (CR 120.3e).
-    pub damage: u16,
+    /// Marked damage (CR 120.3e; saturating at `u32::MAX`, more than any
+    /// toughness: ENGINE.md 46).
+    pub damage: u32,
     /// Dealt damage by a deathtouch source since the last SBA check (704.5h).
     pub deathtouched: bool,
     /// Turn number when its controller gained control (CR 302.6).
@@ -239,16 +240,16 @@ pub struct Player {
     /// Spells cast this game.
     pub spells_game: u16,
     /// Energy counters (CR 122.1).
-    pub energy: u16,
+    pub energy: crate::num::Count,
     /// Lost life this turn (CR 119.3; damage and payments included).
     pub lost_life: bool,
     /// "Until your next turn, you may cast sorcery spells as though they
     /// had flash."
     pub flash_sorceries: bool,
     /// Poison counters (CR 122.1f; ten or more lose the game, 704.5c).
-    pub poison: u16,
+    pub poison: crate::num::Count,
     /// Experience counters (CR 122.1).
-    pub experience: u16,
+    pub experience: crate::num::Count,
     /// "Until end of turn, you may play lands and cast spells from your
     /// graveyard" this turn (the turn number; Yawgmoth's Will).
     pub gy_play_turn: u32,
@@ -507,7 +508,7 @@ pub struct Game {
     pub(crate) waiting: Vec<PendingTrigger>,
     pub(crate) extra_turns: Vec<PlayerId>,
     /// Combat damage assigned so far in the current damage step.
-    pub(crate) combat_dmg: Vec<(CardIdx, Target, u16)>,
+    pub(crate) combat_dmg: Vec<(CardIdx, Target, u32)>,
     pub(crate) next_ts: u32,
     pub(crate) next_stack_id: u32,
     pub(crate) outcome: Option<Outcome>,
@@ -557,7 +558,7 @@ pub struct Game {
     /// [`abilities`](Self::abilities)).
     pub(crate) any_loss: bool,
     /// Counters on permanents: (card, kind, number) (CR 122).
-    pub(crate) counters: Vec<(CardIdx, crate::db::Counter, u16)>,
+    pub(crate) counters: Vec<(CardIdx, crate::db::Counter, crate::num::Count)>,
     /// Permanents with static abilities on the battlefield (a fast path for
     /// the characteristic accessors).
     pub(crate) n_static: u16,
@@ -586,7 +587,7 @@ pub struct Game {
     pub(crate) monarch: Option<PlayerId>,
     /// Counters on permanents that left the battlefield this turn, as they
     /// last existed there (CR 608.2h).
-    pub(crate) lki_counters: Vec<(ObjRef, crate::db::Counter, u16)>,
+    pub(crate) lki_counters: Vec<(ObjRef, crate::db::Counter, crate::num::Count)>,
     /// ... cast with escape; cast for its dash cost (delayed ability k).
     pub(crate) entering_escaped: bool,
     /// ... the X it was cast with.
@@ -600,7 +601,7 @@ pub struct Game {
     /// Counters the permanent being put onto the battlefield enters with
     /// because of the effect that puts it there ("with a corpse counter on
     /// it", persist; CR 614.1c, 122.6): on it before its `Enters` event.
-    pub(crate) entering_counters: Vec<(crate::db::Counter, u16)>,
+    pub(crate) entering_counters: Vec<(crate::db::Counter, crate::num::Count)>,
     /// The effect putting it onto the battlefield says "tapped" (CR 614.1c:
     /// it enters tapped; it doesn't become tapped).
     pub(crate) entering_tapped: bool,
@@ -848,6 +849,11 @@ impl Game {
         }
         if spec.chooser.is_some_and(|p| p > 1) {
             return Err("chooser must be player 0 or 1".into());
+        }
+        // (Per-object turn numbers are u16: `Obj::entered`, `pw_turn`,
+        // marks; ENGINE.md 46.)
+        if spec.max_turns > u16::MAX as u32 {
+            return Err(format!("max_turns {} above {} (turn numbers are u16)", spec.max_turns, u16::MAX));
         }
         let mut g = Game::empty(db, spec, seed);
         for p in 0..2u8 {
@@ -1426,14 +1432,14 @@ impl Game {
         // kicked; kicker {X}: its X, for "mana value X or less".
         if cast && times > 0 {
             if self.def_of(idx).enters_times_counters {
-                self.add_counters(idx, crate::db::Counter::P1P1, times as u16);
+                self.add_counters(idx, crate::db::Counter::P1P1, times as crate::num::Count);
             }
             if self.def_of(idx).times_cost.as_ref().is_some_and(|t| t.x) {
                 self.marks.push((r, Mark::KickerX(x)));
             }
         }
         if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
-            self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note });
+            self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u32 });
         }
         r
     }
@@ -1491,20 +1497,20 @@ impl Game {
         }
         // CR 122.6: "enters with counters".
         for &(k, n) in &self.def_of(idx).enters_counters {
-            self.add_counters(idx, k, n as u16);
+            self.add_counters(idx, k, n as crate::num::Count);
         }
         if self.def_of(idx).enters_x_counters && x > 0 {
-            self.add_counters(idx, crate::db::Counter::P1P1, x as u16);
+            self.add_counters(idx, crate::db::Counter::P1P1, x as crate::num::Count);
         }
         // CR 702.44a-b: sunburst counters (none if it wasn't cast).
         let sun = std::mem::take(&mut self.entering_sunburst);
         if let (Some(k), true) = (self.def_of(idx).sunburst, sun > 0) {
             let k = if self.is_creature(idx) { crate::db::Counter::P1P1 } else { k };
-            self.add_counters(idx, k, sun as u16);
+            self.add_counters(idx, k, sun as crate::num::Count);
         }
         // CR 306.5b: a planeswalker enters with its printed loyalty.
         if let (Some(n), true) = (self.def_of(idx).loyalty, self.def_of(idx).is(types::PLANESWALKER)) {
-            self.add_counters(idx, crate::db::Counter::Loyalty, n as u16);
+            self.add_counters(idx, crate::db::Counter::Loyalty, crate::num::count(n as i64));
         }
         // CR 714.3a: a Saga enters with a lore counter on it (its chapter I
         // ability triggers, 714.2b).
@@ -1600,9 +1606,16 @@ impl Game {
     /// Lose life (CR 119.3; paying life is losing it, 119.4).
     pub(crate) fn lose_life(&mut self, p: PlayerId, n: i32) {
         if n > 0 {
-            self.players[p as usize].life -= n;
+            self.sub_life(p, n);
             self.players[p as usize].lost_life = true;
         }
+    }
+
+    /// A life total changes by `-n` (CR 119.3), saturating at
+    /// +-`num::AMOUNT_MAX` (CR 119 has no bound; shortcuts.md 46.2).
+    fn sub_life(&mut self, p: PlayerId, n: i32) {
+        let l = &mut self.players[p as usize].life;
+        *l = crate::num::amount(*l as i64 - n as i64);
     }
 
     /// `p` gains control of permanent `c` (CR 613.1b; an effect without a
@@ -1856,7 +1869,7 @@ impl Game {
             // the event back, `copies.rs`.)
             let note = std::mem::take(&mut self.enter_note);
             if !std::mem::take(&mut self.defer_enters) {
-                self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(new), b: crate::triggers::Subj::None, amount: note });
+                self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(new), b: crate::triggers::Subj::None, amount: note as u32 });
             }
         }
         if from == Zone::Battlefield && !self.links.is_empty() {
@@ -2294,7 +2307,7 @@ impl Game {
 
     pub(crate) fn gain_life(&mut self, p: PlayerId, n: i32) {
         if n > 0 && !self.players[p as usize].cant_gain_life {
-            self.players[p as usize].life += n;
+            self.sub_life(p, -n);
             self.players[p as usize].gained_life = true;
         }
     }
@@ -2320,10 +2333,10 @@ impl Game {
                 if src.infect {
                     // CR 702.90b: poison counters instead of life loss.
                     let pl = &mut self.players[p as usize];
-                    pl.poison = pl.poison.saturating_add(amount.min(u16::MAX as i32) as u16);
+                    pl.poison = pl.poison.saturating_add(crate::num::count(amount as i64));
                 } else {
                     // CR 120.3a: the player loses that much life.
-                    self.players[p as usize].life -= amount;
+                    self.sub_life(p, amount);
                     self.players[p as usize].lost_life = true;
                 }
             }
@@ -2340,7 +2353,7 @@ impl Game {
                     self.note(|g| format!("damage to {} prevented (protection)", g.describe_target(t)));
                     return 0;
                 }
-                let amt = amount.min(u16::MAX as i32) as u16;
+                let amt = crate::num::unsigned(amount);
                 if walker {
                     // CR 120.3c: that many loyalty counters are removed.
                     self.remove_counters(r.idx, crate::db::Counter::Loyalty, amt);
@@ -2369,7 +2382,7 @@ impl Game {
                 // Nemesis's ruling 66fc62ef, CR 510.2; `combat.rs` emits it).
                 if !self.combat_damage_now {
                     let mut ev = Event::obj(EventKind::DealtDamage, r);
-                    ev.amount = amount.min(u16::MAX as i32) as u16;
+                    ev.amount = crate::num::unsigned(amount);
                     self.event(ev);
                 }
             }
@@ -2385,7 +2398,7 @@ impl Game {
                 kind: EventKind::DealsDamage,
                 a: crate::triggers::Subj::Obj(o),
                 b: crate::triggers::Subj::None,
-                amount: amount.min(u16::MAX as i32) as u16,
+                amount: crate::num::unsigned(amount),
             });
         }
         amount

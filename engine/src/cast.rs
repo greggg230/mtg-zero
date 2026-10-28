@@ -2314,7 +2314,7 @@ impl Game {
         }
         // The event's amount: the spells cast before it this turn, by any
         // player (storm, CR 702.40a).
-        let before = self.players.iter().map(|pl| pl.spells_cast as u16).sum::<u16>() - 1;
+        let before = self.players.iter().map(|pl| pl.spells_cast as u32).sum::<u32>() - 1;
         self.event(crate::triggers::Event {
             kind: crate::db::EventKind::IsCast,
             a: crate::triggers::Subj::Obj(r),
@@ -2540,7 +2540,7 @@ impl Game {
             Filter::Player | Filter::Spell(_) | Filter::Opponent => false,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
             Filter::Color(m) => self.colors_of(c) & m != 0,
-            Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) + self.toughness(c) <= *n,
+            Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) as i64 + self.toughness(c) as i64 <= *n as i64,
             Filter::Subtype(s) => self.has_subtype(c, *s),
             Filter::Supertype(bits) => def.supertypes & bits != 0,
             Filter::ManaValueAtMost(n) => self.mana_value_of(c) <= *n,

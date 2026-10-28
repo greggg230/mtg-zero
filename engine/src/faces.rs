@@ -115,7 +115,8 @@ impl Game {
             }
             Ext::Poison { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    let n = self.amount(f, *n).max(0) as u16;
+                    // (Etali: that many, any number: CR 122.1f.)
+                    let n = crate::num::count(self.amount(f, *n) as i64);
                     let pl = &mut self.players[p as usize];
                     pl.poison = pl.poison.saturating_add(n);
                     self.note(|_| format!("P{p} gets {n} poison counter(s)"));
@@ -219,7 +220,7 @@ impl Game {
                 }
                 if f.i > n || self.players[p as usize].hand.is_empty() {
                     if let (Some(c), true) = (it, f.x > 0) {
-                        self.add_counters(c, crate::db::Counter::P1P1, f.x as u16);
+                        self.add_counters(c, crate::db::Counter::P1P1, crate::num::count(f.x as i64));
                     }
                     return Flow::Next;
                 }
@@ -656,10 +657,10 @@ impl Game {
 
     /// Lore counters on Saga `c` went from `before` to `after`: each chapter
     /// ability N with before < N <= after triggers (CR 714.2b).
-    pub(crate) fn chapters_reached(&mut self, c: CardIdx, before: u16, after: u16) {
-        let last = self.abilities(c).chapters as u16;
+    pub(crate) fn chapters_reached(&mut self, c: CardIdx, before: crate::num::Count, after: crate::num::Count) {
+        let last = self.abilities(c).chapters as crate::num::Count;
         let r = self.obj_ref(c);
-        for n in before + 1..=after.min(last) {
+        for n in before.saturating_add(1)..=after.min(last) {
             self.event(Event { kind: EventKind::Chapter, a: Subj::Obj(r), b: Subj::None, amount: n });
         }
     }
@@ -671,7 +672,7 @@ impl Game {
         let mut out = Vec::new();
         for &c in &self.battlefield {
             // (A Saga is an enchantment, CR 714.1.)
-            let last = self.abilities(c).chapters as u16;
+            let last = self.abilities(c).chapters as crate::num::Count;
             if last == 0 || self.counters_on(c, Counter::Lore) < last || !self.is_type(c, types::ENCHANTMENT) {
                 continue;
             }

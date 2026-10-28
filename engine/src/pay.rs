@@ -618,13 +618,13 @@ impl Game {
                 let mut reuse = 1u8;
                 if let Some((k, n)) = ad.cost.remove_counters {
                     let have = self.counters_on(c, k);
-                    if have < n as u16 {
+                    if have < n as crate::num::Count {
                         continue;
                     }
-                    sac_self |= m.sac_if_no == Some(k) && have == n as u16;
+                    sac_self |= m.sac_if_no == Some(k) && have == n as crate::num::Count;
                     // Without {T} (Pentad Prism): once per counter.
                     if !(ad.cost.tap || ad.cost.sac_self || ad.cost.exile_self) {
-                        reuse = (have / n as u16).min(32) as u8;
+                        reuse = (have / n as crate::num::Count).min(32) as u8;
                     }
                 }
                 let src = Src { card: c, slot: AbilitySlot::Activated(i as u8) };
@@ -905,7 +905,7 @@ impl Game {
             }
             (None, None, None) => i32::MAX,
         };
-        (Budget { life: (pl.life - later as i32).max(0), sac: sac.max(0), tap: i32::MAX }, later > 0)
+        (Budget { life: pl.life.saturating_sub(later as i32).max(0), sac: sac.max(0), tap: i32::MAX }, later > 0)
     }
 
     /// Mana sources whose use takes a permanent a later sacrifice needs, or
@@ -969,7 +969,8 @@ impl Game {
         let mut g = SVec::new();
         for t in 0..6 {
             let held = if t == crate::mana::C && !art_ok { pool.art } else { 0 };
-            let n = pool.amt[t] - held + pm.extra[t] - pm.extra_made[t];
+            // (Saturating: at most 255 of a type, shortcuts.md 46.4.)
+            let n = (pool.amt[t] - held).saturating_add(pm.extra[t]) - pm.extra_made[t];
             if n > 0 {
                 g.push((t as u8, n));
             }
@@ -1187,7 +1188,7 @@ impl Game {
             self.tap(c);
         }
         if let Some((k, n)) = cost.remove_counters {
-            self.remove_counters(c, k, n as u16);
+            self.remove_counters(c, k, n as crate::num::Count);
         }
         if cost.exert {
             // CR 701.39a: it won't untap during its controller's next untap
@@ -1601,10 +1602,10 @@ impl Game {
         let groups = self.vgroups(pm);
         let mut vamt = pool.amt;
         for t in 0..6 {
-            vamt[t] += pm.extra[t];
+            vamt[t] = vamt[t].saturating_add(pm.extra[t]);
         }
-        let vart = pool.art + pm.extra_art;
-        let vhaste = pool.haste + pm.extra_haste;
+        let vart = pool.art.saturating_add(pm.extra_art).min(vamt[C]);
+        let vhaste = pool.haste.saturating_add(pm.extra_haste).min(vamt[R]);
         let vm = pm.vm.expect("the pool's spend is known") as usize;
         if vm == 0 {
             return vec![Rem { amt: vamt, art: vart, haste: vhaste }];
@@ -1651,20 +1652,21 @@ impl Game {
     /// one more need of the payment.
     fn pick_multi(&self, pm: &mut PayMana, classes: &[Class], ci: usize, src: Src, prod: [u8; 6]) {
         let cl = &classes[ci];
+        // (Saturating: at most 255 of a type, shortcuts.md 46.4.)
         for t in 0..6 {
-            pm.extra[t] += prod[t];
+            pm.extra[t] = pm.extra[t].saturating_add(prod[t]);
             if cl.need != 0 {
-                pm.extra_made[t] += prod[t];
+                pm.extra_made[t] = pm.extra_made[t].saturating_add(prod[t]);
             }
         }
         if cl.need != 0 {
             pm.marked.push(cl.need);
         }
         if cl.haste {
-            pm.extra_haste += prod[crate::mana::R];
+            pm.extra_haste = pm.extra_haste.saturating_add(prod[crate::mana::R]);
         }
         if cl.only & crate::db::SPEND_ARTIFACT != 0 {
-            pm.extra_art += prod[crate::mana::C];
+            pm.extra_art = pm.extra_art.saturating_add(prod[crate::mana::C]);
         }
         pm.multi.push((src, prod));
         self.recount(pm, classes);
@@ -1678,7 +1680,7 @@ impl Game {
         let pool = self.players[payer as usize].pool;
         let mut spent = [0u8; 6];
         for t in 0..6 {
-            spent[t] = pool.amt[t] + pm.extra[t] - rem.amt[t];
+            spent[t] = pool.amt[t].saturating_add(pm.extra[t]) - rem.amt[t];
         }
         if self.marks.iter().any(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) {
             let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());

@@ -221,7 +221,7 @@ impl Game {
                 let o = self.def_of(c).opening.clone().expect("an opening-hand action");
                 self.note(|g| format!("P{p} begins the game with {} on the battlefield", g.name(c)));
                 // (With its counters as it enters, CR 614.1c.)
-                self.entering_counters = o.counters.iter().map(|&(k, n)| (k, n as u16)).collect();
+                self.entering_counters = o.counters.iter().map(|&(k, n)| (k, n as crate::num::Count)).collect();
                 self.put_onto_battlefield(c, p);
                 self.entering_counters.clear();
                 self.agenda.push(Task::Opening { p, exile: o.exile });
@@ -360,7 +360,7 @@ impl Game {
                                 kind: crate::db::EventKind::ClassLevel,
                                 a: crate::triggers::Subj::Obj(r),
                                 b: crate::triggers::Subj::None,
-                                amount: *level as u16,
+                                amount: *level as u32,
                             };
                             self.event(ev);
                         }

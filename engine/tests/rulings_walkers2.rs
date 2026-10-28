@@ -62,7 +62,7 @@ fn a_planeswalker_entering_in_combat_waits_for_a_main_phase_and_comets_die_cr_60
     assert!((0..4u8).any(|i| g.has_option(ab(aj, i))), "the main phase: {}", opts(&g));
     // Comet.
     let comet = "Comet, Stellar Pup";
-    for (roll, loyalty, life1, gone) in [(4u64, 1u16, 19, true), (3, 3, 20, false)] {
+    for (roll, loyalty, life1, gone) in [(4u64, 1u32, 19, true), (3, 3, 20, false)] {
         let mut g = scen().battlefield(0, &[comet]).counters(0, comet, Counter::Loyalty, loyalty).at(Step::Main1, 0).start();
         let c = bf(&g, 0, comet);
         g.choose(ab(c, 0));

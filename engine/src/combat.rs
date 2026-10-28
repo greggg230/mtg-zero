@@ -363,19 +363,19 @@ impl Game {
             let trample = self.has_kw(a, Kw::Trample) && dest.is_some();
             if !self.objs[a.i()].blocked {
                 if let Some(t) = dest {
-                    self.combat_dmg.push((a, t, power.min(u16::MAX as i32) as u16));
+                    self.combat_dmg.push((a, t, crate::num::unsigned(power)));
                 }
             } else if blockers.is_empty() {
                 // CR 509.1h / 702.19d: blocked, blockers gone: only trample.
                 if let (true, Some(t)) = (trample, dest) {
-                    self.combat_dmg.push((a, t, power.min(u16::MAX as i32) as u16));
+                    self.combat_dmg.push((a, t, crate::num::unsigned(power)));
                 }
             } else if blockers.len() == 1 && !trample {
                 let b = self.obj_ref(blockers[0]);
-                self.combat_dmg.push((a, Target::Obj(b), power.min(u16::MAX as i32) as u16));
+                self.combat_dmg.push((a, Target::Obj(b), crate::num::unsigned(power)));
             } else {
                 self.agenda.push(Task::CombatDamage { first, att: k as u8 + 1 });
-                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: power.min(u16::MAX as i32) as u16 });
+                self.agenda.push(Task::AssignDamage { att: a, j: 0, left: crate::num::unsigned(power) });
                 return;
             }
         }
@@ -388,7 +388,7 @@ impl Game {
             let p = self.power(c);
             if p > 0 {
                 let ar = self.obj_ref(a);
-                self.combat_dmg.push((c, Target::Obj(ar), p.min(u16::MAX as i32) as u16));
+                self.combat_dmg.push((c, Target::Obj(ar), crate::num::unsigned(p)));
             }
         }
         // CR 510.2: all at once. Sources are read before anything changes.
@@ -414,16 +414,17 @@ impl Game {
             let to_creature = matches!(t, Target::Obj(o) if self.live(o) && self.is_creature(o.idx));
             let to_walker =
                 matches!(t, Target::Obj(o) if self.live(o) && self.is_type(o.idx, crate::db::types::PLANESWALKER));
-            let dealt = self.deal_damage(src, t, n as i32);
+            let dealt = self.deal_damage(src, t, crate::num::signed(n));
+            // (Totals saturate, as every amount: ENGINE.md 46.)
             if dealt > 0 {
                 match by_source.iter_mut().find(|x| x.0 == r) {
-                    Some(x) => x.1 += dealt,
+                    Some(x) => x.1 = x.1.saturating_add(dealt),
                     None => by_source.push((r, dealt)),
                 }
             }
             if let (Target::Obj(o), true) = (t, dealt > 0) {
                 match by_recipient.iter_mut().find(|x| x.0 == o) {
-                    Some(x) => x.1 += dealt,
+                    Some(x) => x.1 = x.1.saturating_add(dealt),
                     None => by_recipient.push((o, dealt)),
                 }
             }
@@ -440,18 +441,18 @@ impl Game {
         self.combat_damage_now = false;
         for (o, n) in by_recipient {
             let mut ev = Event::obj(EventKind::DealtDamage, o);
-            ev.amount = n.min(u16::MAX as i32) as u16;
+            ev.amount = crate::num::unsigned(n);
             self.event(ev);
         }
         for (r, n) in by_source {
-            self.event(Event { kind: EventKind::DealsDamage, a: Subj::Obj(r), b: Subj::None, amount: n.min(u16::MAX as i32) as u16 });
+            self.event(Event { kind: EventKind::DealsDamage, a: Subj::Obj(r), b: Subj::None, amount: crate::num::unsigned(n) });
         }
         for (r, o, n) in to_creatures {
             self.event(Event {
                 kind: EventKind::DealsCombatDamageToCreature,
                 a: Subj::Obj(r),
                 b: Subj::Obj(o),
-                amount: n.min(u16::MAX as i32) as u16,
+                amount: crate::num::unsigned(n),
             });
         }
         // CR 724.2: "whenever a creature deals combat damage to the monarch,
@@ -496,7 +497,7 @@ impl Game {
                 kind: EventKind::DealsCombatDamage,
                 a: Subj::Obj(r),
                 b: Subj::Player(p),
-                amount: n.min(u16::MAX as i32) as u16,
+                amount: crate::num::unsigned(n),
             });
         }
         for (r, o, n) in to_walkers {
@@ -504,7 +505,7 @@ impl Game {
                 kind: EventKind::DealsCombatDamage,
                 a: Subj::Obj(r),
                 b: Subj::Obj(o),
-                amount: n.min(u16::MAX as i32) as u16,
+                amount: crate::num::unsigned(n),
             });
         }
         if batch {
@@ -514,25 +515,24 @@ impl Game {
 
     /// Lethal damage for assignment purposes (CR 510.1c-d, 702.2c): what the
     /// blocker still needs, counting damage already assigned this step.
-    pub(crate) fn lethal_needed(&self, att: CardIdx, b: CardIdx) -> u16 {
-        let assigned: u16 = self
+    pub(crate) fn lethal_needed(&self, att: CardIdx, b: CardIdx) -> u32 {
+        let assigned: u32 = self
             .combat_dmg
             .iter()
             .filter(|&&(_, t, _)| t == Target::Obj(self.obj_ref(b)))
-            .map(|&(_, _, n)| n)
-            .sum();
-        let have = self.objs[b.i()].damage + assigned;
+            .fold(0u32, |s, &(_, _, n)| s.saturating_add(n));
+        let have = self.objs[b.i()].damage.saturating_add(assigned);
         if self.has_kw(att, Kw::Deathtouch) {
             return if assigned > 0 { 0 } else { 1 };
         }
-        (self.toughness(b).max(0) as u16).saturating_sub(have)
+        crate::num::unsigned(self.toughness(b)).saturating_sub(have)
     }
 
     /// The attacking player divides `att`'s damage among its blockers in
     /// order: `NUMBER` n to blocker `j`. Without trample everything goes to
     /// blockers; with trample the player gets the rest only if every blocker
     /// was assigned lethal damage (702.19c).
-    pub(crate) fn assign_damage(&mut self, att: CardIdx, j: u8, left: u16) {
+    pub(crate) fn assign_damage(&mut self, att: CardIdx, j: u8, left: u32) {
         let blockers = self.blockers_of(att);
         // CR 702.19b: the rest to the player or planeswalker it attacks
         // (with nothing to attack, everything to the blockers, 702.19f).
@@ -540,10 +540,10 @@ impl Game {
         let trample = self.has_kw(att, Kw::Trample) && dest.is_some();
         if let Some(Choice::Number(k)) = self.answer.take() {
             // With 32 or more to divide, 30 = lethal and 31 = all the rest.
-            let n = match (left >= act::NUMBER_N, k) {
+            let n = match (left >= act::NUMBER_N as u32, k) {
                 (true, 30) => self.lethal_needed(att, blockers[j as usize]),
                 (true, 31) => left,
-                _ => k as u16,
+                _ => k as u32,
             };
             let b = self.obj_ref(blockers[j as usize]);
             if n > 0 {
@@ -565,29 +565,29 @@ impl Game {
         let last = j as usize == blockers.len() - 1;
         let prev_lethal = blockers[..j as usize].iter().all(|&x| self.lethal_needed(att, x) == 0);
         let lethal = self.lethal_needed(att, b);
-        let amounts: Vec<u16> = if !last {
-            (0..=left).collect()
+        // The amounts the player may assign to this blocker: `lo..=hi`
+        // (a range, not a list: `left` may be any amount, ENGINE.md 46).
+        let (lo, hi) = if !last {
+            (0, left)
         } else if !trample || !prev_lethal || left < lethal {
-            vec![left]
+            (left, left)
         } else {
-            (lethal..=left).collect()
+            (lethal, left)
         };
+        let has = |n: u32| (lo..=hi).contains(&n);
+        let number = |n: u32| Opt { action: act::NUMBER + n as u16, choice: Choice::Number(n as u8) };
         // `NUMBER` n = n damage. With 32 or more to divide, the amounts
         // offered are 0..=29 exactly, the blocker's lethal damage (n = 30)
         // and all of the rest (n = 31): the divisions that differ in what
         // dies and what tramples over (ENGINE.md 13).
-        let opts = if left < act::NUMBER_N {
-            amounts.into_iter().map(|n| Opt { action: act::NUMBER + n, choice: Choice::Number(n as u8) }).collect()
+        let opts = if left < act::NUMBER_N as u32 {
+            (lo..=hi).map(number).collect()
         } else {
-            let mut v: Vec<Opt> = amounts
-                .iter()
-                .filter(|&&n| n <= 29)
-                .map(|&n| Opt { action: act::NUMBER + n, choice: Choice::Number(n as u8) })
-                .collect();
-            if lethal > 29 && amounts.contains(&lethal) {
+            let mut v: Vec<Opt> = (lo..=hi.min(29)).map(number).collect();
+            if lethal > 29 && has(lethal) {
                 v.push(Opt { action: act::NUMBER + 30, choice: Choice::Number(30) });
             }
-            if left > 29 && left != lethal && amounts.contains(&left) {
+            if left > 29 && left != lethal && has(left) {
                 v.push(Opt { action: act::NUMBER + 31, choice: Choice::Number(31) });
             }
             v
