@@ -129,6 +129,9 @@ def now_record(run, cfg, prog, rows, state):
     begun = max([t for t in ((last or {}).get('time'), rs.get('started')) if isinstance(t, (int, float))], default=None)
     if prog.get('phase') == 'selfplay':
         out['selfplay'] = {'games': prog.get('games'), 'target': prog.get('target'), 'since': begun}
+        if prog.get('remote'):             # remote self-play (zero-core remoteplay): its games this iteration
+            r = prog['remote']
+            out['selfplay']['remote'] = {k: r.get(k) for k in ('host', 'workers', 'state', 'games')}
     elif prog.get('phase') in ('train', 'eval', 'remote shards'):
         out['since'] = prog.get('time')
     # The latest checkpoint's evaluation while it runs (a remote one runs beside the next
