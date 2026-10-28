@@ -606,6 +606,11 @@ pub enum EventKind {
     AttackersUnblocked,
     /// A Class became level `amount` (CR 716.2c). Subject: obj.
     ClassLevel,
+    /// A card left a graveyard for another zone ("whenever an instant or
+    /// sorcery card leaves your graveyard", Murktide Regent; ENGINE.md 53).
+    /// Recorded before the card moves (CR 603.10a: it looks back in time).
+    /// Subjects: the graveyard's owner, the card (as it was there).
+    LeavesGraveyard,
 }
 
 /// When a delayed triggered ability triggers (CR 603.7).
@@ -653,7 +658,7 @@ impl EventKind {
             E::CardsPutIntoLibrary => (&[Slot::Player], &[]),
             E::AttackersUnblocked => (&[Slot::Player], &[Slot::Defender]),
             E::DealsCombatDamage | E::DealsCombatDamageToCreature => (&[Slot::Source], &[Slot::Target]),
-            E::CardDiscarded => (&[Slot::Player], &[Slot::Card]),
+            E::CardDiscarded | E::LeavesGraveyard => (&[Slot::Player], &[Slot::Card]),
             E::Delayed => (&[], &[]),
             E::IsCast => (&[Slot::Spell], &[Slot::Controller]),
             E::BecomesTarget => (&[Slot::Target, Slot::TargetSpell], &[Slot::Controller]),
@@ -1207,6 +1212,7 @@ impl CardDef {
             } else {
                 0
             })
+            | (if self.trig_mask & (1u64 << EventKind::LeavesGraveyard as u32) != 0 { crate::game::SEEN_GY_LEAVE } else { 0 })
     }
 }
 
@@ -1337,6 +1343,12 @@ pub struct CardDef {
     pub x_pips: u8,
     /// "Enters with X +1/+1 counters" (the X it was cast with).
     pub enters_x_counters: bool,
+    /// "This creature enters with a +1/+1 counter on it for each <filter>
+    /// card exiled with it" (Murktide Regent; ENGINE.md 53): the cards
+    /// exiled to pay the cost of the spell that became it (its delve, CR
+    /// 607.2q; `Mark::ExiledToPay`), as they are in exile (a card's own
+    /// characteristics, `CardDb::def_matches`); 614.1c.
+    pub counters_per_exiled: Option<Filter>,
     /// "You may play n additional lands on each of your turns" (`ANY_LANDS`:
     /// any number).
     pub extra_lands: u8,
@@ -1930,6 +1942,29 @@ impl CardDb {
         CUBE.get_or_init(|| CardDb::from_document(&load_cube_document()).leak())
     }
 
+    /// The card table of constructed play (ENGINE.md 53): the cube's cards
+    /// (the same definitions at the same ids as [`cube`](Self::cube)) and
+    /// then the cards of `data/cards/legacy.ir.json` (cards outside the
+    /// cube a constructed deck plays: the Izzet Delver mirror's Murktide
+    /// Regent and Prismari Charm), then their tokens and faces. A separate
+    /// table: nothing of the cube (its deck generators, pools, team draft,
+    /// fuzz pool, digests) ever sees the legacy cards. Every legacy card
+    /// must be supported (a loud failure otherwise).
+    pub fn constructed() -> &'static CardDb {
+        static CONSTRUCTED: OnceLock<&'static CardDb> = OnceLock::new();
+        CONSTRUCTED.get_or_init(|| {
+            let mut cards = load_cube_document().cards;
+            let legacy = load_legacy_document().cards;
+            let names: Vec<String> = legacy.iter().map(|c| c.name.clone()).collect();
+            cards.extend(legacy);
+            let db = CardDb::from_cards(&cards);
+            for n in &names {
+                db.expect_id(n).unwrap_or_else(|e| panic!("legacy card IR: {e}"));
+            }
+            db.leak()
+        })
+    }
+
     pub fn id(&self, name: &str) -> Option<DefId> {
         self.by_name.get(name).copied()
     }
@@ -2061,6 +2096,15 @@ pub const CUBE_IR: &str = include_str!("../../data/cards/powerlsv.ir.json");
 
 pub fn load_cube_document() -> card_ir::Document {
     card_ir::load_document(CUBE_IR).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The checked-in legacy IR (cards outside the cube for constructed decks,
+/// ENGINE.md 53), compiled in; encoded with the cube's schema (one
+/// `card_ir` crate reads both: mtg-bot `cards export-ir --pool cube legacy`).
+pub const LEGACY_IR: &str = include_str!("../../data/cards/legacy.ir.json");
+
+pub fn load_legacy_document() -> card_ir::Document {
+    card_ir::load_document(LEGACY_IR).unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// A face-down permanent's characteristics (CR 708.2a): a 2/2 creature, no

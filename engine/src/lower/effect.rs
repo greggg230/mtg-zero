@@ -139,6 +139,15 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 b.op(Op::DealDamage { amount, to });
             }
         }
+        // "<This> deals N damage to each of one or two targets" (Prismari
+        // Charm): one requirement of 1..2 any targets, the same damage to
+        // each (CR 115.3: distinct objects or players).
+        E::DealDamageToEachTarget(nodes::DealDamageToEachTarget { amount, targets }) => {
+            let amount = Amount::Fixed(l.int("DealDamageToEachTarget.amount", *amount, 0, 99));
+            if let Some(to) = lower_targets(l, b, targets, "DealDamageToEachTarget") {
+                b.op(Op::DealDamage { amount, to });
+            }
+        }
         E::DealDamageToTargetCreature(nodes::DealDamageToTargetCreature { amount, targets, optional }) => {
             l.deny("DealDamageToTargetCreature.optional", optional);
             let amount = Amount::Fixed(l.int("DealDamageToTargetCreature.amount", *amount, 0, 99));

@@ -258,6 +258,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             conspiracy_rules,
             replacement_statics,
             companion,
+            enters_with_counter_per_card_exiled_with_it,
         } = p;
         // Which face this printing is (set by the caller for a face); the
         // printings lowered inside it (tokens, emblems) are cards.
@@ -1654,7 +1655,33 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
         None => None,
     };
+    // "This creature enters with a +1/+1 counter on it for each <filter>
+    // card exiled with it" (Murktide Regent, ENGINE.md 53): linked to the
+    // ability printed on the card that exiles cards while paying the cost
+    // to cast it (CR 607.2q), here delve (a granted escape, Underworld
+    // Breach's, isn't printed on it: its cards don't count); the filter
+    // reads a card's own characteristics (the cards are in exile). The
+    // card's own escape (also printed) isn't recorded: a blocker, never a
+    // silent zero.
+    let counters_per_exiled = match enters_with_counter_per_card_exiled_with_it.as_deref() {
+        None => None,
+        Some(x) => {
+            let f = super::filter::lower_pred(l, x);
+            if !*has_delve || ty & types::PERMANENT == 0 || escape.is_some() {
+                l.unsupported("CardPrinting.enters_with_counter_per_card_exiled_with_it(without delve, or with escape)");
+            }
+            match f {
+                Some(f) if crate::db::deck_filter_ok(&f) => Some(f),
+                Some(f) => {
+                    l.unsupported(format!("CardPrinting.enters_with_counter_per_card_exiled_with_it({f:?}: a filter that needs a game)"));
+                    None
+                }
+                None => None,
+            }
+        }
+    };
     let mut def = CardDef {
+        counters_per_exiled,
         companion,
         look_top: *grants_look_at_top_of_library,
         play_top_life: *grants_play_from_top_paying_life,

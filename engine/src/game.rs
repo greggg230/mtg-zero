@@ -594,6 +594,10 @@ pub struct Game {
     pub(crate) entering_x: u8,
     /// ... the colours of mana spent to cast it (sunburst, CR 702.44a).
     pub(crate) entering_sunburst: u8,
+    /// ... the matching cards exiled to pay its cost ("a +1/+1 counter for
+    /// each instant and sorcery card exiled with it", CR 607.2q;
+    /// `CardDef::counters_per_exiled`, ENGINE.md 53).
+    pub(crate) entering_exiled: u8,
     /// Effects that apply to the next permanent put onto the battlefield as
     /// it enters ("it's an enchantment", "it's a Phyrexian in addition";
     /// CR 614.1c-like; set and cleared around one move).
@@ -749,6 +753,8 @@ pub(crate) const SEEN_SAC_MANA: u16 = 8192;
 /// creature as it last existed on the battlefield if it left (Pyrogoyf;
 /// `Game::lki_damage`).
 pub(crate) const SEEN_LKI_DAMAGE: u16 = 16384;
+/// A trigger on a card leaving a graveyard (Murktide Regent; ENGINE.md 53).
+pub(crate) const SEEN_GY_LEAVE: u16 = 32768;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
 /// 400.7).
@@ -825,6 +831,11 @@ pub enum Mark {
     /// as the total cost is paid, after the mana abilities (CR 601.2g-h,
     /// 702.66a), as the payment ends (ENGINE.md 51).
     DelveExile,
+    /// On a spell whose permanent enters with a counter for each card
+    /// exiled with it (Murktide Regent, `CardDef::counters_per_exiled`): a
+    /// card (in exile, this object) its delve exiled to pay its cost (CR
+    /// 607.2q; ENGINE.md 53).
+    ExiledToPay(ObjRef),
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -994,6 +1005,7 @@ impl Game {
             entering_escaped: false,
             entering_x: 0,
             entering_sunburst: 0,
+            entering_exiled: 0,
             entering_mods: Vec::new(),
             entering_counters: Vec::new(),
             entering_tapped: false,
@@ -1468,6 +1480,7 @@ impl Game {
         self.entering_evoked = false;
         self.entering_face = None;
         let _ = std::mem::take(&mut self.entering_sunburst);
+        let _ = std::mem::take(&mut self.entering_exiled);
         self.entering_tapped = false;
         let _ = std::mem::take(&mut self.entering_times);
         let _ = std::mem::take(&mut self.entering_warp);
@@ -1521,6 +1534,13 @@ impl Game {
         if let (Some(k), true) = (self.def_of(idx).sunburst, sun > 0) {
             let k = if self.is_creature(idx) { crate::db::Counter::P1P1 } else { k };
             self.add_counters(idx, k, sun as crate::num::Count);
+        }
+        // CR 607.2q, 614.1c: a +1/+1 counter for each matching card exiled
+        // to pay the cost of the spell that became it (none if it wasn't
+        // cast; Murktide Regent, ENGINE.md 53).
+        let exiled = std::mem::take(&mut self.entering_exiled);
+        if exiled > 0 && self.def_of(idx).counters_per_exiled.is_some() {
+            self.add_counters(idx, crate::db::Counter::P1P1, exiled as crate::num::Count);
         }
         // CR 306.5b: a planeswalker enters with its printed loyalty.
         if let (Some(n), true) = (self.def_of(idx).loyalty, self.def_of(idx).is(types::PLANESWALKER)) {
@@ -1701,6 +1721,13 @@ impl Game {
                 (Zone::Exile, None, Some((results, k, chooser)))
             }
         };
+        // "Whenever a card leaves your graveyard" looks back in time too
+        // (CR 603.10a): recorded before the card moves, the graveyard's
+        // owner and the card as it was there (Murktide Regent; ENGINE.md 53).
+        if from == Zone::Graveyard && to != Zone::Graveyard && self.seen & SEEN_GY_LEAVE != 0 && !self.is_token(idx) {
+            let owner = self.objs[idx.i()].owner;
+            self.event(Event { kind: EventKind::LeavesGraveyard, a: crate::triggers::Subj::Player(owner), b: crate::triggers::Subj::Obj(old), amount: 0 });
+        }
         // Leave-the-battlefield abilities look back in time (CR 603.10a):
         // the events are recorded before the object moves.
         if from == Zone::Battlefield && !self.quiet_leave {

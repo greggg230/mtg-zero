@@ -352,6 +352,11 @@ impl Game {
             TrigPred::Subject(s, f) => {
                 let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
                 match ev.subject(*s) {
+                    // (A card leaving a graveyard is seen there, before it
+                    // moves: CR 603.10a; ENGINE.md 53.)
+                    Subj::Obj(r) if ev.kind == EventKind::LeavesGraveyard => {
+                        self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard && self.card_matches(f, r.idx, &ctx)
+                    }
                     Subj::Obj(r) => self.live(r) && self.subject_matches(f, r.idx, &ctx),
                     Subj::Player(q) => self.filter_ok(f, Target::Player(q), &ctx),
                     Subj::None | Subj::Item(_) => false,

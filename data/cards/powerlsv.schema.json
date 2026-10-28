@@ -143,6 +143,7 @@
    "DealDamagePaidInEnergy",
    "DealDamageThenChainCopy",
    "DealDamageToControllerAndAddMana",
+   "DealDamageToEachTarget",
    "DealDamageToTargetCreature",
    "DealNDamageToEachCreature",
    "DealPowerDamageToEachOfUpToKickedTargets",
@@ -5270,6 +5271,22 @@
       "t": "opt"
      },
      "type_source": "annotation"
+    },
+    {
+     "annotation": "'object | None'",
+     "default": null,
+     "name": "enters_with_counter_per_card_exiled_with_it",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "ObjectPredicate"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation+observed"
     }
    ],
    "kind": "dataclass",
@@ -7249,6 +7266,40 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.damage",
    "qualname": "DealDamageToControllerAndAddMana"
+  },
+  "DealDamageToEachTarget": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "amount",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_board",
+   "qualname": "DealDamageToEachTarget"
   },
   "DealDamageToTargetCreature": {
    "category": "Effect",
@@ -17474,6 +17525,10 @@
     {
      "name": "CLASS_LEVEL_GAINED",
      "value": "class_level_gained"
+    },
+    {
+     "name": "LEAVES_GRAVEYARD",
+     "value": "leaves_graveyard"
     }
    ],
    "module": "mtg_bot.effects.predicates",

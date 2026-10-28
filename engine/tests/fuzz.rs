@@ -46,6 +46,12 @@
 //! the default mode's). Every mode also checks that a sampled first pick is
 //! a candidate of the viewer's prior (in a drafted match: a card its team
 //! never saw).
+//! `FUZZ_POOL=delver` (ENGINE.md 53): the Legacy Izzet Delver mirror, both
+//! players the pinned 60 (`az::constructed`, no sideboard) with the card
+//! table of constructed play (`CardDb::constructed`: Murktide Regent and
+//! Prismari Charm with the cube's cards); every check of the default mode,
+//! and with 200 games or more Murktide Regent must have been cast and its
+//! leave-the-graveyard trigger resolved. Games only (best-of-one).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! Unbounded numbers (M6, ENGINE.md 46): at every decision the decider's
@@ -218,6 +224,7 @@ enum PoolMode {
     Interactions,
     Exponential,
     Drafted,
+    Delver,
 }
 
 fn pool_mode() -> PoolMode {
@@ -226,7 +233,8 @@ fn pool_mode() -> PoolMode {
         Ok("interactions") => PoolMode::Interactions,
         Ok("exponential") => PoolMode::Exponential,
         Ok("drafted") => PoolMode::Drafted,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\" or \"drafted\")"),
+        Ok("delver") => PoolMode::Delver,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\" or \"delver\")"),
     }
 }
 
@@ -236,6 +244,56 @@ fn interactions_mode() -> bool {
 
 fn exponential_mode() -> bool {
     pool_mode() == PoolMode::Exponential
+}
+
+fn delver_mode() -> bool {
+    pool_mode() == PoolMode::Delver
+}
+
+/// The card table of the mode's games: the cube's and the custom test cards,
+/// or constructed play's (`FUZZ_POOL=delver`).
+fn game_db() -> &'static CardDb {
+    if delver_mode() {
+        CardDb::constructed()
+    } else {
+        common::db()
+    }
+}
+
+/// The pinned Delver 60 (`FUZZ_POOL=delver`).
+fn delver_deck() -> Vec<u16> {
+    let d = engine::az::constructed::Decklist::izzet_delver();
+    engine::az::constructed::Decklist::ids(CardDb::constructed(), &d.main).unwrap()
+}
+
+/// `FUZZ_POOL=delver`: Murktide Regents that resolved, and leave-the-graveyard
+/// triggers of theirs that resolved (counted from the game logs' counters).
+static DELVER_MURKTIDES: AtomicU64 = AtomicU64::new(0);
+static DELVER_CHARMS: AtomicU64 = AtomicU64::new(0);
+static DELVER_MURK_TRIGGERS: AtomicU64 = AtomicU64::new(0);
+/// The most actions any game took (the fuzzer's cap is 100,000).
+static MAX_GAME_STEPS: AtomicU64 = AtomicU64::new(0);
+
+/// `FUZZ_POOL=delver`: count the Regents and Charms cast and the Regents'
+/// triggers put on the stack (each stack item once, by its id).
+fn count_delver(g: &Game, seen: &mut Vec<u32>) {
+    for it in g.stack() {
+        if seen.contains(&it.id) {
+            continue;
+        }
+        seen.push(it.id);
+        match it.kind {
+            engine::game::StackKind::Spell { card } => match g.name(card) {
+                "Murktide Regent" => DELVER_MURKTIDES.fetch_add(1, Ordering::Relaxed),
+                "Prismari Charm" => DELVER_CHARMS.fetch_add(1, Ordering::Relaxed),
+                _ => 0,
+            },
+            engine::game::StackKind::Ability { source, .. } if g.db().def(g.obj(source.idx).def).name == "Murktide Regent" => {
+                DELVER_MURK_TRIGGERS.fetch_add(1, Ordering::Relaxed)
+            }
+            _ => 0,
+        };
+    }
 }
 
 /// An exponential deck (40 cards: 12 Forests, 5 random lands, 23 from
@@ -422,6 +480,9 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if exponential_mode() {
         return [exponential_deck(db, &mut rng), exponential_deck(db, &mut rng)];
     }
+    if delver_mode() {
+        return [(delver_deck(), Vec::new()), (delver_deck(), Vec::new())];
+    }
     if seed % 4 == 3 {
         let gen = engine::az::decks::DeckGen::default();
         return [
@@ -441,7 +502,7 @@ fn new_game(seed: u64) -> Game {
     // `FUZZ_LOG=1` keeps the game log, so a panic message shows the game.
     let log = std::env::var("FUZZ_LOG").is_ok();
     let starting_life = if exponential_mode() { EXP_LIFE } else { GameSpec::default().starting_life };
-    Game::with_sideboards(common::db(), GameSpec { log, starting_life, ..GameSpec::default() }, [&d0, &d1], [&s0, &s1], seed).unwrap()
+    Game::with_sideboards(game_db(), GameSpec { log, starting_life, ..GameSpec::default() }, [&d0, &d1], [&s0, &s1], seed).unwrap()
 }
 
 /// Play one game with random actions; run the extra checks along the way.
@@ -457,6 +518,7 @@ fn play(seed: u64, checks: bool) -> Played {
     let mut steps = 0;
     let exp = exponential_mode();
     let mut buf = Vec::new();
+    let mut stack_seen: Vec<u32> = Vec::new();
     while !g.is_over() {
         g.legal_actions(&mut legal);
         assert!(!legal.is_empty(), "seed {seed}: no legal action in a running game");
@@ -488,10 +550,14 @@ fn play(seed: u64, checks: bool) -> Played {
 ")));
         actions.push(a);
         steps += 1;
+        if delver_mode() && !g.stack().is_empty() {
+            count_delver(&g, &mut stack_seen);
+        }
         assert!(steps < 100_000, "seed {seed}: game does not end
 {}", g.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
 "));
     }
+    MAX_GAME_STEPS.fetch_max(steps as u64, Ordering::Relaxed);
     let companions = (0..2).filter(|&p| g.player(p).companion.is_some()).count() as u32;
     let companions_used = (0..2).filter(|&p| g.player(p).companion_used).count() as u32;
     Played { actions, keys, fingerprint: g.fingerprint(), outcome: g.outcome().unwrap(), turns: g.turn().number, companions, companions_used }
@@ -747,6 +813,15 @@ fn fuzz_random_games() {
     }
     if n >= 100 && exponential_mode() {
         assert!(MAX_POWER.load(Ordering::Relaxed) > 65_535, "no board past 65,535 power: {}", extremes_report());
+    }
+    println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
+    if delver_mode() {
+        let (m, t, c) =
+            (DELVER_MURKTIDES.load(Ordering::Relaxed), DELVER_MURK_TRIGGERS.load(Ordering::Relaxed), DELVER_CHARMS.load(Ordering::Relaxed));
+        println!("FUZZ_POOL=delver: Murktide Regent cast {m} times, its leave-the-graveyard triggers {t}, Prismari Charm cast {c} times");
+        if n >= 200 {
+            assert!(m > 0 && t > 0 && c > 0, "the legacy cards weren't played: {m} {t} {c}");
+        }
     }
 }
 
@@ -1087,6 +1162,10 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
 
 #[test]
 fn fuzz_random_matches() {
+    if delver_mode() {
+        println!("FUZZ_POOL=delver: games only (constructed best-of-three isn't built)");
+        return;
+    }
     let games: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
     let n: u64 = std::env::var("FUZZ_MATCHES").ok().and_then(|s| s.parse().ok()).unwrap_or((games / 20).max(20));
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -1125,6 +1204,9 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
+    if delver_mode() {
+        return;
+    }
     for seed in 2000..2012 {
         let a = play_match(seed, false);
         let mut g = MtgAz::new_game(&match_spec(seed), 2, seed).unwrap();

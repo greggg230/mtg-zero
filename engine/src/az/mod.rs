@@ -21,6 +21,7 @@
 //! `draft_v2`), `draft_bots.rs` (`consensus`, heuristic-played matches).
 
 pub mod bots;
+pub mod constructed;
 pub mod decks;
 pub mod draft;
 pub mod draft_bots;
@@ -92,6 +93,15 @@ pub enum DeckMode {
 /// the match's seed (default: the driver's game seed), so a spec built from
 /// a `team_draft` payload plays exactly the event's match. Without these
 /// keys every spec is what it was (the behaviour digests are unchanged).
+///
+/// Constructed (ENGINE.md 53): `"constructed": true` plays fixed 60-card
+/// decklists (`decks` lists, CR 100.2a: at least 60 cards, at most four of a
+/// card but basic lands, a sideboard of at most 15, 100.4a, the four-card
+/// limit over deck and sideboard together) with the card table of constructed
+/// play (`CardDb::constructed`: the cube's cards and the legacy ones, Murktide
+/// Regent, Prismari Charm). Best-of-one only for now (constructed
+/// sideboarding between games is not built: `"bo3"` is an error), and never
+/// random, evaluation or drafted decks (those are limited's).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -104,6 +114,8 @@ pub struct MtgSpec {
     pub format: Format,
     pub pools: bool,
     pub seed: Option<u64>,
+    /// Constructed decklists and their card table (ENGINE.md 53).
+    pub constructed: bool,
 }
 
 impl Default for MtgSpec {
@@ -119,6 +131,7 @@ impl Default for MtgSpec {
             format: Format::Bo1,
             pools: false,
             seed: None,
+            constructed: false,
         }
     }
 }
@@ -168,7 +181,11 @@ impl MtgSpec {
         }
         let v: Value = serde_json::from_str(json).map_err(|e| format!("mtg spec: {e}"))?;
         let obj = v.as_object().ok_or("mtg spec: not a JSON object")?;
-        let db = CardDb::cube();
+        // (Read first: it picks the card table the names are looked up in.)
+        if let Some(x) = obj.get("constructed") {
+            s.constructed = x.as_bool().ok_or("mtg spec: constructed must be a boolean")?;
+        }
+        let db = s.db();
         let mut pools = None;
         for (k, x) in obj {
             let int = || x.as_u64().ok_or_else(|| format!("mtg spec: {k} must be a non-negative integer"));
@@ -186,6 +203,7 @@ impl MtgSpec {
                 "eval_decks" => s.eval_decks = (int()? as u32).max(1),
                 "eval_seed" => s.eval_seed = int()?,
                 "seed" => s.seed = Some(int()?),
+                "constructed" => {}
                 "chooser" => {
                     let c = int()?;
                     if c > 1 {
@@ -259,7 +277,38 @@ impl MtgSpec {
             return Err("mtg spec: max_turns must be positive".into());
         }
         s.pools = pools.unwrap_or(s.format == Format::Bo3);
+        if s.constructed {
+            if s.format != Format::Bo1 {
+                return Err("mtg spec: constructed best-of-three (sideboarding to 60+ / 15) is not built yet: format must be \"bo1\"".into());
+            }
+            if s.pools {
+                return Err("mtg spec: constructed decks don't come from pools".into());
+            }
+            match &s.decks {
+                DeckMode::Lists(a, b) => {
+                    for (p, d) in [a, b].into_iter().enumerate() {
+                        constructed::check(db, d, &[]).map_err(|e| format!("mtg spec: p{p}'s constructed deck: {e}"))?;
+                    }
+                }
+                DeckMode::ListsWithSideboards(p) => {
+                    for (i, (d, sb)) in p.iter().enumerate() {
+                        constructed::check(db, d, sb).map_err(|e| format!("mtg spec: p{i}'s constructed deck: {e}"))?;
+                    }
+                }
+                _ => return Err("mtg spec: constructed needs decklists (decks: {\"p0\": [...], \"p1\": [...]})".into()),
+            }
+        }
         Ok(s)
+    }
+
+    /// The card table this spec's games use: the cube's, or with
+    /// `constructed` the cube's and the legacy cards (ENGINE.md 53).
+    pub fn db(&self) -> &'static CardDb {
+        if self.constructed {
+            CardDb::constructed()
+        } else {
+            CardDb::cube()
+        }
     }
 
     /// The two decks of a game with this seed (the decks of [`pools`](Self::pools)).
@@ -353,8 +402,8 @@ impl MtgAz {
             ..GameSpec::default()
         };
         let [a, b] = &seats;
-        let g = Game::with_sideboards(CardDb::cube(), gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
-        let m = MatchState::new(CardDb::cube(), spec.format, gspec, &seats, seed)?;
+        let g = Game::with_sideboards(spec.db(), gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
+        let m = MatchState::new(spec.db(), spec.format, gspec, &seats, seed)?;
         let mut az = MtgAz { g, m };
         az.set_known_pools();
         Ok(az)

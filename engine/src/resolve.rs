@@ -272,6 +272,11 @@ impl Game {
                         if self.def_of(card).sunburst.is_some() {
                             self.entering_sunburst = self.converge_of(Some(self.obj_ref(card)));
                         }
+                        // "A +1/+1 counter for each instant and sorcery card
+                        // exiled with it" (CR 607.2q; ENGINE.md 53).
+                        if self.def_of(card).counters_per_exiled.is_some() {
+                            self.entering_exiled = self.exiled_to_pay_count(card);
+                        }
                         self.entering_times = item.times;
                         let bestowed = self.def_of(card).bestowed;
                         // Cast with Serra Paragon's permission: the permanent

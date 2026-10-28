@@ -1822,11 +1822,12 @@ impl Game {
         p.haste = rem.haste;
         // Delve's graveyard cards, then those that were mana sources (CR
         // 601.2h, after 601.2g; ENGINE.md 51).
-        self.exile_delved(payer);
+        self.exile_delved(payer, pm.keep.spell);
         for &c in &pm.delve_late {
             if self.objs[c.i()].zone == Zone::Graveyard {
                 self.note(|g| format!("P{payer} exiles {} (delve)", g.name(c)));
-                self.move_card(c, Zone::Exile, Pos::Top);
+                let e = self.move_card(c, Zone::Exile, Pos::Top);
+                self.record_exiled_to_pay(pm.keep.spell, e);
             }
         }
         // Arena of Glory's mana spent on a creature spell gives it haste.

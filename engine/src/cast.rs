@@ -972,7 +972,9 @@ impl Game {
     /// Exile the graveyard cards chosen for delve (in the order chosen) as
     /// the payment of their spell's cost ends (CR 601.2h, after the mana
     /// abilities of 601.2g; ENGINE.md 51).
-    pub(crate) fn exile_delved(&mut self, p: PlayerId) {
+    /// (`spell`: the spell being paid for, whose permanent may count the
+    /// cards exiled with it, `record_exiled_to_pay`.)
+    pub(crate) fn exile_delved(&mut self, p: PlayerId, spell: Option<CardIdx>) {
         if !self.marks.iter().any(|&(_, m)| m == crate::game::Mark::DelveExile) {
             return;
         }
@@ -981,9 +983,51 @@ impl Game {
         for r in picked {
             if self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard {
                 self.note(|g| format!("P{p} exiles {} (delve)", g.name(r.idx)));
-                self.move_card(r.idx, Zone::Exile, Pos::Top);
+                let e = self.move_card(r.idx, Zone::Exile, Pos::Top);
+                self.record_exiled_to_pay(spell, e);
             }
         }
+    }
+
+    /// A card `e` (in exile) that delve exiled to pay the cost of `spell`:
+    /// noted on the spell when its permanent counts the cards exiled with it
+    /// (CR 607.2q: "exiled with it" are the cards exiled to pay the cost of
+    /// the spell that became it; Murktide Regent, ENGINE.md 53). Nothing for
+    /// any other spell.
+    pub(crate) fn record_exiled_to_pay(&mut self, spell: Option<CardIdx>, e: ObjRef) {
+        if let Some(s) = spell.filter(|&s| self.def_of(s).counters_per_exiled.is_some()) {
+            if self.objs[e.idx.i()].zone == Zone::Exile && self.live(e) {
+                let r = self.obj_ref(s);
+                self.marks.push((r, crate::game::Mark::ExiledToPay(e)));
+            }
+        }
+    }
+
+    /// The cards a resolving permanent spell's permanent enters with a
+    /// counter for (`CardDef::counters_per_exiled`): those its delve exiled
+    /// that are still in exile (the same objects, CR 400.7) and match the
+    /// filter by their own characteristics (CR 607.2q). 0 for a copy of the
+    /// spell (it wasn't cast: no cost was paid, CR 707.10) or any other spell.
+    pub(crate) fn exiled_to_pay_count(&self, spell: CardIdx) -> u8 {
+        let Some(f) = &self.def_of(spell).counters_per_exiled else { return 0 };
+        if self.marks.is_empty() || self.is_copy_obj(spell) {
+            return 0;
+        }
+        let r = self.obj_ref(spell);
+        let n = self
+            .marks
+            .iter()
+            .filter(|&&(o, m)| match m {
+                crate::game::Mark::ExiledToPay(e) => {
+                    o == r
+                        && self.live(e)
+                        && self.objs[e.idx.i()].zone == Zone::Exile
+                        && self.db.def_matches(f, self.objs[e.idx.i()].def) == Some(true)
+                }
+                _ => false,
+            })
+            .count();
+        n.min(u8::MAX as usize) as u8
     }
 
     /// Was `c` chosen to be exiled for delve once activated?
@@ -2285,7 +2329,7 @@ impl Game {
                     self.lose_life(p, life_later as i32);
                 }
                 // (No mana to pay: delve's cards now, ENGINE.md 51.)
-                self.exile_delved(p);
+                self.exile_delved(p, Some(card));
             }
             return;
         }

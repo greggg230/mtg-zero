@@ -468,6 +468,33 @@ fn token_registry_and_stable_identities() {
     }
 }
 
+/// The legacy card registry (ENGINE.md 22.2, 53): every card of the legacy IR has a line, the
+/// lines are distinct and none is a cube card, and the identities are 546 + the line, below
+/// `CUBE_CAP` (layout v4's free range); the cube's identities are the same in both card tables.
+#[test]
+fn legacy_registry_and_identities() {
+    let reg = identity::legacy_registry();
+    let cube = identity::cube_names();
+    let legacy = engine::db::load_legacy_document();
+    for c in &legacy.cards {
+        assert!(reg.contains(&c.name.as_str()), "{} has no line in az/legacy_cards.txt (append it)", c.name);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for n in &reg {
+        assert!(seen.insert(*n), "{n} twice");
+        assert!(!cube.iter().any(|c| c == n), "{n} is a cube card");
+    }
+    assert_eq!(cube.len(), identity::LEGACY_BASE);
+    assert!(identity::LEGACY_BASE + reg.len() <= identity::CUBE_CAP);
+    let con = CardDb::constructed();
+    let ids = identity::identities(con);
+    for (k, n) in reg.iter().enumerate() {
+        assert_eq!(ids[con.id(n).unwrap() as usize] as usize, identity::LEGACY_BASE + k, "{n}");
+    }
+    let cube_ids = identity::identities(CardDb::cube());
+    assert_eq!(&ids[..CardDb::cube().num_cards()], &cube_ids[..CardDb::cube().num_cards()]);
+}
+
 #[test]
 fn minor_decisions_are_mana_payments() {
     let mut pay = 0;
