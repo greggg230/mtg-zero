@@ -46,7 +46,7 @@
 //! the default mode's). Every mode also checks that a sampled first pick is
 //! a candidate of the viewer's prior (in a drafted match: a card its team
 //! never saw).
-//! `FUZZ_POOL=delver` (ENGINE.md 53): the Legacy Izzet Delver mirror, both
+//! `FUZZ_POOL=delver` (ENGINE.md 54): the Legacy Izzet Delver mirror, both
 //! players the pinned 60 (`az::constructed`, no sideboard) with the card
 //! table of constructed play (`CardDb::constructed`: Murktide Regent and
 //! Prismari Charm with the cube's cards); every check of the default mode,

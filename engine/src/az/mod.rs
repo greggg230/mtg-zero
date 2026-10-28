@@ -94,7 +94,7 @@ pub enum DeckMode {
 /// a `team_draft` payload plays exactly the event's match. Without these
 /// keys every spec is what it was (the behaviour digests are unchanged).
 ///
-/// Constructed (ENGINE.md 53): `"constructed": true` plays fixed 60-card
+/// Constructed (ENGINE.md 54): `"constructed": true` plays fixed 60-card
 /// decklists (`decks` lists, CR 100.2a: at least 60 cards, at most four of a
 /// card but basic lands, a sideboard of at most 15, 100.4a, the four-card
 /// limit over deck and sideboard together) with the card table of constructed
@@ -114,7 +114,7 @@ pub struct MtgSpec {
     pub format: Format,
     pub pools: bool,
     pub seed: Option<u64>,
-    /// Constructed decklists and their card table (ENGINE.md 53).
+    /// Constructed decklists and their card table (ENGINE.md 54).
     pub constructed: bool,
 }
 
@@ -302,7 +302,7 @@ impl MtgSpec {
     }
 
     /// The card table this spec's games use: the cube's, or with
-    /// `constructed` the cube's and the legacy cards (ENGINE.md 53).
+    /// `constructed` the cube's and the legacy cards (ENGINE.md 54).
     pub fn db(&self) -> &'static CardDb {
         if self.constructed {
             CardDb::constructed()

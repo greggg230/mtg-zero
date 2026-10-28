@@ -659,3 +659,33 @@ and edge cases.
 | 3 | Integration: `mtg` matches from drafts (spec keys `pN_first_picks`, `pN_elsewhere`; digests unchanged), `TokenNet` actions by identity (`id_actions`), the co-training presets (a 2v2 smoke, the 4v4 run), the draft yardsticks (draft Elo, `consensus` and `random` teams, held-out human-pick agreement), the search smoke for `team_draft`, a smoke run | the user's go-ahead for the first run | done (branch m6-part3, zero-core `feat/m6-part3`; ENGINE.md 45): drafted `mtg` specs (`pN_first_picks`, `pN_elsewhere`, `seed`; digests 12642107250032a7 unchanged), the glue `mtgz/az/drafted.py`, `TokenNet`'s `id_actions`, `SearchGame::sims_divisor` (deckbuilding at 32 / 8), the presets `team_draft-smoke`, `team_draft-gpu-smoke`, `team_draft-4v4`, the human-pick yardstick (`GamePackage.evals`), the search smoke's `team_draft` specs, the dashboard for co-training runs, the CPU and GPU smoke runs |
 | run | The first co-training run (4v4 PowerLSV) | | |
 
+
+## 8. Side project: the Legacy Izzet Delver mirror (user, 2026-10-28)
+
+AlphaZero self-play on one constructed matchup, the **Legacy Izzet Delver mirror**: both seats play
+one pinned 75, "Izzet Delver" by i_b_TRUE (Legacy Challenge 32, 2026-10-23, 1st place 8-1, MTGO;
+https://www.mtggoldfish.com/deck/8016541, checked in as `data/decks/izzet_delver_8016541.json`
+next to its MTGO export). It lives in this repository (the `mtg` game, the same engine and
+network code), its runs under `runs/delver1`, apart from the cube's work.
+
+* **Run 1: best-of-one, maindeck only** (the pinned 60 against itself, no sideboards; the London
+  mulligan, the play-or-draw choice, a draw after 60 turns). Run 2: best-of-three with
+  sideboarding (constructed: the deck stays at least 60 cards, the sideboard at most 15; ENGINE.md
+  54.8 lists what that needs).
+* **Cards outside the cube** come from mtg-bot's parser like the cube's (its pool `legacy`), in a
+  separate IR file (`data/cards/legacy.ir.json`) and a separate card table (`CardDb::constructed`):
+  nothing of the cube (its generators, pools, team draft, fuzz pool, behaviour digests) sees them.
+  Their identities are appended in the cube's free range (546..767), so layout v4 is unchanged and
+  a network can read both worlds. D1 ports the two maindeck cards (Murktide Regent, Prismari Charm);
+  the five sideboard cards outside the cube wait for run 2.
+* **Open decklists**: both players know both 75s (best-of-one shows only the 60s in play);
+  hidden are the hands, library order and face-down cards (`determinize` deals the opponent's
+  unseen cards from their 60 minus what the viewer has seen).
+* Yardsticks: the M7c heuristic playing the same deck (the Elo anchor), random, Elo between
+  iterations. Preset `delver-mirror` (mtg-3's settings, ENGINE.md 54.6 for the measured cost).
+
+| # | Milestone | Status |
+|---|---|---|
+| D1 | The deck, the two maindeck cards (full oracle fidelity, rulings as tests), constructed best-of-one (CR 100.2a), the preset and its measurements, gates, docs | done (branch delver-d1, mtg-bot feature/legacy-delver-ir; ENGINE.md 54) |
+| D2 | The run `runs/delver1` | the user's go-ahead |
+| D3 | Best-of-three with constructed sideboarding; the five sideboard cards | |

@@ -1,4 +1,4 @@
-//! Constructed play (ENGINE.md 53): the pinned Izzet Delver 75 and its
+//! Constructed play (ENGINE.md 54): the pinned Izzet Delver 75 and its
 //! provenance, the deck rules of CR 100.2a / 100.4a, the `"constructed"` spec,
 //! the card table of constructed play kept apart from the cube's (the legacy
 //! cards' identities 546.., the cube's definitions unchanged), and the game
@@ -52,7 +52,7 @@ fn the_pinned_75_and_its_provenance() {
     assert_eq!(main, d.main);
     assert_eq!(side, d.sideboard);
     // Every maindeck card is supported in constructed play; the sideboard's
-    // five cards outside the cube are not (yet: ENGINE.md 53.7).
+    // five cards outside the cube are not (yet: ENGINE.md 54.7).
     let ids = Decklist::ids(db(), &d.main).unwrap();
     assert_eq!(ids.len(), 60);
     constructed::check(db(), &ids, &[]).unwrap();
@@ -338,6 +338,6 @@ fn the_heuristic_plays_the_mirror() {
     }
     println!("first player won {first_wins}/{decided}; the heuristic beat random {random_lost}/20; {:.1} turns per game", turns as f64 / 60.0);
     assert!(decided > 30);
-    // (A sanity floor: ENGINE.md 53.6 measures the score over 2,000 games.)
+    // (A sanity floor: ENGINE.md 54.6 measures the score over 2,000 games.)
     assert!(random_lost >= 13, "the heuristic beat random only {random_lost}/20 in the mirror");
 }

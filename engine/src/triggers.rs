@@ -353,7 +353,7 @@ impl Game {
                 let ctx = crate::cast::Ctx { controller: src.controller, source: Some(src.r) };
                 match ev.subject(*s) {
                     // (A card leaving a graveyard is seen there, before it
-                    // moves: CR 603.10a; ENGINE.md 53.)
+                    // moves: CR 603.10a; ENGINE.md 54.)
                     Subj::Obj(r) if ev.kind == EventKind::LeavesGraveyard => {
                         self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard && self.card_matches(f, r.idx, &ctx)
                     }

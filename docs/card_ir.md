@@ -11,8 +11,9 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 
 | Path | What |
 |---|---|
-| `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/companion-ir` 62210e89 (schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
-| `data/cards/powerlsv.schema.json` | The schema that IR was encoded with |
+| `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/legacy-delver-ir` 140eafa9 with the legacy pool (schema `181ba4b8a1e7...`, ENGINE.md 54; the cards byte for byte those of `feature/companion-ir` 62210e89, schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
+| `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; mtg-bot's pool `legacy`), the same export and schema |
+| `data/cards/powerlsv.schema.json` | The schema both documents were encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
 | `card_ir/src/generated.rs` | Generated types (do not edit) |
 | `card_ir/src/support.rs` | Hand-written `Count` (int or `"inf"`) and `Never` |
@@ -60,9 +61,10 @@ Any parser or card-primitive change in mtg-bot can change the schema
 
 ```bash
 # 1. In the mtg-bot checkout (a worktree: PYTHONPATH=src, shared venv):
-PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards roundtrip --pool cube
+PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards roundtrip --pool cube legacy
+# (both pools, one schema: powerlsv.ir.json, legacy.ir.json, powerlsv.schema.json; ENGINE.md 54)
 PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards export-ir \
-    --pool cube --out "C:/Users/Gregg Keithley/mtg-zero/data/cards"
+    --pool cube legacy --out "C:/Users/Gregg Keithley/mtg-zero/data/cards"
 
 # 2. In mtg-zero:
 python tools/codegen/gen_card_ir.py --schema data/cards/powerlsv.schema.json \
@@ -81,7 +83,17 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/companion-ir` 62210e89)
+## Current numbers (mtg-bot `feature/legacy-delver-ir` 140eafa9)
+
+D1 (ENGINE.md 54): exported with `cards export-ir --pool cube legacy`, one schema over both pools
+(sha256 `181ba4b8a1e7b13c1dd77d7529ed4ecd32bbe27ca88d62bf98e6d02c9b5d31b6`): 514 classes (one more,
+`DealDamageToEachTarget`), `CardPrinting.enters_with_counter_per_card_exiled_with_it` (an optional
+object predicate) and `Event.leaves_graveyard`. The cube's 546 cards are those of 62210e89, byte for
+byte (402,200 bytes, `schema_sha256` aside); `legacy.ir.json` holds 2 cards (1,905 bytes). Refresh both
+files together (above: a cube-only export would carry another schema, which `card_ir` rejects for
+the legacy file).
+
+### Before D1 (mtg-bot `feature/companion-ir` 62210e89)
 
 M8a (ENGINE.md 35): exported from mtg-bot branch `feature/companion-ir` at 62210e89 (from main
 8ea9fcca); schema sha256

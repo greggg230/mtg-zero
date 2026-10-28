@@ -1,4 +1,4 @@
-//! Constructed decks (ENGINE.md 53): the deck rules of constructed play (CR
+//! Constructed decks (ENGINE.md 54): the deck rules of constructed play (CR
 //! 100.2a, 100.4a) and the checked-in decklists of `data/decks/`.
 //!
 //! A constructed game of `mtg` (`"constructed": true`, `MtgSpec`) plays fixed
@@ -19,7 +19,7 @@ pub const MAX_COPIES: usize = 4;
 /// CR 100.4a: a constructed sideboard has at most 15 cards.
 pub const MAX_SIDEBOARD: usize = 15;
 
-/// The pinned deck of the Delver mirror (ENGINE.md 53): "Izzet Delver" by
+/// The pinned deck of the Delver mirror (ENGINE.md 54): "Izzet Delver" by
 /// i_b_TRUE, Legacy Challenge 32, 2026-10-23, 1st place (8-1), MTGO;
 /// <https://www.mtggoldfish.com/deck/8016541>.
 pub const IZZET_DELVER: &str = include_str!("../../../data/decks/izzet_delver_8016541.json");

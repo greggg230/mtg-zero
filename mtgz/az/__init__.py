@@ -8,7 +8,7 @@ network (arch 'tokens': `layout_v4.json`, written by the engine's `encode::layou
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
 team_draft-smoke, team_draft-gpu-smoke, team_draft-4v4, team_draft-4v4-mac; the constructed Delver
-mirror delver-mirror and delver-smoke, docs/ENGINE.md 53), the default spec, the
+mirror delver-mirror and delver-smoke, docs/ENGINE.md 54), the default spec, the
 evaluation spec, the dashboard's title / port, the remote 'mac' (run setting eval_remote: the
 MacBook evaluates with exactly the run's code; `mtgz/az/mac.py`, docs/ENGINE.md 44; run setting
 selfplay_remote, or a co-training run's resolver_cfg selfplay_remote: it self-plays too, ENGINE.md
@@ -173,14 +173,14 @@ PRESETS['team_draft-smoke'] = dict(
                   'hidden': 32, 'blocks': 1, 'heads': 2, 'ff': 64, 'conc': 16, 'sims_minor': 2, 'max_steps': 60_000,
                   'eval_games': 4, 'eval_random_games': 2, 'elo_games': 2, 'ref_games': 4})
 
-# The Legacy Izzet Delver mirror (docs/ENGINE.md 53, DESIGN.md 9): both seats the pinned 60 of
+# The Legacy Izzet Delver mirror (docs/ENGINE.md 54, DESIGN.md 8): both seats the pinned 60 of
 # data/decks/izzet_delver_8016541.json (i_b_TRUE, Legacy Challenge 32, 2026-10-23, 1st), best-of-one,
 # no sideboards, the London mulligan, a draw after 60 turns; constructed play's card table (the cube's
 # cards and Murktide Regent, Prismari Charm). Self-play and every evaluation (the yardstick, the M7c
 # heuristic playing the same deck; random; Elo between iterations) play that one spec: the decks are
 # fixed, so the evaluation spec is the spec. Otherwise mtg-3's settings (the last best-of-one run): the
 # token network 128 x 4 on layout v4 (the legacy cards' identities 546..547 are in v4's free range),
-# 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration (ENGINE.md 53.6
+# 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration (ENGINE.md 54.6
 # for the measured cost and the configuration recommended while td1 holds the GPU).
 SPEC_DELVER = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
 PRESETS['delver-mirror'] = dict(PRESETS['mtg-3'], spec=SPEC_DELVER, eval_spec=SPEC_DELVER)

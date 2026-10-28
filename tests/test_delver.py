@@ -1,4 +1,4 @@
-"""The constructed Delver mirror (docs/ENGINE.md 53) through the bindings: the pinned deck and its
+"""The constructed Delver mirror (docs/ENGINE.md 54) through the bindings: the pinned deck and its
 loader (`mtgz.az.decklists`), the presets `delver-mirror` / `delver-smoke` (the spec: both seats the
 pinned 60, best-of-one, constructed; the evaluation spec is the spec), the game through the engine
 module (encode, determinize), the heuristic yardstick against random in the Rust driver, self-play

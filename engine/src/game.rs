@@ -596,7 +596,7 @@ pub struct Game {
     pub(crate) entering_sunburst: u8,
     /// ... the matching cards exiled to pay its cost ("a +1/+1 counter for
     /// each instant and sorcery card exiled with it", CR 607.2q;
-    /// `CardDef::counters_per_exiled`, ENGINE.md 53).
+    /// `CardDef::counters_per_exiled`, ENGINE.md 54).
     pub(crate) entering_exiled: u8,
     /// Effects that apply to the next permanent put onto the battlefield as
     /// it enters ("it's an enchantment", "it's a Phyrexian in addition";
@@ -753,7 +753,7 @@ pub(crate) const SEEN_SAC_MANA: u16 = 8192;
 /// creature as it last existed on the battlefield if it left (Pyrogoyf;
 /// `Game::lki_damage`).
 pub(crate) const SEEN_LKI_DAMAGE: u16 = 16384;
-/// A trigger on a card leaving a graveyard (Murktide Regent; ENGINE.md 53).
+/// A trigger on a card leaving a graveyard (Murktide Regent; ENGINE.md 54).
 pub(crate) const SEEN_GY_LEAVE: u16 = 32768;
 
 /// A rare per-object fact (`Game::marks`); stale with its object (CR
@@ -834,7 +834,7 @@ pub enum Mark {
     /// On a spell whose permanent enters with a counter for each card
     /// exiled with it (Murktide Regent, `CardDef::counters_per_exiled`): a
     /// card (in exile, this object) its delve exiled to pay its cost (CR
-    /// 607.2q; ENGINE.md 53).
+    /// 607.2q; ENGINE.md 54).
     ExiledToPay(ObjRef),
 }
 
@@ -1537,7 +1537,7 @@ impl Game {
         }
         // CR 607.2q, 614.1c: a +1/+1 counter for each matching card exiled
         // to pay the cost of the spell that became it (none if it wasn't
-        // cast; Murktide Regent, ENGINE.md 53).
+        // cast; Murktide Regent, ENGINE.md 54).
         let exiled = std::mem::take(&mut self.entering_exiled);
         if exiled > 0 && self.def_of(idx).counters_per_exiled.is_some() {
             self.add_counters(idx, crate::db::Counter::P1P1, exiled as crate::num::Count);
@@ -1723,7 +1723,7 @@ impl Game {
         };
         // "Whenever a card leaves your graveyard" looks back in time too
         // (CR 603.10a): recorded before the card moves, the graveyard's
-        // owner and the card as it was there (Murktide Regent; ENGINE.md 53).
+        // owner and the card as it was there (Murktide Regent; ENGINE.md 54).
         if from == Zone::Graveyard && to != Zone::Graveyard && self.seen & SEEN_GY_LEAVE != 0 && !self.is_token(idx) {
             let owner = self.objs[idx.i()].owner;
             self.event(Event { kind: EventKind::LeavesGraveyard, a: crate::triggers::Subj::Player(owner), b: crate::triggers::Subj::Obj(old), amount: 0 });

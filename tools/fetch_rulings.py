@@ -11,7 +11,7 @@ again unless `--refresh` is given. Scryfall's limits are respected: at most
 
     python tools/fetch_rulings.py [--cube PATH] [--refresh]
 
-The legacy cards of constructed play (ENGINE.md 53: Murktide Regent, Prismari
+The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari
 Charm; mtg-bot's pool `legacy`, its `data/legacy_delver.json`) go to their own
 file:
 

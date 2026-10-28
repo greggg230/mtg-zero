@@ -1,4 +1,4 @@
-//! Measurements of the constructed Delver mirror (ENGINE.md 53.6), `--ignored`:
+//! Measurements of the constructed Delver mirror (ENGINE.md 54.6), `--ignored`:
 //!
 //! `cargo test --release -p engine --test measure_delver -- --ignored --nocapture --test-threads=1`
 //!

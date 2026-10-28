@@ -992,7 +992,7 @@ impl Game {
     /// A card `e` (in exile) that delve exiled to pay the cost of `spell`:
     /// noted on the spell when its permanent counts the cards exiled with it
     /// (CR 607.2q: "exiled with it" are the cards exiled to pay the cost of
-    /// the spell that became it; Murktide Regent, ENGINE.md 53). Nothing for
+    /// the spell that became it; Murktide Regent, ENGINE.md 54). Nothing for
     /// any other spell.
     pub(crate) fn record_exiled_to_pay(&mut self, spell: Option<CardIdx>, e: ObjRef) {
         if let Some(s) = spell.filter(|&s| self.def_of(s).counters_per_exiled.is_some()) {

@@ -9,7 +9,7 @@ self-play search reaches states that random play (tests/fuzz.rs) does not.
   python tools/search_smoke.py --specs team_draft,team_draft_2v2 --seeds 0-1
   python tools/search_smoke.py --specs delver --preset delver-mirror   # the constructed Delver mirror
 
-The constructed Delver mirror (docs/ENGINE.md 53): `delver` is the preset delver-mirror's spec (both
+The constructed Delver mirror (docs/ENGINE.md 54): `delver` is the preset delver-mirror's spec (both
 seats the pinned 60 of data/decks/izzet_delver_8016541.json, best-of-one, constructed play's card table).
 
 The team draft (M6 part 3, docs/ENGINE.md 45): `team_draft` (4v4) and `team_draft_2v2` draft and
@@ -49,7 +49,7 @@ SPECS = {
     'match_eval': {'max_turns': 60, 'eval_decks': 16, 'eval_seed': 1, 'format': 'bo3', 'decks': 'eval'},
 }
 # team draft events (M6 part 3): (players, the team_draft spec); their matches as a co-training run plays them
-# the Legacy Izzet Delver mirror (docs/ENGINE.md 53): the preset delver-mirror's spec
+# the Legacy Izzet Delver mirror (docs/ENGINE.md 54): the preset delver-mirror's spec
 def _mirror(deck):
     with open(os.path.join(ROOT, 'data', 'decks', deck + '.json'), encoding='utf-8') as f:
         main = [name for n, name in json.load(f)['main'] for _ in range(n)]

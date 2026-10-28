@@ -1656,7 +1656,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         None => None,
     };
     // "This creature enters with a +1/+1 counter on it for each <filter>
-    // card exiled with it" (Murktide Regent, ENGINE.md 53): linked to the
+    // card exiled with it" (Murktide Regent, ENGINE.md 54): linked to the
     // ability printed on the card that exiles cards while paying the cost
     // to cast it (CR 607.2q), here delve (a granted escape, Underworld
     // Breach's, isn't printed on it: its cards don't count); the filter

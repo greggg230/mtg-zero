@@ -1,4 +1,4 @@
-//! The legacy cards of the Delver mirror (ENGINE.md 53) against their Oracle
+//! The legacy cards of the Delver mirror (ENGINE.md 54) against their Oracle
 //! text, and their official rulings (`// ruling: <hash8>`, as the cube's in
 //! `docs/rulings.md`; `data/rulings/legacy.rulings.json`). They are in the
 //! card table of constructed play only (`CardDb::constructed`).

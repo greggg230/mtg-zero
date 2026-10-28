@@ -19,7 +19,7 @@
 //! * a rules definition (`CardDef::rules`: the Undercity dungeon, the initiative's abilities;
 //!   ENGINE.md 27.4) is in the token registry under the key `<name> rules`;
 //! * a legacy card (outside the cube, played in constructed decks: `CardDb::constructed`,
-//!   ENGINE.md 53): [`LEGACY_BASE`] + its line in the legacy registry `legacy_cards.txt` (one
+//!   ENGINE.md 54): [`LEGACY_BASE`] + its line in the legacy registry `legacy_cards.txt` (one
 //!   card name per line, appended, never inserted or reordered: 546.. in the cube's free range
 //!   below [`CUBE_CAP`], so layout v4 is unchanged); `cargo test -p engine --test az
 //!   legacy_registry` fails while a card of `data/cards/legacy.ir.json` has no line;

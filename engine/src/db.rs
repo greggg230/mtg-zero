@@ -607,7 +607,7 @@ pub enum EventKind {
     /// A Class became level `amount` (CR 716.2c). Subject: obj.
     ClassLevel,
     /// A card left a graveyard for another zone ("whenever an instant or
-    /// sorcery card leaves your graveyard", Murktide Regent; ENGINE.md 53).
+    /// sorcery card leaves your graveyard", Murktide Regent; ENGINE.md 54).
     /// Recorded before the card moves (CR 603.10a: it looks back in time).
     /// Subjects: the graveyard's owner, the card (as it was there).
     LeavesGraveyard,
@@ -1344,7 +1344,7 @@ pub struct CardDef {
     /// "Enters with X +1/+1 counters" (the X it was cast with).
     pub enters_x_counters: bool,
     /// "This creature enters with a +1/+1 counter on it for each <filter>
-    /// card exiled with it" (Murktide Regent; ENGINE.md 53): the cards
+    /// card exiled with it" (Murktide Regent; ENGINE.md 54): the cards
     /// exiled to pay the cost of the spell that became it (its delve, CR
     /// 607.2q; `Mark::ExiledToPay`), as they are in exile (a card's own
     /// characteristics, `CardDb::def_matches`); 614.1c.
@@ -1942,7 +1942,7 @@ impl CardDb {
         CUBE.get_or_init(|| CardDb::from_document(&load_cube_document()).leak())
     }
 
-    /// The card table of constructed play (ENGINE.md 53): the cube's cards
+    /// The card table of constructed play (ENGINE.md 54): the cube's cards
     /// (the same definitions at the same ids as [`cube`](Self::cube)) and
     /// then the cards of `data/cards/legacy.ir.json` (cards outside the
     /// cube a constructed deck plays: the Izzet Delver mirror's Murktide
@@ -2099,7 +2099,7 @@ pub fn load_cube_document() -> card_ir::Document {
 }
 
 /// The checked-in legacy IR (cards outside the cube for constructed decks,
-/// ENGINE.md 53), compiled in; encoded with the cube's schema (one
+/// ENGINE.md 54), compiled in; encoded with the cube's schema (one
 /// `card_ir` crate reads both: mtg-bot `cards export-ir --pool cube legacy`).
 pub const LEGACY_IR: &str = include_str!("../../data/cards/legacy.ir.json");
 

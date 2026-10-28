@@ -104,7 +104,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         // aren't blocked".
         Some(E::AttackersUnblocked) => Some(EventKind::AttackersUnblocked),
         // "Whenever an instant or sorcery card leaves your graveyard"
-        // (Murktide Regent; ENGINE.md 53).
+        // (Murktide Regent; ENGINE.md 54).
         Some(E::LeavesGraveyard) => Some(EventKind::LeavesGraveyard),
         Some(other) => {
             l.unsupported(format!("Event:{other:?}"));

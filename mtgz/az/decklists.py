@@ -1,4 +1,4 @@
-"""Constructed decklists of `data/decks/` (docs/ENGINE.md 53) and the `mtg` specs that play them.
+"""Constructed decklists of `data/decks/` (docs/ENGINE.md 54) and the `mtg` specs that play them.
 
 A decklist is a JSON file with its provenance (`source`, `event`, `date`, `player`, ...) and `main` /
 `sideboard` as [count, card name] with the engine's card names (the MTGO export, verbatim, sits next to
@@ -15,7 +15,7 @@ import os
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DECKS = os.path.join(ROOT, 'data', 'decks')
 
-# The Delver mirror's pinned deck (ENGINE.md 53): "Izzet Delver" by i_b_TRUE, Legacy Challenge 32,
+# The Delver mirror's pinned deck (ENGINE.md 54): "Izzet Delver" by i_b_TRUE, Legacy Challenge 32,
 # 2026-10-23, 1st place (8-1), MTGO; https://www.mtggoldfish.com/deck/8016541
 IZZET_DELVER = 'izzet_delver_8016541'
 
