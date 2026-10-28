@@ -3,12 +3,14 @@
 //! first-picks rule, the information model (`determinize` keeps what the
 //! viewer knows; equal keys mean equal features), clones, `force_chance`, a
 //! random-actions fuzz of whole events, an event resolved by heuristic-played
-//! matches, the bots, the spec and the layout file. `DRAFT_SCALE=k` plays k
-//! times as many events in the sampled-state tests; `DRAFT_FUZZ=n` sets the
-//! fuzz's events (default 200).
+//! matches, the bots, the spec and the layout file. Deckbuilding as picks
+//! (ENGINE.md 47): the next pool card in build order or `DONE`, every legal
+//! deck reachable exactly once. `DRAFT_SCALE=k` plays k times as many events
+//! in the sampled-state tests; `DRAFT_FUZZ=n` sets the fuzz's events (default
+//! 200).
 
 use engine::az::draft::{
-    self, cube, DraftSpec, Phase, TeamDraftAz, COUNT, DECK_SIZE, KEY_SEE, KEY_TEAM, MAX_BASIC, OUT,
+    self, cube, DraftSpec, Phase, TeamDraftAz, COUNT, DECK_MIN, DECK_SIZE, DONE, KEY_SEE, KEY_TEAM, MAX_BASIC,
 };
 use engine::az::draft_bots::{self, Consensus};
 use engine::az::draft_encode::{self, NUM_FEATURES};
@@ -16,7 +18,7 @@ use engine::az::pools;
 use engine::az::decks::DeckGen;
 use engine::hidden::{key, key_kind, key_payload, key_player, HIDDEN};
 use engine::rng::Rng;
-use zero_search::game::{make_bot, SearchGame};
+use zero_search::game::{make_bot, Bot, SearchGame};
 
 fn scale(n: u64) -> u64 {
     n * std::env::var("DRAFT_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(1)
@@ -176,7 +178,7 @@ fn picks_are_the_pack_and_illegal_actions_are_errors() {
     let mut keys = Vec::new();
     let not_in = cube().unwrap().cards.iter().copied().find(|c| !l.contains(c)).unwrap();
     assert!(g.clone().step(not_in, &mut keys).is_err());
-    assert!(g.clone().step(OUT, &mut keys).is_err());
+    assert!(g.clone().step(DONE, &mut keys).is_err());
     assert!(g.clone().step(COUNT, &mut keys).is_err());
     g.step(l[0], &mut keys).unwrap();
     assert!(keys.is_empty(), "a pick reveals nothing until the packs pass");
@@ -186,7 +188,7 @@ fn picks_are_the_pack_and_illegal_actions_are_errors() {
     let mut rng = Rng::new(1);
     finish_random(&mut g, &mut rng);
     assert_eq!(g.phase(), Phase::Done);
-    assert!(g.step(OUT, &mut keys).is_err());
+    assert!(g.step(DONE, &mut keys).is_err());
 }
 
 #[test]
@@ -206,6 +208,7 @@ fn every_pool_has_45_cards_and_decks_are_legal() {
             all.extend_from_slice(&pool);
             let (deck, side) = g.deck_and_sideboard(s).unwrap();
             assert_eq!(deck.len(), DECK_SIZE, "a deck is exactly 40 cards (ENGINE.md 42)");
+            assert!(g.build(s).unwrap().pool_cards() >= DECK_MIN as usize, "at least the minimum of pool cards (ENGINE.md 47)");
             let mut non_basic: Vec<u16> = deck.iter().map(|&d| cube.ident_of(d)).filter(|c| !cube.basic_ids.contains(c)).collect();
             for &b in &cube.basic_defs {
                 assert!(deck.iter().filter(|&&d| d == b).count() <= MAX_BASIC as usize);
@@ -237,135 +240,252 @@ fn every_pool_has_45_cards_and_decks_are_legal() {
     }
 }
 
-/// Seat `builder()`'s whole build: `card(legal)` answers a pool card,
-/// `count(legal)` a basic count; returns the options of each decision.
-fn build_seat(g: &mut TeamDraftAz, card: impl Fn(&[u16]) -> u16, count: impl Fn(&[u16]) -> u16) -> Vec<Vec<u16>> {
+/// Seat `builder()`'s whole build: `card(g, legal)` answers a choice of the
+/// next pool card (or `DONE`), `count(legal)` a basic count; returns the
+/// options of each decision.
+fn build_seat(g: &mut TeamDraftAz, card: impl Fn(&TeamDraftAz, &[u16]) -> u16, count: impl Fn(&[u16]) -> u16) -> Vec<Vec<u16>> {
     let s = g.builder();
     let mut keys = Vec::new();
     let mut asked = Vec::new();
     while g.to_move() == Some(s as usize) {
         let l = legal(g);
-        let a = if l.contains(&OUT) { card(&l) } else { count(&l) };
+        let a = if g.build(s).unwrap().cards_done() { count(&l) } else { card(g, &l) };
         asked.push(l);
         g.step(a, &mut keys).unwrap();
     }
     asked
 }
 
+/// The identities at build positions `range` of the builder's order, sorted
+/// (the cards it may add).
+fn at(g: &TeamDraftAz, range: std::ops::RangeInclusive<usize>) -> Vec<u16> {
+    let b = g.build(g.builder()).unwrap();
+    let mut v: Vec<u16> = range.map(|j| b.order[j]).collect();
+    v.sort_unstable();
+    v
+}
+
 #[test]
-fn deckbuilding_makes_exactly_40_cards_from_either_extreme() {
-    // ENGINE.md 42: a deck is exactly 40 cards. From 45-card pools: every
-    // card out then the smallest or the largest counts (40 basic lands, at
-    // most 31 of a type), and every card in (40 pool cards, the last five
-    // forced out, every count forced to 0). The Forest count is always
-    // forced (a single option).
+fn deckbuilding_adds_the_next_card_from_either_extreme() {
+    // ENGINE.md 47: each decision adds the next pool card (one after the
+    // last added, in build order: by identity) or `DONE`, offered once the
+    // deck holds `deck_min` (22) pool cards; a card is offered only while the
+    // minimum stays reachable after it. Then the counts (ENGINE.md 42:
+    // exactly 40 cards, at most 31 of a basic land; the Forest count forced).
+    // 45-card pools of a 2v2 event.
+    let m = DECK_MIN as usize;
+    let skip = 45 - m; // the cards a deck of the minimum leaves out
+    assert_eq!((m, skip), (22, 23));
     let mut g = new(4, 5);
     let mut keys = Vec::new();
     while g.phase() == Phase::Draft {
         let l = legal(&g);
         g.step(l[0], &mut keys).unwrap();
     }
+    for s in 0..4u8 {
+        let b = g.build(s).unwrap();
+        assert!(b.order.windows(2).all(|w| w[0] < w[1]), "build order: by identity");
+    }
     let single = |asked: &[Vec<u16>]| asked.iter().map(|l| l.len() == 1).collect::<Vec<_>>();
-    // Seat 0: everything out, minimum counts: the most basic lands.
-    let asked = build_seat(&mut g, |_| OUT, |l| l[0]);
-    assert_eq!(asked.len(), 50);
-    assert!(asked[..45].iter().all(|l| l.len() == 2 && l[1] == OUT), "a card in or out while the deck has room");
-    assert_eq!(single(&asked[45..]), [false, false, false, false, true]);
+    let next = |g: &TeamDraftAz, _: &[u16]| -> u16 {
+        let b = g.build(g.builder()).unwrap();
+        b.order[b.k as usize]
+    };
+    // Seat 0: the first 22 cards in build order, DONE, the smallest counts:
+    // 18 basic lands. Until 22 pool cards no DONE, and the cards offered are
+    // the positions t..=23 + t (the minimum reachable after each).
+    let mut t = 0;
+    loop {
+        let l = legal(&g);
+        if t < m {
+            assert_eq!(l, at(&g, t..=skip + t), "{t} cards in: the next card, the minimum reachable");
+            assert!(g.clone().step(DONE, &mut keys).is_err(), "DONE before the minimum");
+            if skip + t + 1 < 45 {
+                let late = g.build(0).unwrap().order[skip + t + 1];
+                assert!(g.clone().step(late, &mut keys).is_err(), "a card past the window");
+            }
+            if t > 0 {
+                let early = g.build(0).unwrap().order[t - 1];
+                assert!(g.clone().step(early, &mut keys).is_err(), "a card before the position");
+            }
+        } else {
+            let mut want = at(&g, m..=44);
+            want.push(DONE);
+            assert_eq!(l, want, "the minimum reached: any later card, or DONE");
+            g.step(DONE, &mut keys).unwrap();
+            break;
+        }
+        g.step(next(&g, &l), &mut keys).unwrap();
+        t += 1;
+    }
+    let asked = build_seat(&mut g, next, |l| l[0]);
+    assert_eq!(single(&asked), [false, false, false, false, true], "the counts; Forest forced");
     let b = g.build(0).unwrap();
-    assert_eq!((b.size(), b.basics), (40, [0, 0, 0, 9, 31]));
-    // Seat 1: everything out, maximum counts.
-    let asked = build_seat(&mut g, |_| OUT, |l| *l.last().unwrap());
-    assert_eq!(single(&asked[45..]), [false, false, true, true, true], "Plains 31, Island 9, then 0 forced");
+    assert_eq!((b.size(), b.pool_cards(), b.basics), (40, m, [0, 0, 0, 0, 18]));
+    assert_eq!(g.deck_and_sideboard(0).unwrap().1.len(), 23);
+    // Seat 1: the furthest card first (position 23): the 21 cards after it
+    // are then forced (single options), the last card of the order ends the
+    // cards (no DONE asked); the largest counts: Plains 18, the rest 0.
+    let asked = build_seat(&mut g, |_, l| l[l.len() - 1], |l| *l.last().unwrap());
+    assert_eq!(asked[0].len(), skip + 1);
+    assert!(asked[1..m].iter().all(|l| l.len() == 1 && l[0] != DONE), "forced: the minimum needs every later card");
+    assert_eq!(single(&asked[m..]), [false, true, true, true, true], "Plains 18, then 0 forced");
+    assert_eq!(asked.len(), m + 5, "22 cards and 5 counts, no DONE");
     let b = g.build(1).unwrap();
-    assert_eq!((b.size(), b.basics), (40, [31, 9, 0, 0, 0]));
-    // Seat 2: everything in: the fewest basic lands. Once the deck holds 40
-    // cards the rest of the pool is forced out and every count is 0.
-    let asked = build_seat(&mut g, |l| l[0], |l| l[0]);
-    assert!(asked[..40].iter().all(|l| l.len() == 2));
-    assert!(asked[40..45].iter().all(|l| l == &[OUT]), "forced out once the deck is full");
-    assert!(asked[45..].iter().all(|l| l == &[COUNT]), "every count forced to 0");
+    assert_eq!((b.size(), b.pool_cards(), b.basics, b.inn), (40, m, [18, 0, 0, 0, 0], ((1u64 << m) - 1) << skip));
+    // Seat 2: every card in order: the 40th fills the deck, which ends the
+    // cards (the last five in the sideboard); every count forced to 0.
+    let asked = build_seat(&mut g, next, |l| l[0]);
+    assert_eq!(asked.len(), 45);
+    assert!(asked[..m].iter().all(|l| !l.contains(&DONE) && l.len() == skip + 1));
+    assert!(asked[m..40].iter().all(|l| l.last() == Some(&DONE)), "DONE offered from 22 pool cards on");
+    assert!(asked[40..].iter().all(|l| l == &[COUNT]), "every count forced to 0");
     let b = g.build(2).unwrap();
-    assert_eq!((b.size(), b.basics, b.inn.count_ones()), (40, [0; 5], 40));
+    assert_eq!((b.size(), b.basics, b.pool_cards()), (40, [0; 5], 40));
     let (deck, side) = g.deck_and_sideboard(2).unwrap();
     assert_eq!((deck.len(), side.len()), (40, 5));
-    // Seat 3: the first three cards out, then every card in: the deck is
-    // full at the 43rd card, the last two are forced out. Putting a card
-    // into a full deck is an error.
-    for i in 0..45 {
-        let l = legal(&g);
-        if i >= 43 {
-            assert_eq!(l, [OUT], "card {i}");
-            let card = g.build(3).unwrap().order[i];
-            assert!(g.clone().step(card, &mut keys).is_err(), "a card into a full deck");
-        } else {
-            assert_eq!(l.len(), 2, "card {i}");
-        }
-        g.step(if i < 3 { OUT } else { l[0] }, &mut keys).unwrap();
-    }
-    build_seat(&mut g, |_| unreachable!(), |l| l[0]);
+    // Seat 3: every other card (positions 1, 3, .., 43), DONE at 22; middle
+    // counts.
+    let asked = build_seat(
+        &mut g,
+        |g, l| {
+            let b = g.build(3).unwrap();
+            if b.pool_cards() == 22 {
+                DONE
+            } else {
+                let c = b.order[b.k as usize + 1];
+                assert!(l.contains(&c));
+                c
+            }
+        },
+        |l| l[l.len() / 2],
+    );
+    assert_eq!(asked.len(), m + 6, "22 cards, DONE, 5 counts");
     let b = g.build(3).unwrap();
-    assert_eq!((b.size(), b.basics, b.inn.count_ones()), (40, [0; 5], 40));
+    assert_eq!((b.size(), b.pool_cards(), b.basics), (40, m, [9, 5, 2, 1, 1]));
+    assert_eq!(b.inn, (0..m).fold(0u64, |x, i| x | 1 << (2 * i + 1)));
+    assert_eq!(g.deck_and_sideboard(3).unwrap().1.len(), 23);
     g.check_invariants().unwrap();
     assert!(g.deferred());
 }
 
-#[test]
-fn every_40_card_deck_is_reachable_exactly_once() {
-    // A two-card pool (one pack of two per seat): a depth-first search over
-    // seat 0's deckbuilding decisions reaches every deck of exactly 40 cards
-    // (any subset of the pool, basic lands at most 31 of a type) once, and
-    // no other.
-    let mut g = TeamDraftAz::new(&spec(r#"{"packs": 1, "pack_size": 2}"#), 2, 7).unwrap();
+/// Every final card set of `seat`'s card choices (depth first, from its
+/// first decision): the deck bits of each, and (decisions, single options,
+/// DONE offered). Checks DONE's legality at every decision.
+fn card_sets(g: &TeamDraftAz, seat: u8) -> (Vec<u64>, [u64; 3]) {
+    let m = g.ev.deck_min as usize;
     let mut keys = Vec::new();
-    while g.phase() == Phase::Draft {
-        let l = legal(&g);
-        g.step(l[0], &mut keys).unwrap();
-    }
-    assert_eq!(g.build(0).unwrap().order.len(), 2);
-    let mut seen = std::collections::HashSet::new();
-    let (mut leaves, mut nodes, mut forced) = (0u64, 0u64, 0u64);
-    let mut stack = vec![g];
+    let mut sets = Vec::new();
+    let mut n = [0u64; 3];
+    let mut stack = vec![g.clone()];
     while let Some(g) = stack.pop() {
-        if g.builder() != 0 {
-            let b = g.build(0).unwrap();
-            assert_eq!(b.size(), DECK_SIZE);
-            assert!(b.basics.iter().all(|&x| x <= MAX_BASIC));
-            let key = b.inn | b.basics.iter().enumerate().fold(0u64, |k, (j, &x)| k | (x as u64) << (8 + 6 * j));
-            assert!(seen.insert(key), "a deck reached twice: {:?} {:?}", b.inn, b.basics);
-            leaves += 1;
+        let b = g.build(seat).unwrap();
+        if b.cards_done() {
+            sets.push(b.inn);
             continue;
         }
-        nodes += 1;
         let l = legal(&g);
         assert!(!l.is_empty(), "a dead end");
-        forced += (l.len() == 1) as u64;
+        assert_eq!(l.contains(&DONE), b.pool_cards() >= m, "DONE offered iff the deck holds the minimum");
+        n[0] += 1;
+        n[1] += (l.len() == 1) as u64;
+        n[2] += l.contains(&DONE) as u64;
         for &a in &l {
             let mut c = g.clone();
             c.step(a, &mut keys).unwrap();
             stack.push(c);
         }
     }
-    // Every deck: m pool cards (C(2, m) ways) and five counts of 0..=31
-    // summing to 40 - m.
-    let mut want = 0u64;
-    for m in 0..=2u32 {
-        let ways = [1, 2, 1][m as usize];
+    (sets, n)
+}
+
+fn binomial(n: u64, k: u64) -> u64 {
+    (0..k).fold(1, |acc, i| acc * (n - i) / (i + 1))
+}
+
+#[test]
+fn every_legal_deck_is_reachable_exactly_once() {
+    // ENGINE.md 47: a legal deck is a set of pool cards (at least the
+    // minimum, at most 40) and basic lands making 40 (at most 31 of a type);
+    // its cards are added in build order, so each deck has one path.
+    // (a) The cards, exhaustively: 1v1 events of one pack (12 or 15-card
+    // pools) for several minimums: every set of at least the minimum once,
+    // no other; and a 45-card pool with the minimum 40 (every 40-card set:
+    // the full deck ends the cards).
+    for (pack_size, packs, min) in [(12u8, 1u8, 0u8), (12, 1, 1), (12, 1, 5), (12, 1, 12), (15, 1, 3), (15, 3, 40)] {
+        let sp = format!(r#"{{"packs": {packs}, "pack_size": {pack_size}, "deck_min": {min}}}"#);
+        let mut g = TeamDraftAz::new(&spec(&sp), 2, 7).unwrap();
+        let mut keys = Vec::new();
+        while g.phase() == Phase::Draft {
+            let l = legal(&g);
+            g.step(l[0], &mut keys).unwrap();
+        }
+        let n = g.build(0).unwrap().order.len() as u64;
+        assert_eq!(n, packs as u64 * pack_size as u64);
+        let t0 = std::time::Instant::now();
+        let (sets, [decisions, forced, done]) = card_sets(&g, 0);
+        let mut uniq = sets.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(uniq.len(), sets.len(), "a card set reached twice ({sp})");
+        assert!(sets.iter().all(|s| (min as u32..=40).contains(&s.count_ones())), "{sp}");
+        let want: u64 = (min as u64..=n.min(40)).map(|k| binomial(n, k)).sum();
+        println!("{n}-card pool, minimum {min}: {} card sets of {want}, {decisions} decisions ({forced} single options, DONE offered at {done}), {:.1} s", sets.len(), t0.elapsed().as_secs_f64());
+        assert_eq!(sets.len() as u64, want, "{sp}");
+    }
+    // (b) Whole decks: a two-card pool, minimums 0, 1 and 2: every deck (its
+    // cards and five counts of 0..=31 summing to 40 - its cards) once.
+    let comps = |k: u32| -> u64 {
         let mut n = 0u64;
         for a in 0..=31u32 {
             for b in 0..=31u32 {
                 for c in 0..=31u32 {
                     for d in 0..=31u32 {
-                        let e = 40i64 - m as i64 - (a + b + c + d) as i64;
+                        let e = 40i64 - k as i64 - (a + b + c + d) as i64;
                         n += (0..=31).contains(&e) as u64;
                     }
                 }
             }
         }
-        want += ways * n;
+        n
+    };
+    for min in 0..=2u8 {
+        let mut g = TeamDraftAz::new(&spec(&format!(r#"{{"packs": 1, "pack_size": 2, "deck_min": {min}}}"#)), 2, 7).unwrap();
+        let mut keys = Vec::new();
+        while g.phase() == Phase::Draft {
+            let l = legal(&g);
+            g.step(l[0], &mut keys).unwrap();
+        }
+        assert_eq!(g.build(0).unwrap().order.len(), 2);
+        let mut seen = std::collections::HashSet::new();
+        let (mut leaves, mut nodes, mut forced) = (0u64, 0u64, 0u64);
+        let mut stack = vec![g];
+        while let Some(g) = stack.pop() {
+            if g.builder() != 0 {
+                let b = g.build(0).unwrap();
+                assert_eq!(b.size(), DECK_SIZE);
+                assert!(b.pool_cards() >= min as usize);
+                assert!(b.basics.iter().all(|&x| x <= MAX_BASIC));
+                let key = b.inn | b.basics.iter().enumerate().fold(0u64, |k, (j, &x)| k | (x as u64) << (8 + 6 * j));
+                assert!(seen.insert(key), "a deck reached twice: {:?} {:?}", b.inn, b.basics);
+                leaves += 1;
+                continue;
+            }
+            nodes += 1;
+            let l = legal(&g);
+            assert!(!l.is_empty(), "a dead end");
+            forced += (l.len() == 1) as u64;
+            for &a in &l {
+                let mut c = g.clone();
+                c.step(a, &mut keys).unwrap();
+                stack.push(c);
+            }
+        }
+        let want: u64 = (min as u32..=2).map(|k| [1, 2, 1][k as usize] * comps(k)).sum();
+        println!("two-card pool, minimum {min}: {leaves} decks, {nodes} decisions, {forced} forced (single option)");
+        assert_eq!(leaves, want);
+        assert_eq!(seen.len() as u64, want);
     }
-    println!("{leaves} decks, {nodes} decisions, {forced} forced (single option)");
-    assert_eq!(leaves, want);
-    assert_eq!(seen.len() as u64, want);
 }
 
 #[test]
@@ -807,6 +927,7 @@ fn encoding_slots_hold_the_pack_and_the_picks() {
         (a * 64 + b * 8 + c) as u16
     };
     use draft_encode::{CODE, O_PACK, O_POOL, PACK_W, POOL_W};
+    let mut builds = 0;
     for g in states(8, 2, 30, 31) {
         let v = g.to_move().unwrap() as u8;
         let x = enc(&g, v);
@@ -830,14 +951,28 @@ fn encoding_slots_hold_the_pack_and_the_picks() {
             assert_eq!(ident(&x[o..o + CODE]), c);
             assert_eq!(x[o + CODE], 1.0);
         }
-        if g.phase() == Phase::Build && l.contains(&OUT) {
-            // the card decided is flagged in its pool slot
-            let k = g.picks(v).iter().position(|p| p.0 == l[0]).unwrap();
-            assert_eq!(x[O_POOL + k * POOL_W + CODE + draft_encode::pool::DECIDING], 1.0);
-            assert_eq!(x[O_POOL + k * POOL_W + CODE + draft_encode::pool::OPTION], 1.0);
-            assert!(cube.name(l[0]).len() > 0);
+        if g.phase() == Phase::Build && !g.build(v).unwrap().cards_done() {
+            // Choosing the next card: every card it may add is an option of
+            // its pool slot; every card from the build position on is still
+            // addable; the cards before it are in or out (ENGINE.md 47).
+            use draft_encode::{gl, pool};
+            let b = g.build(v).unwrap();
+            for (k, &(c, _, _)) in g.picks(v).iter().enumerate() {
+                let st = &x[O_POOL + k * POOL_W + CODE..O_POOL + (k + 1) * POOL_W];
+                let i = b.order.iter().position(|&y| y == c).unwrap();
+                assert_eq!(st[pool::OPTION] == 1.0, l.contains(&c), "{}", cube.name(c));
+                assert_eq!(st[pool::AVAILABLE] == 1.0, i >= b.k as usize);
+                assert_eq!(st[pool::IN] + st[pool::OUT], (i < b.k as usize) as u8 as f32);
+                assert_eq!(st[pool::IN] == 1.0, b.inn & (1 << i) != 0);
+            }
+            assert_eq!(x[gl::BUILD_CARD], 1.0);
+            assert_eq!(x[gl::DONE_OK] == 1.0, l.contains(&DONE));
+            assert_eq!(x[gl::NEED], b.need(g.ev.deck_min) as f32 / 40.0);
+            assert_eq!(x[gl::POOL_IN], b.pool_cards() as f32 / 40.0);
+            builds += 1;
         }
     }
+    assert!(builds > 10, "{builds}");
 }
 
 #[test]
@@ -868,33 +1003,47 @@ fn the_bots() {
 #[test]
 fn spec_parsing() {
     let s = spec("");
-    assert_eq!((s.packs, s.pack_size, s.rounds, s.max_turns), (3, 15, None, 60));
-    let s = spec(r#"{"rounds": 2, "packs": 2, "pack_size": 9, "max_turns": 40, "format": "bo1"}"#);
-    assert_eq!((s.packs, s.pack_size, s.rounds, s.max_turns), (2, 9, Some(2), 40));
-    for bad in [r#"{"bogus": 1}"#, r#"{"packs": 4}"#, r#"{"pack_size": 16}"#, r#"{"pack_size": 1}"#, r#"{"rounds": 0}"#, r#"{"format": "bo5"}"#, "[1]"] {
+    assert_eq!((s.packs, s.pack_size, s.rounds, s.max_turns, s.deck_min), (3, 15, None, 60, 22));
+    let s = spec(r#"{"rounds": 2, "packs": 2, "pack_size": 9, "max_turns": 40, "format": "bo1", "deck_min": 33}"#);
+    assert_eq!((s.packs, s.pack_size, s.rounds, s.max_turns, s.deck_min), (2, 9, Some(2), 40, 33));
+    // The minimum is at most the pool.
+    assert_eq!(TeamDraftAz::new(&s, 4, 1).unwrap().ev.deck_min, 18);
+    assert_eq!(TeamDraftAz::new(&spec(r#"{"deck_min": 40}"#), 4, 1).unwrap().ev.deck_min, 40);
+    for bad in [
+        r#"{"bogus": 1}"#,
+        r#"{"packs": 4}"#,
+        r#"{"pack_size": 16}"#,
+        r#"{"pack_size": 1}"#,
+        r#"{"rounds": 0}"#,
+        r#"{"format": "bo5"}"#,
+        r#"{"deck_min": 41}"#,
+        r#"{"deck_min": -1}"#,
+        "[1]",
+    ] {
         assert!(DraftSpec::parse(bad).is_err(), "{bad}");
     }
     for players in [0usize, 1, 3, 10] {
         assert!(TeamDraftAz::new_game(&spec(""), players, 1).is_err(), "{players}");
     }
     assert_eq!(<TeamDraftAz as SearchGame>::NUM_ACTIONS, 1024);
-    assert_eq!(<TeamDraftAz as SearchGame>::NUM_FEATURES, 14_488);
-    assert_eq!(draft::OUT, 768);
+    assert_eq!(<TeamDraftAz as SearchGame>::NUM_FEATURES, 14_492);
+    assert_eq!(draft::DONE, 768);
 }
 
 #[test]
 fn layout_json_is_checked_in() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_draft_v1.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_draft_v2.json");
     let want = draft_encode::layout_json();
     if std::env::var("MTGZ_WRITE_LAYOUT").is_ok() {
         std::fs::write(&path, &want).unwrap();
     }
     let got = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
-    assert!(got == want, "mtgz/az/layout_draft_v1.json is stale: MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test draft layout");
+    assert!(got == want, "mtgz/az/layout_draft_v2.json is stale: MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test draft layout");
 }
 
 /// The random-actions fuzz of whole events (`DRAFT_FUZZ=n` events, 4v4, 2v2,
-/// 3v3 and 1v1): the invariants after every action; the decider's encoding
+/// 3v3 and 1v1; the deck minimum 20, 0, 40 or random): the invariants after
+/// every action; the decider's encoding
 /// finite and within `encode::FEATURE_BOUND` at every decision, and every
 /// world's (ENGINE.md 46); every ~40 actions
 /// `determinize` for the decider and another viewer (knowledge, features,
@@ -909,12 +1058,15 @@ fn fuzz_random_events() {
     let (mut steps, mut worlds, mut options_done, mut searched) = (0u64, 0u64, 0u64, [0u64; 2]);
     let mut team_wins = [0u64; 3];
     let mut heuristic_matches = 0u64;
+    // decks, their pool cards, card choices (DONE offered at) by minimum: the default / other
+    let mut decks = [[0u64; 4]; 2];
     let t0 = std::time::Instant::now();
     for e in 0..events {
         let players = [8usize, 4, 8, 2, 8, 6][e as usize % 6];
-        let mut g = new(players, 0x5EED_0000 + e);
-        // (an event is 45 picks and 50 deckbuilding decisions per seat)
-        let check_at = if e % 8 == 0 { rng.below(95 * players as u32) as u64 } else { u64::MAX };
+        let min = [DECK_MIN as u32, 0, 40, rng.below(41)][(e / 6) as usize % 4];
+        let mut g = TeamDraftAz::new(&spec(&format!(r#"{{"deck_min": {min}}}"#)), players, 0x5EED_0000 + e).unwrap();
+        // (an event is 45 picks and 25-46 deckbuilding decisions per seat)
+        let check_at = if e % 8 == 0 { rng.below(80 * players as u32) as u64 } else { u64::MAX };
         let mut i = 0u64;
         let mut keys = Vec::new();
         let mut x = vec![0.0f32; NUM_FEATURES];
@@ -926,6 +1078,11 @@ fn fuzz_random_events() {
             assert_bounded(&x, e, i, d as u8);
             if l.len() >= 2 {
                 searched[(g.phase() == Phase::Build) as usize] += 1;
+            }
+            if g.phase() == Phase::Build && !g.build(d as u8).unwrap().cards_done() {
+                decks[(min != DECK_MIN as u32) as usize][2] += 1;
+                decks[(min != DECK_MIN as u32) as usize][3] += l.contains(&DONE) as u64;
+                assert_eq!(l.contains(&DONE), g.build(d as u8).unwrap().pool_cards() >= min as usize);
             }
             if i % 40 == 17 {
                 for v in [d as u8, rng.below(players as u32) as u8] {
@@ -967,6 +1124,12 @@ fn fuzz_random_events() {
         }
         steps += i;
         assert!(g.deferred());
+        for s in 0..players as u8 {
+            let b = g.build(s).unwrap();
+            assert!(b.pool_cards() >= min as usize && b.size() == DECK_SIZE);
+            decks[(min != DECK_MIN as u32) as usize][0] += 1;
+            decks[(min != DECK_MIN as u32) as usize][1] += b.pool_cards() as u64;
+        }
         let n = g.matches().unwrap().len();
         if e % 50 == 7 {
             // Random decks are playable: the heuristic plays the event's matches.
@@ -991,6 +1154,15 @@ fn fuzz_random_events() {
         searched[1],
         t0.elapsed().as_secs_f64()
     );
+    for (k, what) in ["minimum 22 (the default)", "minimum 0, 40 or random"].iter().enumerate() {
+        let [n, cards, choices, done] = decks[k];
+        println!(
+            "random decks, {what}: {n}, {:.2} pool cards each, {:.2} card choices per seat ({:.2} with DONE offered)",
+            cards as f64 / n.max(1) as f64,
+            choices as f64 / n.max(1) as f64,
+            done as f64 / n.max(1) as f64
+        );
+    }
 }
 
 /// Every value of a draft encoding is finite and within the bound (ENGINE.md
@@ -1011,7 +1183,8 @@ fn measure() {
     for players in [8usize, 4] {
         let mut rng = Rng::new(1);
         let mut keys = Vec::new();
-        let (mut decisions, mut searched_picks, mut searched_build) = (0u64, 0u64, 0u64);
+        let (mut decisions, mut searched_picks, mut searched_build, mut build_actions) = (0u64, 0u64, 0u64, 0u64);
+        let mut pool_cards = Vec::new();
         let t0 = std::time::Instant::now();
         for e in 0..n {
             let mut g = new(players, e);
@@ -1024,20 +1197,53 @@ fn measure() {
                         searched_build += 1;
                     }
                 }
+                build_actions += (g.phase() == Phase::Build) as u64;
                 keys.clear();
                 g.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
                 decisions += 1;
             }
+            pool_cards.extend((0..players as u8).map(|s| g.build(s).unwrap().pool_cards() as u64));
         }
         let secs = t0.elapsed().as_secs_f64();
+        let seats = (n * players as u64) as f64;
         println!(
-            "{players} seats: {n} random events in {secs:.2} s = {:.0} events/s ({:.3} us per action); per event {} actions, \
-             {:.1} searched picks, {:.1} searched deckbuilding decisions",
+            "{players} seats: {n} random events in {secs:.2} s = {:.0} events/s ({:.3} us per action); per event {:.1} actions, \
+             {:.1} searched picks, {:.1} searched deckbuilding decisions; per seat {:.2} deckbuilding decisions ({:.2} searched), \
+             {:.2} pool cards in its deck ({}..={})",
             n as f64 / secs,
             secs * 1e6 / decisions as f64,
-            decisions / n,
+            decisions as f64 / n as f64,
             searched_picks as f64 / n as f64,
-            searched_build as f64 / n as f64
+            searched_build as f64 / n as f64,
+            build_actions as f64 / seats,
+            searched_build as f64 / seats,
+            pool_cards.iter().sum::<u64>() as f64 / seats,
+            pool_cards.iter().min().unwrap(),
+            pool_cards.iter().max().unwrap()
+        );
+        // `consensus` decks: their pool cards and deckbuilding decisions.
+        let (mut cards, mut acts, mut searched) = (0u64, 0u64, 0u64);
+        let m = 50u64;
+        for e in 0..m {
+            let mut g = new(players, 900 + e);
+            let mut bot = Consensus::default();
+            while g.to_move().is_some() {
+                let l = legal(&g);
+                let a = if l.len() == 1 { l[0] } else { bot.choose(&g, &l) };
+                if g.phase() == Phase::Build {
+                    acts += 1;
+                    searched += (l.len() >= 2) as u64;
+                }
+                g.step(a, &mut keys).unwrap();
+            }
+            cards += (0..players as u8).map(|s| g.build(s).unwrap().pool_cards() as u64).sum::<u64>();
+        }
+        let seats = (m * players as u64) as f64;
+        println!(
+            "{players} seats: consensus decks {:.2} pool cards, {:.2} deckbuilding decisions per seat ({:.2} with two options or more)",
+            cards as f64 / seats,
+            acts as f64 / seats,
+            searched as f64 / seats
         );
         // encode, clone + determinize on sampled states
         let st = states(players, 40, 10, 3);

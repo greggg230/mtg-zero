@@ -13,12 +13,17 @@
 //!   each hidden from the others. A pack is stored as its **removal order**:
 //!   position `t` holds the card taken at pick `t`, the positions from
 //!   `taken` on the cards still in it (kept sorted by identity).
-//! * **Deckbuilding** (after the draft, seat by seat): one decision per pool
-//!   card in the seat's build order (its identity = in the deck, `OUT` = in
-//!   the sideboard; once the deck holds `DECK_SIZE` cards only `OUT`), then
-//!   the five basic land counts (`COUNT + n`; the last is forced); every deck
-//!   of exactly `DECK_SIZE` = 40 cards with at most `MAX_BASIC` of a basic
-//!   land is reachable in exactly one way (ENGINE.md 42).
+//! * **Deckbuilding** (after the draft, seat by seat; ENGINE.md 47): each
+//!   decision adds the **next pool card** to the deck (its identity: a pool
+//!   card after the last one added in the seat's build order, the pool
+//!   sorted by identity) or ends the cards (`DONE`, offered once the deck
+//!   holds the event's `deck_min` pool cards, 22 by default); a full deck
+//!   (`DECK_SIZE` pool cards) or the last card of the order ends them too.
+//!   Then the five basic land counts (`COUNT + n`; the last is forced). The
+//!   rest of the pool is the sideboard. Every deck of exactly `DECK_SIZE` =
+//!   40 cards with at least `deck_min` pool cards and at most `MAX_BASIC` of
+//!   a basic land is reachable in exactly one way (its cards in build
+//!   order).
 //! * **The deferred terminal**: after the last seat's last count `to_move()`
 //!   is `None` and the event waits for its matches (`matches`,
 //!   `deferred_payload`); `resolve` sets their results. `result`, `margin`
@@ -37,10 +42,9 @@ use std::sync::{Arc, OnceLock};
 use serde_json::{json, Value};
 use zero_search::game::{Bot, SearchGame, MAX_SEATS};
 
-use crate::db::{types, CardDb};
+use crate::db::CardDb;
 use crate::hidden::{key, key_kind, key_payload, key_player, HIDDEN};
 use crate::ids::DefId;
-use crate::mana::COLORS;
 use crate::rng::{split64, Rng};
 
 use super::decks::{self, DeckGen};
@@ -48,11 +52,12 @@ use super::identity;
 use super::matches::{Format, MAX_COUNT};
 use super::pools;
 
-/// Action ids: `0..CARD_CAP` a card by identity (pick it; in deckbuilding, put
-/// it in the deck), `OUT` (leave the card being decided in the sideboard),
-/// `COUNT + n` (that many basic lands of the type being decided).
+/// Action ids: `0..CARD_CAP` a card by identity (pick it; in deckbuilding, add
+/// it to the deck next), `DONE` (no more pool cards: the rest of the pool is
+/// the sideboard), `COUNT + n` (that many basic lands of the type being
+/// decided).
 pub const CARD_CAP: u16 = identity::CUBE_CAP as u16;
-pub const OUT: u16 = 768;
+pub const DONE: u16 = 768;
 pub const COUNT: u16 = 800;
 pub const COUNT_N: u16 = MAX_COUNT as u16 + 1;
 pub const NUM_ACTIONS: usize = 1024;
@@ -70,6 +75,14 @@ pub const MAX_SEATS_DRAFT: usize = 2 * MAX_TEAM;
 /// `SideboardCount` range of the match, ENGINE.md 36.2).
 pub const DECK_SIZE: usize = decks::DECK_SIZE;
 pub const MAX_BASIC: u8 = MAX_COUNT;
+
+/// The fewest pool cards a deck holds by default (`DraftSpec::deck_min`;
+/// ENGINE.md 47): `DONE` is offered from then on, so a deck has at most 18
+/// basic lands (the most lands a 40-card deck plays; the pool's own lands
+/// are pool cards), and a random player's or an untrained network's deck
+/// (whose choices almost never reach `DONE`: each skips cards for good) has
+/// this many pool cards, a deck's usual share, never mostly basic lands.
+pub const DECK_MIN: u8 = 22;
 
 /// Key kinds (the `mtg` game's are 1..7).
 pub const KEY_SEE: u64 = 16;
@@ -90,8 +103,6 @@ pub struct DraftCube {
     /// The basic lands W U B R G: identities and definitions.
     pub basic_ids: [u16; 5],
     pub basic_defs: [DefId; 5],
-    /// Identity -> the build-order key (land, colour group, mana value).
-    pub build_key: Vec<(u8, u8, u8)>,
 }
 
 impl DraftCube {
@@ -145,25 +156,7 @@ pub fn cube() -> Result<&'static DraftCube, String> {
         if !bad.is_empty() {
             return Err(format!("team_draft: the cube has unsupported cards: {}", bad.join("; ")));
         }
-        let build_key = (0..identity::CUBE_CAP)
-            .map(|i| {
-                if def[i] == DefId::MAX {
-                    return (0, 0, 0);
-                }
-                let d = db.def(def[i]);
-                if d.is(types::LAND) {
-                    return (1, 0, 0);
-                }
-                let c = d.colors & COLORS;
-                let group = match c.count_ones() {
-                    0 => 6,
-                    1 => c.trailing_zeros() as u8,
-                    _ => 5,
-                };
-                (0, group, d.mana_value())
-            })
-            .collect();
-        Ok(DraftCube { db, cards, def, basic_ids, basic_defs, build_key })
+        Ok(DraftCube { db, cards, def, basic_ids, basic_defs })
     })
     .as_ref()
     .map_err(|e| e.clone())
@@ -173,7 +166,7 @@ pub fn cube() -> Result<&'static DraftCube, String> {
 
 /// The spec of `team_draft` (JSON; every key optional):
 /// `{"rounds": min(T, 3), "packs": 3, "pack_size": 15, "max_turns": 60, "format": "bo3",
-/// "build_sims_div": 1}`.
+/// "build_sims_div": 1, "deck_min": 22}`.
 /// `rounds`: rounds of matches (rotations of the Latin square, at most `T`);
 /// `max_turns` and `format`: the matches' (ENGINE.md 36); `build_sims_div`
 /// (1-16): deckbuilding decisions are searched with the seat's simulations
@@ -182,6 +175,8 @@ pub fn cube() -> Result<&'static DraftCube, String> {
 /// yardstick's position, ENGINE.md 45): `{"views": [[names], ...], "picks":
 /// [names]}`, seat 0's packs at its picks so far and the cards it took, the
 /// last view its pending pick; the event starts there (`TeamDraftAz::new`).
+/// `deck_min` (0-40, default 22): the fewest pool cards a deck holds (`DONE`
+/// is offered from then on; at most the pool; ENGINE.md 47).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DraftSpec {
     pub rounds: Option<u8>,
@@ -190,12 +185,22 @@ pub struct DraftSpec {
     pub max_turns: u32,
     pub format: Format,
     pub build_sims_div: u8,
+    pub deck_min: u8,
     pub history: Option<History>,
 }
 
 impl Default for DraftSpec {
     fn default() -> Self {
-        DraftSpec { rounds: None, packs: 3, pack_size: 15, max_turns: 60, format: Format::Bo3, build_sims_div: 1, history: None }
+        DraftSpec {
+            rounds: None,
+            packs: 3,
+            pack_size: 15,
+            max_turns: 60,
+            format: Format::Bo3,
+            build_sims_div: 1,
+            deck_min: DECK_MIN,
+            history: None,
+        }
     }
 }
 
@@ -264,6 +269,7 @@ impl DraftSpec {
                     }
                 }
                 "build_sims_div" => s.build_sims_div = int()?.min(255) as u8,
+                "deck_min" => s.deck_min = int()?.min(255) as u8,
                 "history" => s.history = Some(History::parse(x)?),
                 other => return Err(format!("team_draft spec: unknown key {other:?}")),
             }
@@ -283,6 +289,9 @@ impl DraftSpec {
         if !(1..=16).contains(&s.build_sims_div) {
             return Err(format!("team_draft spec: build_sims_div {} (1..=16)", s.build_sims_div));
         }
+        if s.deck_min as usize > DECK_SIZE {
+            return Err(format!("team_draft spec: deck_min {} (0..={DECK_SIZE})", s.deck_min));
+        }
         Ok(s)
     }
 }
@@ -300,6 +309,9 @@ pub struct Event {
     pub format: Format,
     /// Deckbuilding's simulations divisor (`DraftSpec::build_sims_div`).
     pub build_sims_div: u8,
+    /// The fewest pool cards of a deck: `DraftSpec::deck_min`, at most the
+    /// pool.
+    pub deck_min: u8,
 }
 
 impl Event {
@@ -326,6 +338,7 @@ impl Event {
             max_turns: spec.max_turns,
             format: spec.format,
             build_sims_div: spec.build_sims_div,
+            deck_min: spec.deck_min.min(spec.packs.saturating_mul(spec.pack_size)),
         })
     }
 
@@ -381,14 +394,21 @@ pub enum Phase {
     Done,
 }
 
-/// One seat's deckbuilding.
+/// One seat's deckbuilding (ENGINE.md 47): the pool cards of its deck, each
+/// decision the next one in build order (or `DONE`), then the basic land
+/// counts. A deck is a set, and its cards are added in build order: every
+/// deck has exactly one path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Build {
-    /// The pool in build order (identities): spells by colour group (W, U, B,
-    /// R, G, multicolour, colourless), then mana value, then identity; then
-    /// lands by identity.
+    /// The pool in build order: sorted by identity (the cube's card list,
+    /// alphabetical: an order that says nothing of a card, so the cards an
+    /// unskilled builder ends with, the order's last ones, are any cards;
+    /// ENGINE.md 47).
     pub order: Vec<u16>,
-    /// The next card to decide (`order.len()`: the counts).
+    /// The build position: the cards before it are decided (in the deck or
+    /// left out), a card from it on may be added next. `order.len()` once
+    /// the pool cards are chosen (`DONE`, a full deck, or the last card of
+    /// the order added): then the counts.
     pub k: u8,
     /// Bit i: `order[i]` is in the deck.
     pub inn: u64,
@@ -412,10 +432,47 @@ impl Build {
         self.inn.count_ones() as usize + self.basics.iter().map(|&b| b as usize).sum::<usize>()
     }
 
-    /// May the card being decided go in the deck (it holds fewer than
-    /// `DECK_SIZE` pool cards; else the rest of the pool is forced `OUT`)?
-    pub fn room(&self) -> bool {
-        (self.inn.count_ones() as usize) < DECK_SIZE
+    /// Pool cards in the deck.
+    pub fn pool_cards(&self) -> usize {
+        self.inn.count_ones() as usize
+    }
+
+    /// Are the pool cards chosen (the counts follow)?
+    pub fn cards_done(&self) -> bool {
+        self.k as usize >= self.order.len()
+    }
+
+    /// Pool cards still to add before `DONE` is offered (a deck holds at
+    /// least `min`).
+    pub fn need(&self, min: u8) -> usize {
+        (min as usize).saturating_sub(self.pool_cards())
+    }
+
+    /// The build positions whose card may be added now: from the position to
+    /// the last one leaving enough cards after it for the minimum (empty once
+    /// the cards are chosen). Never empty while choosing: the position keeps
+    /// the minimum reachable.
+    pub fn window(&self, min: u8) -> std::ops::RangeInclusive<usize> {
+        if self.cards_done() {
+            return 1..=0;
+        }
+        self.k as usize..=self.order.len() - self.need(min).max(1)
+    }
+
+    /// Is `DONE` offered (the cards are being chosen and the deck holds the
+    /// minimum)?
+    pub fn done_ok(&self, min: u8) -> bool {
+        !self.cards_done() && self.need(min) == 0
+    }
+
+    /// Add the card at build position `j` (in the window): the position
+    /// moves past it; a full deck (`DECK_SIZE` pool cards) ends the cards.
+    fn add(&mut self, j: usize) {
+        self.inn |= 1 << j;
+        self.k = (j + 1) as u8;
+        if self.pool_cards() >= DECK_SIZE {
+            self.k = self.order.len() as u8;
+        }
     }
 
     /// The counts the type being decided may take: a deck of exactly
@@ -862,13 +919,15 @@ impl TeamDraftAz {
             }
             Phase::Build => {
                 let b = &self.builds[self.builder as usize];
-                if (b.k as usize) < b.order.len() {
-                    // (A full deck forces the rest of the pool out: a single
-                    // option, as a pack's last card.)
-                    if b.room() {
-                        out.push(b.order[b.k as usize]);
+                if !b.cards_done() {
+                    // The next pool card (its identity), and `DONE` once the
+                    // deck holds the minimum.
+                    let m = self.ev.deck_min;
+                    out.extend(b.window(m).map(|j| b.order[j]));
+                    out.sort_unstable();
+                    if b.done_ok(m) {
+                        out.push(DONE);
                     }
-                    out.push(OUT);
                 } else {
                     let (lo, hi) = b.count_range();
                     out.extend((lo..=hi).map(|n| COUNT + n as u16));
@@ -1019,8 +1078,7 @@ impl TeamDraftAz {
                 self.emit(key(KEY_TEAM, team, HIDDEN), chance);
             }
         }
-        let cube = cube().expect("the cube was loaded");
-        self.builds = (0..self.ev.n).map(|s| Build::new(build_order(cube, &self.pool(s)))).collect();
+        self.builds = (0..self.ev.n).map(|s| Build::new(build_order(&self.pool(s)))).collect();
         self.builder = 0;
     }
 
@@ -1069,16 +1127,24 @@ impl TeamDraftAz {
 
     fn apply_build(&mut self, a: u16) -> Result<(), String> {
         let n = self.ev.n;
+        let m = self.ev.deck_min;
         let s = self.builder;
         let b = &mut self.builds[s as usize];
-        if (b.k as usize) < b.order.len() {
-            let c = b.order[b.k as usize];
-            if a == c && b.room() {
-                b.inn |= 1 << b.k;
-            } else if a != OUT {
-                return Err(format!("team_draft: seat {s} deciding {c}: action {a} (the card while the deck has room, or OUT)"));
+        if !b.cards_done() {
+            if a == DONE {
+                if !b.done_ok(m) {
+                    return Err(format!("team_draft: seat {s}: DONE with {} pool cards in the deck (at least {m})", b.pool_cards()));
+                }
+                b.k = b.order.len() as u8;
+                return Ok(());
             }
-            b.k += 1;
+            let Some(j) = b.window(m).find(|&j| b.order[j] == a) else {
+                return Err(format!(
+                    "team_draft: seat {s}: action {a} is not a pool card it may add next (build positions {:?}; DONE at {m} pool cards)",
+                    b.window(m)
+                ));
+            };
+            b.add(j);
             return Ok(());
         }
         let (lo, hi) = b.count_range();
@@ -1141,7 +1207,7 @@ impl TeamDraftAz {
         if self.phase != Phase::Draft {
             let cube = cube().expect("the cube was loaded");
             for o in (0..ev.n).filter(|o| o % 2 != viewer % 2) {
-                let order = build_order(cube, &self.pool(o));
+                let order = build_order(&self.pool(o));
                 let mut b = Build::new(order);
                 let finished = self.phase == Phase::Done || o < self.builder;
                 if finished {
@@ -1371,7 +1437,7 @@ impl TeamDraftAz {
             }
             for s in 0..ev.n {
                 let b = &self.builds[s as usize];
-                if b.order != build_order(cube, &self.pool(s)) {
+                if b.order != build_order(&self.pool(s)) {
                     return Err(format!("seat {s}: build order is not its pool's"));
                 }
                 if b.order.len() != ev.pool_size() {
@@ -1383,6 +1449,25 @@ impl TeamDraftAz {
                 }
                 if finished && (!b.done() || b.size() != DECK_SIZE) {
                     return Err(format!("seat {s}: deck of {} cards (done {})", b.size(), b.done()));
+                }
+                // The deck's cards are before the build position; the counts
+                // follow the cards; while choosing, the deck has room and the
+                // minimum stays reachable.
+                if b.k as usize > b.order.len() || b.inn >> b.k != 0 {
+                    return Err(format!("seat {s}: build position {}, deck bits {:#x}", b.k, b.inn));
+                }
+                if b.basic_k > 0 && !b.cards_done() {
+                    return Err(format!("seat {s}: counting basic lands before the cards are chosen"));
+                }
+                if !b.cards_done() && (b.pool_cards() >= DECK_SIZE || b.window(ev.deck_min).is_empty()) {
+                    return Err(format!("seat {s}: choosing cards at position {} with {} in (minimum {})", b.k, b.pool_cards(), ev.deck_min));
+                }
+                // A deck the seat built holds the minimum (in a world, an
+                // opponent's finished deck is the heuristic deckbuilder's
+                // stand-in, ENGINE.md 41.2, which ignores it: it never plays).
+                let redrawn = self.observer.is_some_and(|o| o % 2 != s % 2);
+                if finished && !redrawn && b.pool_cards() < ev.deck_min as usize {
+                    return Err(format!("seat {s}: {} pool cards in its deck (at least {})", b.pool_cards(), ev.deck_min));
                 }
                 if s > self.builder && self.phase == Phase::Build && (b.k > 0 || b.basic_k > 0) {
                     return Err(format!("seat {s} builds before its turn"));
@@ -1396,10 +1481,10 @@ impl TeamDraftAz {
     }
 }
 
-/// A pool in build order (DESIGN.md 2.3.3).
-pub fn build_order(cube: &DraftCube, pool: &[u16]) -> Vec<u16> {
+/// A pool in build order (DESIGN.md 2.3.3, ENGINE.md 47): by identity.
+pub fn build_order(pool: &[u16]) -> Vec<u16> {
     let mut v = pool.to_vec();
-    v.sort_by_key(|&c| (cube.build_key[c as usize], c));
+    v.sort_unstable();
     v
 }
 

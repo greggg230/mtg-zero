@@ -5,7 +5,7 @@ supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match w
 between games, decks built from random card pools), its object layout for zero-core's token
 network (arch 'tokens': `layout_v4.json`, written by the engine's `encode::layout_json`), the game
 `team_draft` (docs/ENGINE.md 41, 43, 45, DESIGN.md 2.3: a team cube draft and deckbuilding up to
-the matches, its deferred terminal; its layout `layout_draft_v1.json`), the run
+the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4; the co-training presets team_draft-smoke,
 team_draft-gpu-smoke, team_draft-4v4), the default spec, the evaluation spec, the dashboard's
 title / port, the remote evaluator 'mac' (run setting eval_remote: the MacBook evaluates with
@@ -45,10 +45,10 @@ EVAL_SPEC = eval_spec(SPEC)
 # The objects of encode layout v4 for zero-core's token network (docs/ENGINE.md 22, 35)
 with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v4.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
-# The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41: layout draft_v1, the pack and pool slots
-# and 13 bags; `id_actions`: a slot scores its card's identity, the pick or putting it in the deck,
-# zero-core's TokenNet since M6 part 3, ENGINE.md 45)
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_draft_v1.json'), encoding='utf-8') as _f:
+# The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41, 47: layout draft_v2, the pack and pool
+# slots and 13 bags; `id_actions`: a slot scores its card's identity, the pick or adding it to the deck
+# next, zero-core's TokenNet since M6 part 3, ENGINE.md 45)
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_draft_v2.json'), encoding='utf-8') as _f:
     LAYOUT_DRAFT = json.load(_f)
 # The team draft's default spec: 3 packs of 15, min(T, 3) rounds of best-of-three matches (the seats,
 # 2T, are the run's `players`: [8] for 4v4, [4] for 2v2). The co-training presets are below (M6 part 3,
@@ -110,8 +110,10 @@ PRESETS['mtg-4'] = dict(PRESETS['mtg-3'], spec=SPEC_BO3, eval_spec=eval_spec(SPE
 # are the self-play of the play network (the resolver `mtg`, mtg-4's settings, in <run>/resolver/), each
 # event's outcome its matches' (its deferred terminal resolved by `mtgz.az.drafted`). Draft search: picks
 # 64 / 16 simulations, deckbuilding half of that (the spec's build_sims_div 2: 32 / 8), p_full 0.25,
-# completed-Q targets, temperature for the first 120 decisions of an event (the first pack's 15 pick
-# rounds of a 4v4); the draft network the token network of mtg-3 (128 x 4, actions by identity). An
+# completed-Q targets, temperature for every decision of an event (temp_moves 1000: a 4v4 event has at
+# most ~700 searched decisions, so deckbuilding is sampled by visit count too: ENGINE.md 47; lower it
+# with --temp-moves on a relaunch once deckbuilding has settled); the draft network the token network
+# of mtg-3 (128 x 4, actions by identity). An
 # iteration = 48 events resolved (576 matches, mtg5's scale), 64 events in flight drafting, the matches
 # 768 in flight with backpressure at 2 x 768 queued or playing. Evaluation: the draft network every
 # iteration against `consensus` (the anchor: human pick strength and the heuristic deckbuilder) and
@@ -127,7 +129,7 @@ SPEC_DRAFT_RUN = '{"build_sims_div": 2}'
 _DRAFT_NET = dict(arch='tokens', hidden=128, blocks=4, heads=4, ff=256)
 PRESETS['team_draft-4v4'] = dict(
     game='team_draft', spec=SPEC_DRAFT_RUN, players=[8], iters=100, games=48, rolling=1, conc=64, sims=64,
-    sims_fast=16, p_full=0.25, temp_moves=120, chance_k=0, policy_target='cq', cq_c_visit=50.0, cq_c_scale=1.0,
+    sims_fast=16, p_full=0.25, temp_moves=1000, chance_k=0, policy_target='cq', cq_c_visit=50.0, cq_c_scale=1.0,
     **_DRAFT_NET, batch=512, reuse=4.0, lr=1e-3, window=8, window_grow=1, min_window_samples=20_000, value_q=0.5,
     value_q_warmup=5, keep_data=12, ram_budget_gb=6.0, yardstick='consensus', eval_games=32, eval_sims=32,
     eval_random_games=16, eval_every=1, elo_games=16, elo_opponents=4, elo_together=0, ref_games=32, threads=8,
@@ -148,7 +150,7 @@ PRESETS['team_draft-gpu-smoke'] = dict(
 # (the remote's end-to-end check adds "eval_remote": "mac" to its resolver_cfg, ENGINE.md 48).
 PRESETS['team_draft-smoke'] = dict(
     game='team_draft', spec=SPEC_DRAFT_RUN, players=[4], iters=2, games=4, conc=4, sims=8, sims_fast=2, p_full=0.25,
-    temp_moves=60, policy_target='cq', arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=64, min_steps=10,
+    temp_moves=1000, policy_target='cq', arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=64, min_steps=10,
     lr_warmup_steps=0, min_window_samples=0, yardstick='consensus', eval_games=4, eval_sims=4, eval_random_games=2,
     elo_games=2, ref_games=4, threads=2, max_steps=20_000, resolver='mtg', resolver_conc=16, pending_max=0,
     draft_eval_net_every=2,

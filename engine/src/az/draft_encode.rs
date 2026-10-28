@@ -1,13 +1,14 @@
-//! The network input of `team_draft` (DESIGN.md 2.3.5): layout `draft_v1`,
-//! 14,488 floats for a viewer, with nothing it cannot know (its own packs and
-//! picks; after the draft its team's knowledge and its teammates' decks).
+//! The network input of `team_draft` (DESIGN.md 2.3.5): layout `draft_v2`
+//! (ENGINE.md 47; `draft_v1` before deckbuilding chose the next card), 14,492
+//! floats for a viewer, with nothing it cannot know (its own packs and picks;
+//! after the draft its team's knowledge and its teammates' decks).
 //!
 //! | Block | Offset | Floats | What |
 //! |---|---:|---:|---|
-//! | globals | 0 | 64 | phase, round, pick, direction, team size, my place, who decides, sizes, my pool's colours, the deck being built (`gl::*`) |
-//! | pack | 64 | 15 x 68 | my current pack (sorted by identity): card code, present, an option of my decision, my view number of this pack |
-//! | pool | 1,084 | 45 x 76 | my picks in pick order: card code + `pool::*` (round, pick, first pick, in / out of the deck, decided now, option, build position, a companion the deck so far fulfills) |
-//! | bags | 4,504 | 13 x 768 | identities x 0.25 (`bag::*`): my draft (taken by others between two of my views, passed with their fate unknown, wheeled), teammates' pools (3), teammates' decks (3), opponents' known pools (4) |
+//! | globals | 0 | 68 | phase, round, pick, direction, team size, my place, who decides, sizes, my pool's colours, the deck being built, `DONE` offered, the pool cards still needed, the minimum (`gl::*`) |
+//! | pack | 68 | 15 x 68 | my current pack (sorted by identity): card code, present, an option of my decision, my view number of this pack |
+//! | pool | 1,088 | 45 x 76 | my picks in pick order: card code + `pool::*` (round, pick, first pick, in / out of the deck, still addable, an option now, build position, a companion the deck so far fulfills) |
+//! | bags | 4,508 | 13 x 768 | identities x 0.25 (`bag::*`): my draft (taken by others between two of my views, passed with their fate unknown, wheeled), teammates' pools (3), teammates' decks (3), opponents' known pools (4) |
 //!
 //! A card code is 64 floats: the identity's digits (16, 8, 8; vocabulary
 //! 1024, the `mtg` layout's) and a descriptor of 32 (`desc`).
@@ -23,7 +24,7 @@ use super::draft::{cube, DraftCube, Phase, TeamDraftAz, MAX_PACK, MAX_POOL, MAX_
 use super::identity;
 
 pub const CODE: usize = 64;
-pub const GLOBALS: usize = 64;
+pub const GLOBALS: usize = 68;
 pub const PACK_W: usize = CODE + 4;
 pub const POOL_W: usize = CODE + 12;
 pub const BAGS: usize = 13;
@@ -68,7 +69,7 @@ pub mod gl {
     pub const DECK_SIZE: usize = 46;
     /// My deck's basic lands (W U B R G) / 20.
     pub const DECK_BASICS: usize = 47;
-    /// I decide a card / a basic count (the type, one-hot 5).
+    /// I choose the next pool card / a basic count (the type, one-hot 5).
     pub const BUILD_CARD: usize = 52;
     pub const BUILD_BASIC: usize = 53;
     pub const OPTIONS: usize = 58;
@@ -77,6 +78,13 @@ pub mod gl {
     pub const PACKS: usize = 61;
     pub const PACK_SIZE: usize = 62;
     pub const ROUNDS: usize = 63;
+    /// `DONE` is one of my options (draft_v2).
+    pub const DONE_OK: usize = 64;
+    /// My deck's pool cards / 40; the pool cards it still needs before
+    /// `DONE` / 40; the event's minimum / 40 (draft_v2).
+    pub const POOL_IN: usize = 65;
+    pub const NEED: usize = 66;
+    pub const DECK_MIN: usize = 67;
 }
 
 /// Pack slot status (after the card code).
@@ -94,8 +102,13 @@ pub mod pool {
     pub const PICK: usize = 4;
     pub const FIRST_PICK: usize = 5;
     pub const IN: usize = 6;
+    /// Before the build position and not in the deck (or every card not in
+    /// it once the cards are chosen): the sideboard.
     pub const OUT: usize = 7;
-    pub const DECIDING: usize = 8;
+    /// While I choose my cards: at or after the build position (it may still
+    /// be added, now or later; draft_v1: the card decided now).
+    pub const AVAILABLE: usize = 8;
+    /// Adding it is one of my options now.
     pub const OPTION: usize = 9;
     pub const BUILD_POS: usize = 10;
     pub const COMPANION_OK: usize = 11;
@@ -261,6 +274,7 @@ pub fn encode(g: &TeamDraftAz, viewer: u8, out: &mut [f32]) {
     }
 
     // My deck so far (deckbuilding).
+    x[gl::DECK_MIN] = ev.deck_min as f32 / 40.0;
     let my_build = g.build(viewer);
     if let Some(b) = my_build {
         let mut lands = 0f32;
@@ -285,9 +299,12 @@ pub fn encode(g: &TeamDraftAz, viewer: u8, out: &mut [f32]) {
         x[gl::DECK_LANDS] = lands / 20.0;
         x[gl::DECK_SIZE] = b.size() as f32 / 40.0;
         x[gl::BUILD_POS] = b.k as f32 / 45.0;
+        x[gl::POOL_IN] = b.pool_cards() as f32 / 40.0;
+        x[gl::NEED] = b.need(ev.deck_min) as f32 / 40.0;
         if me_decide && phase == Phase::Build {
-            if (b.k as usize) < b.order.len() {
+            if !b.cards_done() {
                 x[gl::BUILD_CARD] = 1.0;
+                x[gl::DONE_OK] = b.done_ok(ev.deck_min) as u8 as f32;
             } else {
                 x[gl::BUILD_BASIC + b.basic_k as usize] = 1.0;
             }
@@ -326,9 +343,9 @@ pub fn encode(g: &TeamDraftAz, viewer: u8, out: &mut [f32]) {
                 st[pool::BUILD_POS] = i as f32 / 45.0;
                 if i < b.k as usize {
                     st[if b.inn & (1 << i) != 0 { pool::IN } else { pool::OUT }] = 1.0;
-                } else if i == b.k as usize && me_decide && phase == Phase::Build {
-                    st[pool::DECIDING] = 1.0;
-                    st[pool::OPTION] = legal.contains(&c) as u8 as f32;
+                } else if me_decide && phase == Phase::Build {
+                    st[pool::AVAILABLE] = 1.0;
+                    st[pool::OPTION] = legal.binary_search(&c).is_ok() as u8 as f32;
                 }
             }
             if let Some(cond) = &cube.db.def(cube.def_of(c)).companion {
@@ -407,12 +424,12 @@ fn companion_ok(cube: &DraftCube, cond: &DeckCond, deck: &[DefId]) -> bool {
 }
 
 /// The object layout of this encoding for zero-core's token network
-/// (`mtgz/az/layout_draft_v1.json`; a test keeps the two equal): the pack and
+/// (`mtgz/az/layout_draft_v2.json`; a test keeps the two equal): the pack and
 /// pool slots (identity digits 16, 8, 8; the present flag after the card
 /// code); `id_actions: 0` = a slot scores the action of its card's identity
-/// (M6 part 2 adds it to `TokenNet`; the pinned core ignores the key); the
-/// 13 bags; everything else globals. `cards`: the name behind each identity
-/// (analysis only).
+/// (zero-core's `TokenNet`, ENGINE.md 45.4: a pack slot its pick, a pool slot
+/// adding its card to the deck next); the 13 bags; everything else globals.
+/// `cards`: the name behind each identity (analysis only).
 pub fn layout_json() -> String {
     use serde_json::json;
     let cube = cube().expect("the cube");
@@ -424,7 +441,7 @@ pub fn layout_json() -> String {
     }
     let id = json!({"at": 0, "radix": [16, 8, 8]});
     let v = json!({
-        "version": 1,
+        "version": 2,
         "game": "team_draft",
         "features": NUM_FEATURES,
         "vocab": identity::D,

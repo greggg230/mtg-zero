@@ -1,8 +1,9 @@
 """The game `team_draft` (docs/ENGINE.md 41, 43, DESIGN.md 2.3) through the bindings: its info, a
 whole event of random actions (encode, determinize keeping the decider's view and options), the
 deferred terminal (the result is refused until the matches are played; zero-core's driver parks the
-event there and resolves it with the matches' results, ENGINE.md 43), the spec, and the token network
-reading layout draft_v1 on real positions and a driver's leaf batch."""
+event there and resolves it with the matches' results, ENGINE.md 43), the spec, deckbuilding as picks
+(ENGINE.md 47), and the token network reading layout draft_v2 on real positions and a driver's leaf
+batch."""
 import json
 
 import numpy as np
@@ -14,11 +15,12 @@ from mtgz.az import protocol
 
 def test_info_and_spec():
     info = G.info('team_draft')
-    assert info['num_actions'] == 1024 and info['num_features'] == 14488
+    assert info['num_actions'] == 1024 and info['num_features'] == 14492
     assert info['min_players'] == 2 and info['max_players'] == 8
     assert info['bots'] == ['random', 'consensus']
     E = G.engine()
-    for spec, players in (('{"bogus": 1}', 8), ('{"packs": 4}', 8), ('{}', 3), ('{}', 10), ('{"rounds": 3}', 4)):
+    for spec, players in (('{"bogus": 1}', 8), ('{"packs": 4}', 8), ('{}', 3), ('{}', 10), ('{"rounds": 3}', 4),
+                          ('{"deck_min": 41}', 4)):
         with pytest.raises(Exception):
             E.Game('team_draft', spec, players, 1)
 
@@ -43,12 +45,19 @@ def test_an_event_through_the_bindings():
                 assert np.array_equal(np.asarray(d.encode(p)), x)          # nothing hidden in the features
             g.step(int(legal[rng.integers(len(legal))]))
             steps += 1
-        assert steps == players * 45 + players * 50
+        # 45 picks per seat; deckbuilding: at least 22 pool cards (DONE from then on), at most 40, and
+        # five counts (ENGINE.md 47)
+        assert players * (45 + 22 + 5) <= steps <= players * (45 + 40 + 5)
         assert g.to_move is None and g.deferred and g.team_size == players // 2
         # the deferred terminal: no result until the matches are played (zero-core's bindings refuse it)
         with pytest.raises(ValueError, match='deferred terminal'):
             g.result()
-        assert len(json.loads(g.deferred_payload())['matches']) == {8: 12, 4: 4}[players]
+        ms = json.loads(g.deferred_payload())['matches']
+        assert len(ms) == {8: 12, 4: 4}[players]
+        basics = {'Plains', 'Island', 'Swamp', 'Mountain', 'Forest'}
+        for p in ms[0]['players']:
+            assert len(p['deck']) == 40 and len(p['deck']) - sum(c in basics for c in p['deck']) >= 22
+            assert len(p['deck']) - sum(c in basics for c in p['deck']) + len(p['sideboard']) == 45
 
 
 def test_a_driver_parks_the_event_until_its_matches_are_played():
@@ -71,7 +80,7 @@ def test_a_driver_parks_the_event_until_its_matches_are_played():
     assert row['result'] == [0.5, 0.0, 0.5, 0.0] and row['scores'] == [3, 1, 3, 1] and drv.finished
 
 
-def test_token_network_reads_layout_draft_v1():
+def test_token_network_reads_layout_draft_v2():
     import torch
     import mtgz.az as A
     from zero.infer import NetEvaluator

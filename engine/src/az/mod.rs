@@ -16,9 +16,9 @@
 //!   evaluation set, or given lists).
 //! * Bots: `random` (zero-core) and `heuristic` (`bots.rs`).
 //!
-//! The game `team_draft` (DESIGN.md 2.3, ENGINE.md 41): `draft.rs` (the event,
-//! deckbuilding, the deferred terminal), `draft_encode.rs` (layout
-//! `draft_v1`), `draft_bots.rs` (`consensus`, heuristic-played matches).
+//! The game `team_draft` (DESIGN.md 2.3, ENGINE.md 41, 47): `draft.rs` (the
+//! event, deckbuilding, the deferred terminal), `draft_encode.rs` (layout
+//! `draft_v2`), `draft_bots.rs` (`consensus`, heuristic-played matches).
 
 pub mod bots;
 pub mod decks;

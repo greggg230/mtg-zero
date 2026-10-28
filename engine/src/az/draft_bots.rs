@@ -21,7 +21,7 @@ use zero_search::game::{Bot, SearchGame};
 use crate::game::{Game, GameSpec};
 
 use super::bots::{self, Heuristic};
-use super::draft::{cube, heuristic_build, Build, DraftCube, MatchSetup, Phase, TeamDraftAz, COUNT, OUT};
+use super::draft::{cube, heuristic_build, Build, DraftCube, MatchSetup, Phase, TeamDraftAz, COUNT, DONE};
 use super::identity;
 use super::matches::{Format, MatchState, Seat};
 use super::MtgAz;
@@ -85,10 +85,18 @@ impl Consensus {
             self.plan = Some((s, b.order.clone(), plan));
         }
         let plan = &self.plan.as_ref().expect("a plan").2;
-        if (b.k as usize) < b.order.len() {
-            // (The plan's deck has 40 cards, so its cards always have room.)
+        if !b.cards_done() {
+            // The plan's next card from the build position, then `DONE` (its
+            // deck holds 23 spells and its lands, more than the minimum of a
+            // 45-card pool: each is offered in turn). A plan below the
+            // minimum (a small test pool) takes the next card in build order
+            // until `DONE` is offered.
             let k = b.k as usize;
-            return if plan.inn & (1 << k) != 0 && legal.contains(&b.order[k]) { b.order[k] } else { OUT };
+            match (k..b.order.len()).find(|&j| plan.inn & (1 << j) != 0) {
+                Some(j) if legal.contains(&b.order[j]) => return b.order[j],
+                None if legal.contains(&DONE) => return DONE,
+                _ => return b.order[k],
+            }
         }
         // The count nearest the plan's among the legal ones.
         let want = COUNT + plan.basics[b.basic_k as usize] as u16;

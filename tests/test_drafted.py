@@ -2,7 +2,7 @@
 glue (`mtgz.az.drafted`: the payload's matches as `mtg` specs, the matches' results back, a
 malformed result refused), events parked by a draft driver and resolved by matches a second
 driver plays from those specs (zero-core's coordinator), the token network's actions by identity
-on layout draft_v1, the human-pick yardstick, the co-training presets."""
+on layout draft_v2, the human-pick yardstick, the co-training presets."""
 import json
 import os
 
@@ -101,8 +101,8 @@ def test_events_park_and_resolve_through_two_drivers():
 
 
 def test_token_network_scores_cards_by_identity():
-    """Layout draft_v1's `id_actions`: a pack slot scores its card's pick, a pool slot putting its
-    card in the deck (zero-core's TokenNet, M6 part 3)."""
+    """Layout draft_v2's `id_actions`: a pack slot scores its card's pick, a pool slot adding its card
+    to the deck next (zero-core's TokenNet, M6 part 3; ENGINE.md 47); DONE and the counts are generic."""
     import torch
     from zero.net import make_net
     info = G.info('team_draft')
@@ -121,16 +121,17 @@ def test_token_network_scores_cards_by_identity():
     while not g.over:
         legal = list(g.legal())
         p = g.to_move
+        x = np.asarray(g.encode(p))
         with torch.no_grad():
-            pol = m(torch.from_numpy(np.asarray(g.encode(p)))[None], torch.tensor([4]))[0][0].numpy()
-        if len(legal) > 1 and legal[-1] < 768:                                     # a pick: the pack's cards
+            pol = m(torch.from_numpy(x)[None], torch.tensor([4]))[0][0].numpy()
+        if len(legal) > 1 and x[0] == 1.0:                                         # a pick: the pack's cards
             assert all(pol[a] == 1.0 for a in legal)
             seen['pick'] += 1
-        elif len(legal) == 2 and legal[1] == 768:                                  # a pool card: in, or OUT
-            assert pol[legal[0]] == 2.0 and pol[768] == 0.0
+        elif len(legal) > 1 and x[52] == 1.0:                                      # the next pool card, or DONE
+            assert all(pol[a] == 2.0 for a in legal if a < 768) and pol[768] == 0.0
             seen['build'] += 1
         g.step(int(legal[rng.integers(len(legal))]))
-    assert seen['pick'] > 100 and seen['build'] > 50
+    assert seen['pick'] > 100 and seen['build'] > 20
 
 
 def test_human_pick_agreement_on_a_few_drafts(tmp_path, monkeypatch):

@@ -3,7 +3,7 @@
     {
       "count": 13,
       "name": "draft",
-      "offset": 4504,
+      "offset": 4508,
       "width": 768
     }
   ],
@@ -1033,7 +1033,7 @@
     null,
     null
   ],
-  "features": 14488,
+  "features": 14492,
   "game": "team_draft",
   "segments": [
     {
@@ -1049,7 +1049,7 @@
       },
       "id_actions": 0,
       "name": "pack",
-      "offset": 64,
+      "offset": 68,
       "present": 64,
       "width": 68
     },
@@ -1066,11 +1066,11 @@
       },
       "id_actions": 0,
       "name": "pool",
-      "offset": 1084,
+      "offset": 1088,
       "present": 64,
       "width": 76
     }
   ],
-  "version": 1,
+  "version": 2,
   "vocab": 1024
 }
