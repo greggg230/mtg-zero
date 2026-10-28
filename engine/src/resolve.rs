@@ -363,12 +363,14 @@ impl Game {
                     f.pc += 1;
                     f.i = 0;
                     f.floor = 0;
+                    self.pile_done(&f, prog);
                     self.new_event();
                 }
                 Flow::Jump(pc) => {
                     f.pc = pc;
                     f.i = 0;
                     f.floor = 0;
+                    self.pile_done(&f, prog);
                     self.new_event();
                 }
                 Flow::Suspend => return,
@@ -382,6 +384,15 @@ impl Game {
                 self.agenda.extend(tasks);
                 return;
             }
+        }
+    }
+
+    /// After an op: once the looked-at pile is placed (empty, or the next
+    /// op places none of it), the shuffles its replacements put off
+    /// (`Game::pile_shuffles`, ENGINE.md 51).
+    fn pile_done(&mut self, f: &Frame, prog: &[Op]) {
+        if self.pile_shuffles != 0 && (f.pile.is_empty() || !matches!(prog.get(f.pc as usize), Some(Op::PileTo { .. }))) {
+            self.flush_pile_shuffles();
         }
     }
 
@@ -813,7 +824,9 @@ impl Game {
                         if set {
                             f.floor = self.objs[c.i()].def;
                         }
+                        self.pile_moving = true;
                         self.put_from_pile(p, c, dest, reveal);
+                        self.pile_moving = false;
                         if dest == PileDest::FaceDown {
                             // Linked to the source (CR 607.2a: "the exiled
                             // card").
@@ -832,9 +845,11 @@ impl Game {
                     // "The rest into your graveyard": no choice, canonical order.
                     let mut all = std::mem::take(&mut f.pile);
                     all.sort_by_key(|c| (self.objs[c.i()].def, c.0));
+                    self.pile_moving = true;
                     for c in all {
                         self.put_from_pile(p, c, dest, reveal);
                     }
+                    self.pile_moving = false;
                     return Flow::Next;
                 }
                 let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };

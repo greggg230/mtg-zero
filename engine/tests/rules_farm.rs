@@ -9,14 +9,17 @@
 //! * 51.2 `ChooseGraveyardCard with no options` (an opponent's Lotus Petal
 //!   counted for "exile cards from your graveyard" and delve, CR 400.3);
 //! * 51.3 a payment search that never ended (Gaea's Cradle's mana against
-//!   its own waterbend tap: a matching kept in eight bits).
+//!   its own waterbend tap: a matching kept in eight bits);
+//! * 51.4 a world that changed its decider's encoding (Blightsteel Colossus
+//!   surveiled into the graveyard shuffled the pile still to be placed).
 
 mod common;
 
 use common::db;
 use engine::az::matches::{Format, MatchState, Seat};
-use engine::az::{sample, MtgAz};
+use engine::az::{sample, MtgAz, NUM_FEATURES};
 use engine::db::{AbilitySlot};
+use engine::rng::Rng;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Target, Zone};
 use zero_search::game::SearchGame;
@@ -46,6 +49,12 @@ fn bf(g: &Game, p: PlayerId, name: &str) -> CardIdx {
 
 fn options(g: &Game) -> Vec<Choice> {
     g.pending_decision().map(|d| d.options.iter().map(|o| o.choice).collect()).unwrap_or_default()
+}
+
+fn encoding(g: &Game, viewer: PlayerId) -> Vec<f32> {
+    let mut x = vec![0.0f32; NUM_FEATURES];
+    g.encode_features(viewer, &mut x);
+    x
 }
 
 /// Answer decisions (`answer`, else the first option) until a player has
@@ -306,4 +315,68 @@ fn cr_605_3a_gaeas_cradle_with_many_creatures_tapped_for_waterbend_is_checked_at
         .expect("the castability and payment of Aang's waterbend (28 creatures, Gaea's Cradle one of them) did not end in 30 s");
     assert!(offered, "waterbend {{8}}");
     assert!(paths > 0);
+}
+
+// ---- 51.4: a surveil's replacement shuffle -------------------------------------
+
+/// CR 701.25a (surveil: put any number of the looked-at cards into the
+/// graveyard and the rest on top, one action), 614.1a (Blightsteel
+/// Colossus: "if it would be put into a graveyard from anywhere, reveal it
+/// and shuffle it into its owner's library instead"). The engine asks the
+/// cards one by one; the Colossus picked first shuffled the library at
+/// once, the other looked-at card still to be placed in it: its player no
+/// longer knew which card it was, a world `determinize` sampled for that
+/// player dealt it again, and the decision's encoding changed (fuzz match
+/// 10036882 with `FUZZ_POOL=interactions` at 075649c: Kaito's surveil). The
+/// shuffle now follows the pile's placement.
+#[test]
+fn cr_701_25a_a_surveiled_blightsteel_colossus_shuffles_after_the_pile_is_placed() {
+    let start = || {
+        scen()
+            .battlefield(0, &["Kaito, Bane of Nightmares"])
+            .library(0, &["Blightsteel Colossus", "Screaming Nemesis", "Island", "Island", "Island", "Island", "Island", "Island"])
+            .library(1, &["Island"; 8])
+            .at(Step::Main1, 0)
+            .start()
+    };
+    for to_graveyard in [false, true] {
+        let mut g = start();
+        let kaito = bf(&g, 0, "Kaito, Bane of Nightmares");
+        let bs = g.card(0, "Blightsteel Colossus", Zone::Library);
+        let nemesis = g.card(0, "Screaming Nemesis", Zone::Library);
+        let nemesis_def = g.obj(nemesis).def;
+        // Kaito's 0: surveil 2.
+        g.choose(act(kaito, 1));
+        finish(&mut g, |_| None);
+        g.pass();
+        g.pass();
+        assert_eq!(g.kind(), Some(DecisionKind::PutInGraveyard), "{}", log(&g));
+        g.choose(Choice::Card(bs));
+        assert_eq!(g.kind(), Some(DecisionKind::PutInGraveyard), "{}", log(&g));
+        assert!(options(&g).contains(&Choice::Card(nemesis)));
+        assert!(g.knows(0, nemesis), "P0 still knows the looked-at Screaming Nemesis");
+        // Every world P0 samples keeps it, and P0's encoding.
+        let x = encoding(&g, 0);
+        for s in 0..32 {
+            let mut d = g.clone();
+            d.determinize(0, &mut Rng::new(s));
+            assert_eq!(d.ident(nemesis), nemesis_def, "world {s}");
+            assert_eq!(encoding(&d, 0), x, "world {s}: P0's encoding");
+        }
+        // Then the Nemesis into the graveyard or on top; the library is
+        // shuffled after (the Colossus in it, revealed).
+        if to_graveyard {
+            g.choose(Choice::Card(nemesis));
+        } else {
+            g.choose(Choice::Pass);
+        }
+        resolve_with(&mut g, |_| None);
+        assert_eq!(g.obj(bs).zone, Zone::Library, "{}", log(&g));
+        assert_eq!(g.obj(nemesis).zone, if to_graveyard { Zone::Graveyard } else { Zone::Library });
+        assert_eq!(g.player(0).library.len(), if to_graveyard { 7 } else { 8 });
+        if !to_graveyard {
+            assert!(!g.knows(0, nemesis), "shuffled: nobody knows where it is");
+        }
+        g.check_knowledge().unwrap();
+    }
 }

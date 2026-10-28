@@ -668,6 +668,14 @@ pub struct Game {
     pub(crate) entering_times: u8,
     pub(crate) enter_note: u16,
     pub(crate) defer_enters: bool,
+    /// A card of a looked-at pile is being put where the effect says
+    /// (`Op::PileTo`); and the players whose library a replacement
+    /// ("shuffle it into its owner's library instead": Blightsteel
+    /// Colossus surveilled into the graveyard) shuffles once the pile's
+    /// other cards are put too (CR 701.25a: one action; ENGINE.md 51).
+    /// Both clear between ops.
+    pub(crate) pile_moving: bool,
+    pub(crate) pile_shuffles: u8,
     /// Prepared permanents (CR 722.3a) and the copy of their prepare spell
     /// in exile (722.3c).
     pub(crate) prepared: Vec<(ObjRef, CardIdx)>,
@@ -1007,6 +1015,8 @@ impl Game {
             entering_times: 0,
             enter_note: 0,
             defer_enters: false,
+            pile_moving: false,
+            pile_shuffles: 0,
             prepared: Vec::new(),
             may_copies: 0,
             activations: Vec::new(),
@@ -2078,8 +2088,31 @@ impl Game {
         } else {
             self.move_card_ctl(idx, Zone::Library, Pos::Top, None)
         };
-        self.shuffle_library(owner);
+        if self.pile_moving && from == Zone::Library {
+            // A card of a looked-at pile (a surveil's, put into the
+            // graveyard): the pile's other cards go where the effect puts
+            // them in the same action (CR 701.25a, 608.2c), and the library
+            // is shuffled after it (`flush_pile_shuffles`). Shuffled now, the
+            // looked-at cards still to be placed were in it, unknown to the
+            // player placing them, and a world `determinize` sampled for
+            // that player dealt them again (FUZZ_POOL=interactions match
+            // 10036882 at 075649c: Kaito's surveil; ENGINE.md 51).
+            self.pile_shuffles |= 1 << owner;
+        } else {
+            self.shuffle_library(owner);
+        }
         r
+    }
+
+    /// The library shuffles a looked-at pile's replacement put off
+    /// (`pile_shuffles`), once the pile's cards are placed.
+    pub(crate) fn flush_pile_shuffles(&mut self) {
+        let s = std::mem::take(&mut self.pile_shuffles);
+        for p in 0..2u8 {
+            if s & (1 << p) != 0 {
+                self.shuffle_library(p);
+            }
+        }
     }
 
     /// CR 610.3a: the cards exiled "until" `source` leaves the battlefield
