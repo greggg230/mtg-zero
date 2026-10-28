@@ -86,16 +86,14 @@ impl Consensus {
         }
         let plan = &self.plan.as_ref().expect("a plan").2;
         if !b.cards_done() {
-            // The plan's next card from the build position, then `DONE` (its
-            // deck holds 23 spells and its lands, more than the minimum of a
-            // 45-card pool: each is offered in turn). A plan below the
-            // minimum (a small test pool) takes the next card in build order
-            // until `DONE` is offered.
-            let k = b.k as usize;
-            match (k..b.order.len()).find(|&j| plan.inn & (1 << j) != 0) {
-                Some(j) if legal.contains(&b.order[j]) => return b.order[j],
+            // The plan's cards by identity, then `DONE` (its deck holds 23
+            // spells and its lands, more than the minimum of a 45-card pool).
+            // A plan below the minimum (a small test pool) adds the smallest
+            // card left until `DONE` is offered.
+            match (0..b.order.len()).find(|&j| plan.inn & (1 << j) != 0 && b.inn & (1 << j) == 0) {
+                Some(j) => return b.order[j],
                 None if legal.contains(&DONE) => return DONE,
-                _ => return b.order[k],
+                None => return legal[0],
             }
         }
         // The count nearest the plan's among the legal ones.

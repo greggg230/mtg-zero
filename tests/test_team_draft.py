@@ -45,9 +45,9 @@ def test_an_event_through_the_bindings():
                 assert np.array_equal(np.asarray(d.encode(p)), x)          # nothing hidden in the features
             g.step(int(legal[rng.integers(len(legal))]))
             steps += 1
-        # 45 picks per seat; deckbuilding: at least 22 pool cards (DONE from then on), at most 40, and
-        # five counts (ENGINE.md 47)
-        assert players * (45 + 22 + 5) <= steps <= players * (45 + 40 + 5)
+        # 45 picks per seat; deckbuilding (ENGINE.md 47): 22-40 pool cards, DONE (from 22 on; none for a
+        # full deck), five counts: 28-45 decisions
+        assert players * (45 + 28) <= steps <= players * (45 + 45)
         assert g.to_move is None and g.deferred and g.team_size == players // 2
         # the deferred terminal: no result until the matches are played (zero-core's bindings refuse it)
         with pytest.raises(ValueError, match='deferred terminal'):

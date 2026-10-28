@@ -7,7 +7,7 @@
 //! |---|---:|---:|---|
 //! | globals | 0 | 68 | phase, round, pick, direction, team size, my place, who decides, sizes, my pool's colours, the deck being built, `DONE` offered, the pool cards still needed, the minimum (`gl::*`) |
 //! | pack | 68 | 15 x 68 | my current pack (sorted by identity): card code, present, an option of my decision, my view number of this pack |
-//! | pool | 1,088 | 45 x 76 | my picks in pick order: card code + `pool::*` (round, pick, first pick, in / out of the deck, still addable, an option now, build position, a companion the deck so far fulfills) |
+//! | pool | 1,088 | 45 x 76 | my picks in pick order: card code + `pool::*` (round, pick, first pick, in / out of the deck, still addable, an option now, rank by identity, a companion the deck so far fulfills) |
 //! | bags | 4,508 | 13 x 768 | identities x 0.25 (`bag::*`): my draft (taken by others between two of my views, passed with their fate unknown, wheeled), teammates' pools (3), teammates' decks (3), opponents' known pools (4) |
 //!
 //! A card code is 64 floats: the identity's digits (16, 8, 8; vocabulary
@@ -73,7 +73,9 @@ pub mod gl {
     pub const BUILD_CARD: usize = 52;
     pub const BUILD_BASIC: usize = 53;
     pub const OPTIONS: usize = 58;
-    pub const BUILD_POS: usize = 59;
+    /// My pool cards are chosen (`DONE`, a full deck; draft_v1: the build
+    /// position / 45).
+    pub const CARDS_CHOSEN: usize = 59;
     pub const SEATS_BUILT: usize = 60;
     pub const PACKS: usize = 61;
     pub const PACK_SIZE: usize = 62;
@@ -102,14 +104,15 @@ pub mod pool {
     pub const PICK: usize = 4;
     pub const FIRST_PICK: usize = 5;
     pub const IN: usize = 6;
-    /// Before the build position and not in the deck (or every card not in
-    /// it once the cards are chosen): the sideboard.
+    /// Not in the deck once my cards are chosen: the sideboard.
     pub const OUT: usize = 7;
-    /// While I choose my cards: at or after the build position (it may still
-    /// be added, now or later; draft_v1: the card decided now).
+    /// Not in the deck while I choose my cards (draft_v1: the card decided
+    /// now).
     pub const AVAILABLE: usize = 8;
     /// Adding it is one of my options now.
     pub const OPTION: usize = 9;
+    /// Its rank in my pool sorted by identity / 45 (draft_v1: its build
+    /// order position).
     pub const BUILD_POS: usize = 10;
     pub const COMPANION_OK: usize = 11;
 }
@@ -298,7 +301,7 @@ pub fn encode(g: &TeamDraftAz, viewer: u8, out: &mut [f32]) {
         }
         x[gl::DECK_LANDS] = lands / 20.0;
         x[gl::DECK_SIZE] = b.size() as f32 / 40.0;
-        x[gl::BUILD_POS] = b.k as f32 / 45.0;
+        x[gl::CARDS_CHOSEN] = b.cards_done() as u8 as f32;
         x[gl::POOL_IN] = b.pool_cards() as f32 / 40.0;
         x[gl::NEED] = b.need(ev.deck_min) as f32 / 40.0;
         if me_decide && phase == Phase::Build {
@@ -341,8 +344,10 @@ pub fn encode(g: &TeamDraftAz, viewer: u8, out: &mut [f32]) {
         if let Some(b) = my_build {
             if let Some(i) = b.order.iter().position(|&y| y == c) {
                 st[pool::BUILD_POS] = i as f32 / 45.0;
-                if i < b.k as usize {
-                    st[if b.inn & (1 << i) != 0 { pool::IN } else { pool::OUT }] = 1.0;
+                if b.inn & (1 << i) != 0 {
+                    st[pool::IN] = 1.0;
+                } else if b.cards_done() {
+                    st[pool::OUT] = 1.0;
                 } else if me_decide && phase == Phase::Build {
                     st[pool::AVAILABLE] = 1.0;
                     st[pool::OPTION] = legal.binary_search(&c).is_ok() as u8 as f32;
@@ -392,7 +397,7 @@ pub fn encode(g: &TeamDraftAz, viewer: u8, out: &mut [f32]) {
             if let Some(b) = g.build(m) {
                 let started = phase == Phase::Done || m <= g.builder();
                 if started {
-                    for i in 0..(b.k as usize).min(b.order.len()) {
+                    for i in 0..b.order.len() {
                         if b.inn & (1 << i) != 0 {
                             bag_add(out, bag::TEAMMATE_DECK + slot, b.order[i], 1.0);
                         }
