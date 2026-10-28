@@ -8871,7 +8871,7 @@ line), `--json`, `--noise` (the study's summary). Control: `bash tools/mac.sh 'b
 pause|resume|stop|start|install|uninstall'`; jobs at a time: `~/mtgz-fuzzfarm/config.json`
 (`{"jobs": 4, "chunk_s": 600}` now; read every round).
 
-### 50.3 The Mac as a self-play worker (design only: nothing of it is built)
+### 50.3 The Mac as a self-play worker (the design; built in section 52, with its deviations in 52.2)
 
 **The measurement** (`python tools/match_noise.py bench --model <mtg5 iter 14> --seconds 150 ...`:
 mtg-4's self-play, generated best-of-three pools, the 128 x 4 token network with CPU inference, a
@@ -9055,7 +9055,7 @@ measurement like 50.3's on the desktop would show.
   only: branches are fuzzed by hand (`mac.sh`). `draft-events` waits for this branch on main. It ends
   at logout and starts at login (no LaunchDaemon). Its search smokes use `--threads 4`; their
   per-configuration counts (400 games, 24 events) are the gate's.
-* **Remote self-play** (50.3) is a design: nothing of it is built. The Mac's throughput was measured
+* **Remote self-play** (50.3) was a design here; section 52 built it. The Mac's throughput was measured
   from cold starts of a few minutes and one long steady phase; a run's Mac share also depends on the
   other projects' remote evaluations there (`~/kbz-remote`).
 * On the Mac: `~/mtgz-noise/` (the study's events, results, summary; ~60 MB), the pinned checkout
@@ -9361,3 +9361,399 @@ At 8e1211f, the branch's last engine code (f7f61be adds a test; the documentatio
   hand is pinned): consistent now that every cloud's card is in its domain before it.
 * `FUZZ_GROUPS` reproduces an older commit's interactions decks only while the groups before `n` are
   unchanged (groups are only appended).
+
+## 52. Remote self-play: the Mac self-plays for a run (M6)
+
+Branch `m6-remoteselfplay` (from main 692a52c; tools, presets, tests and docs: the engine is main's),
+zero-core pinned at `feat/remote-selfplay` (from core main af44741; its docs/az.md 5.3 and 11.6). The
+user's decision of 2026-10-28: build 50.3's design. Why: the MacBook (M4 Max, CPU inference of the
+128 x 4 token network) self-plays at 19.4k / 33.0k / 37.1k leaves/s with 1 / 2 / 3 driver processes
+(50.3) where the desktop's GPU self-play does 6.3-11.4k, and the 4v4 co-training run td1 spends most
+of its iteration in self-play waiting for its matches (td1's iterations 2-3: self-play 843 and 865 s
+of 1,666 and 1,683, the draft network waiting 586 and 628 s of it for backpressure: the play
+network's matches are the bottleneck).
+
+### 52.1 What was built
+
+* **zero-core** (`zero/remoteplay.py`; its docs/az.md 5.3, 11.6): run setting **`selfplay_remote`**
+  (a remote of the game package, the same `remotes` entry as `eval_remote`) and, for a co-training
+  run, the resolver's **`resolver_cfg['selfplay_remote']`**; `selfplay_remote_procs` (0 = the
+  remote's `procs`), `selfplay_remote_wait` (30 s), `selfplay_remote_timeout` (3,600 s).
+  * The run keeps `procs` **persistent workers** on the Mac, each one ssh session to `python -m
+    mtgz.az.remote selfplay <mirror> <K>` (stdin: control lines; stdout: events), its rolling driver
+    alive across the run's iterations. As soon as training has written checkpoint i-1 the run ships
+    it to the mirror and tells the workers `phase i` (a new search epoch: the checkpoint the desktop's
+    next phase will use), so the Mac plays through the desktop's evaluation phase; when the desktop
+    has played its quota it tells them `end i`, they end their phase (games in flight carry over, as
+    the desktop's rolling driver's do) and flush their last shard. The workers idle only while the
+    desktop trains.
+  * **Shards**: `data/iter_i/m<KK>-<sid>_SSS.npz` (8,192 samples, zlib level 1 on a background
+    thread), announced on stdout as soon as written, copied by the run's fetch threads (one per
+    worker) under a temporary name, checked on arrival (the non-finite guard, the run's game,
+    features and actions) and renamed into the run's `data/iter_i/` (`resolver/data/iter_i/` for
+    co-training) beside its `r00` shards; the Mac's copy is deleted. The run waits for a phase's
+    last shards at most `selfplay_remote_wait` s; later ones are dropped, never put into another
+    iteration (same checkpoint only). A non-finite shard is quarantined to `<run>/debug/` and the run
+    fails (NonFinite) before training, as for a local one.
+  * **Co-training**: the remote is a second consumer of the coordinator's queue: the local resolver
+    driver keeps at most max(16, resolver_conc / 4) matches queued in its driver, the remote takes up
+    to conc x 1.25 (960) outstanding per worker, oldest first; rows come back by tag into the
+    coordinator (an event resolves when its 12 rows are in, from either machine), samples as shards.
+    A worker that dies or stalls has its outstanding matches requeued at the front at once; a match
+    not finished within `selfplay_remote_timeout` s of its worker's running time is requeued too, and
+    the second copy's row is dropped (at worst played twice). The quota (events resolved) and the
+    events' resolution are the coordinator's as before. `pending_max` 0 = 2 x resolver_conc + the
+    remote's room.
+  * **Robustness**: everything ssh happens on the run's threads; the main thread only starts and ends
+    phases (the end bounded). A session that fails (the Mac asleep, unreachable, its checkout refused)
+    is started again after 60 s (logged the first three times in a row, then every 10 minutes); one
+    silent for 300 s is killed; the workers exit on `quit`, on stdin closing (the run gone) or after
+    180 s without a control line (the run pings every 20 s). PAUSE, STOP, a crash and the end of the
+    iterations close them. A restart replays the interrupted iteration (its data directory cleared,
+    as before) with new sessions; a new worker for a slot stops the same run's previous one if it is
+    still alive. Nothing writes into the run's directories except the fetched shards (and the
+    quarantined ones in `debug/`).
+  * **Remote evaluation first**: a worker watches `~/mtgz-remote/.eval.lock` (the remote's own
+    workdir's lock, always) and the remote's `selfplay.locks` (mtgz: `~/kbz-remote/.eval.lock`,
+    `~/domz-remote/.eval.lock`); while one is held by a live process it stops asking for leaf batches
+    (`backoff` 'stop', the default), or with `backoff` 'background' plays on under the Darwin
+    background policy (52.4). A phase holds a **busy marker** `~/mtgz-selfplay/.busy-<mirror>-w<K>`
+    (owner "<pid> <time>").
+  * Also in the core: the training window subsamples each shard as it reads it (the same rows, a
+    peak of the window plus one shard instead of every shard: td1's resolver window at full size is
+    ~31 GB of shards before the Mac's data; 3 times that would not fit the desktop's 68 GB), compressed
+    shards (`data.savez_level`), metrics `selfplay.remote` and progress.json's `remote` /
+    `matches_remote`, the dashboard's status line, `zero.remote._alive` without `os.kill(pid, 0)` on
+    Windows (it terminates the process there).
+* **mtgz**: `RunCommitRemote` carries the spec's `selfplay` dict, resolved with the rest (the Mac's
+  checkout of exactly the run's commit; `python -m mtgz.az.remote selfplay` runs `verify_checkout`
+  first, as `eval` does). The remote 'mac' (`mtgz/az/__init__.py`): `selfplay = {workdir
+  ~/mtgz-selfplay, procs 2, nice 5, locks [kbz, domz evaluation locks], env OMP_NUM_THREADS=3,
+  overrides {infer_device cpu, conc 768, threads 12, groups 4, infer_workers 4, torch_threads 3,
+  shard_rows 8192}}` (50.3's best setting; 2 processes: 33k of 3's 37k leaves/s with room left on the
+  Mac). Presets, opt-in: **`mtg-4-mac`** (mtg-4 with a desktop quota of 200 matches and
+  `selfplay_remote` 'mac': 50.3's single-game plan) and **`team_draft-4v4-mac`** (team_draft-4v4 with
+  the play network's matches on the Mac too); no existing preset changed. `tools/mac_backoff.py`'s
+  default locks add `~/mtgz-selfplay/.busy-*` (glob patterns allowed): the fuzz farm and the studies
+  stop while a run's self-play phase runs on the Mac (52.4).
+* **Tests**: zero-core `tests/test_remoteplay.py` (17: the remote 'local'), `tests/test_net_data.py`
+  (the streamed window); mtgz `tests/test_mac_remote.py` (the spec's `selfplay`, the Mac's settings,
+  a worker refusing other code, a worker playing `mtg` self-play and queued best-of-three matches
+  through the core's remote side, the back-off's glob), `tests/test_drafted.py` (the presets).
+
+### 52.2 Deviations from 50.3
+
+* **Persistent workers, not a process per iteration.** 768 matches in flight per process at ~1
+  match per second take ~13 minutes to finish their first wave; a fresh driver every iteration
+  would spend the first quarter of an iteration finishing nothing and drop ~half a wave at its end.
+  The workers keep their driver across iterations, exactly as the desktop's rolling self-play does:
+  a phase boundary is a new search epoch with the new checkpoint, games in flight carry over (so a
+  shard of iteration i holds checkpoint i-1's decisions and the carried-over games' earlier ones,
+  like the desktop's own `r00` shards).
+* **The head start is 50.3's**: the remote's phase i starts "after training writes models/iter_{i-1}.pt",
+  i.e. before the desktop evaluates that checkpoint (td1: 13-23 minutes of evaluation per iteration,
+  plus `eval_yard_net` every 4th), not when the desktop's own phase i starts. The first build started
+  it with the desktop's phase, which left the Mac idle through every evaluation (its duty cycle in
+  td1 would have been ~25%); changed after the single-game end-to-end run, before the co-training
+  one (zero-core aee1a2f). Still on-policy: the checkpoint is the one the desktop's phase i uses.
+  `lead_s` in the metrics is the head start.
+* **Shards stream back during the phase** (each announced and fetched as soon as written), not
+  only at its end: the end waits for the last shard per worker. Default deadline 30 s (50.3: 60).
+* **Staleness: the same phase only.** A shard is accepted only into the iteration whose phase
+  produced it, and only until the deadline. 50.3's "simpler alternative" (the Mac one checkpoint
+  behind, never waiting) is not built.
+* **Co-training's split** is a shared queue with two consumers (the local driver's queue capped,
+  the remote's outstanding capped), not 50.3's fixed share: each machine takes work as it has
+  room. Timeouts count the worker's running time (not wall time), so the desktop's evaluation
+  phases and the Mac's back-offs do not requeue matches.
+* **Back-off**: 'stop' as 50.1's rule (the default), plus an optional 'background' mode (macOS's
+  background policy) built for the long evaluation every 2nd iteration and measured not worth it
+  (52.4: 2-5% of the workers' speed). **The fuzz farm**: 50.3's lock "of its
+  own" is the busy marker, honoured by `tools/mac_backoff.py`; the farm runs code installed from
+  main, so it yields once main has this branch and the farm is reinstalled (52.4 measures what it
+  costs until then).
+* **Mirrors** in `~/mtgz-selfplay/<run>` (single-game) and `~/mtgz-selfplay/<run>.resolver`
+  (co-training), not in `~/mtgz-remote` (the evaluations' workdir and lock stay as they were).
+* **Training** follows the new samples (`reuse` unchanged: more samples, more steps), as 50.3
+  said; the window needed the streamed load (52.1) to stay inside the desktop's RAM.
+
+### 52.3 End to end with the Mac (`mtg-smoke`, `team_draft-smoke`)
+
+From this worktree (clean, committed), `bash tools/mac.sh --eval-checkout` (~40 s:
+`~/mtg-zero-wt/run-<sha12>`), the mirrors in a test workdir (`ZERO_SELFPLAY_WORKDIR=/Users/greggkeithley/mtgz-selfplay-test`,
+with `MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR`: Git Bash rewrites a POSIX path in the environment of a
+Windows process, which the first attempt showed - its worker could not find its mirror, and ssh had
+created `~/C:/Program Files/Git/...` on the Mac, removed; such a workdir is now refused at start),
+CUDA hidden, the desktop shared with td1; each run 3 iterations in `E:/mtg-zero-scratch/remote-selfplay/`
+and the same without the Mac as the baseline:
+
+```
+python -m mtgz.az.run --run <scratch>/sg_mac --preset mtg-smoke --iters 3 --games 64 --selfplay-remote mac
+python -m mtgz.az.run --run <scratch>/td_mac --preset team_draft-smoke --iters 3 --games 8 \
+  --resolver-cfg '<team_draft-smoke resolver_cfg + "selfplay_remote": "mac">'
+```
+
+**`mtg-smoke`, single games, 64 per iteration** (the run at a9d5bfc, before the head start: the first shards fetched one at
+a time and the local phase's seconds still counting the wait - both fixed since, 7e90ded):
+
+| | iteration 1 | 2 | 3 |
+|---|---:|---:|---:|
+| desktop: games, samples (the same quota with or without the Mac) | 64, 3,755 | 64, 3,553 | 64, 3,107 |
+| **Mac: games, samples** | **949, 30,623** | **1,478, 72,046** | **951, 49,723** |
+| Mac: shards, MB shipped (compressed: x 58.2-61.7 against the desktop's npz) | 4, 33.4 | 10, 82.3 | 7, 57.5 |
+| Mac: its phase, leaves/s (2 workers, the tiny smoke network: ~114k each) | 4.8 s, 228,156 | 5.2 s, 210,025 | 3.5 s, 198,490 |
+| the desktop's wait for the Mac's last shards (copies: 2.5-3 s each, one at a time then) | 10.7 s | 27.2 s | 16.3 s |
+| training: steps, seconds (the samples of both) | 1,075, 36 s | 2,363, 77 s | 1,651, 60 s |
+| **iteration** with the Mac / without (baseline: 118-123 steps, 4-5 s training) | **58 s / 14 s** | **115 s / 14 s** | **87 s / 15 s** |
+
+The workers came up 3 s into iteration 1 (ssh, Python, the engine), got their checkpoint and played
+3.5-5 s of each of the desktop's 5-9 s phases (no head start in this run); at this scale (a 32 x 1 network) the Mac plays
+15-20 times the desktop's samples in that time, and the iteration grows with the training on them
+(3 iterations: 4 min 26 s against 47 s). The quota stays the desktop's (52.2): a single-game run with
+the Mac gets more data per iteration, not shorter iterations, unless its quota is lowered
+(`mtg-4-mac`). On the Mac after the run: no worker, no slot lock, no busy marker; the mirror's
+fetched shards deleted.
+
+**`team_draft-smoke`, co-training, 8 events (32 matches) per iteration** (at e428eba, the head start
+included; the Mac's 2 workers took matches only once the desktop's 16 slots and 16-long queue were
+full, so a few dozen at a time - hence its low leaves/s here):
+
+| | iteration 1 | 2 | 3 |
+|---|---:|---:|---:|
+| events resolved (the quota) | 8 | 8 | 8 |
+| matches back: desktop + **Mac** | 16 + **38** | 1 + **62** | 9 + **10** |
+| Mac: samples, MB shipped | 7,497, 8.4 | 12,607, 14.4 | 949, 1.0 |
+| Mac: head start before the desktop's phase (`lead_s`), its phase | 0 s, 36 s | 15 s, 15 s | 56 s, 67 s |
+| Mac: leaves/s, matches still outstanding at the end | 6,206, 62 | 4,291, 0 | 759, 33 |
+| the desktop's self-play phase with the Mac / without | 42 s / 41 s | **3 s / 617 s** | 12 s / 34 s |
+| the end's wait for the Mac's shards | 2.8 s | 2.7 s | 0.7 s |
+| **iteration** with the Mac / without | **73 s / 66 s** | **80 s / 675 s** | **46 s / 69 s** |
+
+3 iterations: **4 min 5 s with the Mac, 14 min 5 s without**. No match was requeued, no duplicate. In
+iterations 2 and 3 the Mac played through the desktop's evaluation (15 and 56 s, the latter with
+`eval_yard_net`) and the events it completed were resolved in the first seconds of the desktop's
+phase. The baseline's iteration 2 lost ~9.5 minutes to an idle stretch that is not this branch's: the
+same run at main 692a52c (zero-core af44741) stops at exactly the same point (6 of 8 events
+resolved, 16 matches in flight, 29-30 done; its resolver thread waiting in the driver's
+`next_batch`, the draft network on backpressure, the process idle) and its iteration 2's self-play
+takes 649 s (the resolver at 129 leaves/s, 637 s of backpressure; iteration 1 identical to this
+branch's to the sample: 33 matches, 6,019 samples, 189 steps) - with the Mac, those matches ran on
+the Mac's drivers (52.8).
+
+### 52.4 The Mac with the play network: throughput, the farm, the back-off modes
+
+The workers' own measurement (`bgx.py`, `bgx2.py` in `~/mtgz-selfplay-test/`: two workers with the
+Mac's settings run directly - `zero.remote.main(['selfplay', ...])` - on mtg-4's self-play with
+runs/mtg5's iteration 14, td1's starting play network; 90 s windows after a 70 s warm-up; leaves
+from the workers' status lines; the Mac shared with other agents' jobs, load 3-15):
+
+| | leaves/s (2 workers) |
+|---|---:|
+| alone | **31,108** (re-test: 30,765; 50.3's two bench processes: 33,036) |
+| beside 4 nice-19 CPU burners (the fuzz farm's footprint: 4 single-threaded jobs) | 28,034 (**-9.9%**) |
+| `backoff` 'background' while a test lock is held, beside an evaluation-like job (`match_noise.py bench`, the evaluation's settings: 12 threads, 2 groups, 3 x 4 inference, 128 matches, normal priority) | 736 (2.4%) |
+| 'background' with the lock held and nothing else of ours running (re-test) | 1,654 (5.4%) |
+| after the lock is gone (re-test: the workers logged "out of the background after 74-77 s") | 31,836 (all of it back) |
+
+| the evaluation-like job | leaves/s |
+|---|---:|
+| alone (the workers stopped) | 8,247 |
+| beside the two workers in 'background' | 8,275 (the same) |
+
+* **Throughput**: two workers deliver 31k leaves/s with td1's play network, as 50.3 measured with
+  its bench (the same driver loop). At td1's 18,254 leaves per drafted match (its iteration 3:
+  9,090,702 leaves for 498 matches) that is **1.70 matches per second**, against the desktop's 0.58
+  (td1: 498 matches in 865 s): 2.9 times the desktop's resolver.
+* **The fuzz farm costs ~10%** at nice 19 beside the workers' nice 5 (the burners' measurement):
+  nice alone is not enough, so the farm yields - `tools/mac_backoff.py` stops its jobs while a busy
+  marker is held - once it runs code with this change (a reinstall from main). During this work the
+  farm was paused by m6-farmfix (its `PAUSE`, untouched), so nothing of it ran beside the workers.
+* **'background' does not slow the evaluation** (8,275 against 8,247 leaves/s) **and leaves the workers
+  2-5%** of their speed (the Darwin background band on the efficiency cores loses to anything else);
+  they recover fully when the lock goes. 'stop' stays the default: the 2-5% is not worth a mode
+  whose throughput depends on what else runs. (A first attempt kept the workers in the background
+  after the lock's holder was killed: an unreaped child still answers `kill(pid, 0)`; zombie owners
+  now count as dead, `lock_held`.)
+* **When the play network's evaluation runs** on the Mac (every 2nd iteration; td1's: 410-419 s,
+  44.4's idle Mac: 560 s): with the early start (52.2) the remote's phase overlaps the desktop's
+  evaluation phase, which is when the Mac's own evaluation of the same checkpoint runs (td1 queues it
+  right after training): the workers stop for those ~7 minutes and play the rest of the desktop's
+  13-23 minute evaluation phase and its self-play.
+
+### 52.5 td1 with the Mac: the projected iteration
+
+**td1 today** (its metrics and log; core af44741, the play network's evaluation already on the Mac):
+
+| iteration | self-play (matches; the draft network waiting on backpressure) | training | the draft network: vs `consensus` + random | its Elo matches | `eval_yard_net` | iteration |
+|---|---:|---:|---:|---:|---:|---:|
+| 2 | 843 s (531; 586 s waiting) | 89 s | 152 s | 581 s (2 opponents) | - | 1,666 s (27.8 min) |
+| 3 | 865 s (498; 628 s) | 73 s | 155 s | 590 s (2) | - | 1,683 s (28.1 min) |
+| 4 | 1,214 s (664) | 96 s | ~150 s | (3 opponents) | running 80+ min at the time of writing (iteration 0: 3,073 s) | |
+
+The play network's matches are the self-play phase's bottleneck: the desktop plays 0.55-0.61 matches
+per second (10.2-10.5k leaves/s at 18,254 leaves per match) and the draft network, which drafts 48
+events in ~240-260 s of its own time, waits for them 70% of the phase.
+
+**With the Mac** (52.4: two workers, 31.1k leaves/s = 1.70 matches/s; 2.9 times the desktop's
+resolver, 3.9 times together):
+
+* **Self-play**: 576 matches per iteration take 2.28 matches/s -> ~4.2 min of both machines; and the
+  Mac's head start (52.2) adds the desktop's whole evaluation phase (13-23 min, ~7 min of it stopped
+  for its own evaluation of the play network every 2nd iteration: td1's take 410-419 s there) -
+  far more than an iteration needs. So the matches stop being the bottleneck and **the phase
+  becomes the draft network's drafting, ~4-4.5 min** (48 events at td1's measured rate), against
+  14-20 min today. (The co-training smoke of 52.3 shows the effect at small scale: with the head
+  start, the desktop's phases of iterations 2-3 took 3 and 12 s.)
+* **Training**: unchanged (~1.2-1.6 min): an iteration still resolves 48 events, ~576 matches, about
+  the same samples; the Mac plays a share of them rather than more of them.
+* **The draft network's evaluation, unchanged and now the largest part**: vs `consensus` and random
+  ~2.5 min; its Elo matches ~5 min per opponent (td1: 2 opponents ~10 min at iterations 2-3; 3 at
+  4-7, ~15 min; 4 from iteration 8, ~20 min); `eval_yard_net` every 4th iteration, 51+ min.
+
+| | today | with the Mac | |
+|---|---:|---:|---:|
+| an iteration like 2-3 (Elo vs 2) | 28 min | **~18 min** | 1.5x |
+| iterations 5-7 (Elo vs 3) | ~33 min | **~23 min** | 1.4x |
+| iterations 9-11, 13-15 ... (Elo vs 4) | ~38 min | **~28 min** | 1.35x |
+| every 4th (+ `eval_yard_net`, 51+ min) | ~89+ min | ~79+ min | |
+| **average from iteration 8 on** | **~51 min** | **~41 min** | **~1.25x** |
+
+So td1's ordinary iterations go from 28-38 to ~18-28 minutes (50.3's "20-30" for the self-play-bound
+iteration), but its average, with `eval_yard_net` every 4th, only from ~51 to ~41: the Mac saves
+~10 minutes of self-play per iteration, and the draft network's evaluation on the desktop (its Elo
+matches, `eval_yard_net`) becomes ~60-70% of an iteration. The next levers are there, not in
+self-play: `elo_opponents` 2-3 or fewer `elo_games` for the draft network, `draft_eval_net_every` 8,
+`eval_yard_net` on the Mac (48.6's idea; the remote matches workers of this section could play its
+episodes with the play network at the evaluation settings - a non-recording worker mode - not done);
+and with most matches on the Mac, a smaller desktop `resolver_conc` (e.g. 256) would leave the GPU to
+the drafting and the evaluations.
+
+### 52.6 Turning it on for td1 (at a restart)
+
+A run can use `selfplay_remote` only from a commit that has this code on both machines (td1's pinned
+commit has none of it), so the switch is a re-pin, as for 48.3:
+
+1. This branch on main (the user's merge; main has m6-farmfix's engine fixes and its section 51 since
+   433ff28: both branches append a section at the end of this file, a conflict of order only), a
+   pinned worktree of the commit `<S>`: `git -C ~/mtg-zero worktree add --detach ~/mtg-zero-wt/run-<s7> <S>`,
+   there `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<s7> bash tools/build_py.sh`.
+2. There: `bash tools/mac.sh --eval-checkout` (the Mac's `~/mtg-zero-wt/run-<s12>`, ~40 s: the same
+   checkout serves the play network's evaluations and the self-play workers).
+3. Stop td1 cleanly after an iteration: `touch runs/td1/STOP`; the run exits after the current
+   iteration and the supervisor with it (a play-network evaluation still pending on the Mac is
+   queued again at the restart, 48.1).
+4. `rm runs/td1/STOP`, and from the new worktree:
+
+   ```
+   python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1/supervisor_console.txt" \
+     python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1" --preset team_draft-4v4 \
+     --resolver-cfg '{"preset": "mtg-4", "eval_every": 2, "eval_remote": "mac", "selfplay_remote": "mac"}'
+   ```
+
+   (`--resolver-cfg` replaces the saved dict: the whole of td1's, plus `selfplay_remote`.) The log
+   says `[resolver] episodes also on the remote 'mac' (greggkeithley@100.95.248.116, 2 worker(s),
+   mirror /Users/greggkeithley/mtgz-selfplay/td1.resolver)`, within seconds `[resolver] remote
+   self-play mac: worker 0 up (pid ... on Greggs-MacBook-Pro.local, ...)`, and after each self-play
+   phase `[resolver] iter N remote self-play: 2 worker(s), ... games, ... samples in ... shards
+   (... MB), ... leaves/s ...; matches ... back, ... assigned, ... outstanding, ...`; the primary's
+   `cotrain` row gets `episodes_remote`, the resolver's metrics `selfplay.remote`; progress.json
+   `matches_remote` (the dashboard's status line: `remote mac: playing, 2 worker(s), ...`). Its
+   `pending_max` (0) becomes 2 x 768 + 2 x 960 = 3,456 by itself.
+5. Optional: `"selfplay_remote_procs": 3` in the same dict for 37k instead of 33k leaves/s (50.3:
+   the Mac's last 12%, leaving less room for the other agents' jobs there). Not recommended: the
+   Mac's `backoff` 'background' (52.4: 2-5% of the speed while an evaluation runs).
+6. The fuzz farm yields to the busy markers once reinstalled from a main with this branch (`bash
+   tools/mac.sh 'bash tools/fuzz_farm.sh install'` in main's checkout; it keeps its state and
+   cursors).
+
+Off again at a restart: the same `--resolver-cfg` without `"selfplay_remote"` (or with `""`); the
+iteration then is exactly today's. A single-game run: `--selfplay-remote mac` (`''` to stop), and
+`--games` lower than before (the Mac adds its share to the desktop's quota, it does not replace it:
+`mtg-4-mac` has 200).
+
+### 52.7 Checks
+
+At e428eba, zero-core aee1a2f (the code; the later commits pin the core's test and docs commits
+only; the engine is main 692a52c's: this branch changes presets, `mtgz/az/mac.py`, a tool, tests and
+docs; the core's Rust is af44741's):
+
+* **Engine tests on the Mac** (`bash tools/mac.sh 'cargo test --release --no-fail-fast'`: every test
+  binary of the workspace, `az` included; the desktop runs no `az`): **1,398 passed, 0 failed, 13
+  ignored** (105 result blocks; `az` 14 passed), the build 5 min 43 s, the Mac shared with the
+  resumed fuzz farm.
+* **Behaviour digests** (Mac): combined digest **1ed7e08dd5078f55** (main's; 2,000 random and 500
+  heuristic games in 9.1 s).
+* **Python**: `bash tools/build_py.sh` (desktop 1 min 56 s; Mac); `python -m pytest -q tests`: desktop
+  **40 passed** (692a52c's 35 and the 5 new), Mac 39 passed, 1 skipped (CUDA).
+* **Search smoke** (Mac, `python tools/search_smoke.py --specs random,match,team_draft --seeds 0-1`):
+  **0 failed of 6**, 126 s: random 400 games each (161,770 and 166,767 decisions), match 400 each
+  (385,154 and 381,064 decisions, 10.2 and 10.1 million simulations), team_draft 24 events each, all
+  resolved (team A won 9 and 11, drew 6 and 7), 288 matches each, 15,581 and 15,539 draft
+  decisions, parked records at most 10.64 and 12.89 MB.
+* **zero-core** (`feat/remote-selfplay`): `cargo test --release` **44 passed** (the Rust unchanged);
+  `python -m pytest tests` **128 passed** (110 and 18 new: 17 in `tests/test_remoteplay.py`, the
+  streamed window). On the Mac (through this checkout's submodule, its own target dir):
+  `tests/test_remoteplay.py` and `tests/test_net_data.py` **39 passed, 1 skipped** (CUDA) - the
+  darwin paths ('background' set and cleared, POSIX liveness, niceness); a first run there failed
+  one test's timing assumption (progress.json is written every 2 s, the toy's phases there are
+  shorter), fixed in the test (5cd9c36: no code changed).
+  `SMOKE_TARGET=remoteselfplay bash tools/smoke_all.sh --with-this-core` (the games at their main
+  checkouts' HEADs, each in a temporary worktree with the core moved to this branch: 000e243 for
+  the first three, 5cd9c36 - the same code - for MTG Zero, which the test fix reached mid-run):
+  **GREEN**, 19 steps, 37 min: core cargo test 44, pytest 128; Glass Road c1f56dc cargo test 46,
+  pytest 33, `glassroad-smoke` 4 rows; Caverna a6fad73 47, 32, `caverna-smoke` 4 rows; Kingdom
+  Builder 4202a4a 105 (4 ignored), 45, `kingdombuilder-smoke` 4 rows; MTG Zero main 433ff28
+  (m6-farmfix's engine fixes; core af44741 pinned there) cargo test 1,407 (every binary, `az`
+  included; 13 ignored), pytest 35, `mtg-smoke` 4 rows.
+* **The remote's failure paths** (zero-core's tests, the remote 'local'): an unreachable host (ssh to
+  `.invalid`: every start retried and logged, the run trains on its own samples), a worker killed
+  mid-phase (its episodes requeued, a new worker), a slow worker (episodes requeued on the timeout,
+  duplicates dropped, quotas exact), shards later than the deadline (dropped), a damaged shard
+  (quarantined, NonFinite before training), an evaluation lock held (the worker stops; macOS's
+  'background' mode on the Mac, 52.4), PAUSE mid-phase (exit 75, no worker left, the replayed
+  iteration without the old session's shards), a remote workdir that is not an absolute path
+  (refused at start).
+
+### 52.8 Limits and open issues
+
+* **Not reproducible**, as 50.3 said: what the Mac contributes to an iteration depends on timing
+  (when its sessions started, how long the desktop's phase lasted, its back-offs), and the Mac's
+  CPU arithmetic differs from the desktop's CUDA at float rounding (44.4: other games then). A
+  worker's games are reproducible per session (its driver's seed is `seed x 7919 + i0 + 7,777,777 x
+  (K + 1)`); every sample carries its search's `net`, every remote shard's meta its worker and
+  session; the games themselves are not recorded (nor are the desktop's).
+* **Single-game runs: more data, not shorter iterations**, unless the desktop's quota is lowered
+  (the quota stays the desktop's by design; `mtg-4-mac` has 200 matches): with the same quota an
+  iteration is as long as before plus its training on several times the samples (52.3).
+* **Co-training's split favours the desktop at a phase's start**: the local driver's free slots take
+  queued matches first (its queue is capped, its slots are not). In td1 the queue is long (the
+  backpressure lets 3,456 matches be outstanding), so both machines stay busy; a small run (a few
+  events per iteration, 52.3) can leave the Mac little.
+* **An event's latency**: an event resolves when its last match does, on whichever machine; matches
+  that time out (3,600 s of the worker's running time) are played again here. A Mac match that
+  hangs (an engine bug such as 50.2's payment search at game 10049522) stalls its worker's group:
+  the worker's session is killed after 300 s of silence and its matches are requeued here, where the
+  same spec would hang the desktop's driver too (as it would have without the Mac).
+* **The fuzz farm** yields only after a reinstall from a main with this branch; until then it runs
+  at nice 19 beside the workers' nice 5 (52.4: what that costs). It was paused by m6-farmfix during
+  this work (its `PAUSE`), untouched here.
+* **Two runs self-playing on the Mac** at once share its cores (no lock between self-play runs);
+  other projects' remote evaluations (`~/kbz-remote`, `~/domz-remote`) stop the workers (their
+  locks), other projects' remote self-play would not.
+* **A pre-existing idle stretch in co-training self-play** (not this branch's; found by its baseline,
+  52.3): `python -m mtgz.az.run --preset team_draft-smoke --iters 3 --games 8` (CPU) idles ~9.5
+  minutes in iteration 2's self-play - 6 of 8 events resolved, 16 matches in flight, the resolver
+  thread waiting in the driver's `next_batch`, the draft network on backpressure, the process at
+  ~0% CPU - then goes on; the same at main 692a52c with zero-core af44741 (649 s against 617 s, at
+  the same counts; the resolver's rolling stats are those of the iterations that do not stall). Not
+  investigated (the core's Rust driver: a wait inside `next_batch` with games in flight). Related
+  or not: td1's iteration-4 `eval_yard_net` had run 80+ minutes with its process nearly idle when
+  this was written (iteration 0's: 51 min); td1 was not touched.
+* zerodash (zero-core's dashboard) shows nothing of the remote yet; the game dashboard's status
+  line does (progress.json), its throughput charts show the desktop's leaves/s only.
+* On the Mac: `~/mtgz-selfplay-test/` (this section's mirrors, the experiments' scripts and logs, the
+  checks' logs and the mtg5 checkpoint copy; ~40 MB), the checkout `~/mtg-zero-wt/run-e428ebadcdca`
+  and its target dir (0.4 GB; `run-a9d5bfcf7c89` of the first runs removed),
+  `~/mtg-zero-wt/m6-remoteselfplay` and its target dir (the checks, 4.2 GB),
+  `~/cargo-target/zero-core/remote-selfplay` (the core's toy module for its tests there, 133 MB);
+  `~/mtgz-remote` untouched; `~/mtgz-selfplay` does not exist until a run uses it.
