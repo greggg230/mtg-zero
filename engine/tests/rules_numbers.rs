@@ -1,7 +1,7 @@
 //! Unbounded numbers (M6, ENGINE.md 46): Magic has no maximum for counters,
 //! life, power, toughness or damage (CR 107.1, 122.1, 119, 120, 208). The
 //! engine keeps every such value exact up to its class-B bound
-//! (docs/shortcuts.md 46.1) and saturates there, never wrapping or
+//! (docs/shortcuts.md 46.1-46.6) and saturates there, never wrapping or
 //! truncating; and every feature `encode` writes stays finite and bounded
 //! (|x| <= `encode::FEATURE_BOUND`, 256) whatever the game state.
 //!

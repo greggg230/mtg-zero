@@ -191,7 +191,7 @@ impl Game {
                 self.note(|_| format!("P{p} removes {n} counter(s) for mana"));
                 // (One mana per counter, one choice each, counted by the
                 // frame's u8 `i` (1 + the mana added): at most 254 mana,
-                // about the pool's bound for a type, shortcuts.md 46.4.)
+                // shortcuts.md 46.4.)
                 f.x = n.min(254) as i32;
                 f.i = 1;
                 f.floor = 0;

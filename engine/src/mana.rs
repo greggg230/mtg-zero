@@ -234,7 +234,7 @@ impl ManaPool {
     }
 
     /// Add mana (CR 106.4). At most 255 of a type: more saturates (an
-    /// engine limit, shortcuts.md 46.4; CR 106 has no maximum).
+    /// engine limit, shortcuts.md 46.3; CR 106 has no maximum).
     pub fn add(&mut self, mana: &[u8; 6]) {
         for (a, &n) in self.amt.iter_mut().zip(mana) {
             *a = a.saturating_add(n);

@@ -969,7 +969,7 @@ impl Game {
         let mut g = SVec::new();
         for t in 0..6 {
             let held = if t == crate::mana::C && !art_ok { pool.art } else { 0 };
-            // (Saturating: at most 255 of a type, shortcuts.md 46.4.)
+            // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
             let n = (pool.amt[t] - held).saturating_add(pm.extra[t]) - pm.extra_made[t];
             if n > 0 {
                 g.push((t as u8, n));
@@ -1652,7 +1652,7 @@ impl Game {
     /// one more need of the payment.
     fn pick_multi(&self, pm: &mut PayMana, classes: &[Class], ci: usize, src: Src, prod: [u8; 6]) {
         let cl = &classes[ci];
-        // (Saturating: at most 255 of a type, shortcuts.md 46.4.)
+        // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
         for t in 0..6 {
             pm.extra[t] = pm.extra[t].saturating_add(prod[t]);
             if cl.need != 0 {

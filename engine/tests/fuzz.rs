@@ -56,9 +56,9 @@
 //! doubling, and the cards that turn a creature's size into damage, life or
 //! poison), 12 Forests and 5 random lands; every life total starts at
 //! 1,000,000,000 and attacks are declared one time in four, so most games
-//! run to the 60-turn cap with growing boards; the largest power, counter
-//! count, marked damage and life reached are printed, and with 100 games or
-//! more a board past 65,535 power must have been reached.
+//! run to the 60-turn cap with growing boards. Every mode prints the largest
+//! power, counter count, marked damage and life reached; with 100 games or
+//! more the exponential mode must have reached a board past 65,535 power.
 
 mod common;
 
@@ -454,9 +454,7 @@ fn play(seed: u64, checks: bool) -> Played {
             count_kind(g.kind());
             // The decider's encoding is finite and bounded (ENGINE.md 46).
             check_encoding(&g, g.to_move().unwrap(), &mut buf, &|| format!("seed {seed} step {steps}"));
-            if exp {
-                record_extremes(&g);
-            }
+            record_extremes(&g);
         }
         if checks && rng.below(40) == 0 {
             check_clone(&g, a, seed);

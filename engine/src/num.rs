@@ -4,7 +4,7 @@
 //! any number in a 60-turn game. The engine keeps every such value exact up
 //! to its type's end and **saturates** there, never wrapping or truncating
 //! (a wrong number that looks fine is the worst outcome: DESIGN.md 3.1). The
-//! bounds are class-B engineering limits (docs/shortcuts.md 46.1-46.4):
+//! bounds are class-B engineering limits (docs/shortcuts.md 46.1-46.6):
 //!
 //! * a count of counters of one kind on one object or player (+1/+1,
 //!   -1/-1, loyalty, lore, charge, poison, energy, experience, ...): [`Count`]
@@ -14,7 +14,10 @@
 //!   +-2,147,483,647 ([`AMOUNT_MAX`]; symmetric, so negating never
 //!   overflows);
 //! * marked damage and an event's amount: `u32` (at least any amount);
-//! * mana of one type in a pool: `u8` (255), the payment's arithmetic.
+//! * mana of one type in a pool: `u8` (255), the payment's arithmetic;
+//! * a frame's loop counts (copies, connive, cards looked at, Coalition
+//!   Relic's mana), spells cast and cards drawn this turn, turn numbers and
+//!   the objects of a game (46.4-46.6).
 //!
 //! Every conversion between them goes through these functions (saturating,
 //! with the reason at the call site), never a bare `as` that could
