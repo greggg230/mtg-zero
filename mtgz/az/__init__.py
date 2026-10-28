@@ -118,9 +118,11 @@ PRESETS['mtg-4'] = dict(PRESETS['mtg-3'], spec=SPEC_BO3, eval_spec=eval_spec(SPE
 # random teams, Elo against its checkpoints 1, 2, 4 and 8 back, the matches played by the heuristic
 # (one play agent for the Elo), and every 4th iteration against `consensus` with the matches played by
 # the play network (eval_yard_net); the agreement with held-out human picks (a curiosity); the play
-# network every 2nd iteration as mtg-4 (its yardstick the heuristic, the fixed evaluation pools).
-# resolver_init: the play network's start, a checkpoint of runs/mtg5 chosen at launch
-# (--resolver-init); '' = a fresh play network.
+# network every 2nd iteration as mtg-4 (its yardstick the heuristic, the fixed evaluation pools) ON THE
+# MAC (resolver_cfg eval_remote 'mac', zero-core docs/az.md 11.5, docs/ENGINE.md 48: ~9 min there, ~30-70
+# on the shared desktop; the run's checkout needs `bash tools/mac.sh --eval-checkout` before it starts);
+# the draft network's evaluation stays on the desktop. resolver_init: the play network's start, a
+# checkpoint of runs/mtg5 chosen at launch (--resolver-init); '' = a fresh play network.
 SPEC_DRAFT_RUN = '{"build_sims_div": 2}'
 _DRAFT_NET = dict(arch='tokens', hidden=128, blocks=4, heads=4, ff=256)
 PRESETS['team_draft-4v4'] = dict(
@@ -130,17 +132,20 @@ PRESETS['team_draft-4v4'] = dict(
     value_q_warmup=5, keep_data=12, ram_budget_gb=6.0, yardstick='consensus', eval_games=32, eval_sims=32,
     eval_random_games=16, eval_every=1, elo_games=16, elo_opponents=4, elo_together=0, ref_games=32, threads=8,
     groups=2, infer_workers=1, torch_threads=2, infer_device='cuda', train_device='cuda', max_steps=20_000,
-    resolver='mtg', resolver_cfg={'preset': 'mtg-4', 'eval_every': 2}, resolver_init='', resolver_conc=768,
+    resolver='mtg', resolver_cfg={'preset': 'mtg-4', 'eval_every': 2, 'eval_remote': 'mac'}, resolver_init='',
+    resolver_conc=768,
     pending_max=0, draft_eval_net_every=4)
 # The GPU smoke (M6 part 3): the 4v4 run's networks and search at a few events per iteration, modest
-# concurrency (other runs share the GPU), small evaluations; the play network from --resolver-init.
+# concurrency (other runs share the GPU), small evaluations, the play network's on the Mac as the run's
+# (ENGINE.md 48); the play network from --resolver-init.
 PRESETS['team_draft-gpu-smoke'] = dict(
     PRESETS['team_draft-4v4'], iters=3, games=8, conc=16, eval_games=4, eval_random_games=2, elo_games=2,
     elo_opponents=2, ref_games=4, min_window_samples=0, draft_eval_net_every=2, resolver_conc=96, pending_max=0,
     resolver_cfg={'preset': 'mtg-4', 'conc': 96, 'eval_games': 8, 'eval_random_games': 4, 'elo_games': 4,
-                  'ref_games': 8, 'min_window_samples': 0, 'eval_every': 1})
+                  'ref_games': 8, 'min_window_samples': 0, 'eval_every': 1, 'eval_remote': 'mac'})
 # The CPU smoke (M6 part 3): 2v2 events (4 seats, 4 matches each: both rotations) with tiny token
-# networks for both games, few simulations, a few events per iteration; no GPU.
+# networks for both games, few simulations, a few events per iteration; no GPU, everything evaluated here
+# (the remote's end-to-end check adds "eval_remote": "mac" to its resolver_cfg, ENGINE.md 48).
 PRESETS['team_draft-smoke'] = dict(
     game='team_draft', spec=SPEC_DRAFT_RUN, players=[4], iters=2, games=4, conc=4, sims=8, sims_fast=2, p_full=0.25,
     temp_moves=60, policy_target='cq', arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=64, min_steps=10,

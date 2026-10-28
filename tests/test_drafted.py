@@ -174,3 +174,8 @@ def test_cotraining_presets():
     rc = resolver_config(dict(DEFAULTS, **run))
     assert (rc['sims'], rc['sims_fast'], rc['sims_minor'], rc['hidden'], rc['blocks']) == (64, 16, 4, 128, 4)
     assert (run['resolver_conc'], run['draft_eval_net_every'], rc['eval_every']) == (768, 4, 2)
+    # the play network's evaluation on the Mac (ENGINE.md 48), the draft network's here; the CPU smoke
+    # evaluates everything here
+    remote = {n: (PRESETS[n].get('eval_remote', ''), resolver_config(dict(DEFAULTS, **PRESETS[n]))['eval_remote'])
+              for n in ('team_draft-4v4', 'team_draft-gpu-smoke', 'team_draft-smoke')}
+    assert remote == {'team_draft-4v4': ('', 'mac'), 'team_draft-gpu-smoke': ('', 'mac'), 'team_draft-smoke': ('', '')}
