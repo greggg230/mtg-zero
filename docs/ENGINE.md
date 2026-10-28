@@ -8269,7 +8269,8 @@ Rust is unchanged):
 
 ### 48.6 Limits and open issues
 
-* **`eval_yard_net` stays on the desktop** (the user's decision: the draft network's evaluation is
+* **`eval_yard_net` stays on the desktop** (moved to the Mac by the run setting
+  `draft_eval_net_remote` since 53.3; at the time the user's decision: the draft network's evaluation is
   the desktop's). It could go to the Mac at moderate cost - a second remote command rebuilding
   zero-core's `CoRun.event_match` from a mirror holding both networks' checkpoints and the run's
   settings, the commit check and the lock as they are - and it is now the largest evaluation of the
@@ -9773,10 +9774,11 @@ docs; the core's Rust is af44741's):
   minutes in iteration 2's self-play - 6 of 8 events resolved, 16 matches in flight, the resolver
   thread waiting in the driver's `next_batch`, the draft network on backpressure, the process at
   ~0% CPU - then goes on; the same at main 692a52c with zero-core af44741 (649 s against 617 s, at
-  the same counts; the resolver's rolling stats are those of the iterations that do not stall). Not
-  investigated (the core's Rust driver: a wait inside `next_batch` with games in flight). Related
-  or not: td1's iteration-4 `eval_yard_net` took 88 minutes with its process nearly idle for long
-  stretches (07:31-08:59; iteration 0's: 51 min); td1 was not touched.
+  the same counts; the resolver's rolling stats are those of the iterations that do not stall).
+  Investigated and fixed in 53.1 (a slow game step held up every game of the driver: zero-core's
+  strict round-robin group service; the step's cause was not reproduced). td1's iteration-4
+  `eval_yard_net` (88 minutes, its process nearly idle for long stretches, 07:31-08:59; iteration
+  0's: 51 min) is another thing: latency-bound network calls with a long tail (53.2).
 * zerodash (zero-core's dashboard) shows nothing of the remote yet; the game dashboard's status
   line does (progress.json), its throughput charts show the desktop's leaves/s only.
 * On the Mac: `~/mtgz-selfplay-test/` (this section's mirrors, the experiments' scripts and logs, the
@@ -9785,6 +9787,274 @@ docs; the core's Rust is af44741's):
   `~/mtg-zero-wt/m6-remoteselfplay` and its target dir (the checks, 4.2 GB),
   `~/cargo-target/zero-core/remote-selfplay` (the core's toy module for its tests there, 133 MB);
   `~/mtgz-remote` untouched; `~/mtgz-selfplay` does not exist until a run uses it.
+
+## 53. The idle stall, and the draft network's play-network evaluation on the Mac (M6)
+
+Branch `m6-evalstall` (from main b11952b; a pin, a preset, tests and docs: the engine is main's),
+zero-core pinned at `feat/eval-stall` (from core main eb03dd1; its docs/az.md 11.7, 11.8 and
+docs/search.md 2.3, 2.9). Two linked tasks of 2026-10-28: the pre-existing idle stretch of 52.8 (and
+whether it is what made td1's iteration-4 `eval_yard_net` take 88 minutes, its process mostly idle),
+and moving `eval_yard_net` - the draft network against `consensus` with every event's matches played
+by the play network - to the Mac, as the play network's own evaluation went there in 48.
+
+### 53.1 The stall: root cause and fix (zero-core 9714be3)
+
+**What 52.8 saw**: `team_draft-smoke --iters 3 --games 8` (CPU) sat ~10 minutes in iteration 2's
+self-play (6 of 8 events resolved, 16 matches in flight, the resolver thread waiting in the driver's
+`next_batch`, the draft network on backpressure, the process idle), the same at main 692a52c with
+core af44741 at the same point - both runs had played identical games up to it (iteration 1 the
+same to the sample). The resolver's iteration-2 counters: 73,854 leaves (iteration 3: 79,728 in
+34 s) and 50 s of inference in a 617 s phase: for ~10 minutes nothing was searched and nothing was
+evaluated.
+
+**Root cause** (the core's; its docs/az.md 11.8): a driver group's batch is assembled when every
+game of the group has made its step (its search and moves up to its next leaf), and `next_batch`
+served the groups in strict round-robin order. One game whose step takes long - an engine slow path
+- therefore stopped every game of the driver: its own group waits for it by design, and the other
+group, its batch answered and the next one ready, waited for its turn behind it. In co-training
+that driver is the resolver's episode player: no match finishes, the matches outstanding stay at
+`pending_max`, the draft network waits on its backpressure, and the process idles with one search
+thread in the slow step (Windows' per-process CPU accounting does not show one busy thread of 32 on
+this desktop: a busy loop measured 0.14-0.59 of a core with psutil). Two more of the core's made it
+worse: `in_flight()` (the progress snapshot, every half second on the resolver's thread) locked
+every chunk holding Python's GIL, so meeting the slow game's chunk it blocked every Python thread
+(the draft network's loop and progress.json too); and the episode player's first group
+re-dispatched took every queued match (td1's evaluation: 383 / 1 of its 384 matches), so its two
+groups' search and inference did not overlap.
+
+**What made the step slow** could not be reproduced: 52.8's runs used engines with the exponential
+payment search fixed by 819f44e (51.3: `covers` past eight units, "slow below a hang"), td1's
+iterations 0-4 ab02574's; 16 smoke runs since (69 iterations, ~2,400 drafted matches; 27 of the
+iterations on 692a52c's engine in a scratch worktree), with a stall catcher dumping every thread
+(py-spy, and cdb for the Rust threads) after 45-120 s without progress, never idled (53.5). The counters below say it when it
+happens again: `iter N self-play (resolver driver): K game step(s) took over 10 s (the longest so far
+S s, game G): an engine slow path?`.
+
+**The fix** (zero-core 9714be3):
+* A `queue_only` driver - co-training's episode players: the resolver's self-play driver, the
+  evaluation's (`CoRun.event_match`), a remote matches worker (52) - serves the first of its groups
+  that is ready, in round-robin order: a slow game holds up its own group only (with 2 groups, half
+  the matches in flight play on). Every other driver keeps the strict order (reproducible runs).
+* The groups share the queued matches (`queue_share`: a group starts its share of everything in
+  flight or queued, never fewer than the other groups' free slots cannot take): 192 / 192.
+* `in_flight()` never waits for a search thread (try-lock; a chunk being searched counts its games
+  as of its group's last dispatch).
+* `stats()` gains `step_max_s`, `step_max_gid`, `slow_steps` (steps over 10 s); co-training logs
+  them after each self-play phase and each event match and counts them in the rolling stats.
+
+**Regression tests** (zero-core's driver tests): a toy game that sleeps 1.5 s once in one step, in
+a `queue_only` driver of 2 groups x 4 with 8 queued games: the other group plays on to its last
+batch meanwhile (with the strict order it got one batch: the test fails on eb03dd1's driver), the
+step is counted, `in_flight()` returns at once; 8 matches for 2 x 8 slots start 4 / 4 (were 7 / 1)
+and play the same games as with one group; a long queue fills every slot.
+
+### 53.2 Why td1's `eval_yard_net` takes 51-88 minutes
+
+td1's `eval_yard_net` (iterations 0 and 4: 3,073 and 5,274 s, before 52.6's restart) is 32 events
+against `consensus` at 32 simulations, then their 384 matches played by the play network at 32
+simulations, minor decisions included (an evaluation seat has no `sims_minor`). Measured with
+copies of td1's iteration-4 checkpoints and settings, 8 events (96 matches) per measurement,
+`CoRun.eval_net` scripted with a log of every network call, three at once on the desktop (td1's
+GPU self-play beside them until td1 paused at 12:57, the core's smoke_all and the search smoke on
+the CPU for part of the time):
+
+| 8 events, 96 matches | GPU (td1's setting), core eb03dd1 | GPU, this core | CPU inference, this core |
+|---|---:|---:|---:|
+| drafting: 13,829 calls of 4 rows (two groups of 4 events) | 158 s (11.5 ms a call) | 159 s | 79 s (5.7 ms) |
+| matches, minutes 3-10: rows per second, rows per call, ms per call | 1,687 / 46.9 / 25.9 | 1,713 / 46.8 / 25.7 | 1,689 / 45.4 / 25.6 |
+| matches in flight after 30 / 40 / 56 min | 32 / 10 / 4 | 32 / 9 / 3 | 12 / 5 / 2 |
+| the last 10 minutes: calls per second, rows per call, ms per call | 49 / 3.0 / 19.9 | 49 / 3.0 / 19.8 | 109 / 1.4 / 8.8 |
+| **done** | stopped at 67 min, 2 matches left | stopped at 67 min, 2 left | **65.8 min** |
+
+* **Not a stall: latency-bound.** The evaluating thread spends ~96% of the matches phase inside
+  network calls (the search threads idle: "the process mostly idle"); a call of a few rows costs about as
+  much as one of 48 on the GPU shared with training (the token network alone, td1 training beside:
+  9-11 ms for 1-32 rows, 14 / 21 / 49 ms for 96 / 192 / 384; on 2 CPU threads 3.0 / 4.3 / 6.6 ms for
+  1 / 8 / 32 rows and 15 / 27 / 50 ms for 96 / 192 / 384).
+* **The longest match decides.** One leaf per game per call: the matches finish over the whole
+  hour; the CPU run needed 280,000 calls in all (2.86 million leaves for 96 matches, ~30,000 per
+  match, the last ones several times that), the GPU runs had made 168,000 when stopped with 2
+  matches left, the tail's calls 1-3 rows each at 20 ms on the GPU. With 32 events the bulk is
+  larger and the tail about as long: td1's 51-88 minutes.
+* **The core's changes leave it as it was** (before and after within 1% at every point): the
+  evaluation's 95 / 1 start (383 / 1 with 32 events) cost nothing measurable, since one thread
+  evaluates both groups' batches in turn either way, and no step was slow.
+* **CPU inference halves the drafting and the tail** (5.7 against 11.5 ms, 8.8 against 19.9 ms a
+  call), the matches' bulk the same; on the desktop it would take CPU from nothing else during an
+  evaluation (td1's search threads idle then). Not built (53.6).
+* **td1's iterations 0-4 ran ab02574's engine** (with the exponential payment search of 51.3):
+  whether a slow step added to their 51 and 88 minutes cannot be told from their logs; the latency
+  alone accounts for an hour.
+
+### 53.3 `eval_yard_net` on the Mac (zero-core 1663d89, its docs/az.md 11.7)
+
+* **The run setting `draft_eval_net_remote`** (a remote of the package; '' = here): each iteration
+  whose `eval_yard_net` is due (an evaluated multiple of `draft_eval_net_every`) is queued once its
+  metrics row is written (the row without `eval_yard_net`); a thread of the run ships the mirror
+  `<workdir>/<run>` - the run's config.json with every remote setting off and the Mac's overrides on
+  both networks (CPU inference, 12 threads, 2 groups, 3 inference workers), the draft network's
+  `models/iter_N.pt` and the play network's `resolver/models/iter_N.pt` of that iteration only -
+  and runs `python -m mtgz.az.remote evalnet <mirror> <N>` in the Mac's checkout of the run's commit
+  (`RunCommitRemote`; the checkout is checked there before anything else, as for `eval`). The Mac
+  rebuilds zero-core's `CoRun` from the mirror and calls `CoRun.eval_net(N)`, the code that plays the
+  events on the desktop (same seeds, same drivers, coordinator and `mtgz.az.drafted` glue). The
+  result lands in the run's **`evals.jsonl`** (`{iter, eval_yard_net, time, host, seconds,
+  remote_s}`), the log says `iter N vs consensus (episodes by the resolver net; remote mac, Ns):
+  {...}`, and the dashboard merges it into the draft network's rows (its win-rate chart's line).
+* **The lock and the back-off as they are**: `evalnet` takes `~/mtgz-remote/.eval.lock`, so the play
+  network's evaluation (48) and `eval_yard_net` queue behind each other, and the remote self-play
+  workers (52) stop while either runs.
+* **Restarts and failures**: a restart queues the due iterations without a result again (none is
+  replayed); a failure (the Mac asleep, unreachable, its checkout missing) is retried every 5
+  minutes on that thread and never blocks training; at the end of its iterations the run waits for
+  both remote queues (PAUSE ends the wait).
+* **The heuristic-played evaluation stays on the desktop**: the draft network against `consensus`
+  and random with the matches played by the heuristic, its Elo matches, the human picks.
+* **mtgz**: `team_draft-4v4-mac` (opt-in) also sets `draft_eval_net_remote` 'mac'; no running preset
+  changes. Tests: `tests/test_mac_remote.py` (`evalnet` refused at another commit before anything is
+  evaluated or locked; a team_draft mirror evaluated by the remote side), `tests/test_drafted.py`.
+* **`ZERO_EVAL_WORKDIR`**: another evaluation workdir on the Mac (its own mirrors and lock), for
+  end-to-end tests beside td1's `~/mtgz-remote`.
+
+**End to end with the Mac** (`team_draft-smoke`, CPU, from this branch at a2a0602 after `bash
+tools/mac.sh --eval-checkout`, the mirrors in a test workdir beside td1's):
+
+```
+MSYS2_ENV_CONV_EXCL=ZERO_EVAL_WORKDIR ZERO_EVAL_WORKDIR=/Users/greggkeithley/mtgz-evalstall-test \
+  python -m mtgz.az.run --run E:/mtg-zero-scratch/eval-stall/td_mac --preset team_draft-smoke --iters 3 \
+  --games 8 --draft-eval-net-remote mac
+```
+
+The log: `eval_yard_net on the remote 'mac' (greggkeithley@100.95.248.116, mirror
+/Users/greggkeithley/mtgz-evalstall-test/td_mac)`; iterations 0 and 2 (`draft_eval_net_every` 2)
+wrote their metrics rows without `eval_yard_net` and went on; `iter 0 vs consensus (episodes by the
+resolver net; remote mac, 12s): {'win': 0.625, ...}` and `iter 2 ... (remote mac, 11s): {'win':
+0.75, ...}` (8.0 and 7.9 s of play there, the rest shipping and ssh); `evals.jsonl` holds both rows
+and the dashboard (`/api/run/td_mac`) merges them into rows 0 and 2; 3 iterations in 5 min 4 s,
+`done`. The mirror held config.json (every remote setting off, the Mac's overrides on both
+networks), `models/iter_000{0,2}.pt` and `resolver/models/iter_000{0,2}.pt`. The same smoke playing
+`eval_yard_net` on the desktop took 29-35 s for it per evaluated iteration (53.5).
+
+**td1's evaluation on the Mac** (iteration 4's checkpoints and td1's settings: 32 events, 384
+matches; the run's own code path - `RemoteNetEval` shipping the mirror and running `evalnet` - from
+a scratch copy of the run, in the test workdir): **2,126 s (35.4 min), 2,120 s of it on the Mac**,
+win 0.172 against `consensus` (td1's own result on the desktop: 0.1875; margin -3.81 both). The Mac
+was not free: td1's three self-play workers (52, nice 5) played beside it the whole time (the test
+workdir's lock is not the one they watch), and `ps` showed the evaluation at 1.4-2.4 of the Mac's 16
+cores. In production `evalnet` takes `~/mtgz-remote/.eval.lock` and the workers stop, so it will be
+shorter than this; the same evaluation took td1 51 and 88 minutes on the desktop, and 8 of its 32
+events take over an hour there today (53.2).
+
+### 53.4 Turning it on for td1 (at a restart)
+
+td1 ran (from 11:05) from `~/mtg-zero-wt/run-b11952b` with the play network's evaluation and a share of
+its matches on the Mac (52.6) and `draft_eval_net_every` 8, and has been **paused** since 12:57 at
+the user's request (its PAUSE file; its supervisor waits for it). Its next `eval_yard_net` is
+iteration 8's. Turning it on, when td1 is to resume, is a re-pin as for 48.3 and 52.6:
+
+1. This branch on main (the user's merge), a pinned worktree of the commit `<S>`: `git -C
+   ~/mtg-zero worktree add --detach ~/mtg-zero-wt/run-<s7> <S>`, there
+   `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<s7> bash tools/build_py.sh`.
+2. There: `bash tools/mac.sh --eval-checkout` (the Mac's `~/mtg-zero-wt/run-<s12>`, ~40 s; the same
+   checkout serves the play network's evaluations, the self-play workers and `evalnet`).
+3. The supervisor waiting on the PAUSE file runs the old command: `touch runs/td1/STOP` ends it
+   ("STOP file present while paused: supervisor done"; td1 stays paused); then `rm runs/td1/STOP`.
+   (Were td1 running instead: `touch runs/td1/STOP`, it exits after its iteration.)
+4. From the new worktree, td1's command of today plus one flag (a run started while PAUSE exists
+   exits 75 at once and the supervisor waits for PAUSE to go):
+
+   ```
+   python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1/supervisor_console.txt" \
+     python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/td1" --preset team_draft-4v4 \
+     --resolver-init "C:/Users/Gregg Keithley/mtg-zero/runs/mtg5/models/iter_0014.pt" \
+     --resolver-cfg '{"preset": "mtg-4", "eval_every": 2, "eval_remote": "mac", "selfplay_remote": "mac", "selfplay_remote_procs": 3}' \
+     --draft-eval-net-every 8 --draft-eval-net-remote mac
+   ```
+
+   (`--draft-eval-net-remote` is a top-level setting, saved in config.json; the other flags are
+   today's, also saved.) Then `python tools/pause_run.py runs/td1 --resume` when the user resumes
+   td1. The log says `eval_yard_net on the remote 'mac' (greggkeithley@100.95.248.116, mirror
+   /Users/greggkeithley/mtgz-remote/td1)`; at iteration 8 the draft network's metrics row is written
+   without `eval_yard_net` and the iteration goes on to 9 at once; when the Mac is done, `iter 8 vs
+   consensus (episodes by the resolver net; remote mac, Ns): {...}` and a row in
+   `runs/td1/evals.jsonl` (the dashboard merges it). Iterations 0 and 4 keep their results (nothing is
+   played again).
+5. Off again: the same command with `--draft-eval-net-remote ''`.
+
+The Mac's `evalnet` holds `~/mtgz-remote/.eval.lock`, so td1's Mac self-play workers stop while it
+runs (as for the play network's evaluation): every 8th iteration the desktop plays the matches alone
+for that time. `evalnet` does not touch co-training's match queue (its drivers are its own on the
+Mac), so it cannot add to the queue drain of td1's iteration 7 (the Mac's workers took the shared
+queue while the desktop's GPU played none; a separate fix).
+
+### 53.5 Checks
+
+At d1b0ae6 (zero-core 3c26d9f; the code is zero-core 1663d89's and this branch's a2a0602; the engine
+is main b11952b's):
+
+* **zero-core** (`feat/eval-stall`): `cargo test --release` **47 passed** (44 and the 3 new driver
+  tests); `python -m pytest tests` **133 passed** (128 and the 5 new: `draft_eval_net_remote` on the
+  remote 'local', a restart with one missing, an unreachable remote, the settings refused,
+  `ZERO_EVAL_WORKDIR`; the two CUDA tests with the GPU visible). `SMOKE_TARGET=evalstall bash
+  tools/smoke_all.sh --with-this-core` (the games at their HEADs in temporary worktrees, the core
+  moved to 3c26d9f): Glass Road c1f56dc cargo test 46, pytest 33, `glassroad-smoke`; Caverna a6fad73
+  47, 32, `caverna-smoke`; Kingdom Builder 4202a4a 105 (4 ignored), 45, `kingdombuilder-smoke`: all
+  **ok**; the core's steps: cargo test 47, pytest 1 failed of 133 in that run
+  (`tests/test_remoteplay.py::test_late_shards_are_dropped`, a timing test: it expects ~6 s phases
+  and a shard announced 3 s after it is written, so later than its phase; with my three probes and
+  the search smoke beside it a phase took 23 s and a shard came in time), then the core's steps
+  again on a quiet desktop: **GREEN** (cargo test 47, pytest 133, 9 min 17 s). MTG Zero main b11952b with this core (smoke_all without
+  its cargo step: the desktop runs no `az`; the Mac ran the engine tests below): build, pytest 40,
+  `mtg-smoke`: all **ok**.
+* **MTG Zero**: `bash tools/build_py.sh` (desktop, at the pin); `python -m pytest -q tests` **41
+  passed** (40 and the `evalnet` mirror test); engine tests on the Mac (`bash tools/mac.sh 'cargo test
+  --release --no-fail-fast'`: every binary, `az` included) **1,407 passed, 0 failed, 13 ignored** (`az`
+  14), 6 min 49 s with the build beside td1's workers; behaviour digests (desktop, `cargo test
+  --release -p engine --test digest -- --ignored`): combined **804002969bdd0938**, unchanged (2,000
+  random and 500 heuristic games in 13.1 s); search smoke (desktop, `python tools/search_smoke.py
+  --specs team_draft,team_draft_2v2,random,match --seeds 0-1`): **0 failed of 8**, 726 s: team_draft
+  24 events each, all resolved (team A won 9 and 11, drew 6 and 7), 288 matches each, 15,581 and
+  15,539 draft decisions (52.7's to the decision); team_draft_2v2 24 events each (96 matches); random
+  400 games each (161,710 and 166,767 decisions); match 400 each (385,008 and 381,016 decisions).
+* **The CPU smoke before and after** (`team_draft-smoke --iters 3 --games 8`, seeds 0 and 1; the old
+  core from a frozen copy of its build and the new one side by side, CUDA hidden): `eval_yard_net`
+  32.8 / 34.7 s against 32.9 / 34.2 s at iteration 0 and 35.0 / 22.9 against 29.0 / 25.5 at iteration
+  2; self-play 73.0, 39.2, 33.6 and 96.8, 26.0, 28.4 s against 71.5, 45.6, 35.0 and 95.8, 21.6, 34.0
+  s: the same within the runs' noise (no slow step happened, and the smoke's 16 matches fill its 16
+  slots, so its groups were balanced before too). The GPU smoke (`team_draft-gpu-smoke`: ~40 minutes
+  per `eval_yard_net` and ~34 per self-play phase, 45.10) was not run; 53.2 measures the evaluation at
+  td1's settings on the GPU and on the CPU, old core and new.
+* **The stall hunt**: 16 smoke runs (69 iterations, ~2,400 drafted matches; 27 iterations on
+  692a52c's engine in a scratch worktree), a catcher dumping every thread after 45-120 s without
+  progress: none idled; one 319 s self-play phase under 12 of my own processes (both Python threads
+  in torch, inference 10-20 times slower, the search threads waiting for them: overload, not a
+  stall).
+
+### 53.6 Limits and open issues
+
+* **What made 52.8's step slow is not known** (53.1): the fix keeps it from stopping everything else
+  and the counters name the game the next time; the step itself still delays its own group's
+  matches and the end of its phase.
+* **`eval_yard_net` is latency-bound** (53.2): on the desktop one evaluating thread waits on one
+  network call per round of a few rows; the core changes leave its time as it was. With the Mac
+  (53.3) the desktop no longer waits for it. Two levers not built: CPU inference for the
+  evaluations' small batches on the desktop (its draft half 2x faster, 53.2) - a run setting for
+  the evaluation drivers' device; and fewer matches per event in this evaluation.
+* **On the Mac it competes**: while `evalnet` runs, the self-play workers stop (the lock: as for the
+  play network's evaluation), so td1's self-play on the Mac loses that time every 8th iteration;
+  the measurement of 53.3 ran beside td1's workers (a test workdir: not their lock), so the
+  production time is shorter.
+* **The CPU accounting on this desktop** (Windows, i9-13900K): psutil's per-process CPU time showed
+  a pure-Python busy loop at 0.59 of a core at normal priority and 0.14 below normal (the run's
+  priority) with ~the same loop counts: "the process is idle" from CPU counters is not evidence
+  here; a thread dump is (py-spy, and cdb for the Rust threads: `cdb -pv -p PID -y <target>/release/deps -c "~*k; qd"`).
+* **zero-core's `test_late_shards_are_dropped` is load-sensitive** (53.5): it failed once beside my
+  probes and passed alone (pre-existing; remote self-play's code is unchanged here).
+* On the Mac: `~/mtg-zero-wt/run-a2a06027be33` (this branch's eval checkout, 0.4 GB target dir) and
+  `~/mtg-zero-wt/m6-evalstall` (the engine tests, 3.9 GB target dir); `~/mtgz-evalstall-test` removed
+  after the measurements; `~/mtgz-remote` and `~/mtgz-selfplay` untouched. On the desktop: the
+  scratch worktree of 692a52c and its target dir, the smokes' target dirs and the scratch runs'
+  shards removed (their logs and metrics are in `E:/mtg-zero-scratch/eval-stall/`).
 
 ## 54. Constructed play: the Legacy Izzet Delver mirror (D1)
 
