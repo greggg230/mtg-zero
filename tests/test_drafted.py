@@ -186,7 +186,10 @@ def test_cotraining_presets():
     assert sp == {'team_draft-4v4': ('', ''), 'team_draft-gpu-smoke': ('', ''), 'team_draft-smoke': ('', ''),
                   'team_draft-4v4-mac': ('', 'mac')}
     mac4 = PRESETS['team_draft-4v4-mac']
-    assert {k: v for k, v in mac4.items() if k != 'resolver_cfg'} == {k: v for k, v in run.items() if k != 'resolver_cfg'}
+    assert {k: v for k, v in mac4.items() if k != 'resolver_cfg'} == dict(
+        {k: v for k, v in run.items() if k != 'resolver_cfg'}, draft_eval_net_remote='mac')
     assert mac4['resolver_cfg'] == dict(run['resolver_cfg'], selfplay_remote='mac')
+    # the draft network's play-network-played evaluation on the Mac (ENGINE.md 53): the -mac preset only
+    assert [n for n in PRESETS if PRESETS[n].get('draft_eval_net_remote')] == ['team_draft-4v4-mac']
     assert PRESETS['mtg-4-mac'] == dict(PRESETS['mtg-4'], games=200, selfplay_remote='mac')
     assert all(not PRESETS[n].get('selfplay_remote') for n in PRESETS if not n.endswith('-mac'))

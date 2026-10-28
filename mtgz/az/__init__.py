@@ -157,12 +157,14 @@ PRESETS['team_draft-gpu-smoke'] = dict(
 # compressed shards into data/iter_i/), or in a co-training run plays a share of the play network's
 # queued matches. mtg-4-mac: mtg-4 with a desktop quota of 200 matches (the Mac adds its share on top:
 # ENGINE.md 50.3's single-game plan); team_draft-4v4-mac: team_draft-4v4 with the play network's
-# matches on the Mac too. The run's checkout needs `bash tools/mac.sh --eval-checkout` before it starts
+# matches on the Mac too, and the draft network's evaluation whose matches the play network plays
+# (eval_yard_net: run setting draft_eval_net_remote, ENGINE.md 53). The run's checkout needs `bash tools/mac.sh --eval-checkout` before it starts
 # (the same checkout as the evaluations). A running run turns it on at a restart with a flag
 # (ENGINE.md 52.5): presets fill only settings a run has not saved.
 PRESETS['mtg-4-mac'] = dict(PRESETS['mtg-4'], games=200, selfplay_remote='mac')
 PRESETS['team_draft-4v4-mac'] = dict(
-    PRESETS['team_draft-4v4'], resolver_cfg=dict(PRESETS['team_draft-4v4']['resolver_cfg'], selfplay_remote='mac'))
+    PRESETS['team_draft-4v4'], resolver_cfg=dict(PRESETS['team_draft-4v4']['resolver_cfg'], selfplay_remote='mac'),
+    draft_eval_net_remote='mac')
 PRESETS['team_draft-smoke'] = dict(
     game='team_draft', spec=SPEC_DRAFT_RUN, players=[4], iters=2, games=4, conc=4, sims=8, sims_fast=2, p_full=0.25,
     temp_moves=1000, policy_target='cq', arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=64, min_steps=10,

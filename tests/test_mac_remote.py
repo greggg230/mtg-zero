@@ -122,6 +122,35 @@ def test_a_resolver_mirror_is_evaluated_after_the_same_check(tmp_path):
     assert 'elo' in m and json.load(open(mirror / 'elo' / 'ratings.json'))['anchor'] == 'heuristic'
 
 
+def test_an_eval_net_mirror_is_evaluated_after_the_same_check(tmp_path):
+    """A co-training run's eval_yard_net mirror (<workdir>/<run>, run setting draft_eval_net_remote,
+    zero-core docs/az.md 11.7; ENGINE.md 53) holds the run's settings (team_draft-smoke's) and both
+    networks' checkpoints: `python -m mtgz.az.remote evalnet` refuses it with other code than the run's
+    before evaluating or locking anything; the remote side it then runs (zero.remote.evaluate_net_mirror)
+    plays the draft network's events against `consensus` with the play network's matches."""
+    from zero.cotrain import CoRun
+    from zero.net import save
+    from zero.run import DEFAULTS, PRESETS, model_path
+    cfg = dict(DEFAULTS, **PRESETS['team_draft-smoke'])
+    cfg.update(eval_games=2, draft_eval_net_every=1)
+    mirror = tmp_path / 'mtgz-remote' / 'td'
+    (mirror / 'models').mkdir(parents=True)
+    (mirror / 'resolver' / 'models').mkdir(parents=True)
+    (mirror / 'config.json').write_text(json.dumps(cfg))
+    co = CoRun(str(mirror), cfg)
+    save(co.P.new_model(), model_path(str(mirror), 0), {'iter': 0})
+    save(co.R.new_model(), model_path(co.R.run, 0), {'iter': 0})
+    p = subprocess.run([sys.executable, '-m', 'mtgz.az.remote', 'evalnet', str(mirror), '0'], cwd=ROOT,
+                       env=dict(os.environ, MTGZ_REMOTE_COMMIT='f' * 40, PYTHONIOENCODING='utf-8'),
+                       capture_output=True, text=True, timeout=300)
+    assert p.returncode != 0 and "is not the run's code: HEAD is" in p.stderr, p.stdout + p.stderr
+    assert not (mirror / 'metrics.jsonl').exists() and not (tmp_path / 'mtgz-remote' / '.eval.lock').exists()
+    m = remote.evaluate_net_mirror(str(mirror), 0)
+    e = m['eval_yard_net']
+    assert e['opp'] == 'consensus' and e['games'] == 2 and e['unfinished'] == 0 and m['seconds'] > 0
+    assert [r['iter'] for r in map(json.loads, open(mirror / 'metrics.jsonl'))] == [0]
+
+
 # ---------------------------------------------------------------- remote self-play (ENGINE.md 52)
 
 def test_the_macs_selfplay_settings():
