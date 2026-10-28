@@ -13,7 +13,6 @@
 //! nonland permanent to its owner's hand."
 
 use engine::db::{AbilitySlot, CardDb, Counter, Kw};
-use engine::decision::act as ids;
 use engine::game::StackKind;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Target, Zone};
@@ -547,5 +546,4 @@ fn prismari_charm_returns_a_nonland_permanent_to_its_owners_hand() {
     resolve(&mut g);
     assert!(!g.battlefield().contains(&clue));
     assert_eq!(g.obj(clue).zone, Zone::Nowhere);
-    let _ = ids::PASS;
 }
