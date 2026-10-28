@@ -39,6 +39,24 @@ def spec_with_log(spec):
     return json.dumps(s, separators=(',', ':'))
 
 
+# A minor decision (which mana source to tap next, which mana to keep: the engine's
+# `minor_decision`, engine/src/az/mod.rs) in the spectator view's JSON (serde_json sorts keys; only
+# the decision has a "kind").
+_MINOR = ('"kind":"PayMana"', '"kind":"PayPool"')
+
+
+class _Recorder(core.RecordingDriver):
+    """zero.replay's driver with self-play's budget for minor decisions: `sims_minor`
+    simulations (zero-core searches them so in self-play and never records them). The Python
+    driver has no `sims_minor`; without it a payment's decisions got the full budget."""
+    sims_minor = None
+
+    def _start(self, slot, seat, p):
+        super()._start(slot, seat, p)
+        if self.sims_minor and any(k in slot.game.export_state() for k in _MINOR):
+            slot.target = self.sims_minor
+
+
 def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print):
     """`games` games of `ckpt` against itself, with the run's settings. -> zero-replay/1 dicts."""
     run, it = core.run_of(ckpt)
@@ -49,9 +67,14 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
         import torch
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     seed = random.randrange(1 << 30) if seed is None else seed
-    return core.record(ckpt, opp='self', games=games, sims=sims or cfg.get('sims', 64), spec=spec_with_log(cfg['spec']),
-                       selfplay=selfplay, hint=None, chance_k=cfg.get('chance_k', 0), device=device, seed=seed,
-                       title=title, conc=conc, log=log)
+    driver = type('Recorder', (_Recorder,), {'sims_minor': cfg.get('sims_minor')})
+    real, core.RecordingDriver = core.RecordingDriver, driver   # core.record builds its driver by this name
+    try:
+        return core.record(ckpt, opp='self', games=games, sims=sims or cfg.get('sims', 64),
+                           spec=spec_with_log(cfg['spec']), selfplay=selfplay, hint=None,
+                           chance_k=cfg.get('chance_k', 0), device=device, seed=seed, title=title, conc=conc, log=log)
+    finally:
+        core.RecordingDriver = real
 
 
 def summary(rep):

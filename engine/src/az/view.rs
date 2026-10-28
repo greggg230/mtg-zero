@@ -271,7 +271,7 @@ impl Game {
         use DecisionKind as K;
         let nm = |i: CardIdx| self.name(i).to_string();
         let tgt = |t: Target| match t {
-            Target::Player(p) => format!("player {}", p + 1),
+            Target::Player(p) => format!("P{}", p + 1),
             _ => self.describe_target(t).split('#').next().unwrap_or("").to_string(),
         };
         match (kind, c) {
@@ -350,6 +350,11 @@ impl Game {
             (K::PutInHand, Choice::Def(d)) => format!("{} into hand", self.db().def(d).name),
             (K::PutOntoBattlefield, Choice::Def(d)) => format!("{} onto the battlefield", self.db().def(d).name),
             (K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield, Choice::Pass) => "Done".into(),
+            (K::PutOnTop, Choice::Card(i)) => format!("{} on top", nm(i)),
+            (K::PutOnBottom, Choice::Card(i)) => format!("{} on the bottom", nm(i)),
+            (K::PutInGraveyard, Choice::Card(i)) => format!("{} into the graveyard", nm(i)),
+            (K::PutInHand, Choice::Card(i)) => format!("{} into hand", nm(i)),
+            (K::PutOntoBattlefield, Choice::Card(i)) => format!("{} onto the battlefield", nm(i)),
             (K::ChooseDiscard, Choice::Def(d)) => format!("They discard {}", self.db().def(d).name),
             (K::NameCard, Choice::Def(d)) => format!("Name {}", self.db().def(d).name),
             (K::ChooseMode, Choice::Number(n)) => format!("Mode {}", n + 1),
@@ -369,7 +374,11 @@ impl Game {
             }
             (K::RevealCompanion, Choice::Def(d)) => format!("Reveal {}", self.db().def(d).name),
             (K::RevealCompanion, Choice::Pass) => "No companion".into(),
-            _ => self.describe_choice(c),
+            (_, Choice::Card(i)) => nm(i),
+            (_, Choice::Def(d)) => self.db().def(d).name.clone(),
+            (_, Choice::Target(t)) => format!("Target {}", tgt(t)),
+            // (the engine's debug wording, without its slot numbers)
+            _ => self.describe_choice(c).split('#').next().unwrap_or("").to_string(),
         }
     }
 
@@ -391,6 +400,10 @@ impl Game {
         let mut v = json!({"player": d.player, "kind": format!("{:?}", d.kind), "options": options});
         if let Some(t) = self.asking_task() {
             v["task"] = json!(t);
+        }
+        // A decision while a spell or ability resolves ("you may ...", a pile to order): its source.
+        if let Some(Task::Run(f)) = self.agenda.last() {
+            v["source"] = json!(self.db().def(f.source_def).name);
         }
         // What is being cast or activated while its costs and targets are chosen.
         if let Some(top) = self.stack.last() {

@@ -14,9 +14,13 @@ Each pass:
     them. Only the newest checkpoint is recorded; ones skipped while the publisher was down are
     not back-filled. The recorded iterations are kept in <run>/delverai.json.
 
-`--loop N`: repeat every N seconds (default: one pass). The upload key: --key-file,
+`--loop N`: repeat every N seconds (default: one pass), waiting for a run that has not started
+yet. The upload key: --key-file,
 $MTGZ_DELVERAI_KEY or ~/delverai/.upload_key (the site's Worker secret UPLOAD_KEY).
-Recording uses the GPU next to the run (~a minute per generation); `--device cpu` keeps off it.
+Recording runs on the CPU by default (`--threads` torch threads): zero.replay's Python driver
+sends batches of a few positions, which on a GPU shared with the run (and other projects) wait
+behind its kernels (measured 2026-10-28: ~70 ms a batch on the busy GPU; on 6 CPU threads two
+mtg5-network Delver games of 36 and 45 turns took 5.5 min).
 """
 import argparse
 import json
@@ -177,20 +181,35 @@ def main(argv=None):
     ap.add_argument('--loop', type=float, default=None, help='repeat every N seconds')
     ap.add_argument('--games', type=int, default=6)
     ap.add_argument('--sims', type=int, default=None, help="default: the run's self-play sims")
-    ap.add_argument('--device', default=None, help='default: cuda when available')
+    ap.add_argument('--device', default='cpu', help='inference device (default cpu, see above)')
+    ap.add_argument('--threads', type=int, default=4, help='torch threads for CPU inference')
     ap.add_argument('--min-iter', type=int, default=None, help='record no checkpoint older than this')
     ap.add_argument('--url', default=replays.SITE)
     ap.add_argument('--key-file', default=None)
     ap.add_argument('--dry-run', action='store_true', help='record, but upload nothing')
     a = ap.parse_args(argv)
-    if not os.path.isdir(a.run):
+    if not os.path.isdir(a.run) and a.loop is None:
         raise SystemExit(f'{a.run}: no such run directory')
     key = None if a.dry_run else replays.upload_key(a.key_file)
+    if a.device == 'cpu':
+        import torch
+        torch.set_num_threads(a.threads)
+    # Below the run: recording games must never slow its self-play.
+    import psutil
+    psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == 'nt' else 10)
 
     def log(msg):
         print(f'{time.strftime("%H:%M:%S")} {msg}', flush=True)
 
+    waiting = False
     while True:
+        if not os.path.exists(os.path.join(a.run, 'config.json')):    # not launched yet (--loop)
+            if not waiting:
+                log(f'waiting for {a.run} to start')
+            waiting = True
+            time.sleep(a.loop)
+            continue
+        waiting = False
         try:
             one_pass(a.run, a, key, log)
         except Exception:                  # a network hiccup or a half-written file: try again next pass
