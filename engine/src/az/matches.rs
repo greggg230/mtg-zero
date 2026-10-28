@@ -277,12 +277,16 @@ pub struct MatchState {
     pub priors: Option<Arc<[super::sample::FirstPickPrior; 2]>>,
 }
 
-/// The first game's setup of one player: deck, sideboard, first picks.
+/// The first game's setup of one player: deck, sideboard, first picks, and
+/// the cards it knows are elsewhere (a drafted match, ENGINE.md 45: its
+/// team saw them in the draft, outside this opponent's pool; they leave its
+/// prior of the opponent's unseen first picks; empty otherwise). Sorted.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Seat {
     pub deck: Vec<DefId>,
     pub sideboard: Vec<DefId>,
     pub first_picks: Vec<DefId>,
+    pub elsewhere: Vec<DefId>,
 }
 
 impl MatchState {
@@ -301,8 +305,13 @@ impl MatchState {
             }
         }
         let pools = [p0, p1];
+        // (Player p's first picks as the other player samples them: what that
+        // player knows is elsewhere is not among them.)
         let priors = (format == Format::Bo3).then(|| {
-            Arc::new([super::sample::FirstPickPrior::new(db, &pools, 0), super::sample::FirstPickPrior::new(db, &pools, 1)])
+            Arc::new([
+                super::sample::FirstPickPrior::new(db, &pools, 0, &seats[1].elsewhere),
+                super::sample::FirstPickPrior::new(db, &pools, 1, &seats[0].elsewhere),
+            ])
         });
         Ok(MatchState {
             format,

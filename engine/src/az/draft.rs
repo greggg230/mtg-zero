@@ -172,9 +172,16 @@ pub fn cube() -> Result<&'static DraftCube, String> {
 // ------------------------------------------------------------------ the spec
 
 /// The spec of `team_draft` (JSON; every key optional):
-/// `{"rounds": min(T, 3), "packs": 3, "pack_size": 15, "max_turns": 60, "format": "bo3"}`.
+/// `{"rounds": min(T, 3), "packs": 3, "pack_size": 15, "max_turns": 60, "format": "bo3",
+/// "build_sims_div": 1}`.
 /// `rounds`: rounds of matches (rotations of the Latin square, at most `T`);
-/// `max_turns` and `format`: the matches' (ENGINE.md 36).
+/// `max_turns` and `format`: the matches' (ENGINE.md 36); `build_sims_div`
+/// (1-16): deckbuilding decisions are searched with the seat's simulations
+/// divided by it (zero-core's `SearchGame::sims_divisor`; DESIGN.md 2.3.9:
+/// picks 64 / 16, deckbuilding 32 / 8 with 2; ENGINE.md 45). `history` (a
+/// yardstick's position, ENGINE.md 45): `{"views": [[names], ...], "picks":
+/// [names]}`, seat 0's packs at its picks so far and the cards it took, the
+/// last view its pending pick; the event starts there (`TeamDraftAz::new`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DraftSpec {
     pub rounds: Option<u8>,
@@ -182,11 +189,55 @@ pub struct DraftSpec {
     pub pack_size: u8,
     pub max_turns: u32,
     pub format: Format,
+    pub build_sims_div: u8,
+    pub history: Option<History>,
 }
 
 impl Default for DraftSpec {
     fn default() -> Self {
-        DraftSpec { rounds: None, packs: 3, pack_size: 15, max_turns: 60, format: Format::Bo3 }
+        DraftSpec { rounds: None, packs: 3, pack_size: 15, max_turns: 60, format: Format::Bo3, build_sims_div: 1, history: None }
+    }
+}
+
+/// Seat 0's draft so far (identities): the pack at each of its picks and the
+/// card it took; one view more than picks (the pending pick).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct History {
+    pub views: Vec<Vec<u16>>,
+    pub picks: Vec<u16>,
+}
+
+impl History {
+    fn parse(x: &Value) -> Result<History, String> {
+        let cube = cube()?;
+        let card = |n: &Value| -> Result<u16, String> {
+            let n = n.as_str().ok_or("team_draft spec: history: card names are strings")?;
+            let d = cube.db.expect_id(n).map_err(|e| format!("team_draft spec: history: {e}"))?;
+            let c = cube.ident_of(d);
+            if cube.cards.binary_search(&c).is_err() {
+                return Err(format!("team_draft spec: history: {n} is not a draftable card"));
+            }
+            Ok(c)
+        };
+        let list = |v: &Value| -> Result<Vec<u16>, String> {
+            v.as_array().ok_or("team_draft spec: history: lists of card names")?.iter().map(card).collect()
+        };
+        let o = x.as_object().ok_or("team_draft spec: history must be {\"views\": [...], \"picks\": [...]}")?;
+        if let Some(k) = o.keys().find(|k| !["views", "picks"].contains(&k.as_str())) {
+            return Err(format!("team_draft spec: history: unknown key {k:?}"));
+        }
+        let views = o
+            .get("views")
+            .and_then(|v| v.as_array())
+            .ok_or("team_draft spec: history.views must be a list of packs")?
+            .iter()
+            .map(list)
+            .collect::<Result<Vec<_>, _>>()?;
+        let picks = list(o.get("picks").ok_or("team_draft spec: history.picks is missing")?)?;
+        if views.len() != picks.len() + 1 {
+            return Err(format!("team_draft spec: history: {} views for {} picks (one more: the pending pick)", views.len(), picks.len()));
+        }
+        Ok(History { views, picks })
     }
 }
 
@@ -212,6 +263,8 @@ impl DraftSpec {
                         _ => return Err(format!("team_draft spec: format must be \"bo1\" or \"bo3\", not {x}")),
                     }
                 }
+                "build_sims_div" => s.build_sims_div = int()?.min(255) as u8,
+                "history" => s.history = Some(History::parse(x)?),
                 other => return Err(format!("team_draft spec: unknown key {other:?}")),
             }
         }
@@ -226,6 +279,9 @@ impl DraftSpec {
         }
         if s.max_turns == 0 {
             return Err("team_draft spec: max_turns must be positive".into());
+        }
+        if !(1..=16).contains(&s.build_sims_div) {
+            return Err(format!("team_draft spec: build_sims_div {} (1..=16)", s.build_sims_div));
         }
         Ok(s)
     }
@@ -242,6 +298,8 @@ pub struct Event {
     pub rounds: u8,
     pub max_turns: u32,
     pub format: Format,
+    /// Deckbuilding's simulations divisor (`DraftSpec::build_sims_div`).
+    pub build_sims_div: u8,
 }
 
 impl Event {
@@ -259,7 +317,16 @@ impl Event {
         if need > cube.cards.len() {
             return Err(format!("team_draft: {need} cards needed, the cube has {}", cube.cards.len()));
         }
-        Ok(Event { n: players as u8, t, packs: spec.packs, size: spec.pack_size, rounds, max_turns: spec.max_turns, format: spec.format })
+        Ok(Event {
+            n: players as u8,
+            t,
+            packs: spec.packs,
+            size: spec.pack_size,
+            rounds,
+            max_turns: spec.max_turns,
+            format: spec.format,
+            build_sims_div: spec.build_sims_div,
+        })
     }
 
     /// Packs of the event (`packs x n`); pack `p` = round `p / n`, opener `p % n`.
@@ -441,6 +508,9 @@ pub struct TeamDraftAz {
 impl TeamDraftAz {
     pub fn new(spec: &DraftSpec, players: usize, seed: u64) -> Result<TeamDraftAz, String> {
         let ev = Event::new(spec, players)?;
+        if let Some(h) = &spec.history {
+            return TeamDraftAz::from_history(ev, h, seed);
+        }
         let cube = cube()?;
         let mut rng = Rng::new(split64(seed ^ 0x7EA4_D2AF_0000_0001));
         let mut cards = cube.cards.clone();
@@ -473,6 +543,120 @@ impl TeamDraftAz {
         };
         let mut r2 = Rng::new(split64(seed ^ 0x7EA4_D2AF_0000_0002));
         g.draw_future(&mut r2);
+        Ok(g)
+    }
+
+    /// The event at seat 0's pending pick of a draft history (a yardstick's
+    /// position: DESIGN.md 2.3.8, the agreement with held-out human picks;
+    /// ENGINE.md 45): seat 0's packs at its views are the history's (its
+    /// picks at their places; between two views of a pack, the cards that
+    /// disappeared, in a random order; after its last view, the rest), every
+    /// other cell a random card none of the views holds. Every seat has made
+    /// the round's earlier picks; seat 0 picks first in the pick round. The
+    /// views must fit the event: `pack_size - t` cards at pick `t`, a pack
+    /// seen again holding only cards of its previous view less the card
+    /// taken then, a card in one pack only.
+    pub fn from_history(ev: Event, h: &History, seed: u64) -> Result<TeamDraftAz, String> {
+        let cube = cube()?;
+        let s0 = ev.size as usize;
+        let np = ev.n_packs();
+        let k = h.picks.len();
+        if k >= ev.pool_size() {
+            return Err(format!("team_draft history: {k} picks made, a pool has {}", ev.pool_size()));
+        }
+        let (r, t) = (k / s0, k % s0);
+        let mut where_ = vec![usize::MAX; identity::CUBE_CAP];
+        let mut views: Vec<Vec<(usize, Vec<u16>, Option<u16>)>> = vec![Vec::new(); np];
+        for (j, v) in h.views.iter().enumerate() {
+            let (rj, tj) = (j / s0, j % s0);
+            if v.len() != s0 - tj {
+                return Err(format!("team_draft history: view {j} (pick {tj}) has {} cards, not {}", v.len(), s0 - tj));
+            }
+            let mut v = v.clone();
+            v.sort_unstable();
+            if v.windows(2).any(|w| w[0] == w[1]) {
+                return Err(format!("team_draft history: view {j} holds a card twice"));
+            }
+            let p = ev.pack_at(0, rj, tj);
+            for &c in &v {
+                if where_[c as usize] != usize::MAX && where_[c as usize] != p {
+                    return Err(format!("team_draft history: {} is in two packs", cube.name(c)));
+                }
+                where_[c as usize] = p;
+            }
+            let pick = h.picks.get(j).copied();
+            if let Some(c) = pick {
+                if v.binary_search(&c).is_err() {
+                    return Err(format!("team_draft history: pick {j} ({}) is not in its pack", cube.name(c)));
+                }
+            }
+            views[p].push((tj, v, pick));
+        }
+        for vs in &views {
+            for w in vs.windows(2) {
+                let pick = w[0].2.expect("an earlier view's pick");
+                if let Some(&c) = w[1].1.iter().find(|&&c| c == pick || w[0].1.binary_search(&c).is_err()) {
+                    return Err(format!(
+                        "team_draft history: the pack seen at picks {} and {} gained {} (not a {}-seat pod?)",
+                        w[0].0,
+                        w[1].0,
+                        cube.name(c),
+                        ev.n
+                    ));
+                }
+            }
+        }
+        let mut rng = Rng::new(split64(seed ^ 0x7EA4_D2AF_0000_0003));
+        let mut free: Vec<u16> = cube.cards.iter().copied().filter(|&c| where_[c as usize] == usize::MAX).collect();
+        rng.shuffle(&mut free);
+        let mut order = vec![NONE; np * s0];
+        let mut taken = vec![0u8; np];
+        for (p, vs) in views.iter().enumerate() {
+            let base = p * s0;
+            let rp = p / ev.n as usize;
+            taken[p] = (if rp < r { s0 } else if rp == r { t } else { 0 }) as u8;
+            let first = vs.first().map_or(s0, |v| v.0);
+            for i in 0..first {
+                order[base + i] = free.pop().ok_or("team_draft history: the cube is too small")?;
+            }
+            for (i, (tv, cards, pick)) in vs.iter().enumerate() {
+                match pick {
+                    None => order[base + tv..base + s0].copy_from_slice(cards),
+                    Some(pc) => {
+                        order[base + tv] = *pc;
+                        let next = vs.get(i + 1);
+                        let mut gone: Vec<u16> =
+                            cards.iter().copied().filter(|c| c != pc && next.is_none_or(|n| n.1.binary_search(c).is_err())).collect();
+                        rng.shuffle(&mut gone);
+                        let end = next.map_or(s0, |n| n.0);
+                        debug_assert_eq!(gone.len(), end - tv - 1);
+                        order[base + tv + 1..base + end].copy_from_slice(&gone);
+                    }
+                }
+            }
+            order[base + taken[p] as usize..base + s0].sort_unstable();
+        }
+        free.sort_unstable();
+        let mut g = TeamDraftAz {
+            ev: Arc::new(ev),
+            order,
+            taken,
+            rest: free,
+            round: r as u8,
+            pick: t as u8,
+            turn: 0,
+            phase: Phase::Draft,
+            builds: Vec::new(),
+            builder: 0,
+            rotations: Vec::new(),
+            match_seed: 0,
+            observer: None,
+            forced: Vec::new(),
+            fpos: 0,
+            outcome: None,
+        };
+        g.draw_future(&mut rng);
+        g.check_invariants()?;
         Ok(g)
     }
 
@@ -1369,6 +1553,16 @@ impl SearchGame for TeamDraftAz {
     /// Seats per team: seat `s` is in team `s % 2` (zero-core's `s % (n / T)`).
     fn team_size(&self) -> usize {
         self.ev.t as usize
+    }
+
+    /// Deckbuilding is searched with the seat's simulations divided by the
+    /// spec's `build_sims_div` (DESIGN.md 2.3.9; ENGINE.md 45).
+    fn sims_divisor(&self) -> u32 {
+        if self.phase == Phase::Build {
+            self.ev.build_sims_div as u32
+        } else {
+            1
+        }
     }
 
     fn bot_names() -> &'static [&'static str] {

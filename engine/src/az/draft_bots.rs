@@ -121,7 +121,7 @@ pub fn match_game(setup: &MatchSetup, max_turns: u32, format: Format) -> Result<
     let db = crate::db::CardDb::cube();
     let seats: [Seat; 2] = [0, 1].map(|i| {
         let p = &setup.players[i];
-        Seat { deck: p.deck.clone(), sideboard: p.sideboard.clone(), first_picks: p.first_picks.clone() }
+        Seat { deck: p.deck.clone(), sideboard: p.sideboard.clone(), first_picks: p.first_picks.clone(), elsewhere: p.elsewhere.clone() }
     });
     let gspec = GameSpec { max_turns, mulligans: true, chooser: None, hidden_decks: format == Format::Bo3, ..GameSpec::default() };
     let [a, b] = &seats;
@@ -130,6 +130,30 @@ pub fn match_game(setup: &MatchSetup, max_turns: u32, format: Format) -> Result<
     let mut az = MtgAz { g, m };
     az.set_known_pools();
     Ok(az)
+}
+
+/// The `mtg` spec of a match of the event (DESIGN.md 2.3.6, ENGINE.md 45):
+/// each player's deck and sideboard, its real first picks and what it knows
+/// is elsewhere (`pN_first_picks`, `pN_elsewhere`), the match seed, the
+/// event's turn cap and format: the mapping `mtgz/az/drafted.py` makes from
+/// the deferred payload in a co-training run (tests and the drafted-match
+/// fuzz build it here). `MtgAz` from this spec is `match_game(setup)`.
+pub fn match_spec(setup: &MatchSetup, max_turns: u32, format: Format) -> String {
+    let db = crate::db::CardDb::cube();
+    let names = |v: &[crate::ids::DefId]| -> Vec<&str> { v.iter().map(|&d| db.def(d).name.as_str()).collect() };
+    let [a, b] = &setup.players;
+    serde_json::json!({
+        "max_turns": max_turns,
+        "format": match format { Format::Bo1 => "bo1", Format::Bo3 => "bo3" },
+        "seed": setup.seed,
+        "decks": {
+            "p0": names(&a.deck), "p0_sideboard": names(&a.sideboard),
+            "p0_first_picks": names(&a.first_picks), "p0_elsewhere": names(&a.elsewhere),
+            "p1": names(&b.deck), "p1_sideboard": names(&b.sideboard),
+            "p1_first_picks": names(&b.first_picks), "p1_elsewhere": names(&b.elsewhere),
+        }
+    })
+    .to_string()
 }
 
 /// Play the event's matches with the heuristic bot on both sides (test-only

@@ -34,6 +34,16 @@
 //! (best-of-three on those lists, open decklists) both use it, with every
 //! check of the default mode. The decision kinds asked are counted and
 //! printed (interaction decisions per 1,000, against the default mode's).
+//! `FUZZ_POOL=drafted` (M6 part 3, ENGINE.md 45): the matches are drafted
+//! ones: a `team_draft` event (4v4 or 2v2; random picks and decks, or team A
+//! drafting and building as `consensus`) and one of its matches as the `mtg`
+//! spec a co-training run plays (`draft_bots::match_spec`: the drafted
+//! decks, the rest of the pools as sideboards, the real first picks, what
+//! each player knows is elsewhere, the match seed), one match in eight with
+//! 12-turn games; every check of the matches' default mode (the games are
+//! the default mode's). Every mode also checks that a sampled first pick is
+//! a candidate of the viewer's prior (in a drafted match: a card its team
+//! never saw).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 
 mod common;
@@ -155,13 +165,41 @@ const GROUPS: &[(&str, &[&str])] = &[
     ]),
 ];
 
-/// `FUZZ_POOL`: unset (the default decks) or `interactions`.
-fn interactions_mode() -> bool {
+/// `FUZZ_POOL`: unset (the default decks), `interactions` or `drafted`.
+fn pool_mode() -> &'static str {
     match std::env::var("FUZZ_POOL").as_deref() {
-        Err(_) | Ok("") => false,
-        Ok("interactions") => true,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset or \"interactions\")"),
+        Err(_) | Ok("") => "",
+        Ok("interactions") => "interactions",
+        Ok("drafted") => "drafted",
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\" or \"drafted\")"),
     }
+}
+
+fn interactions_mode() -> bool {
+    pool_mode() == "interactions"
+}
+
+/// The spec of drafted match `seed` (`FUZZ_POOL=drafted`): a 4v4 or 2v2 event
+/// (random, or team A as `consensus`) and one of its matches.
+fn drafted_spec(seed: u64) -> engine::az::MtgSpec {
+    use engine::az::draft::{DraftSpec, TeamDraftAz};
+    use engine::az::draft_bots::{match_spec, Consensus};
+    use zero_search::game::{Bot, SearchGame};
+    let players = if seed % 2 == 0 { 8 } else { 4 };
+    let consensus = seed % 4 >= 2;
+    let mut ev = TeamDraftAz::new(&DraftSpec::default(), players, seed ^ 0xD2AF_7ED0).unwrap();
+    let mut rng = Rng::new(seed ^ 0xD2AF_7ED1);
+    let mut bot = Consensus::default();
+    let (mut legal, mut keys) = (Vec::new(), Vec::new());
+    while let Some(p) = ev.to_move() {
+        ev.legal_actions(&mut legal);
+        let a = if consensus && p % 2 == 0 { bot.choose(&ev, &legal) } else { legal[rng.below(legal.len() as u32) as usize] };
+        ev.step(a, &mut keys).unwrap();
+    }
+    let ms = ev.matches().unwrap();
+    let setup = &ms[(seed / 4) as usize % ms.len()];
+    let turns = if seed % 8 == 7 { 12 } else { 60 };
+    engine::az::MtgSpec::parse(&match_spec(setup, turns, engine::az::Format::Bo3)).unwrap()
 }
 
 /// The groups' cards as ids of `db`, and `db`'s supported lands.
@@ -577,6 +615,9 @@ fn same_seed_and_actions_replay_identically() {
 /// evaluation pools, M8a's generated decks with 7-card sideboards, or short
 /// games (drawn games: the turn cap).
 fn match_spec(seed: u64) -> engine::az::MtgSpec {
+    if pool_mode() == "drafted" {
+        return drafted_spec(seed);
+    }
     if interactions_mode() {
         // Combo-dense lists (cube cards), best-of-three, open decklists;
         // one match in four short.
@@ -641,6 +682,13 @@ fn check_hidden_pool(g: &engine::az::MtgAz, d: &engine::az::MtgAz, viewer: u8, s
     assert!(sp.list[..sp.n_cards].windows(2).all(|w| w[0].0 < w[1].0), "match {seed}: sampled pool not sorted");
     assert!(sp.first_picks.iter().all(|f| sp.list.iter().any(|e| e.0 == *f)));
     assert!(sp.first_picks.iter().all(|f| !g.m.pools[v].list.iter().any(|e| e.0 == *f)), "match {seed}: a first pick in the viewer's pool");
+    if let Some(pri) = &g.m.priors {
+        // a sampled first pick is a candidate of the prior (a real one kept: seen)
+        assert!(
+            sp.first_picks.iter().all(|f| pri[ou].cands.contains(f) || rp.first_picks.contains(f)),
+            "match {seed}: a sampled first pick outside the prior"
+        );
+    }
     let size = |c: &[u8]| c.iter().map(|&n| n as usize).sum::<usize>();
     assert_eq!(size(&g.m.decks[ou]), size(&d.m.decks[ou]), "match {seed}: deck size");
     for (k, &(_, n)) in sp.list.iter().enumerate() {

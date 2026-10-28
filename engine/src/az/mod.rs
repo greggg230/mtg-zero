@@ -54,6 +54,12 @@ pub enum DeckMode {
     /// sideboards (ENGINE.md 35).
     Lists(Vec<DefId>, Vec<DefId>),
     ListsWithSideboards([(Vec<DefId>, Vec<DefId>); 2]),
+    /// A match of a team draft (DESIGN.md 2.3.6, ENGINE.md 45): each
+    /// player's drafted deck and sideboard (the rest of its pool), its real
+    /// first picks (hidden from the other player in best-of-three, ENGINE.md
+    /// 36.11) and the cards it knows are elsewhere (its team saw them in the
+    /// draft: they narrow its prior of the opponent's unseen first picks).
+    Drafted(Box<[Seat; 2]>),
 }
 
 /// The spec of the `mtg` game (JSON; every key optional):
@@ -75,6 +81,17 @@ pub enum DeckMode {
 /// random and evaluation decks come from generated card pools of 45 cards
 /// built into decks by the heuristic deckbuilder, the rest of the pool the
 /// sideboard (`pools.rs`; default: true for `"bo3"`, false for `"bo1"`).
+///
+/// Drafted matches (M6 part 3, DESIGN.md 2.3.6, ENGINE.md 45): `decks` may
+/// also hold `"p0_first_picks"` / `"p1_first_picks"` (the player's real first
+/// picks, cards of its pool: hidden from the other player in best-of-three
+/// as generated pools' are, ENGINE.md 36.11) and `"p0_elsewhere"` /
+/// `"p1_elsewhere"` (the cards the player knows are elsewhere: its team saw
+/// them in the draft and they are not in this opponent's pool; they leave
+/// its prior of the opponent's unseen first picks); `"seed"` (top level) is
+/// the match's seed (default: the driver's game seed), so a spec built from
+/// a `team_draft` payload plays exactly the event's match. Without these
+/// keys every spec is what it was (the behaviour digests are unchanged).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -86,6 +103,7 @@ pub struct MtgSpec {
     pub chooser: Option<u8>,
     pub format: Format,
     pub pools: bool,
+    pub seed: Option<u64>,
 }
 
 impl Default for MtgSpec {
@@ -100,8 +118,46 @@ impl Default for MtgSpec {
             chooser: None,
             format: Format::Bo1,
             pools: false,
+            seed: None,
         }
     }
+}
+
+/// The keys of a spec's `decks` object: the lists, then a drafted match's
+/// knowledge (any of the last four makes the match a drafted one).
+const DECKS_KEYS: [&str; 8] =
+    ["p0", "p1", "p0_sideboard", "p1_sideboard", "p0_first_picks", "p1_first_picks", "p0_elsewhere", "p1_elsewhere"];
+
+/// A drafted match's seats are consistent (ENGINE.md 45): each player's first
+/// picks are distinct cards of its pool (deck and sideboard; no basic land),
+/// and what it knows is elsewhere is in no place of the other player's pool
+/// (else it would know a first pick of theirs, or think a card of their pool
+/// is not theirs: the real world would be outside its own information set).
+fn check_drafted(db: &CardDb, seats: &[Seat; 2]) -> Result<(), String> {
+    let basics = pools::basic_ids(db);
+    for (p, s) in seats.iter().enumerate() {
+        let mut pool: Vec<DefId> = s.deck.iter().chain(&s.sideboard).copied().filter(|d| !basics.contains(d)).collect();
+        pool.sort_unstable();
+        for w in s.first_picks.windows(2) {
+            if w[0] == w[1] {
+                return Err(format!("mtg spec: p{p}_first_picks names {} twice", db.def(w[0]).name));
+            }
+        }
+        for &d in &s.first_picks {
+            if pool.binary_search(&d).is_err() {
+                return Err(format!("mtg spec: p{p}'s first pick {} is not in its pool (deck or sideboard)", db.def(d).name));
+            }
+        }
+        if let Some(&d) = s.elsewhere.iter().find(|d| basics.contains(d)) {
+            return Err(format!("mtg spec: p{p}_elsewhere names a basic land ({})", db.def(d).name));
+        }
+        let o = &seats[1 - p];
+        if let Some(&d) = s.elsewhere.iter().find(|d| o.deck.contains(d) || o.sideboard.contains(d)) {
+            let what = if o.first_picks.contains(&d) { "a first pick" } else { "a card" };
+            return Err(format!("mtg spec: p{p}_elsewhere names {} ({what} of p{}'s pool)", db.def(d).name, 1 - p));
+        }
+    }
+    Ok(())
 }
 
 impl MtgSpec {
@@ -129,6 +185,7 @@ impl MtgSpec {
                 "mulligans" => s.mulligans = x.as_bool().ok_or("mtg spec: mulligans must be a boolean")?,
                 "eval_decks" => s.eval_decks = (int()? as u32).max(1),
                 "eval_seed" => s.eval_seed = int()?,
+                "seed" => s.seed = Some(int()?),
                 "chooser" => {
                     let c = int()?;
                     if c > 1 {
@@ -167,13 +224,26 @@ impl MtgSpec {
                                     .collect()
                             };
                             for key in o.keys() {
-                                if !["p0", "p1", "p0_sideboard", "p1_sideboard"].contains(&key.as_str()) {
+                                if !DECKS_KEYS.contains(&key.as_str()) {
                                     return Err(format!("mtg spec: unknown decks key {key:?}"));
                                 }
                             }
                             let side = |key: &str| if o.contains_key(key) { list(key) } else { Ok(Vec::new()) };
                             let (s0, s1) = (side("p0_sideboard")?, side("p1_sideboard")?);
-                            if s0.is_empty() && s1.is_empty() {
+                            let drafted = DECKS_KEYS[4..].iter().any(|k| o.contains_key(*k));
+                            if drafted {
+                                let seat = |p: usize, deck: Vec<DefId>, sideboard: Vec<DefId>| -> Result<Seat, String> {
+                                    let mut first_picks = side(&format!("p{p}_first_picks"))?;
+                                    first_picks.sort_unstable();
+                                    let mut elsewhere = side(&format!("p{p}_elsewhere"))?;
+                                    elsewhere.sort_unstable();
+                                    elsewhere.dedup();
+                                    Ok(Seat { deck, sideboard, first_picks, elsewhere })
+                                };
+                                let seats = [seat(0, list("p0")?, s0)?, seat(1, list("p1")?, s1)?];
+                                check_drafted(db, &seats)?;
+                                DeckMode::Drafted(Box::new(seats))
+                            } else if s0.is_empty() && s1.is_empty() {
                                 DeckMode::Lists(list("p0")?, list("p1")?)
                             } else {
                                 DeckMode::ListsWithSideboards([(list("p0")?, s0), (list("p1")?, s1)])
@@ -211,7 +281,7 @@ impl MtgSpec {
         let db = CardDb::cube();
         let built = |p: pools::Pool| -> Seat {
             let (deck, sideboard) = pools::build_deck(db, &p.cards, &self.gen);
-            Seat { deck, sideboard, first_picks: p.first_picks }
+            Seat { deck, sideboard, first_picks: p.first_picks, elsewhere: Vec::new() }
         };
         if self.pools {
             match &self.decks {
@@ -226,7 +296,10 @@ impl MtgSpec {
                 _ => {}
             }
         }
-        let seat = |(deck, sideboard): (Vec<DefId>, Vec<DefId>)| Seat { deck, sideboard, first_picks: Vec::new() };
+        if let DeckMode::Drafted(seats) = &self.decks {
+            return (**seats).clone();
+        }
+        let seat = |(deck, sideboard): (Vec<DefId>, Vec<DefId>)| Seat { deck, sideboard, first_picks: Vec::new(), elsewhere: Vec::new() };
         let p: [(Vec<DefId>, Vec<DefId>); 2] = match &self.decks {
             DeckMode::Random => {
                 let mut rng = Rng::new(seed ^ 0x00DE_C50F_2A11);
@@ -239,6 +312,7 @@ impl MtgSpec {
             }
             DeckMode::Lists(a, b) => [(a.clone(), Vec::new()), (b.clone(), Vec::new())],
             DeckMode::ListsWithSideboards(p) => p.clone(),
+            DeckMode::Drafted(_) => unreachable!("returned above"),
         };
         p.map(seat)
     }
@@ -315,7 +389,8 @@ impl SearchGame for MtgAz {
         if players != 2 {
             return Err(format!("mtg: {players} players (two only)"));
         }
-        MtgAz::new(spec, seed)
+        // (A drafted match's spec carries the event's match seed.)
+        MtgAz::new(spec, spec.seed.unwrap_or(seed))
     }
 
     fn num_players(&self) -> usize {

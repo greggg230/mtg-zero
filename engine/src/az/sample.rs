@@ -50,7 +50,11 @@ const PLAYED_BEFORE: f64 = 3.0;
 /// elsewhere is not a first pick), weighted as the generator weighs spells
 /// (creatures 3, interaction 2, other coloured cards 1, colourless 0.5) and
 /// x4 when playable in `pair`, the colours the deckbuilder would choose for
-/// the known part of the pool. Fixed per match.
+/// the known part of the pool. Fixed per match. In a drafted match (ENGINE.md
+/// 45) the viewer also knows where the cards its team saw in the draft are:
+/// those it knows are elsewhere (`elsewhere`) are no candidates either (4v4:
+/// 193 candidates, the opposing team's 12 first picks and the 181 undrafted
+/// cards).
 #[derive(Clone, Debug)]
 pub struct FirstPickPrior {
     pub pair: u8,
@@ -105,8 +109,9 @@ fn facts(db: &'static CardDb) -> &'static [(f64, bool, u8)] {
 impl FirstPickPrior {
     /// The prior of `owner`'s first picks (`pools`: both players' real
     /// pools; only what `opp(owner)` knows is read: the known part of
-    /// `owner`'s pool and the viewer's own).
-    pub fn new(db: &CardDb, pools: &[MatchPool; 2], owner: PlayerId) -> FirstPickPrior {
+    /// `owner`'s pool and the viewer's own; `elsewhere`: the cards the viewer
+    /// knows are elsewhere, sorted; empty but in a drafted match).
+    pub fn new(db: &CardDb, pools: &[MatchPool; 2], owner: PlayerId, elsewhere: &[DefId]) -> FirstPickPrior {
         let pool = &pools[owner as usize];
         let known: Vec<DefId> = pool.list[..pool.n_cards].iter().map(|e| e.0).filter(|d| pool.first_picks.binary_search(d).is_err()).collect();
         let pair = pools::best_pair(db, &known);
@@ -117,7 +122,11 @@ impl FirstPickPrior {
         let mut cum = Vec::new();
         let mut tot = 0.0;
         for id in lands.into_iter().chain(spells) {
-            if basics.contains(&id) || known.binary_search(&id).is_ok() || mine.list.iter().any(|e| e.0 == id) {
+            if basics.contains(&id)
+                || known.binary_search(&id).is_ok()
+                || mine.list.iter().any(|e| e.0 == id)
+                || elsewhere.binary_search(&id).is_ok()
+            {
                 continue;
             }
             let d = db.def(id);
