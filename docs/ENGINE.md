@@ -1196,6 +1196,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_payment.rs` | M7e part 2 (section 34): the payment model, 14 tests, the CR in each name: 106.4 and 601.2h (the pool's mana chosen; a source's mana and the pool's together; converge counting the chosen colours; which {R} pays a creature spell), 605.3a (Loot paying Mana Leak's {3} during resolution; Pentad Prism, Arena of Glory, Wizard's Rockets while paying), 602.2b (no mana ability pays its own cost), 601.2g (Rain of Filth after Ancient Tomb's damaging tap; Squandered Resources after Mana Confluence's life; a Lotus Petal delved and exiled for Uro's escape), 601.2h (X life after the mana abilities) |
 | `tests/rules_shortcuts.rs` | M7e part 1 (section 33): the rules shortcuts removed, 27 tests, the CR in each name: 724.2 (the monarch's triggers on the stack, countered by Tidebinder, one per creature), 603.7 (Okoye's delayed trigger), 603.2c ("one or more" once per event: Laelia, Wan Shi Tong, Inti), 614.1c (entering with an effect's counters), 614.12a (Metamorph and Exhume), 608.2h (Pyrogoyf's damage as the creature last existed), 702.171a (saddle without a crew bonus), 601.2h (teamwork tapping mana creatures), 116.2b (turning face up after losing abilities), 702.8a (Necromancy's flash permission), 106.1b (exact converge), 614.1a (Mox Diamond put onto the battlefield), 616.1 (Blightsteel and Yawgmoth's Will, flashback and Dauthi Voidwalker), 601.2b (Breach's escape with Bitter Triumph's own cost), 601.2a (Paragon or Lurrus, flashback or Will, Paragon and a card with another face), 709.3 (the Citadel's split card), 613.7e (an Equipment re-attached), 613.1f (Paragon's granted trigger lost), 113.7 (a granted ward's source) |
 | `tests/rules_numbers.rs` | M6 (section 46): unbounded numbers, the mtg5 incident reproduced: 122.1 (Ouroboroid's counters past 65,535 exact, total power past 1.31 million, both encodings finite and within `FEATURE_BOUND`), 510.2 (65,537 combat damage dealt in full), 702.19b (a trampler's lethal damage to a 65,539-toughness blocker, not truncated to 16 bits); all three fail on 8307cb4 |
+| `tests/rules_castpay.rs` | M6 (section 49): castability and payment agree, on cube cards: 601.2g and 605.3a (Wizard's Rockets turning mana into colours is not also an artifact tapped for Urza's {U}: no Griselbrand from seven mana), 107.3 (Green Sun's Zenith's X with the Rockets and Urza), 702.126a (nor tapped for improvise: Kappa Cannoneer), 106.6 (Mishra's Workshop's mana never turned into colours: Cryogen Relic), 601.2h (two Lotus Petals for Psychic Frog's graveyard cost of no mana), 702.66a (two Petals delved for Treasure Cruise), 614.1a (no delve of Petals under Dauthi Voidwalker), 702.138a (escape's discard feeds the graveyard: not Blightsteel Colossus), 712.11b (a face-down hideaway card cast with a choice of faces is revealed: worlds `determinize` samples keep it), 707.2 (a copy of Llanowar Elves that is also an artifact for Urza: the Elves offered for {G}); the ten and the agreement fuzz fail on 01fa623; the agreement fuzz: random cube boards, every spell and ability offered at priority followed to the next priority (`CASTPAY_BOARDS`, `CASTPAY_PATHS`, `CASTPAY_FROM`, `CASTPAY_LOG`) |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
@@ -1203,7 +1204,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
 | `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c). Part 3 (section 39.5): the last two cells, a token copy of a nightbound permanent (`interactions_copies.rs`: 707.8a, 702.145f) and True-Name Nemesis's chosen player after Oko's exchange (`interactions_zones.rs`: 702.16j, 110.2) |
-| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45); M6: every decider's encoding finite and within `FEATURE_BOUND` (games, determinized worlds, matches) and `FUZZ_POOL=exponential`, exponential boards to the turn cap (section 46.5) |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45); M6: every decider's encoding finite and within `FEATURE_BOUND` (games, determinized worlds, matches) and `FUZZ_POOL=exponential`, exponential boards to the turn cap (section 46.5); M6: a fourteenth interaction group, mana abilities and costs (section 49.4) |
 | `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, at least the minimum of 22 pool cards, section 47; deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), deckbuilding as picks (section 47: any card not in the deck offered, `DONE` exactly from 22 pool cards on, the extremes: 22 pool cards and 18 basic lands of one type, 40 pool cards ending the cards with every count forced to 0, the same cards in two orders one state and one encoding), every legal deck an end state reached by each order of its pool cards (every path of 6- and 7-card pools, the states of 12- and 15-card pools for several minimums, the 487,676 whole decks of a two-card pool), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`; M6: the decider's encoding and every world's finite and within `FEATURE_BOUND`; section 47: minimums 22, 0, 40 and random, `DONE` offered iff the deck holds the minimum, every deck at least the minimum), measurements (`--ignored`: `measure`; section 47: deckbuilding decisions per seat, the pool cards of random and `consensus` decks); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v2` (section 47) |
 | `tests/draft_matches.rs` | drafted matches (section 45): the `mtg` spec of an event's match (`pN_first_picks`, `pN_elsewhere`, `seed`) plays the event's match move for move (`match_game`; 32 matches: 4v4 and 2v2, random and `consensus`-built decks, best-of-three and best-of-one), the first-pick prior is exactly the cards the viewer's team never saw (193 in 4v4, 367 in 2v2; the real first picks among them), `determinize` samples first picks from it (never the viewer's knowledge) and keeps the viewer's encoding, the spec refuses contradicting knowledge, specs without the keys are what they were; a position from a draft history is seat 0's information set (its knowledge and encoding the real event's) and a history that does not fit is an error; deckbuilding's simulations divisor; `tests/test_drafted.py` (pytest): the glue (payload -> specs, results -> `resolve`, a malformed result refused), events parked by a draft driver and resolved through a heuristic match driver, the token network's actions by identity on `draft_v1`, the human-pick yardstick on a few drafts, the co-training presets |
 | `tests/draft_deferred.rs` | `team_draft` through zero-core's deferred hook (section 43): 2v2 and 1v1 events through the self-play driver with a stand-in network (deferred terminals evaluated as leaves of no options, every event parked, a malformed result refused, resolved with heuristic-played matches, samples with the real outcome and margin), the hooks mapping the inherent methods (1v1-4v4); `--ignored`: `measure_parked_memory` |
@@ -4946,7 +4947,8 @@ of the pool's mana chosen. Kept: the payment spends as much of the virtual pool 
 * **Wizard's Rockets** ({X}, {T}, sacrifice: X mana in any combination of colours): picked, every
   unit of the payment may be of any colour (`PayMana::convert`, `Cands::convert`): its X is the
   mana it turns into colours, never asked. Offered only when nothing else pays (13.14); with
-  priority too, for its draw.
+  priority too, for its draw. (Section 49: its activation rules out its card's other sources, Urza's
+  tap and improvise, and it never turns mana with a spending restriction into colours.)
 * **Squandered Resources, Orcish Lumberjack** (sacrifice another permanent): sources on each
   permanent they may sacrifice (`SQ_FOR`: one mana of a type the land could produce, 106.7;
   `LJ_FOR`: three of red and/or green, the Lumberjack tapped, `Class::share` and `Budget::tap`
@@ -5881,9 +5883,10 @@ careful reading first) and True-Name Nemesis's chosen player after a control cha
 tested in part 3, 39.5: no cell is left untested.)
 
 **38.5 The combo-dense fuzz mode.** `FUZZ_POOL=interactions` (`tests/fuzz.rs`): thirteen groups
-of cube cards (`GROUPS`), one per family of the matrix's cells: copies and enter/leave
-abilities; flicker and linked exile; reanimation and replacement effects; face-down cards;
-double-faced cards, Adventures and split cards; counterspells and copies of spells; control
+of cube cards (`GROUPS`; fourteen since section 49.4), one per family of the matrix's cells:
+copies and enter/leave abilities; flicker and linked exile; reanimation and replacement effects;
+face-down cards; double-faced cards, Adventures and split cards; counterspells and copies of
+spells; control
 changes; taxes, alternative and additional costs and free casts; damage, protection, deathtouch,
 infect and divided damage; planeswalkers; last known information, triggers and state-based
 actions; combat keywords; day and night. A deck takes 17 random lands and 23 spells from two or
@@ -8254,3 +8257,253 @@ Rust is unchanged):
   hours) unless STOP exists; PAUSE ends the wait (the restart queues them again).
 * The scratch mirror `~/mtgz-remote/td_mac.resolver` was removed after 48.2; the checkout
   `~/mtg-zero-wt/run-9307c09d6350` and its target dir (0.4 GB) stay, as other run checkouts do.
+
+## 49. Castability and payment agree (M6)
+
+Branch `m6-payfix` (from main 01fa623; zero-core pinned at d68778e, unchanged). A spell or ability
+is offered only if it can be completed (sections 6 and 18): the castability checks (`can_pay_with`
+over `pay::cands`, `cost_payable`, the X maxima) must count exactly what the payment (`PayMana`,
+`PayCosts`, delve) can then do, or an offered option ends in a decision without options, a panic
+that fails a self-play run (zero-core makes a panic fail the run). Two drafted matches did:
+`PayMana: no way to pay {4}{B}{B}{B}{B}` (Griselbrand) and `PayMana: no way to pay {10}{G}` (Green
+Sun's Zenith, X = 10). Both are one fault, Wizard's Rockets counted twice. The audit and an
+agreement fuzz written for it (49.4) found six more, all fixed here: five where the payment could not
+do what castability counted, one where both counted mana the rules don't give (Mishra's Workshop's
+turned into colours); and the checks found a seventh, in hidden information (49.6).
+
+### 49.1 The two reproductions
+
+* **Griselbrand** (the drafted match `e8657`, heuristic seats, every driver seed): P1's mana classes
+  in the panic were Wizard's Rockets (def 532: `{X}, {T}, sacrifice this artifact: add X mana in any
+  combination of colors`; `convert`, `sac_self`, `res` TAP | SAC, the production `[0; 6]` because
+  its X is the mana it turns into colours, section 34.2), Fiery Islet, Mox Jet, Creeping Tar Pit,
+  Savai Triome, Sacred Foundry, and Urza, Lord High Artificer's "tap an untapped artifact you
+  control: add {U}" on four artifacts (`TAP_FOR` = `Trigger(255)`, mask {U}), the Rockets among them.
+  Eight cards, three of them black. Castability (`cands`) kept the converter apart
+  (`Cands::convert`) and put the Rockets' card's other way, tapped for Urza's {U}, among the units;
+  `payable_converted` turned every unit into any colour, the Rockets' own {U} included: eight units,
+  {4}{B}{B}{B}{B} payable, the cast offered. The payment: picking the Rockets uses its card (TAP |
+  SAC: `used_res`), so its `TAP_FOR` source is gone, seven units; `convert_ok` false, no single-mana
+  source completes the cost, no option: the panic.
+* **Green Sun's Zenith** (`search_smoke --specs team_draft_2v2` on a branch with other
+  deckbuilding; replayed on main with the spec): P0 with the Rockets, Urza, two Talismans, an Island
+  and Plains, no green source. X was chosen up to what castability counted (`can_pay_spell` for each
+  X, CR 107.3, 601.2f): 10 with the Rockets' {U} and its colours, 9 in truth, and {10}{G} had no
+  payment. The same fault: the X maxima are exact once `can_pay` is.
+
+The deckpick agent's lead (the Rockets, def 532, in both decks; how castability models a mana
+ability with {X}) pointed at the same class: the {X} model itself (section 34.2: picked, the
+payment's mana may be of any colour) is right; what was wrong is that the Rockets' activation, which
+taps and sacrifices it, did not rule out its card's other uses.
+
+### 49.2 The fixes, with their rules
+
+* **A converter's card is used up** (CR 601.2g, 605.3a; 702.126a for improvise). `Cands::convert`
+  lists every usable converter with the index in `Cands::alts` of its card's other ways (Urza's
+  tapped artifact, improvise, any other source on that card: they are one alternative of their own
+  there, never folded into `fixed`); `cands_payable_c` converts without them
+  (`payable_converted(.., skip)`). The payment was already right (`used_res`). Covers Urza's
+  `TAP_FOR`, an improvise spell (Kappa Cannoneer: the Rockets tapped for improvise or activated, not
+  both) and waterbend.
+* **Mana with a spending restriction is not converted** (CR 106.6): Mishra's Workshop's "spend
+  this mana only to cast artifact spells" can't pay the Rockets' {X} (activating a mana ability is
+  not casting an artifact spell), so the Rockets doesn't turn it into colours. `mana::RESTRICTED`
+  marks such a unit (bit 7, which on a need is `NOT_MADE`; `fits` reads a unit's types and `MADE`
+  only, and a need without `NOT_MADE` never has the bit); `convert` leaves it. It is set on the
+  candidates of a class with `only` (`cands`), the pool's artifact-only {C} when the payment may
+  spend it (`add_pool`), the virtual pool's (a kind + 16 in `vgroups`, the Workshop's production in
+  `feasible_prods`) and converge's units. `pool_rems` keeps "artifact-only {C} spent before other
+  {C}" as the most of it among the spends of the same mana; without the Rockets every split is
+  feasible, so the pools left and their order are as before. Delighted Halfling's restricted mana is
+  any colour already. Digest game h 411 (below) is this case in random play.
+* **Sources a graveyard cost needs, with no mana to pay** (CR 601.2g-h): `pay_mana`'s early finish
+  ("paid by single-mana sources alone") waits until `PayMana::forced` is empty. Psychic Frog's
+  "exile three cards from your graveyard" costs no mana; with one card in the graveyard and two
+  Lotus Petals, the payment activated the first Petal, found nothing left to pay and finished
+  without the second: the exile had two cards for three (`ChooseGraveyardCard` without options).
+* **Delve's mana sources** (CR 702.66a, 601.2g-h; 614.1a): the delve decision offers a source that
+  sacrifices itself (Lotus Petal, Gemstone Mine on its last counter) when the rest is payable with
+  the graveyard's cards *and the sources after it* (castability, `delve_classes`, counts each such
+  source as its mana and one more generic mana; the decision counted the graveyard only, so with
+  two such sources and too few cards it offered neither, only "stop", and the payment had no way).
+  `delve_classes` now counts only a card that reaches the graveyard (`feeds_graveyard`, as
+  `delve_sources` and the decision do: not under Yawgmoth's Will or an opponent's Dauthi
+  Voidwalker, "exile it instead").
+* **Escape's graveyard fed by a discard** (CR 702.138a, 601.2h, 614.1a; ruling bea302d9):
+  `discards_feed` counts the hand cards the cost may discard that would go to the graveyard (it read
+  the first card in hand: with Blightsteel Colossus, shuffled into its library instead, first the
+  escape wasn't offered; with another card first, the Colossus was then offered as the discard, a
+  dead end); the `DiscardCost` decision offers only such cards while the graveyard would be short
+  by as many cards as discards are left (as the sacrifice decision already did).
+* **One source of a kind, one that works** (CR 707.2, 601.2g): the payment offers one source per
+  class (same definition and ability: the canonical choice, no permutations). A class's members
+  can differ in their cards' other sources or reservations: Saheeli's copy of Llanowar Elves on Mox
+  Sapphire has the Elves' "{T}: add {G}" and is an artifact as well, which Urza's ability taps for
+  {U}. With the copy first in the class, the copy, the Elves and a Mountain had no option for Oko
+  ({1}{U}{G}): the copy picked for {G} leaves no {U}, and the classes after it can't make {G}
+  (castability, card by card, was right). The payment now offers the first free member whose pick
+  leaves the cost payable, each kind of member (its reservation and the other classes its card is
+  in) tried once, so a class of plain lands costs nothing more.
+
+### 49.3 The audit
+
+The class model was read for every way castability can count more than the payment can use, and
+the agreement fuzz (49.4) checks it on random boards:
+
+* **Sources that yield nothing.** Only the Rockets has a production of no mana (`[0; 6]`, units
+  `Some([])`): `might_pay` counts it as 0 and `cands` as a converter only. Other sources that could
+  make nothing make no class: `PerPermanent` with no matching permanent, `Linked`, `Chosen`,
+  `IfCounter` and `ColorAmong` without a colour (`yield_of` returns `None`); `Fixed` and `IfElse`
+  always make some mana (the lowering). A production of nothing is never offered (`feasible_prods`
+  wants the virtual pool's spend to grow). Nothing to fix.
+* **Conversion.** The used-up card and the restricted mana (49.2). The converter's own budget (a
+  sacrifice reservation: Tinker's artifact) is charged on both sides (`reserved`); `MADE` units keep
+  `MADE` when converted on both sides (13.15); the Rockets is offered only when nothing else pays
+  (13.14) and castability tries without it first: the same set.
+* **Triggered mana.** Land-subtype bonuses (Nissa, Who Shakes the World) and the creature bonus
+  (Badgermole Cub) are in the class's yield (`yield_with`; the Lumberjack's in `sac_classes`), read
+  by both sides; a permanent tapped for Urza's ability gets no bonus on either side (not "tapped for
+  mana", CR 106.12a). Nothing to fix.
+* **`allow` and `keep`.** Restricted classes are filtered by `keep.allow` in `cands` and in the
+  payment's options; hand castability takes the `allow` path whenever a restricted class or
+  artifact-only pool mana exists (else the plain candidates, allow 0, the same sources); `exclude`,
+  the sacrifice, discard and exile reservations come from `keep_for` on both sides; the X maxima use
+  the cast's keep (allow, life paid later), abilities' X the ability's keep and exclusion. Found:
+  the escape discard's (49.2).
+* **Pooled mana.** The pool's units in castability (`add_pool`) and payment (`vgroups`) agree (the
+  artifact-only {C} held unless the payment may spend it, now also never converted).
+* **X maxima.** Spells (`can_pay_spell` per X, kicker {X}, "pay X life"), abilities (`choose_x`):
+  exact as soon as `can_pay` is; the Zenith's X was the Rockets fault.
+* **Graveyard costs.** Delve, escape and "exile n cards from your graveyard" with self-sacrificing
+  mana sources: four faults (49.2), three found by the fuzz, the Dauthi Voidwalker one by reading.
+* **Classes.** A class's members (same definition and ability) are alike for their own mana, not
+  always for their cards' other sources: a copy (49.2), found by the fuzz.
+
+### 49.4 The agreement fuzz
+
+`tests/rules_castpay.rs`, `castability_and_payment_agree_on_random_cube_boards`: random boards of
+the cube (P0: one to eight lands, up to four permanents with a mana ability or a mana bonus, the
+Rockets and Urza one time in four each, the counters a mana ability removes, sometimes another
+permanent such as a tax or a lock; one to three cards in hand and sometimes a mana permanent, a
+graveyard half the time, mana in the pool one time in four, a low life one time in four; P1:
+permanents, lands, a hand to respond with). At P0's priority every spell and ability offered is
+followed six times to the next priority (always the first option, always the last: the largest X,
+the last source; four random paths, the largest X one time in two); then a random action and the
+stack resolved (each player passing three times in four, else acting at random: P1's responses,
+"unless pays" costs), three rounds per board. A panic anywhere is a failure, reported with the
+board, the actions before it and the path (`CASTPAY_LOG=1`: the game's log before the panicking
+step). `CASTPAY_BOARDS` (default 4,000, 2.4 s), `CASTPAY_PATHS` (6), `CASTPAY_FROM` (replay a
+board). On main 01fa623: 19 failures in the default 4,000 boards, 100 in 20,000 (the twelve the
+failure lists: the Rockets with Urza). On the branch the fuzz found four of 49.2's faults in turn,
+each fixed before the next run: board 85,480 (Psychic Frog and two Petals), 226,634 (escape and
+Blightsteel Colossus), 980,602 (delve with Gemstone Mine and a Petal), 2,505,552 (the copy of
+Llanowar Elves). At the branch's last code: 0 failures in 4,400,000 boards (49.7).
+
+`tests/fuzz.rs`: a fourteenth interaction group, "mana abilities x costs" (the Rockets, Urza, Kappa
+Cannoneer, Mishra's Workshop, Delighted Halfling, Lotus Petal, Black Lotus, Lion's Eye Diamond,
+Psychic Frog, Abhorrent Oculus, Treasure Cruise, Dig Through Time, Uro, Green Sun's Zenith, Walking
+Ballista, Griselbrand, Cryogen Relic, Esika's Chariot, Sunken Ruins, Chromatic Star, Pentad Prism,
+Gemstone Mine, Squandered Resources, Orcish Lumberjack, Arena of Glory, Rain of Filth, Badgermole
+Cub, Nissa, Sol Ring, Mana Vault, Grim and Basalt Monolith, Talisman of Dominance, the Spirit Guides,
+Mana Confluence, Ancient Tomb, Loot, Gaea's Cradle, Coalition Relic, Mox Opal, Mox Amber, Aang's
+waterbend, Tinker, Thalia, Bolas's Citadel), so `FUZZ_POOL=interactions`' option completion
+(`check_options_complete`: every option of a sampled decision followed to the next priority, a
+panic on the way a failure) meets these boards in games and matches too.
+
+### 49.5 Tests
+
+`tests/rules_castpay.rs`, every test on real cube cards; all eleven fail on main 01fa623 (built
+with the test file alone), all pass on the branch:
+
+* `cr_601_2g_wizards_rockets_converting_is_not_also_tapped_for_urza`: the Rockets, Urza, three
+  Swamps and four Islands: {3}{B}{B}{B}{B} payable, {4}{B}{B}{B}{B} not, no Griselbrand; {5}{B}{B}{B}
+  payable (the Rockets an artifact for Urza); a fifth Island: cast, every payment path completes,
+  the Rockets sacrificed.
+* `cr_107_3_x_is_at_most_what_the_payment_can_pay_with_wizards_rockets`: the Rockets, Urza, three
+  Plains: Green Sun's Zenith's X is 0 to 2 (main offered 3), every path of every X completes.
+* `cr_702_126a_wizards_rockets_converting_is_not_also_tapped_for_improvise`: the Rockets and five
+  Mountains, no Kappa Cannoneer; six Mountains: cast and paid.
+* `cr_106_6_wizards_rockets_does_not_turn_mishras_workshop_mana_into_colours`: the Workshop and the
+  Rockets: no Cryogen Relic ({1}{U}); with a Mountain the Rockets turns its mana blue, the Workshop
+  pays {1}, two artifact-only {C} stay in the pool.
+* `cr_601_2h_two_lotus_petals_for_psychic_frogs_graveyard_cost`: the Frog's "exile three" with one
+  graveyard card and two Petals: every path completes, both Petals and the card exiled, two mana in
+  the pool; one Petal: not offered.
+* `cr_702_66a_two_lotus_petals_delved_for_treasure_cruise`: four Islands, two Petals, an empty
+  graveyard: Treasure Cruise cast, both Petals delved.
+* `cr_614_1a_no_delve_for_lotus_petals_exiled_by_dauthi_voidwalker`: the same board under P1's
+  Dauthi Voidwalker: not offered.
+* `cr_702_138a_escape_discard_must_feed_the_graveyard`: Underworld Breach, two other graveyard
+  cards, Bone Shards escaped with "discard a card": the discard is the Island, never Blightsteel
+  Colossus, whichever is first in hand; the Colossus alone: no escape.
+* `cr_707_2_a_copy_that_is_also_an_artifact_for_urza_is_not_the_one_offered_for_its_green`: Mox
+  Sapphire a copy of Llanowar Elves (Saheeli's -2), the Elves, Urza and a Mountain: Oko cast, every
+  payment path completes (main: `PayMana: no way to pay {1}{U}{G}`).
+* `cr_712_11b_a_face_down_card_cast_with_a_choice_of_faces_is_revealed` (49.6).
+* `castability_and_payment_agree_on_random_cube_boards` (49.4).
+
+### 49.6 Found by the checks
+
+`FUZZ_POOL=interactions` with the new group dealt new decks and failed at seed 7165, a fault in
+hidden information, not in payment, that 01fa623's engine has as well: P1 played Shelldock Isle's
+hideaway card (exiled face down), Brazen Borrower // Petty Theft, both faces castable, so a
+`ChooseFace` decision came first (`begin_cast_either_face`, a cast during a resolution); in a world
+`determinize` sampled for P0 the face-down card was dealt again, a card without another face, and
+the other face's option panicked ("a card with another face"). At priority such a card is revealed
+before the choice (`Choice::Faces`: it is public either way, CR 712.11b, 715.3, 601.2a); during a
+resolution it now is too. Test `cr_712_11b_...` (fails on 01fa623 with that panic). Digest game r
+1925 is the same play (the reveal's chance key as the Borrower leaves the Isle).
+
+### 49.7 Checks
+
+At 567b2c3, the branch's last code (the documentation commit after it changes none):
+
+* **The reproductions** (the drafted specs replayed with heuristic seats over driver seeds, the
+  search smoke's driver; `mtgz/_engine` built at 567b2c3 on the desktop): the Griselbrand match
+  `e8657`, seeds 0-49: 50 complete, 0 panics (P1 wins it 2-1, every seed alike); the Green Sun's
+  Zenith spec, seeds 0-49: 50 complete, 0 panics (P1 wins 2-0). On 01fa623 every seed tried
+  panicked (e8657 seeds 9-10, the Zenith spec seeds 0-5).
+* **Every engine test binary**: the Mac (`cargo test --release -p engine --no-fail-fast`, `az`
+  included; 101 binaries and the doctests): 1,393 passed, 0 failed, 13 ignored (434 s). The desktop
+  without `az` (the library and the 99 other test binaries): 1,379 passed, 0 failed, 13 ignored.
+* **Behaviour digests**: two games re-recorded, each attributed by playing it on both sides: h 411
+  (in 1b1dca5: P1 cast Sewer-veillance Cam, {U}, an artifact, on turn 3 with Mishra's Workshop's
+  {C} turned blue by Wizard's Rockets, the illegal payment 49.2 removes: the Cam is not offered
+  there) and r 1925 (in 790107e: the reveal's chance key as Brazen Borrower is cast from Shelldock
+  Isle, 49.6; the same actions). Combined digest 12642107250032a7 (01fa623) -> de6fa2e70663316c
+  (1b1dca5) -> 1ed7e08dd5078f55 (790107e; 567b2c3 changed none), on the desktop and the Mac.
+* **Fuzz** (the Mac): default `FUZZ_GAMES=20000 FUZZ_MATCHES=2000`: 20,000 games (wins 9,991 /
+  9,972, 37 draws), 5,651,654 options completed (5,651,655 on 01fa623: one option no longer offered),
+  2,000 matches (5,139 games), 6,033,392 encodings checked, no failure (254 s).
+  `FUZZ_POOL=interactions` (fourteen groups): 20,000 games (9,888 / 10,063, 49 draws), 5,552,281
+  options completed, 2,000 matches (5,117 games), 6,140,401 encodings, no failure (306 s; at 1b1dca5
+  it stopped at seed 7165, 49.6). `FUZZ_POOL=drafted`: 2,000 drafted matches (5,015 games), 50,506
+  worlds, and the default games, no failure (256 s). `FUZZ_POOL=exponential FUZZ_GAMES=5000
+  FUZZ_MATCHES=2000`: 5,000 games (2,117 / 2,122, 761 draws), 3,862,285 options completed, largest
+  power 2,147,483,647, counters 4,294,967,295, life 2,147,483,647, no failure (1,112 s).
+  `DRAFT_FUZZ=20000`: 20,000 events, 11,400,000 actions, 573,334 worlds, 12,534 options completed,
+  1,866 heuristic-played matches, no match panic recorded, no failure (175 s).
+* **The agreement fuzz** (49.4): boards 0 to 3,199,999 on the Mac (eight processes, 178 s) and
+  3,200,000 to 4,399,999 on the desktop (four): 4,400,000 boards, 10,216,228 priority decisions,
+  31,197,142 options (14,406,163 of them casts), 187,182,852 paths, 0 failures.
+* **Python**: `bash tools/build_py.sh`, `python -m pytest -q tests`: 34 passed on the desktop; 33
+  passed, 1 skipped on the Mac (no CUDA).
+* **Search smoke** (the Mac): `python tools/search_smoke.py --specs
+  random,match,team_draft,team_draft_2v2 --seeds 0-3`: 0 failed of 16 configurations (3,200 games,
+  2,176,739 decisions, 57.1 million simulations; 192 team-draft events, 1,536 matches, 101,409 draft
+  decisions; 306 s).
+* **Speed** (the payment's options and candidates changed; the desktop, `tests/perf.rs` `measure`
+  built once at 01fa623 and once at 567b2c3, one target dir, run interleaved, five runs each): random
+  play 6.58-6.61 us per decision on 01fa623 and 6.51-6.54 on the branch (841,706 decisions: the same
+  games), clone 1,202-1,225 ns and 1,208-1,249 ns, clone + `determinize` 1,601-1,640 ns and
+  1,619-1,653 ns, `determinize` alone 991-1,002 ns and 937-962 ns, `legal_actions` 5-6 ns and 5 ns:
+  no change beyond the noise. `size_of::<Game>()` 1,600 bytes on both.
+
+### 49.8 Limits
+
+* The fuzz finds over-counting (an option offered that can't be completed), not under-counting (a
+  cost the rules let a player pay that the engine doesn't offer): there is no second payment model
+  to compare with. The known under-counts are the shortcuts' (docs/shortcuts.md 13.12-13.17).
+* Only P0's main-phase priority is checked option by option; instants on the opponent's turn and in
+  combat go through the same castability code and are covered by `FUZZ_POOL=interactions`' option
+  completion.
