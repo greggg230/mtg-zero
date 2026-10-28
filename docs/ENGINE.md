@@ -9588,7 +9588,7 @@ from the workers' status lines; the Mac shared with other agents' jobs, load 3-1
 |---|---:|---:|---:|---:|---:|---:|
 | 2 | 843 s (531; 586 s waiting) | 89 s | 152 s | 581 s (2 opponents) | - | 1,666 s (27.8 min) |
 | 3 | 865 s (498; 628 s) | 73 s | 155 s | 590 s (2) | - | 1,683 s (28.1 min) |
-| 4 | 1,214 s (664) | 96 s | ~150 s | (3 opponents) | running 80+ min at the time of writing (iteration 0: 3,073 s) | |
+| 4 | 1,214 s (664) | 96 s | ~150 s | (3 opponents) | 5,275 s (88 min; iteration 0: 3,073 s) | |
 
 The play network's matches are the self-play phase's bottleneck: the desktop plays 0.55-0.61 matches
 per second (10.2-10.5k leaves/s at 18,254 leaves per match) and the draft network, which drafts 48
@@ -9608,18 +9608,18 @@ resolver, 3.9 times together):
   the same samples; the Mac plays a share of them rather than more of them.
 * **The draft network's evaluation, unchanged and now the largest part**: vs `consensus` and random
   ~2.5 min; its Elo matches ~5 min per opponent (td1: 2 opponents ~10 min at iterations 2-3; 3 at
-  4-7, ~15 min; 4 from iteration 8, ~20 min); `eval_yard_net` every 4th iteration, 51+ min.
+  4-7, ~15 min; 4 from iteration 8, ~20 min); `eval_yard_net` every 4th iteration, 51-88 min.
 
 | | today | with the Mac | |
 |---|---:|---:|---:|
 | an iteration like 2-3 (Elo vs 2) | 28 min | **~18 min** | 1.5x |
 | iterations 5-7 (Elo vs 3) | ~33 min | **~23 min** | 1.4x |
 | iterations 9-11, 13-15 ... (Elo vs 4) | ~38 min | **~28 min** | 1.35x |
-| every 4th (+ `eval_yard_net`, 51+ min) | ~89+ min | ~79+ min | |
-| **average from iteration 8 on** | **~51 min** | **~41 min** | **~1.25x** |
+| every 4th (+ `eval_yard_net`, 51-88 min) | ~89-126 min | ~79-116 min | |
+| **average from iteration 8 on** (`eval_yard_net` 51-88 min) | **~51-60 min** | **~41-50 min** | **~1.2-1.25x** |
 
 So td1's ordinary iterations go from 28-38 to ~18-28 minutes (50.3's "20-30" for the self-play-bound
-iteration), but its average, with `eval_yard_net` every 4th, only from ~51 to ~41: the Mac saves
+iteration), but its average, with `eval_yard_net` every 4th, only from ~51-60 to ~41-50: the Mac saves
 ~10 minutes of self-play per iteration, and the draft network's evaluation on the desktop (its Elo
 matches, `eval_yard_net`) becomes ~60-70% of an iteration. The next levers are there, not in
 self-play: `elo_opponents` 2-3 or fewer `elo_games` for the draft network, `draft_eval_net_every` 8,
@@ -9747,8 +9747,8 @@ docs; the core's Rust is af44741's):
   ~0% CPU - then goes on; the same at main 692a52c with zero-core af44741 (649 s against 617 s, at
   the same counts; the resolver's rolling stats are those of the iterations that do not stall). Not
   investigated (the core's Rust driver: a wait inside `next_batch` with games in flight). Related
-  or not: td1's iteration-4 `eval_yard_net` had run 80+ minutes with its process nearly idle when
-  this was written (iteration 0's: 51 min); td1 was not touched.
+  or not: td1's iteration-4 `eval_yard_net` took 88 minutes with its process nearly idle for long
+  stretches (07:31-08:59; iteration 0's: 51 min); td1 was not touched.
 * zerodash (zero-core's dashboard) shows nothing of the remote yet; the game dashboard's status
   line does (progress.json), its throughput charts show the desktop's leaves/s only.
 * On the Mac: `~/mtgz-selfplay-test/` (this section's mirrors, the experiments' scripts and logs, the
