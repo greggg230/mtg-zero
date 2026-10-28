@@ -1259,3 +1259,5 @@ ef26b159	b	DEF	this land type carries no intrinsic abilities of its own
 c8a74bc2	a	mana	a mana-cost-based search is restricted to the exact printed mana cost symbols, not just a matching mana value
 655d544a	a	triggers	this permanent forces you to sacrifice it unless you cast it via its own escape-style permission specifically
 1b138927	a	triggers	this permanents second ability triggers on entering the battlefield regardless of whether it escaped to get there
+87078369	a	mana	delve does not change the mana cost or mana value (Murktide Regent stays 7)
+05ce86bd	a	mana	delve pays only generic mana, at most the generic part of the total cost (five for Murktide Regent)

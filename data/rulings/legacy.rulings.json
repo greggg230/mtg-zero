@@ -1,0 +1,28 @@
+[
+ {
+  "name": "Murktide Regent",
+  "oracle_id": "7f993ac7-c2cd-413c-a106-2c051a77ebf6",
+  "rulings": [
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Because delve isn't an alternative cost, it can be used in conjunction with alternative costs, such as flashback. It can also be used to pay for additional costs that include generic mana."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "Delve doesn't change a spell's mana cost or mana value. For example, Murktide Regent's mana value is 7 even if you exiled three cards to cast it."
+   },
+   {
+    "date": "2021-06-18",
+    "source": "wotc",
+    "text": "You can exile cards to pay only for generic mana, and you can't exile more cards than the generic mana requirement of a spell with delve. For example, you can't exile more than five cards from your graveyard to cast Murktide Regent unless an effect has increased its cost."
+   }
+  ]
+ },
+ {
+  "name": "Prismari Charm",
+  "oracle_id": "c3c25a2c-f71c-4cb7-9117-0bcda9248bfd",
+  "rulings": []
+ }
+]

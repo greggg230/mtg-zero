@@ -10,6 +10,12 @@ again unless `--refresh` is given. Scryfall's limits are respected: at most
 ~8 requests per second, a User-Agent and an Accept header.
 
     python tools/fetch_rulings.py [--cube PATH] [--refresh]
+
+The legacy cards of constructed play (ENGINE.md 53: Murktide Regent, Prismari
+Charm; mtg-bot's pool `legacy`, its `data/legacy_delver.json`) go to their own
+file:
+
+    python tools/fetch_rulings.py --cube <mtg-bot>/data/legacy_delver.json --out data/rulings/legacy.rulings.json
 """
 
 import argparse
@@ -49,6 +55,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cube", default=DEFAULT_CUBE)
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--out", default=OUT)
     a = ap.parse_args()
     cube = json.load(open(a.cube, encoding="utf-8"))
     os.makedirs(CACHE, exist_ok=True)
@@ -75,11 +82,11 @@ def main():
         out.append({"name": c["name"], "oracle_id": c["oracle_id"], "rulings": rulings})
     if len(out) != len(cube):
         sys.exit("card count mismatch")
-    with open(OUT, "w", encoding="utf-8", newline="\n") as f:
+    with open(a.out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(out, f, indent=1, ensure_ascii=False)
         f.write("\n")
     n = sum(len(c["rulings"]) for c in out)
-    print(f"{len(out)} cards, {n} rulings ({fetched} fetched, {len(out) - fetched} cached) -> {OUT}")
+    print(f"{len(out)} cards, {n} rulings ({fetched} fetched, {len(out) - fetched} cached) -> {a.out}")
 
 
 if __name__ == "__main__":
