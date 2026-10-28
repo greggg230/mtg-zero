@@ -547,3 +547,187 @@ fn prismari_charm_returns_a_nonland_permanent_to_its_owners_hand() {
     assert!(!g.battlefield().contains(&clue));
     assert_eq!(g.obj(clue).zone, Zone::Nowhere);
 }
+
+// ---- Edge cases (an independent review's probes, adopted) -----------------------------
+
+/// A modal double-faced card with a sorcery front (a sorcery card outside the
+/// battlefield and the stack, CR 712.8a), a split card of two sorceries (a
+/// sorcery card, 709.4), an adventurer (a creature card, 715.4), two lands.
+const MIXED: [&str; 5] =
+    ["Shatterskull Smashing // Shatterskull, the Hammer Pass", "Life // Death", "Brazen Borrower // Petty Theft", "Island", "Island"];
+
+#[test]
+fn murktide_counts_a_card_by_its_characteristics_in_exile_cr_712_8a_709_4_715_4() {
+    let mut g = scen().battlefield(0, &["Island", "Island"]).graveyard(0, &MIXED).hand(0, &[MURKTIDE]).at(Step::Main1, 0).start();
+    let picks = gy(&g, 0);
+    let m = g.card(0, MURKTIDE, Zone::Hand);
+    g.choose(Choice::Cast(m));
+    assert_eq!(pay_with(&mut g, &picks, |_| None), 5, "{}", opts(&g));
+    resolve(&mut g);
+    assert_eq!(g.obj(m).zone, Zone::Battlefield);
+    assert_eq!(p1p1(&g, m), 2, "the MDFC and the split card, not the adventurer\n{}", g.log_lines().join("\n"));
+}
+
+#[test]
+fn a_card_leaving_the_graveyard_is_seen_by_its_characteristics_there_cr_603_10a() {
+    // The same five delved by a second Regent: the first sees two instant or
+    // sorcery cards leave.
+    let mut g = scen().battlefield(0, &[MURKTIDE, "Island", "Island"]).graveyard(0, &MIXED).hand(0, &[MURKTIDE]).at(Step::Main1, 0).start();
+    let first = g.card(0, MURKTIDE, Zone::Battlefield);
+    let picks = gy(&g, 0);
+    let m = g.card(0, MURKTIDE, Zone::Hand);
+    g.choose(Choice::Cast(m));
+    pay_with(&mut g, &picks, |_| None);
+    resolve(&mut g);
+    assert_eq!(p1p1(&g, first), 2, "{}", g.log_lines().join("\n"));
+    assert_eq!(p1p1(&g, m), 2);
+}
+
+#[test]
+fn endurance_putting_a_graveyard_on_the_bottom_triggers_once_per_instant_or_sorcery() {
+    // "Its controller puts all the cards from their graveyard on the bottom of
+    // their library": three instants and sorceries and a land leave.
+    let mut g = scen()
+        .battlefield(0, &[MURKTIDE, "Forest", "Forest", "Forest"])
+        .graveyard(0, &["Brainstorm", "Ponder", "Island", "Lightning Bolt"])
+        .hand(0, &["Endurance"])
+        .at(Step::Main1, 0)
+        .start();
+    let m = g.card(0, MURKTIDE, Zone::Battlefield);
+    let e = g.card(0, "Endurance", Zone::Hand);
+    g.choose(Choice::Cast(e));
+    pay_with(&mut g, &[], |_| None);
+    let me = Choice::Target(Target::Player(0));
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(me)).then_some(me));
+    assert!(g.player(0).graveyard.is_empty(), "{}", g.log_lines().join("\n"));
+    assert_eq!(p1p1(&g, m), 3, "{}", g.log_lines().join("\n"));
+}
+
+#[test]
+fn an_opponents_lantern_exiling_a_graveyard_triggers_that_graveyards_regent() {
+    // P0's Soul-Guide Lantern exiles each opponent's graveyard: P1's Regent sees
+    // two instants and sorceries leave its controller's graveyard.
+    let g = scen()
+        .battlefield(0, &["Soul-Guide Lantern"])
+        .battlefield(1, &[MURKTIDE])
+        .graveyard(1, &["Brainstorm", "Ponder", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let m = g.card(1, MURKTIDE, Zone::Battlefield);
+    let l = g.card(0, "Soul-Guide Lantern", Zone::Battlefield);
+    let mut done = false;
+    for slot in 0..3u8 {
+        let c = Choice::Ability(l, AbilitySlot::Activated(slot));
+        if !g.has_option(c) {
+            continue;
+        }
+        let mut h = g.clone();
+        h.choose(c);
+        pay_with(&mut h, &[], |_| None);
+        resolve(&mut h);
+        if h.player(1).graveyard.is_empty() {
+            assert_eq!(p1p1(&h, m), 2, "{}", h.log_lines().join("\n"));
+            done = true;
+        }
+    }
+    assert!(done, "no Lantern activation exiled P1's graveyard: {}", opts(&g));
+}
+
+#[test]
+fn a_card_cast_from_the_graveyard_with_yawgmoths_will_triggers_it() {
+    let mut g = scen()
+        .battlefield(0, &[MURKTIDE, "Underground Sea", "Underground Sea", "Underground Sea", "Underground Sea"])
+        .graveyard(0, &["Brainstorm"])
+        .hand(0, &["Yawgmoth's Will"])
+        .at(Step::Main1, 0)
+        .start();
+    let m = g.card(0, MURKTIDE, Zone::Battlefield);
+    let y = g.card(0, "Yawgmoth's Will", Zone::Hand);
+    g.choose(Choice::Cast(y));
+    pay_with(&mut g, &[], |_| None);
+    resolve(&mut g);
+    let bs = g.card(0, "Brainstorm", Zone::Graveyard);
+    let a = g.graveyard_action(0, bs);
+    assert!(legal(&g).contains(&a), "{}", opts(&g));
+    g.apply(a, &mut Vec::new()).unwrap();
+    pay_with(&mut g, &[], |_| None);
+    resolve(&mut g);
+    assert_eq!(p1p1(&g, m), 1, "{}", g.log_lines().join("\n"));
+}
+
+#[test]
+fn prismari_charm_needs_a_target_never_the_same_player_twice_and_hits_planeswalkers() {
+    let mut g = scen()
+        .battlefield(0, &["Volcanic Island", "Volcanic Island"])
+        .hand(0, &[CHARM])
+        .battlefield(1, &[TAMIYO])
+        .transformed(1, TAMIYO)
+        .counters(1, SCHOLAR, Counter::Loyalty, 2)
+        .at(Step::Main1, 0)
+        .start();
+    let t = g.card(1, SCHOLAR, Zone::Battlefield);
+    let c = g.card(0, CHARM, Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.choose(Choice::Number(1));
+    let (p1, tt) = (Choice::Target(Target::Player(1)), g.tgt(t));
+    let asked = std::cell::Cell::new(0);
+    pay_with(&mut g, &[], |g| match g.kind() {
+        Some(DecisionKind::Target) => {
+            asked.set(asked.get() + 1);
+            if asked.get() == 1 {
+                assert!(!g.has_option(Choice::Pass), "zero targets: {}", opts(g));
+                assert!(g.has_option(tt), "a planeswalker is any target: {}", opts(g));
+                Some(p1)
+            } else {
+                assert!(!g.has_option(p1), "the same player twice: {}", opts(g));
+                Some(tt)
+            }
+        }
+        _ => None,
+    });
+    resolve(&mut g);
+    assert_eq!(g.life(1), 19);
+    assert_eq!(g.counters_on(t, Counter::Loyalty), 1);
+}
+
+#[test]
+fn a_metamorph_copying_a_regent_enters_without_counters_and_triggers_cr_707_2() {
+    // Copy effects copy no counters (707.2), and the Metamorph wasn't cast as
+    // a Regent with delve (607.2q): no counters as it enters. As a Regent it
+    // has the trigger: a Brainstorm leaving its controller's graveyard (P0's
+    // Lantern exiling it) gives it one, not the original's controller's.
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Island", "Island"])
+        .hand(0, &["Phyrexian Metamorph", "Soul-Guide Lantern"])
+        .graveyard(0, &["Brainstorm"])
+        .battlefield(1, &[MURKTIDE])
+        .counters(1, MURKTIDE, Counter::P1P1, 3)
+        .at(Step::Main1, 0)
+        .start();
+    let theirs = g.card(1, MURKTIDE, Zone::Battlefield);
+    let pm = g.card(0, "Phyrexian Metamorph", Zone::Hand);
+    g.choose(Choice::Cast(pm));
+    pay_with(&mut g, &[], |_| None);
+    let (pick, tt) = (Choice::Card(theirs), g.tgt(theirs));
+    resolve_with(&mut g, |g| {
+        if g.has_option(pick) {
+            Some(pick)
+        } else if g.has_option(tt) {
+            Some(tt)
+        } else if g.has_option(Choice::Yes) {
+            Some(Choice::Yes)
+        } else {
+            None
+        }
+    });
+    assert_eq!(g.name(pm), MURKTIDE, "not a copy");
+    assert_eq!(p1p1(&g, pm), 0);
+    let l = g.card(0, "Soul-Guide Lantern", Zone::Hand);
+    g.choose(Choice::Cast(l));
+    pay_with(&mut g, &[], |_| None);
+    let bs = g.card(0, "Brainstorm", Zone::Graveyard);
+    let tb = g.tgt(bs);
+    resolve_with(&mut g, |g| (g.kind() == Some(DecisionKind::Target) && g.has_option(tb)).then_some(tb));
+    assert_eq!(p1p1(&g, pm), 1, "{}", g.log_lines().join("\n"));
+    assert_eq!(p1p1(&g, theirs), 3, "their Regent: not their graveyard");
+}

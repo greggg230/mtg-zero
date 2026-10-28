@@ -1221,7 +1221,7 @@ they isolate one keyword or trigger each.
 | `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, at least the minimum of 22 pool cards, section 47; deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), deckbuilding as picks (section 47: any card not in the deck offered, `DONE` exactly from 22 pool cards on, the extremes: 22 pool cards and 18 basic lands of one type, 40 pool cards ending the cards with every count forced to 0, the same cards in two orders one state and one encoding), every legal deck an end state reached by each order of its pool cards (every path of 6- and 7-card pools, the states of 12- and 15-card pools for several minimums, the 487,676 whole decks of a two-card pool), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`; M6: the decider's encoding and every world's finite and within `FEATURE_BOUND`; section 47: minimums 22, 0, 40 and random, `DONE` offered iff the deck holds the minimum, every deck at least the minimum; section 50.2: `DRAFT_FUZZ_FIRST=f`, events from f on, each on random streams of its own, a failing one printing its rerun), measurements (`--ignored`: `measure`; section 47: deckbuilding decisions per seat, the pool cards of random and `consensus` decks); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v2` (section 47) |
 | `tests/draft_matches.rs` | drafted matches (section 45): the `mtg` spec of an event's match (`pN_first_picks`, `pN_elsewhere`, `seed`) plays the event's match move for move (`match_game`; 32 matches: 4v4 and 2v2, random and `consensus`-built decks, best-of-three and best-of-one), the first-pick prior is exactly the cards the viewer's team never saw (193 in 4v4, 367 in 2v2; the real first picks among them), `determinize` samples first picks from it (never the viewer's knowledge) and keeps the viewer's encoding, the spec refuses contradicting knowledge, specs without the keys are what they were; a position from a draft history is seat 0's information set (its knowledge and encoding the real event's) and a history that does not fit is an error; deckbuilding's simulations divisor; `tests/test_drafted.py` (pytest): the glue (payload -> specs, results -> `resolve`, a malformed result refused), events parked by a draft driver and resolved through a heuristic match driver, the token network's actions by identity on `draft_v1`, the human-pick yardstick on a few drafts, the co-training presets |
 | `tests/draft_deferred.rs` | `team_draft` through zero-core's deferred hook (section 43): 2v2 and 1v1 events through the self-play driver with a stand-in network (deferred terminals evaluated as leaves of no options, every event parked, a malformed result refused, resolved with heuristic-played matches, samples with the real outcome and margin), the hooks mapping the inherent methods (1v1-4v4); `--ignored`: `measure_parked_memory` |
-| `tests/cards_legacy.rs` | section 54: the legacy cards (constructed play's card table) against their Oracle text, 17 tests: Murktide Regent (3/3 flying, delve; a +1/+1 counter for each instant and sorcery card its delve exiled, 607.2q; none when put onto the battlefield uncast or for instants another Regent exiled; a second Regent's delve triggers the first once per instant or sorcery card, the triggers above the spell, 603.10a; an opponent's graveyard and lands don't; Tamiyo's -3 and a flashback cast do; its three rulings: mana value 7 under Mana Drain, at most five cards exiled, delve with Underworld Breach's escape, whose cards aren't "exiled with it"), Prismari Charm (choose one; surveil 2 then draw; 1 damage to each of one or two targets, distinct, any target, one target allowed, 608.2b with one gone; a nonland permanent to its owner's hand, a token ceasing to exist) |
+| `tests/cards_legacy.rs` | section 54: the legacy cards (constructed play's card table) against their Oracle text, 24 tests (7 of them an independent review's probes: a modal double-faced, a split and an Adventure card counted and seen by their card characteristics, 712.8a / 709.4 / 715.4; Endurance putting a graveyard on the bottom; an opponent's Soul-Guide Lantern triggering the graveyard owner's Regent; Yawgmoth's Will's cast from the graveyard; a Phyrexian Metamorph copy of a Regent, no counters as it enters but the trigger, 707.2; the Charm's target never zero, never one player twice, a planeswalker): Murktide Regent (3/3 flying, delve; a +1/+1 counter for each instant and sorcery card its delve exiled, 607.2q; none when put onto the battlefield uncast or for instants another Regent exiled; a second Regent's delve triggers the first once per instant or sorcery card, the triggers above the spell, 603.10a; an opponent's graveyard and lands don't; Tamiyo's -3 and a flashback cast do; its three rulings: mana value 7 under Mana Drain, at most five cards exiled, delve with Underworld Breach's escape, whose cards aren't "exiled with it"), Prismari Charm (choose one; surveil 2 then draw; 1 damage to each of one or two targets, distinct, any target, one target allowed, 608.2b with one gone; a nonland permanent to its owner's hand, a token ceasing to exist) |
 | `tests/constructed.rs` | section 54: the pinned 75 and its provenance (the JSON is the MTGO export), CR 100.2a / 100.4a, the `constructed` spec, the two card tables (the cube's definitions and identities unchanged, the legacy cards at 546-547), 60-card games (the play-or-draw choice, the London mulligan, the turn cap), `determinize` dealing the opponent's unseen cards from their 60 (open decklists), the heuristic in the mirror |
 | `tests/measure_delver.rs` | section 54.6's measurements (`--release -- --ignored --nocapture --test-threads=1`, `MEASURE_GAMES`) |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
@@ -9807,7 +9807,7 @@ stops. Scope (the user, 2026-10-28, during D1): only the two maindeck cards outs
 | Loaders | `engine/src/az/constructed.rs` (`Decklist`), `mtgz/az/decklists.py` | the JSON (compiled into the engine), the export checked against it (tests), the mirror's spec |
 | The cards | mtg-bot pool `legacy` (its `data/legacy_delver.json`: Scryfall records, no basic lands); `data/cards/legacy.ir.json` | the IR of the two cards, encoded with the cube's schema (54.2) |
 | A second card table | `CardDb::constructed()` (`db.rs`) | the cube's 546 cards (the same definitions at the same ids as `CardDb::cube()`), then the legacy cards, then the tokens and faces; every legacy card must be supported (a loud failure otherwise) |
-| Identities | `engine/src/az/legacy_cards.txt` (`identity::legacy_registry`, `LEGACY_BASE` = 546) | 546 + the line: Murktide Regent 546, Prismari Charm 547 (22.2); append-only, in the free range below `CUBE_CAP` (layout v4 unchanged) |
+| Identities | `engine/src/az/legacy_cards.txt` (`identity::legacy_registry`, `LEGACY_BASE` = 546) | 546 + the line: Murktide Regent 546, Prismari Charm 547 (22.2); append-only, in the free range below `CUBE_CAP` (layout v4 unchanged). The cube list must stay at 546 cards: `identities` asserts it fits below `LEGACY_BASE`, so a card added to the cube list fails loudly there; acceptable, since another cube list is a new layout anyway (22.2), which then moves `LEGACY_BASE` above it |
 | Rules | `cast.rs`, `pay.rs`, `resolve.rs`, `game.rs`, `triggers.rs`, `lower/` | 54.3 |
 | The spec | `MtgSpec.constructed` (`"constructed": true`) | `CardDb::constructed`, CR 100.2a / 100.4a decklists, best-of-one only (54.4) |
 | The presets | `delver-mirror`, `delver-smoke` (`mtgz/az/__init__.py`) | 54.6 |
@@ -9873,7 +9873,11 @@ Readings taken (the ambiguities resolved):
 in) needs explicit decklists (`decks: {"p0": [...], "p1": [...]}`, sideboards optional) and checks CR
 100.2a and 100.4a (`az::constructed::check`): at least 60 cards (`MIN_DECK`; more is legal), at most
 four of a card other than basic lands (supertype basic and a land) over the deck and the sideboard
-together (`MAX_COPIES`), a sideboard of at most 15 (`MAX_SIDEBOARD`), cards only (no token, no face).
+together (`MAX_COPIES`), a sideboard of at most 15 (`MAX_SIDEBOARD`), cards only (no token, no face),
+and **at most 64 cards** (`MAX_DECK`, the engine's limit, not the CR's: every card of a deck may end up
+in one zone, and a hand, a library list and a graveyard have 64 action slots each, section 11:
+`act::HAND_N`, `LIBRARY_N`, `GRAVEYARD_N`, the bound derived from them; a 65-card deck is refused at
+the spec with that reason rather than reaching an out-of-range slot mid-game).
 Best-of-three is an error (constructed sideboarding is not built, 54.8), so are pools and random,
 evaluation and drafted decks (limited's). Without the key every spec is what it was: the cube's card
 table (in which "Murktide Regent" is an unknown card) and limited's 40 (section 42), untouched. The
@@ -9964,11 +9968,12 @@ yardsticks 4.5-6.5 min, Elo 6-10 min: **~18-25 minutes**, 40 iterations in ~12-1
 
 ### 54.7 Tests, fuzzing, smoke, digests
 
-* **Rust** (`cargo test --release -p engine --no-fail-fast`, every binary including `az`): 1,425 passed,
-  1 failed (`the_heuristic_plays_the_mirror`'s floor of 17 random losses in 20 games, too tight: 16
-  with Murktide's trigger fixed; now 13, the 2,000-game score is 54.6's), 13 ignored; after the fix the
-  run of 54.10. New: `cards_legacy.rs` 17, `constructed.rs` 7, `az.rs` 1 (15 there), `measure_delver.rs`
-  1 ignored. `cargo test -p card_ir`, `python -m pytest tools/codegen` (generated.rs current): pass.
+* **Rust** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`;
+  on the Mac at 02a10e4, bit-identical to the desktop, section 44): **1,432 passed, 0 failed, 14
+  ignored** (and after the review's additions, 54.10: 1,439). New: `cards_legacy.rs` 24 (17 and the
+  review's 7), `constructed.rs` 7, `az.rs` 1 (15 there), `measure_delver.rs` 1 ignored. (A desktop run before that had one failure, `the_heuristic_plays_the_mirror`'s floor of 17
+  random losses in 20 games, too tight for 20 games: 16 once Murktide's trigger worked; the floor is 13
+  now, 54.6 has the 2,000-game score.) `python -m pytest tools/codegen` (generated.rs current): pass.
 * **Behaviour digests** (`cargo test --release -p engine --test digest -- --ignored --nocapture`):
   combined **804002969bdd0938 before (b11952b) and after** (every one of the 2,500 games equal to
   `tests/data/digests.txt`): the cube's card table, its generators and its games are untouched.
@@ -9980,10 +9985,20 @@ yardsticks 4.5-6.5 min, Elo 6-10 min: **~18-25 minutes**, 40 iterations in ~12-1
   mode asserts all three in 200 games or more). Every check of the default mode: invariants, clones,
   `determinize` for both viewers (view, known cards, clouds, information sets), the encoding finite
   and bounded, every option completed in the game and in the sampled worlds.
-* **The default fuzz** (`FUZZ_GAMES=20000 FUZZ_MATCHES=2000`, on the Mac): see 54.10.
+* **The default fuzz** (`FUZZ_GAMES=20000 FUZZ_MATCHES=2000`, the Mac at 0fae496): no failure, 226 s;
+  20,000 games (wins 9,993 / 9,970, 37 draws), 214.0 decisions per game, 5,651,735 options completed,
+  2,000 matches (5,138 games, 1,138 of three, 1,491 drawn), 47,803 sideboarding decisions, 42,768
+  hidden-pool worlds: **every number main's of 51.8**, the same games (the cube's fuzz pool is the cube
+  IR's and the custom test cards').
 * **The search smoke**: `--specs delver --seeds 0-3 --preset delver-mirror` 0 failed of 4 (1,600 games,
-  462,661 decisions, 12.8 million simulations, 333 s); the default (`random,eval,match`, seeds 0-3):
-  54.10.
+  462,661 decisions, 12.8 million simulations, 333 s); the default (`python tools/search_smoke.py`:
+  `random,eval,match`, seeds 0-3, the mtg-3 seat) 0 failed of 12 (4,800 games and matches: random
+  658,117 decisions and 16.9 million simulations, eval 704,510 and 18.0 million, match 1,515,641 and
+  40.2 million; 1,373 s with the desktop shared).
+* **The run loop** (`python -m mtgz.az.run --run E:/mtg-zero-scratch/delver-d1/smoke --preset
+  delver-smoke`, CPU, 24 s): three tiny iterations of the mirror end to end, self-play (16 games,
+  239-251 decisions and ~60 samples per game, 67 KB per sample), training, the heuristic (1-2 of 8)
+  and random yardsticks, Elo; no failure. (A scratch directory, not a run.)
 * **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): 45 passed (5 new in
   `tests/test_delver.py`).
 * **Rulings**: `data/rulings/legacy.rulings.json` (`tools/fetch_rulings.py --out`): Murktide Regent's
@@ -10023,9 +10038,15 @@ yardsticks 4.5-6.5 min, Elo 6-10 min: **~18-25 minutes**, 40 iterations in ~12-1
 * **Not measured**: the mirror on the GPU alone (54.6's estimate); the speed of the engine change
   (`tests/perf.rs`): the cube's hot paths only gained a `seen` test in `move_card` and a match arm in
   `TrigPred::Subject`.
+* **At most 64 cards in a deck** (54.4: the action slots), and the cube list at 546 (54.1: the legacy
+  identities start there).
 * No rules shortcut was added (docs/shortcuts.md unchanged).
 
 ### 54.9 A run configuration for `runs/delver1`
+
+(At ~60 samples per game, 54.7's run-loop check, an iteration is ~36k samples, ~2.4 GB: the 12 GB
+window budget holds five iterations of the window's six; mtg3 had ~19k samples an iteration.)
+
 
 **`delver-mirror` as it is, on the GPU, when td1 is not using it** (td1 was paused on 10-28 during
 D1). From a pinned worktree of the merged commit (21.5): `bash tools/build_py.sh`, the gate

@@ -41,6 +41,8 @@ pub mod act {
     pub const LIBRARY_N: u16 = 64;
     /// Graveyards: the decider's 0..63, the opponent's 64..127 (M4b).
     pub const GRAVEYARD: u16 = 404;
+    /// Slots per graveyard.
+    pub const GRAVEYARD_N: u16 = 64;
     /// Activate ability i of the decider's permanent in `MY_PERM` slot s:
     /// `ACTIVATE + s * 4 + i` (at priority, and mana abilities while paying).
     pub const ACTIVATE: u16 = 532;
@@ -400,8 +402,8 @@ impl Game {
     pub fn graveyard_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
         let owner = self.objs[idx.i()].owner;
         let pos = self.players[owner as usize].graveyard.iter().position(|&c| c == idx).expect("card in a graveyard");
-        assert!(pos < 64, "graveyard slot {pos} out of range");
-        act::GRAVEYARD + if owner == viewer { 0 } else { 64 } + pos as u16
+        assert!(pos < act::GRAVEYARD_N as usize, "graveyard slot {pos} out of range");
+        act::GRAVEYARD + if owner == viewer { 0 } else { act::GRAVEYARD_N } + pos as u16
     }
 
     /// Human-readable description of an option (tests, logs).

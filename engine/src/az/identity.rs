@@ -122,7 +122,14 @@ fn compute(db: &CardDb) -> Vec<u16> {
     assert!(names.len() <= CUBE_CAP, "the cube list ({}) exceeds the identity capacity {CUBE_CAP}", names.len());
     let mut pos: std::collections::HashMap<&str, u16> = names.iter().enumerate().map(|(i, n)| (n.as_str(), i as u16)).collect();
     let legacy = legacy_registry();
-    assert!(names.len() <= LEGACY_BASE, "the cube list ({}) reaches the legacy identities ({LEGACY_BASE})", names.len());
+    // (A cube list of more than 546 cards would take the legacy cards' identities: a change to the
+    // cube list is a new layout anyway (ENGINE.md 22.2, 54.1), which then moves LEGACY_BASE and
+    // renumbers the legacy registry's cards with it.)
+    assert!(
+        names.len() <= LEGACY_BASE,
+        "the cube list ({}) reaches the legacy identities ({LEGACY_BASE}): a new cube list is a new layout (ENGINE.md 22.2); move LEGACY_BASE above it with the layout",
+        names.len()
+    );
     assert!(LEGACY_BASE + legacy.len() <= CUBE_CAP, "the legacy registry ({}) exceeds the free identities", legacy.len());
     for (k, n) in legacy.into_iter().enumerate() {
         assert!(pos.insert(n, (LEGACY_BASE + k) as u16).is_none(), "legacy registry: {n} is a cube card or listed twice");

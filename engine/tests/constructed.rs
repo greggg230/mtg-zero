@@ -70,10 +70,17 @@ fn cr_100_2a_and_100_4a_constructed_deck_rules() {
     constructed::check(db, &main, &[]).unwrap();
     // At least 60 cards.
     assert!(constructed::check(db, &main[..59], &[]).unwrap_err().contains("at least 60"));
-    // More than 60 is legal.
+    // More than 60 is legal, up to the engine's 64 (a hand, a library list, a
+    // graveyard each have 64 action slots); 65 is refused, not played.
     let mut more = main.clone();
     more.push(id("Island"));
     constructed::check(db, &more, &[]).unwrap();
+    assert_eq!(constructed::MAX_DECK, 64);
+    let mut most = main.clone();
+    most.extend(std::iter::repeat_n(id("Island"), constructed::MAX_DECK - main.len()));
+    constructed::check(db, &most, &[]).unwrap();
+    most.push(id("Island"));
+    assert!(constructed::check(db, &most, &[]).unwrap_err().contains("at most 64"));
     // At most four of a card but basic lands: a fifth Brainstorm in the deck
     // or in the sideboard (the limit is over both, 100.4a).
     let mut five = main.clone();
@@ -85,9 +92,12 @@ fn cr_100_2a_and_100_4a_constructed_deck_rules() {
     assert!(constructed::check(db, &main, &[id("Brainstorm")]).unwrap_err().contains("5 copies of Brainstorm"));
     // Two Unholy Heat in the deck and one in the sideboard: three.
     constructed::check(db, &main, &[id("Unholy Heat")]).unwrap();
-    // Basic lands: any number.
+    // Basic lands: any number (up to the engine's 64 cards).
     let mut islands = main.clone();
-    islands.extend(std::iter::repeat_n(id("Island"), 20));
+    for c in islands.iter_mut().filter(|c| db.def(**c).types & engine::db::types::LAND != 0) {
+        *c = id("Island");
+    }
+    assert!(islands.iter().filter(|&&c| c == id("Island")).count() > 4);
     constructed::check(db, &islands, &[]).unwrap();
     // A sideboard of at most 15.
     assert!(constructed::check(db, &main, &[id("Island"); 16]).unwrap_err().contains("at most 15"));
@@ -118,6 +128,9 @@ fn the_constructed_spec() {
     assert!(bad(serde_json::json!({"constructed": true, "decks": "eval"})).contains("decklists"));
     // The deck rules are checked.
     assert!(bad(serde_json::json!({"constructed": true, "decks": {"p0": &names[..40], "p1": names}})).contains("at least 60"));
+    // More cards than the engine's action slots can hold: refused at the spec.
+    let big: Vec<String> = names.iter().cloned().chain(std::iter::repeat_n("Island".to_string(), 5)).collect();
+    assert!(bad(serde_json::json!({"constructed": true, "decks": {"p0": names, "p1": big}})).contains("p1's constructed deck: 65 cards"));
     assert!(bad(serde_json::json!({"constructed": "yes"})).contains("boolean"));
     // Without "constructed" the cube's card table: no legacy card there.
     assert!(bad(serde_json::json!({"decks": {"p0": names, "p1": names}})).contains("Murktide Regent"));

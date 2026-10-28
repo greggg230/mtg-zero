@@ -18,6 +18,16 @@ pub const MIN_DECK: usize = 60;
 pub const MAX_COPIES: usize = 4;
 /// CR 100.4a: a constructed sideboard has at most 15 cards.
 pub const MAX_SIDEBOARD: usize = 15;
+/// The largest deck the engine can play: every card of a deck may end up in
+/// one zone, and a hand, a searched or looked-at library list and a graveyard
+/// each have `act::HAND_N`, `LIBRARY_N` and `GRAVEYARD_N` action slots (ENGINE.md
+/// 11): 64. (CR 100.2a has no maximum; a larger deck is refused, never played
+/// into an out-of-range slot.)
+pub const MAX_DECK: usize = {
+    let (h, l, g) = (crate::decision::act::HAND_N, crate::decision::act::LIBRARY_N, crate::decision::act::GRAVEYARD_N);
+    let m = if h < l { h } else { l };
+    (if m < g { m } else { g }) as usize
+};
 
 /// The pinned deck of the Delver mirror (ENGINE.md 54): "Izzet Delver" by
 /// i_b_TRUE, Legacy Challenge 32, 2026-10-23, 1st place (8-1), MTGO;
@@ -33,10 +43,16 @@ pub fn is_basic_land(d: &CardDef) -> bool {
 
 /// CR 100.2a, 100.4a: at least 60 cards in the deck, at most 15 in the
 /// sideboard, at most four of each card but basic lands over both together;
-/// only cards (no tokens).
+/// only cards (no tokens); and at most [`MAX_DECK`] (the engine's limit).
 pub fn check(db: &CardDb, deck: &[DefId], sideboard: &[DefId]) -> Result<(), String> {
     if deck.len() < MIN_DECK {
         return Err(format!("{} cards in the deck (CR 100.2a: at least {MIN_DECK})", deck.len()));
+    }
+    if deck.len() > MAX_DECK {
+        return Err(format!(
+            "{} cards in the deck: the engine plays at most {MAX_DECK} (the action slots of a hand, a library list, a graveyard; ENGINE.md 11, 54.4)",
+            deck.len()
+        ));
     }
     if sideboard.len() > MAX_SIDEBOARD {
         return Err(format!("{} cards in the sideboard (CR 100.4a: at most {MAX_SIDEBOARD})", sideboard.len()));
