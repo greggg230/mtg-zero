@@ -6,8 +6,9 @@ between games, decks built from random card pools), its object layout for zero-c
 network (arch 'tokens': `layout_v4.json`, written by the engine's `encode::layout_json`), the game
 `team_draft` (docs/ENGINE.md 41, DESIGN.md 2.3: a team cube draft and deckbuilding up to the matches,
 which wait for zero-core's deferred hook; its layout `layout_draft_v1.json`), the run
-presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4), the default spec, the evaluation spec
-and the dashboard's title / port.
+presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4), the default spec, the evaluation spec,
+the dashboard's title / port, and the remote evaluator 'mac' (run setting eval_remote: the MacBook
+evaluates with exactly the run's code; `mtgz/az/mac.py`, docs/ENGINE.md 44).
 
 The modules of this package are the core's under the usual names, so every command has the same
 CLI as in the other games: `python -m mtgz.az.run`, `python -m mtgz.az.dashboard --host 0.0.0.0
