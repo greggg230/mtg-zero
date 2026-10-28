@@ -31,6 +31,7 @@ pub mod identity;
 pub mod matches;
 pub mod pools;
 pub mod sample;
+pub mod view;
 
 use crate::db::CardDb;
 use crate::game::{Game, GameSpec};
@@ -102,6 +103,9 @@ pub enum DeckMode {
 /// Regent, Prismari Charm). Best-of-one only for now (constructed
 /// sideboarding between games is not built: `"bo3"` is an error), and never
 /// random, evaluation or drafted decks (those are limited's).
+///
+/// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
+/// (`view.rs`, the replay recorder); it changes nothing else.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -116,6 +120,9 @@ pub struct MtgSpec {
     pub seed: Option<u64>,
     /// Constructed decklists and their card table (ENGINE.md 54).
     pub constructed: bool,
+    /// Keep the games' log (`GameSpec::log`): the replay recorder's games, for the viewer's
+    /// play-by-play (`view.rs`). Off in self-play and evaluation (it costs a clone per log line).
+    pub log: bool,
 }
 
 impl Default for MtgSpec {
@@ -132,6 +139,7 @@ impl Default for MtgSpec {
             pools: false,
             seed: None,
             constructed: false,
+            log: false,
         }
     }
 }
@@ -204,6 +212,7 @@ impl MtgSpec {
                 "eval_seed" => s.eval_seed = int()?,
                 "seed" => s.seed = Some(int()?),
                 "constructed" => {}
+                "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
                 "chooser" => {
                     let c = int()?;
                     if c > 1 {
@@ -399,6 +408,7 @@ impl MtgAz {
             mulligans: spec.mulligans,
             chooser: spec.chooser,
             hidden_decks: spec.format == Format::Bo3,
+            log: spec.log,
             ..GameSpec::default()
         };
         let [a, b] = &seats;
@@ -543,6 +553,11 @@ impl SearchGame for MtgAz {
         self.g
             .pending_decision()
             .is_some_and(|d| matches!(d.kind, crate::decision::DecisionKind::PayMana | crate::decision::DecisionKind::PayPool))
+    }
+
+    /// The spectator view (`view.rs`): what the replay recorder stores at every step.
+    fn export_state(&self) -> String {
+        self.spectator_json()
     }
 
     fn bot_names() -> &'static [&'static str] {

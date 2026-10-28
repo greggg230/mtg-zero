@@ -1,0 +1,142 @@
+"""`python -m mtgz.az.replays`: games of a checkpoint, recorded for the replay viewer of
+delverai.greggg230.com (zero-core `zero.replay`, its docs/replays.md; the state at every step is
+the engine's spectator view, engine/src/az/view.rs: both hands, the board, the stack, the
+pending decision's options in words, the game log's tail).
+
+  python -m mtgz.az.replays runs/delver1/models/iter_0012.pt [--games 6] [--selfplay]
+      [--sims N] [--device cuda] [--upload [URL]] [--key-file F]
+
+The checkpoint plays itself, seats alternating between games. Defaults come from the
+checkpoint's run (`runs/<run>/config.json`): its spec with `"log": true` (the engine's
+play-by-play), its self-play simulations (`sims`) and `chance_k`. Evaluation settings by
+default (no noise, the most visited option: how the network plays); `--selfplay` = the run's
+self-play noise and temperature for the first `temp_moves` decisions (what training sees).
+
+Files: `runs/<run>/replays/<stamp>_<k>.json.gz` (format zero-replay/1). `--upload` posts each to
+`<url>/api/replays/upload` (default URL `SITE`) with the key from `--key-file`, the environment
+variable `MTGZ_DELVERAI_KEY` or `~/delverai/.upload_key` (the site's Worker secret UPLOAD_KEY).
+"""
+import argparse
+import base64
+import gzip
+import json
+import os
+import random
+import urllib.request
+
+import mtgz.az  # noqa: F401  (registers the game package)
+from zero import replay as core
+
+SITE = 'https://delverai.greggg230.com'
+KEY_ENV = 'MTGZ_DELVERAI_KEY'
+KEY_FILE = os.path.join(os.path.expanduser('~'), 'delverai', '.upload_key')
+
+
+def spec_with_log(spec):
+    """The spec JSON with the engine's log on (`"log": true`, engine/src/az/mod.rs)."""
+    s = json.loads(spec) if spec else {}
+    s['log'] = True
+    return json.dumps(s, separators=(',', ':'))
+
+
+def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print):
+    """`games` games of `ckpt` against itself, with the run's settings. -> zero-replay/1 dicts."""
+    run, it = core.run_of(ckpt)
+    cfg = core.run_config(run)
+    if not cfg.get('spec'):
+        raise SystemExit(f'{ckpt}: no run config with a spec next to it ({run or "no run directory"})')
+    if device is None:
+        import torch
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    seed = random.randrange(1 << 30) if seed is None else seed
+    return core.record(ckpt, opp='self', games=games, sims=sims or cfg.get('sims', 64), spec=spec_with_log(cfg['spec']),
+                       selfplay=selfplay, hint=None, chance_k=cfg.get('chance_k', 0), device=device, seed=seed,
+                       title=title, conc=conc, log=log)
+
+
+def summary(rep):
+    """The site's listing record of a replay: who played, who won, how, and how long."""
+    final = rep['states'][rep['final']] if rep['states'] else {}
+    first = rep['states'][0] if rep['states'] else {}
+    res = rep.get('result')
+    winner = None
+    if res and max(res) > min(res):
+        winner = res.index(max(res))
+    src = rep.get('source') or {}
+    return {'format': rep['format'], 'title': rep['title'], 'group': rep['group'], 'created': rep['created'],
+            'run': src.get('run'), 'iter': src.get('iter'), 'game_index': rep['game_index'],
+            'seats': [s['name'] for s in rep['seats']], 'sims': rep['seats'][0].get('sims'),
+            'selfplay': rep['selfplay'], 'winner': winner, 'draw': bool(res) and winner is None,
+            'reason': final.get('reason'), 'turns': final.get('turn', rep.get('rounds')),
+            'life': [p.get('life') for p in final.get('players', [])],
+            'starting': final.get('starting', first.get('starting')),
+            'mulligans': [p.get('mulligans') for p in final.get('players', [])],
+            'frames': len(rep['frames']), 'over': rep['over']}
+
+
+def public(rep):
+    """The replay without this machine's paths (checkpoints by file name)."""
+    rep = dict(rep, seats=[dict(s) for s in rep['seats']], source=dict(rep.get('source') or {}))
+    for s in rep['seats'] + [rep['source']]:
+        if s.get('checkpoint'):
+            s['checkpoint'] = os.path.basename(s['checkpoint'])
+    return rep
+
+
+def upload(rep, url, key, timeout=60):
+    """POST one replay to the site (`<url>/api/replays/upload`). -> the site's answer (dict)."""
+    rep = public(rep)
+    gz = gzip.compress(json.dumps(rep, separators=(',', ':')).encode('utf-8'))
+    body = json.dumps({'meta': summary(rep), 'gz': base64.b64encode(gz).decode('ascii')}).encode('utf-8')
+    return post(url.rstrip('/') + '/api/replays/upload', body, key, timeout)
+
+
+def post(url, body, key, timeout=60):
+    req = urllib.request.Request(url, data=body, method='POST',
+                                 headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {key}',
+                                          'User-Agent': 'mtgz-delverai/1'})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
+def upload_key(key_file=None):
+    """The site's upload key: `key_file`, else $MTGZ_DELVERAI_KEY, else ~/delverai/.upload_key."""
+    if key_file:
+        with open(key_file) as f:
+            return f.read().strip()
+    if os.environ.get(KEY_ENV):
+        return os.environ[KEY_ENV].strip()
+    if os.path.exists(KEY_FILE):
+        with open(KEY_FILE) as f:
+            return f.read().strip()
+    raise SystemExit(f'no upload key: --key-file, ${KEY_ENV} or {KEY_FILE}')
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('ckpt')
+    ap.add_argument('--games', type=int, default=6)
+    ap.add_argument('--sims', type=int, default=None, help="default: the run's self-play sims")
+    ap.add_argument('--selfplay', action='store_true', help="the run's self-play noise and temperature")
+    ap.add_argument('--device', default=None, help='default: cuda when available')
+    ap.add_argument('--seed', type=int, default=None)
+    ap.add_argument('--conc', type=int, default=8, help='games played side by side')
+    ap.add_argument('--title', default=None)
+    ap.add_argument('--out', default=None, help='default: <run>/replays')
+    ap.add_argument('--upload', nargs='?', const=SITE, default=None, help=f'upload to the site (default {SITE})')
+    ap.add_argument('--key-file', default=None)
+    a = ap.parse_args(argv)
+    key = upload_key(a.key_file) if a.upload else None
+    reps = record(a.ckpt, games=a.games, sims=a.sims, selfplay=a.selfplay, device=a.device, seed=a.seed, conc=a.conc,
+                  title=a.title)
+    run, _ = core.run_of(a.ckpt)
+    out = a.out or os.path.join(run or '.', 'replays')
+    for r in reps:
+        s = summary(r)
+        print(f'{core.save(r, out)}: winner {s["winner"]} turn {s["turns"]} life {s["life"]} ({s["frames"]} steps)')
+        if key:
+            print(f'  uploaded: {upload(r, a.upload, key)}')
+
+
+if __name__ == '__main__':
+    main()
