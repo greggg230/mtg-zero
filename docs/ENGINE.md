@@ -1204,7 +1204,7 @@ they isolate one keyword or trigger each.
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
 | `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c). Part 3 (section 39.5): the last two cells, a token copy of a nightbound permanent (`interactions_copies.rs`: 707.8a, 702.145f) and True-Name Nemesis's chosen player after Oko's exchange (`interactions_zones.rs`: 702.16j, 110.2) |
 | `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45); M6: every decider's encoding finite and within `FEATURE_BOUND` (games, determinized worlds, matches) and `FUZZ_POOL=exponential`, exponential boards to the turn cap (section 46.5) |
-| `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), both extremes reachable (40 basic lands, 31 of a type; 40 pool cards with the rest of the pool forced out and every count forced to 0; a card into a full deck an error), every 40-card deck of a two-card pool reachable exactly once (487,676 decks), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`; M6: the decider's encoding and every world's finite and within `FEATURE_BOUND`), measurements (`--ignored`: `measure`); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v1` |
+| `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, at least the minimum of 22 pool cards, section 47; deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), deckbuilding as picks (section 47: any card not in the deck offered, `DONE` exactly from 22 pool cards on, the extremes: 22 pool cards and 18 basic lands of one type, 40 pool cards ending the cards with every count forced to 0, the same cards in two orders one state and one encoding), every legal deck an end state reached by each order of its pool cards (every path of 6- and 7-card pools, the states of 12- and 15-card pools for several minimums, the 487,676 whole decks of a two-card pool), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`; M6: the decider's encoding and every world's finite and within `FEATURE_BOUND`; section 47: minimums 22, 0, 40 and random, `DONE` offered iff the deck holds the minimum, every deck at least the minimum), measurements (`--ignored`: `measure`; section 47: deckbuilding decisions per seat, the pool cards of random and `consensus` decks); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v2` (section 47) |
 | `tests/draft_matches.rs` | drafted matches (section 45): the `mtg` spec of an event's match (`pN_first_picks`, `pN_elsewhere`, `seed`) plays the event's match move for move (`match_game`; 32 matches: 4v4 and 2v2, random and `consensus`-built decks, best-of-three and best-of-one), the first-pick prior is exactly the cards the viewer's team never saw (193 in 4v4, 367 in 2v2; the real first picks among them), `determinize` samples first picks from it (never the viewer's knowledge) and keeps the viewer's encoding, the spec refuses contradicting knowledge, specs without the keys are what they were; a position from a draft history is seat 0's information set (its knowledge and encoding the real event's) and a history that does not fit is an error; deckbuilding's simulations divisor; `tests/test_drafted.py` (pytest): the glue (payload -> specs, results -> `resolve`, a malformed result refused), events parked by a draft driver and resolved through a heuristic match driver, the token network's actions by identity on `draft_v1`, the human-pick yardstick on a few drafts, the co-training presets |
 | `tests/draft_deferred.rs` | `team_draft` through zero-core's deferred hook (section 43): 2v2 and 1v1 events through the self-play driver with a stand-in network (deferred terminals evaluated as leaves of no options, every event parked, a malformed result refused, resolved with heuristic-played matches, samples with the real outcome and margin), the hooks mapping the inherent methods (1v1-4v4); `--ignored`: `measure_parked_memory` |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
@@ -6448,7 +6448,8 @@ fetch land, interaction: `decks::interacts`). `layout_draft_v1.json`: version 1,
 of 13 x 768, `cards` (the name of each identity). `id_actions` (a slot scores the action of its
 card's identity: the pick, or putting the card in the deck) is part 2's `TokenNet` addition; the
 pinned core ignores the key, so today every action is scored from the pooled state (tested: the
-token network reads the layout on real positions and answers a driver's leaf batch).
+token network reads the layout on real positions and answers a driver's leaf batch). Section 47
+replaced it with `draft_v2` (14,492 floats) for deckbuilding as picks.
 
 ### 41.4 The bots and the heuristic-played matches
 
@@ -7436,6 +7437,7 @@ evaluation on the Mac** (section 48, the preset since then): ~28-57 min, ~42 on 
   count and decks stay diverse within a team, at the cost of noisier picks), or a zero-core hook
   for temperature per decision class (deckbuilding sampled, picks greedy after the first pack),
   or a policy that scores `OUT` per card (a layout change: the decided card's slot scoring `OUT`).
+  The user chose deckbuilding as picks: section 47.
 
 * **The play network's start**: runs/mtg5's iteration 10 (the copy used here) lost 0/8 to the
   heuristic and won 3/4 against random at 32 simulations; the matches of the first draft
@@ -7704,6 +7706,369 @@ unchanged.
   them (the bad shard stays in `runs/mtg5/debug`). A run continues on this engine with its network
   as it is: layout v4 is unchanged and every normal state encodes bit for bit as before; only states
   past the threshold (0.009% of the default fuzz's encodings) read differently.
+
+## 47. Deckbuilding as picks (M6)
+
+Branch `m6-deckpick` (from 01fa623: main 2b27c84 with M6 parts 1-3 and branch m6-bounds,
+section 46). The user's decision of 2026-10-27 after part 3's smoke runs (45.10, 45.12): each
+deckbuilding decision **chooses the next pool card to add to the deck**, scored by its card
+identity like a draft pick, or `DONE`; after `DONE`, or when the deck is full, the basic lands;
+exactly 40 cards; temperature sampling through deckbuilding. zero-core is unchanged (pinned
+d68778e); the `mtg` game is unchanged (layout v4, behaviour digests 12642107250032a7); layout
+`draft_v1` became `draft_v2` (14,492 floats). DESIGN.md 2.3.3 describes the result.
+
+### 47.1 The problem
+
+Part 3's deckbuilding (41.1, 42.1) was a binary decision per pool card in a build order: the card's
+identity (in) or `OUT` = 768, then five basic land counts. A card's "in" was its pool slot's pointer
+logit, but `OUT` was one generic logit shared by every card decision of every seat: a small
+consistent bias of a fresh network (its value head's random preference between two near-identical
+children decides every completed-Q target the same way) flipped every card the same way. Both
+smokes swung to an extreme within two iterations: the GPU smoke's draft network put every card
+`OUT` and built 40 basic lands (31 Plains) and lost every evaluation match; the CPU smoke put every
+card in (0-4 basic lands). In self-play every seat is the same network, so every seat builds the
+same broken deck; two decks of 40 basic lands draw every match: a fixed point without signal.
+
+### 47.2 The design
+
+| | Part 3 (41.1, 42.1) | Now |
+|---|---|---|
+| a deckbuilding decision | the next card of the build order: its identity (in) or `OUT` (768) | **any pool card not in the deck** (its identity: the pool slot's pointer logit, `id_actions`), or **`DONE`** (768, a generic logit), offered once the deck holds `deck_min` pool cards |
+| the cards end | after the 45th card (a full deck forced the rest `OUT`) | `DONE`, a full deck (40 pool cards), or the whole pool in the deck (small pools): no `DONE` asked then |
+| the basic lands | five counts (`COUNT + n`; Plains .. Forest; at most 31 of a type; the Forest count forced) | unchanged (`Build::count_range`) |
+| a legal deck | 0-40 pool cards and basic lands making 40 | **22-40 pool cards** (`deck_min`) and basic lands making 40, at most 31 of a type |
+| paths to a deck | one | one per order of its pool cards (k!), one state |
+| decisions per seat | 50 (45 cards, 5 counts) | 28-45 (22-40 cards, `DONE` unless the deck is full, 5 counts) |
+| options of a card decision | 2 | up to 45 (the cards not in the deck, `DONE`) |
+
+**The minimum (`deck_min`, a spec key: 0-40, default 22, at most the pool).** `DONE` is offered
+once the deck holds 22 pool cards. (1) `DONE` is one generic logit, as `OUT` was: without a floor,
+a bias toward it ends every deck at its first decision, 40 basic lands, the GPU smoke's fixed point;
+now it is out of reach. (2) 22 pool cards means at most 18 basic lands, the most lands a 40-card
+deck plays (16-18; the pool's nonbasic lands are pool cards), so no sensible deck is excluded. (3)
+It is a format restriction of ours, like exactly 40 cards (CR 100.2b makes 40 a minimum and allows
+any number of basic lands), and for `team_draft`'s deckbuilding only: the `mtg` game's sideboarding
+(unchanged, layout v4 frozen) may go below it in games 2 and 3. Without it a uniform builder's deck
+would hold 0-40 pool cards uniformly (one in five with 32 or more basic lands).
+
+**Order and canonical form: any order.** A deck is a set: the state (`Build::inn`) is the set of
+cards in, so the encoding, the legal actions and every later decision are the same whatever order
+the cards came in (tested: the same 22 cards in two orders give equal builds, encodings and
+options). Every legal deck is one end state, reached by the k! orders of its k pool cards. The
+search does not merge them: zero-core's tree has no transpositions (a node table keyed by a
+game-provided state hash would be a zero-core change, not made, 47.9), so below the root two
+orders of the same cards are two nodes, a state evaluated twice: wasted simulations, not a bias
+(each node is the same state's value; the root's options, the recorded decision, are distinct
+cards). A simulation reaches a transposition only at depth 2 or more of a deckbuilding search of 32
+or 8 simulations over up to 45 options.
+
+**The canonical order was built first and dropped** (commit 3a73e39, replaced by d3a8fa6): each
+card added had to come after the last one added in a build order, so each deck had exactly one
+path (the user's first example). Measured, it cannot learn the deck's size:
+
+* A card chosen passes over every card before it for good, and with the minimum the cards after a
+  window are kept for it: a builder may pass over at most `pool - deck_min` = 23 cards. An
+  untrained chooser (uniform priors, Dirichlet noise at full searches, sampling by visit count)
+  jumps about half the window per choice and has no room left after ~4 choices; the rest of the
+  order is then forced (single options) and the order's last card ends the cards. Every such deck
+  has exactly the minimum of pool cards, and `DONE` is never offered, so the deck's size cannot be
+  learned until the network first learns a positional rule (add the earliest wanted card, not the
+  best one). Without a minimum the walk's deck has H(46) - 1 = 3.4 pool cards (36 basic lands;
+  simulated, 3.41 over 20,000 walks).
+* The draft fuzz (`DRAFT_FUZZ=20000`): 30,796 random decks at the default minimum, every one
+  exactly 22 pool cards, `DONE` offered at none of their card choices. `measure`: a random seat
+  made 27.0 deckbuilding decisions, 8.1 of them with two options or more.
+* With the build order of part 3 (colour groups, then lands) the forced tail was the pool's lands,
+  colourless and gold cards; sorted by identity (alphabetical) it was any cards: the order was by
+  identity in that version.
+* The smokes (47.8): every self-play deck of the CPU smoke from iteration 3 on, and all 152 of the
+  GPU smoke's iteration 1, held exactly 22 pool cards and 18 basic lands; `DONE` was chosen in 5%
+  of the CPU smoke's iteration-1 decks and never after.
+
+In any order an untrained builder's deck holds 22-40 pool cards (32.9 on average in random play:
+`measure`), `DONE` is offered at every decision from the minimum on, and a card is chosen for
+itself: the cards compete head to head, as the user asked.
+
+**Decisions and search cost** (`measure`, the desktop): a random seat makes 38.6 deckbuilding
+decisions (35.8 with two options or more) and holds 32.9 pool cards (22-40); `consensus` 31.8
+decisions (30.3), 25.8 pool cards. A random 4v4 event is 669 actions with 287 searched
+deckbuilding decisions (part 3: 760 and 387); with `consensus`-built decks 243. At deckbuilding's
+32 / 8 simulations (p_full 0.25, mean 14) that is ~3,400 leaves per event (part 3: ~5,400), the
+picks' 9,400 unchanged.
+
+### 47.3 Temperature through deckbuilding
+
+The draft presets (`team_draft-4v4`, `team_draft-gpu-smoke`, `team_draft-smoke`) set `temp_moves`
+1000. zero-core's driver samples the move by visit count while the episode's searched decisions
+(every seat's, from the event's first pick: `driver/worker.rs` `decide`) are fewer than
+`temp_moves`; a 4v4 event has at most 336 + 8 x 45 = 696 searched decisions, a 2v2 event 348, so
+every decision of an event is sampled in self-play, deckbuilding included (part 3's 120 ended
+before it). The picks come first, so covering deckbuilding means covering the draft: every pick is
+sampled too, at the cost of noisier drafts. "Early on": a relaunch with `--temp-moves 120`
+(command-line settings override the run's `config.json`) returns to the first pack only once the
+decks settle. Temperature per decision class (deckbuilding sampled, the picks greedy after the
+first pack) or a schedule by iteration needs zero-core (47.9).
+
+### 47.4 Layout `draft_v2` (14,492 floats)
+
+| | `draft_v1` | `draft_v2` |
+|---|---|---|
+| globals | 64 floats | 68: `gl::DONE_OK` (64: `DONE` is one of my options), `POOL_IN` (65: my deck's pool cards / 40), `NEED` (66: pool cards still needed before `DONE` / 40), `DECK_MIN` (67: the minimum / 40); `gl::CARDS_CHOSEN` (59) replaces the build position; `BUILD_CARD` (52): I choose a card |
+| offsets | pack 64, pool 1,084, bags 4,504 | pack 68, pool 1,088, bags 4,508 |
+| pool slot (after the card code) | in, out (decided), the card decided now, an option, its build-order position | `IN` (in the deck), `OUT` (not in once the cards are chosen), `AVAILABLE` (8: not in while I choose), `OPTION` (adding it is an option now), `BUILD_POS` (10: its rank in the pool by identity / 45) |
+| actions | a pool slot scores putting its card in (`id_actions: 0`); `OUT` and the counts generic | a pool slot scores adding its card (`id_actions: 0`); `DONE` and the counts generic |
+
+`mtgz/az/layout_draft_v2.json` (version 2; `MTGZ_WRITE_LAYOUT=1` rewrites it; `draft_v1`'s file is
+gone: no run used it), loaded by `mtgz/az/__init__.py`. A teammate's deck bag holds every card in
+its deck so far. Every value stays within the event's sizes (the fuzz checks `FEATURE_BOUND`).
+
+### 47.5 Bots and the information model
+
+`consensus` adds its plan's cards (the heuristic deckbuilder's deck: 23 spells and its
+lands, at least 22 pool cards from a 45-card pool) by identity, then `DONE`, then the counts
+nearest the plan's: still `pools::build_deck`'s deck (tested). `random` is zero-core's uniform
+bot, as before (41.4): random picks and a random legal deck, now 22-40 pool cards (it never used
+the heuristic deckbuilder; zero-core's `make_bot` answers `random` before the game's bots). The
+heuristic-played matches, the deferred glue (the payload's decks and sideboards) and the
+human-pick yardstick (picks only) are unchanged.
+
+**The information model is unchanged**: deckbuilding emits no key; `determinize` keeps the
+viewer's and its teammates' builds, gives an opponent who has built the heuristic deck of its
+known pool and restarts one building now (41.2); the decider's options never change (tested at
+every check and in the fuzz). `check_invariants`: the deck's bits inside the pool, the counts after
+the cards, room while choosing, a deck the seat built at least the minimum (a world's redrawn
+opponent deck, the heuristic's stand-in, excepted).
+
+### 47.6 Tests
+
+* `engine/tests/draft.rs` (24, `measure` among them): `deckbuilding_adds_any_card_until_done`
+  (45-card pools of a 2v2 event: every card not in the deck offered, `DONE` an error before 22 pool
+  cards and offered from then on, a card already in the deck an error; the 22 smallest cards then
+  `DONE` and the smallest counts: 22 pool cards and 18 Forests; the 22 largest and the largest
+  counts: 18 Plains, the other counts forced; every card: the 40th ends the cards, no `DONE` asked,
+  every count forced to 0, five cards in the sideboard; 22 cards in a shuffled order and in its
+  reverse: equal builds, encodings and options); `every_legal_deck_is_reachable_and_one_state`
+  (every path of the card choices of 6-card pools, minimums 0, 1, 4, 6: 64, 63, 22 and 1 card sets,
+  1,957, 1,956, 1,800 and 720 paths, each set ending exactly k! of them; a 7-card pool, minimum 3:
+  99 sets, 13,650 paths; the states with the orders merged of 12-card pools, minimums 0, 5, 12:
+  4,096, 3,302 and 1 end states, and a 15-card pool, minimum 3: 32,647, each set of at least the
+  minimum once and no other; whole decks of a two-card pool, minimums 0, 1, 2: 487,676, 354,400 and
+  110,880 decks (cards and five counts), each reached by its k! paths; `DONE` offered exactly from
+  the minimum at every decision); `encoding_slots_hold_the_pack_and_the_picks` (while choosing:
+  every card not in the deck `AVAILABLE` and an `OPTION`, the cards in `IN`, none `OUT`; `DONE_OK`,
+  `NEED`, `POOL_IN`); `spec_parsing` (`deck_min`, at most the pool, 41 and -1 refused; 14,492
+  features; `DONE` 768); the fuzz (`DRAFT_FUZZ`: the minimum 22, 0, 40 or random by event, `DONE`
+  offered exactly when the deck holds the minimum at every card choice, every finished deck at least
+  the minimum and 40 cards; since 8d7dbaf its heuristic-played matches are played one at a time,
+  `draft_bots::play_match_heuristic`, and a match that panics in the `mtg` engine is recorded with
+  its spec, the event resolved with random results and the fuzz goes on, failing at the end with
+  every such match listed, so one engine fault no longer hides the other 19,999 events);
+  `every_pool_has_45_cards_and_decks_are_legal` (at least 22 pool cards; `consensus` builds
+  `pools::build_deck`'s deck); `measure` (deckbuilding decisions per seat, the pool cards of random
+  and `consensus` decks). The information-model tests are unchanged and pass.
+* `tests/test_team_draft.py`: 14,492 features, `deck_min` 41 refused, 28-45 deckbuilding decisions
+  per seat, every deck of the payload 40 cards with at least 22 pool cards and deck + sideboard =
+  the pool; the token network on `draft_v2`. `tests/test_drafted.py`: the pool slots score every
+  card a builder may add, `DONE` generic.
+
+### 47.7 Checks
+
+At d3a8fa6 (the design) and 8d7dbaf (the fuzz's record-and-continue; the docs commit changes
+nothing else), the Mac running the committed HEAD (`tools/mac.sh`, bit-identical to the desktop,
+section 44) unless the desktop is named:
+
+* **Every engine test binary** (`cargo test --release -p engine --no-fail-fast`, `az` included:
+  the library, the 99 test files, the doctests): **1,382 passed, 0 failed, 13 ignored** at
+  d3a8fa6 (363 s) and at 8d7dbaf; the same at 3a73e39 (370 s).
+* **Behaviour digests** (`--test digest -- --ignored`): combined **12642107250032a7**, unchanged
+  (the Mac at 3a73e39 and d3a8fa6, 8.8 s; the desktop, 13.0 s).
+* **`DRAFT_FUZZ=20000`**: **fails: one of the 1,866 heuristic-played matches panicked in the `mtg`
+  engine, the pre-existing `PayMana` fault of 47.10 (case 2), not a deckbuilding regression**;
+  every check of the draft held (the desktop at 8d7dbaf, 208 s): 20,000 events
+  (4v4, 2v2, 3v3, 1v1; the minimum 22, 0, 40 or random), 9,871,224 actions, 5,040,000 searched
+  picks and 4,087,506 searched deckbuilding decisions (part 3: 11.4 million actions, 5,804,002),
+  497,122 determinized worlds, 37,488 offered options played to the end of their event, team A
+  8,080 / 8,188 / 3,732; the 30,800 random decks at the default minimum held 32.84 pool cards
+  (33.59 card choices per seat, 11.59 of them with `DONE` offered), the 89,200 others 31.28. The
+  Mac at d3a8fa6, before the fuzz recorded such panics, stopped at the same match (52 s). At
+  3a73e39 (build order): no failure, 96 s, 8,586,574 actions, 804,331 searched deckbuilding
+  decisions, 431,358 worlds, 14,415 options completed; its 30,796 random decks at the default
+  minimum all exactly 22 pool cards.
+* **`FUZZ_POOL=drafted FUZZ_MATCHES=2000`** (`--test fuzz`): no failure, 41 s: 2,000 drafted
+  matches, 4,984 games (984 matches of three, 761 drawn games), 493.5 decisions per match, 43,548
+  sideboarding decisions, 5,845 decks changed, 49,086 sampled worlds (first picks resampled in
+  42,272, decks in 48,955); the default games 300, 209.7 decisions, 80,016 options completed
+  (part 3, 45.9: 5,015 games, 508.0 decisions, 46,741 sideboarding decisions; at 3a73e39: 5,060,
+  513.0, 46,482).
+* **Python** (`bash tools/build_py.sh`, `python -m pytest -q tests`): the desktop **34 passed**
+  (36 s); the Mac 33 passed, 1 skipped (the human-pick test: no held-out drafts there).
+* **Search smoke** (`python tools/search_smoke.py --specs team_draft,team_draft_2v2,random,match
+  --seeds 0-1`, 24 events per draft configuration): **0 failed of 8**, 126 s. 4v4: 48 events, 576
+  matches, 31,120 searched draft decisions (648 per event; part 3: 704), 660,152 simulations (13,750
+  per event; part 3: 14,600), 7,750 samples, parked records at most 10.6 MB; 2v2: 48 events, 192
+  matches, 15,528 decisions, 3,850 samples, at most 5.5 MB; every event resolved with a sane
+  outcome, every match ended; random 800 games, 328,537 decisions, 8.4 million simulations; match
+  800 matches, 766,218 decisions, 20.3 million simulations (part 3's numbers: the `mtg` path is
+  unchanged). At 3a73e39 (build order) the same command failed 1 of 8: `seed 0 team_draft_2v2`, a
+  drafted match panicked in the `mtg` engine: the pre-existing `PayMana` fault of 47.10 (case 1),
+  not a deckbuilding regression.
+* **`measure`** (`--test draft measure -- --ignored`; the desktop above, the Mac: 9,864 random 4v4
+  events per second, 0.15 us per action, `encode` 2.5 us, clone + `determinize` of deckbuilding
+  states 3.9 us).
+
+### 47.8 The smoke runs (scratch run directories under `E:\mtg-zero-scratch\deckpick`)
+
+Part 3's two presets, in scratch run directories: `team_draft-smoke` (2v2 on the CPU, tiny
+networks, picks 8 / 2 simulations, deckbuilding 4 / 1) and `team_draft-gpu-smoke` (4v4, the
+run's 128 x 4 network and search: picks 64 / 16, deckbuilding 32 / 8, 8 events per iteration,
+16 drafting, 96 matches in flight, the play network from a copy of runs/mtg5's `best.pt`,
+iteration 10 at the copy, part 3's play network; its own evaluations cut to 2 matches,
+`--draft-eval-net-every 0`), both with `temp_moves` 1000. The GPU was free (runs/mtg5 stopped at
+its iteration 15; nvidia-smi: another project's model server only). A wrapper of `mtgz.az.run`
+(scratch, not committed: `run_decklog.py`) logged every parked event's decks with the phase that
+drafted it; `deckstats.py` reads them. Per self-play iteration: the decks of the events parked
+during it (every seat; rolling self-play drafts ahead, so more events than the 4 or 8 resolved),
+their pool cards (= cards added before `DONE`), spells and nonbasic lands among them, basic
+lands (and their types), all lands, the colours of their nonland cards (a colour with at least
+two), `DONE` chosen (the cards ended before 40 pool cards), distinct decks. "Checkpoint" rows:
+each iteration's network building by itself at its evaluation settings (8 events of 4 seats,
+4 simulations, deckbuilding at 2, no noise, no temperature: `ckpt_decks.py`).
+
+**Build order (the canonical form, 3a73e39), CPU 2v2, 6 iterations** (all done):
+
+| iteration | decks | pool cards | spells / nonbasic lands | basic lands (types) | lands | colours | `DONE` chosen | checkpoint's decks |
+|---:|---:|---|---|---|---:|---:|---:|---|
+| 1 | 56 | 22.4 (22-28) | 17.9 / 4.5 | 17.6 (2.2) | 22.1 | 4.3 | 5% | 22.0, 18 basic lands (iteration 0's: 40 pool cards, its ties) |
+| 2 | 16 | 22.7 (22-30) | 18.9 / 3.8 | 17.3 (3.4) | 21.1 | 4.3 | 0% | 22.0 |
+| 3 | 16 | 22.0 (all) | 18.2 / 3.8 | 18.0 (4.6) | 21.8 | 4.5 | 0% | 22.0 |
+| 4 | 12 | 22.0 (all) | 18.4 / 3.6 | 18.0 (4.4) | 21.6 | 4.6 | 0% | 22.0 |
+| 5 | 20 | 22.0 (all) | 17.8 / 4.2 | 18.0 (2.4) | 22.2 | 4.3 | 0% | |
+| 6 | 20 | 22.0 (all) | 16.9 / 5.0 | 18.0 (4.2) | 23.1 | 4.2 | 0% | |
+
+The draft network against `consensus` (4 events, heuristic-played matches) won 0, 0, 1, 0.5, 0.5,
+2 and 1 of 4 at iterations 0-6, against random 0, 1, 2, 0.5, 1, 2 and 1 of 2. Every deck was the
+minimum with the order's tail from iteration 3 on: pinned (47.2). (Iterations 5-6's checkpoints
+were not measured: the engine had moved to any order by then.)
+
+**Any order (d3a8fa6), CPU 2v2, 6 iterations** (all done; the same binary but for a then
+temporary spec switch, the final code's behaviour):
+
+| iteration | decks | pool cards | spells / nonbasic lands | basic lands (types) | lands | colours | `DONE` chosen | checkpoint's decks |
+|---:|---:|---|---|---|---:|---:|---:|---|
+| 1 | 48 | 38.3 (23-40; 36 of 48 at 40) | 31.9 / 6.4 | 1.7 (0.4) | 8.1 | 5.0 | 25% | 24.7 pool cards, `DONE` 97%, 16.7 lands (iteration 0's: 40, its ties) |
+| 2 | 24 | 25.6 (22-40) | 23.2 / 2.4 | 14.4 (1.7) | 16.8 | 4.7 | 96% | 22.0, 18 basic lands of 5 types |
+| 3 | 12 | 24.2 (22-40) | 20.7 / 3.6 | 15.8 (3.8) | 19.3 | 4.5 | 92% | 22.0 (3.1 types) |
+| 4 | 24 | 22.2 (22-23) | 19.9 / 2.2 | 17.8 (3.4) | 20.1 | 4.4 | 100% | 22.0 (3.0 types) |
+| 5 | 12 | 22.2 (22-24) | 18.8 / 3.4 | 17.8 (2.7) | 21.2 | 4.5 | 100% | 22.0 (5 types) |
+| 6 | 8 | 22.2 (22-23) | 18.5 / 3.8 | 17.8 (3.4) | 21.5 | 4.2 | 100% | 22.0, 18 basic lands of one type |
+
+Against `consensus` 1, 1, 1, 0.5, 0, 3 and 1.5 of 4 at iterations 0-6, against random 0, 0, 0, 0,
+0.5, 1.5 and 0 of 2. Every deck distinct in every iteration.
+
+**Any order (d3a8fa6), GPU 4v4, 3 iterations** (`--iters 3 --draft-eval-net-every 0`, the play
+network's own evaluation cut to 2 matches; the checkpoint rows at the run's evaluation settings:
+4 events of 8 seats, 32 simulations, deckbuilding at 16, on the GPU beside the run):
+
+| iteration | decks | pool cards | spells / nonbasic lands | basic lands (types) | lands | colours | `DONE` chosen | checkpoint's decks |
+|---:|---:|---|---|---|---:|---:|---:|---|
+| 1 | 256 | 37.2 (22-40; 149 at 40) | 30.9 / 6.3 | 2.8 (0.8) | 9.1 | 4.9 | 42% | 22.0 (all), 18 basic lands (2.2 types), `DONE` 100% (iteration 0's, the fresh network: 31.0, all: its ties) |
+| 2 | 64 | 22.7 (22-30) | 18.3 / 4.4 | 17.3 (2.7) | 21.7 | 4.5 | 100% | 22.0 (all), 18 basic lands of 2 types |
+| 3 | 56 | 23.4 (22-38) | 19.1 / 4.3 | 16.6 (2.7) | 20.9 | 4.7 | 100% | 22.0 (all), 18 basic lands of 2 types, 21.0 lands |
+
+Self-play per iteration (the draft; the matches by the play network): iteration 1 resolved 8 events
+in 1,648 s (640.6 searched draft decisions per event, 1,229 samples, 447,744 draft leaves at 272 per
+second; 183 matches, 400 per hour, 29,993 play samples), iteration 2 in 774 s (646.5, 1,324 samples;
+102 matches, 475 per hour), iteration 3 in 361 s (652.2, 1,233 samples; 83 matches, 827 per hour:
+the decks of 22 pool cards end their matches sooner); the draft's completed-Q targets over 16.8-17.1
+options, normalised entropy 0.93; no failure, `done`. The draft network against `consensus` (4
+events, heuristic-played matches) won 0, 1.5, 0.5 and 0 of 4 at iterations 0-3 (margins -2.5, -1.5,
+-4.5 and -6.0 of 12), against random 1, 1, 0.5 and 0 of 2; the draft Elo 655, 849, 720 and 646 (the
+best iteration 1).
+
+**Build order (3a73e39), GPU 4v4** (stopped during iteration 1's self-play, once the CPU smoke
+had shown the pin, to give the GPU to the final design): iteration 0's evaluation 0 of 4 against
+`consensus`, 2 of 2 against random; iteration 1's self-play (the fresh network with search and
+temperature) parked 19 events: **all 152 decks exactly 22 pool cards and 18 basic lands, `DONE`
+chosen in none** (spells 17.7, nonbasic lands 4.3, lands 22.3, colours 4.4).
+
+**Judgement: the collapse of part 3 is gone, but deckbuilding still swings to an extreme, now in
+its size.** Gone: no deck of 40 basic lands can be built (the minimum), no single logit decides
+every card (each card is its own pointer logit), and every deck of every iteration of both smokes
+is distinct, with varied cards. Not gone: in both smokes the deck's size swung within one
+iteration, from the fresh network's 37-38 pool cards (8-9 lands: its tied priors and its fast
+searches without noise add the first card of the list, the smallest identity, before `DONE`, the
+last) to `DONE` as soon as it is offered: every checkpoint from iteration 1 or 2 on builds
+exactly 22 pool cards and 18 basic lands (of one or two types), and self-play decks sit at 22-24
+with `DONE` chosen in 100%. `DONE` is the one generic logit left, and it swung as `OUT` did; the
+floor caught it at a playable deck (~19 spells, ~21 lands) instead of 40 basic lands, so the
+matches keep a signal, but the size is no longer explored, and the GPU smoke's iteration-3 network
+lost all its evaluation events (0 of 4 against `consensus`, margin -6.0 of 12; 0 of 2 against
+random, whose decks hold 33 pool cards). The colours were not learned in 3-6 iterations (4-5
+colours with two cards or more in every iteration). Whether 18 basic lands is the weak play
+network's own best answer for five-colour piles (it plays the self-play matches; the evaluation is
+heuristic-played: DESIGN.md 2.2's stated risk) or a bias of the value head was not separated here.
+Build order would not have learned the size at all (pinned at the minimum from the first iteration,
+`DONE` never offered).
+
+### 47.9 zero-core
+
+No change is needed (pinned d68778e). Possible hooks, not made (zero-core is being changed
+elsewhere):
+
+* **Temperature per decision class**: a `SearchGame` hook (e.g. `sample_move() -> Option<bool>`)
+  that `decide` consults before `temp_moves`, so deckbuilding is sampled for a whole run while the
+  picks follow `temp_moves` (today 1000 samples every pick too).
+* **A temperature schedule** by iteration in `zero.run` (e.g. `temp_moves` after iteration N), so
+  "early on" ends by itself instead of by a relaunch.
+* **Transpositions**: one node per state in the search (a table keyed by a game-provided state
+  hash), so the orders of the same deck share their statistics below the root; not needed at
+  deckbuilding's budget.
+* **A game's own `random`**: `make_bot` answers `random` before `SearchGame::make_bot`, and
+  `zero.run` plays its random yardstick as the bot named `random`; a `random` drafter that builds
+  with the heuristic deckbuilder needs one of the two to change.
+
+### 47.10 Open issues
+
+* **An `mtg` engine fault the new decks reach** (not fixed here: the `mtg` game is frozen in this
+  branch): the engine offers a cast its payment cannot pay, and `PayMana` panics (`pay.rs:1569`,
+  "PayMana: no way to pay ..."). Two cases: (1) at 3a73e39 (build order), the search smoke's `seed 0
+  team_draft_2v2`, drafted match `8/3`: P0 casts Green Sun's Zenith for X = 10 ({10}{G}); (2) at
+  d3a8fa6 and 8d7dbaf, `DRAFT_FUZZ=20000`'s event 8657, match 0: P1 casts {4}{B}{B}{B}{B}
+  (Griselbrand, in its deck). Both decks hold Wizard's Rockets ({X}, sacrifice it: X mana in any
+  combination of colours), and both panics' payment classes hold its definition (def 532: a
+  sacrifice-itself converting class with no fixed production): a lead (the castability check
+  counting what the payment cannot use), not a diagnosis. Both match specs
+  (`E:\mtg-zero-scratch\deckpick\paymana_gsz_spec.json`, `paymana_bbbb_spec.json`) panic with every
+  driver seed when heuristic seats play them, and identically on 01fa623's engine (its run-01fa623
+  checkout): the fault is part 3's. Both decks are random drafts' decks of a kind part 3's binary
+  deckbuilding rarely built; the engine is part 3's, unchanged. In a co-training run such a panic in
+  a match stops the run (a search worker's panic aborts zero-core's driver), so it is to be fixed
+  before the first run, in a branch of its own (the behaviour digests may change).
+* **The deck's size swung to the floor** (47.8): `DONE` is still one generic logit, and in both
+  smokes the network chose it as soon as it was offered from its first or second trained
+  iteration on (every checkpoint's deck 22 pool cards and 18 basic lands; self-play 22-24). The
+  floor makes that a playable deck instead of 40 basic lands, but the size is then no longer
+  explored: temperature samples `DONE` by its visits, and the value network sees few decks of
+  other sizes. Not separated: the weak play network's own preference (it plays the self-play
+  matches) from a value-head bias. To watch in the run's first iterations (the decks' pool cards and
+  lands: the evaluation decks against `consensus` show them); levers: `deck_min` 23 (the
+  textbook 23 spells and 17 basic lands as the floor, a spec key), temperature per decision class
+  (47.9), or more events per iteration than the smokes' 4 and 8.
+* **The basic land counts** are generic logits too (`COUNT + n`, unchanged): the CPU smoke's
+  iteration-6 network put all 18 basic lands of its evaluation decks into one type. The counts read
+  the deck's coloured pips (`gl::DECK_PIPS`), so a trained network can follow them; to watch.
+* **Colours**: every smoke deck had cards of 4-5 colours (two or more cards each): no colour
+  learning in 3-6 iterations of 4-8 events. The card choices are the pointer logits now, so a
+  network that learns its colours adds those cards directly.
+* **`random`'s decks changed**: zero-core's uniform bot builds 22-40 pool cards (32.9 on average,
+  `measure`) where part 3's built about 22.5; the draft Elo's random reference is not comparable
+  with part 3's. It never used the heuristic deckbuilder (only `consensus` does; 47.9 on making
+  it).
+* **Temperature covers the picks too** (47.3): every pick of an event is sampled in self-play
+  while `temp_moves` is 1000; lower it on a relaunch once the decks settle, or make it per decision
+  class in zero-core (47.9).
+* The canonical-order version (3a73e39) stays in the branch's history: its tests were replaced by
+  d3a8fa6's.
 
 ## 48. The play network's evaluation on the Mac (co-training runs, M6)
 
