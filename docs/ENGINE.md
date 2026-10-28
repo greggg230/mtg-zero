@@ -6847,7 +6847,8 @@ records, results).
   measured no interference between the two drivers' evaluators; MTG's draft leaves are ~2x an
   `mtg` leaf).
 * zero-core tools that play matches outside the run (`zero.h2h`, `zero.replay`, `zero.targets`,
-  `zero.bench`) do not resolve deferred games; the dashboard does not show `<run>/resolver/` yet.
+  `zero.bench`) do not resolve deferred games; the dashboard does not show `<run>/resolver/` yet
+  (it does since section 45.8; the other items of this list are section 45's).
 
 ## 44. The Mac: offload and remote evaluation
 
@@ -7045,9 +7046,6 @@ stops at start with the command (44.3).
 * The remote's host and paths are fixed in `mtgz/az/__init__.py` (`MTGZ_MAC` is mac.sh's only).
 * The Mac's results are not bit-identical to the desktop's for network players (44.4), so a run's
   evaluations before and after the switch differ by the usual noise only.
-
-  `zero.bench`) do not resolve deferred games; the dashboard does not show `<run>/resolver/` yet
-  (it does since section 45.8; the other items of this list are section 45's).
 
 ## 45. Team drafting end to end (M6 part 3)
 
