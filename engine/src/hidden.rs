@@ -614,19 +614,42 @@ impl Game {
         (slots, pinned)
     }
 
-    /// Hidden decks (ENGINE.md 36.11): give `owner`'s cards `slots` the
-    /// identities `defs` (one each, in order; a sampled deck's cards) and
-    /// set their sideboard. The rare-rule bits (`seen`) learn the new
-    /// identities (with hidden decks the miracle question does not read
-    /// them: `Game::deck_question`).
-    pub(crate) fn redeal(&mut self, owner: PlayerId, slots: &[CardIdx], defs: &[DefId], sideboard: std::sync::Arc<[DefId]>) {
-        debug_assert_eq!(slots.len(), defs.len());
+    /// Hidden decks (ENGINE.md 36.11): give `owner`'s cards `slots` (those
+    /// `viewer` does not know; `pinned`, kept by a payment in progress, are
+    /// not among them) the identities `defs` (one each; a sampled deck's
+    /// cards), each cloud of (`viewer`, `owner`)'s identities among the
+    /// slots of its domain (`resample_with_clouds`), and set their
+    /// sideboard. The rare-rule bits (`seen`) learn the new identities
+    /// (with hidden decks the miracle question does not read them:
+    /// `Game::deck_question`).
+    ///
+    /// (The deal must hold the clouds itself: `determinize`, which follows,
+    /// keeps the payer's hand mana sources where they are (ENGINE.md 10),
+    /// and a card a cloud places in the library dealt to such a hand slot
+    /// stayed there, so the cloud's card was dealt twice and another card
+    /// of the deck not at all; ENGINE.md 51.)
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn redeal(
+        &mut self,
+        viewer: PlayerId,
+        owner: PlayerId,
+        slots: &[CardIdx],
+        pinned: &[CardIdx],
+        defs: &[DefId],
+        sideboard: std::sync::Arc<[DefId]>,
+        rng: &mut Rng,
+    ) {
+        assert_eq!(slots.len(), defs.len(), "redeal: a sampled deck that does not fit P{owner}'s cards");
         let bits = seen_bits_of(self.db);
         for (&c, &d) in slots.iter().zip(defs) {
             if self.ident(c) != d {
                 self.seen |= bits[d as usize];
                 self.set_ident(c, d);
             }
+        }
+        if self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
+            let pool: Vec<DefId> = slots.iter().map(|&c| self.ident(c)).collect();
+            self.resample_with_clouds(viewer, owner, slots, pinned, pool, rng);
         }
         self.players[owner as usize].sideboard = sideboard;
     }
@@ -687,8 +710,9 @@ impl Game {
         let (home, needs) = self.cloud_needs(viewer, owner, slots, pinned);
         for need in &needs {
             for &d in need {
-                let ok = take_one(&mut pool, d);
-                debug_assert!(ok, "cloud identity {d} not in the pool");
+                // (Never a world that holds a card twice and another not at
+                // all: ENGINE.md 51.)
+                assert!(take_one(&mut pool, d), "determinize: a cloud's card {d} is not among P{owner}'s hidden cards for P{viewer}");
             }
         }
         rng.shuffle(&mut pool);

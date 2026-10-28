@@ -196,6 +196,9 @@ pub fn known_before(m: &MatchState, owner: PlayerId, ids: &[u16], d: DefId) -> b
 pub(crate) struct Knowledge {
     /// `owner`'s cards the viewer does not know exactly (dealt again).
     pub slots: Vec<CardIdx>,
+    /// `owner`'s hidden cards a payment in progress keeps (known for this
+    /// pass, ENGINE.md 10).
+    pub pinned: Vec<CardIdx>,
     /// The identities (card definitions) of the other cards of `owner`'s
     /// starting deck, sorted.
     pub known: Vec<DefId>,
@@ -270,7 +273,7 @@ pub(crate) fn knowledge(g: &Game, viewer: PlayerId, owner: PlayerId, sizes: [usi
     for &x in &extras {
         take_one(&mut required, x);
     }
-    Knowledge { slots: slots.to_vec(), known, extras, required }
+    Knowledge { slots: slots.to_vec(), pinned, known, extras, required }
 }
 
 /// May card `d` be in a deck that fulfills companion condition `cond`
@@ -490,7 +493,7 @@ impl super::MtgAz {
         assert_eq!(deal.len(), kn.slots.len(), "P{o}'s sampled deck does not fit their cards");
         let side: Arc<[DefId]> = Arc::from(pool.sideboard(&counts));
         if self.m.sb.is_none() {
-            self.g.redeal(o, &kn.slots, &deal, side);
+            self.g.redeal(viewer, o, &kn.slots, &kn.pinned, &deal, side, rng);
         }
         let counts: Arc<[u8]> = Arc::from(counts);
         let mut pools = (*self.m.pools).clone();
