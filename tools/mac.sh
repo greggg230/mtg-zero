@@ -24,15 +24,32 @@
 # mtgz/az/mac.py): ~/mtg-zero-wt/run-<sha12> at exactly this HEAD (the working tree must be clean:
 # the run's code is a commit), its engine built (tools/build_py.sh) and stamped with the commit.
 # Run it in the run's checkout (e.g. its pinned worktree) before the run starts with eval_remote.
+#
+# --pin NAME: a checkout for a long job on the Mac (ENGINE.md 50: the match-noise study):
+# ~/mtg-zero-wt/NAME-<sha12> at exactly this HEAD (clean tree), its engine built (target dir
+# ~/cargo-target/mtg-zero/NAME-<sha12>); later mac.sh commands never check anything out there, so a
+# job started in it keeps its code and its engine module while the branch's own checkout moves on
+# (--pin again at the same commit re-installs the module there: not while its job runs).
 set -euo pipefail
 HOST="${MTGZ_MAC:-greggkeithley@100.95.248.116}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-[ $# -gt 0 ] || { sed -n 2,26p "$0"; exit 2; }
+[ $# -gt 0 ] || { sed -n 2,32p "$0"; exit 2; }
 
 SHA="$(git rev-parse HEAD)"
 PIN="$(git rev-parse HEAD:third_party/zero-core)"            # zero-core's pinned commit
-if [ "$1" = --eval-checkout ]; then
+if [ "$1" = --pin ]; then
+  [ $# -eq 2 ] || { echo "mac.sh: --pin NAME" >&2; exit 2; }
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "mac.sh --pin: uncommitted changes (a pinned checkout is a commit):" >&2
+    git status --short --untracked-files=no >&2
+    exit 1
+  fi
+  BRANCH="$2-${SHA:0:12}"
+  CMD='set -euo pipefail
+bash tools/build_py.sh
+echo "pinned checkout ready: $PWD (target $CARGO_TARGET_DIR)"'
+elif [ "$1" = --eval-checkout ]; then
   [ $# -eq 1 ] || { echo "mac.sh: --eval-checkout takes no command" >&2; exit 2; }
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     echo "mac.sh --eval-checkout: uncommitted changes (a run's remote evaluation needs its exact code: a commit):" >&2
