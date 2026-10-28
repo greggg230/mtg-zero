@@ -115,34 +115,23 @@ fn every_path_completes(g: &Game, budget: &mut usize) -> usize {
 
 // ---- 51.1: the hidden pool's deal and a payment's pinned hand -----------------
 
-/// ENGINE.md 36.11, 10. In a best-of-three match `determinize(viewer)`
-/// samples the opponent's deck and deals its unknown cards to the slots the
-/// viewer does not know; `Game::determinize` then keeps the hand mana
-/// sources of an opponent who is paying (pinned: the payment may count on
-/// them) and deals the rest so each cloud's cards stay in its domain. The
-/// hidden pool's deal ignored the clouds, so a card a cloud places in the
-/// library could be dealt to a hand slot; a hand mana source there (Elvish
-/// Spirit Guide) was then pinned, the cloud's card was missing from what
-/// the second deal shared out and was dealt again: the world held it twice
-/// and another card of the deck not at all (fuzz match 10009649: Elvish
-/// Spirit Guide twice, no Jennifer Walters). Here the Guide is in P0's
-/// graveyard; P0 discards Emrakul, the Aeons Torn to Psychic Frog, whose
-/// trigger shuffles the graveyard into the library (P1 now knows the Guide
-/// is somewhere in it: a cloud), and casts Lightning Bolt, paying. Every
-/// world P1 samples holds P0's sampled deck exactly, the Guide in the
-/// library.
-#[test]
-fn hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_its_owner_pays() {
-    // Every card of P0's that P1 does not know sorts after the Guide
-    // (definitions are in name order), so the deal that ignored the clouds
-    // gave it the first hand slot.
-    let mut p0_lib = vec!["Mountain"; 16];
-    p0_lib.extend(["Forest"; 16]);
+/// The state of 51.1's tests: `card` in P0's graveyard; P0 discards
+/// Emrakul, the Aeons Torn to Psychic Frog, whose trigger shuffles the
+/// graveyard into the library (P1 now knows `card` is somewhere in it: a
+/// cloud); P0 casts `spell` (`lands` on the battlefield, the rest of the
+/// 40 cards Forests) and pays. Every card of P0's that P1 does not know
+/// sorts after `card` (definitions are in name order), so the deal that
+/// ignored the clouds gave it the first hand slot. In 64 worlds sampled for
+/// P1: P0's cards are the sampled deck, `card` once and in the library.
+fn hidden_pool_world_while_paying(card: &str, spell: &str, lands: &[&str]) {
+    let mut bf0 = vec!["Psychic Frog"];
+    bf0.extend_from_slice(lands);
+    let p0_lib = vec!["Forest"; 40 - bf0.len() - 5];
     let mut g = scen()
         .spec(|s| s.hidden_decks = true)
-        .battlefield(0, &["Psychic Frog", "Mountain", "Mountain"])
-        .hand(0, &["Emrakul, the Aeons Torn", "Lightning Bolt", "Mountain", "Forest"])
-        .graveyard(0, &["Elvish Spirit Guide"])
+        .battlefield(0, &bf0)
+        .hand(0, &["Emrakul, the Aeons Torn", spell, "Forest", "Forest"])
+        .graveyard(0, &[card])
         .library(0, &p0_lib)
         .battlefield(1, &["Island", "Island", "Island"])
         .library(1, &["Island"; 37])
@@ -157,7 +146,7 @@ fn hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_its_owner_pays() {
     assert_eq!((deck(&g, 0).len(), deck(&g, 1).len(), g.objs().len()), (40, 40, 80));
     let seat = |p| Seat { deck: deck(&g, p), sideboard: Vec::new(), first_picks: Vec::new(), elsewhere: Vec::new() };
     let m = MatchState::new(db(), Format::Bo3, *g.spec(), &[seat(0), seat(1)], 7).unwrap();
-    let esg = g.card(0, "Elvish Spirit Guide", Zone::Graveyard);
+    let pinned = g.card(0, card, Zone::Graveyard);
     let emrakul = g.card(0, "Emrakul, the Aeons Torn", Zone::Hand);
     // The Frog's "discard a card": Emrakul; its trigger shuffles P0's
     // graveyard into the library.
@@ -165,20 +154,21 @@ fn hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_its_owner_pays() {
     g.choose(act(frog, 0));
     finish(&mut g, |g| (g.kind() == Some(DecisionKind::DiscardCost)).then_some(Choice::Card(emrakul)));
     resolve_with(&mut g, |_| None);
-    assert_eq!((g.obj(esg).zone, g.obj(emrakul).zone), (Zone::Library, Zone::Library), "{}", log(&g));
-    assert!(!g.knows(1, esg));
+    assert_eq!((g.obj(pinned).zone, g.obj(emrakul).zone), (Zone::Library, Zone::Library), "{}", log(&g));
+    assert!(!g.knows(1, pinned));
     assert!(
-        g.clouds().iter().any(|k| k.viewer == 1 && k.owner == 0 && k.library && !k.hand && k.defs.contains(&g.obj(esg).def)),
-        "P1 knows the Guide is in P0's library: {:?}",
+        g.clouds().iter().any(|k| k.viewer == 1 && k.owner == 0 && k.library && !k.hand && k.defs.contains(&g.obj(pinned).def)),
+        "P1 knows {card} is in P0's library: {:?}",
         g.clouds()
     );
-    // P0 casts Lightning Bolt: the payment is P0's next decision.
-    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
-    g.choose(Choice::Cast(bolt));
+    // P0 casts the spell: the payment is P0's next decision.
+    let s = g.card(0, spell, Zone::Hand);
+    g.choose(Choice::Cast(s));
     for _ in 0..20 {
         match g.kind() {
             Some(DecisionKind::PayMana) => break,
             Some(DecisionKind::Target) => g.choose(Choice::Target(Target::Player(1))),
+            Some(DecisionKind::ChooseAltCost) => g.choose(Choice::Number(0)),
             _ => {
                 let c = g.pending_decision().unwrap().options[0].choice;
                 g.choose(c)
@@ -187,19 +177,49 @@ fn hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_its_owner_pays() {
     }
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
     assert!(g.player(0).hand.iter().all(|&c| !g.knows(1, c)) && !g.player(0).hand.is_empty());
-    let esg_def = g.obj(esg).def;
+    let def = g.obj(pinned).def;
     let az = MtgAz { g, m };
     for s in 0..64 {
         let mut d = az.clone();
         d.determinize(1, &mut zero_search::rng::Rng::new(s));
         let want = d.m.deck(0);
         assert_eq!(sample::game_cards(&d, 0), want, "world {s}: P0's cards are not the sampled deck");
-        let guides: Vec<CardIdx> = (0..40).map(|i| CardIdx(i as u16)).filter(|&c| sample::card_of(&d.g, c) == esg_def).collect();
-        assert_eq!(guides.len(), 1, "world {s}: one Elvish Spirit Guide");
-        assert_eq!(d.g.obj(guides[0]).zone, Zone::Library, "world {s}: the cloud's Guide in the library");
+        let copies: Vec<CardIdx> = (0..40).map(|i| CardIdx(i as u16)).filter(|&c| sample::card_of(&d.g, c) == def).collect();
+        assert_eq!(copies.len(), 1, "world {s}: one {card}");
+        assert_eq!(d.g.obj(copies[0]).zone, Zone::Library, "world {s}: the cloud's {card} in the library");
         d.g.check_knowledge().unwrap_or_else(|e| panic!("world {s}: {e}"));
         d.g.check_invariants().unwrap_or_else(|e| panic!("world {s}: {e}"));
     }
+}
+
+/// ENGINE.md 36.11, 10. In a best-of-three match `determinize(viewer)`
+/// samples the opponent's deck and deals its unknown cards to the slots the
+/// viewer does not know; `Game::determinize` then keeps the hand mana
+/// sources of an opponent who is paying (pinned: the payment may count on
+/// them) and deals the rest so each cloud's cards stay in its domain. The
+/// hidden pool's deal ignored the clouds, so a card a cloud places in the
+/// library could be dealt to a hand slot; a hand mana source there (Elvish
+/// Spirit Guide) was then pinned, the cloud's card was missing from what
+/// the second deal shared out and was dealt again: the world held it twice
+/// and another card of the deck not at all (fuzz match 10009649: Elvish
+/// Spirit Guide twice, no Jennifer Walters). Here P0 pays for Lightning
+/// Bolt.
+#[test]
+fn hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_its_owner_pays() {
+    hidden_pool_world_while_paying("Elvish Spirit Guide", "Lightning Bolt", &["Mountain", "Mountain"]);
+}
+
+/// The other pins (ENGINE.md 10): the hand cards a cost of the spell being
+/// cast may exile ("exile a red card from your hand", Fury's evoke) are
+/// kept too, whichever cost is paid. Chain Lightning dealt to the hand by
+/// the deal that ignored the clouds was pinned as a red card (the farm's
+/// drafted match 10043680 at ab02574: Force of Vigor's green card, Green
+/// Sun's Zenith twice; interactions match 10039110: Fury's red card,
+/// Chandra, Torch of Defiance in the hand and the cloud's Watery Grave out
+/// of its domain). Here P0 pays Fury's mana cost.
+#[test]
+fn hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_an_evoke_cost_pins_the_hand() {
+    hidden_pool_world_while_paying("Chain Lightning", "Fury", &["Mountain", "Mountain", "Mountain", "Mountain", "Mountain"]);
 }
 
 // ---- 51.2: another player's Lotus Petal goes to its owner's graveyard ----------
