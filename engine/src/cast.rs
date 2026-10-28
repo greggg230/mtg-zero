@@ -981,17 +981,19 @@ impl Game {
             return std::borrow::Cow::Borrowed(classes);
         }
         let mut out = classes.to_vec();
-        let mut tokens = Vec::new();
+        let mut kept = Vec::new();
         for cl in out.iter_mut() {
             if !(cl.sac_self && cl.need == 0 && !crate::pay::is_sac_slot(cl.members[0].slot)) {
                 continue;
             }
             let Yield::One(u) = cl.yld else { continue };
-            // (Tokens cease to exist: no delve.)
+            // (Tokens cease to exist: no delve; nor a card exiled instead of
+            // going to the graveyard, under Yawgmoth's Will or an opponent's
+            // Dauthi Voidwalker: `delve_sources`, ENGINE.md 49.)
             let mut cards = crate::pay::Members::new();
             for s in cl.members.iter() {
-                if self.is_token(s.card) {
-                    tokens.push((cl.clone(), *s));
+                if !self.feeds_graveyard(s.card) {
+                    kept.push((cl.clone(), *s));
                 } else {
                     cards.push(*s);
                 }
@@ -1003,7 +1005,7 @@ impl Game {
             let prods = (0..6).filter(|&t| u.mask & (1 << t) != 0).map(|t| std::array::from_fn(|i| (i == t) as u8)).collect();
             cl.yld = Yield::Multi { prods, units: Some(vec![u, crate::mana::Unit::free(0)]) };
         }
-        for (cl, s) in tokens {
+        for (cl, s) in kept {
             let mut m = crate::pay::Members::new();
             m.push(s);
             out.push(crate::pay::Class { members: m, ..cl });
@@ -1080,9 +1082,12 @@ impl Game {
         if item.delved as usize == committed.len() {
             let gy_left = n_cards.saturating_sub(keep);
             let after = late.iter().rposition(|c| committed.contains(c)).map_or(0, |i| i + 1);
-            for &c in &late[after..] {
+            for (j, &c) in late.iter().enumerate().skip(after) {
                 let rest = cost.less_generic(1);
-                if (0..=gy_left.min(rest.generic as usize)).any(|d| self.can_pay_for(p, &rest.less_generic(d as u8), allow)) {
+                // (The sources after it may be delved as well: castability
+                // counted each, `delve_classes`; ENGINE.md 49.)
+                let later = late.len() - j - 1;
+                if (0..=(gy_left + later).min(rest.generic as usize)).any(|d| self.can_pay_for(p, &rest.less_generic(d as u8), allow)) {
                     opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
                 }
             }

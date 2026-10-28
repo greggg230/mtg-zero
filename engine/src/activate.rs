@@ -540,17 +540,26 @@ impl Game {
         !self.is_token(c) && matches!(self.replaced_dest(c, Zone::Battlefield, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
     }
 
-    /// The cards `cost`'s discards put into `p`'s graveyard (none under
-    /// "exile it instead", CR 614.1a).
+    /// The cards `cost`'s discards can put into `p`'s graveyard: as many as
+    /// it discards, of the hand cards it may discard that would go there
+    /// (none under "exile it instead", CR 614.1a; not Blightsteel Colossus,
+    /// shuffled into its library: ENGINE.md 49).
     pub(crate) fn discards_feed(&self, p: PlayerId, card: CardIdx, cost: &Cost) -> usize {
         if cost.discard == 0 {
             return 0;
         }
-        let h = self.players[p as usize].hand.iter().copied().find(|&c| c != card);
-        match h {
-            Some(h) if matches!(self.replaced_dest(h, Zone::Hand, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard)) => cost.discard as usize,
-            _ => 0,
-        }
+        let n = self.players[p as usize].hand.iter().filter(|&&c| c != card && self.discard_feeds(p, card, cost, c)).count();
+        n.min(cost.discard as usize)
+    }
+
+    /// Would hand card `c`, discarded for `card`'s `cost`, go to the
+    /// graveyard (and may the cost discard it)?
+    fn discard_feeds(&self, p: PlayerId, card: CardIdx, cost: &Cost, c: CardIdx) -> bool {
+        let ok = cost.discard_filter.as_ref().is_none_or(|f| {
+            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+            self.card_matches(f, c, &ctx)
+        });
+        ok && matches!(self.replaced_dest(c, Zone::Hand, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
     }
 
     /// The cards `cost` itself puts into `p`'s graveyard before its
@@ -810,6 +819,18 @@ impl Game {
             if let Some(f) = &cost.discard_filter {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
                 opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.card_matches(f, c, &ctx)));
+            }
+            // A cost that also exiles graveyard cards (escape): while the
+            // graveyard (the discards so far in it, the sacrifices chosen to
+            // come) would be short by as many cards as discards are left,
+            // only a card that goes there helps (not Blightsteel Colossus;
+            // ENGINE.md 49, as the sacrifices above).
+            if cost.exile_graveyard > 0 {
+                let fed = picked[..n_sac].iter().filter(|&&c| self.feeds_graveyard(c)).count();
+                let need = self.exile_short(p, card, cost).saturating_sub(fed);
+                if need > 0 && need >= n_disc - picked.len() {
+                    opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.discard_feeds(p, card, cost, c)));
+                }
             }
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::DiscardCost, opts);
             return;

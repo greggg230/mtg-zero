@@ -28,6 +28,13 @@ pub const MADE: ManaMask = 1 << 6;
 /// mana ability activated within the payment (CR 605.3a, 602.2b).
 pub const NOT_MADE: ManaMask = 1 << 7;
 
+/// On a unit (never on a need, where the bit is `NOT_MADE`): mana with a
+/// spending restriction (CR 106.6: Mishra's Workshop's "only to cast
+/// artifact spells"), which can't pay Wizard's Rockets' {X}, so the Rockets
+/// never turns it into colours (ENGINE.md 49). `fits` reads a unit's types
+/// and `MADE` only.
+pub const RESTRICTED: ManaMask = 1 << 7;
+
 /// Can a unit of `unit` pay a need of `need` (their types meet; a `MADE`
 /// unit never pays a `NOT_MADE` need)?
 #[inline]

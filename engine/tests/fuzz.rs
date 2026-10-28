@@ -177,6 +177,18 @@ const GROUPS: &[(&str, &[&str])] = &[
         "Phyrexian Metamorph", "Saheeli, Sublime Artificer", "Flickerwisp", "Oust", "Swords to Plowshares",
         "Etali, Primal Conqueror // Etali, Primal Sickness", "Brainstorm", "Ponder", "Lightning Bolt",
     ]),
+    // (ENGINE.md 49: castability and payment agree.)
+    ("mana abilities x costs: converters, tapped artifacts, improvise, restricted mana, graveyard costs, X", &[
+        "Wizard's Rockets", "Urza, Lord High Artificer", "Kappa Cannoneer", "Mishra's Workshop", "Delighted Halfling",
+        "Lotus Petal", "Black Lotus", "Lion's Eye Diamond", "Psychic Frog", "Abhorrent Oculus", "Treasure Cruise",
+        "Dig Through Time", "Uro, Titan of Nature's Wrath", "Green Sun's Zenith", "Walking Ballista", "Griselbrand",
+        "Cryogen Relic", "Esika's Chariot", "Sunken Ruins", "Chromatic Star", "Pentad Prism", "Gemstone Mine",
+        "Squandered Resources", "Orcish Lumberjack", "Arena of Glory", "Rain of Filth", "Badgermole Cub",
+        "Nissa, Who Shakes the World", "Sol Ring", "Mana Vault", "Grim Monolith", "Basalt Monolith",
+        "Talisman of Dominance", "Elvish Spirit Guide", "Simian Spirit Guide", "Mana Confluence", "Ancient Tomb",
+        "Loot, the Pathfinder", "Gaea's Cradle", "Coalition Relic", "Mox Opal", "Mox Amber",
+        "Aang, Swift Savior // Aang and La, Ocean's Fury", "Tinker", "Thalia, Guardian of Thraben", "Bolas's Citadel",
+    ]),
 ];
 
 /// The cards of `FUZZ_POOL=exponential` (ENGINE.md 46): what grows a board
