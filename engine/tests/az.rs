@@ -585,3 +585,294 @@ fn heuristic_beats_random_and_is_always_legal() {
     assert_eq!(MtgAz::bot_names(), &["heuristic"]);
     assert!(make_bot::<MtgAz>(&sp, "nope", 0).is_none());
 }
+
+// ---- The opening: the declared mulligan (ENGINE.md 55) ---------------------
+
+/// The specs of the opening tests: the cube's random best-of-one decks, a
+/// best-of-three match's first game, the Legacy Izzet Delver mirror
+/// (`runs/delver1`, ENGINE.md 54).
+fn opening_specs() -> Vec<(&'static str, MtgSpec)> {
+    let names = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let mirror = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
+    vec![
+        ("cube", spec()),
+        ("bo3", MtgSpec::parse(r#"{"format": "bo3"}"#).unwrap()),
+        ("delver", MtgSpec::parse(&mirror).unwrap()),
+    ]
+}
+
+/// Every state of the opening of `games` games of `sp` (from the
+/// play-or-draw choice to the first decision of turn 1, included), with
+/// seeded random answers: play or draw, reveal a companion or not, keep or
+/// mulligan (keep after three), random bottoms.
+fn opening_states(sp: &MtgSpec, games: u64, seed: u64) -> Vec<MtgAz> {
+    let mut rng = Rng::new(seed);
+    let mut out = Vec::new();
+    for s in 0..games {
+        let mut g = MtgAz::new_game(sp, 2, seed * 1000 + s).unwrap();
+        let mut keys = Vec::new();
+        while let Some(p) = g.to_move() {
+            out.push(g.clone());
+            if g.g.turn().number >= 1 {
+                break;
+            }
+            let l = legal(&g);
+            let a = match g.g.kind() {
+                Some(engine::DecisionKind::Mulligan) if g.g.player(p as u8).mulligans >= 3 => act::PASS,
+                _ => l[rng.below(l.len() as u32) as usize],
+            };
+            g.step(a, &mut keys).unwrap();
+        }
+    }
+    out
+}
+
+/// FNV-1a over 64-bit words (as `tests/digest.rs`).
+struct Fnv(u64);
+
+impl Fnv {
+    fn new() -> Fnv {
+        Fnv(0xcbf2_9ce4_8422_2325)
+    }
+    fn u64(&mut self, x: u64) {
+        for b in x.to_le_bytes() {
+            self.0 ^= b as u64;
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+}
+
+/// The encodings of the opening, both viewers, with the two declared-mulligan
+/// globals masked, are what they were before the flag (recorded on main at
+/// 05e37bb, which did not encode it): the flag changed no other float of any
+/// opening state. (A later change to the encoding of these states re-records
+/// these values; the failure message prints the new ones.)
+#[test]
+fn opening_encodings_but_the_declaration_are_unchanged() {
+    let mut got = Vec::new();
+    for (name, sp) in opening_specs() {
+        let mut h = Fnv::new();
+        let (mut states, mut declared, mut bottoms) = (0, 0, 0);
+        for g in opening_states(&sp, 40, 21) {
+            states += 1;
+            declared += (0..2).any(|p| g.g.player(p).mulligan_declared) as u32;
+            bottoms += (g.g.kind() == Some(engine::DecisionKind::MulliganBottom)) as u32;
+            for v in 0..2 {
+                let mut x = enc(&g, v);
+                x[MULL] = 0.0;
+                x[MULL + 1] = 0.0;
+                for f in x {
+                    h.u64(f.to_bits() as u64);
+                }
+            }
+        }
+        println!("{name}: {states} opening states, {declared} with a declared mulligan, {bottoms} bottoms: {:016x}", h.0);
+        assert!(declared > 10 && bottoms > 10, "{name}: {declared} declared, {bottoms} bottoms");
+        got.push((name, format!("{:016x}", h.0)));
+    }
+    let want = [("cube", "6f267cb231046dd1"), ("bo3", "03550aad88c4a965"), ("delver", "cb3395e062b2fd8f")];
+    let want: Vec<(&str, String)> = want.iter().map(|&(n, h)| (n, h.to_string())).collect();
+    assert_eq!(got, want, "the opening's encodings changed beyond the declared-mulligan flag");
+}
+
+/// The declared-mulligan globals: `g[MULL + side]`, viewer first.
+const MULL: usize = encode::glob::MULLIGAN_DECLARED;
+
+/// The per-player global "kept" of `side` (viewer first).
+fn kept_at(side: usize) -> usize {
+    24 + 40 * side + 13
+}
+
+/// A new game of `sp` driven to the starting player's first declaration
+/// (they play first; no companion revealed).
+fn first_declaration(sp: &MtgSpec, seed: u64) -> MtgAz {
+    let mut g = MtgAz::new_game(sp, 2, seed).unwrap();
+    let mut keys = Vec::new();
+    loop {
+        match g.g.kind() {
+            Some(engine::DecisionKind::Mulligan) => return g,
+            Some(engine::DecisionKind::PlayDraw) => {
+                g.step(act::PLAYER, &mut keys).unwrap();
+            }
+            Some(engine::DecisionKind::RevealCompanion) => {
+                g.step(act::PASS, &mut keys).unwrap();
+            }
+            k => panic!("{k:?} before the mulligans"),
+        }
+    }
+}
+
+/// `g` after action `a`.
+fn after(g: &MtgAz, a: u16) -> MtgAz {
+    let mut h = g.clone();
+    h.step(a, &mut Vec::new()).unwrap();
+    h
+}
+
+/// The features where `a` and `b` differ (outside the decision's context
+/// block unless `context`).
+fn diff(a: &[f32], b: &[f32], context: bool) -> Vec<usize> {
+    let cx = encode::O_CONTEXT..encode::O_CONTEXT + encode::CONTEXT;
+    (0..NUM_FEATURES).filter(|&i| a[i] != b[i] && (context || !cx.contains(&i))).collect()
+}
+
+/// CR 103.5: the starting player's declaration of a mulligan is public and
+/// encoded at once, for both viewers: after "Mulligan" the position differs
+/// from the one before the declaration outside the decision's context (main
+/// at 05e37bb: only the context's decider differed), and from "Keep"
+/// exactly in the kept and declared flags.
+#[test]
+fn cr_103_5_a_declared_mulligan_is_encoded() {
+    for (name, sp) in opening_specs() {
+        for seed in 0..6 {
+            let g = first_declaration(&sp, seed);
+            let s = g.g.turn().starting as usize;
+            let o = 1 - s;
+            assert_eq!(g.to_move(), Some(s));
+            let (m, k) = (after(&g, act::YES), after(&g, act::PASS));
+            assert!(m.g.player(s as u8).mulligan_declared && !k.g.player(s as u8).mulligan_declared);
+            assert!(k.g.player(s as u8).kept && !m.g.player(s as u8).kept);
+            assert_eq!((m.to_move(), k.to_move()), (Some(o), Some(o)), "{name}: the other player declares next");
+            for v in 0..2 {
+                let side = (v != s) as usize; // the starting player's side for viewer v
+                let (xb, xm, xk) = (enc(&g, v), enc(&m, v), enc(&k, v));
+                assert_eq!((xb[MULL], xb[MULL + 1]), (0.0, 0.0), "{name} seed {seed}: nobody declared yet");
+                assert_eq!(diff(&xb, &xm, false), vec![MULL + side], "{name} seed {seed} viewer {v}: before / after Mulligan");
+                let mut want = vec![kept_at(side), MULL + side];
+                want.sort();
+                assert_eq!(diff(&xk, &xm, true), want, "{name} seed {seed} viewer {v}: Keep / Mulligan");
+                assert_eq!((xm[MULL + side], xm[MULL + 1 - side]), (1.0, 0.0));
+                assert_eq!((xk[MULL], xk[MULL + 1]), (0.0, 0.0));
+            }
+        }
+    }
+}
+
+/// CR 103.5: the second player declares seeing the first player's declared
+/// mulligan, in the first round and in a later one; once the mulligans are
+/// taken (new hands, the counts up) the flags are clear again.
+#[test]
+fn cr_103_5_the_second_player_sees_the_declaration_and_it_clears() {
+    use engine::DecisionKind as K;
+    let mut checked = 0;
+    for (name, sp) in opening_specs() {
+        for seed in 0..6 {
+            let g = first_declaration(&sp, seed);
+            let s = g.g.turn().starting;
+            let o = 1 - s;
+            // Round 1: the starting player declares; the other decides seeing it.
+            let m = after(&g, act::YES);
+            let x = enc(&m, o as usize);
+            assert_eq!(x[encode::O_CONTEXT + K::Mulligan as usize], 1.0);
+            assert_eq!((x[MULL], x[MULL + 1]), (0.0, 1.0), "{name} seed {seed}: P{o} sees P{s}'s declaration");
+            // Both declare: the mulligans are taken at once (one new hand each).
+            let mut r = after(&m, act::YES);
+            for p in [s, o] {
+                assert!(!r.g.player(p).mulligan_declared, "{name} seed {seed}: P{p}'s flag after its mulligan");
+                assert_eq!((r.g.player(p).mulligans, r.g.player(p).hand.len()), (1, 7));
+            }
+            assert_eq!((r.g.kind(), r.to_move()), (Some(K::MulliganBottom), Some(s as usize)));
+            while r.g.kind() == Some(K::MulliganBottom) {
+                for v in 0..2 {
+                    let x = enc(&r, v);
+                    assert_eq!((x[MULL], x[MULL + 1]), (0.0, 0.0), "{name} seed {seed}: bottoms");
+                }
+                let a = legal(&r)[0];
+                r = after(&r, a);
+            }
+            // Round 2: the same, one card fewer.
+            assert_eq!((r.g.kind(), r.to_move()), (Some(K::Mulligan), Some(s as usize)));
+            assert_eq!((r.g.player(s).hand.len(), r.g.player(o).hand.len()), (6, 6));
+            for v in 0..2 {
+                let x = enc(&r, v);
+                assert_eq!((x[MULL], x[MULL + 1]), (0.0, 0.0), "{name} seed {seed}: round 2 before the declaration");
+            }
+            let m2 = after(&r, act::YES);
+            let x = enc(&m2, o as usize);
+            assert_eq!((x[MULL], x[MULL + 1]), (0.0, 1.0), "{name} seed {seed}: round 2");
+            // The other keeps: the starting player's second mulligan is taken.
+            let t = after(&m2, act::PASS);
+            assert!(!t.g.player(s).mulligan_declared && t.g.player(o).kept);
+            assert_eq!(t.g.player(s).mulligans, 2);
+            for v in 0..2 {
+                let x = enc(&t, v);
+                assert_eq!((x[MULL], x[MULL + 1]), (0.0, 0.0), "{name} seed {seed}: after round 2");
+            }
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 18);
+}
+
+/// In every opening state of the sampled openings (both viewers) the flags
+/// are the players' `mulligan_declared`, set only while the second player
+/// declares after the starting player declared a mulligan.
+#[test]
+fn cr_103_5_the_declared_flags_follow_the_game() {
+    let mut set = 0;
+    for (name, sp) in opening_specs() {
+        for g in opening_states(&sp, 40, 22) {
+            let s = g.g.turn().starting;
+            if (0..2).any(|p| g.g.player(p).mulligan_declared) {
+                set += 1;
+                assert!(g.g.player(s).mulligan_declared && !g.g.player(1 - s).mulligan_declared, "{name}");
+                assert_eq!((g.g.kind(), g.to_move()), (Some(engine::DecisionKind::Mulligan), Some(1 - s as usize)), "{name}");
+            }
+            for v in 0..2u8 {
+                let x = enc(&g, v as usize);
+                for (side, p) in [v, 1 - v].into_iter().enumerate() {
+                    assert_eq!(x[MULL + side], g.g.player(p).mulligan_declared as u8 as f32, "{name}: P{p} for viewer P{v}");
+                }
+            }
+        }
+    }
+    assert!(set > 30, "{set}");
+}
+
+/// The flag survives clones and `determinize` (for both viewers: the flag is
+/// public, so the viewer's encoding is the same in every world, and every
+/// world takes the declared mulligan); equal states encode equally (the
+/// same game rebuilt and replayed; two worlds of the decider after the same
+/// declaration: zero-core's child signature).
+#[test]
+fn the_declared_mulligan_survives_clones_and_determinize() {
+    use engine::DecisionKind as K;
+    let mut zr = zero_search::rng::Rng::new(55);
+    for (name, sp) in opening_specs() {
+        for seed in 0..6 {
+            let g = first_declaration(&sp, seed);
+            let s = g.g.turn().starting;
+            let m = after(&g, act::YES);
+            let rebuilt = after(&first_declaration(&sp, seed), act::YES);
+            let c = m.clone();
+            assert!(c.g.player(s).mulligan_declared);
+            for v in 0..2 {
+                assert_eq!(enc(&m, v), enc(&rebuilt, v), "{name} seed {seed}: equal states");
+                assert_eq!(enc(&m, v), enc(&c, v), "{name} seed {seed}: a clone");
+            }
+            assert_eq!(after(&c, act::PASS).g.player(s).mulligans, 1);
+            for v in 0..2 {
+                for _ in 0..3 {
+                    let mut d = m.clone();
+                    d.determinize(v, &mut zr);
+                    assert!(d.g.player(s).mulligan_declared, "{name} seed {seed}: determinized for P{v}");
+                    assert_eq!(enc(&d, v), enc(&m, v), "{name} seed {seed}: the viewer's encoding in a world of P{v}");
+                    let t = after(&d, act::PASS);
+                    assert!(!t.g.player(s).mulligan_declared);
+                    assert_eq!(t.g.player(s).mulligans, 1);
+                    assert_eq!((t.g.kind(), t.to_move()), (Some(K::MulliganBottom), Some(s as usize)));
+                }
+            }
+            // Two worlds of the deciding starting player, the same declaration.
+            let (mut a, mut b) = (g.clone(), g.clone());
+            a.determinize(s as usize, &mut zr);
+            b.determinize(s as usize, &mut zr);
+            let (mut ka, mut kb) = (Vec::new(), Vec::new());
+            a.step(act::YES, &mut ka).unwrap();
+            b.step(act::YES, &mut kb).unwrap();
+            assert_eq!((ka, a.to_move(), legal(&a)), (kb, b.to_move(), legal(&b)));
+            assert_eq!(enc(&a, s as usize), enc(&b, s as usize), "{name} seed {seed}: two worlds of P{s}");
+            assert_eq!(enc(&a, s as usize)[MULL], 1.0);
+        }
+    }
+}

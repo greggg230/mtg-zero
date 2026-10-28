@@ -25,7 +25,10 @@
 //! turn (CR 103.1; `g[18]`: the viewer is the starting player); per player
 //! (`g[24 + 40 * side..]`) `glob::SIDEBOARD`: the cards of their sideboard
 //! still outside the game / 15, `glob::COMPANION`: a revealed companion
-//! whose special action is available.
+//! whose special action is available. After the freeze (ENGINE.md 55, in
+//! spare globals, no width or offset changed): `g[125 + side]`
+//! (`glob::MULLIGAN_DECLARED`), the player declared a mulligan not yet taken
+//! (CR 103.5).
 //!
 //! A card code (52 floats) is the card's stable identity (`identity.rs`: its
 //! position in the cube's IR card list, tokens from a registry; capacity
@@ -353,7 +356,19 @@ pub mod glob {
     pub const COMPANION: usize = 39;
     /// `g[CHOOSER]`: the viewer chose who takes the first turn (CR 103.1).
     pub const CHOOSER: usize = 124;
+    /// `g[MULLIGAN_DECLARED + side]` (viewer first): the player declared a
+    /// mulligan in this round of declarations and has not taken it yet (CR
+    /// 103.5: the declarations are public; ENGINE.md 55). Set only while the
+    /// second player declares after the starting player declared a mulligan
+    /// (once every player has declared, the mulligans are taken). In layout
+    /// v4's spare globals 125-126 (127 stays spare).
+    pub const MULLIGAN_DECLARED: usize = 125;
 }
+const _: () = assert!(
+    glob::ROOM + 2 * crate::dungeon::ROOMS.len() <= glob::CHOOSER
+        && glob::CHOOSER < glob::MULLIGAN_DECLARED
+        && glob::MULLIGAN_DECLARED + 2 <= GLOBALS
+);
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
 fn code(out: &mut [f32], db: &CardDb, ids: &[u16], def: DefId) {
@@ -1034,6 +1049,8 @@ impl Game {
             if let (Some(r), _) = self.dungeon(p) {
                 g[glob::ROOM + crate::dungeon::ROOMS.len() * side + r as usize] = 1.0;
             }
+            // ENGINE.md 55: a declared mulligan not yet taken (public).
+            g[glob::MULLIGAN_DECLARED + side] = self.players[p as usize].mulligan_declared as u8 as f32;
         }
         // Day and night (CR 731).
         g[104] = (self.day == Some(true)) as u8 as f32;
