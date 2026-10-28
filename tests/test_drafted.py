@@ -180,3 +180,13 @@ def test_cotraining_presets():
     remote = {n: (PRESETS[n].get('eval_remote', ''), resolver_config(dict(DEFAULTS, **PRESETS[n]))['eval_remote'])
               for n in ('team_draft-4v4', 'team_draft-gpu-smoke', 'team_draft-smoke')}
     assert remote == {'team_draft-4v4': ('', 'mac'), 'team_draft-gpu-smoke': ('', 'mac'), 'team_draft-smoke': ('', '')}
+    # remote self-play (ENGINE.md 52): opt-in presets only; the running presets do not change
+    sp = {n: (PRESETS[n].get('selfplay_remote', ''), resolver_config(dict(DEFAULTS, **PRESETS[n]))['selfplay_remote'])
+          for n in ('team_draft-4v4', 'team_draft-gpu-smoke', 'team_draft-smoke', 'team_draft-4v4-mac')}
+    assert sp == {'team_draft-4v4': ('', ''), 'team_draft-gpu-smoke': ('', ''), 'team_draft-smoke': ('', ''),
+                  'team_draft-4v4-mac': ('', 'mac')}
+    mac4 = PRESETS['team_draft-4v4-mac']
+    assert {k: v for k, v in mac4.items() if k != 'resolver_cfg'} == {k: v for k, v in run.items() if k != 'resolver_cfg'}
+    assert mac4['resolver_cfg'] == dict(run['resolver_cfg'], selfplay_remote='mac')
+    assert PRESETS['mtg-4-mac'] == dict(PRESETS['mtg-4'], games=200, selfplay_remote='mac')
+    assert all(not PRESETS[n].get('selfplay_remote') for n in PRESETS if not n.endswith('-mac'))

@@ -11,16 +11,20 @@ a lock appearing and continues it once the lock is gone; exits with COMMAND's st
 SIGINT to this wrapper continue the group and pass the signal on. `tools/fuzz_farm.py` and
 `tools/match_noise.py` use the same functions in-process.
 
-The locks watched: `$MTGZ_BACKOFF_LOCKS` (colon-separated lock directories) or by default the
-mtgz remote's, `~/mtgz-remote/.eval.lock`, and the other zero-core games' remotes on the Mac
-(`~/kbz-remote/.eval.lock`, `~/domz-remote/.eval.lock`: their evaluations share the cores too).
-A lock whose owner process is gone is ignored (zero-core removes such a stale lock at the next
-evaluation); a lock without its owner file yet counts as held (being created).
+The locks watched: `$MTGZ_BACKOFF_LOCKS` (colon-separated lock directories; glob patterns allowed)
+or by default the mtgz remote's, `~/mtgz-remote/.eval.lock`, the other zero-core games' remotes on
+the Mac (`~/kbz-remote/.eval.lock`, `~/domz-remote/.eval.lock`: their evaluations share the cores
+too) and **remote self-play's busy markers** (`~/mtgz-selfplay/.busy-*`: a run's self-play worker
+holds one while its phase runs, zero-core's zero/remoteplay.py, docs/ENGINE.md 52: the farm and the
+studies yield to a run's self-play as to its evaluations). A lock whose owner process is gone is
+ignored (zero-core removes such a stale lock at the next evaluation); a lock without its owner file
+yet counts as held (being created).
 
 A stopped job's wall clock keeps running: a job that times itself must count only the time it was
 running (`Governor.paused_s`), or its watchdog would fire after a long evaluation.
 """
 import argparse
+import glob
 import json
 import os
 import signal
@@ -31,13 +35,25 @@ import time
 
 HOME = os.path.expanduser('~')
 DEFAULT_LOCKS = [os.path.join(HOME, d, '.eval.lock') for d in ('mtgz-remote', 'kbz-remote', 'domz-remote')]
+# remote self-play's busy markers (zero.remoteplay: <selfplay workdir>/.busy-<mirror>-w<K>, mtgz's workdir
+# ~/mtgz-selfplay): held while a run's self-play phase runs on the Mac
+SELFPLAY_BUSY = os.path.join(HOME, 'mtgz-selfplay', '.busy-*')
 
 
 def lock_dirs():
+    """The lock directories (or glob patterns of them) to back off for."""
     env = os.environ.get('MTGZ_BACKOFF_LOCKS')
     if env is not None:
         return [os.path.expanduser(p) for p in env.split(':') if p]
-    return list(DEFAULT_LOCKS)
+    return list(DEFAULT_LOCKS) + [SELFPLAY_BUSY]
+
+
+def _expand(locks):
+    for p in locks:
+        if glob.has_magic(p):
+            yield from sorted(glob.glob(p))
+        else:
+            yield p
 
 
 def _alive(pid):
@@ -52,7 +68,7 @@ def _alive(pid):
 
 def held(locks=None):
     """The first lock directory held by a live owner (or being created), else None."""
-    for d in (lock_dirs() if locks is None else locks):
+    for d in _expand(lock_dirs() if locks is None else locks):
         if not os.path.isdir(d):
             continue
         try:

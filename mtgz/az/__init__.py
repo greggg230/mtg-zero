@@ -6,10 +6,12 @@ between games, decks built from random card pools), its object layout for zero-c
 network (arch 'tokens': `layout_v4.json`, written by the engine's `encode::layout_json`), the game
 `team_draft` (docs/ENGINE.md 41, 43, 45, DESIGN.md 2.3: a team cube draft and deckbuilding up to
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
-presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4; the co-training presets team_draft-smoke,
-team_draft-gpu-smoke, team_draft-4v4), the default spec, the evaluation spec, the dashboard's
-title / port, the remote evaluator 'mac' (run setting eval_remote: the MacBook evaluates with
-exactly the run's code; `mtgz/az/mac.py`, docs/ENGINE.md 44), and for co-training runs
+presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
+team_draft-smoke, team_draft-gpu-smoke, team_draft-4v4, team_draft-4v4-mac), the default spec, the
+evaluation spec, the dashboard's title / port, the remote 'mac' (run setting eval_remote: the
+MacBook evaluates with exactly the run's code; `mtgz/az/mac.py`, docs/ENGINE.md 44; run setting
+selfplay_remote, or a co-training run's resolver_cfg selfplay_remote: it self-plays too, ENGINE.md
+52), and for co-training runs
 `team_draft`'s deferred glue (its payload's matches as `mtg` specs and their results back:
 `mtgz.az.drafted`) and its other yardstick (the agreement with held-out human picks:
 `mtgz.az.human_picks`).
@@ -148,6 +150,17 @@ PRESETS['team_draft-gpu-smoke'] = dict(
 # The CPU smoke (M6 part 3): 2v2 events (4 seats, 4 matches each: both rotations) with tiny token
 # networks for both games, few simulations, a few events per iteration; no GPU, everything evaluated here
 # (the remote's end-to-end check adds "eval_remote": "mac" to its resolver_cfg, ENGINE.md 48).
+# Remote self-play on the Mac (docs/ENGINE.md 52, zero-core docs/az.md 5.3 and 11.6), opt-in: the MacBook
+# self-plays with the run's checkpoint i-1 while the desktop plays its quota (its samples come back as
+# compressed shards into data/iter_i/), or in a co-training run plays a share of the play network's
+# queued matches. mtg-4-mac: mtg-4 with a desktop quota of 200 matches (the Mac adds its share on top:
+# ENGINE.md 50.3's single-game plan); team_draft-4v4-mac: team_draft-4v4 with the play network's
+# matches on the Mac too. The run's checkout needs `bash tools/mac.sh --eval-checkout` before it starts
+# (the same checkout as the evaluations). A running run turns it on at a restart with a flag
+# (ENGINE.md 52.5): presets fill only settings a run has not saved.
+PRESETS['mtg-4-mac'] = dict(PRESETS['mtg-4'], games=200, selfplay_remote='mac')
+PRESETS['team_draft-4v4-mac'] = dict(
+    PRESETS['team_draft-4v4'], resolver_cfg=dict(PRESETS['team_draft-4v4']['resolver_cfg'], selfplay_remote='mac'))
 PRESETS['team_draft-smoke'] = dict(
     game='team_draft', spec=SPEC_DRAFT_RUN, players=[4], iters=2, games=4, conc=4, sims=8, sims_fast=2, p_full=0.25,
     temp_moves=1000, policy_target='cq', arch='tokens', hidden=32, blocks=1, heads=2, ff=64, batch=64, min_steps=10,
@@ -169,10 +182,24 @@ PACKAGE = register(GamePackage(
     # ~/mtg-zero-wt/run-<sha12> of the commit of the run's checkout (`bash tools/mac.sh
     # --eval-checkout` there), checked when the run starts and before every evaluation (mtgz/az/mac.py).
     # CPU inference (MPS: twice the time at these batches of ~6-13 leaves), 3 inference workers of 4
-    # torch threads each (ENGINE.md 44.4: the Elo matches 325 s, against 575 s with one worker of 12)
+    # torch threads each (ENGINE.md 44.4: the Elo matches 325 s, against 575 s with one worker of 12).
+    # Remote self-play (run setting selfplay_remote 'mac', zero.remoteplay; ENGINE.md 50.3, 52): 2 worker
+    # processes (one is bound by its own Python loop: 1 / 2 / 3 processes 19.4k / 33.0k / 37.1k leaves/s),
+    # each 768 matches in flight, 12 search threads, 4 groups of 192 with 4 inference workers of 3 torch
+    # threads (50.3's best), CPU inference, shards of 8192 samples compressed; at nice 5 (above the fuzz
+    # farm's and the studies' 19, below anything at normal priority); mirrors in ~/mtgz-selfplay; they
+    # back off while an evaluation holds ~/mtgz-remote/.eval.lock (always) or the other games' remotes'
+    # locks on the Mac (their evaluations share the cores)
     remotes={'mac': RunCommitRemote(ROOT, host='greggkeithley@100.95.248.116', home='/Users/greggkeithley',
                                     python='/Users/greggkeithley/.venvs/dominion-zero/bin/python',
                                     workdir='/Users/greggkeithley/mtgz-remote', env={'OMP_NUM_THREADS': '4'},
                                     overrides={'infer_device': 'cpu', 'train_device': 'cpu', 'threads': 12,
-                                               'groups': 2, 'infer_workers': 3})},
+                                               'groups': 2, 'infer_workers': 3},
+                                    selfplay={'workdir': '/Users/greggkeithley/mtgz-selfplay', 'procs': 2, 'nice': 5,
+                                              'locks': ['/Users/greggkeithley/kbz-remote/.eval.lock',
+                                                        '/Users/greggkeithley/domz-remote/.eval.lock'],
+                                              'env': {'OMP_NUM_THREADS': '3'},
+                                              'overrides': {'infer_device': 'cpu', 'train_device': 'cpu', 'conc': 768,
+                                                            'threads': 12, 'groups': 4, 'infer_workers': 4,
+                                                            'torch_threads': 3, 'shard_rows': 8192}})},
 ))

@@ -1,6 +1,7 @@
 """The MacBook as a run's remote evaluator (run setting eval_remote = 'mac'; zero.remote,
-docs/ENGINE.md 44): the remote spec of MTG Zero's game package, and the checks that the Mac
-evaluates with exactly the run's code.
+docs/ENGINE.md 44) and remote self-play worker (run setting selfplay_remote = 'mac', a co-training
+run's resolver_cfg selfplay_remote; zero.remoteplay, docs/ENGINE.md 52): the remote spec of MTG Zero's
+game package, and the checks that the Mac evaluates and self-plays with exactly the run's code.
 
 The run's code is the commit of its checkout (where the run process imports mtgz from: a pinned
 run worktree, or main). The Mac's checkout of it is ~/mtg-zero-wt/run-<sha12>, made by `bash
@@ -16,10 +17,15 @@ checkout's git dir). `RunCommitRemote` is the spec; it resolves when the run sta
   prepares it; the Mac unreachable -> a warning only (zero.remote retries an evaluation every 5
   minutes, and the check below runs before each one).
 
-On the Mac, `python -m mtgz.az.remote eval ...` checks the checkout (`verify_checkout`) before
-anything else and refuses with the reason (zero.remote logs it in the run's log and retries): an
-evaluation never runs with other code than the run's. `python -m mtgz.az.remote check [SHA]`: the
-check alone (SHA default $MTGZ_REMOTE_COMMIT).
+On the Mac, `python -m mtgz.az.remote eval ...` and `... selfplay ...` check the checkout
+(`verify_checkout`) before anything else and refuse with the reason (zero.remote logs it in the
+run's log and retries; zero.remoteplay logs the worker's failure and starts it again later): an
+evaluation or a self-play worker never runs with other code than the run's. `python -m
+mtgz.az.remote check [SHA]`: the check alone (SHA default $MTGZ_REMOTE_COMMIT).
+
+The spec's `selfplay` dict (zero.remoteplay): the self-play workers' workdir, processes, niceness,
+the other games' evaluation locks they back off for, and their run-setting overrides; it resolves
+with the rest (the same checkout, commit and environment).
 """
 import os
 import shlex
@@ -86,14 +92,15 @@ class RunCommitRemote(Mapping):
     those of the commit of the run's checkout `root`, resolved and checked on first use (module
     docstring). `home`: the remote's home directory (absolute: zero.remote quotes the paths)."""
 
-    KEYS = ('host', 'repo', 'python', 'workdir', 'env', 'overrides')
+    KEYS = ('host', 'repo', 'python', 'workdir', 'env', 'overrides', 'selfplay')
 
-    def __init__(self, root, host, home, python, workdir, env=None, overrides=None):
+    def __init__(self, root, host, home, python, workdir, env=None, overrides=None, selfplay=None):
         self.root = root
         self.fixed = {'host': host, 'python': python, 'workdir': workdir}
         self.home = home
         self.env = dict(env or {})
         self.overrides = dict(overrides or {})
+        self.selfplay = dict(selfplay or {})
         self._spec = None
 
     def __iter__(self):
@@ -116,11 +123,11 @@ class RunCommitRemote(Mapping):
         """-> the spec for the run's checkout as it is now (SystemExit: see the module docstring)."""
         head, dirty = checkout_state(self.root)
         if dirty:
-            raise SystemExit(f'eval_remote: the run\'s checkout {self.root} has uncommitted changes, so no '
-                             f'remote checkout can hold its code: {"; ".join(d.strip() for d in dirty[:5])} '
-                             f'(commit them, or run without eval_remote)')
+            raise SystemExit(f'eval_remote / selfplay_remote: the run\'s checkout {self.root} has uncommitted '
+                             f'changes, so no remote checkout can hold its code: '
+                             f'{"; ".join(d.strip() for d in dirty[:5])} (commit them, or run without the remote)')
         spec = dict(self.fixed, repo=eval_checkout(head, self.home), env=dict(self.env, **{ENV_COMMIT: head}),
-                    overrides=dict(self.overrides))
+                    overrides=dict(self.overrides), selfplay=dict(self.selfplay))
         if preflight:
             self.preflight(spec, head)
         return spec
