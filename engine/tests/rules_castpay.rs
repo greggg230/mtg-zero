@@ -372,6 +372,46 @@ fn cr_712_11b_a_face_down_card_cast_with_a_choice_of_faces_is_revealed() {
     assert_eq!(g.obj(bb).known, 0b11, "revealed to both players");
 }
 
+/// CR 707.2, 601.2g: a copy has the copied card's mana ability, and
+/// Saheeli's copy is an artifact as well (Urza's "tap an untapped artifact
+/// you control: add {U}" can tap it). Mox Sapphire a copy of Llanowar Elves
+/// ({T}: add {G}), the Elves and a Mountain pay Oko ({1}{U}{G}): the copy
+/// for Urza's {U}, the Elves' {G}. The payment offered one source per kind
+/// (same definition and ability), the first in order, the copy: picked for
+/// {G} it leaves no {U}, so nothing was offered (castability, card by card,
+/// was right). Found by the agreement fuzz (board 2,505,552).
+#[test]
+fn cr_707_2_a_copy_that_is_also_an_artifact_for_urza_is_not_the_one_offered_for_its_green() {
+    use engine::db::AbilitySlot;
+    let mut g = scen()
+        .battlefield(0, &["Mox Sapphire", "Llanowar Elves", "Urza, Lord High Artificer", "Saheeli, Sublime Artificer", "Mountain"])
+        .hand(0, &["Oko, Thief of Crowns"])
+        .at(Step::Main1, 0)
+        .start();
+    let (sapphire, elves) = (g.card(0, "Mox Sapphire", Zone::Battlefield), g.card(0, "Llanowar Elves", Zone::Battlefield));
+    let saheeli = g.card(0, "Saheeli, Sublime Artificer", Zone::Battlefield);
+    g.choose(Choice::Ability(saheeli, AbilitySlot::Activated(0)));
+    finish(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => [g.tgt(sapphire), g.tgt(elves)].into_iter().find(|&c| g.has_option(c)),
+        _ => None,
+    });
+    for _ in 0..20 {
+        if g.stack().is_empty() {
+            break;
+        }
+        g.pass();
+        finish(&mut g, |_| None);
+    }
+    assert_eq!(g.name(sapphire), "Llanowar Elves", "a copy: {}", log(&g));
+    let oko = g.card(0, "Oko, Thief of Crowns", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(oko)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(oko));
+    let mut budget = 2_000;
+    assert!(every_path_completes(&g, &mut budget) > 0);
+    finish(&mut g, |_| None);
+    assert_eq!(g.obj(oko).zone, Zone::Stack, "{}", log(&g));
+}
+
 // ---- 49.4: the agreement, fuzzed --------------------------------------------
 
 /// The cube's lands, its nonland permanents with a mana ability or a mana
@@ -610,7 +650,7 @@ fn check_board(seed: u64, pools: &Pools, paths: u32, stats: &mut [u64; 4]) -> Ve
                     follow(&mut h, &mut Rng::new(path_seed), k, trace);
                 };
                 if let Err(p) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(None))) {
-                    let err: String = message(p).chars().take(700).collect();
+                    let err: String = message(p).chars().take(if logged { 100_000 } else { 700 }).collect();
                     let trace = Trace::default();
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(Some(&trace))));
                     fails.push(format!(
@@ -647,7 +687,7 @@ fn check_board(seed: u64, pools: &Pools, paths: u32, stats: &mut [u64; 4]) -> Ve
                 }
             }
             Err(p) => {
-                let err: String = message(p).chars().take(700).collect();
+                let err: String = message(p).chars().take(if logged { 100_000 } else { 700 }).collect();
                 let trace = Trace::default();
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(Some(&trace))));
                 fails.push(format!(

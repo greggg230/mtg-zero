@@ -1534,40 +1534,65 @@ impl Game {
             if cl.only & !pm.keep.allow != 0 {
                 continue; // its mana can't be spent on this (CR 106.6)
             }
-            // A card already picked for one of its abilities is spent.
-            let Some(&rep) = cl.members.iter().find(|s| pm.free(&classes, cl, s)) else { continue };
-            let ok = if cl.convert {
-                !pm.convert && pm.chosen.is_empty() && self.convert_ok(&pm, &classes, ci, rep)
-            } else {
-                match &cl.yld {
-                    Yield::One(u) => match self.after_picks(&pm, &classes, dmg, budget, Some((ci, rep))) {
-                        None => false,
-                        Some(left) => {
-                            // Only classes from this one on can complete the
-                            // set (the canonical order), so feasibility is
-                            // checked against those; they all make one mana.
-                            let rest = self.pay_cands(&pm, &classes, ci, Some(rep), dmg);
-                            if groups.is_empty() {
-                                let mut ch = chosen_masks.clone();
-                                ch.push(u.mask);
-                                cands_payable(&pm.cost, &pm.marked, &ch, &rest, left)
-                            } else {
-                                spends.iter().any(|s| {
-                                let mut ch = chosen_masks.clone();
-                                ch.push(u.mask);
-                                ch.extend(s.iter().copied());
-                                cands_payable(&pm.cost, &pm.marked, &ch, &rest, left)
-                            })
+            let ok_of = |rep: Src| -> bool {
+                if cl.convert {
+                    !pm.convert && pm.chosen.is_empty() && self.convert_ok(&pm, &classes, ci, rep)
+                } else {
+                    match &cl.yld {
+                        Yield::One(u) => match self.after_picks(&pm, &classes, dmg, budget, Some((ci, rep))) {
+                            None => false,
+                            Some(left) => {
+                                // Only classes from this one on can complete the
+                                // set (the canonical order), so feasibility is
+                                // checked against those; they all make one mana.
+                                let rest = self.pay_cands(&pm, &classes, ci, Some(rep), dmg);
+                                if groups.is_empty() {
+                                    let mut ch = chosen_masks.clone();
+                                    ch.push(u.mask);
+                                    cands_payable(&pm.cost, &pm.marked, &ch, &rest, left)
+                                } else {
+                                    spends.iter().any(|s| {
+                                        let mut ch = chosen_masks.clone();
+                                        ch.push(u.mask);
+                                        ch.extend(s.iter().copied());
+                                        cands_payable(&pm.cost, &pm.marked, &ch, &rest, left)
+                                    })
+                                }
                             }
+                        },
+                        Yield::Multi { .. } => {
+                            debug_assert!(pm.chosen.is_empty(), "several-mana classes come first");
+                            !self.feasible_prods(&pm, &classes, ci, rep).is_empty()
                         }
-                    },
-                    Yield::Multi { .. } => {
-                        debug_assert!(pm.chosen.is_empty(), "several-mana classes come first");
-                        !self.feasible_prods(&pm, &classes, ci, rep).is_empty()
                     }
                 }
             };
-            if ok {
+            // A card already picked for one of its abilities is spent. The
+            // members of a class are alike but for their cards' other
+            // sources and reservations (Mox Sapphire a copy of Llanowar
+            // Elves, Saheeli's: also an artifact Urza's ability taps;
+            // ENGINE.md 49): the first free member whose pick leaves the
+            // payment payable, each kind of member tried once.
+            let kind_of = |s: &Src| -> (bool, Vec<usize>) {
+                let others = classes.iter().enumerate().filter(|&(j, c)| j != ci && c.members.iter().any(|m| m.card == s.card)).map(|(j, _)| j);
+                (self.reserved(payer, &pm.keep, cl, s), others.collect())
+            };
+            let mut free = cl.members.iter().copied().filter(|s| pm.free(&classes, cl, s));
+            let Some(first) = free.next() else { continue };
+            let rep = if ok_of(first) {
+                Some(first)
+            } else {
+                let mut tried = vec![kind_of(&first)];
+                free.find(|s| {
+                    let k = kind_of(s);
+                    if tried.contains(&k) {
+                        return false;
+                    }
+                    tried.push(k);
+                    ok_of(*s)
+                })
+            };
+            if let Some(rep) = rep {
                 opts.push(if is_sac_slot(rep.slot) {
                     // A granted ability or another's sacrificing it: after
                     // its own (`ACTIVATE` + `slot_id`; `sac_classes` checks
