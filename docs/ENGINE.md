@@ -2096,7 +2096,8 @@ minutes), then
 worktree cannot fetch it: `git -C third_party/zero-core fetch ~/zero-core main && git -C
 third_party/zero-core checkout <pin>` first. Pause / resume / stop as in every Zero project
 (PAUSE and STOP files, `tools/pause_run.py`, the dashboards). zerodash lists the runs
-(`zero-core/dashboard/projects.json`, project `mtg`).
+(`zero-core/dashboard/projects.json`, project `mtg`). CPU work on the MacBook (`tools/mac.sh`) and a
+run's evaluations there (`--eval-remote mac`): section 44.
 
 Presets: `mtg-smoke` (CPU, a 32 x 1 network, 16 games per iteration at 8 / 2 sims, 8 games
 against the heuristic) and `mtg-1` (the first run's settings, 21.6).
@@ -6844,3 +6845,200 @@ records, results).
   `mtg` leaf).
 * zero-core tools that play matches outside the run (`zero.h2h`, `zero.replay`, `zero.targets`,
   `zero.bench`) do not resolve deferred games; the dashboard does not show `<run>/resolver/` yet.
+
+## 44. The Mac: offload and remote evaluation
+
+Branch `m6-mac` (from eeb6291; Python, tools and docs only: the engine is eeb6291's). The MacBook
+(Apple M4 Max: 12 performance and 4 efficiency cores, 64 GB, no CUDA; `greggkeithley@100.95.248.116`
+on the tailnet, key auth) is a second machine for MTG Zero in two ways: CPU-only work (cargo tests,
+fuzz runs, search smokes, pytest) through `tools/mac.sh`, and a run's evaluations (the yardstick and
+random matches, the Elo matches) through zero-core's `eval_remote`, while the desktop keeps
+self-playing. Dominion Zero's `tools/mac.sh` and Kingdom Builder Zero's remote evaluation are the
+patterns.
+
+### 44.1 `tools/mac.sh`
+
+`bash tools/mac.sh <command>` runs the command on the Mac against this checkout's **committed** HEAD
+(uncommitted changes are not sent; a warning says so): it pushes HEAD to the Mac's bare repo
+`~/mtg-zero.git` (git remote `mac`) as `refs/heads/<branch>`, checks the commit out (detached) in
+`~/mtg-zero-wt/<branch>` (a worktree of the clone `~/mtg-zero`; main in `~/mtg-zero` itself), runs
+`git submodule update --init` there, and runs the command with Rust (`~/.cargo/bin`), the venv
+`~/.venvs/dominion-zero` (Python 3.13, torch 2.14 CPU/MPS, numpy, pytest, flask, psutil: everything
+mtgz needs, shared with Dominion's and Kingdom Builder's remote work) first on PATH,
+`CARGO_TARGET_DIR=~/cargo-target/mtg-zero/<branch>` (one per checkout, never shared) and
+`CARGO_BUILD_JOBS=12`. The command travels base64-encoded (quotes, pipes and semicolons arrive
+intact). `MTGZ_MAC=user@host` names another Mac.
+
+* **zero-core**: the Mac cannot fetch the core from GitHub (the repository is private and the Mac's
+  `gh` token is invalid), so mac.sh pushes the checkout's pinned core commit from
+  `third_party/zero-core` to a mirror on the Mac, `~/mtg-zero-core.git` (`refs/heads/pin-<sha>`), and
+  the clone's `submodule.third_party/zero-core.url` points at it (a local-path submodule needs
+  `git -c protocol.file.allow=always`, which mac.sh passes). A pin not on GitHub yet works the same.
+* **The PyO3 module on macOS** leaves libpython's symbols to the loader: mac.sh exports
+  `RUSTFLAGS="-C link-arg=-undefined -C link-arg=dynamic_lookup"` for every command (Dominion has it in
+  a build.rs; here it is outside the repo, so any commit builds), so the builds in a target dir never
+  thrash between `tools/build_py.sh` and `cargo test`. Cargo by hand in those checkouts needs the
+  same RUSTFLAGS, or it rebuilds. zero-core's `build_engine.sh` installs the dylib as
+  `mtgz/_engine.so`.
+* **`--eval-checkout`** (no command): the checkout a run's remote evaluation uses (44.3):
+  `~/mtg-zero-wt/run-<sha12>` at exactly this HEAD, refused if the working tree has uncommitted
+  changes (tracked files or the submodule), its engine built (`tools/build_py.sh`, target dir
+  `~/cargo-target/mtg-zero/run-<sha12>`, ~40 s) and stamped with the commit (`mtgz-engine-commit` in
+  the worktree's git dir), then checked (`python -m mtgz.az.remote check <sha>`).
+
+```
+bash tools/mac.sh cargo test --release --no-fail-fast
+bash tools/mac.sh 'FUZZ_GAMES=20000 FUZZ_MATCHES=2000 cargo test --release -p engine --test fuzz -- --nocapture'
+bash tools/mac.sh 'bash tools/build_py.sh && python -m pytest -q tests'
+bash tools/mac.sh 'bash tools/build_py.sh && python tools/search_smoke.py --specs random,match --seeds 0-1'
+bash tools/mac.sh --eval-checkout          # in a run's checkout, before it starts with eval_remote mac
+```
+
+On the Mac (all new; nothing of the other projects touched): `~/mtg-zero.git`, `~/mtg-zero-core.git`,
+`~/mtg-zero` (clone, no checkout of its own until main is used), `~/mtg-zero-wt/<branch>` and
+`run-<sha12>`, `~/cargo-target/mtg-zero/<branch>` (4.1 GB for a branch after the full test suite,
+0.4 GB for an evaluation checkout), the remote workdir `~/mtgz-remote` (empty until a run uses it).
+
+### 44.2 Bit-identity at eeb6291
+
+`bash tools/mac.sh ...` at eeb6291 (the Mac otherwise idle; desktop numbers from 40.9 and 42.6,
+the desktop loaded by mtg5):
+
+| Check | Mac | Desktop |
+|---|---|---|
+| `bash tools/build_py.sh`, empty target dir | 39 s | 151 s (today) |
+| digests (`cargo test --release -p engine --test digest -- --ignored --nocapture`) | combined **12642107250032a7**; the 2,000 random and 500 heuristic games in 9.0 s | 12642107250032a7 |
+| `cargo test --release --no-fail-fast` (az included) | 1,374 passed, 0 failed, 12 ignored, 337 s with the build of every test binary: the 96 engine binaries but az 1,355 passed and 12 ignored, `az` 14, card_ir 5 | 96 binaries but az: 1,355 passed, 12 ignored |
+| `python -m pytest -q tests` | 24 passed, 14 s (28 at this branch's head) | 24 passed |
+| `FUZZ_GAMES=20000 FUZZ_MATCHES=2000` | no failure, 111 s (108 s again): 20,000 games, 214.0 decisions per game, 5,651,655 options completed; 2,000 matches, 5,139 games, 1,139 of three, 1,491 drawn, 426.4 decisions per match, 47,810 sideboarding decisions, 6,142 decks changed, 42,766 sampled worlds | the same counts, 148 s |
+| `python tools/search_smoke.py --specs random,match --seeds 0-1` | 0 failed of 4, 121 s (random 17.1 s each: 328,537 decisions, 8,432,848 simulations; match 41.4-42.4 s: 766,218 decisions, 20,295,468 simulations) | 0 failed, 546 s (random 75-78 s, match 191-195 s; the same decisions and simulations) |
+
+The engine (Rust: games, bots, the search with a uniform evaluator) is bit-identical on the Mac; it
+builds and smokes 3.9 and 4.5 times faster than the loaded desktop, fuzzes 1.3 times faster.
+
+### 44.3 Remote evaluation: exactly the run's code on the Mac
+
+zero-core's `eval_remote` (`zero/remote.py`, pinned 681ba8d): the run queues each evaluated
+checkpoint and keeps training; a thread ships the checkpoints an evaluation needs to the remote's
+mirror of the run (`<workdir>/<run name>`: config.json with the remote's overrides, the run's
+`elo/results.json` and `metrics.jsonl` once), runs `python -m mtgz.az.remote eval <mirror> <iter>` in
+the remote's `repo` over ssh, appends the result to the run's `evals.jsonl` and copies the mirror's
+`elo/` and `models/index.json` back (the remote owns the run's Elo while `eval_remote` is on); a
+failure is logged and retried every 5 minutes. The game dashboard (`python -m mtgz.az.dashboard`)
+merges `evals.jsonl` into the iterations' rows.
+
+A remote's `repo` is one fixed path in the core's spec, but a run's code is the commit of its
+pinned worktree, and runs are re-pinned. MTG Zero's remote (`mtgz/az/mac.py`, `RunCommitRemote`, the
+package's `remotes={'mac': ...}`) ties the Mac's checkout to the commit of the run's checkout:
+
+* The spec resolves when zero.remote reads it (`remote_spec`, when the run starts its
+  `RemoteEval`), not at import: the run's checkout must be clean (`git status --porcelain
+  --untracked-files=no`, the submodule included), else **SystemExit** (no commit holds its code);
+  `repo` is `~/mtg-zero-wt/run-<sha12>` of its HEAD, and `env` carries the full commit
+  (`MTGZ_REMOTE_COMMIT`).
+* Preflight: the run checks the Mac's checkout over ssh (`python -m mtgz.az.remote check` there);
+  missing, at another commit, changed, or without its engine stamp: **SystemExit** with the reason
+  and the command that prepares it (`bash tools/mac.sh --eval-checkout` in the run's checkout). The
+  Mac unreachable (ssh exit 255, a timeout): a warning on stderr, and the run starts (the core
+  retries the evaluations).
+* Remote side: `mtgz/az/remote.py` (the shim `python -m mtgz.az.remote`, as in the other games)
+  checks the checkout before every evaluation (`verify_checkout`: HEAD = `MTGZ_REMOTE_COMMIT`, nothing
+  changed, the engine stamp = HEAD) and refuses otherwise (exit 1 with the reason, which the run's
+  log shows every 5 minutes until the checkout is prepared; then the queued evaluations run). An
+  evaluation never runs with other code than the run's.
+
+The Mac's settings (`overrides`, on top of the run's config): `infer_device` cpu, `train_device`
+cpu, `threads` 12, `groups` 2, `infer_workers` 3, and `OMP_NUM_THREADS=4` in `env` (torch threads:
+the remote side of the core does not apply `torch_threads`); python
+`~/.venvs/dominion-zero/bin/python`, workdir `~/mtgz-remote`. Tests: `tests/test_mac_remote.py` (the
+spec is the checkout's commit through `zero.remote.remote_spec`, resolved lazily, refused when
+dirty; the remote side refuses another commit, a change, a missing or stale stamp, an unset
+commit). End to end on the desktop: `python -m mtgz.az.run --run <scratch>/e2e-mac --preset mtg-smoke
+--eval-remote mac` (26 s): the preflight passed, iterations 0-3 were evaluated on the Mac (3.5-5.1 s
+each, shipping included), `evals.jsonl` got their rows (host mac: vs the heuristic, vs random, Elo),
+`metrics.jsonl` has none, `zero.dashboard._metrics` merges them into the four rows, `elo/` and
+`models/index.json` came back. Refusals checked by hand: a missing Mac checkout stops the run at
+start with the command to run; an unreachable host warns and goes on; the remote shim refuses a
+checkout at another commit and an unset commit.
+
+### 44.4 Measurements: mtg5's iteration 8
+
+A scratch copy of `runs/mtg5` (config.json, checkpoints 4, 6 and 8, `metrics.jsonl` up to iteration
+7 and `elo/results.json` without iteration 8's pairs) evaluated with preset mtg-4's evaluation
+settings: 100 best-of-three matches against the heuristic and 50 against random at 32 simulations
+on the evaluation pools, then the Elo matches against iterations 6 and 4 together (`elo_together`,
+20 each). Single phases with `Run.play_match` / `play_matches` and run-setting overrides (the Mac
+otherwise idle):
+
+| Phase | Settings | Mac |
+|---|---|---:|
+| vs heuristic | CPU, 12 search threads, groups 2, 1 inference worker, torch 12 threads (its default) | 113 s |
+| vs heuristic | **MPS**, otherwise the same | 234 s |
+| vs heuristic | CPU, 2 workers x 6 threads / 4 x 3 with groups 4 / 1 x 4 / 8 search threads, 4 x 2, groups 4 | 93 / 93 / 89 / 93 s |
+| Elo | CPU, 1 worker, torch 12 threads | 575 s |
+| Elo | CPU, 1 worker x 4 threads | 365 s |
+| Elo | CPU, **3 workers x 4 threads**, groups 2 | **325 s** |
+| Elo | CPU, 4 workers x 3 threads, groups 4 | 740 s |
+
+Inference dominates (batches of ~13 leaves vs the heuristic, ~6 in the Elo matches: 197,315
+network calls for 1.2 million leaves), so MPS's per-call cost doubles the time and CPU inference with
+a few small thread teams in parallel is fastest. Then one full evaluation through the run's own path
+(`zero.remote.RemoteEval` from the desktop, the settings of 44.3, the checkout `run-a51dd686f134`):
+
+| Phase | Mac | Desktop (mtg5, CUDA inference, loaded by self-play) |
+|---|---:|---:|
+| vs heuristic (100 matches) | 85 s | 7.2-8.4 min |
+| vs random (50) | 146 s | 11.6-12.7 min |
+| Elo (2 x 20) | 320 s | 48.6 min (the first attempt was killed by the stall watchdog after 60 minutes without progress) |
+| all, shipping included | **560 s (9.3 min)** | ~68 min |
+
+Results against the desktop's: vs the heuristic 1/100, margin -1.89 (the desktop 1/100 twice, -1.89;
+average rounds 28.99 vs 28.88); vs random 22/50 (the desktop 22/50 twice; margin -0.38 vs -0.44); Elo
+matches 11.5/20 and 12.0/20 against iterations 6 and 4 (the desktop 13.0 and 13.5); fitted Elo 161
++-189 (the desktop 179 +-189). Every Mac setting (CPU or MPS, workers, groups, threads) played the
+same games, and the evaluation repeats exactly on the Mac. The arithmetic differs at float32
+rounding: on 60 recorded leaf batches of these matches, the network's priors differ by at most
+3.6e-7 between the Mac's CPU and MPS, 4.2e-7 against the desktop's CPU and 4.8e-7 against its CUDA
+(values 1.2e-7; batch against one leaf at a time 3e-7), and the search turns such near-ties into
+other moves now and then: the Mac's games are not the desktop's, its results are the same within
+noise.
+
+### 44.5 Turning it on for a run (mtg5)
+
+A run can use `eval_remote mac` only from a commit that has this code (mtg5's eeb6291 has no
+`remotes`), so the switch is a re-pin to this branch's head (or main fast-forwarded to it: the
+engine is eeb6291's, so its search-smoke gate holds), at an iteration boundary:
+
+1. Pinned worktree of the commit `<S>`: `git -C ~/mtg-zero worktree add --detach
+   ~/mtg-zero-wt/run-<s7> <S>`, then there `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<s7> bash
+   tools/build_py.sh`.
+2. There: `bash tools/mac.sh --eval-checkout` (the Mac's `~/mtg-zero-wt/run-<s12>`, ~40 s).
+3. Stop mtg5 cleanly after an iteration: `touch runs/mtg5/STOP` while an odd iteration (not
+   evaluated: `eval_every` 2) self-plays; the run exits after its training and the supervisor with it.
+4. `rm runs/mtg5/STOP`, and from the new worktree: `python tools/launch_hidden.py
+   <run>/supervisor_console.txt python tools/supervise.py <run> --preset mtg-4 --seed 1 --eval-every 2
+   --eval-remote mac` (`<run>` = `C:/Users/Gregg Keithley/mtg-zero/runs/mtg5`). The log says `evaluations on the
+   remote 'mac' (greggkeithley@100.95.248.116)`; the first evaluated iteration creates
+   `~/mtgz-remote/mtg5` and logs `iter N vs heuristic (remote mac, ...s)` and `iter N elo ... (remote
+   mac)`; `runs/mtg5/evals.jsonl` holds the results. `--eval-remote ''` turns it off (from then the
+   run evaluates here again; `elo/` is the Mac's last).
+
+Every later re-pin repeats steps 1, 2 and 4: a run started at a commit whose Mac checkout is missing
+stops at start with the command (44.3).
+
+### 44.6 Limits
+
+* zero-core's co-training (`zero/cotrain.py`, core e6166c3, M6 part 2) refuses `eval_remote` for now
+  ("eval_remote is not supported in co-training runs"): co-trained team-draft runs evaluate on the
+  desktop until the core supports it.
+* zerodash (`zero-core/dashboard`) reads `metrics.jsonl` and `elo/ratings.json` only: with
+  `eval_remote` its Elo is current (ratings.json comes back) but its win rates vs the yardstick and
+  random stop at the last local evaluation; the game dashboard merges `evals.jsonl`. `models/best.pt`
+  is not copied back (index.json is). Core changes, not made here.
+* The Mac shares the venv `~/.venvs/dominion-zero`: a torch upgrade there changes its arithmetic (at
+  rounding level, 44.4); the checkout check covers the code, not the venv. Other projects' remote
+  evaluations on the Mac (`~/kbz-remote`, `~/domz-remote`) have their own locks and would share its
+  cores.
+* The remote's host and paths are fixed in `mtgz/az/__init__.py` (`MTGZ_MAC` is mac.sh's only).
+* The Mac's results are not bit-identical to the desktop's for network players (44.4), so a run's
+  evaluations before and after the switch differ by the usual noise only.
