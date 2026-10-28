@@ -579,6 +579,9 @@ impl Game {
             }
             v.extend([self.sideboard_size(p) as u64, pl.companion_used as u64]);
             v.push(pl.companion_def.map_or(u64::MAX, |d| d as u64));
+            // The London mulligan's public state (CR 103.5; ENGINE.md 55):
+            // mulligans taken, kept, a declared mulligan not yet taken.
+            v.extend([pl.mulligans as u64, pl.kept as u64, pl.mulligan_declared as u64]);
             v.push(u64::MAX - 5);
         }
         for p in 0..2u8 {

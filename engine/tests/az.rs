@@ -743,6 +743,10 @@ fn cr_103_5_a_declared_mulligan_is_encoded() {
                 assert_eq!(diff(&xk, &xm, true), want, "{name} seed {seed} viewer {v}: Keep / Mulligan");
                 assert_eq!((xm[MULL + side], xm[MULL + 1 - side]), (1.0, 0.0));
                 assert_eq!((xk[MULL], xk[MULL + 1]), (0.0, 0.0));
+                // The observable view of the hidden-information checks
+                // (`Game::view_of`) holds it too (main: Keep and Mulligan
+                // looked the same there).
+                assert_ne!(m.g.view_of(v as u8), k.g.view_of(v as u8), "{name} seed {seed} viewer {v}: view_of");
             }
         }
     }
@@ -875,4 +879,51 @@ fn the_declared_mulligan_survives_clones_and_determinize() {
             assert_eq!(enc(&a, s as usize)[MULL], 1.0);
         }
     }
+}
+
+/// The audit of the opening (ENGINE.md 55.4): in every sampled opening state
+/// (the play-or-draw choice, companion reveals, declarations, bottoms,
+/// opening-hand actions; cube, best-of-three, the Delver mirror) both
+/// players' encodings and observable views are the same in every world
+/// `determinize` makes for them (nothing hidden is encoded), and two worlds
+/// of the decider played with the same action give it the same encoding
+/// while the keys, the next decider and its options agree.
+#[test]
+fn the_opening_encodes_no_hidden_information() {
+    let mut zr = zero_search::rng::Rng::new(56);
+    let mut rng = Rng::new(56);
+    let (mut worlds, mut pairs) = (0, 0);
+    for (name, sp) in opening_specs() {
+        for g in opening_states(&sp, 40, 23) {
+            let mover = g.to_move().unwrap();
+            for v in 0..2 {
+                let (x, view) = (enc(&g, v), g.g.view_of(v as u8));
+                for _ in 0..2 {
+                    let mut d = g.clone();
+                    d.determinize(v, &mut zr);
+                    assert_eq!(d.to_move(), Some(mover));
+                    let y = enc(&d, v);
+                    if let Some(i) = (0..NUM_FEATURES).find(|&i| x[i] != y[i]) {
+                        panic!("{name}: P{v}'s feature {i} changed in a world at {:?} of P{mover}", g.g.kind());
+                    }
+                    assert_eq!(d.g.view_of(v as u8), view, "{name}: P{v}'s view at {:?}", g.g.kind());
+                    worlds += 1;
+                }
+            }
+            let (mut a, mut b) = (g.clone(), g.clone());
+            a.determinize(mover, &mut zr);
+            b.determinize(mover, &mut zr);
+            let l = legal(&a);
+            let x = l[rng.below(l.len() as u32) as usize];
+            let (mut ka, mut kb) = (Vec::new(), Vec::new());
+            a.step(x, &mut ka).unwrap();
+            b.step(x, &mut kb).unwrap();
+            if ka == kb && a.to_move() == b.to_move() && legal(&a) == legal(&b) {
+                assert_eq!(enc(&a, mover), enc(&b, mover), "{name}: two worlds of P{mover} after {:?}", g.g.kind());
+                pairs += 1;
+            }
+        }
+    }
+    println!("{worlds} worlds, {pairs} pairs of worlds compared");
+    assert!(worlds > 3000 && pairs > 300, "{worlds} {pairs}");
 }
