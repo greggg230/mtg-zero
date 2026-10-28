@@ -1202,8 +1202,9 @@ they isolate one keyword or trigger each.
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
 | `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c). Part 3 (section 39.5): the last two cells, a token copy of a nightbound permanent (`interactions_copies.rs`: 707.8a, 702.145f) and True-Name Nemesis's chosen player after Oko's exchange (`interactions_zones.rs`: 702.16j, 110.2) |
-| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5) |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45) |
 | `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), both extremes reachable (40 basic lands, 31 of a type; 40 pool cards with the rest of the pool forced out and every count forced to 0; a card into a full deck an error), every 40-card deck of a two-card pool reachable exactly once (487,676 decks), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`), measurements (`--ignored`: `measure`); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v1` |
+| `tests/draft_matches.rs` | drafted matches (section 45): the `mtg` spec of an event's match (`pN_first_picks`, `pN_elsewhere`, `seed`) plays the event's match move for move (`match_game`; 32 matches: 4v4 and 2v2, random and `consensus`-built decks, best-of-three and best-of-one), the first-pick prior is exactly the cards the viewer's team never saw (193 in 4v4, 367 in 2v2; the real first picks among them), `determinize` samples first picks from it (never the viewer's knowledge) and keeps the viewer's encoding, the spec refuses contradicting knowledge, specs without the keys are what they were; a position from a draft history is seat 0's information set (its knowledge and encoding the real event's) and a history that does not fit is an error; deckbuilding's simulations divisor; `tests/test_drafted.py` (pytest): the glue (payload -> specs, results -> `resolve`, a malformed result refused), events parked by a draft driver and resolved through a heuristic match driver, the token network's actions by identity on `draft_v1`, the human-pick yardstick on a few drafts, the co-training presets |
 | `tests/draft_deferred.rs` | `team_draft` through zero-core's deferred hook (section 43): 2v2 and 1v1 events through the self-play driver with a stand-in network (deferred terminals evaluated as leaves of no options, every event parked, a malformed result refused, resolved with heuristic-played matches, samples with the real outcome and margin), the hooks mapping the inherent methods (1v1-4v4); `--ignored`: `measure_parked_memory` |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
@@ -1307,7 +1308,9 @@ time to budget before a launch; `python -m mtgz.az.bench search --game mtg --thr
 --sims 64` is one configuration with a plainer seat (driver seed 0, the default spec, no minor
 decisions; 65 s; the bench has no seed option and no hang watchdog). M8b: the specs `match` and
 `match_eval` (best-of-three matches on random or evaluation pools, three times the step cap); the
-default is `--specs random,eval,match` (section 36.8).
+default is `--specs random,eval,match` (section 36.8). M6 part 3: the specs `team_draft` (4v4) and
+`team_draft_2v2` (`--events` events drafted and built with the seat of `team_draft-4v4`, parked,
+their matches played by the heuristic from the glue's `mtg` specs and resolved; section 45.7).
 It came after the self-play run mtg3 (preset `mtg-3`, engine 0577e06, 524 cards) panicked in
 iteration 15 with "no legal target for a required target" and its process hung. On 0577e06 the
 smoke finds that panic in 1 of 23 configurations (9,200 random-deck games; seed 2, every time, in
@@ -7042,3 +7045,406 @@ stops at start with the command (44.3).
 * The remote's host and paths are fixed in `mtgz/az/__init__.py` (`MTGZ_MAC` is mac.sh's only).
 * The Mac's results are not bit-identical to the desktop's for network players (44.4), so a run's
   evaluations before and after the switch differ by the usual noise only.
+
+  `zero.bench`) do not resolve deferred games; the dashboard does not show `<run>/resolver/` yet
+  (it does since section 45.8; the other items of this list are section 45's).
+
+## 45. Team drafting end to end (M6 part 3)
+
+Branch `m6-part3` (from main at 5ce8057), zero-core pinned at `feat/m6-part3` (zero-core main
+e6166c3 + five commits: its docs/search.md 1 and 3, docs/az.md 5.1, 10 and 11.3a). The
+integration of DESIGN.md 7.1 part 3 with the user's decisions of 2026-10-27 (DESIGN.md 2.3.10:
+full co-training, a 4v4 PowerLSV pod, learned deckbuilding in `team_draft` with exactly 40
+cards, the post-draft knowledge at every match, teammates sharing decks, one deck per player for
+all its matches, the margin over the team's matches, both rotations in 2v2, the heuristic
+first-pick prior, the play network from mtg5's best checkpoint, mtg-4's match search, draft
+evaluation with heuristic-played matches every `eval_every` and play-network matches every
+`draft_eval_net_every`, the uniform determinization, dashboard support). Section 44 is branch
+m6-mac's. The `mtg` path's behaviour is unchanged: digests 12642107250032a7, layout v4 (33,652
+floats) and `draft_v1` (14,488) unchanged, runs/mtg5's checkpoints play identically (45.9).
+
+### 45.1 What was built
+
+| Piece | Where | What |
+|---|---|---|
+| Drafted matches | `engine/src/az/mod.rs`, `matches.rs`, `sample.rs` | the `mtg` spec keys `p0_first_picks` / `p1_first_picks`, `p0_elsewhere` / `p1_elsewhere` (in `decks`) and `seed` (45.2); `DeckMode::Drafted`; `Seat::elsewhere`; `FirstPickPrior::new(.., elsewhere)` |
+| The spec of an event's match | `engine/src/az/draft_bots.rs` | `match_spec(setup, max_turns, format)`: the JSON the glue builds; `match_game` passes `elsewhere` too |
+| The deferred glue | `mtgz/az/drafted.py` | `GamePackage.deferred['team_draft']`: payload -> `mtg` specs, match rows -> `resolve` JSON, a malformed result refused (45.3) |
+| Actions by identity | zero-core `python/zero/net.py` | `TokenNet`'s `id_actions` (45.4) |
+| Deckbuilding's simulations | zero-core `SearchGame::sims_divisor`; `team_draft`'s spec key `build_sims_div` | deckbuilding at the seat's simulations / 2 (45.4) |
+| A position from a draft history | `engine/src/az/draft.rs` | `team_draft`'s spec key `history`, `TeamDraftAz::from_history` (the human-pick yardstick's positions, 45.5) |
+| The presets | `mtgz/az/__init__.py` | `team_draft-smoke` (2v2, CPU), `team_draft-gpu-smoke`, `team_draft-4v4` (45.6) |
+| The yardsticks | `mtgz/az/human_picks.py`, `tools/data/08_heldout_drafts.py`; zero-core `GamePackage.evals`, `Run.extra_evals` | `consensus` (the anchor) and `random` teams, the draft Elo, play-net-played evaluation (zero-core's co-training, configured), the agreement with held-out human picks (45.5) |
+| The search smoke | `tools/search_smoke.py` | specs `team_draft` (4v4) and `team_draft_2v2` (45.7) |
+| The dashboard | zero-core `python/zero/dashboard.py` | co-training runs: a tab per network, the co-training progress and tiles, the other yardsticks (45.8) |
+| Tests | `engine/tests/draft_matches.rs` (7), `engine/tests/fuzz.rs` (`FUZZ_POOL=drafted`), `tests/test_drafted.py` (6); zero-core: `driver::tests::light_decisions_divide_the_simulations_and_are_recorded`, `test_net_data.py` (2), `test_cotrain.py` (2) | 45.9 |
+
+### 45.2 Drafted matches in `mtg` (DESIGN.md 2.3.6)
+
+A match of a `team_draft` event is an `mtg` spec:
+
+```json
+{"max_turns": 60, "format": "bo3", "seed": <the event's match seed>,
+ "decks": {"p0": [...], "p0_sideboard": [...], "p0_first_picks": [...], "p0_elsewhere": [...],
+           "p1": [...], "p1_sideboard": [...], "p1_first_picks": [...], "p1_elsewhere": [...]}}
+```
+
+* `pN` / `pN_sideboard`: player N's built deck (exactly 40 cards, basic lands repeated) and the
+  rest of its pool (CR 100.4b); the A player (an even seat) is `mtg` seat 0, as in
+  `TeamDraftAz::matches`.
+* `pN_first_picks`: its real first picks (one per pack), `MatchPool::first_picks`: the other
+  player does not know them until it sees them, exactly as generated pools' (36.11): the bags,
+  `known_pools`, the deck questions and `determinize` read only the known part.
+* `pN_elsewhere`: the cards player N knows are elsewhere: its team saw them in the draft (its
+  own and its teammates' pools, the other opponents' known cards) and they are not in this
+  opponent's pool. They leave N's prior of the opponent's unseen first picks
+  (`FirstPickPrior::new(db, pools, owner, elsewhere)`): its candidates were the supported cards
+  outside the known part of the opponent's pool and outside the viewer's own pool (~454 for a
+  45-card pool); a drafted match's are exactly the cards the viewer's team never saw: **193** in
+  4v4 (the opposing team's 12 first picks and the 181 undrafted cards), 367 in 2v2 (6 + 361).
+  The weights stay the engine heuristic's (the user's decision, 2.3.10 question 6). With these
+  two keys the knowledge at a match is the post-draft knowledge (the user's reading: nothing
+  another match reveals is carried over).
+* `seed`: the match's seed replaces the driver's game seed (`new_game`), so the spec plays the
+  event's own match: `MtgAz::new_game(spec)` is `draft_bots::match_game(setup)` (the same game
+  fingerprint, pools, decks, priors and encodings for both viewers, and heuristic play gives the
+  same keys, results and step counts; tested on 32 matches of 4v4 and 2v2 events, random and
+  `consensus`-built decks, best-of-three and best-of-one).
+* **The spec checks its knowledge**: a first pick outside its player's pool (deck or
+  sideboard), named twice or a basic land; a card "elsewhere" that is a basic land or in the
+  other player's pool (a first pick of theirs would leave the real world outside the viewer's
+  information set; a known card of theirs is a contradiction): errors that name the card.
+* **Unchanged**: without the four knowledge keys the `decks` object is `Lists` or
+  `ListsWithSideboards` as before, and without `seed` the driver's seed is used: the generated
+  pools, the evaluation pools, best-of-one and every existing spec are what they were (the
+  digests, 45.9). Decks of up to 31 of a basic, exactly 40 cards: `MatchPool::new` and
+  sideboarding as section 42.
+* `match_game` (part 1's test utility) now passes `elsewhere` too (the heuristic reads the real
+  game: its play is unchanged).
+
+### 45.3 The deferred glue (`mtgz/az/drafted.py`; zero-core's `GamePackage.deferred`)
+
+zero-core parses no payload (43.2). `episodes(payload)` turns `TeamDraftAz::deferred_payload()`
+(`{"event": {seats, team_size, rounds, max_turns, format}, "matches": [{round, seats, seed,
+players: [{seat, deck, sideboard, first_picks, elsewhere}, x2]}, ...]}`) into one spec per
+match (45.2), in the payload's order; the coordinator queues them tagged `<gid>/<k>`.
+`results(payload, rows)` turns the matches' result rows, in order, into `[{"result": [a, b],
+"scores": [wins a, wins b]}, ...]` for `resolve` and **refuses a malformed result**
+(ValueError): another number of rows than of matches, a row that is not a two-player match, a
+result other than 1/0, 0/1 or 0.5/0.5; the engine's `resolve` refuses it again and the event
+stays at its deferred terminal (tested). A match cut at the driver's `max_steps` arrives as a
+draw (0.5/0.5, `over` false) and counts as one. In a run the coordinator's exception reaches the
+main thread and the run aborts (zero-core 11.2): a malformed result never becomes a made-up
+outcome. The engine's `draft_bots::match_spec` builds the same spec from the event (tests, the
+fuzz).
+
+### 45.4 Actions by identity, deckbuilding's budget
+
+**`TokenNet`'s `id_actions`** (zero-core docs/az.md 10; DESIGN.md 2.3.5): layout `draft_v1`'s
+two segments (the pack's 15 slots, the pool's 45) carry `id_actions: 0`: a present slot also
+scores action `0 + its identity`, one pointer column per segment, from its token conditioned on
+the pooled state. A pick (the pack's identities) is scored by the pack slots, putting the card
+being decided into the deck (its identity) by its pool slot; `OUT` and the counts keep the
+generic logits. A pack card and a pool card are never the same identity (a singleton cube), so
+no action is scored twice. Layouts without the key (layout v4) build exactly the network they
+did (no identity column, the normalised layout stored in checkpoints unchanged): runs/mtg5's
+iteration 10 plays identically (45.9).
+
+**Deckbuilding at half a pick's simulations** (DESIGN.md 2.3.9: picks 64 / 16, deckbuilding
+32 / 8): zero-core's new `SearchGame::sims_divisor` (default 1) divides the seat's drawn budget
+of the pending decision (at least one simulation; recorded as usual, every network seat);
+`team_draft` returns its spec's `build_sims_div` (1-16, default 1) during deckbuilding, and the
+run presets set 2. Measured in the search smoke (4v4, uniform evaluator, 45.9): 33,785 searched
+decisions of 48 events took 697,792 simulations, 20.7 per decision (picks 28 on average at p_full
+0.25, deckbuilding decisions 14): ~14,600 per event, DESIGN.md 2.3.9's 14,900.
+
+### 45.5 The draft yardsticks (DESIGN.md 2.3.8)
+
+* **`consensus`** (the anchor, Elo 1000: the run's `yardstick`) and **`random`** teams: events
+  whose team seats alternate between the draft checkpoint and the bot (zero-core's
+  `CoRun.event_match`), every evaluated iteration (`eval_every` 1), the matches played by the
+  heuristic (the resolver's yardstick: one play agent for the whole Elo pool); `eval_games` 32
+  events against `consensus`, `eval_random_games` 16 against `random`, `ref_games` 32 reference
+  events `random` against `consensus`.
+* **Draft Elo**: each checkpoint against its checkpoints 1, 2, 4 and 8 back (`elo_opponents`
+  4), `elo_games` 16 events each, heuristic-played; Bradley-Terry with `consensus` at 1000
+  (`elo/`).
+* **Play-network matches** every 4th iteration (`draft_eval_net_every` 4: `eval_yard_net`, 32
+  events against `consensus`, the matches played by the play network of the same iteration at
+  its `eval_sims`), logged in metrics, outside the Elo fit (43.2).
+* **Agreement with held-out human picks** (a logged curiosity, never optimised: DESIGN.md 0).
+  `tools/data/08_heldout_drafts.py` (the M1 venv: pyarrow) keeps the CubeCobra test split's
+  drafts (docs/data_m1.md 5: held out by draft) that are one seat's whole 3 x 15 draft
+  consistent with an 8-seat pod (a pack seen again eight picks later holds only cards of its
+  earlier view less the card taken, and no card in two packs), 2,585 of 3,150, and writes a seeded sample of 400 to
+  `E:\mtg-zero\data\splits\cubecobra_heldout_8seat.json` (raw human picks: never committed).
+  `mtgz/az/human_picks.py` (`GamePackage.evals['team_draft']`, run on every evaluated
+  iteration of a 4v4 run; skipped, logged, for other pods or without the file) takes the first
+  100 drafts (`MTGZ_HUMAN_PICKS_DRAFTS`): the drafts mix cube versions (76% of their pack cards
+  are current cards, matched by name, face name and with the accents dropped on both sides); a
+  card not in the current cube is replaced, consistently within the draft, by a random current
+  card the draft does not hold (seeded per draft: the same positions every iteration). Each pick
+  whose card is current, with at least two current cards in the pack, is a position: the spec
+  key `history` (45.1: seat 0's packs at its picks and its picks; `TeamDraftAz::from_history`
+  builds the event with seat 0's views exactly, its picks in place, the cards between two views
+  of a pack in a random order, every other cell a random card none of the views holds, every
+  seat at the same pick; tested: the encoding and the knowledge of seat 0 equal the real event's
+  at 0, 5, 9, 23 and 44 picks in 4v4, 13 and 31 in 2v2, 40 in 1v1; a history that does not fit
+  the event is an error). The network's choice is its policy's top card among the pack's current
+  cards (no search: the network's own judgement), the human's among the same cards. Logged:
+  `extras.human_picks` = {value (top-1 agreement), n, drafts, se, refs: {random, strongest card}}
+  (on the same positions; the strongest card by M1's pick strength, fit on the whole corpus, so
+  an optimistic reference). 100 drafts: 3,603 positions; ~1 s per evaluation on the GPU once the
+  positions are built (cached per process). Values: 45.10.
+
+### 45.6 The presets (`mtgz/az/__init__.py`)
+
+| | `team_draft-4v4` (the run) | `team_draft-gpu-smoke` | `team_draft-smoke` (CPU) |
+|---|---|---|---|
+| pod, events / iteration, in flight | 4v4 (players [8]), 48, 64 | 4v4, 8, 16 | 2v2 ([4]), 4, 4 |
+| draft search | picks 64 / 16, deckbuilding 32 / 8 (`build_sims_div` 2), p_full 0.25, cq targets, `temp_moves` 120 | as the run | 8 / 2, deckbuilding 4 / 1 |
+| draft network | tokens 128 x 4 (heads 4, ff 256; actions by identity), batch 512, reuse 4, window 8 (min 20,000 samples), value_q 0.5 (warm-up 5), RAM 6 GB, CUDA | as the run (min window 0) | tokens 32 x 1 |
+| play network (`resolver_cfg`) | mtg-4 (64 / 16, minor 4, 128 x 4, cq, value_q 0.9), evaluated every 2nd iteration on the fixed evaluation pools; `resolver_init` the mtg5 checkpoint chosen at launch | mtg-4, 96 in flight, small evaluations | mtg-smoke, best-of-three, tokens 32 x 1, minor 2 |
+| matches in flight, backpressure | 768, 2 x 768 (`pending_max` 0) | 96, 192 | 16, 32 |
+| draft evaluation | `consensus` 32 events, random 16, Elo 4 x 16, reference 32 (heuristic-played, every iteration); `eval_yard_net` every 4th; human picks | 4, 2, 2 x 2, 4; `eval_yard_net` every 2nd | 4, 2, 2, 4; every 2nd |
+
+`temp_moves` 120: zero-core counts an episode's searched decisions over all seats, so 120 is the
+first pack's 15 pick rounds of a 4v4 (mtg-4's 60 would be 7.5); root noise at every full search.
+The draft network's value target blends the event's outcome with the root search's estimate as
+the default (value_q 0.5 after 5 iterations): the search's leaves at the deferred terminal are
+the network's own estimate, so the outcome carries the signal.
+
+### 45.7 The search smoke for `team_draft` (`tools/search_smoke.py`)
+
+Specs `team_draft` (4v4) and `team_draft_2v2`: `--events` (default 24) events per seed with the
+self-play seat of `team_draft-4v4` (picks 64 / 16, deckbuilding 32 / 8, p_full 0.25, cq,
+temperature) and a uniform evaluator through zero-core's driver, which parks every event at its
+deferred terminal; the coordinator of zero-core's co-training (`zero.cotrain.run_pair`) queues
+each parked event's matches (the glue's specs) into a second, `queue_only` driver of heuristic
+seats and resolves the event with their results. Every event must resolve (none left parked)
+with a sane outcome (each seat `1/T`, `0` or `1/2T`, the team result the one its match wins
+give, at most 12 or 4 match wins), samples emitted, every match ended; a configuration with no
+batch for `--stall` seconds is a hang (a worker's panic). Reported: events, team A's wins and
+draws, matches, searched draft decisions, samples, simulations, events parked, the parked
+records' peak.
+
+### 45.8 The dashboard (zero-core `zero.dashboard`, `python -m mtgz.az.dashboard`, port 5340)
+
+Generic (zero-core docs/az.md 5.1, 11.3a): for a run with a `resolver/` directory
+`/api/run/<name>` adds `resolver` (its config, metrics, Elo results and ratings), and the page
+shows a tab per network (`team_draft network`, `mtg network (resolver)`), each the single-game
+view of that network: its Elo by iteration and head-to-head table, win rates against its
+yardstick and random (the draft network's also against `consensus` with the matches played by
+the play network, `eval_yard_net`), losses, throughput, minutes per iteration, the table; the
+status line shows the co-training progress (`Iteration i: self-play e/48 events resolved · d
+drafting · p waiting for their matches · matches q queued, f in flight, n done`), and tiles the
+other network's newest Elo, matches per hour and the event latency (park to resolve, pending
+events, the parked records' peak). `extras` (the human-pick agreement) are charted in "Other
+yardsticks" with their references; a failed one is named in the caption. A single-game run renders
+exactly as before: rendered headless (Playwright, its requests answered by the Flask test client:
+no port) for a copy of runs/mtg5's metrics, Elo and log, the old dashboard (zero-core e6166c3)
+and the new one give the same page DOM (the new page's two hidden elements aside) and the same
+screenshot but the "last log line N s ago" clock; no script error, no horizontal scroll at phone
+width, for the single-game run and both tabs of the smoke runs. The live dashboard (:5340,
+main's checkout) shows co-training runs once main pins this core.
+
+### 45.9 Checks
+
+* **Engine tests**: every test binary but `az` (`cargo test --release -p engine --no-fail-fast
+  --lib --test <each file of engine/tests but az>`, 98 binaries: the library and 97 files):
+  **1,364 passed, 0 failed, 13 ignored** (the 7 of the new `draft_matches.rs`; ignored as
+  before).
+* **Behaviour digests** (`cargo test --release -p engine --test digest -- --ignored`): combined
+  digest **12642107250032a7**, main's (2,000 random and 500 heuristic games, 16.3 s).
+* **Fuzz** (`FUZZ_GAMES=20000 FUZZ_MATCHES=2000`): no failure, 284 s; identical to section
+  42.6 (20,000 games, 214.0 decisions per game, 5,651,655 options completed; 2,000 matches, 5,139
+  games, 1,139 of three, 1,491 drawn, 426.4 decisions per match, 47,810 sideboarding decisions,
+  6,142 decks changed, 42,766 sampled worlds, first picks resampled in 23,947) - the new check
+  (a sampled first pick is a candidate of the prior) held in every world.
+  `FUZZ_POOL=interactions`: no failure, 342 s, identical to 42.6 (20,000 games, 206.2 decisions,
+  5,425,503 options; 2,000 matches, 5,127 games, 43,030 sideboarding decisions, 44,548 worlds).
+  **`FUZZ_POOL=drafted`** (the matches of 2,000 drafted events: 4v4 and 2v2, random and
+  `consensus` team A, one in eight with 12-turn games): no failure, 27 s; 5,015 games (1,015
+  matches of three, 768 drawn games), 508.0 decisions per match, 46,741 sideboarding decisions,
+  5,919 decks changed, 50,506 sampled worlds, first picks resampled in 46,564 (the rest: first
+  picks seen), decks in 50,385. `DRAFT_FUZZ=20000`: no failure, 119 s, the counts of 42.6
+  (20,000 events, 11.4 million actions, 5,040,000 searched picks, 5,804,002 searched deckbuilding
+  decisions, 573,334 worlds, 12,534 options completed, 1,866 heuristic-played matches; team A
+  8,066 / 8,155 / 3,779).
+* **Python** (`bash tools/build_py.sh`, `python -m pytest -q tests`): **30 passed** (main's 24
+  and the 6 of `test_drafted.py`), 69 s.
+* **Search smoke**: `python tools/search_smoke.py --specs random,match --seeds 0-1`: **0 failed
+  of 4**, 734 s (random 103-107 s, 800 games, 328,537 decisions: part 2's; match 253-260 s, 800
+  matches, 766,218 decisions, 20.3 million simulations: section 42.6's). `--specs
+  team_draft,team_draft_2v2 --seeds 0-1` (24 events each): **0 failed of 4**, 22 s: 4v4 48 events,
+  576 matches, 33,785 searched draft decisions (704 per event), 697,792 simulations (20.7 per
+  decision), 8,398 samples (175 per event), parked records at most 11.6-16.5 MB (two or three
+  events at a time); 2v2 48 events, 192 matches, 16,889 decisions, 4,216 samples, at most 7.7 MB;
+  every event resolved with a sane outcome (team A won 16, drew 7 of 48 in 4v4, 22 and 14 in
+  2v2: the uniform evaluator's drafts against each other), every match ended.
+* **`check_checkpoint_compat`** (zero-core's tool) on a copy of runs/mtg5's iteration 10: main's
+  checkout (m6-corepin at 5ce8057, zero-core e6166c3) against this branch, best-of-three spec, 4
+  self-play matches at 16 / 4 simulations, policy targets visits and cq, 2 matches against random:
+  **identical** (542 samples each, records 9451e8d0d1824754 / 16280d8b0ee4a21a, results
+  48342af1b2fab28f, the match 1d9e9da9908a8244).
+* **zero-core** (`feat/m6-part3`): `cargo test --release` 44 passed (41 + webnet 3: the driver's
+  new `light_decisions_divide_the_simulations_and_are_recorded`); `python -m pytest tests` 105
+  passed (101 and 4 new). `SMOKE_TARGET=m6part3 bash tools/smoke_all.sh --with-this-core` (Glass
+  Road c1f56dc, Caverna a6fad73, Kingdom Builder 4202a4a, MTG Zero main 5ce8057, each at its HEAD
+  with this core d68778e): **GREEN**, 19 steps: core cargo test 44, pytest 105; Glass Road cargo
+  test 46, pytest 33, `glassroad-smoke` 4 rows; Caverna 47, 32, `caverna-smoke` 4 rows; Kingdom
+  Builder 105 (4 ignored), 45, `kingdombuilder-smoke` 4 rows; MTG Zero cargo test 1,376 (every
+  binary, `az` included as smoke_all runs it; 13 ignored), pytest 24, `mtg-smoke` 4 rows.
+* **The dashboard**: 45.8 (the same DOM for a single-game run; no script error).
+
+### 45.10 The smoke runs (scratch run directories; the desktop shared with runs/mtg5 on the GPU and other projects' runs)
+
+**CPU, 2v2** (`python -m mtgz.az.run --run <scratch>/td_cpu --preset team_draft-smoke --iters 3`,
+CUDA hidden): iteration 0 evaluated both nets (the draft network 0/4 against `consensus`, 1 of 2
+against random, 3 of 4 against `consensus` with play-net matches; the human-pick yardstick
+skipped: a 2v2 run); iteration 1 drafted, parked and resolved 4 events (22 matches played by the
+play network, both nets trained and evaluated); **killed** (`tools/kill_run.py`) during iteration
+2's self-play (1 event resolved, 10 parked, 16 matches in flight) and restarted with the same
+command: "starting after iter 1", iteration 2 replayed from its start (both data directories
+cleared), then iteration 3; `done`, no debug directory. Per iteration (tiny networks, 8 / 2
+simulations): 25-40 s of self-play, 4 events and 21-24 matches (360-580 events and 2,160-3,050
+matches per hour), 345-368 draft samples, 2,096-4,237 match samples; draft leaves 15-24% of the
+leaves (27-39% as leaf-equivalents); parked records 28-32 MB at most (10-11 events waiting);
+event latency (park to resolve) 25-34 s; the coordinator's delay from the last match to `resolve`
+1.6-7.5 ms; the draft driver waited for backpressure 18-20 s of each phase (the matches are the
+bottleneck, as designed). The dashboard showed both tabs (45.8).
+
+**GPU, 4v4** (`--preset team_draft-gpu-smoke --resolver-init <a copy of runs/mtg5's
+iteration 10>`: the run's networks and search at 8 events per iteration, 16 events and 96 matches
+in flight, backpressure at 192): iteration 0 = a fresh draft network and mtg5's iteration 10 as
+the play network ("resolver iteration 0 = ...mtg5_iter_0010.pt (tokens, 33652 features, 1024
+actions)"); its evaluation: the play network 0/8 against the heuristic, 3/4 against random; the
+draft network 0/4 against `consensus` (margin -6.5 matches of 12), 0/2 against random, 1/4
+against `consensus` with play-net matches (40 min: 48 matches at 32 simulations, 48 in flight);
+human picks 15.1% (random 17.8%, strongest card 39.7%: an untrained network). Iteration 1
+(self-play 2,046 s, while the engine fuzz and search smokes and smoke_all's builds ran on the
+CPU):
+
+| | draft (`team_draft`, 4v4) | matches (`mtg`, the play network) |
+|---|---:|---:|
+| resolved / played | 8 events (28 more parked, 16 drafting) | 241 matches (2.5 games, 610 decisions, 33 minor each) |
+| per hour | 14 events resolved (the quota of 8 per phase; drafting ran ahead, backpressure) | 424 matches |
+| leaves, leaves/s, mean batch | 703,092, 344, 8.0 | 5,108,844, 2,497, 47.9 |
+| leaves per unit | ~16,000 per event drafted (~44 drafted; the search smoke: 14,600) | 21,200 per match (runs/mtg5: 14,700-24,800) |
+| samples | 1,436 (180 per event) | 35,187 (146 per match) |
+| GPU split (leaves; x2 for a draft leaf's tokens) | 12.1% (21.6%) in this phase; at steady state (14,600 per event against 12 x 21,200) 5.4% (10.3%) | |
+| parked records, event latency | 151.6 MB at most (28 events, 5.4 MB each), park to resolve 1,303 s mean / 1,811 s max; the coordinator 10.6 / 18.9 ms; backpressure 1,144 s of 2,046 | |
+
+**Killed** (`tools/kill_run.py`) 1 min into iteration 2's self-play (1 event resolved, 28
+parked, 96 matches in flight) and restarted with the same command and `--iters 2
+--draft-eval-net-every 0` (to skip a second 40-minute play-net evaluation of the draft): "starting
+after iter 1", iteration 2 replayed from its start (its data directories cleared, the events and
+matches in flight dropped). Iteration 2 (self-play 2,047 s, the CPU quieter, the GPU still
+shared): 8 events resolved (24 parked), 1,410 draft samples, 641,184 draft leaves (313 per second,
+batches of 8); 226 matches (471 decisions, 29 minor each; 397 per hour), 25,693 samples,
+3,889,971 leaves (1,900 per second, batches of 47.7: 17,200 per match); GPU split 14.1% of the
+leaves (24.8% as leaf-equivalents) in this phase; parked records 144.1 MB at most (24 events);
+event latency 1,262 s mean / 1,707 s max, the coordinator 9.3 / 22.0 ms, backpressure 1,015 s.
+Training: the draft net 50 steps (31-37 s), the play net 101-138 steps (24-38 s; windows of
+1,436-2,846 and 35,187-60,880 samples). Evaluations of iterations 1 and 2: the play network 0/8
+against the heuristic, 3/4 and 1.5/4 against random (its evaluation and Elo 16-31 min with 4-8
+matches in flight); the draft network 0/4 against `consensus` (margin -11.5 of 12) and 0/2
+against random (-11.0), the draft Elo 2/2 for iteration 2 against 1 and 0/2 against 0 (its
+evaluation and Elo 8.5-10 min); human picks 19.5% and 18.9% (iteration 2 on the regenerated
+3,603 positions: random 17.8%, strongest card 41.1%; none failed). Both networks trained and
+evaluated each iteration; `done`, no debug directory, no non-finite value.
+
+**What the smokes' draft networks learned: deckbuilding collapsed to an extreme.** The GPU
+smoke's iteration-2 draft network, choosing by its policy, puts every pool card `OUT` and builds
+40 basic lands (31 Plains); its searched evaluation lost every match to `consensus` and to random
+drafters. Its iteration-1 training data (drafted by the fresh network with search) already leaned
+that way: on 709 card decisions the completed-Q target put on average 52.4% on `OUT`, and above
+50% in 90.8% of them (iteration 2: 52.9%, 85.4%); the fresh value head's random preference
+between two near-identical children decides every such target the same way, and `OUT` is one
+generic logit shared by every card decision (the card's own action is its slot's pointer logit),
+so a small consistent bias becomes the policy. The CPU smoke swung the other way (iteration 1
+30-39 basic lands, iterations 2-3 every card in, 0-4 basic lands). In self-play every seat is the
+same network, so a shared degenerate deck would be a fixed point: decks of 40 basic lands on both
+sides draw every match and give no signal to leave it; nothing explores deckbuilding but the
+root noise (`temp_moves` 120 ends before the first deckbuilding decision). The smoke's self-play
+had not reached it (its searched decks still decided matches: 5.4 match wins per team and event
+in iteration 2, 26% of iteration 1's samples from drawn events, none in iteration 2), but its
+evaluation had. Two iterations of 8 events say little about a 48-event run's learning; this is
+the first thing to watch (45.12).
+
+
+**Projection for `team_draft-4v4`** (48 events per iteration). An event is ~14,600 draft leaves
+(x2: ~29,000 leaf-equivalents) and 12 matches of 17,200-21,200 leaves: ~235,000-284,000
+leaf-equivalents. With
+768 matches and 64 events in flight the batches are runs/mtg5's (384 leaves), whose self-play
+measured 6,600-11,400 leaves/s on this GPU (iterations 1-10, the GPU shared with the other
+projects): **84-175 events (1,000-2,100 matches) per hour of self-play**, so **16-34 min of
+self-play per iteration** (DESIGN.md 2.3.9: 145-175 events per hour at 11.4k leaves/s; the matches
+grew from 17k to 21k leaves). The smoke's own 344 + 2,497 leaves/s came from 16 events and 96
+matches in flight on a GPU busy with runs/mtg5 (batches of 8 and 48); it is not the run's rate.
+Training both nets: ~2-3 min (the play net ~84k samples per iteration, mtg5's 1.5-3 min; the
+draft net ~8.6k). Evaluation: the draft network every iteration (32 + 16 events against
+`consensus` and random, 4 x 16 Elo events, heuristic-played: ~112 events whose 4 or 8 searching seats make ~19,000-38,000 leaf-equivalents each, ~5-10 min; in the smoke, 4 + 2 events took 4 min with 4 and 2 events in flight), the play network every
+2nd iteration as mtg-4 (runs/mtg5: 28-69 min of evaluation and Elo per evaluated iteration), the
+play-net matches of the draft evaluation every 4th (32 events, 384 matches at 32 simulations:
+~20-40 min). **An iteration: ~42-91 min, ~65 on average (0.9 per hour; 100 iterations ~4.5
+days)**; self-play alone ~84-175 events per hour, the whole loop ~45 events per hour. The GPU
+split at that scale: the draft ~5-6% of the leaves (10-12% as leaf-equivalents; 2.3.9: 11-13%);
+parked records ~5.4 MB per event, ~350 MB for 64 events waiting.
+
+### 45.11 Deviations from the design (DESIGN.md 2.3, 5.1, 7.1)
+
+* **`"seed"` in the `mtg` spec** (2.3.6 named two keys): the event's match seed must reach the
+  match, and zero-core's queued setups take a spec, not a seed. With it a drafted spec is the
+  event's match exactly (tested move for move); without it the driver's seed is used as before.
+* **`SearchGame::sims_divisor`** (zero-core; 2.3.9 gave deckbuilding 32 / 8 without saying how):
+  the core had one budget per seat (`sims_minor` aside, which is never recorded). A game hook was
+  the smallest generic change: `team_draft`'s spec key `build_sims_div` (default 1, the presets 2).
+  It applies to every network seat, so the draft network's evaluation searches deckbuilding at
+  `eval_sims` / 2 too.
+* **The human-pick positions** (2.3.8 said "agreement with held-out human picks"): built from
+  whole held-out drafts as 4v4 positions of seat 0 (a new `team_draft` spec key, `history`),
+  with cards of older cube versions replaced by random current ones and the choice restricted to
+  the pack's current cards; the network's policy without search; skipped for other pods than
+  4v4. The data stays on E: (raw human picks). A failing evaluation of this kind is logged and
+  recorded, not fatal (zero-core's `Run.extra_evals`): a curiosity must not stop a long run.
+* **`temp_moves` 120** for the draft (2.3.9 did not set it): zero-core counts an event's searched
+  decisions over all eight seats; 120 covers the first pack.
+* **The preset keeps the play network's evaluation as mtg-4's** (`eval_every` 2 with mtg-4's 100
+  / 50 / 20 x 2 matches): 2.3.9 budgeted ~27 min for it; runs/mtg5 measured 28-69 min of
+  evaluation and Elo per evaluated iteration (iterations 2-10), the largest cost after self-play
+  (45.10). Not changed (the user's "mtg-4's settings"); an option for the launch (45.12).
+* Unchanged from part 2 and kept: the draft network's play-net evaluation (`eval_yard_net`,
+  `eval_games` events) stays out of its Elo fit; the coordinator raises on a malformed result.
+
+### 45.12 Open issues
+
+* **Deckbuilding can collapse to a shared degenerate deck** (45.10: both smokes' draft networks
+  swung to all-`OUT` or all-in within 1-2 iterations; all-basic-land decks on both sides would draw
+  every match, a fixed point without signal). Watch the draft network's decks in the first
+  iterations (the evaluation against random drafters and `consensus` shows it: margins near -12
+  of 12). Levers, none applied here: temperature over the whole event in self-play
+  (`--temp-moves 800`: an event has ~723 searched decisions, so deckbuilding is sampled by visit
+  count and decks stay diverse within a team, at the cost of noisier picks), or a zero-core hook
+  for temperature per decision class (deckbuilding sampled, picks greedy after the first pack),
+  or a policy that scores `OUT` per card (a layout change: the decided card's slot scoring `OUT`).
+
+* **The play network's start**: runs/mtg5's iteration 10 (the copy used here) lost 0/8 to the
+  heuristic and won 3/4 against random at 32 simulations; the matches of the first draft
+  iterations reward what a weak player can pilot (DESIGN.md 2.2's stated risk). The checkpoint
+  is the user's choice at launch.
+* **Iteration time** (45.10): the projection is ~42-91 min per iteration (~65 on average) with
+  mtg-4's evaluation of the play network every 2nd iteration, against 2.3.9's 35-40 min. Options: the play network's
+  `eval_every` 4 (`--resolver-cfg '{"preset": "mtg-4", "eval_every": 4}'`), fewer Elo games, or
+  `elo_sims` lower; the draft side is cheap.
+* The minutes-per-iteration chart of the dashboard shows self-play, training, evaluation and Elo,
+  not the draft network's play-net evaluation phase (`eval_net_s`, in metrics and the table's
+  minutes); the dashboard on :5340 runs main's core until main pins this one.
+* The human-pick agreement uses 100 of the 2,585 eligible held-out drafts (3,603 positions, SE
+  ~0.8 points); the strongest-card reference is fit on the whole corpus (optimistic). The first
+  extraction kept 11 drafts with a repeated card (a card in two packs, 32 positions failed in the
+  GPU smoke's iteration 0); the tool now drops them.
+* zero-core tools that play matches outside a run (`zero.h2h`, `zero.replay`, `zero.targets`,
+  `zero.bench`) still do not resolve deferred games (43.5).
+* The uniform determinization (2.3.10 question 10, kept) and the heuristic first-pick prior
+  (question 6, kept): both are options for later, with the run's own drafts as data.
