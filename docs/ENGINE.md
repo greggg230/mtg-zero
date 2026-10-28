@@ -6962,13 +6962,15 @@ the remote side of the core does not apply `torch_threads`); python
 `~/.venvs/dominion-zero/bin/python`, workdir `~/mtgz-remote`. Tests: `tests/test_mac_remote.py` (the
 spec is the checkout's commit through `zero.remote.remote_spec`, resolved lazily, refused when
 dirty; the remote side refuses another commit, a change, a missing or stale stamp, an unset
-commit). End to end on the desktop: `python -m mtgz.az.run --run <scratch>/e2e-mac --preset mtg-smoke
+commit; a co-training run's resolver mirror is checked and evaluated the same way, section 48).
+End to end on the desktop: `python -m mtgz.az.run --run <scratch>/e2e-mac --preset mtg-smoke
 --eval-remote mac` (26 s): the preflight passed, iterations 0-3 were evaluated on the Mac (3.5-5.1 s
 each, shipping included), `evals.jsonl` got their rows (host mac: vs the heuristic, vs random, Elo),
 `metrics.jsonl` has none, `zero.dashboard._metrics` merges them into the four rows, `elo/` and
 `models/index.json` came back. Refusals checked by hand: a missing Mac checkout stops the run at
 start with the command to run; an unreachable host warns and goes on; the remote shim refuses a
-checkout at another commit and an unset commit.
+checkout at another commit and an unset commit. Co-training runs: the play network's evaluation on the
+Mac, mirror `~/mtgz-remote/<run>.resolver` (section 48).
 
 ### 44.4 Measurements: mtg5's iteration 8
 
@@ -7037,9 +7039,10 @@ stops at start with the command (44.3).
 
 ### 44.6 Limits
 
-* zero-core's co-training (`zero/cotrain.py`, core e6166c3, M6 part 2) refuses `eval_remote` for now
-  ("eval_remote is not supported in co-training runs"): co-trained team-draft runs evaluate on the
-  desktop until the core supports it.
+* zero-core's co-training (`zero/cotrain.py`, core e6166c3, M6 part 2) refused `eval_remote`
+  ("eval_remote is not supported in co-training runs"). Since zero-core f8adf48 (section 48) a
+  co-training run's play network (the resolver) is evaluated on a remote with `resolver_cfg`'s
+  `eval_remote` (`team_draft-4v4`: the Mac); the draft network's evaluation stays on the desktop.
 * zerodash (`zero-core/dashboard`) reads `metrics.jsonl` and `elo/ratings.json` only: with
   `eval_remote` its Elo is current (ratings.json comes back) but its win rates vs the yardstick and
   random stop at the last local evaluation; the game dashboard merges `evals.jsonl`. `models/best.pt`
@@ -7207,7 +7210,7 @@ decisions of 48 events took 697,792 simulations, 20.7 per decision (picks 28 on 
 | pod, events / iteration, in flight | 4v4 (players [8]), 48, 64 | 4v4, 8, 16 | 2v2 ([4]), 4, 4 |
 | draft search | picks 64 / 16, deckbuilding 32 / 8 (`build_sims_div` 2), p_full 0.25, cq targets, `temp_moves` 120 | as the run | 8 / 2, deckbuilding 4 / 1 |
 | draft network | tokens 128 x 4 (heads 4, ff 256; actions by identity), batch 512, reuse 4, window 8 (min 20,000 samples), value_q 0.5 (warm-up 5), RAM 6 GB, CUDA | as the run (min window 0) | tokens 32 x 1 |
-| play network (`resolver_cfg`) | mtg-4 (64 / 16, minor 4, 128 x 4, cq, value_q 0.9), evaluated every 2nd iteration on the fixed evaluation pools; `resolver_init` the mtg5 checkpoint chosen at launch | mtg-4, 96 in flight, small evaluations | mtg-smoke, best-of-three, tokens 32 x 1, minor 2 |
+| play network (`resolver_cfg`) | mtg-4 (64 / 16, minor 4, 128 x 4, cq, value_q 0.9), evaluated every 2nd iteration on the fixed evaluation pools **on the Mac** (`eval_remote` mac, section 48); `resolver_init` the mtg5 checkpoint chosen at launch | mtg-4, 96 in flight, small evaluations (on the Mac, 48) | mtg-smoke, best-of-three, tokens 32 x 1, minor 2 |
 | matches in flight, backpressure | 768, 2 x 768 (`pending_max` 0) | 96, 192 | 16, 32 |
 | draft evaluation | `consensus` 32 events, random 16, Elo 4 x 16, reference 32 (heuristic-played, every iteration); `eval_yard_net` every 4th; human picks | 4, 2, 2 x 2, 4; `eval_yard_net` every 2nd | 4, 2, 2, 4; every 2nd |
 
@@ -7393,7 +7396,8 @@ play-net matches of the draft evaluation every 4th (32 events, 384 matches at 32
 ~20-40 min). **An iteration: ~42-91 min, ~65 on average (0.9 per hour; 100 iterations ~4.5
 days)**; self-play alone ~84-175 events per hour, the whole loop ~45 events per hour. The GPU
 split at that scale: the draft ~5-6% of the leaves (10-12% as leaf-equivalents; 2.3.9: 11-13%);
-parked records ~5.4 MB per event, ~350 MB for 64 events waiting.
+parked records ~5.4 MB per event, ~350 MB for 64 events waiting. **With the play network's
+evaluation on the Mac** (section 48, the preset since then): ~28-57 min, ~42 on average (48.4).
 
 ### 45.11 Deviations from the design (DESIGN.md 2.3, 5.1, 7.1)
 
@@ -7416,7 +7420,8 @@ parked records ~5.4 MB per event, ~350 MB for 64 events waiting.
 * **The preset keeps the play network's evaluation as mtg-4's** (`eval_every` 2 with mtg-4's 100
   / 50 / 20 x 2 matches): 2.3.9 budgeted ~27 min for it; runs/mtg5 measured 28-69 min of
   evaluation and Elo per evaluated iteration (iterations 2-10), the largest cost after self-play
-  (45.10). Not changed (the user's "mtg-4's settings"); an option for the launch (45.12).
+  (45.10). Not changed (the user's "mtg-4's settings"); an option for the launch (45.12). Since
+  section 48 it runs on the Mac (`resolver_cfg` `eval_remote` 'mac'), off the desktop's iteration.
 * Unchanged from part 2 and kept: the draft network's play-net evaluation (`eval_yard_net`,
   `eval_games` events) stays out of its Elo fit; the coordinator raises on a malformed result.
 
@@ -7439,7 +7444,8 @@ parked records ~5.4 MB per event, ~350 MB for 64 events waiting.
 * **Iteration time** (45.10): the projection is ~42-91 min per iteration (~65 on average) with
   mtg-4's evaluation of the play network every 2nd iteration, against 2.3.9's 35-40 min. Options: the play network's
   `eval_every` 4 (`--resolver-cfg '{"preset": "mtg-4", "eval_every": 4}'`), fewer Elo games, or
-  `elo_sims` lower; the draft side is cheap.
+  `elo_sims` lower; the draft side is cheap. **Taken (the user's decision of 2026-10-27): the play
+  network's evaluation on the Mac, ~42 min per iteration on average (section 48.4).**
 * The minutes-per-iteration chart of the dashboard shows self-play, training, evaluation and Elo,
   not the draft network's play-net evaluation phase (`eval_net_s`, in metrics and the table's
   minutes); the dashboard on :5340 runs main's core until main pins this one.
@@ -7698,3 +7704,188 @@ unchanged.
   them (the bad shard stays in `runs/mtg5/debug`). A run continues on this engine with its network
   as it is: layout v4 is unchanged and every normal state encodes bit for bit as before; only states
   past the threshold (0.009% of the default fuzz's encodings) read differently.
+
+## 48. The play network's evaluation on the Mac (co-training runs, M6)
+
+Branch `m6-cotrain-remote` (from 01fa623: main 2b27c84 + m6-bounds; presets, tests and docs only: the
+engine is 01fa623's), zero-core pinned at `feat/cotrain-remote` af44741 (core main d68778e + f8adf48,
+the code, and af44741, its docs/az.md 5.2 and 11.5). The user's decision of 2026-10-27: in co-training
+runs the MacBook evaluates the play network (`mtg`, the resolver), as single-game runs already could
+(section 44); the draft network's evaluation stays on the desktop. Why: the play network's evaluation
+with mtg-4's settings every 2nd iteration was the largest cost of the 4v4 run after self-play (45.10:
+28-69 min on the desktop per evaluated iteration, ~65 min per iteration on average against 2.3.9's
+35-40), and the Mac plays it in ~9 minutes (44.4) while the desktop goes on.
+
+### 48.1 What was built
+
+* **zero-core** (its docs/az.md 11.5): `eval_remote` in `resolver_cfg` - the resolver's own setting,
+  meaning there what it means for a single-game run (no new run setting) - gives the resolver's
+  `Run` a `zero.remote.RemoteEval`: each evaluated iteration of the play network (`eval_every`) is
+  queued and the run goes on; the remote's thread ships the checkpoints to the mirror
+  **`~/mtgz-remote/<run name>.resolver`** (a sibling of single-game mirrors such as `mtg5`: the same
+  lock, one evaluation at a time in `~/mtgz-remote`, and the same `overrides.json`), runs `python -m
+  mtgz.az.remote eval` there, appends the result to **`<run>/resolver/evals.jsonl`** and copies the
+  mirror's Elo back to `<run>/resolver/elo/` and `resolver/models/index.json`. The resolver's rows in
+  `resolver/metrics.jsonl` carry no evaluation; the log's lines are `[resolver] ... (remote mac, Ns)`.
+  A restart queues the play network's evaluations without a result again; an unreachable Mac is
+  retried every 5 minutes on that thread while both networks train and the draft network is
+  evaluated; at the end of its iterations the run waits for the queue (progress phase `remote
+  evaluations`; PAUSE stops the wait). The run's top-level `eval_remote` would be the draft network's
+  and is refused (its events' matches need the run's resolver drivers); an unknown remote name is
+  refused at start.
+* **The presets** (`mtgz/az/__init__.py`): `team_draft-4v4` and `team_draft-gpu-smoke` add
+  `'eval_remote': 'mac'` to their `resolver_cfg`; `team_draft-smoke` (the CPU smoke the tests run)
+  evaluates everything on the desktop (48.2 adds the key on its command line).
+* **The Mac's side is unchanged**, and covers co-training as it is:
+  * `RunCommitRemote` (`mtgz/az/mac.py`) resolves to the commit of the co-training run's checkout:
+    refused at start if the checkout has uncommitted changes, `repo` = `~/mtg-zero-wt/run-<sha12>`,
+    preflighted over ssh (missing, another commit, changed or unstamped: refused at start with the
+    command that prepares it).
+  * `bash tools/mac.sh --eval-checkout` builds the whole engine there (`mtg` and `team_draft`); the
+    resolver's evaluation uses `mtg`.
+  * A resolver mirror's config.json is the resolver's settings: a single-game `mtg` run's (mtg-4's,
+    with the Mac's overrides). `python -m mtgz.az.remote eval` checks the checkout (HEAD =
+    `MTGZ_REMOTE_COMMIT`, nothing changed, the engine stamp) before evaluating any mirror, so the
+    commit check applies to the play network's evaluations exactly as to mtg5's.
+* **Tests**: `tests/test_mac_remote.py::test_a_resolver_mirror_is_evaluated_after_the_same_check`
+  (team_draft-smoke's resolver mirror: `python -m mtgz.az.remote eval` refuses it at another commit
+  before evaluating or locking anything; the remote side then evaluates it: the heuristic, random,
+  Elo); `tests/test_drafted.py::test_cotraining_presets` (the three presets' remotes). zero-core's
+  `tests/test_cotrain.py`: the toy co-training run with the resolver's remote `local`, a restart with
+  evaluations pending, an unreachable remote (its docs/az.md 11.5).
+
+### 48.2 End to end: the Mac for real (`team_draft-smoke`, 2v2, CPU)
+
+At 9307c09 (committed), `bash tools/mac.sh --eval-checkout` (41 s: `~/mtg-zero-wt/run-9307c09d6350`,
+engine built in 38 s, checked), then in a scratch directory, CUDA hidden, the desktop shared with
+other projects' runs:
+
+```
+python -m mtgz.az.run --run E:/mtg-zero-scratch/cotrain-remote/td_mac --preset team_draft-smoke --iters 3 \
+  --resolver-cfg '<team_draft-smoke resolver_cfg + "eval_remote": "mac">'
+```
+
+The log: `[resolver] evaluations on the remote 'mac' (greggkeithley@100.95.248.116, mirror
+/Users/greggkeithley/mtgz-remote/td_mac.resolver)`; the preflight passed. Iterations 0-3, 3 min 2 s,
+`done`:
+
+| | where | iteration 0 | 1 | 2 | 3 |
+|---|---|---:|---:|---:|---:|
+| play network: vs the heuristic (4 matches), random (2), Elo | **Mac** (the mirror's phases: evaluation, Elo) | 0.9 s, 0.0 s | 1.5, 4.0 | 1.4, 4.7 | 1.3, 4.6 |
+| the same, wall clock from the queue (shipping, ssh, the checkout check) | Mac | 4.3 s | 7.7 | 8.5 | 8.2 |
+| draft network: vs `consensus` (4 events), random (2) | desktop | 3.6 s | 3.6 | 4.9 | 4.0 |
+| draft network: vs `consensus`, play-network matches (`eval_yard_net`, every 2nd) | desktop | 18.9 s | - | 36.6 | - |
+| draft network: Elo | desktop | 0.5 s | 3.0 | 9.5 | 6.3 |
+| iteration (self-play + training + the desktop's evaluations) | desktop | 23 s | 46 | 84 | 29 |
+
+* `resolver/evals.jsonl`: four rows, `host` mac (vs the heuristic 0/4 each, random 0, 0, 0.5, 1 of 2;
+  Elo -99, -43, 358, 399); `resolver/metrics.jsonl`: four rows without an evaluation;
+  `resolver/elo/` (ratings of iterations 0-3, random, the heuristic) and `resolver/models/index.json`
+  came back. The draft network's rows in `metrics.jsonl` have their evaluations, Elo and
+  `eval_yard_net` (iterations 0 and 2), all played on the desktop; no `evals.jsonl` at the run root.
+* The Mac's mirror `~/mtgz-remote/td_mac.resolver`: config.json (`mtg`, mtg-smoke's network and
+  evaluation settings, the Mac's overrides), checkpoints 0-3, its metrics and Elo, next to `mtg5`.
+* The dashboard (`zero.dashboard`, `/api/run/td_mac`): the play network's tab has the Mac's rows
+  merged (win rates, Elo by iteration) and its Elo table from the copied-back `resolver/elo/`.
+* **A local baseline** (the same command without the remote, right after, the desktop busier):
+  3 iterations in 8 min 31 s; the play network's evaluation on the desktop 2.6-9.6 s and its Elo
+  0-74 s per iteration (16.9, 59.8 and 74.0 s for iterations 1-3: the Elo matches grow with the
+  checkpoints played), all of it on the iteration's critical path. The two runs' self-play differs
+  (co-training self-play is not deterministic: two drivers on two threads), so only the phases
+  compare.
+* **Refusals in the co-training path**: a run started from this worktree with an uncommitted change
+  stopped at start ("eval_remote: the run's checkout ... has uncommitted changes, so no remote
+  checkout can hold its code"); a run started at a commit whose Mac checkout does not exist stopped
+  at start with the command that prepares it (48.5).
+
+### 48.3 Turning it on for the 4v4 run
+
+As for mtg5 (44.5), from the run's pinned worktree at a commit with this branch's code:
+
+1. `git -C ~/mtg-zero worktree add --detach ~/mtg-zero-wt/run-<s7> <S>`, there
+   `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<s7> bash tools/build_py.sh`.
+2. There: `bash tools/mac.sh --eval-checkout` (~40 s: the Mac's `~/mtg-zero-wt/run-<s12>`).
+3. `python tools/launch_hidden.py <run>/supervisor_console.txt python tools/supervise.py <run>
+   --preset team_draft-4v4 --resolver-init <the mtg5 checkpoint>`: the preset's `resolver_cfg` has
+   `eval_remote` 'mac'. The log says `[resolver] evaluations on the remote 'mac' (..., mirror
+   /Users/greggkeithley/mtgz-remote/<run>.resolver)`; each evaluated iteration of the play network
+   logs `[resolver] iter N vs heuristic (remote mac, ...s)` and `[resolver] iter N elo ... (remote
+   mac)`; `<run>/resolver/evals.jsonl` holds the results.
+4. Off (or on, for a run started without it), at a restart: `--resolver-cfg` with the whole dict (a
+   flag replaces the saved one), e.g. `--resolver-cfg '{"preset": "mtg-4", "eval_every": 2,
+   "eval_remote": ""}'`: from then the play network is evaluated on the desktop again, from its
+   `resolver/elo/` as the Mac last left it. Every re-pin repeats steps 1-2.
+
+### 48.4 The projected 4v4 iteration
+
+45.10's projection per iteration: self-play 16-34 min, training 2-3, the draft network's evaluation
+5-10 (heuristic-played events, every iteration), the play network's 28-69 every 2nd (runs/mtg5 on the
+desktop), the draft network's play-network events (`eval_yard_net`) 20-40 every 4th: 42-91 min, ~65
+on average. With the play network's evaluation on the Mac, the desktop's iteration is self-play,
+training and the draft network's evaluation:
+
+| | desktop per iteration | average |
+|---|---:|---:|
+| iterations 1, 2, 3 of 4 (no `eval_yard_net`) | 23-47 min | ~35 |
+| every 4th (`eval_yard_net`) | 43-87 min | ~65 |
+| **average** | **28-57 min** | **~42 (1.4 iterations per hour; 100 iterations ~2.9 days, against ~4.5)** |
+
+The Mac's share: the play network's evaluation (mtg-4's: 100 matches against the heuristic, 50
+against random, the Elo matches, ~9.3 min with shipping on the idle Mac, 44.4) every 2nd iteration,
+~85 min apart: busy ~11% of the time, so it never falls behind; each result lands ~10 min after its
+checkpoint, later by up to one evaluation when another mtgz run's (mtg5's) holds the lock in
+`~/mtgz-remote`, or by the shared cores when other projects evaluate there (`~/kbz-remote`). The
+largest evaluation left on the desktop is `eval_yard_net` (48.6).
+
+### 48.5 Checks
+
+At 9307c09 (the engine is 01fa623's: this branch changes presets, tests and docs, and the core's
+Rust is unchanged):
+
+* **Engine tests on the Mac** (`bash tools/mac.sh 'cargo test --release --no-fail-fast'`: every test
+  binary of the workspace, `az` included; the desktop runs no `az`): **1,387 passed, 0 failed, 13
+  ignored** (`az` 14 passed, card_ir 5), 6 min 28 s with the builds.
+* **Behaviour digests** (Mac, `cargo test --release -p engine --test digest -- --ignored`): combined
+  digest **12642107250032a7** (2,000 random and 500 heuristic games in 9.0 s).
+* **Python** (desktop, `bash tools/build_py.sh`, 2 min 28 s; `python -m pytest -q tests`): **35
+  passed** (01fa623's 34 and the new resolver-mirror test), 74 s.
+* **Search smoke** (Mac, `python tools/search_smoke.py --specs random,match,team_draft --seeds 0-1`):
+  **0 failed of 6**, 123 s: random 400 games each (161,770 and 166,767 decisions), match 400 each
+  (385,154 and 381,064 decisions, 10.2 and 10.1 million simulations), team_draft 24 events each, all
+  resolved (team A won 6 and 10, drew 3 and 4), 288 matches each, 16,874 and 16,911 draft
+  decisions, parked records at most 11.55 and 16.52 MB.
+* **Refusals at start** in the co-training path (48.2): an uncommitted change in the run's checkout;
+  a commit without its Mac checkout (this section's docs commit, before its `--eval-checkout`): stopped at start, "eval_remote:
+  greggkeithley@100.95.248.116:/Users/greggkeithley/mtg-zero-wt/run-<sha12> is not the run's code
+  (<sha12>): ... No such file or directory" and "prepare it: in <checkout>: bash tools/mac.sh
+  --eval-checkout".
+* **zero-core** (`feat/cotrain-remote` af44741): `cargo test --release` 44 passed (unchanged Rust);
+  `python -m pytest tests` **110 passed** (105 and 5 new: the resolver's remote `local`, a restart
+  with evaluations pending, an unreachable remote, the run's own `eval_remote` and an unknown name
+  refused), 296 s.
+  `SMOKE_TARGET=cotrainremote bash tools/smoke_all.sh --with-this-core` (Glass Road c1f56dc,
+  Caverna a6fad73, Kingdom Builder 4202a4a, MTG Zero main 2b27c84, each at its HEAD with core
+  af44741): **GREEN**, 19 steps, 42 min: core cargo test 44, pytest 110; Glass Road cargo test 46,
+  pytest 33, `glassroad-smoke` 4 rows; Caverna 47, 32, `caverna-smoke` 4 rows; Kingdom Builder 105
+  (4 ignored), 45, `kingdombuilder-smoke` 4 rows; MTG Zero cargo test 1,387 (every binary, `az`
+  included as smoke_all runs it; 13 ignored), pytest 34, `mtg-smoke` 4 rows.
+
+### 48.6 Limits and open issues
+
+* **`eval_yard_net` stays on the desktop** (the user's decision: the draft network's evaluation is
+  the desktop's). It could go to the Mac at moderate cost - a second remote command rebuilding
+  zero-core's `CoRun.event_match` from a mirror holding both networks' checkpoints and the run's
+  settings, the commit check and the lock as they are - and it is now the largest evaluation of the
+  desktop's iteration (32 events, 384 play-network matches at 32 simulations every 4th iteration,
+  20-40 min: ~5-10 min of the ~42 average). Not done; the other lever is `draft_eval_net_every` 8.
+* The Mac's checkout check covers the code, not the shared venv `~/.venvs/dominion-zero` (44.6); the
+  Mac's results are those of its arithmetic (44.4), so the play network's Elo differs from what the
+  desktop would fit by the usual noise (48.2's local baseline: iteration 2 at 203 here against 358
+  there, on other self-play).
+* `models/best.pt` of the play network is not copied back (index.json is); zerodash (zero-core's
+  `dashboard/`) reads `metrics.jsonl` and `elo/` only (44.6): the game dashboard merges
+  `resolver/evals.jsonl`.
+* A run that finishes its iterations waits for the play network's last evaluations (at most 6
+  hours) unless STOP exists; PAUSE ends the wait (the restart queues them again).
+* The scratch mirror `~/mtgz-remote/td_mac.resolver` was removed after 48.2; the checkout
+  `~/mtg-zero-wt/run-9307c09d6350` and its target dir (0.4 GB) stay, as other run checkouts do.
