@@ -3,7 +3,9 @@
 //! the payment then offers a way to pay it: every test here is a cube board
 //! where the engine offered a cast (or an X) that its payment could not
 //! complete (`PayMana: no way to pay`, a panic that fails a self-play run),
-//! or counted mana the rules don't give. Each failed before its fix.
+//! or counted mana the rules don't give (one, 49.6: a face choice a world
+//! sampled for the opponent could not complete). Each fails on 01fa623.
+//! The agreement fuzz (49.4) closes the file.
 
 mod common;
 
@@ -73,7 +75,7 @@ fn finish(g: &mut Game, answer: impl Fn(&Game) -> Option<Choice>) {
     panic!("finish: no progress\n{}", log(g));
 }
 
-// ---- 49.1: Wizard's Rockets and its card's other uses ----------------------
+// ---- 49.1-49.2: Wizard's Rockets and its card's other uses ------------------
 
 /// CR 601.2g, 605.3a: Wizard's Rockets ("{X}, {T}, sacrifice this: add X
 /// mana in any combination of colors") taps and sacrifices itself, so in the
@@ -194,7 +196,7 @@ fn cr_106_6_wizards_rockets_does_not_turn_mishras_workshop_mana_into_colours() {
     assert_eq!((g.player(0).pool.amt, g.player(0).pool.art), ([0, 0, 0, 0, 0, 2], 2), "{}", log(&g));
 }
 
-// ---- 49.3: sources a graveyard cost needs, with no mana to pay --------------
+// ---- 49.2: graveyard costs (found by the agreement fuzz, 49.4) ---------------
 
 /// CR 601.2g-h, 602.2b: mana abilities are activated before the rest of a
 /// cost is paid, so Lotus Petals sacrificed for mana are graveyard cards an
