@@ -1082,7 +1082,9 @@ fn layout_json_is_checked_in() {
 /// `determinize` for the decider and another viewer (knowledge, features,
 /// options, invariants); at one decision of every 8th event every offered
 /// option completes the event; the event resolved with random results (every
-/// 50th by heuristic-played matches).
+/// 50th by heuristic-played matches: a match that panics in the `mtg` engine
+/// is recorded with its spec, the event resolved with random results, and the
+/// test fails at the end listing every such match).
 #[test]
 fn fuzz_random_events() {
     let events: u64 = std::env::var("DRAFT_FUZZ").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
@@ -1091,6 +1093,7 @@ fn fuzz_random_events() {
     let (mut steps, mut worlds, mut options_done, mut searched) = (0u64, 0u64, 0u64, [0u64; 2]);
     let mut team_wins = [0u64; 3];
     let mut heuristic_matches = 0u64;
+    let mut match_panics: Vec<String> = Vec::new();
     // decks, their pool cards, card choices (DONE offered at) by minimum: the default / other
     let mut decks = [[0u64; 4]; 2];
     let t0 = std::time::Instant::now();
@@ -1165,9 +1168,31 @@ fn fuzz_random_events() {
         }
         let n = g.matches().unwrap().len();
         if e % 50 == 7 {
-            // Random decks are playable: the heuristic plays the event's matches.
-            let res = draft_bots::resolve_with_heuristic(&mut g, e).unwrap_or_else(|err| panic!("event {e}: {err}"));
+            // Random decks are playable: the heuristic plays the event's matches
+            // (one at a time: a panic of the `mtg` engine is recorded with the
+            // match's spec, and fails the test at the end).
+            let (max_turns, format) = (g.ev.max_turns, g.ev.format);
+            let mut res = Vec::new();
+            for (i, setup) in g.matches().unwrap().iter().enumerate() {
+                let played = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    draft_bots::play_match_heuristic(setup, max_turns, format, e, i)
+                }));
+                match played {
+                    Ok(Ok(m)) => res.push(m.result),
+                    Ok(Err(err)) => panic!("event {e} match {i}: {err}"),
+                    Err(p) => {
+                        let msg = p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+                        match_panics.push(format!(
+                            "event {e} match {i} (seed {e}): {}\n    spec: {}",
+                            msg.chars().take(160).collect::<String>(),
+                            draft_bots::match_spec(setup, max_turns, format)
+                        ));
+                        res.push([0.5, 0.5]);
+                    }
+                }
+            }
             heuristic_matches += res.len() as u64;
+            g.resolve(&res).unwrap();
         } else {
             let res: Vec<[f32; 2]> = (0..n).map(|_| [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]][rng.below(3) as usize]).collect();
             g.resolve(&res).unwrap();
@@ -1187,6 +1212,9 @@ fn fuzz_random_events() {
         searched[1],
         t0.elapsed().as_secs_f64()
     );
+    for p in &match_panics {
+        println!("MTG ENGINE PANIC in a heuristic-played match: {p}");
+    }
     for (k, what) in ["minimum 22 (the default)", "minimum 0, 40 or random"].iter().enumerate() {
         let [n, cards, choices, done] = decks[k];
         println!(
@@ -1196,6 +1224,7 @@ fn fuzz_random_events() {
             done as f64 / n.max(1) as f64
         );
     }
+    assert!(match_panics.is_empty(), "{} heuristic-played matches panicked in the mtg engine (above)", match_panics.len());
 }
 
 /// Every value of a draft encoding is finite and within the bound (ENGINE.md

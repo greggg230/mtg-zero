@@ -167,36 +167,42 @@ pub fn match_spec(setup: &MatchSetup, max_turns: u32, format: Format) -> String 
 pub fn play_matches_heuristic(ev: &TeamDraftAz, seed: u64) -> Result<Vec<MatchResult>, String> {
     let mut out = Vec::new();
     for (i, setup) in ev.matches()?.iter().enumerate() {
-        let mut az = match_game(setup, ev.ev.max_turns, ev.ev.format)?;
-        let mut h = [Heuristic::new(seed ^ (2 * i as u64 + 1)), Heuristic::new(seed ^ (2 * i as u64 + 2))];
-        let mut legal = Vec::new();
-        let mut keys = Vec::new();
-        let mut steps = 0u64;
-        while let Some(p) = az.to_move() {
-            az.legal_actions(&mut legal);
-            let a = if legal.len() == 1 {
-                legal[0]
-            } else {
-                match az.sideboarding() {
-                    Some(sb) => bots::sideboard(sb, &legal),
-                    None => h[p].choose(&az.g, &legal),
-                }
-            };
-            keys.clear();
-            az.step(a, &mut keys)?;
-            steps += 1;
-            if steps > 400_000 {
-                return Err(format!("match {i}: no end after {steps} steps"));
-            }
-        }
-        let r = az.result();
-        let (wins, games) = match ev.ev.format {
-            Format::Bo3 => (az.m.wins, az.m.game_no),
-            Format::Bo1 => ([(r[0] == 1.0) as u8, (r[1] == 1.0) as u8], 1),
-        };
-        out.push(MatchResult { result: [r[0], r[1]], wins, games, steps });
+        out.push(play_match_heuristic(setup, ev.ev.max_turns, ev.ev.format, seed, i)?);
     }
     Ok(out)
+}
+
+/// Match `i` of an event (`setup`) played by the heuristic bot on both sides
+/// (`play_matches_heuristic`'s; its bots seeded from `seed` and `i`).
+pub fn play_match_heuristic(setup: &MatchSetup, max_turns: u32, format: Format, seed: u64, i: usize) -> Result<MatchResult, String> {
+    let mut az = match_game(setup, max_turns, format)?;
+    let mut h = [Heuristic::new(seed ^ (2 * i as u64 + 1)), Heuristic::new(seed ^ (2 * i as u64 + 2))];
+    let mut legal = Vec::new();
+    let mut keys = Vec::new();
+    let mut steps = 0u64;
+    while let Some(p) = az.to_move() {
+        az.legal_actions(&mut legal);
+        let a = if legal.len() == 1 {
+            legal[0]
+        } else {
+            match az.sideboarding() {
+                Some(sb) => bots::sideboard(sb, &legal),
+                None => h[p].choose(&az.g, &legal),
+            }
+        };
+        keys.clear();
+        az.step(a, &mut keys)?;
+        steps += 1;
+        if steps > 400_000 {
+            return Err(format!("match {i}: no end after {steps} steps"));
+        }
+    }
+    let r = az.result();
+    let (wins, games) = match format {
+        Format::Bo3 => (az.m.wins, az.m.game_no),
+        Format::Bo1 => ([(r[0] == 1.0) as u8, (r[1] == 1.0) as u8], 1),
+    };
+    Ok(MatchResult { result: [r[0], r[1]], wins, games, steps })
 }
 
 /// Resolve the event with heuristic-played matches (test-only utility).
