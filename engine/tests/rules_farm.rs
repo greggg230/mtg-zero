@@ -11,14 +11,16 @@
 //! * 51.3 a payment search that never ended (Gaea's Cradle's mana against
 //!   its own waterbend tap: a matching kept in eight bits);
 //! * 51.4 a world that changed its decider's encoding (Blightsteel Colossus
-//!   surveiled into the graveyard shuffled the pile still to be placed).
+//!   surveiled into the graveyard shuffled the pile still to be placed);
+//! * 51.6 `PayMana: no way to pay {3}{U}{U}` (delve exiled the graveyard
+//!   before the mana abilities that read it, CR 601.2g-h).
 
 mod common;
 
 use common::db;
 use engine::az::matches::{Format, MatchState, Seat};
 use engine::az::{sample, MtgAz, NUM_FEATURES};
-use engine::db::{AbilitySlot};
+use engine::db::{AbilitySlot, Counter};
 use engine::rng::Rng;
 use engine::testkit::Scenario;
 use engine::{CardIdx, Choice, DecisionKind, Game, PlayerId, Step, Target, Zone};
@@ -379,4 +381,45 @@ fn cr_701_25a_a_surveiled_blightsteel_colossus_shuffles_after_the_pile_is_placed
         }
         g.check_knowledge().unwrap();
     }
+}
+
+// ---- 51.6: delve after the mana abilities ------------------------------------
+
+/// CR 601.2g-h, 702.66a-b: the mana abilities are activated (601.2g) before
+/// the total cost is paid (601.2h), delve's exiled cards included. Fanatic
+/// of Rhonas's "{T}: add {G}{G}{G}{G}; activate only if you control a
+/// creature with power 4 or greater" with Dragon's Rage Channeler a 4/4 by
+/// delirium (a counter, the graveyard's four card types) pays Dig Through
+/// Time ({6}{U}{U}) with two cards delved. The engine exiled the delved
+/// cards first: the creature card gone, delirium was too, the Fanatic made
+/// {G}, and {4}{U}{U} had no payment (fuzz game 10013181: `PayMana: no way
+/// to pay {3}{U}{U}`). Delve's cards are now exiled as the payment ends.
+#[test]
+fn cr_601_2g_mana_abilities_are_activated_before_delve_exiles_the_graveyard() {
+    let mut g = scen()
+        .battlefield(0, &["Botanical Sanctum", "Talisman of Creativity", "Fanatic of Rhonas", "Dragon's Rage Channeler"])
+        .counters(0, "Dragon's Rage Channeler", Counter::P1P1, 1)
+        .graveyard(0, &["Llanowar Elves", "Island", "Lightning Bolt", "Gitaxian Probe"])
+        .hand(0, &["Dig Through Time"])
+        .library(0, &["Island"; 10])
+        .library(1, &["Island"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    let drc = bf(&g, 0, "Dragon's Rage Channeler");
+    assert_eq!(g.power(drc), 4);
+    let dig = g.card(0, "Dig Through Time", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(dig)));
+    g.choose(Choice::Cast(dig));
+    let mut budget = 3_000;
+    assert!(every_path_completes(&g, &mut budget) > 0);
+    // The first path: the Elves delved first, then a land; the Fanatic's
+    // four green paid with the graveyard whole; both cards exiled after.
+    let elves = g.card(0, "Llanowar Elves", Zone::Graveyard);
+    finish(&mut g, |g| {
+        let opts = options(g);
+        (g.kind() == Some(DecisionKind::ChooseGraveyardCard) && opts.contains(&Choice::Card(elves))).then_some(Choice::Card(elves))
+    });
+    assert_eq!(g.obj(elves).zone, Zone::Exile, "{}", log(&g));
+    assert_eq!(g.graveyard_cards(0).count(), 2, "{}", log(&g));
+    assert!(g.obj(bf(&g, 0, "Fanatic of Rhonas")).tapped);
 }

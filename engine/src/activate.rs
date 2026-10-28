@@ -730,7 +730,9 @@ impl Game {
         if cost.exile_graveyard == 0 {
             return 0;
         }
-        (cost.exile_graveyard as usize).saturating_sub(self.graveyard_cards(p).filter(|&c| c != card).count())
+        // (Not the cards the delve of the spell being cast exiles first,
+        // `Mark::DelveExile`: ENGINE.md 51.)
+        (cost.exile_graveyard as usize).saturating_sub(self.graveyard_cards(p).filter(|&c| c != card && !self.delve_exiling(c)).count())
     }
 
     /// The mana sources a payment activates first so that they are in the

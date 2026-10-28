@@ -821,6 +821,10 @@ pub enum Mark {
     /// delve of the spell being cast once its mana ability is activated
     /// (CR 601.2g before 601.2h; ENGINE.md 18).
     DelveLate,
+    /// A graveyard card chosen for the delve of the spell being cast: exiled
+    /// as the total cost is paid, after the mana abilities (CR 601.2g-h,
+    /// 702.66a), as the payment ends (ENGINE.md 51).
+    DelveExile,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.

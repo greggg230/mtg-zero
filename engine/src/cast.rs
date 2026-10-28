@@ -963,6 +963,29 @@ impl Game {
         out
     }
 
+    /// Is graveyard card `c` chosen for a delve, to be exiled as the cost is
+    /// paid (`Mark::DelveExile`)?
+    pub(crate) fn delve_exiling(&self, c: CardIdx) -> bool {
+        !self.marks.is_empty() && self.marks.iter().any(|&(o, m)| o.idx == c && m == crate::game::Mark::DelveExile && self.live(o))
+    }
+
+    /// Exile the graveyard cards chosen for delve (in the order chosen) as
+    /// the payment of their spell's cost ends (CR 601.2h, after the mana
+    /// abilities of 601.2g; ENGINE.md 51).
+    pub(crate) fn exile_delved(&mut self, p: PlayerId) {
+        if !self.marks.iter().any(|&(_, m)| m == crate::game::Mark::DelveExile) {
+            return;
+        }
+        let picked: Vec<ObjRef> = self.marks.iter().filter(|&&(_, m)| m == crate::game::Mark::DelveExile).map(|&(o, _)| o).collect();
+        self.marks.retain(|&(_, m)| m != crate::game::Mark::DelveExile);
+        for r in picked {
+            if self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard {
+                self.note(|g| format!("P{p} exiles {} (delve)", g.name(r.idx)));
+                self.move_card(r.idx, Zone::Exile, Pos::Top);
+            }
+        }
+    }
+
     /// Was `c` chosen to be exiled for delve once activated?
     pub(crate) fn delve_late(&self, c: CardIdx) -> bool {
         let r = self.obj_ref(c);
@@ -1039,12 +1062,21 @@ impl Game {
                 self.agenda.push(Task::Delve { id });
                 return;
             }
+            // A graveyard card: chosen now, exiled as the total cost is
+            // paid (CR 601.2h, 702.66a), after the mana abilities (601.2g),
+            // so a mana ability that reads the graveyard sees it whole:
+            // Fanatic of Rhonas's {G}{G}{G}{G} with Dragon's Rage Channeler
+            // grown by delirium (fuzz game 10013181: delve exiled a creature
+            // card first, delirium was gone and Dig Through Time's
+            // {3}{U}{U} had no payment; ENGINE.md 51). It stays where it is
+            // until then (`Mark::DelveExile`; `exile_delved`).
             Some(Choice::Card(c)) => {
                 let at = self.players[p as usize].graveyard.iter().position(|&x| x == c).unwrap_or(0);
-                self.move_card(c, Zone::Exile, Pos::Top);
+                let r = self.obj_ref(c);
+                self.marks.push((r, crate::game::Mark::DelveExile));
                 let item = &mut self.stack[pos];
                 item.delved += 1;
-                item.delve_floor = at as u8;
+                item.delve_floor = (at + 1) as u8;
                 self.agenda.push(Task::Delve { id });
                 return;
             }
@@ -1064,11 +1096,14 @@ impl Game {
         let floor = item.delve_floor as usize;
         let keep = self.escape_exiles(card, item.from) as usize;
         let gy = &self.players[p as usize].graveyard;
+        let late = self.delve_sources(p);
+        let committed: Vec<CardIdx> = late.iter().copied().filter(|&c| self.delve_late(c)).collect();
         // Picks go up the graveyard (each set once), leaving enough cards
         // above for the picks still needed. (Cards only: a token there isn't
-        // one, CR 108.2.)
+        // one, CR 108.2. The cards picked so far, below `floor`, are still
+        // there: not counted.)
         let card_at = |i: usize| !self.is_token(gy[i]);
-        let n_cards = (0..gy.len()).filter(|&i| card_at(i)).count();
+        let n_cards = (0..gy.len()).filter(|&i| card_at(i)).count().saturating_sub((item.delved as usize).saturating_sub(committed.len()));
         let mut opts: Vec<Opt> = gy
             .iter()
             .enumerate()
@@ -1078,8 +1113,6 @@ impl Game {
         // Mana sources that sacrifice themselves (Lotus Petal), first and
         // in canonical order: in the graveyard by the time delve's cards are
         // exiled (CR 601.2g before 601.2h), when the rest stays payable.
-        let late = self.delve_sources(p);
-        let committed: Vec<CardIdx> = late.iter().copied().filter(|&c| self.delve_late(c)).collect();
         if item.delved as usize == committed.len() {
             let gy_left = n_cards.saturating_sub(keep);
             let after = late.iter().rposition(|c| committed.contains(c)).map_or(0, |i| i + 1);
@@ -2246,9 +2279,13 @@ impl Game {
                 pm.keep.life = pm.keep.life.saturating_add(life_later);
                 pm.life_after = life_later;
                 self.agenda.push(Task::PayMana(Box::new(pm)));
-            } else if life_later > 0 {
-                self.note(|_| format!("P{p} pays {life_later} life"));
-                self.lose_life(p, life_later as i32);
+            } else {
+                if life_later > 0 {
+                    self.note(|_| format!("P{p} pays {life_later} life"));
+                    self.lose_life(p, life_later as i32);
+                }
+                // (No mana to pay: delve's cards now, ENGINE.md 51.)
+                self.exile_delved(p);
             }
             return;
         }

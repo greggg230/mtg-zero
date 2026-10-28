@@ -1820,7 +1820,9 @@ impl Game {
         p.amt = rem.amt;
         p.art = rem.art;
         p.haste = rem.haste;
-        // Delve's cards that were mana sources (CR 601.2h, after 601.2g).
+        // Delve's graveyard cards, then those that were mana sources (CR
+        // 601.2h, after 601.2g; ENGINE.md 51).
+        self.exile_delved(payer);
         for &c in &pm.delve_late {
             if self.objs[c.i()].zone == Zone::Graveyard {
                 self.note(|g| format!("P{payer} exiles {} (delve)", g.name(c)));
