@@ -107,9 +107,12 @@ PACKAGE = register(GamePackage(
     # remote evaluation (run setting eval_remote='mac', zero.remote; docs/ENGINE.md 44): the MacBook
     # (M4 Max, 16 cores, no CUDA) evaluates with exactly the run's code: its checkout
     # ~/mtg-zero-wt/run-<sha12> of the commit of the run's checkout (`bash tools/mac.sh
-    # --eval-checkout` there), checked when the run starts and before every evaluation (mtgz/az/mac.py)
+    # --eval-checkout` there), checked when the run starts and before every evaluation (mtgz/az/mac.py).
+    # CPU inference (MPS: twice the time at these batches of ~6-13 leaves), 3 inference workers of 4
+    # torch threads each (ENGINE.md 44.4: the Elo matches 325 s, against 575 s with one worker of 12)
     remotes={'mac': RunCommitRemote(ROOT, host='greggkeithley@100.95.248.116', home='/Users/greggkeithley',
                                     python='/Users/greggkeithley/.venvs/dominion-zero/bin/python',
-                                    workdir='/Users/greggkeithley/mtgz-remote',
-                                    overrides={'infer_device': 'cpu', 'train_device': 'cpu', 'threads': 12})},
+                                    workdir='/Users/greggkeithley/mtgz-remote', env={'OMP_NUM_THREADS': '4'},
+                                    overrides={'infer_device': 'cpu', 'train_device': 'cpu', 'threads': 12,
+                                               'groups': 2, 'infer_workers': 3})},
 ))
