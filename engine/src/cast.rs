@@ -262,7 +262,7 @@ impl Game {
         };
         // Delve: its mana sources that sacrifice themselves too (ENGINE.md
         // 18).
-        let delved = self.delve_classes(c, cls);
+        let delved = self.delve_classes(p, c, cls);
         let cls = &delved[..];
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls, crate::game::CastFrom::Hand));
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
@@ -738,7 +738,7 @@ impl Game {
         } else {
             classes
         };
-        let delved = self.delve_classes(card, classes);
+        let delved = self.delve_classes(p, card, classes);
         let classes = &delved[..];
         let keep = self.escape_exiles(card, from);
         // Bolas's Citadel: life equal to its mana value (CR 119.4), kept from
@@ -909,7 +909,7 @@ impl Game {
         exclude: Option<CardIdx>,
     ) -> bool {
         let def = self.def_of(card);
-        let delved = self.delve_classes(card, classes);
+        let delved = self.delve_classes(p, card, classes);
         let classes = &delved[..];
         // Bolas's Citadel's life, paid after the mana: kept (ENGINE.md 38).
         let top_life = if from == crate::game::CastFrom::LibraryTop { def.mana_value() } else { 0 };
@@ -941,7 +941,9 @@ impl Game {
 
     /// `p`'s mana sources that sacrifice themselves and are cards (one mana,
     /// no mana cost: Lotus Petal), in canonical order: delve may exile them
-    /// once their mana ability is activated (CR 601.2g-h).
+    /// once their mana ability is activated (CR 601.2g-h). Only `p`'s own
+    /// cards: another player's Lotus Petal that `p` controls goes to its
+    /// owner's graveyard (CR 400.3; ENGINE.md 51).
     pub(crate) fn delve_sources(&self, p: PlayerId) -> Vec<CardIdx> {
         let classes = self.mana_classes(p, None);
         let mut out: Vec<CardIdx> = Vec::new();
@@ -951,10 +953,7 @@ impl Game {
                     // (Only a card that would reach the graveyard: not under
                     // Yawgmoth's Will or an opponent's Dauthi Voidwalker,
                     // CR 614.1a; ENGINE.md 38.)
-                    if !self.is_token(s.card)
-                        && !out.contains(&s.card)
-                        && matches!(self.replaced_dest(s.card, Zone::Battlefield, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
-                    {
+                    if self.feeds_graveyard(p, s.card) && !out.contains(&s.card) {
                         out.push(s.card);
                     }
                 }
@@ -973,7 +972,7 @@ impl Game {
     /// `classes` with delve's due (ENGINE.md 18): each mana source that
     /// sacrifices itself and is a card pays its mana and, exiled from the
     /// graveyard afterwards, one more generic mana of a delve spell.
-    pub(crate) fn delve_classes<'a>(&self, card: CardIdx, classes: &'a [crate::pay::Class]) -> std::borrow::Cow<'a, [crate::pay::Class]> {
+    pub(crate) fn delve_classes<'a>(&self, p: PlayerId, card: CardIdx, classes: &'a [crate::pay::Class]) -> std::borrow::Cow<'a, [crate::pay::Class]> {
         use crate::pay::Yield;
         if !self.def_of(card).delve
             || !classes.iter().any(|cl| cl.sac_self && cl.need == 0 && matches!(cl.yld, Yield::One(_)) && !crate::pay::is_sac_slot(cl.members[0].slot))
@@ -989,10 +988,12 @@ impl Game {
             let Yield::One(u) = cl.yld else { continue };
             // (Tokens cease to exist: no delve; nor a card exiled instead of
             // going to the graveyard, under Yawgmoth's Will or an opponent's
-            // Dauthi Voidwalker: `delve_sources`, ENGINE.md 49.)
+            // Dauthi Voidwalker: `delve_sources`, ENGINE.md 49; nor another
+            // player's card, which goes to its owner's graveyard, CR 400.3,
+            // ENGINE.md 51.)
             let mut cards = crate::pay::Members::new();
             for s in cl.members.iter() {
-                if !self.feeds_graveyard(s.card) {
+                if !self.feeds_graveyard(p, s.card) {
                     kept.push((cl.clone(), *s));
                 } else {
                     cards.push(*s);
@@ -1818,7 +1819,7 @@ impl Game {
     /// any)?
     pub(crate) fn normal_payable(&self, p: PlayerId, card: CardIdx, classes: &[crate::pay::Class]) -> bool {
         let def = self.def_of(card);
-        let delved = self.delve_classes(card, classes);
+        let delved = self.delve_classes(p, card, classes);
         let classes = &delved[..];
         let cost = self.spell_cost(card, p);
         let cost = self.delve_reduced(card, p, cost, 0);
@@ -2055,7 +2056,7 @@ impl Game {
             None => {
                 let def = self.def_of(card);
                 let classes = self.mana_classes(p, None);
-                let classes = self.delve_classes(card, &classes).into_owned();
+                let classes = self.delve_classes(p, card, &classes).into_owned();
                 let keep = self.escape_exiles(card, item.from);
                 let life_later = self.life_later(card, item);
                 let src = Some(self.obj_ref(card));

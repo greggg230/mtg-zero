@@ -534,10 +534,14 @@ impl Game {
         self.end_batch();
     }
 
-    /// Would permanent `c`, sacrificed, be a card in its owner's graveyard
-    /// (not a token; not exiled instead, CR 614.1a)?
-    pub(crate) fn feeds_graveyard(&self, c: CardIdx) -> bool {
-        !self.is_token(c) && matches!(self.replaced_dest(c, Zone::Battlefield, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
+    /// Would permanent `c`, sacrificed, be a card in `p`'s graveyard (not
+    /// a token; not exiled instead, CR 614.1a; `p`'s own card: a permanent
+    /// `p` controls but another player owns goes to its owner's graveyard,
+    /// CR 400.3, ENGINE.md 51)?
+    pub(crate) fn feeds_graveyard(&self, p: PlayerId, c: CardIdx) -> bool {
+        self.objs[c.i()].owner == p
+            && !self.is_token(c)
+            && matches!(self.replaced_dest(c, Zone::Battlefield, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
     }
 
     /// The cards `cost`'s discards can put into `p`'s graveyard: as many as
@@ -568,7 +572,7 @@ impl Game {
     /// besides the mana sources `d` counted already (each card once).
     pub(crate) fn cost_feeds_graveyard(&self, p: PlayerId, card: CardIdx, cost: &Cost, d: &[CardIdx]) -> usize {
         let sacs = cost.sacrifice.as_ref().map_or(0, |s| {
-            (s.n as usize).min(self.sacrifice_candidates(p, card, s).into_iter().filter(|&c| !d.contains(&c) && self.feeds_graveyard(c)).count())
+            (s.n as usize).min(self.sacrifice_candidates(p, card, s).into_iter().filter(|&c| !d.contains(&c) && self.feeds_graveyard(p, c)).count())
         });
         self.discards_feed(p, card, cost) + sacs
     }
@@ -799,7 +803,7 @@ impl Game {
             // would be short by as many cards as sacrifices are left, only
             // a card that will be there helps (ruling bea302d9).
             let need = if cost.exile_graveyard > 0 {
-                let fed = picked.iter().filter(|&&c| self.feeds_graveyard(c)).count() + self.discards_feed(p, card, cost);
+                let fed = picked.iter().filter(|&&c| self.feeds_graveyard(p, c)).count() + self.discards_feed(p, card, cost);
                 self.exile_short(p, card, cost).saturating_sub(fed)
             } else {
                 0
@@ -808,7 +812,7 @@ impl Game {
             let opts: Vec<Opt> = self
                 .sacrifice_candidates(p, card, s)
                 .into_iter()
-                .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(*c)))
+                .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(p, *c)))
                 .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
@@ -826,7 +830,7 @@ impl Game {
             // only a card that goes there helps (not Blightsteel Colossus;
             // ENGINE.md 49, as the sacrifices above).
             if cost.exile_graveyard > 0 {
-                let fed = picked[..n_sac].iter().filter(|&&c| self.feeds_graveyard(c)).count();
+                let fed = picked[..n_sac].iter().filter(|&&c| self.feeds_graveyard(p, c)).count();
                 let need = self.exile_short(p, card, cost).saturating_sub(fed);
                 if need > 0 && need >= n_disc - picked.len() {
                     opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.discard_feeds(p, card, cost, c)));
