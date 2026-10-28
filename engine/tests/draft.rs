@@ -894,7 +894,9 @@ fn layout_json_is_checked_in() {
 }
 
 /// The random-actions fuzz of whole events (`DRAFT_FUZZ=n` events, 4v4, 2v2,
-/// 3v3 and 1v1): the invariants after every action; every ~40 actions
+/// 3v3 and 1v1): the invariants after every action; the decider's encoding
+/// finite and within `encode::FEATURE_BOUND` at every decision, and every
+/// world's (ENGINE.md 46); every ~40 actions
 /// `determinize` for the decider and another viewer (knowledge, features,
 /// options, invariants); at one decision of every 8th event every offered
 /// option completes the event; the event resolved with random results (every
@@ -915,9 +917,13 @@ fn fuzz_random_events() {
         let check_at = if e % 8 == 0 { rng.below(95 * players as u32) as u64 } else { u64::MAX };
         let mut i = 0u64;
         let mut keys = Vec::new();
+        let mut x = vec![0.0f32; NUM_FEATURES];
         while let Some(d) = g.to_move() {
             let l = legal(&g);
             assert!(!l.is_empty() && l.windows(2).all(|w| w[0] < w[1]) && l.iter().all(|&a| (a as usize) < 1024));
+            x.fill(0.0);
+            g.encode(d, &mut x);
+            assert_bounded(&x, e, i, d as u8);
             if l.len() >= 2 {
                 searched[(g.phase() == Phase::Build) as usize] += 1;
             }
@@ -928,7 +934,9 @@ fn fuzz_random_events() {
                     w.check_invariants().unwrap_or_else(|err| panic!("event {e}: world for {v}: {err}"));
                     let mask = g.knowing(v);
                     assert_eq!(w.knowledge(mask), g.knowledge(mask));
-                    assert_eq!(enc(&w, v), enc(&g, v), "event {e} step {i}: viewer {v}");
+                    let xw = enc(&w, v);
+                    assert_bounded(&xw, e, i, v);
+                    assert_eq!(xw, enc(&g, v), "event {e} step {i}: viewer {v}");
                     assert_eq!(w.to_move(), g.to_move());
                     if v == d as u8 {
                         assert_eq!(legal(&w), l);
@@ -983,6 +991,15 @@ fn fuzz_random_events() {
         searched[1],
         t0.elapsed().as_secs_f64()
     );
+}
+
+/// Every value of a draft encoding is finite and within the bound (ENGINE.md
+/// 46).
+fn assert_bounded(x: &[f32], e: u64, i: u64, viewer: u8) {
+    let bound = engine::az::encode::FEATURE_BOUND;
+    if let Some((k, v)) = x.iter().enumerate().find(|(_, v)| !(v.is_finite() && v.abs() <= bound)) {
+        panic!("event {e} step {i}: viewer {viewer}'s feature {k} is {v} (bound {bound})");
+    }
 }
 
 /// Measurements (ENGINE.md 41): `cargo test --release -p engine --test draft

@@ -45,13 +45,27 @@
 //! a candidate of the viewer's prior (in a drafted match: a card its team
 //! never saw).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
+//!
+//! Unbounded numbers (M6, ENGINE.md 46): at every decision the decider's
+//! encoding (and at the ~1-in-40 checkpoints both players' encodings, in
+//! the game and in every world `determinize` samples) has every value finite
+//! and within `encode::FEATURE_BOUND` (256); matches check `MtgAz`'s
+//! encoding the same way. `FUZZ_POOL=exponential`: exponential boards. Each
+//! player's 23 spells come from `GROWTH` (counter and token doublers,
+//! Ouroboroid, Bristly Bill, Scythecat Cub, Jacked Rabbit, Elspeth's token
+//! doubling, and the cards that turn a creature's size into damage, life or
+//! poison), 12 Forests and 5 random lands; every life total starts at
+//! 1,000,000,000 and attacks are declared one time in four, so most games
+//! run to the 60-turn cap with growing boards; the largest power, counter
+//! count, marked damage and life reached are printed, and with 100 games or
+//! more a board past 65,535 power must have been reached.
 
 mod common;
 
 use engine::db::CardDb;
 use engine::rng::Rng;
 use engine::{Choice, DecisionKind, Game, GameSpec, Outcome, NUM_ACTIONS};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 /// The interaction groups of `FUZZ_POOL=interactions` (ENGINE.md 38.5; cube
 /// cards only, so matches can use them; a misspelt name fails loudly).
@@ -165,18 +179,118 @@ const GROUPS: &[(&str, &[&str])] = &[
     ]),
 ];
 
-/// `FUZZ_POOL`: unset (the default decks), `interactions` or `drafted`.
-fn pool_mode() -> &'static str {
+/// The cards of `FUZZ_POOL=exponential` (ENGINE.md 46): what grows a board
+/// without bound (counters on each creature equal to a power, doubling
+/// counters, tokens equal to a power, token doubling, counters each turn) and
+/// what turns a creature's size into damage, life, poison or mana.
+const GROWTH: &[&str] = &[
+    "Ouroboroid", "Bristly Bill, Spine Sower", "Scythecat Cub", "Jacked Rabbit", "Elspeth, Storm Slayer", "Baloth Prime",
+    "Badgermole Cub", "Hexdrinker", "Walking Ballista", "Luminarch Aspirant", "Guide of Souls", "Ivora, Insatiable Heir",
+    "Ajani, Nacatl Pariah // Ajani, Nacatl Avenger", "Forth Eorlingas!", "Pest Infestation", "Sentinel of the Nameless City",
+    "Vaultborn Tyrant", "Fanatic of Rhonas", "Esika's Chariot", "Thundertrap Trainer", "Sylvan Safekeeper", "Surrak, Elusive Hunter",
+    "Swords to Plowshares", "Solitude", "Minsc & Boo, Timeless Heroes", "Etali, Primal Conqueror // Etali, Primal Sickness",
+    "Pyrogoyf", "Batroc the Leaper", "Cecil, Dark Knight // Cecil, Redeemed Paladin", "Coalition Relic", "Griselbrand",
+    "Ocelot Pride", "Deep-Cavern Bat", "Passageway Seer", "The One Ring", "Tezzeret, Cruel Captain",
+];
+
+/// `FUZZ_POOL=exponential`: every player's starting life (near the bound of
+/// an amount, `num::AMOUNT_MAX`: life gained past it saturates).
+const EXP_LIFE: i32 = 1_000_000_000;
+
+/// `FUZZ_POOL`: unset (the default decks), `interactions`, `exponential` or `drafted`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PoolMode {
+    Default,
+    Interactions,
+    Exponential,
+    Drafted,
+}
+
+fn pool_mode() -> PoolMode {
     match std::env::var("FUZZ_POOL").as_deref() {
-        Err(_) | Ok("") => "",
-        Ok("interactions") => "interactions",
-        Ok("drafted") => "drafted",
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\" or \"drafted\")"),
+        Err(_) | Ok("") => PoolMode::Default,
+        Ok("interactions") => PoolMode::Interactions,
+        Ok("exponential") => PoolMode::Exponential,
+        Ok("drafted") => PoolMode::Drafted,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\" or \"drafted\")"),
     }
 }
 
 fn interactions_mode() -> bool {
-    pool_mode() == "interactions"
+    pool_mode() == PoolMode::Interactions
+}
+
+fn exponential_mode() -> bool {
+    pool_mode() == PoolMode::Exponential
+}
+
+/// An exponential deck (40 cards: 12 Forests, 5 random lands, 23 from
+/// `GROWTH`) and a sideboard of seven from `GROWTH`.
+fn exponential_deck(db: &CardDb, rng: &mut Rng) -> (Vec<u16>, Vec<u16>) {
+    let growth: Vec<u16> = GROWTH.iter().map(|n| db.expect_id(n).unwrap_or_else(|e| panic!("GROWTH card: {e}"))).collect();
+    let (lands, _) = common::fuzz_pool();
+    let forest = db.expect_id("Forest").unwrap();
+    let mut deck: Vec<u16> = vec![forest; 12];
+    deck.extend((0..5).map(|_| lands[rng.below(lands.len() as u32) as usize]));
+    deck.extend((0..23).map(|_| growth[rng.below(growth.len() as u32) as usize]));
+    let side = (0..7).map(|_| growth[rng.below(growth.len() as u32) as usize]).collect();
+    (deck, side)
+}
+
+/// The largest numbers the fuzzed games reached (ENGINE.md 46; printed).
+static MAX_POWER: AtomicI64 = AtomicI64::new(0);
+static MAX_COUNTERS: AtomicI64 = AtomicI64::new(0);
+static MAX_DAMAGE: AtomicI64 = AtomicI64::new(0);
+static MAX_LIFE: AtomicI64 = AtomicI64::new(0);
+/// Encodings checked (`check_bounded`), and those the squash changed (some
+/// value beyond `encode::SQUASH_FROM`).
+static ENCODINGS: AtomicU64 = AtomicU64::new(0);
+static SQUASHED: AtomicU64 = AtomicU64::new(0);
+
+fn record_extremes(g: &Game) {
+    for &c in g.battlefield() {
+        MAX_POWER.fetch_max(g.power(c).unsigned_abs() as i64, Ordering::Relaxed);
+        MAX_DAMAGE.fetch_max(g.obj(c).damage as i64, Ordering::Relaxed);
+        for (_, n) in g.counters_of(c) {
+            MAX_COUNTERS.fetch_max(n as i64, Ordering::Relaxed);
+        }
+    }
+    for p in 0..2 {
+        MAX_LIFE.fetch_max(g.life(p).unsigned_abs() as i64, Ordering::Relaxed);
+    }
+}
+
+fn extremes_report() -> String {
+    format!(
+        "largest power {}, counters {}, marked damage {}, |life| {}; {} encodings checked, {} with a value past {} (squashed)",
+        MAX_POWER.load(Ordering::Relaxed),
+        MAX_COUNTERS.load(Ordering::Relaxed),
+        MAX_DAMAGE.load(Ordering::Relaxed),
+        MAX_LIFE.load(Ordering::Relaxed),
+        ENCODINGS.load(Ordering::Relaxed),
+        SQUASHED.load(Ordering::Relaxed),
+        engine::az::encode::SQUASH_FROM
+    )
+}
+
+/// Every value of an encoding is finite and within the bound (ENGINE.md 46).
+fn check_bounded(x: &[f32], what: &dyn Fn() -> String) {
+    use engine::az::encode::{FEATURE_BOUND, SQUASH_FROM};
+    ENCODINGS.fetch_add(1, Ordering::Relaxed);
+    let mut squashed = false;
+    for (i, &v) in x.iter().enumerate() {
+        assert!(v.is_finite() && v.abs() <= FEATURE_BOUND, "{}: feature {i} is {v} (bound {FEATURE_BOUND})", what());
+        squashed |= v.abs() > SQUASH_FROM;
+    }
+    SQUASHED.fetch_add(squashed as u64, Ordering::Relaxed);
+}
+
+/// `viewer`'s encoding of `g` (`buf`: a scratch vector) is bounded.
+fn check_encoding(g: &Game, viewer: u8, buf: &mut Vec<f32>, what: &dyn Fn() -> String) {
+    buf.clear();
+    buf.resize(engine::az::NUM_FEATURES, 0.0);
+    g.encode_features(viewer, buf);
+    check_bounded(buf, &|| format!("{} (viewer P{viewer})", what()));
 }
 
 /// The spec of drafted match `seed` (`FUZZ_POOL=drafted`): a 4v4 or 2v2 event
@@ -286,6 +400,9 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     if interactions_mode() {
         return [interaction_deck(db, &mut rng), interaction_deck(db, &mut rng)];
     }
+    if exponential_mode() {
+        return [exponential_deck(db, &mut rng), exponential_deck(db, &mut rng)];
+    }
     if seed % 4 == 3 {
         let gen = engine::az::decks::DeckGen::default();
         return [
@@ -304,7 +421,8 @@ fn new_game(seed: u64) -> Game {
     let [(d0, s0), (d1, s1)] = decks(seed);
     // `FUZZ_LOG=1` keeps the game log, so a panic message shows the game.
     let log = std::env::var("FUZZ_LOG").is_ok();
-    Game::with_sideboards(common::db(), GameSpec { log, ..GameSpec::default() }, [&d0, &d1], [&s0, &s1], seed).unwrap()
+    let starting_life = if exponential_mode() { EXP_LIFE } else { GameSpec::default().starting_life };
+    Game::with_sideboards(common::db(), GameSpec { log, starting_life, ..GameSpec::default() }, [&d0, &d1], [&s0, &s1], seed).unwrap()
 }
 
 /// Play one game with random actions; run the extra checks along the way.
@@ -318,14 +436,27 @@ fn play(seed: u64, checks: bool) -> Played {
     let mut actions = Vec::new();
     let mut keys = Vec::new();
     let mut steps = 0;
+    let exp = exponential_mode();
+    let mut buf = Vec::new();
     while !g.is_over() {
         g.legal_actions(&mut legal);
         assert!(!legal.is_empty(), "seed {seed}: no legal action in a running game");
         assert!(legal.windows(2).all(|w| w[0] < w[1]), "seed {seed}: actions not sorted/unique");
         assert!(legal.iter().all(|&a| (a as usize) < NUM_ACTIONS));
-        let a = legal[rng.below(legal.len() as u32) as usize];
+        // (Exponential boards: attackers are declared one time in four, so
+        // the boards grow through the 60 turns.)
+        let a = if exp && g.kind() == Some(DecisionKind::DeclareAttackers) && rng.below(4) != 0 && legal.contains(&engine::act::PASS) {
+            engine::act::PASS
+        } else {
+            legal[rng.below(legal.len() as u32) as usize]
+        };
         if checks {
             count_kind(g.kind());
+            // The decider's encoding is finite and bounded (ENGINE.md 46).
+            check_encoding(&g, g.to_move().unwrap(), &mut buf, &|| format!("seed {seed} step {steps}"));
+            if exp {
+                record_extremes(&g);
+            }
         }
         if checks && rng.below(40) == 0 {
             check_clone(&g, a, seed);
@@ -395,6 +526,12 @@ fn check_determinize(g: &Game, seed: u64, rng: &mut Rng) {
             }
         }
         d.check_invariants().unwrap();
+        // Both players' encodings of the world (and of the game) are bounded.
+        let mut buf = Vec::new();
+        for v in [0u8, 1] {
+            check_encoding(&d, v, &mut buf, &|| format!("seed {seed}: a world determinized for P{viewer}"));
+            check_encoding(g, v, &mut buf, &|| format!("seed {seed}: a checkpoint"));
+        }
         // What the search does in that world: try every option.
         check_options_complete(&d, seed, &format!("a world determinized for P{viewer} (mover P{mover})"));
         if viewer == mover {
@@ -587,8 +724,12 @@ fn fuzz_random_games() {
     );
     println!("companions revealed {companions}, put into a hand {companions_used}");
     println!("decisions{}: {}", if interactions_mode() { " (FUZZ_POOL=interactions)" } else { "" }, kinds_report());
-    if n >= 200 && !interactions_mode() {
+    println!("numbers{}: {}", if exponential_mode() { " (FUZZ_POOL=exponential)" } else { "" }, extremes_report());
+    if n >= 200 && pool_mode() == PoolMode::Default {
         assert!(companions_used > 0, "no companion special action in {n} games");
+    }
+    if n >= 100 && exponential_mode() {
+        assert!(MAX_POWER.load(Ordering::Relaxed) > 65_535, "no board past 65,535 power: {}", extremes_report());
     }
 }
 
@@ -615,7 +756,7 @@ fn same_seed_and_actions_replay_identically() {
 /// evaluation pools, M8a's generated decks with 7-card sideboards, or short
 /// games (drawn games: the turn cap).
 fn match_spec(seed: u64) -> engine::az::MtgSpec {
-    if pool_mode() == "drafted" {
+    if pool_mode() == PoolMode::Drafted {
         return drafted_spec(seed);
     }
     if interactions_mode() {
@@ -826,6 +967,12 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
         let sb = g.sideboarding().is_some();
         sideboard_decisions += sb as u32;
         let a = legal[rng.below(legal.len() as u32) as usize];
+        if checks {
+            // The decider's encoding is finite and bounded (ENGINE.md 46).
+            x1.fill(0.0);
+            g.encode(p, &mut x1);
+            check_bounded(&x1, &|| format!("match {seed} step {}", actions.len()));
+        }
         if checks && rng.below(40) == 0 {
             // A clone continues identically.
             let (mut c1, mut c2) = (g.clone(), g.clone());
@@ -849,6 +996,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                 x2.fill(0.0);
                 g.encode(viewer, &mut x1);
                 d.encode(viewer, &mut x2);
+                check_bounded(&x2, &|| format!("match {seed}: a world determinized for P{viewer}"));
                 if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
                     panic!("match {seed}: determinize changed the encoding of P{viewer} (mover P{p}) at {i}: {} -> {}", x1[i], x2[i]);
                 }
