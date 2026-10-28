@@ -10065,3 +10065,14 @@ priors are the cube's).
 * Keep mtg-3's search and network settings for the first run: they were the last best-of-one run that
   improved steadily (22.8); the one matchup may need fewer games per iteration to move (300 would
   halve the self-play phase), a choice to make after a few iterations' metrics.
+
+### 54.10 After the review
+
+An independent read-only review of f59ff72 found no rules fault (the digests, Murktide Regent's
+607.2q and 603.10a readings and rulings, Prismari Charm, the IR, the deck rules and the
+open-decklist `determinize` checked). Folded in at daedbca: the 64-card cap (54.4), the identity
+constraint said (54.1, and in the assert's message), its seven probes as tests (`cards_legacy.rs`,
+ENGINE.md 15). Checks at daedbca: `cargo test --release -p engine -p card_ir --no-fail-fast` (the
+Mac) **1,439 passed, 0 failed, 14 ignored**; the digests 804002969bdd0938 (unchanged);
+`FUZZ_POOL=delver FUZZ_GAMES=20000` (the Mac) no failure, the same numbers as 54.7 to the option;
+`bash tools/build_py.sh`, `python -m pytest -q tests` 45 passed.
