@@ -1197,6 +1197,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_shortcuts.rs` | M7e part 1 (section 33): the rules shortcuts removed, 27 tests, the CR in each name: 724.2 (the monarch's triggers on the stack, countered by Tidebinder, one per creature), 603.7 (Okoye's delayed trigger), 603.2c ("one or more" once per event: Laelia, Wan Shi Tong, Inti), 614.1c (entering with an effect's counters), 614.12a (Metamorph and Exhume), 608.2h (Pyrogoyf's damage as the creature last existed), 702.171a (saddle without a crew bonus), 601.2h (teamwork tapping mana creatures), 116.2b (turning face up after losing abilities), 702.8a (Necromancy's flash permission), 106.1b (exact converge), 614.1a (Mox Diamond put onto the battlefield), 616.1 (Blightsteel and Yawgmoth's Will, flashback and Dauthi Voidwalker), 601.2b (Breach's escape with Bitter Triumph's own cost), 601.2a (Paragon or Lurrus, flashback or Will, Paragon and a card with another face), 709.3 (the Citadel's split card), 613.7e (an Equipment re-attached), 613.1f (Paragon's granted trigger lost), 113.7 (a granted ward's source) |
 | `tests/rules_numbers.rs` | M6 (section 46): unbounded numbers, the mtg5 incident reproduced: 122.1 (Ouroboroid's counters past 65,535 exact, total power past 1.31 million, both encodings finite and within `FEATURE_BOUND`), 510.2 (65,537 combat damage dealt in full), 702.19b (a trampler's lethal damage to a 65,539-toughness blocker, not truncated to 16 bits); all three fail on 8307cb4 |
 | `tests/rules_castpay.rs` | M6 (section 49): castability and payment agree, on cube cards: 601.2g and 605.3a (Wizard's Rockets turning mana into colours is not also an artifact tapped for Urza's {U}: no Griselbrand from seven mana), 107.3 (Green Sun's Zenith's X with the Rockets and Urza), 702.126a (nor tapped for improvise: Kappa Cannoneer), 106.6 (Mishra's Workshop's mana never turned into colours: Cryogen Relic), 601.2h (two Lotus Petals for Psychic Frog's graveyard cost of no mana), 702.66a (two Petals delved for Treasure Cruise), 614.1a (no delve of Petals under Dauthi Voidwalker), 702.138a (escape's discard feeds the graveyard: not Blightsteel Colossus), 712.11b (a face-down hideaway card cast with a choice of faces is revealed: worlds `determinize` samples keep it), 707.2 (a copy of Llanowar Elves that is also an artifact for Urza: the Elves offered for {G}); the ten and the agreement fuzz fail on 01fa623; the agreement fuzz: random cube boards, every spell and ability offered at priority followed to the next priority (`CASTPAY_BOARDS`, `CASTPAY_PATHS`, `CASTPAY_FROM`, `CASTPAY_LOG`) |
+| `tests/rules_farm.rs` | M6 (section 51): the fuzz farm's first bugs, each state built on cube cards: the hidden pool's deal holds the clouds while the opponent pays (Elvish Spirit Guide, a best-of-three match from a scenario: every world is the sampled deck), 400.3 (an opponent's Lotus Petal is not in your graveyard: no Psychic Frog exile, no delve for Treasure Cruise), 605.3a (Gaea's Cradle animated by Nissa with 28 creatures and Aang's waterbend: checked and paid within 30 s on a thread), 701.25a (a surveiled Blightsteel Colossus shuffles the library after the pile is placed: the decider's worlds and encoding keep the other card), 709.3 (Life // Death from Shelldock Isle revealed before the half is chosen: fixed by 49.6, fails on 075649c), 601.2g-h (delve's cards exiled after the mana abilities: Fanatic of Rhonas with a delirious Dragon's Rage Channeler pays Dig Through Time); five fail on ab02574, all six on 075649c; `pay.rs` unit tests: `covers` on 255 units and an augmenting path, an exhausted search's panic |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
@@ -1204,7 +1205,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
 | `tests/interactions_*.rs` | M8d part 2 (section 38, `docs/interactions.md`): pairs of mechanics written in different milestones. `interactions_copies.rs` (copies against layers, face-down permanents, replacement effects on entering, "as this enters" choices, ward: 707.2, 708.2, 614.12, 616.1, 707.5, 702.21a), `interactions_costs.rs` (Bolas's Citadel's life with spree and kicker costs, Thalia's tax on free and Citadel casts, a Lotus Petal under Yawgmoth's Will: 601.2f-h, 614.1a), `interactions_faces.rs` (a split card with two graveyard permissions: 709.3, 601.2b), `interactions_zones.rs` (flicker of face-down, transformed and reanimated permanents and of Leyline Binding, control exchange and summoning sickness, Fractured Identity on a planeswalker, trample over protection: 400.7, 304.4, 610.3, 302.6, 306.5b, 702.19c). Part 3 (section 39.5): the last two cells, a token copy of a nightbound permanent (`interactions_copies.rs`: 707.8a, 702.145f) and True-Name Nemesis's chosen player after Oko's exchange (`interactions_zones.rs`: 702.16j, 110.2) |
-| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45); M6: every decider's encoding finite and within `FEATURE_BOUND` (games, determinized worlds, matches) and `FUZZ_POOL=exponential`, exponential boards to the turn cap (section 46.5); M6: a fourteenth interaction group, mana abilities and costs (section 49.4) |
+| `tests/fuzz.rs` | random play (below), option completion (below) and replay determinism; M8b: random best-of-three matches and their replay, `determinize` for both viewers with the hidden pool's checks; M8d part 2: `FUZZ_POOL=interactions`, combo-dense decks from interaction groups (section 38.5); M6 part 3: `FUZZ_POOL=drafted`, matches of random and `consensus`-drafted 4v4 and 2v2 events as their `mtg` specs (first picks, what each player knows elsewhere), and in every mode a sampled first pick is a candidate of the prior (section 45); M6: every decider's encoding finite and within `FEATURE_BOUND` (games, determinized worlds, matches) and `FUZZ_POOL=exponential`, exponential boards to the turn cap (section 46.5); M6: a fourteenth interaction group, mana abilities and costs (section 49.4); M6: `FUZZ_GROUPS=n` (the first n interaction groups: an older commit's decks for its seeds) and a single match's rerun passing when the match completes (section 51.7) |
 | `tests/draft.rs` | the zero-core game `team_draft` (section 41): packs seeded, disjoint and full (the 541 cards drafted or undrafted), seats alternating and every pass to an opponent (round 1 to the right), picks are the pack and illegal actions errors, every pool 45 cards and every deck legal (exactly 40 cards, section 42; at most 31 of a basic, at least the minimum of 22 pool cards, section 47; deck + sideboard = the pool; `consensus` builds `pools::build_deck`'s deck), deckbuilding as picks (section 47: any card not in the deck offered, `DONE` exactly from 22 pool cards on, the extremes: 22 pool cards and 18 basic lands of one type, 40 pool cards ending the cards with every count forced to 0, the same cards in two orders one state and one encoding), every legal deck an end state reached by each order of its pool cards (every path of 6- and 7-card pools, the states of 12- and 15-card pools for several minimums, the 487,676 whole decks of a two-card pool), the Latin-square pairings (12, 4, 1 and 9 matches; three different opponents), the first-picks rule (after the draft a team knows every cell but the opposing openers' first picks), `determinize` keeping the viewer's knowledge, encoding and the decider's options (for the decider and another viewer), equal keys meaning equal features, keys masked for the observer, clones, `force_chance` replaying openings and impossible keys falling back in order, heuristic-played matches resolving 1v1, 2v2 and 4v4 events, the result refused while the matches are pending, `resolve`'s checks, the payload, the encoding's slots, the bots, the spec, the layout file checked in (`MTGZ_WRITE_LAYOUT=1`), the random-actions fuzz (`DRAFT_FUZZ=n`; M6: the decider's encoding and every world's finite and within `FEATURE_BOUND`; section 47: minimums 22, 0, 40 and random, `DONE` offered iff the deck holds the minimum, every deck at least the minimum; section 50.2: `DRAFT_FUZZ_FIRST=f`, events from f on, each on random streams of its own, a failing one printing its rerun), measurements (`--ignored`: `measure`; section 47: deckbuilding decisions per seat, the pool cards of random and `consensus` decks); `tests/test_team_draft.py` (pytest): the game through the bindings, the loud failure at the deferred terminal, the token network on layout `draft_v2` (section 47) |
 | `tests/draft_matches.rs` | drafted matches (section 45): the `mtg` spec of an event's match (`pN_first_picks`, `pN_elsewhere`, `seed`) plays the event's match move for move (`match_game`; 32 matches: 4v4 and 2v2, random and `consensus`-built decks, best-of-three and best-of-one), the first-pick prior is exactly the cards the viewer's team never saw (193 in 4v4, 367 in 2v2; the real first picks among them), `determinize` samples first picks from it (never the viewer's knowledge) and keeps the viewer's encoding, the spec refuses contradicting knowledge, specs without the keys are what they were; a position from a draft history is seat 0's information set (its knowledge and encoding the real event's) and a history that does not fit is an error; deckbuilding's simulations divisor; `tests/test_drafted.py` (pytest): the glue (payload -> specs, results -> `resolve`, a malformed result refused), events parked by a draft driver and resolved through a heuristic match driver, the token network's actions by identity on `draft_v1`, the human-pick yardstick on a few drafts, the co-training presets |
 | `tests/draft_deferred.rs` | `team_draft` through zero-core's deferred hook (section 43): 2v2 and 1v1 events through the self-play driver with a stand-in network (deferred terminals evaluated as leaves of no options, every event parked, a malformed result refused, resolved with heuristic-played matches, samples with the real outcome and margin), the hooks mapping the inherent methods (1v1-4v4); `--ignored`: `measure_parked_memory` |
@@ -8829,6 +8830,7 @@ matches per hour of the farm in each of the default and interactions modes, and 
   test --release -p engine --test fuzz fuzz_random_matches -- --exact --nocapture` (reproduced at
   075649c). Not a payment panic; determinize's resampling of the opponent's deck (ENGINE.md 36.11)
   with a double-faced card and a card exiled from the hand as a cost are the suspects. Untouched here.
+  (Fixed in section 51.1: the deal ignored a cloud while the opponent paid.)
 * **Unexpected: `ChooseGraveyardCard with no options`** (`engine/src/flow.rs:208`, from
   `activate::pay_costs`: an activated ability whose cost takes a graveyard card was offered with
   nothing to take), drafted match 10001565 at 075649c: `FUZZ_POOL=drafted FUZZ_FIRST=10001565
@@ -8857,6 +8859,11 @@ matches per hour of the farm in each of the default and interactions modes, and 
   search smoke, seed 1000: a co-training run's own path). The noise study's heuristic-played drafted
   matches hit `{1}{R}`, `{5}{U}`, `{7}{U}` and `{6}{U}{U}` (5 matches, specs in
   `~/mtgz-noise/failed_specs.jsonl`), and section 47's draft fuzz Griselbrand's `{4}{B}{B}{B}{B}`.
+
+Section 51 settles every one of these: the hidden pool's deal, the opponent's Lotus Petal, the
+payment search and the surveil's shuffle were live on ab02574 and are fixed there; "a card with
+another face", `{5}{U}` and `{1}{B}` were fixed by ab02574 (section 49); `{3}{U}{U}` was a new case
+(delve before the mana abilities), fixed there too.
 
 **Checking it from the desktop**: `bash tools/fuzz_farm_status.sh` (the state, per mode the totals
 and rates, every failure with its reproduction, NEW since the last check; the noise study's progress
@@ -9054,3 +9061,303 @@ measurement like 50.3's on the desktop would show.
 * On the Mac: `~/mtgz-noise/` (the study's events, results, summary; ~60 MB), the pinned checkout
   `~/mtg-zero-wt/noise-5843007ef161` and its target dir, `~/mtgz-fuzzfarm/` and
   `~/cargo-target/mtg-zero/fuzzfarm` (~3 GB), the LaunchAgent plist; `~/mtgz-remote` untouched.
+
+## 51. The fuzz farm's first bugs (M6)
+
+Branch `m6-farmfix` (from 692a52c: main ab02574 and branch m6-macuse, the farm's tools and
+`DRAFT_FUZZ_FIRST`; zero-core af44741, unchanged). The fuzz farm (section 50.2) found six kinds of
+failure in its first hours, on main 94d43c1 and 075649c. Re-run on ab02574, the engine of the live
+4v4 co-training run td1: three reproduced at their seeds, a fourth (a `PayMana` panic) as well, and
+two passed only because ab02574's fourteenth interaction group deals other decks for the same
+seeds. Each is below with its cards, its root cause, the fix and its rule, and a test that builds
+the state on real cube cards (`tests/rules_farm.rs`; every test fails on 075649c, and on ab02574
+unless said otherwise). One commit per fix:
+
+| | farm failure (reproduction) | cards | live at ab02574 | fix |
+|---|---|---|---|---|
+| 51.1 | the world's cards are not the sampled deck (match 10009649; on ab02574 also drafted match 10043680) and a cloud's card out of its domain (interactions match 10039110 on ab02574) | Elvish Spirit Guide twice, no Jennifer Walters // The Sensational She-Hulk; Force of Vigor, Fury | yes (silent in a run) | 1759983 |
+| 51.2 | `ChooseGraveyardCard with no options` (drafted match 10001565) | Crabomination, Lotus Petal, Psychic Frog | yes (a panic) | 2f2b607 |
+| 51.3 | a payment search that never ends (game 10049522) | Gaea's Cradle, Nissa, Who Shakes the World, Aang | yes (a hang) | 819f44e |
+| 51.4 | determinize changes the decider's encoding (interactions match 10036882) | Kaito, Bane of Nightmares, Blightsteel Colossus | yes (silent) | 83e12e1 |
+| 51.5 | "a card with another face" (interactions game 10070547) | Shelldock Isle, Life // Death | no: fixed by 49.6 | - |
+| 51.6 | `PayMana: no way to pay {3}{U}{U}` (game 10013181) | Dig Through Time, Fanatic of Rhonas, Dragon's Rage Channeler | yes (a panic) | df83060 |
+| 51.6 | `{5}{U}`, `{1}{B}` | Wizard's Rockets with improvise, with Urza | no: fixed by 49.2 | - |
+
+"Live" is measured, not inferred: each test of `tests/rules_farm.rs` was run on 692a52c (ab02574's
+engine), and the farm's interactions seeds were dealt their 075649c decks again on it with
+`FUZZ_GROUPS=13` (51.7).
+
+### 51.1 The hidden pool's deal against a cloud
+
+**The failure.** Match 10009649 (default mode; also 10048520, `FUZZ_POOL=interactions` 10009634 and
+drafted 10036613): in a world `determinize` sampled for P1, P0's cards held Elvish Spirit Guide twice
+and not Jennifer Walters // The Sensational She-Hulk, though the sampled deck had one of each. In a run
+nothing checks this: the search simply plays worlds that are not the deck it sampled. While this
+branch was being checked the farm, now on ab02574, recorded two more of the same fault: drafted match
+10043680 (P1 cast Force of Vigor free from Urza's exile; in P0's world P1 held Green Sun's Zenith twice
+and one Island too few) and interactions match 10039110 (P1 paid for Fury; P0's cloud over P1's hand
+and one library slot lists Horizon Canopy and Watery Grave, and in P0's world the Grave was outside
+that domain: `check_knowledge` failed).
+
+**Root cause.** A best-of-three world is made in two deals (sections 36.11, 10). The hidden pool's
+(`MtgAz::sample_hidden_pool`) samples the opponent's deck and gives its cards to the slots the
+viewer does not know (`Game::redeal`): in order, the hand's slots first, ignoring the clouds (what
+the viewer knows is somewhere in a zone: here, after a shuffle, that the Guide was in P0's library).
+`Game::determinize` follows and deals the slots again so each cloud's cards land in its domain, but
+it **pins** the hand mana sources of a player who is paying (their payment may count on them,
+section 10), and it computes the pins from the world's identities. P0 was paying for Shifting
+Woodland's ability; the first deal had put the Guide in a hand slot (the lowest card definition,
+the first slot); the second pinned it there, so the cloud's Guide was missing from what it shared
+out, was dealt again from the cloud's list anyway, and one card of the deck (Jennifer Walters) was
+never dealt. The `debug_assert` that would have caught the missing card is off in release. The
+other pins do the same: the hand cards a cost of the spell being cast may exile (Force of Vigor's
+"exile a green card from your hand": the cloud's Green Sun's Zenith dealt to P1's hand and pinned;
+Fury's evoke, a red card: Chandra, Torch of Defiance pinned in the hand, which left the cloud over
+the hand and a library slot room for one of its two lands, `cloud_needs` truncating the other).
+
+**Fix.** The hidden pool's deal holds the clouds itself: `Game::redeal(viewer, owner, slots, pinned,
+...)` deals the sampled cards with `resample_with_clouds` (each cloud's cards among the slots of its
+domain, the payment's real pins kept out), so whatever `determinize` pins afterwards, every cloud's
+card is still in its domain's pool. `resample_with_clouds` now asserts that each cloud's card is
+among the cards it deals (a panic, never a world with a card twice). Hidden information, ENGINE.md
+36.11 and 10: a sampled world is the sampled deck exactly and agrees with what the viewer knows.
+
+**Why the fix holds for every pin.** With each cloud's cards in its domain before
+`determinize`, a pinned slot of a domain holds either one of the cloud's cards (`cloud_needs` takes
+it off the cloud's list) or another card (one slot less of room); so a cloud's list never exceeds its
+unpinned slots, and every card on it is among the unpinned cards dealt.
+
+**Tests.** Two cases of one helper, a best-of-three match built from a scenario
+(`MatchState::new` with the game's 40 + 40 cards): a card in P0's graveyard, P0 discards Emrakul,
+the Aeons Torn to Psychic Frog, Emrakul's trigger shuffles the graveyard into the library (a cloud of
+P1's over P0's library), P0 casts a spell and pays; every card of P0's that P1 does not know sorts
+after the graveyard card. `hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_its_owner_pays`
+(Elvish Spirit Guide; Lightning Bolt) and
+`hidden_pool_deal_keeps_a_clouds_card_in_its_domain_while_an_evoke_cost_pins_the_hand` (Chain
+Lightning; Fury's mana cost paid, its evoke's red card pinned). In 64 worlds sampled for P1: P0's
+cards are the sampled deck, the card once and in the library, knowledge and invariants hold. On
+ab02574 both fail at world 0 (the card twice). The farm's four seeds of 075649c and two of ab02574
+pass on the branch; the two of ab02574 fail on 692a52c and pass from 1759983, this fix alone.
+
+### 51.2 Another player's Lotus Petal is not in your graveyard
+
+**The failure.** Drafted match 10001565 (and default match 10040102): `ChooseGraveyardCard with no
+options`, from `activate::pay_costs`. P1's Crabomination exiled P0's Lotus Petal from P0's graveyard
+and P1 cast it; P1 then activated Psychic Frog's "exile three cards from your graveyard" with two
+cards in its graveyard and the Petal: the Petal paid nothing towards the cost, the exile found two
+cards for three.
+
+**Root cause and rule.** CR 400.3: a card that would go to a graveyard other than its owner's goes to
+its owner's. The Petal is P0's: sacrificed for P1's mana it is a card in P0's graveyard, not P1's.
+Castability (`cost_payable`: `exile_short`'s shortfall met by `delve_sources`, the sources activated
+first so they are in the graveyard, section 49.2) and delve (`delve_sources`, `delve_classes`)
+counted every self-sacrificing mana source P1 controlled; `feeds_graveyard` (sacrifices for such a
+cost) asked only whether the card reaches *a* graveyard.
+
+**Fix.** `feeds_graveyard(p, c)` is true only for `p`'s own nontoken card that reaches the
+graveyard; `delve_sources(p)` and `delve_classes(p, ..)` use it. Test
+`cr_400_3_an_opponents_lotus_petal_does_not_feed_your_graveyard_costs`: P0 takes P1's Petal with
+Dack Fayden's -2; Psychic Frog's ability is not offered with two graveyard cards (with P0's own Petal
+it is, and every payment path completes); Treasure Cruise is not offered with two Islands, the
+Petal and four graveyard cards (seven; with P0's own Petal delved, eight: offered, every path
+completes). On ab02574 the Frog's ability is offered.
+
+### 51.3 A payment search that never ended, and a bound on the searches
+
+**The failure.** Game 10049522 sat for over 50 minutes in `pay::covers::go` (section 50.2). A
+self-play worker meeting such a board hangs its run until the stall watchdog (2 hours for td1).
+
+**Root cause.** `cands` folds a card's ways to pay into one when one way makes every other's mana
+(`covers`: can the units of way A make the units of way B, each by its own unit?). It assumed ways of
+at most four units and kept the units already used in eight bits (`used: u8`, `1 << i`). P1's Gaea's
+Cradle, animated by Nissa, Who Shakes the World's +1 (a creature), had two ways: its own "{T}: add
+{G} for each creature you control" (28 {G}) and a tap for Aang's waterbend (creatures and artifacts
+pay {1} each, like improvise). `covers` compares the 28-unit way with itself: past the eighth unit
+every bit is taken (in release a shift past 7 wraps), the search fails at depth 8 and backtracks
+through the permutations of 28 units, about 10^9 nodes of 28 steps each, per call, many calls per
+priority decision. The answer was not wrong (no fold), only never reached.
+
+**Fix.** `covers` is a bipartite matching by augmenting paths (Kuhn), polynomial for any number of
+units (at most 255 per way). And every exponential feasibility search of the payment is bounded: a
+node budget `SEARCH_NODES` = 16,777,216 per search for `ways_payable` (the cards with several ways),
+`payable_within_n` (the budgeted units) and `most_spent_from` (the virtual pool's spends); past it the
+search panics with its inputs printed (cost, needs, chosen units, fixed units, every card's ways,
+budget: that search's reproduction, run alone), never an answer it did not finish. A panic fails a
+self-play run at once (zero-core 681ba8d) instead of stalling it for two hours. The most nodes one
+search visited, measured with an instrumented build on the Mac (5,000 default and 5,000
+interactions games, 500 default, interactions and drafted matches, 500 exponential games):
+`ways_payable` 20,103 (a default match), `most_spent_from` 432, `payable_within_n` 92: the bound is
+834 times the largest. Rules: CR 601.2g-h and 605.3a (mana abilities activated while paying,
+each source once), nothing changes in what is payable.
+
+**Tests.** `cr_605_3a_gaeas_cradle_with_many_creatures_tapped_for_waterbend_is_checked_at_once`:
+Gaea's Cradle, Nissa, Aang and 26 Llanowar Elves; Nissa's +1 animates the Cradle (28 creatures);
+Aang's waterbend {8} is offered and every payment path completes, all within 30 s on a thread
+against a clock (milliseconds on the branch; on ab02574 and 075649c it times out). Unit tests in
+`pay.rs`: `covers` on 255 units, an augmenting path, a colour none of the units makes; a search of
+21 cards with two ways each against {W} (3^21 paths) panics with "a feasibility search visited".
+
+**Speed.** The old `covers` was also slow below a hang: random play is 13-15% faster on the branch
+(51.8), all of it from `covers` (the branch with the old `covers` put back: 7.28-7.32 us per decision,
+as 692a52c).
+
+### 51.4 A surveil's replacement shuffle
+
+**The failure.** `FUZZ_POOL=interactions` match 10036882 at 075649c: `determinize changed the
+encoding of P1 (mover P1) at 29444`, the first float of the decision's card list (`O_LIST`). P1 had
+surveiled 2 with Kaito, Bane of Nightmares' 0 (Blightsteel Colossus and Screaming Nemesis on top),
+put the Colossus into the graveyard first and was asked about the Nemesis; in a world sampled for
+P1 the Nemesis' slot held another card.
+
+**Root cause and rule.** CR 701.25a: to surveil is to put any number of the looked-at cards into the
+graveyard and the rest on top, one action; the Colossus' replacement ("if it would be put into a
+graveyard from anywhere, reveal it and shuffle it into its owner's library instead", CR 614.1a)
+modifies that action. The engine asks the cards one by one and moved the Colossus at once: its
+shuffle shuffled the library with the Nemesis still in it, still to be placed. The shuffle made P1
+forget the Nemesis' slot (an owner's knowledge of its library is exact or nothing), so P1's own
+world dealt it again, and the decision, which names the slot, showed P1 a different card.
+
+**Fix.** While a looked-at pile's cards are put (`Op::PileTo`), a replacement's shuffle of their
+library waits (`Game::pile_shuffles`) until the pile is placed: the pile empty, or the next op not a
+`PileTo` (`Game::flush_pile_shuffles`, after each op of `run_frame`). The final state is the one
+action's: the cards to the graveyard, the rest on top, the Colossus shuffled in with them. Test
+`cr_701_25a_a_surveiled_blightsteel_colossus_shuffles_after_the_pile_is_placed`: after the Colossus,
+P0 still knows the Nemesis; in 32 worlds sampled for P0 it keeps its identity and P0's encoding is the
+game's; then with the Nemesis on top (or into the graveyard) the library is shuffled after, the
+Colossus in it. On ab02574: P0 no longer knows the Nemesis. The same seed with its 075649c decks
+(`FUZZ_GROUPS=13`) fails on ab02574 and passes on the branch.
+
+### 51.5 A card with another face: fixed on ab02574
+
+`FUZZ_POOL=interactions` game 10070547 at 075649c: `a card with another face` (`faces.rs`,
+`choose_face`): P1 played its Shelldock Isle hideaway card, Life // Death (a split card, CR 709.3),
+both halves castable, so the half was asked first; in a world sampled for P0 the face-down card was
+dealt again, a card without halves. It is section 49.6's fault (there with Brazen Borrower, an
+Adventure card): ab02574 reveals a card cast during a resolution with a choice of faces before the
+choice (CR 712.11b, 601.2a: public either way). The farm's seed passes on ab02574 with its 075649c
+decks (`FUZZ_GROUPS=13`). Test `cr_709_3_a_split_card_played_from_shelldock_isle_is_revealed_before_its_half_is_chosen`
+(the farm's case: a split card): passes on ab02574, fails on 075649c with the farm's panic.
+
+### 51.6 The `PayMana` panics; delve after the mana abilities
+
+The farm recorded three `PayMana: no way to pay` panics before ab02574 existed:
+
+* **`{5}{U}`** (interactions game 10019015, match 10018076 at 075649c): Wizard's Rockets and an
+  improvise spell, the Rockets counted once tapped for improvise and once converted: section 49.2's
+  first fault. Both seeds pass on ab02574 with their 075649c decks (`FUZZ_GROUPS=13`).
+* **`{1}{B}`** (`search_smoke --specs team_draft --seeds 1000`, game 199 of driver seed 1001 at
+  075649c): the Rockets with Urza's tapped artifacts, 49.1's fault. Seed 1000 passes on ab02574
+  (24 events, 288 matches).
+* **`{3}{U}{U}`** (game 10013181 at 94d43c1, the default mode, same decks on ab02574): **still a panic
+  on ab02574**, a new castability-versus-payment case. P1 cast Dig Through Time ({6}{U}{U}, delve)
+  with Underground Mortuary, Botanical Sanctum, Talisman of Creativity, Fanatic of Rhonas ("{T}: add
+  {G}{G}{G}{G}; activate only if you control a creature with power 4 or greater") and Dragon's Rage
+  Channeler, a 4/4 with delirium (four card types in the graveyard, a creature card, Mawloc, among
+  them). Castability was right: the Fanatic's {G}{G}{G}{G} and up to six delved cards. The payment
+  exiled delve's cards first, as each was chosen: with Mawloc exiled delirium was gone, the Channeler
+  a 2/2, the Fanatic's ability off, and {3}{U}{U} had four mana.
+
+**Rule and fix.** CR 601.2g-h, 702.66a-b: delve isn't an alternative or additional cost; its
+exiled cards pay for generic mana as the total cost is paid (601.2h), after the mana abilities are
+activated (601.2g). So the Fanatic is tapped with the graveyard whole. The engine now chooses
+delve's cards in the delve decisions (each `Mark::DelveExile`, kept in place; the next picks go up
+the graveyard above them) and exiles them as the payment ends (`exile_delved`, before the
+self-sacrificing sources delve exiles after their mana, `PayMana::delve_late`, as before;
+a cost with no mana left exiles them at once). `exile_short` (a graveyard cost after the mana,
+escape's) leaves out the cards a delve exiles first. Castability (section 49) already counted
+this way. Test `cr_601_2g_mana_abilities_are_activated_before_delve_exiles_the_graveyard`: the
+Fanatic, the Channeler (a +1/+1 counter, delirium from Llanowar Elves, Island, Lightning Bolt and
+Gitaxian Probe), Botanical Sanctum, Talisman of Creativity: Dig Through Time is offered and every
+path completes (on ab02574 the first path, the Elves delved first, panics: `no way to pay
+{5}{U}{U}`); on that path the Elves and one card are exiled after the Fanatic is tapped.
+
+The noise study's five heuristic-played panics (section 50.5: `{1}{R}`, `{5}{U}`, `{7}{U}`,
+`{6}{U}{U}`) were replayed on the branch (51.8).
+
+### 51.7 The fuzz harness
+
+* `FUZZ_GROUPS=n` (`tests/fuzz.rs`): `FUZZ_POOL=interactions` deals from the first `n` groups only.
+  The farm records a failure with its commit's seeds; when a group is added, the same seed deals
+  other decks. `FUZZ_GROUPS=13` deals 075649c's decks on ab02574 and later: how 51.4-51.6's
+  interactions seeds were checked against ab02574 (they are the same games up to the failure:
+  the same panics on 692a52c where the bug is live).
+* A single match's rerun (`FUZZ_MATCHES=1`, the farm's reproductions) failed its chunk's statistical
+  assertion (a sideboarding, a changed deck and a match of three among the matches) unless the match
+  went to three games; it now applies from 20 matches, as the hidden-pool one did.
+
+### 51.8 Checks
+
+At 8e1211f, the branch's last engine code (f7f61be adds a test; the documentation commit changes none):
+
+* **Every engine test binary** (the Mac, `cargo test --release -p engine --no-fail-fast`, `az`
+  included; the library, 101 test binaries and the doctests): 1,401 passed, 0 failed, 13 ignored
+  (section 49's 1,393, the six tests of `tests/rules_farm.rs` then and `pay.rs`'s two unit tests);
+  `tests/rules_farm.rs` at f7f61be (its seventh test): 7 passed on the desktop and the Mac. The
+  desktop (td1 live: not the whole suite): the library's `pay` unit tests, `rules_farm`,
+  `rules_castpay`, the digests and the farm's seeds.
+* **Behaviour digests**: re-recorded in 83e12e1 (r 476, 51.4) and df83060 (158 games, 51.6): combined
+  1ed7e08dd5078f55 (main) -> 4fb5cc3ca4e7dc22 -> **804002969bdd0938**, on the desktop and the Mac.
+  Attributed by building the branch without each fix: without 51.6's and 51.4's the digests are
+  main's exactly (51.1-51.3 change no recorded game); without 51.6's alone only r 476 differs. Every
+  one of the 159 changed games plays the same cards to the same end on both sides (the chosen
+  options by card, the outcome, the turn, the decision count): 158 cast a delve spell for two or
+  more cards (the later picks' action ids are places in a graveyard that keeps the chosen cards,
+  and the graveyard in the encodings until the payment ends), r 476 is Tamiyo, Collector of Tales'
+  reveal and Kaito's surveil with Blightsteel Colossus (the library shuffled after the pile: its
+  order, and so the later hashed hidden zones, differ).
+* **Fuzz** (the Mac, the farm paused, the five runs at once at nice 10): the default mode
+  `FUZZ_GAMES=20000 FUZZ_MATCHES=2000`: 20,000 games (wins 9,993 / 9,970, 37 draws), 5,651,735
+  options completed, 2,000 matches (5,138 games, 1,138 of three), 42,768 hidden-pool worlds,
+  6,033,684 encodings checked, no failure (228 s). `FUZZ_POOL=interactions` (fourteen groups): 20,000
+  games (9,888 / 10,063, 49 draws), 5,551,982 options, 2,000 matches (5,116 games), 45,986 worlds,
+  6,139,919 encodings, no failure (266 s). `FUZZ_POOL=drafted`: 2,000 drafted matches (4,983 games),
+  48,996 worlds, no failure (43 s). `FUZZ_POOL=exponential FUZZ_GAMES=5000`: 5,000 games (2,117 /
+  2,122, 761 draws), 3,862,285 options, largest power 2,147,483,647, counters 4,294,967,295, life
+  2,147,483,647, no failure (977 s). `DRAFT_FUZZ=20000`: 20,000 events, 9,871,224 actions, 5,040,000
+  searched picks, 4,087,506 searched deckbuilding decisions, 497,122 worlds, 37,488 options completed,
+  1,866 heuristic-played matches (none panicked), team A 8,080 / 8,188 / 3,732, no failure (125 s):
+  section 50.4's counts exactly, without event 8657's `PayMana` (fixed by ab02574).
+* **The farm's failing seeds**, all passing on the branch (the Mac): matches 10009649 and 10048520,
+  interactions match 10009634 (`FUZZ_GROUPS=13`), drafted 10036613 (51.1); drafted 10001565, match
+  10040102 (51.2); game 10049522 in 0.19 s, and the 1,000 games around it from 10,049,000 in 13 s
+  (51.3); interactions match 10036882 and game 10070547 (`FUZZ_GROUPS=13`, 51.4-51.5);
+  game 10013181, interactions game 10019015 and match 10018076 (`FUZZ_GROUPS=13`, 51.6); the
+  `team_draft` smoke's seed 1000. The two of ab02574 (drafted 10043680, interactions 10039110) on the
+  desktop: pass on the branch and from 1759983, fail on 692a52c.
+* **The agreement fuzz** (49.4; the Mac, eight processes of 400,000 boards from 0): 3,200,000 boards,
+  7,429,517 priority decisions of P0, 22,688,675 options (10,476,766 of them casts), 136,132,050 paths,
+  0 failures (172 s).
+* **Python**: `bash tools/build_py.sh`, `python -m pytest -q tests`: 35 passed on the desktop; 34
+  passed, 1 skipped on the Mac (no CUDA).
+* **Search smoke** (the Mac): `python tools/search_smoke.py --specs random,match,team_draft,team_draft_2v2
+  --seeds 0-3`: 0 failed of 16 configurations (3,200 games and 2,173,758 decisions; 192 team-draft
+  events and their 1,536 matches, 93,293 draft decisions; 255 s).
+* **The noise study's five panics** (`tools/match_noise.py repro --tag <tag> --player heuristic`,
+  section 50.5): every match completes on the branch, and on 692a52c with the same results: fixed by
+  ab02574.
+* **Speed** (the desktop with td1 live; `tests/perf.rs` `measure` built at 692a52c and at 8e1211f, run
+  interleaved, five runs each): random play 7.26-7.54 us per decision on 692a52c and 6.25-6.31 on the
+  branch (841,706 decisions: the same games); clone 1,490-2,094 ns (one outlier; else to 1,504) and
+  1,451-1,513 ns; clone + `determinize` 1,978-2,587 and 1,893-2,196 ns; `determinize` alone
+  1,105-1,460 and 1,170-1,543 ns; `legal_actions` 5-8 and 3-10 ns; `size_of::<Game>()` 1,600 bytes on
+  both (the two new fields fit in padding). The branch with the old `covers` put back: 7.28 and 7.32
+  us per decision: the speed-up is `covers`'.
+* **The search bound's headroom** (51.3): an instrumented build (a maximum per search kind, not
+  committed) on the Mac.
+
+### 51.9 Limits
+
+* `ways_payable` is exponential in the cards with several ways to pay (Talismans, painlands, an
+  artifact tapped for Urza or improvise ...): 20,103 nodes on one default match board, about 15 such
+  cards. The bound turns a pathological board into a loud failure (with the search's inputs), not a
+  fast search; identical cards (several Talismans of one kind) could be searched as a multiset if a
+  board ever comes near it.
+* The surveil fix covers looked-at piles (`Op::PileTo`); a replacement's shuffle that needs a
+  decision of its own (Blightsteel Colossus under Dauthi Voidwalker: library or exile) still
+  shuffles when that choice is answered, after the pile's op has moved on. Milling (no pile) shuffles
+  at once, as before: the milled cards are chosen before, by slot.
+* The hidden pool's fix makes the first deal respect the clouds; a world's later `Game::determinize`
+  still computes the payer's pins from the world's identities (a hand mana source sampled into the
+  hand is pinned): consistent now that every cloud's card is in its domain before it.
+* `FUZZ_GROUPS` reproduces an older commit's interactions decks only while the groups before `n` are
+  unchanged (groups are only appended).
