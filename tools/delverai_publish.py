@@ -26,7 +26,8 @@ pass; the run argument is the fallback.
 Lineage (`lineage` in the progress record): the run's history since its first ancestor, for the
 site's charts from the beginning. A fork (the A/B experiments' `done` entries of --follow's file:
 the fork's directory, the run it forked from and at which iteration, its changed setting) keeps
-its parent's numbering; a migration (MIGRATED_FROM.json: a layout widen) starts again at 0 with
+its parent's numbering (`--forks FILE`, repeatable: more such state files, e.g. an earlier round of
+experiments whose forks are still in the main line's history); a migration (MIGRATED_FROM.json: a layout widen) starts again at 0 with
 the source's checkpoint, so its rows get a global generation = the source's + its own. Each
 segment's rows are read from its own run directory, up to where its child took over. The upload key: --key-file,
 $MTGZ_DELVERAI_KEY or ~/delverai/.upload_key (the site's Worker secret UPLOAD_KEY).
@@ -198,11 +199,12 @@ def _label(flag):
     return ' '.join([parts[0].lstrip('-').replace('-', '_')] + parts[1:]) if parts else str(flag)
 
 
-def fork_registry(path):
-    """The A/B experiments' forks (their state file's `done`): fork run directory ->
+def fork_registry(paths):
+    """The A/B experiments' forks (their state files' `done`): fork run directory ->
     {parent, at, label, won}."""
     out = {}
-    for d in ((_json(path, {}) or {}).get('done') or []) if path else []:
+    done = [d for path in paths if path for d in ((_json(path, {}) or {}).get('done') or [])]
+    for d in done:
         a = (d.get('raw') or {}).get('a')
         if not a or d.get('k') is None or not d.get('main_before'):
             continue
@@ -316,7 +318,7 @@ def latest_checkpoint(run, every=1, settle_s=30):
 
 
 def post_progress(run, a, key, log=print):
-    p = progress(run, a.every, fork_registry(a.follow))
+    p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])))
     if a.dry_run:
         log(json.dumps({k: v for k, v in p.items() if k != 'iters'})[:800])
         log(f'{len(p["iters"])} iteration rows')
@@ -402,6 +404,7 @@ def main(argv=None):
     ap.add_argument('--min-iter', type=int, default=None, help='record no checkpoint older than this')
     ap.add_argument('--every', type=int, default=1, help='record only iterations divisible by this (2: even ones)')
     ap.add_argument('--follow', default=None, help='a JSON file whose "main" names the run to publish (runs/ab/state.json)')
+    ap.add_argument('--forks', action='append', default=[], help="more A/B state files whose forks are in the lineage (repeatable)")
     ap.add_argument('--url', default=replays.SITE)
     ap.add_argument('--key-file', default=None)
     ap.add_argument('--dry-run', action='store_true', help='record, but upload nothing')
