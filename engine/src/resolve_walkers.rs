@@ -39,8 +39,10 @@ impl Game {
                 if let (Some(x), Some(y)) = (x, y) {
                     let (cx, cy) = (self.objs[x.i()].controller, self.objs[y.i()].controller);
                     if cx != cy && x != y {
-                        self.change_control(x, cy);
-                        self.change_control(y, cx);
+                        // (No room check: an exchange keeps both players'
+                        // numbers of permanents, ENGINE.md 58.2.)
+                        self.set_control(x, cy);
+                        self.set_control(y, cx);
                     }
                 }
                 Flow::Next

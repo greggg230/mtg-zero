@@ -708,6 +708,11 @@ pub struct Game {
     /// While the modes of a stack item are chosen, its id: it can't target
     /// itself (CR 115.5). 0 otherwise (always between tasks).
     pub(crate) choosing_for: u32,
+    /// While the targets (or modes, or X) of a stack item are chosen with it
+    /// on the stack, its id: the stack items a target may be are counted
+    /// from below it (`Game::stack_in_reach`, ENGINE.md 58.1). 0 otherwise
+    /// (always between tasks; a check before the item is put on the stack).
+    pub(crate) targeting: u32,
     // ---- M7c: the single-card tail (ENGINE.md 28) ----
     /// Rare per-object facts, one list (a clone copies one empty vector
     /// in the common case): exhaust abilities activated, colours chosen
@@ -1041,6 +1046,7 @@ impl Game {
             dungeons: [Dungeon::default(); 2],
             rules_srcs: Vec::new(),
             choosing_for: 0,
+            targeting: 0,
             marks: Vec::new(),
             known_pools: [None, None],
             batching: false,
@@ -1268,6 +1274,26 @@ impl Game {
     /// [`put_onto_battlefield`](Self::put_onto_battlefield) of an Aura that
     /// enters attached to `attach` (CR 303.4f, chosen as it enters).
     pub(crate) fn put_onto_battlefield_attached(&mut self, idx: CardIdx, controller: PlayerId, attach: Option<ObjRef>) -> ObjRef {
+        // The engine's 96 permanents a player (`perm_room`; class B, ENGINE.md
+        // 58.2): when the player it would enter under has no room, another
+        // player's card enters under its owner's control (whose room keeps
+        // it), and a token or a copy (a copy of a permanent spell, CR 707.10:
+        // Sage of the Skies) ceases to exist instead, as a token beyond the
+        // limit is never created (`token_count`).
+        let owner = self.objs[idx.i()].owner;
+        let is_card = idx.0 < self.first_token;
+        let controller = if (owner != controller || !is_card) && self.perm_room(controller) == 0 {
+            if !is_card {
+                self.note(|g| format!("P{controller} controls the engine's most permanents: {} ceases to exist", g.name(idx)));
+                self.entering_cast = false;
+                self.clear_entering();
+                return self.move_card(idx, Zone::Nowhere, Pos::Top);
+            }
+            self.note(|g| format!("P{controller} controls the engine's most permanents: {} enters under its owner's control", g.name(idx)));
+            owner
+        } else {
+            controller
+        };
         // Mox Diamond: "If this would enter, you may discard a land card
         // instead. If you do, put it onto the battlefield. If you don't, put
         // it into its owner's graveyard" (CR 614.1a), however it would enter
@@ -1594,19 +1620,37 @@ impl Game {
                 n = n.saturating_mul(f as u32).min(64);
             }
         }
-        // (Cards it owns elsewhere, or that another player controls.)
-        let reserve = self
-            .objs
+        n.min((crate::decision::act::PERM_N as u32).saturating_sub(have + self.perm_reserve(controller)))
+    }
+
+    /// The cards `p` owns that may still enter the battlefield under their
+    /// control: elsewhere, or controlled by another player (the room the
+    /// limit on `p`'s permanents keeps: `token_count`, `perm_room`).
+    fn perm_reserve(&self, p: PlayerId) -> u32 {
+        self.objs
             .iter()
             .enumerate()
             .filter(|&(i, o)| {
-                o.owner == controller
+                o.owner == p
                     && (i as u16) < self.first_token
-                    && !(o.zone == Zone::Battlefield && o.controller == controller)
+                    && !(o.zone == Zone::Battlefield && o.controller == p)
                     && o.zone != Zone::Nowhere
             })
-            .count() as u32;
-        n.min((crate::decision::act::PERM_N as u32).saturating_sub(have + reserve))
+            .count() as u32
+    }
+
+    /// How many more permanents `p` may get that are not cards they own (a
+    /// token, another player's permanent or card): 96 less their permanents
+    /// and the room kept for their own cards (`perm_reserve`). The engine
+    /// limit of 96 permanents a player (the `MY_PERM` / `OPP_PERM` action
+    /// slots, class B: docs/shortcuts.md 26.11.6, ENGINE.md 58.2): tokens
+    /// beyond it aren't created (`token_count`), and a player with no room
+    /// gains control of no other player's permanent (`change_control`) and
+    /// gets no other player's card onto the battlefield (it enters under its
+    /// owner's control: `put_onto_battlefield_attached`).
+    pub(crate) fn perm_room(&self, p: PlayerId) -> u32 {
+        let have = self.permanents_of(p).count() as u32;
+        (crate::decision::act::PERM_N as u32).saturating_sub(have + self.perm_reserve(p))
     }
 
     /// Create one token (CR 111.2): a new object slot, put onto the
@@ -1653,8 +1697,25 @@ impl Game {
     }
 
     /// `p` gains control of permanent `c` (CR 613.1b; an effect without a
-    /// duration). It is removed from combat (506.4).
+    /// duration). It is removed from combat (506.4). Not a permanent `p`
+    /// doesn't own while `p` has no room for another permanent (the engine's
+    /// 96, `perm_room`; class B, ENGINE.md 58.2): then nothing happens.
     pub(crate) fn change_control(&mut self, c: CardIdx, p: PlayerId) {
+        if self.objs[c.i()].zone == Zone::Battlefield
+            && self.objs[c.i()].controller != p
+            && self.objs[c.i()].owner != p
+            && self.perm_room(p) == 0
+        {
+            self.note(|g| format!("P{p} controls the engine's most permanents: no control of {}", g.name(c)));
+            return;
+        }
+        self.set_control(c, p);
+    }
+
+    /// [`change_control`](Self::change_control) without the room check: an
+    /// exchange of control (CR 701.12), which leaves every player's number of
+    /// permanents as it was.
+    pub(crate) fn set_control(&mut self, c: CardIdx, p: PlayerId) {
         if self.objs[c.i()].zone != Zone::Battlefield || self.objs[c.i()].controller == p {
             return;
         }

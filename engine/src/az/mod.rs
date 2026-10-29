@@ -307,6 +307,17 @@ impl MtgSpec {
                 _ => return Err("mtg spec: constructed needs decklists (decks: {\"p0\": [...], \"p1\": [...]})".into()),
             }
         }
+        // The engine's deck limit for every given list (ENGINE.md 58.3; the
+        // random, evaluation and drafted decks have 40 cards).
+        let lists: Vec<(&[DefId], &[DefId])> = match &s.decks {
+            DeckMode::Lists(a, b) => vec![(a, &[]), (b, &[])],
+            DeckMode::ListsWithSideboards(p) => p.iter().map(|(d, sb)| (&d[..], &sb[..])).collect(),
+            DeckMode::Drafted(seats) => seats.iter().map(|x| (&x.deck[..], &x.sideboard[..])).collect(),
+            _ => Vec::new(),
+        };
+        for (p, (d, sb)) in lists.into_iter().enumerate() {
+            constructed::check_size(db, d, sb).map_err(|e| format!("mtg spec: p{p}'s deck: {e}"))?;
+        }
         Ok(s)
     }
 

@@ -582,7 +582,13 @@ impl Game {
             .map(|(_, &(_, t))| t)
             .collect();
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
-        for t in self.target_candidates(tr, &ctx, &exclude) {
+        // (The copy is on the stack: the stack items in reach are counted
+        // from below it, ENGINE.md 58.1; a deeper current target is kept by
+        // `PASS`.)
+        self.targeting = id;
+        let cands = self.target_candidates(tr, &ctx, &exclude);
+        self.targeting = 0;
+        for t in cands {
             if t != cur {
                 opts.push(Opt { action: self.target_action(p, t), choice: Choice::Target(t) });
             }

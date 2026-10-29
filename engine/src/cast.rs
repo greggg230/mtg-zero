@@ -8,6 +8,11 @@ use crate::ids::{CardIdx, ObjRef, PlayerId, Target, Zone};
 use crate::pay::PayMana;
 use crate::svec::SVec;
 
+/// How many stack items below the item whose targets are chosen a target may
+/// be among (`Game::stack_in_reach`; ENGINE.md 58.1): the `STACK` slots but
+/// the top one, which that item takes.
+pub(crate) const STACK_REACH: usize = act::STACK_N as usize - 1;
+
 /// Who is asking whether a filter matches: the spell or ability's
 /// controller ("you") and source ("this", "another").
 #[derive(Clone, Copy, Debug)]
@@ -787,9 +792,13 @@ impl Game {
             let ctx = Ctx { controller: p, source: Some(source) };
             let mut most = (act::NUMBER_N - 1) as u8;
             if let crate::db::ActEffect::Stack(ab) = &ad.effect {
+                // (On the stack: the items in reach counted from below it,
+                // ENGINE.md 58.1.)
+                self.targeting = id;
                 for tr in ab.targets.iter().filter(|t| t.max == crate::db::X_TARGETS) {
                     most = most.min(self.target_candidates(tr, &ctx, &[Target::Stack(id)]).len().min(255) as u8);
                 }
+                self.targeting = 0;
             }
             // (Not with the source's own mana when the cost taps it: an
             // artifact Urza could tap for mana, ENGINE.md 31.)
@@ -1538,10 +1547,13 @@ impl Game {
             self.players[p as usize].hand.len() < chosen || !self.can_pay_with(p, &mana, &self.mana_classes(p, None), &keep)
         };
         let (p, source) = (item.controller, Some(self.item_source(item)));
-        // (Not the ability itself, already on the stack: CR 115.5.)
+        // (Not the ability itself, already on the stack: CR 115.5; the stack
+        // items in reach counted from below it, ENGINE.md 58.1.)
         self.choosing_for = id;
+        self.targeting = id;
         let mut avail: Vec<bool> = m.list.iter().map(|x| self.targets_available(x, p, source)).collect();
         self.choosing_for = 0;
+        self.targeting = 0;
         // Spree (CR 702.172a, 700.2h): a mode whose additional cost can't be
         // paid with the others chosen can't be chosen.
         if !m.costs.is_empty() {
@@ -1765,10 +1777,10 @@ impl Game {
         let ok = |t: Target| self.filter_ok(&tr.filter, t, ctx) && self.targetable(t, ctx);
         let players = [ctx.controller, crate::ids::opp(ctx.controller)].into_iter().map(Target::Player);
         let perms = self.battlefield.iter().map(|&c| Target::Obj(self.obj_ref(c)));
-        // Spells and abilities on the stack, top first (an ability only for
-        // a filter that names abilities: a cheap test first).
+        // Spells and abilities on the stack in reach, top first (an ability
+        // only for a filter that names abilities: a cheap test first).
         let abilities = wants_ability(&tr.filter);
-        let spells = self.stack.iter().rev().filter_map(move |s| match s.kind {
+        let spells = self.stack_in_reach().filter_map(move |s| match s.kind {
             StackKind::Spell { card } => Some(self.obj_ref(card)).filter(|&r| Some(r) != ctx.source).map(Target::Obj),
             // (Not the ability whose modes are being chosen, CR 115.5.)
             StackKind::Ability { .. } => (abilities && s.id != self.choosing_for).then_some(Target::Stack(s.id)),
@@ -2240,6 +2252,9 @@ impl Game {
             self.agenda.push(Task::ChooseTargets { id, req: req + 1 });
             return;
         }
+        // (The item is on the stack: the stack items in reach are counted
+        // from below it, ENGINE.md 58.1.)
+        self.targeting = id;
         let mut cands = self.target_candidates(tr, &ctx, &exclude);
         if tr.pair != 0 {
             // A card of the player whose permanent was chosen.
@@ -2259,6 +2274,7 @@ impl Game {
             let chosen = item.targets.clone();
             cands.retain(|&t| self.later_distinct_ok(&reqs, req, t, &chosen, &ctx));
         }
+        self.targeting = 0;
         let mut opts: Vec<Opt> = cands
             .iter()
             .map(|&t| Opt { action: self.target_action(ctx.controller, t), choice: Choice::Target(t) })
@@ -2425,6 +2441,29 @@ impl Game {
         }
     }
 
+    /// The stack items a spell or ability may target now, top first (an
+    /// engineering limit of the action layout, class B: ENGINE.md 58.1,
+    /// docs/shortcuts.md 58.1). The `STACK` ids name the top
+    /// [`act::STACK_N`] (32) stack slots, and targets are chosen with their
+    /// spell or ability on top of the stack (CR 601.2a-c, 602.2a-b, 603.3d),
+    /// so a target may be one of the [`STACK_REACH`] (31) items below it: the
+    /// top 31 items not counting the item whose targets are chosen
+    /// (`Game::targeting`, while it is on the stack; a check before it is put
+    /// there counts every item, and the item then goes on top). The deeper
+    /// (older) items of a taller stack can't be targeted. A check and the
+    /// choice after it agree: the same items are in reach.
+    pub(crate) fn stack_in_reach(&self) -> impl Iterator<Item = &StackItem> + '_ {
+        let me = self.targeting;
+        let mut above = 0usize;
+        self.stack.iter().rev().take_while(move |s| {
+            let ok = above < STACK_REACH;
+            if s.id != me {
+                above += 1;
+            }
+            ok
+        })
+    }
+
     pub(crate) fn target_candidates(&self, tr: &TargetReq, ctx: &Ctx, exclude: &[Target]) -> Vec<Target> {
         let mut out = Vec::new();
         let consider = |t: Target, out: &mut Vec<Target>| {
@@ -2439,7 +2478,7 @@ impl Game {
             consider(Target::Obj(self.obj_ref(c)), &mut out);
         }
         let abilities = wants_ability(&tr.filter);
-        for s in self.stack.iter().rev() {
+        for s in self.stack_in_reach() {
             match s.kind {
                 StackKind::Spell { card } => {
                     let r = self.obj_ref(card);

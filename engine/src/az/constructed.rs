@@ -48,12 +48,7 @@ pub fn check(db: &CardDb, deck: &[DefId], sideboard: &[DefId]) -> Result<(), Str
     if deck.len() < MIN_DECK {
         return Err(format!("{} cards in the deck (CR 100.2a: at least {MIN_DECK})", deck.len()));
     }
-    if deck.len() > MAX_DECK {
-        return Err(format!(
-            "{} cards in the deck: the engine plays at most {MAX_DECK} (the action slots of a hand, a library list, a graveyard; ENGINE.md 11, 54.4)",
-            deck.len()
-        ));
-    }
+    check_size(db, deck, sideboard)?;
     if sideboard.len() > MAX_SIDEBOARD {
         return Err(format!("{} cards in the sideboard (CR 100.4a: at most {MAX_SIDEBOARD})", sideboard.len()));
     }
@@ -67,6 +62,24 @@ pub fn check(db: &CardDb, deck: &[DefId], sideboard: &[DefId]) -> Result<(), Str
         if w.len() > MAX_COPIES && !is_basic_land(d) {
             return Err(format!("{} copies of {} (CR 100.2a: at most {MAX_COPIES} with the sideboard, 100.4a)", w.len(), d.name));
         }
+    }
+    Ok(())
+}
+
+/// The engine's limit on any deck it plays (constructed, limited lists,
+/// drafted): its cards and a companion it may reveal from its sideboard and
+/// put into its hand (CR 103.2b, 116.2g) are every card the player can have
+/// in the game, and each zone's action slots hold [`MAX_DECK`] of them (a
+/// hand, a library list, a graveyard; ENGINE.md 11, 54.4, 58.3). A larger
+/// deck is refused, never played into an out-of-range slot.
+pub fn check_size(db: &CardDb, deck: &[DefId], sideboard: &[DefId]) -> Result<(), String> {
+    let companion = sideboard.iter().any(|&d| (d as usize) < db.len() && db.def(d).companion.is_some());
+    if deck.len() + companion as usize > MAX_DECK {
+        let with = if companion { " with a companion in the sideboard" } else { "" };
+        return Err(format!(
+            "{} cards in the deck{with}: the engine plays at most {MAX_DECK} cards in the game (the action slots of a hand, a library list, a graveyard; ENGINE.md 11, 54.4, 58.3)",
+            deck.len()
+        ));
     }
     Ok(())
 }
