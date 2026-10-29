@@ -12535,8 +12535,8 @@ Tier "opt-in core feature with byte-identical defaults" (feedback_tiered_gates).
 
 ## 64. Root minimum visits at the Delver mirror's small decisions (zero-core `root_min_visits`)
 
-Branch `root-min-visits` (from main 3b2e6f4): zero-core pinned at **abb0bbc** (feat/root-min-visits:
-5ce50d4 + docs abb0bbc, on main f57ee57 = the league), `tools/mull_floor.py`, this section. Nothing of this repo's engine
+Branch `root-min-visits` (from main 3b2e6f4): zero-core pinned at **b486d36** (feat/root-min-visits:
+5ce50d4 + docs abb0bbc, b486d36, on main f57ee57 = the league), `tools/mull_floor.py`, this section. Nothing of this repo's engine
 changed; with the new settings off a run is the run of before, byte for byte.
 
 ### 64.1 Why
@@ -12741,7 +12741,7 @@ MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py runs/r3-2-rootmin4/super
 Tier "opt-in core feature with byte-identical defaults" (the tiered gates), all CPU-only
 (`CUDA_VISIBLE_DEVICES=-1`), below normal, <= 6 threads, nothing on the Mac.
 
-* **zero-core** at abb0bbc (its docs/search.md 3.5, az.md 9.2): `cargo test --release --workspace`
+* **zero-core** at abb0bbc (= b486d36 but for az.md 9.2's checks; its docs/search.md 3.5, az.md 9.2): `cargo test --release --workspace`
   59 + 3 passed (8 new; the feature's 9 also in a debug build, its `debug_assert`s on); `pytest
   tests` 228 passed, 3 CUDA tests skipped; the golden records and match unchanged (with the floor at
   0 and at an unpayable k); toy-smoke runs (classic, rolling, margin_w 0.2 + chance_k 2 + cq targets +
@@ -12750,7 +12750,7 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates), all 
   metrics (timing aside); `check_checkpoint_compat --package zero` (random, uniform, a toy
   checkpoint) identical; Glass Road Zero, Caverna Zero (and its wasm crate, `cargo check`) and Kingdom
   Builder Zero build against it.
-* **This repo** (zero-core pinned abb0bbc): `bash tools/build_py.sh` (1 min 13 s, its own target
+* **This repo** (zero-core pinned b486d36 = abb0bbc + docs; the suites ran at abb0bbc, the same code): `bash tools/build_py.sh` (1 min 13 s, its own target
   dir), `cargo test --release -p engine --test az` **27 passed**, `pytest tests` **49 passed**;
   `check_checkpoint_compat --package mtgz` with delver2's iteration 21 (a copy, sha256 fcdf2116...)
   on main 3b2e6f4's build (zero-core f57ee57) against this one, the Delver spec, 8 self-play games per
