@@ -388,6 +388,11 @@ impl Game {
         let t = &self.turn;
         v.extend([t.number as u64, t.step as u64, t.active as u64, t.priority as u64, t.passes as u64]);
         v.push(self.outcome.map_or(9, |o| o.winner.map_or(2, |w| w as u64)));
+        // The turn's other public parts and the extra turns to come (ENGINE.md
+        // 58.6: the public-state gate's view).
+        v.extend([t.normal as u64, t.extra_combats as u64, t.cleanup_again as u64]);
+        v.extend(self.extra_turns.iter().map(|&p| p as u64));
+        v.push(u64::MAX - 6);
         let obj = |v: &mut Vec<u64>, c: CardIdx| {
             let o = &self.objs[c.i()];
             v.extend([o.def as u64, o.owner as u64, o.controller as u64, o.tapped as u64, o.damage as u64]);
@@ -397,6 +402,11 @@ impl Game {
             // activations this turn, when it entered (public).
             v.push(o.attacks.map_or(u64::MAX, |r| self.battlefield.iter().position(|&x| x == r.idx).unwrap_or(999) as u64));
             v.extend([o.pw_turn as u64, o.pw_used as u64, o.pw_extra as u64, o.entered as u64]);
+            // Since when its controller controls it, what it blocks (by
+            // place), first-strike damage dealt, evoked, cast with flashback
+            // (public; ENGINE.md 58.6).
+            v.push(o.blocking.map_or(u64::MAX, |b| self.battlefield.iter().position(|&x| x == b).unwrap_or(999) as u64));
+            v.extend([o.control_since as u64, o.struck_first as u64, o.evoked as u64, o.flashback as u64]);
             // Counters and attachments (public, CR 122, 301.5).
             for (k, n) in self.counters_of(c) {
                 v.extend([h64(&k), n as u64]);
@@ -458,7 +468,9 @@ impl Game {
         for s in &self.stack {
             match s.kind {
                 crate::game::StackKind::Spell { card } => {
-                    v.extend([1, self.objs[card.i()].def as u64, self.is_copy_obj(card) as u64, s.times as u64])
+                    v.extend([1, self.objs[card.i()].def as u64, self.is_copy_obj(card) as u64, s.times as u64]);
+                    // (Cast with flashback: exiled as it leaves, ENGINE.md 58.6.)
+                    v.push(self.objs[card.i()].flashback as u64)
                 }
                 crate::game::StackKind::Ability { ability, source } => {
                     let slot = match ability.slot {
@@ -472,6 +484,18 @@ impl Game {
                 }
             }
             v.push(s.controller as u64);
+            // How it was cast and announced (public; ENGINE.md 58.6): the
+            // additional and alternative costs, from where, delve, X, the
+            // division, splices, a ninjutsu attack, a trigger's event and
+            // noted permanents (objects by place, a stack item by position).
+            v.extend([s.cost_option as u64, s.alt as u64, h64(&s.from), s.delved as u64, s.x as u64, s.origin as u64]);
+            v.extend(s.division.iter().map(|&n| n as u64));
+            v.extend(s.spliced.iter().map(|&d| d as u64));
+            v.push(s.attack_as.map_or(u64::MAX, |a| a.map_or(u64::MAX - 1, live_place)));
+            v.extend([s.ev.player.map_or(9, |p| p as u64), s.ev.obj.map_or(u64::MAX, live_place), s.ev.obj2.map_or(u64::MAX, live_place)]);
+            v.extend([s.ev.amount as u64, self.stack.iter().position(|x| x.id == s.ev.item).map_or(99, |i| i as u64)]);
+            v.extend(s.noted.iter().map(|&r| live_place(r)));
+            v.push(u64::MAX - 7);
             for &(r, tg) in &s.targets {
                 v.push(r as u64);
                 v.push(match tg {
@@ -513,6 +537,16 @@ impl Game {
             // tell which physical card a hidden choice was.)
             v.extend([l.until as u64, l.back as u64, live_place(l.source), live_place(l.card)]);
             v.push(l.until_monarch.map_or(9, |p| p as u64));
+        }
+        v.push(u64::MAX);
+        // Rare per-object facts (public; ENGINE.md 58.6): exhausted, a colour or
+        // name chosen, exerted, can't be countered, ... (objects by place).
+        for &(r, m) in &self.marks {
+            let what = match m {
+                crate::game::Mark::ExiledToPay(x) => 1_000_000 + live_place(x),
+                m => h64(&m),
+            };
+            v.extend([live_place(r), what]);
         }
         v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
@@ -590,6 +624,14 @@ impl Game {
             v.push(pl.cant_gain_life as u64);
             v.extend([pl.lost_life as u64, pl.flash_sorceries as u64, pl.poison as u64, pl.experience as u64]);
             v.extend(pl.pool.amt.iter().map(|&n| n as u64));
+            // The rest of a player's public state (ENGINE.md 58.6): the pool's
+            // tagged mana, losses, turns, this turn's counts and permissions,
+            // energy, blessings and protection, the companion's card.
+            v.extend([pl.pool.art as u64, pl.pool.haste as u64, pl.drew_from_empty as u64, pl.lost as u64, pl.turns as u64]);
+            v.extend([pl.left_battlefield as u64, pl.drawn as u64, pl.spells_cast as u64, pl.noncreature_cast as u64]);
+            v.extend([pl.gained_life as u64, pl.draw_step_draws as u64, pl.spells_game as u64, pl.energy as u64]);
+            v.extend([pl.gy_play_turn as u64, pl.gy_exile_turn as u64, pl.city_blessing as u64, pl.prot_until as u64]);
+            v.push(pl.companion.map_or(u64::MAX, |c| self.objs[c.i()].zone as u64));
             v.extend(pl.graveyard.iter().map(|&c| self.objs[c.i()].def as u64));
             v.push(u64::MAX);
             // Library cards the viewer knows exactly, by position.

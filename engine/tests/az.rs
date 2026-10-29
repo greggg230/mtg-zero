@@ -927,3 +927,289 @@ fn the_opening_encodes_no_hidden_information() {
     println!("{worlds} worlds, {pairs} pairs of worlds compared");
     assert!(worlds > 3000 && pairs > 300, "{worlds} {pairs}");
 }
+
+// ---- The public-state encoding gate (ENGINE.md 58.6) ----
+
+/// The positions of the public-state gate: mid-game states (mixed heuristic
+/// and random play, one every ~`every` decisions, sideboarding left out) of
+/// the cube's random decks, the Delver mirror, best-of-three matches and a
+/// drafted match (a random 2v2 `team_draft` event's spec), `per` of each.
+fn gate_positions(per: usize, seed: u64) -> Vec<(&'static str, MtgAz)> {
+    use engine::az::draft::{DraftSpec, TeamDraftAz};
+    let mut specs: Vec<(&'static str, MtgSpec)> = opening_specs();
+    let mut ev = TeamDraftAz::new(&DraftSpec::default(), 4, seed).unwrap();
+    let mut rng = Rng::new(seed);
+    let mut keys = Vec::new();
+    while ev.to_move().is_some() {
+        let mut l = Vec::new();
+        ev.legal_actions(&mut l);
+        ev.step(l[rng.below(l.len() as u32) as usize], &mut keys).unwrap();
+    }
+    let setup = ev.matches().unwrap().remove(0);
+    let json = engine::az::draft_bots::match_spec(&setup, ev.ev.max_turns, ev.ev.format);
+    specs.push(("drafted", MtgSpec::parse(&json).unwrap()));
+    let mut out = Vec::new();
+    for (name, sp) in specs {
+        let mut h = Heuristic::new(seed);
+        let mut n = 0;
+        let mut s = 0;
+        while n < per {
+            let mut g = MtgAz::new_game(&sp, 2, seed * 1000 + s).unwrap();
+            s += 1;
+            while g.to_move().is_some() && n < per {
+                if g.sideboarding().is_none() && g.g.turn().number >= 2 && rng.below(40) == 0 {
+                    out.push((name, g.clone()));
+                    n += 1;
+                }
+                let a = mixed(&g, &mut h, &mut rng);
+                g.step(a, &mut keys).unwrap();
+            }
+        }
+    }
+    out
+}
+
+fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
+    let mut x = g.g.view_of(v);
+    x.push(u64::MAX - 77);
+    x.extend(engine::public_state::match_view(g, v));
+    x
+}
+
+/// The dual of the hidden-information checks (ENGINE.md 58.6): every public
+/// field of the game state is classified (`public_state::fields`, an
+/// exhaustive destructuring) and has a perturbation; each perturbation, made
+/// on positions of the four kinds of games, changes the public view for both
+/// players (it is public) and the encoding for both viewers (it reaches the
+/// network), but the deliberate limits (`public_state::limits`).
+#[test]
+fn public_state_reaches_the_encoding() {
+    use engine::public_state::{fields, limits, perturbations, Class, LimitKind};
+    let t0 = std::time::Instant::now();
+    let pos = gate_positions(scale(60) as usize, 59);
+    let ps = perturbations();
+    let lim = limits();
+    #[derive(Default)]
+    struct Tally {
+        applied: usize,
+        view_same: [usize; 2],
+        enc_same: [usize; 2],
+        example: Option<String>,
+    }
+    let mut t: Vec<Tally> = ps.iter().map(|_| Tally::default()).collect();
+    let mut rng = Rng::new(5959);
+    for (spec, a) in &pos {
+        let base_enc = [enc(a, 0), enc(a, 1)];
+        let base_view = [public_view(a, 0), public_view(a, 1)];
+        for (k, p) in ps.iter().enumerate() {
+            let mut b = a.clone();
+            let Some(what) = (p.apply)(&mut b, &mut rng) else { continue };
+            t[k].applied += 1;
+            for v in 0..2 {
+                if public_view(&b, v as u8) == base_view[v] {
+                    t[k].view_same[v] += 1;
+                    t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s view unchanged)"));
+                }
+                if enc(&b, v) == base_enc[v] {
+                    t[k].enc_same[v] += 1;
+                    t[k].example.get_or_insert_with(|| format!("{spec}: {what} (P{v}'s encoding unchanged)"));
+                }
+            }
+        }
+    }
+    let f = fields();
+    let count = |c: Class| f.iter().filter(|x| x.class == c).count();
+    println!(
+        "{} positions, {} fields ({} public, {} hidden, {} derived), {} perturbations, {:.1} s",
+        pos.len(),
+        f.len(),
+        count(Class::Public),
+        count(Class::Hidden),
+        count(Class::Derived),
+        ps.len(),
+        t0.elapsed().as_secs_f64()
+    );
+    let mut findings = Vec::new();
+    let (mut ok, mut by_design, mut v5) = (0, 0, 0);
+    for (p, x) in ps.iter().zip(&t) {
+        let limited = lim.iter().find(|l| l.name == p.name).map(|l| l.kind);
+        let view_bad = x.view_same.iter().any(|&n| n > 0);
+        let enc_bad = x.enc_same.iter().any(|&n| n > 0);
+        let state = match (x.applied, view_bad, enc_bad, limited) {
+            (0, _, _, None) if p.rare => "rare, not applied",
+            (0, _, _, Some(_)) if p.rare => "rare limit",
+            (0, ..) => "NOT APPLIED",
+            (_, true, ..) => "VIEW GAP",
+            (_, false, true, Some(LimitKind::Design)) => "limit (design)",
+            (_, false, true, Some(LimitKind::V5)) => "gap (layout v5)",
+            (_, false, true, None) => "ENCODING GAP",
+            (_, false, false, Some(_)) => "STALE LIMIT",
+            _ => "ok",
+        };
+        match state {
+            "ok" => ok += 1,
+            "limit (design)" => by_design += 1,
+            "gap (layout v5)" | "rare limit" => v5 += 1,
+            _ => {}
+        }
+        println!(
+            "{state:>18} | {:<58} | {:<26} | {:>4} applied, view same {:?}, encoding same {:?}{}",
+            p.name,
+            p.field,
+            x.applied,
+            x.view_same,
+            x.enc_same,
+            x.example.as_deref().map(|e| format!(" | {e}")).unwrap_or_default()
+        );
+        if !matches!(state, "ok" | "limit (design)" | "gap (layout v5)" | "rare, not applied" | "rare limit") {
+            findings.push(format!("{state}: {} ({})", p.name, p.field));
+        }
+    }
+    println!("{ok} perturbations encoded, {by_design} deliberate limits, {v5} gaps for layout v5 (ENGINE.md 58.10)");
+    assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
+}
+
+/// The gate's classification (ENGINE.md 58.7), as a table.
+#[test]
+fn public_state_classification() {
+    use engine::public_state::{fields, perturbations, Class};
+    let ps = perturbations();
+    for x in fields() {
+        let n = ps.iter().filter(|p| p.field == x.path).count();
+        println!("{:<28} {:<8} {} | {}", x.path, format!("{:?}", x.class), n, x.why);
+        if x.class == Class::Public {
+            assert!(n > 0, "{} has no perturbation", x.path);
+        }
+    }
+}
+
+/// Answer decisions (`prefer`, else the first option) and pass priority until
+/// the stack is empty at a priority decision.
+fn settle(g: &mut engine::Game, prefer: impl Fn(&engine::Game) -> Option<engine::Choice>) {
+    use engine::{Choice, DecisionKind};
+    for _ in 0..300 {
+        let Some(d) = g.pending_decision() else { return };
+        if d.kind == DecisionKind::Priority {
+            if g.stack().is_empty() {
+                return;
+            }
+            g.pass();
+            continue;
+        }
+        let c = prefer(g).filter(|&c| g.has_option(c)).unwrap_or(d.options[0].choice);
+        let _: Choice = c;
+        g.choose(c);
+    }
+    panic!("settle: no progress\n{}", g.log_lines().join("\n"));
+}
+
+fn features(g: &engine::Game, v: u8) -> Vec<f32> {
+    let mut x = vec![0.0; NUM_FEATURES];
+    g.encode_features(v, &mut x);
+    x
+}
+
+/// The public-state gate's encoding fixes (ENGINE.md 58.8), each read back
+/// from its float for both viewers: the monarch (g[127]), spells cast this
+/// turn and energy (the match block's 27-30), X on the stack (stack status
+/// 31), and a permanent's cards exiled with it, other counters and protection
+/// (permanent status 93-95; can't block / can't be blocked and the descriptor's
+/// types and colours as they are are the gate's perturbations').
+#[test]
+fn the_public_state_fixes_are_encoded() {
+    use encode::{glob, mtch, perm, stack, O_GLOBALS, O_MATCH, O_MY_PERM, O_OPP_PERM, O_STACK, PERM_W, STACK_W};
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Target, Zone};
+    let db = CardDb::cube();
+    let perm_slot = |g: &engine::Game, v: u8, c: engine::CardIdx| -> usize {
+        let ctl = g.obj(c).controller;
+        let k = g.permanents_of(ctl).position(|x| x == c).unwrap();
+        (if ctl == v { O_MY_PERM } else { O_OPP_PERM }) + k * PERM_W + CODE
+    };
+    // Palace Jailer: its controller becomes the monarch, an opponent's
+    // creature is exiled with it; then Walking Ballista is cast with X = 2.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Plains"; 10])
+        .library(1, &["Island"; 10])
+        .hand(0, &["Palace Jailer", "Walking Ballista"])
+        .pool(0, [2, 0, 0, 0, 0, 6], 0)
+        .battlefield(1, &["Llanowar Elves"])
+        .start();
+    for v in 0..2 {
+        let x = features(&g, v);
+        assert_eq!((x[O_GLOBALS + glob::MONARCH], x[O_MATCH + mtch::SPELLS], x[O_MATCH + mtch::SPELLS + 1]), (0.0, 0.0, 0.0));
+    }
+    let elves = g.card(1, "Llanowar Elves", Zone::Battlefield);
+    let jailer = g.card(0, "Palace Jailer", Zone::Hand);
+    g.choose(Choice::Cast(jailer));
+    let t = g.tgt(elves);
+    settle(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(t));
+    let jailer = g.card(0, "Palace Jailer", Zone::Battlefield);
+    assert_eq!(g.obj(elves).zone, Zone::Exile);
+    for (v, me) in [(0u8, 1.0f32), (1, -1.0)] {
+        let x = features(&g, v);
+        assert_eq!(x[O_GLOBALS + glob::MONARCH], me, "P{v}: the monarch");
+        assert_eq!(x[perm_slot(&g, v, jailer) + perm::EXILED_WITH], 0.25, "P{v}: the Elves exiled with Palace Jailer");
+        let side = v as usize; // P0 cast one spell: the viewer's own float for P0, the opponent's for P1
+        assert_eq!(x[O_MATCH + mtch::SPELLS + side], 0.25, "P{v}: spells cast this turn");
+        assert_eq!(x[O_MATCH + mtch::SPELLS + 1 - side], 0.0);
+    }
+    let wb = g.card(0, "Walking Ballista", Zone::Hand);
+    g.choose(Choice::Cast(wb));
+    for _ in 0..20 {
+        match g.kind() {
+            Some(DecisionKind::Priority) => break,
+            Some(DecisionKind::ChooseMode) if g.has_option(Choice::Number(2)) => g.choose(Choice::Number(2)),
+            _ => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c)
+            }
+        };
+    }
+    assert_eq!(g.stack().last().unwrap().x, 2);
+    for v in 0..2u8 {
+        let x = features(&g, v);
+        assert_eq!(x[O_STACK + CODE + stack::X], 0.25, "P{v}: X = 2 on the stack");
+        assert_eq!(x[O_MATCH + mtch::SPELLS + v as usize], 0.5, "P{v}: two spells");
+    }
+    // Other counters and protection: a Walking Ballista with two stun
+    // counters, True-Name Nemesis (protection from the chosen player).
+    let g = Scenario::new(db)
+        .battlefield(0, &["True-Name Nemesis", "Walking Ballista"])
+        .counters(0, "Walking Ballista", engine::db::Counter::Stun, 2)
+        .counters(0, "Walking Ballista", engine::db::Counter::P1P1, 3)
+        .start();
+    let (tnn, wb) = (g.card(0, "True-Name Nemesis", Zone::Battlefield), g.card(0, "Walking Ballista", Zone::Battlefield));
+    for v in 0..2 {
+        let x = features(&g, v);
+        assert_eq!((x[perm_slot(&g, v, tnn) + perm::PROTECTED], x[perm_slot(&g, v, wb) + perm::PROTECTED]), (1.0, 0.0));
+        assert_eq!(x[perm_slot(&g, v, wb) + perm::OTHER_COUNTERS], 0.5, "P{v}: the stun counters, not the +1/+1 ones");
+        assert_eq!((x[perm_slot(&g, v, wb) + perm::CANT_BLOCK], x[perm_slot(&g, v, wb) + perm::CANT_BE_BLOCKED]), (0.0, 0.0));
+    }
+    // Energy: Galvanic Discharge gives three, none paid.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Mountain"; 10])
+        .library(1, &["Island"; 10])
+        .hand(0, &["Galvanic Discharge"])
+        .pool(0, [0, 0, 0, 1, 0, 0], 0)
+        .battlefield(1, &["Llanowar Elves"])
+        .start();
+    let elves = g.card(1, "Llanowar Elves", Zone::Battlefield);
+    let gd = g.card(0, "Galvanic Discharge", Zone::Hand);
+    g.choose(Choice::Cast(gd));
+    let t = g.tgt(elves);
+    settle(&mut g, |g| match g.kind() {
+        Some(DecisionKind::Target) => Some(t),
+        Some(DecisionKind::ChooseMode) => Some(Choice::Number(0)),
+        _ => None,
+    });
+    assert_eq!(g.player(0).energy, 3, "{}", g.log_lines().join("\n"));
+    let _ = Target::Player(0);
+    for v in 0..2u8 {
+        let x = features(&g, v);
+        let side = v as usize;
+        assert_eq!((x[O_MATCH + mtch::ENERGY + side], x[O_MATCH + mtch::ENERGY + 1 - side]), (0.75, 0.0), "P{v}: P0's three energy");
+    }
+}

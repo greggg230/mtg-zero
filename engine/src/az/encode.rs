@@ -28,7 +28,16 @@
 //! whose special action is available. After the freeze (ENGINE.md 55, in
 //! spare globals, no width or offset changed): `g[125 + side]`
 //! (`glob::MULLIGAN_DECLARED`), the player declared a mulligan not yet taken
-//! (CR 103.5).
+//! (CR 103.5). The public-state gate's fixes (ENGINE.md 58.8, the last of
+//! layout v4's spare floats but the context's 246-255 and the match's 31):
+//! `g[127]` the monarch (`glob::MONARCH`, the viewer 1, the opponent -1); the
+//! match block's 27-30 spells cast this turn and energy, per player (game
+//! facts: `mtch::SPELLS`, `mtch::ENERGY`); a permanent's status 91-95 (can't
+//! block, can't be blocked, other counters, cards exiled with it, protection:
+//! `perm::CANT_BLOCK` ..); a stack item's status 31 (X: `stack::X`); and a
+//! permanent's descriptor shows its card types and colours as they are
+//! (layers 4 and 5), not its card's. `public_state.rs` is the gate that
+//! checks every public field reaches this input.
 //!
 //! A card code (52 floats) is the card's stable identity (`identity.rs`: its
 //! position in the cube's IR card list, tokens from a registry; capacity
@@ -188,8 +197,17 @@ pub mod mtch {
     pub const COUNT_ENTRY: usize = 25;
     pub const LAST_ENTRY: usize = 26;
     pub const END: usize = 27;
+    /// The public-state gate's fixes (ENGINE.md 58.8) in the match block's
+    /// spare floats 27-30, game facts written by `Game::encode_features` (the
+    /// token network reads the globals and the match block as one input,
+    /// `TokenNet.g`): spells cast this turn / 4 by the viewer, by the opponent
+    /// (squashed; storm, prowess, Cori-Steel Cutter's flurry, CR 702.40); their
+    /// energy counters / 4 (squashed, CR 122.1). Float 31 stays the match's.
+    pub const SPELLS: usize = 27;
+    pub const ENERGY: usize = 29;
+    pub const GAME_END: usize = 31;
 }
-const _: () = assert!(mtch::END <= MATCH);
+const _: () = assert!(mtch::END <= mtch::SPELLS && mtch::ENERGY + 2 == mtch::GAME_END && mtch::GAME_END <= MATCH);
 
 /// Offsets inside a companion slot (after its card code; layout v4).
 pub mod comp {
@@ -313,7 +331,23 @@ pub mod perm {
     pub const GOADED: usize = 89;
     /// It is exiled if it would leave the battlefield (From the Catacombs).
     pub const EXILE_IF_LEAVES: usize = 90;
+    /// The public-state gate's fixes (ENGINE.md 58.8), in layout v4's spare
+    /// status floats 91-95 (no width or offset changed): it can't block, it
+    /// can't be blocked (rules effects, CR 509.1b; `Game::flags_of`); its
+    /// counters other than +1/+1, -1/-1, loyalty and lore / 4 (stun, keyword
+    /// and named counters: charge, oil, ...; CR 122); the cards exiled with
+    /// it / 4 (`Game::links`: they return when it leaves, CR 610.3, 607.2a);
+    /// it has protection from something (printed or from an effect, CR
+    /// 702.16). Also (58.8) the descriptor's card types and colours are the
+    /// permanent's as they are (layers 4 and 5: an animated land is a
+    /// creature, Painter's Servant's colour), not its card's.
+    pub const CANT_BLOCK: usize = 91;
+    pub const CANT_BE_BLOCKED: usize = 92;
+    pub const OTHER_COUNTERS: usize = 93;
+    pub const EXILED_WITH: usize = 94;
+    pub const PROTECTED: usize = 95;
 }
+const _: () = assert!(CODE + perm::PROTECTED < PERM_W);
 
 /// Offsets inside a stack slot's status (after its card code).
 pub mod stack {
@@ -332,7 +366,12 @@ pub mod stack {
     pub const UNCOUNTERABLE: usize = 28;
     pub const SLOT: usize = 29;
     pub const GRAVEYARD: usize = 30;
+    /// The public-state gate's fix (ENGINE.md 58.8), layout v4's spare float
+    /// 31: the value of X / 8 (squashed; CR 107.3a: announced as it was cast or
+    /// activated).
+    pub const X: usize = 31;
 }
+const _: () = assert!(CODE + stack::X < STACK_W);
 
 /// Offsets inside the per-player globals (`g[24 + 40 * side..]`, viewer
 /// first) added in M7b part 3b, and the room one-hots.
@@ -361,13 +400,17 @@ pub mod glob {
     /// 103.5: the declarations are public; ENGINE.md 55). Set only while the
     /// second player declares after the starting player declared a mulligan
     /// (once every player has declared, the mulligans are taken). In layout
-    /// v4's spare globals 125-126 (127 stays spare).
+    /// v4's spare globals 125-126.
     pub const MULLIGAN_DECLARED: usize = 125;
+    /// `g[MONARCH]`: 1 if the viewer is the monarch, -1 if the opponent is
+    /// (CR 724; ENGINE.md 58.8: layout v4's last spare global).
+    pub const MONARCH: usize = 127;
 }
 const _: () = assert!(
     glob::ROOM + 2 * crate::dungeon::ROOMS.len() <= glob::CHOOSER
         && glob::CHOOSER < glob::MULLIGAN_DECLARED
-        && glob::MULLIGAN_DECLARED + 2 <= GLOBALS
+        && glob::MULLIGAN_DECLARED + 2 == glob::MONARCH
+        && glob::MONARCH + 1 == GLOBALS
 );
 
 /// A card code: the identity's digits (16, 8, 8), then types, colours, size.
@@ -635,6 +678,19 @@ impl Game {
                         out[o + 45] = th as f32 / 8.0;
                     }
                 }
+                // ENGINE.md 58.8: its card types and colours as they are (layers
+                // 4 and 5, with a copy's exceptions above: an animated land is a
+                // creature, Painter's Servant's colour), not its card's.
+                let (ty, col) = (self.types_of(c), self.colors_of(c));
+                for (k, t) in [types::ARTIFACT, types::CREATURE, types::ENCHANTMENT, types::INSTANT, types::LAND, types::SORCERY]
+                    .iter()
+                    .enumerate()
+                {
+                    out[o + 32 + k] = (ty & t != 0) as u8 as f32;
+                }
+                for k in 0..5 {
+                    out[o + 38 + k] = (col & (1 << k) != 0) as u8 as f32;
+                }
                 let st = &mut out[o + CODE..o + PERM_W];
                 st[perm::PRESENT] = 1.0;
                 st[perm::TAPPED] = ob.tapped as u8 as f32;
@@ -709,7 +765,31 @@ impl Game {
                 }
                 st[perm::LOST_ABILITIES] = self.lost_abilities(c) as u8 as f32;
                 st[perm::GOADED] = [me, op_].iter().any(|&p| self.goaded_by(c, p)) as u8 as f32;
-                st[perm::EXILE_IF_LEAVES] = self.flags_of(c).exile_if_leaves as u8 as f32;
+                let flags = self.flags_of(c);
+                st[perm::EXILE_IF_LEAVES] = flags.exile_if_leaves as u8 as f32;
+                // ENGINE.md 58.8 (spare floats 91-95).
+                st[perm::CANT_BLOCK] = flags.cant_block as u8 as f32;
+                st[perm::CANT_BE_BLOCKED] = flags.cant_be_blocked as u8 as f32;
+                if !self.counters.is_empty() {
+                    use crate::db::Counter as K;
+                    let n: u64 = self
+                        .counters
+                        .iter()
+                        .filter(|x| x.0 == c && !matches!(x.1, K::P1P1 | K::M1M1 | K::Loyalty | K::Lore))
+                        .map(|x| x.2 as u64)
+                        .sum();
+                    st[perm::OTHER_COUNTERS] = squash(n as f32 / 4.0);
+                }
+                if !self.links.is_empty() {
+                    let r = self.obj_ref(c);
+                    let n = self
+                        .links
+                        .iter()
+                        .filter(|l| l.source == r && self.live(l.card) && self.objs[l.card.idx.i()].zone == Zone::Exile)
+                        .count();
+                    st[perm::EXILED_WITH] = squash(n as f32 / 4.0);
+                }
+                st[perm::PROTECTED] = !self.protection_of(c).is_empty() as u8 as f32;
             }
         }
         // The viewer's hand.
@@ -758,6 +838,8 @@ impl Game {
             st[5] = item.modes.len() as f32 / 4.0;
             st[6] = item.cost_option as f32 / 4.0;
             st[7] = item.targets.len() as f32 / 4.0;
+            // ENGINE.md 58.8 (spare float 31).
+            st[stack::X] = squash(item.x as f32 / 8.0);
             match item.kind {
                 StackKind::Spell { card } => {
                     st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
@@ -856,6 +938,13 @@ impl Game {
             out[o + CODE + comp::IN_GAME] = pl.companion_used as u8 as f32;
         }
         self.encode_context(me, ids, &mut out[O_CONTEXT..O_CONTEXT + CONTEXT]);
+        // Game facts in the match block's spare floats (ENGINE.md 58.8; the
+        // match's own floats are `encode_match`'s).
+        for (side, p) in [me, op_].into_iter().enumerate() {
+            let pl = &self.players[p as usize];
+            out[O_MATCH + mtch::SPELLS + side] = squash(pl.spells_cast as f32 / 4.0);
+            out[O_MATCH + mtch::ENERGY + side] = squash(pl.energy as f32 / 4.0);
+        }
     }
 
     /// The ward abilities permanent `c` has (CR 702.21): its own and those a
@@ -1052,6 +1141,12 @@ impl Game {
             // ENGINE.md 55: a declared mulligan not yet taken (public).
             g[glob::MULLIGAN_DECLARED + side] = self.players[p as usize].mulligan_declared as u8 as f32;
         }
+        // ENGINE.md 58.8: the monarch (CR 724), the viewer 1, the opponent -1.
+        g[glob::MONARCH] = match self.monarch {
+            Some(p) if p == me => 1.0,
+            Some(_) => -1.0,
+            None => 0.0,
+        };
         // Day and night (CR 731).
         g[104] = (self.day == Some(true)) as u8 as f32;
         g[105] = (self.day == Some(false)) as u8 as f32;

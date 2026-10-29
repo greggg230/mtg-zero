@@ -151,7 +151,7 @@ impl Game {
 
     /// Recompute the "loses all abilities" fast path after the effects
     /// changed.
-    fn effects_changed(&mut self) {
+    pub(crate) fn effects_changed(&mut self) {
         self.any_loss = self.effects.iter().any(|e| e.m == Mod::LoseAllAbilities);
     }
 

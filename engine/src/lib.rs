@@ -35,6 +35,7 @@ mod sba;
 mod stack_ext;
 mod svec;
 pub mod dungeon;
+pub mod public_state;
 pub mod testkit;
 pub mod layers;
 mod triggers;
