@@ -10232,7 +10232,7 @@ parameters, 64 / 16 simulations):
   user's game held it). **Estimate on the GPU alone**: the same network on layout v4 at 768 in flight
   evaluates 10.2-10.5k leaves/s on this GPU (td1's play network, 52.5; mtg3's 12.4k on layout v3), so
   at 8,000 simulations a game **~4,600-5,600 games per hour**, an iteration's 600 games in **~6.5-8
-  minutes** of self-play, less as games shorten.
+  minutes** of self-play, less as games shorten. (Superseded by what runs/delver1 measured: 54.11. The estimate was ~3x optimistic.)
 
 **A projected iteration on the GPU alone** (mtg3's phases scaled by the mirror's 289 against mtg3's
 ~190 searched decisions per game early on, x 1.5): self-play 6.5-8 min, training ~0.5 min, the
@@ -10348,6 +10348,25 @@ ENGINE.md 15). Checks at daedbca: `cargo test --release -p engine -p card_ir --n
 Mac) **1,439 passed, 0 failed, 14 ignored**; the digests 804002969bdd0938 (unchanged);
 `FUZZ_POOL=delver FUZZ_GAMES=20000` (the Mac) no failure, the same numbers as 54.7 to the option;
 `bash tools/build_py.sh`, `python -m pytest -q tests` 45 passed.
+
+### 54.11 What runs/delver1 measured (corrects 54.6's estimate)
+
+54.6 estimated ~4,600-5,600 self-play games an hour on the GPU alone (~6.5-8 minutes per 600-game iteration), from
+td1's 10.2-10.5k leaves/s and the uniform evaluator's 289 decisions a game. `runs/delver1` (2026-10-28, `metrics.jsonl`
+`selfplay`, iterations 1-20) measured about a third of that on the desktop:
+
+| | 54.6 estimate | Measured |
+|---|---|---|
+| Desktop leaves/s (CUDA, 768 in flight) | 10.2-10.5k | 5.0-6.5k (iterations 1-4; inference-bound: `infer_s` > wall time; the GPU shared with the user's game) |
+| Decisions per game | 289 | 192, then 503-589 at iterations 3-4 (networks mulliganing to 0 cards: long games from empty hands), 170-380 from iteration 5 |
+| Desktop games per hour | 4,600-5,600 | 1,319-1,912 at iterations 1-4 (a 600-game iteration took 19-27 minutes of self-play); ~2,000-2,700 at 100-150 games an iteration |
+| Mac remote self-play (section 52, from iteration 5) | - | 28.5-31.8k leaves/s with 2 workers when not backing off (~5x the desktop); 434-4,120 games an iteration, depending on the desktop's quota |
+
+The two assumptions that failed: td1's network on an idle GPU (here the GPU was shared), and decisions per game (the
+early networks' mulligan spiral doubled them). Training phases grew with the window: 42 s at iteration 1, 558 s at
+iteration 15 (1,451 steps, 163 s of it loading a 20 GB window), 70-225 s at 150 games an iteration (81-126 s of
+`load_s` each). Sample staleness (rows by `net`) with 768 desktop / 1,536 Mac games in flight: 3-4 iterations at
+`--games 100`, 0.6-1.2 at `--games 150 --conc 192` (iterations 18-20).
 
 ## 55. The declared mulligan in the encoding
 
