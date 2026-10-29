@@ -11900,7 +11900,9 @@ settings set as above. td1 (co-training): its draft network's layout (`team_draf
 unchanged, its play network (the resolver, game `mtg`) is v4: a v5 td1 is a new co-training run
 whose draft network is a `fork_run` of td1's (the same layout: a copy) and whose resolver starts from
 td1's resolver checkpoint through `resolver_init` (widened onto v5 at the start: `init_resolver`
-passes the layout since zero-core f606724); not rehearsed here.
+passes the layout since zero-core f606724); not rehearsed here. (Rehearsed in 60.7, which corrects
+it: with only the forked draft checkpoint the co-training bootstrap overwrites it with a fresh
+network, so both iteration-0 checkpoints come from `fork_run`.)
 
 ### 60.6 Checks
 
@@ -11932,3 +11934,87 @@ the GPU; CPU only, `CARGO_BUILD_JOBS` 8; on the Mac one job at `nice -n 19`).
 * End to end: 60.2's real-checkpoint check and the v5 `delver-smoke` from a forked v4 checkpoint.
 * No search smoke (its uniform evaluator never reads the features; tier "encoding-only" and the
   core's change is the widen, which the run loop never calls).
+
+### 60.7 mtg5 and td1 moved to v5 (60.5's procedure rehearsed; both new runs paused)
+
+Branch `migrate-v5` (main 4e11759, zero-core f3f5535), 2026-10-29, CPU only. The two paused v4 runs
+became **`runs/mtg5-v5`** and **`runs/td1-v5`**, each with its PAUSE file written before anything
+else and no supervisor: they stay paused until the user resumes them (the commands: the hub's
+paused-runs manifest `data/paused_runs_2026-10-28.json`, which marks td1's v4 entry superseded).
+`runs/mtg5` and `runs/td1` were only read. mtg5 ran on `run-55e6194`, td1 on `run-b11952b` (its play
+network from mtg5's iteration 14): the same `layout_v4.json` as a6bb3bc, before 55's declared
+mulligan and 58's public-state floats, which the moved networks now see as any re-pin would (55.6,
+58.12). The draft side is unchanged since b11952b (`layout_draft_v2.json`, `draft.rs`,
+`draft_encode.rs`; the events below draft the same in both builds).
+
+| New run | From (v4) | Iteration 0 (`tools/fork_run.py`) | Settings changed |
+|---|---|---|---|
+| mtg5-v5 | mtg5 iter_0015 (newest) | widened: 1,500,317 -> 1,552,797 parameters | mtg5's config.json; `value_q_warmup` 0 |
+| td1-v5 | td1 iter_0006 (newest with both networks; 7 was training) | a copy (draft_v2), 1,292,050 parameters | td1's config.json; `value_q_warmup` 0; `resolver_init` td1's resolver iter_0006 |
+| td1-v5/resolver | td1 resolver/iter_0006 | widened, as mtg5's | `resolver_cfg` td1's + `lr` 0.001, `value_q_warmup` 0 |
+
+All three networks were at `lr` 0.001 (`lr_halve_every` 30) and full `value_q` (0.9, 0.5, 0.9), so
+`--lr 0.001 --value-q-warmup 0` keeps both; the step decay's clock restarts (mtg5's first halving was
+due at its iteration 31 = the fork's 16, the fork halves at its own 31; `--lr-halve-every 15 --iters
+25` would keep mtg5's planned 40 exactly). `MIGRATED_FROM.json` in each (delverai_publish's lineage
+record). `runs/mtg5-v5/ref/` holds two widened references for h2h across the move: `best.pt`, which is
+iteration 10's, and iteration 14, the best in `models/index.json` (385 +- 57). Under `eval_remote`
+zero-core copies the Mac's `models/index.json` back but not `best.pt`, so a remote-evaluated run's
+best.pt is its last local evaluation's best.
+
+**The co-training route, corrected.** 60.5's route (the draft network a `fork_run`, the resolver
+through `resolver_init`), rehearsed in `E:/mtg-zero-scratch/migrate-v5/hazard-td1` (the forked draft
+checkpoint alone, `--resolver-init` td1's resolver, `team_draft-smoke`, `--iters 0`), **silently
+discards the forked draft network**: zero-core's `CoRun.loop` bootstraps whenever no iteration has
+both checkpoints and writes `P.new_model()` over the existing `models/iter_0000.pt` (afterwards it is
+bit for bit the preset's fresh seed-0 network, 152,434 parameters; no error, no log line). So both of
+td1-v5's iteration-0 checkpoints come from `fork_run` (`fork_run.py
+runs/td1/resolver/models/iter_0006.pt runs/td1-v5/resolver` writes `resolver/models/iter_0000.pt`):
+the run starts after iteration 0 and bootstraps nothing, and its `resolver_init` is a record only.
+`init_resolver`'s widen itself is right (that run's resolver iteration 0 equals fork_run's tensor
+for tensor). A zero-core fix, not made here: the bootstrap should keep (or refuse) an existing
+checkpoint 0 of either network.
+
+**Exactness** (`E:/mtg-zero-scratch/migrate-v5/collect.py`, `compare.py`, `result.json`; 60.2's
+method): the v4 build (a6bb3bc, `E:/mtg-zero-scratch/migrate-v5/v4ref`) and this build played the
+same seeded random games (legal-action lists and the events' payloads hashed: equal): 1,296
+positions of mtg5's self-play spec (the cube's random decks, best-of-three), 492 of its evaluation
+spec, 1,140 of drafted matches (two 4v4 events at td1's spec drafted and built at random to their
+deferred terminal, the first 3 matches of each through `mtgz.az.drafted`), both viewers every 5th
+decision; and 195 of the events' own encodings. The v5 encodings at the widen's map equal the v4 ones
+bit for bit in every group (2,751 of 2,928 have a v5-only float set). Each source on the v4 encoding
+against its new checkpoint, read from the new run, on the v5 encoding (CPU, float32; max abs, rows
+bit for bit):
+
+| Network | Positions | Policy logits | Value logits | Value probabilities | Margin |
+|---|---|---|---|---|---|
+| mtg5 iter 15 -> mtg5-v5 iter 0 | bo3 1,296 / eval 492 | 1.5e-6 (830) / 1.9e-6 (357) | 2.4e-7 / 3.6e-7 | 1.2e-7 | 9.5e-7 |
+| mtg5 best.pt (iter 10) -> ref | bo3 / eval | 1.2e-6 / 1.2e-6 | 1.8e-7 / 1.6e-7 | 8.9e-8 | 4.8e-7 |
+| mtg5 iter 14 -> ref | bo3 / eval | 1.2e-6 / 1.4e-6 | 2.1e-7 / 3.6e-7 | 1.2e-7 | 8.3e-7 |
+| td1 resolver iter 6 -> td1-v5 resolver iter 0 | drafted 1,140 / bo3 | 2.0e-6 (806) / 2.7e-6 (844) | 3.9e-7 / 3.6e-7 | 1.8e-7 | 1.1e-6 |
+| td1 draft iter 6 -> td1-v5 iter 0 | draft 195 | 0 (195) | 0 | 0 | 0 |
+
+Every new checkpoint equals an in-memory `widen` of its source tensor for tensor (the draft
+network: its source's tensors); with the v5-only floats replaced by noise in [-4, 4] the outputs are
+the same, with them zeroed bit for bit the same.
+
+**End to end** (scratch copies, CPU, no Mac; `rehearse-mtg5`, `rehearse-td1`): mtg5-v5's iteration 0
+with `mtg-smoke` on mtg5's best-of-three specs, and td1-v5's two iteration-0 checkpoints (and its
+`resolver_init`) with `team_draft-smoke` (2v2, the resolver's dict the smoke's), both with the lr and
+value_q flags, 2 iterations each: iteration 0 evaluated (the draft network also with the play
+network's events), self-play with v5 play shards (37,620 wide) and draft_v2 draft shards (14,492),
+both networks trained (at lr 0.001, value_q full from iteration 1), evaluations and Elo at 1 and 2,
+iteration 0 never rewritten, no failure. The resume commands resolve (`zero.run.resolve_config`,
+`cotrain.resolver_config`) against the new configs to the old runs' settings but for the changes
+above (later settings at their defaults: today's behaviour), and on scratch copies of the two run
+directories they exit at once with status 75 (PAUSE), config.json untouched.
+
+**Resuming** (the user's call: both need the desktop GPU, held by `runs/delver2`, and the Mac): a
+pinned worktree of main at that time (`run-<sha7>`, `bash tools/build_py.sh`, `bash tools/mac.sh
+--eval-checkout`; layout v5), from it the supervisor with the manifest's command (mtg5-v5:
+`--preset mtg-4 --seed 1 --eval-every 2 --eval-remote mac --lr 0.001 --value-q-warmup 0`,
+`MTGZ_SUPERVISE_STALL=3600`; td1-v5: td1's flags with the resolver dict above, `--resolver-init`
+td1's resolver iter_0006, `--lr 0.001 --value-q-warmup 0`, `MTGZ_SUPERVISE_STALL=7200`; 53.4's
+`--draft-eval-net-remote mac` optional), then `python tools/pause_run.py <run> --resume`. Never
+delete one of td1-v5's iteration-0 checkpoints (the bootstrap above), and never resume
+`runs/mtg5` or `runs/td1` on a v5 build (60.5).
