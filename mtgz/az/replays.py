@@ -57,8 +57,30 @@ class _Recorder(core.RecordingDriver):
             slot.target = self.sims_minor
 
 
+def check_encoding(ckpt):
+    """The checkpoint's network reads this build's encoding: its input width is the engine's and
+    its token layout's version this package's (a layout v5 checkpoint run by a v4 build - or the
+    reverse - is misread without any error: the network takes the first floats it was given,
+    docs/ENGINE.md 60). Raises ValueError naming both; recording such games would show moves the
+    network never chose."""
+    import torch
+    from zero import games as G
+    ck = torch.load(ckpt, map_location='cpu', weights_only=False)
+    cfg = ck.get('config') or (ck.get('extra') or {}).get('config') or {}
+    game = cfg.get('game', 'mtg')
+    want = G.info(game)['num_features']
+    if cfg.get('features') != want:
+        raise ValueError(f'{ckpt}: the network reads {cfg.get("features")} features, this build encodes {want} '
+                         f'(another layout): record it with a build of its layout')
+    mine = (mtgz.az.PACKAGE.tokens or {}).get(game) or {}
+    theirs = cfg.get('layout') if isinstance(cfg.get('layout'), dict) else {}
+    if theirs.get('version') is not None and mine.get('version') is not None and theirs['version'] != mine['version']:
+        raise ValueError(f'{ckpt}: token layout v{theirs["version"]}, this build v{mine["version"]}')
+
+
 def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print):
     """`games` games of `ckpt` against itself, with the run's settings. -> zero-replay/1 dicts."""
+    check_encoding(ckpt)
     run, it = core.run_of(ckpt)
     cfg = core.run_config(run)
     if not cfg.get('spec'):
