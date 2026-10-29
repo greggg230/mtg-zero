@@ -530,7 +530,7 @@ cards and 4v4 PowerLSV, then best-of-3 with sideboarding.
   matches), with samples held until the result arrives. Designed in 5.1 (M6 part 2), with the
   co-training of the draft and play networks in one run.
 * A set/transformer encoder network: done in M5b (zero-core arch `tokens`, `net.TokenNet`, its
-  docs/az.md 10; MTG's object layout `mtgz/az/layout_v4.json` since M8a, v3 before). Also for `team_draft`
+  docs/az.md 10; MTG's object layout `mtgz/az/layout_v5.json` since ENGINE.md 60, v4 since M8a, v3 before). Also for `team_draft`
   (`layout_draft_v2.json`, 2.3.5), with one addition in part 2: a segment's slots score the action of
   their card's identity (`id_actions`).
 * Remote (Mac) workers: zero-core step 2, already planned.

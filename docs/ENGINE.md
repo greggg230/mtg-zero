@@ -2590,6 +2590,10 @@ same bags from what the viewer knows). The first run of layout v4 is `runs/mtg4`
 layout v5; newly appended token keys keep v4. A new field in a spare float keeps v4 too (section
 55: the declared mulligan in globals 125-126; old checkpoints load and see a new non-zero input).
 
+**Layout v5** (section 60, 37,620 floats): v4 with additions only (wider permanent and stack slots,
+two bags, 64 globals after the match block), so a v4 token network widens onto it exactly
+(zero-core's `widen` with the layout; `tools/fork_run.py` into a new run).
+
 ### 22.8 The third and fourth runs (`runs/mtg3`, `runs/mtg4`)
 
 **Settings.** Preset `mtg-3` (`runs/mtg3`, seed 1) is the first run on the GPU: tokens 128 x 4
@@ -11410,7 +11414,7 @@ stack's size `g[20]` for the rest), 16 hand slots (the hand bag), 4 trigger slot
 graveyard-ability slots; numbers exact within +-128 then squashed (46); summaries where a slot has
 one float (protection's qualities, other counters' kinds).
 
-### 58.10 Gaps for layout v5 (not fixed)
+### 58.10 Gaps for layout v5 (encoded by layout v5: section 60)
 
 42 gaps need room layout v4 doesn't have (`LimitKind::V5`; each with its reason in
 `public_state::limits`). Grouped by where a v5 would put them:
@@ -11433,6 +11437,9 @@ one float (protection's qualities, other counters' kinds).
   (Murktide Regent's counters), a triggered ability's event amount, noted permanents, divided
   damage, a ninjutsu attack, splices.
 * **Graveyards**: cards discarded this turn (mayhem).
+
+(Done since: layout v5, section 60, encodes all 42 with v4 kept as it is, so a v4 network widens onto
+it exactly instead of starting fresh.)
 
 **Recommendation.** No v5 now: the Delver mirror's most relevant facts are in v4's spare floats,
 and a v5 means a fresh start for every run (never resume across a layout change). When a v5 comes
@@ -11640,3 +11647,288 @@ tests` 46 passed in 1 min 32 s.
   at `cq_c_scale` (only `selfplay_select_c_*` is affected; the main line sets neither). The re-pin
   updates the Mac's checkouts.
 * **Which S** is the h2h measurement's question (not answered here).
+
+## 60. Layout v5: the gate's 42 gaps encoded, and a v4 network widened onto it exactly
+
+Branch `layout-v5` (from main 6c27a9b), with zero-core `feat/token-widen` (f606724 and its docs
+f3f5535, on main c8110c1), pinned here at f3f5535. Tier: an encoding change plus a zero-core network
+change (60.6). 58.10 left 42 public facts that layout v4 had no room for and recommended a v5 only
+"for another reason", because a new layout meant a fresh start for every run. It no longer does:
+**layout v5 is layout v4 with additions only**, and zero-core's `widen` now follows such a layout
+change exactly, so a v4 network becomes a v5 network that computes what it computed (60.2). A run
+still never resumes across a layout change: it forks into a new run directory whose iteration 0 is
+its widened checkpoint (60.5). (59 is the selection scale's.)
+
+### 60.1 The layout
+
+Every v4 float keeps its index within its block and its meaning; blocks after a wider one move.
+
+| Block | v4 offset | v4 floats | v5 offset | v5 floats | Added |
+|---|---:|---:|---:|---:|---|
+| globals | 0 | 128 | 0 | 128 | |
+| context | 128 | 256 | 128 | 256 | |
+| bags | 384 | 17 x 1024 | 384 | 19 x 1024 | rows 17-18: the exiled cards the viewer may play, those the opponent may play |
+| tops | 17,792 | 6 x 54 | 19,840 | 6 x 54 | |
+| my permanents | 18,116 | 32 x 148 | 20,164 | 32 x 172 | status 96-119 (16 used, 8 spare) |
+| opponent permanents | 22,852 | 32 x 148 | 25,668 | 32 x 172 | the same |
+| hand | 27,588 | 16 x 60 | 31,172 | 16 x 60 | |
+| stack | 28,548 | 8 x 84 | 32,132 | 8 x 124 | status 32-71 (32 used, 8 spare) |
+| triggers | 29,220 | 4 x 56 | 33,124 | 4 x 56 | |
+| list | 29,444 | 64 x 60 | 33,348 | 64 x 60 | |
+| graveyard abilities | 33,284 | 4 x 56 | 37,188 | 4 x 56 | |
+| companions | 33,508 | 2 x 56 | 37,412 | 2 x 56 | |
+| match | 33,620 | 32 | 37,524 | 32 | |
+| globals v5 | | | 37,556 | 64 | per player 24 (16 used), the game's 16 (2 used) |
+| **total** | | **33,652** | | **37,620** | +3,968 (bags 2,048, permanents 1,536, stack 320, globals 64) |
+
+The same 11 segments in the same order with the same slot counts, present flags, identities (card
+codes) and action ids: the token network has the same 170 token positions and pointer columns. A
+128 x 4 network grows from 1,500,317 to 1,552,797 parameters (the input maps: permanents 2 x 24 x
+128, stack 40 x 128, bags 2 x 129 x 128, globals 64 x 128). A sample is 75 KB in a shard (float16)
+instead of 67 KB (+11.8%: a window budget holds 10.5% fewer samples). `mtgz/az/layout_v5.json` is
+checked in (`encode::layout_json`, version 5; `layout_json_is_checked_in`), and `layout_v4.json`
+stays as it was (the layout of every v4 checkpoint, and the widen's source: `mtgz/az/__init__.py`
+registers v5). v5's layout declares its **global blocks** (`globals` 0-127, `match`, `globals_v5`;
+zero-core's optional layout key, its docs/az.md 10.3), so a later widen can add globals inside a
+block or between blocks; v4 declares none (its 160 globals map onto v5's first 160 in feature
+order). Room for later facts without a v6: permanent status 112-119, stack status 64-71, 8 globals
+per player and 14 of the game's (and v4's context 246-255 and match float 31).
+
+### 60.2 The exact widen, and the proof on the main line's checkpoint
+
+**zero-core** (`net.widen(old, features, actions, layout=)`, `net.token_feature_map`; its docs/az.md
+10.3): given the game package's layout, a token network whose stored layout differs is widened
+segment by segment: the segments by name and order (the same slots, present flags, identities and
+actions; a slot may be wider at its end), the bags by name (rows added at the end, new bags), the
+globals by declared block (else as a prefix in feature order). Every new input column gets zero
+weights in its projection (the segment's input map `seg_in`, the bag map, the global map `g`);
+everything else is copied. A layout that would add tokens (a new segment, more slots) or change
+what a token is (present flag, identity, actions, another vocabulary) is refused. `fork_run.py
+<src.pt> <new run>` and the co-training `resolver_init` pass the game's layout; without a layout, or
+with the same layout, `widen` is as before. The layout description says which columns belong to
+which segment (offset, slot count, width): the widen maps a v4 slot's floats to the first floats of
+the v5 slot.
+
+**The encoding side**: `encode::v4_projection()` (the v5 index of each v4 feature) is the map the
+widen derives from the two checked-in JSON files (`layout_v5_widens_layout_v4_exactly` derives it
+with the widen's rules), and it holds the v4 encoding exactly:
+
+* **`DIGEST_ENCODING=v4`** (tests/digest.rs: every 10th decision's encoding hashed through the
+  projection) gives **317b5ba05dc569fb**, layout v4's recorded full digest (58.11): over the 2,500
+  digest games every v4 float of every hashed v5 encoding is v4's, bit for bit.
+* `opening_encodings_but_the_declaration_are_unchanged` hashes the opening's encodings through the
+  projection and keeps its recorded values (cube, best-of-three, Delver; `MtgAz::encode`, so the
+  match block too).
+* `the_v4_projection_leaves_exactly_the_v5_additions` (encode.rs): one to one, and the v5 floats it
+  leaves are exactly the additions of 60.1.
+
+**Real states, two builds**: a v4 build (main a6bb3bc, `E:/mtg-zero-scratch/v5/v4ref`) and this
+build played the same seeded games (`E:/mtg-zero-scratch/v5/exact_collect.py`: uniform random play,
+24 games each of the cube's random decks, best-of-three matches and the Delver mirror with
+`runs/ab2-cqscale03`'s spec; every legal-action list hashed: the same trajectories in both). Of
+their 8,440 encodings (both viewers every 5th decision: 2,034 cube, 4,756 best-of-three, 1,650
+Delver), **the v5 encodings at the widen's map equal the v4 encodings bit for bit, all 8,440**; 8,068
+of them have a v5-only float set (343 of the 3,968 new floats are set somewhere).
+
+**The real network** (`E:/mtg-zero-scratch/v5/exact_compare.py`, results in `exact_result.json`): a
+copy of `runs/ab2-cqscale03/models/iter_0115.pt` (layout v4, tokens 128 x 4; read only) widened
+with this build's layout, through `tools/fork_run.py` into `E:/mtg-zero-scratch/v5/fork-ab2` (its
+iteration 0 is the in-memory widen tensor for tensor). On the 8,440 positions (CPU, float32):
+
+| Widened network on | vs the source on the v4 encoding: policy logits | value logits | value probabilities | margin |
+|---|---|---|---|---|
+| the v5 encoding | max abs 5.7e-6 (7,984 rows bit for bit) | 1.9e-6 (8,012) | 3.0e-7 | 8.3e-7 (7,984) |
+| the v5 encoding, every v5-only float uniform noise in [-4, 4] | the same | the same | the same | the same |
+
+and the widened network on the v5 encoding with its v5-only floats zeroed equals it on the real
+v5 encoding bit for bit (all 8,440 rows, all three heads): the new columns have no effect at all,
+and the residual 1e-6 is float rounding of the input maps' sums over more (zero-weighted) columns.
+The source's value probabilities on these positions span 1e-5 .. 0.99999. Also: zero-core's tests
+(a synthetic wider layout, declared blocks, the refusals, fork_run across a layout change) and this
+repo's pytest `test_a_v4_token_network_widens_onto_layout_v5_exactly` (a random v4 network on this
+build's real encodings, the v5 floats randomised).
+
+**End to end** (`E:/mtg-zero-scratch/v5/smoke-v4`, `smoke-v5`): a v4 `delver-smoke` iteration with
+a tiny token network (32 x 1, 2 heads) on the v4 build; its `iter_0001.pt` forked by `fork_run` into
+a new run on this build; `delver-smoke` 2 iterations there: iteration 0's evaluation (the widened
+network: vs the heuristic 2/8, vs random 3/4), self-play with v5 shards (75 KB a sample),
+training (policy 0.942, 0.918), evaluation and Elo at 1 and 2, no failure.
+
+### 60.3 The 42 gaps, encoded
+
+Per-player globals (`g5::*`, at `encode::O_GLOBALS_V5` + 24 x side, viewer first; squashed counts):
+
+| Fact (the gate's perturbation) | Float |
+|---|---|
+| cards drawn this turn; in the draw step | `DRAWN` / 4, `DRAW_STEP` / 2 |
+| noncreature spells cast this turn; spells cast this game | `NONCREATURE` / 4, `SPELLS_GAME` / 16 |
+| gained life this turn; can't gain life | `GAINED_LIFE`, `CANT_GAIN` |
+| creatures that attacked this turn | `ATTACKED` / 4 |
+| Yawgmoth's Will this turn; graveyard exile this turn | `GY_PLAY`, `GY_EXILE` |
+| the city's blessing; protection from everything | `CITY`, `PROTECTED` |
+| the pool's artifact-only and haste mana | `POOL_ART` / 4, `POOL_HASTE` / 4 |
+| delayed triggers waiting | `DELAYED` / 4 (their controller's) |
+| exiled cards they may play | `EXILE_PLAY` / 4 (face down included) and the bags 17-18 by identity |
+| graveyard cards discarded this turn | `DISCARDED` / 4 (their owner's) |
+| the last normal turn; additional combats | the game's `NORMAL` (the viewer's), `EXTRA_COMBATS` / 2 |
+
+Permanent status 96-111 (`perm::*`): `MUST_ATTACK` and `EXILE_IF_DIES` (counts of those rules
+effects / 2; goad keeps its own float), `SUBTYPES` (effects that change its subtypes / 2),
+`EVOKED`, `ESCAPED`, `MONSTROUS`, `CHOSEN_PLAYER` (1 the viewer, -1 the opponent), `EXHAUSTED`
+(exhaust abilities activated / 2), `CHOSEN_COLOR` (5, one-hot), `EXERTED`, `RESOLVED` (times its
+abilities resolved this turn / 4), `DONE_ONCE` (once-each-turn actions / 2). Stack status 32-63
+(`stack::*`): `MODES` (8: the times mode k was chosen / 2; the most modes of an ability in either
+card table is 4, `every_mode_has_a_float`), `ALT` and `ALT_INDEX` (an alternative cost and which),
+`FROM` (7, one-hot: flashback, flashback with the mana-cost choice, escape, a permission from exile,
+another graveyard route, miracle, the library's top) and `FREE`, `ORIGIN` (4, one-hot: a graveyard,
+exile, a library, another zone; from hand none), `DELVED` / 4, `AMOUNT` (a trigger's event amount
+/ 8), `EXILED_AFTER` (it is exiled as it leaves), `FLASHBACK` (the card's flashback flag),
+`NOTED` / 4, `DIVISION` (its first two targets' amounts / 8), `ATTACK_AS` and `ATTACK_WALKER`
+(ninjutsu), `SPLICED` / 4.
+
+Counts rather than flags wherever the same thing can apply twice (a second "attacks each combat",
+a second exhaust ability, another ability resolving): one more always shows. The cards a player may
+play from exile are a bag (their identities, pooled into the global token like every bag) plus a
+count, not a segment: a segment's tokens would join the attention (no exact widen), and a bag goes
+through zero weights until training reaches it. A face-down card is in a bag only for a viewer who
+knows it; its existence is in the count for both (Headliner Scarlett).
+
+**The gate** (`public_state_reaches_the_encoding`, 240 positions, 140 perturbations): **131
+encoded, the 4 deliberate limits of 58.9, 0 gaps** (the test now asserts that only `Design` limits
+are left), and 5 rare perturbations never applied by random positions: a prepared permanent (58.8),
+haste mana, divided damage, a ninjutsu attack, a splice; the last four are encoded and read back by
+hand (`v5_rare_stack_and_pool_facts_are_encoded`, encode.rs: every other float unchanged). The
+limits' kind `V5` became `NextLayout` (none). `public_state::V5_FIXED` names the 42. One
+perturbation changed: "an exiled card may be played this turn" picks a card its owner may not play
+yet (another permission on a playable card changes nothing they may do).
+
+`the_v5_facts_are_encoded` reads the Delver mirror's facts back for both viewers: Prismari Charm's
+mode 2 on the stack (`MODES` 0, 0, 0.5), the caster's noncreature spell and spell this game;
+Force of Will cast by exiling Counterspell (`ALT` 1, `ALT_INDEX` 0.25; the Bolt below at 0);
+Murktide Regent delving five cards (`DELVED` 1.25); Brainstorm's three draws (`DRAWN` 0.75); True-Name
+Nemesis's chosen player (-1 / 1 by viewer) and Painter's Servant's red.
+
+### 60.4 Hidden information
+
+Every new fact is public (the fields were classified public in 58.7, and `Game::view_of` already
+showed them, 58.8), except a face-down card's identity, which only its knower's bag holds. Tests:
+`the_v5_facts_encode_no_hidden_information` (the 42 perturbations on the gate's positions of the
+four kinds: 2,667 perturbed positions; for each viewer three `determinize` worlds compared with each
+other, 10,668 worlds: identical; worlds rather than the position itself, because a change made by
+hand can leave the other player's pending decision stale and every world of a non-deciding viewer
+recomputes it), and its Headliner Scarlett part (the face-down card in P0's `MY_EXILE_PLAY` bag, not
+in P1's `OPP_EXILE_PLAY`, the count 0.25 for both; 40 worlds of P1 encode the same while the card is
+resampled); the existing `determinize_keeps_features_and_legal_actions_for_both_viewers`,
+`equal_keys_mean_equal_features` and `the_opening_encodes_no_hidden_information` on v5; the fuzzer's
+`determinize` checks (20,000 Delver games, 60.6).
+
+### 60.5 Moving a run to v5
+
+**Never resume across a layout change**: a v4 run's window holds v4 shards (33,652 wide), its
+optimizer state has v4's parameter shapes, and its checkpoints read v4 inputs. Note the hazard: a
+v4 token checkpoint evaluated by a v5 build reads the first 33,652 floats of a v5 encoding without
+any error (`TokenNet.forward` takes `x[:, :features]`, the prefix read that lets an older network
+read a wider input whose new features come last): everything after the bags would be misread. So a v4 run stays on its v4 pinned build until it moves, and it moves by
+**forking its newest checkpoint into a NEW run directory** (`tools/fork_run.py <iter_K.pt> <new
+run>`: iteration 0 of the new run is the widened network, 60.2). In the new run the **iteration
+numbering, the Elo pool, the window and the optimizer state restart**; the network's knowledge
+carries over exactly. Settings tied to the iteration number restart with it: the learning rate's
+step decay (`lr` x 0.5^((it - 1) // `lr_halve_every`), floor `lr_min`) and `value_q`'s warm-up, so the
+fork sets the main line's current values; AdamW starts fresh with its warm-up (`lr_warmup_steps`
+100, as after any fresh optimizer); the window grows from the fork's own first iteration
+(`window_grow`), and training waits for `min_window_samples` (30,000: about one iteration of 800
+games).
+
+**The live Delver main line** (`runs/ab2-cqscale03`, layout v4; at iteration 131 on 10-29, `lr` at its
+floor 1e-4, `value_q` 0.6), once this branch and zero-core `feat/token-widen` are merged (the
+procedure of 56.10 / 57.5 / 59.3 for the worktree; `<sha7>` the merged commit, `<K>` the newest
+checkpoint, `ab2v5` the new run's name):
+
+```
+# 1. the pinned worktree of the merged commit, built; the Mac's checkout of it (evaluation, self-play)
+git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha7>" <sha7>
+cd "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha7>"
+bash tools/build_py.sh
+bash tools/mac.sh --eval-checkout
+# 2. stop the main line at an iteration boundary (it exits after the iteration in progress)
+touch "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/STOP"
+# 3. its newest checkpoint widened into a new run; the main line's settings (cq_c_scale 0.3 and the
+#    rest: a flag overrides, the preset fills only what the run has not saved)
+python tools/fork_run.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/models/iter_<K>.pt" \
+  "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5"
+cp "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/config.json" "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5/config.json"
+# 4. the main line's command (59.3) on the new run, plus the iteration-tied settings at the main line's values
+python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2v5" --preset delver-mirror --seed 1 \
+  --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --ram-budget-gb 20 --selfplay-remote-linger 1 \
+  --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25 \
+  --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 \
+  --lr 0.0001 --value-q-warmup 0
+```
+
+(With 59.3's `--eval-select-c-scale S` if the main line has one by then. Optionally `--window-grow
+0`: the window reaches 6 iterations as soon as it has them.) Then `watch_run` on the new run, and
+the delverai publisher pointed at `runs/ab2v5` (`tools/delverai_publish.py`; its checkout needs this
+pin). The main line's directory stays as it is (stopped, its checkpoints, Elo pool and shards kept);
+`fork_run` only reads it.
+
+**Evaluation and Elo continuity** (what to read across the move):
+
+* **Iteration 0 of the fork is iteration K of the main line** (60.2: the same outputs to 1e-6). Its
+  evaluation (100 games against the heuristic at 32 simulations, the reference games) is a fresh
+  measurement of K's strength on the same yardstick: the yardstick's win rate is the continuous
+  series (it should agree with K's within its standard error; the searches see the same values up
+  to float rounding, so a game may still take another line at a near tie).
+* **Elo restarts**: the fork's pool (`runs/ab2v5/elo/<rule>/`) holds its own iterations from 0;
+  anchored on the same yardstick (the heuristic, 1000) its ratings are on the main line's scale but
+  another fit (other opponents, other games), so a few dozen points between the two series mean
+  nothing. On the dashboard the fork is a new run (its own line); the main line's chart ends at K.
+* **Head to head across the move**: any v4 checkpoint widens exactly, so the main line's
+  checkpoints can be compared with the fork's in the v5 build: `fork_run` (or `zero.net.widen` with
+  the layout) gives the v5 form of `iter_K.pt` (or of an older main-line checkpoint), and `python -m
+  mtgz.az.h2h` between it and the fork's iteration j measures the fork's progress against the main
+  line directly (a v4 build can't play a v5 checkpoint, nor the v5 build a v4 one unwidened).
+* The new floats start untrained (zero weights): the fork plays exactly as the main line did until
+  training moves those weights; the first iterations' gains, if any, are learning to read the 42
+  facts (Delver: spells this game, noncreature spells this turn, draws this turn, the stack's modes,
+  pitch costs and delve).
+
+**The paused v4 runs** (td1, mtg5): they stay on their v4 pinned worktrees and builds (never
+re-pinned onto a v5 build: the hazard above) until migrated the same way. mtg5 (a single-game `mtg`
+run): `fork_run` of its newest checkpoint into a new run, its config copied, the iteration-tied
+settings set as above. td1 (co-training): its draft network's layout (`team_draft`, draft_v2) is
+unchanged, its play network (the resolver, game `mtg`) is v4: a v5 td1 is a new co-training run
+whose draft network is a `fork_run` of td1's (the same layout: a copy) and whose resolver starts from
+td1's resolver checkpoint through `resolver_init` (widened onto v5 at the start: `init_resolver`
+passes the layout since zero-core f606724); not rehearsed here.
+
+### 60.6 Checks
+
+Recorded on this desktop, 2026-10-29 (`runs/ab2-cqscale03` live on the GPU and the Mac, an h2h on
+the GPU; CPU only, `CARGO_BUILD_JOBS` 8; on the Mac one job at `nice -n 19`).
+
+* **Digests**: `DIGEST_ENCODING=0` **5f0579aa50453818**, unchanged (no game plays differently);
+  `DIGEST_ENCODING=v4` 317b5ba05dc569fb (layout v4's full digest: 60.2); the full digest re-recorded
+  once with `DIGEST_WRITE=1`: **317b5ba05dc569fb -> 808de5cb10665e48** (2,500 of 2,500 games differ:
+  every encoding is wider).
+* `cargo test --release -p engine --test az`: **27 passed** (24 and `layout_v5_widens_layout_v4_exactly`,
+  `the_v5_facts_are_encoded`, `the_v5_facts_encode_no_hidden_information`); `--test limits` 8, `--test
+  hidden` 11, `--test view` 2 (1 ignored), `--lib` 13 (encode.rs's 3 new among them); a local fuzz of
+  1,000 Delver games and of 1,000 games + 50 matches (encodings finite and within `FEATURE_BOUND`).
+* **The Mac** (7d1f24b, this branch's code commit, pinning f606724; the docs commit after it moves the
+  pin to zero-core's docs commit f3f5535, no code): `FUZZ_POOL=delver FUZZ_GAMES=20000` under `nice -n
+  19`: 20,000 mirror games, no failure (197 s; 4,399,041 options completed: the games of 58.5 and
+  58.11).
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): 47 passed (46 and the widen test).
+* **zero-core** f606724 (rebased on main c8110c1): `cargo test --release` zero_search 50 passed,
+  zero_webnet 3 (with `--workspace` the timing test `queued_setups_are_shared_between_the_groups`
+  failed once under the parallel load and passes alone, in both modes: unrelated, no Rust changed);
+  `pytest tests` 184 passed, 3 skipped (10 min 30 s; the 4 new widen tests among them);
+  `tools/check_checkpoint_compat.py --package zero` against c8110c1 with a toy MLP checkpoint, a toy
+  token checkpoint, `random` and `uniform`: identical (the other widen paths and play unchanged); the
+  other games build against it (build only, at their HEADs with this core in their submodule: Glass
+  Road Zero c1f56dc 17 s, Caverna Zero a6fad73 20 s, Kingdom Builder Zero 4202a4a 32 s; the package
+  imported with this core's `zero.net`): all ok.
+* End to end: 60.2's real-checkpoint check and the v5 `delver-smoke` from a forked v4 checkpoint.
+* No search smoke (its uniform evaluator never reads the features; tier "encoding-only" and the
+  core's change is the widen, which the run loop never calls).
