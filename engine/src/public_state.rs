@@ -332,8 +332,8 @@ pub enum LimitKind {
     Design,
     /// A genuine gap the layout has no room for, for its next version (layout
     /// v4's 42, ENGINE.md 58.10, are encoded by layout v5, 60; one now: the
-    /// graveyard's order, which the `GRAVEYARD` action ids depend on, ENGINE.md
-    /// 65).
+    /// graveyard's order, which Priority's `GRAVEYARD` action ids depend on,
+    /// ENGINE.md 65.10).
     NextLayout,
 }
 
@@ -1381,12 +1381,13 @@ pub fn perturbations() -> Vec<Perturbation> {
 /// 58.9: by design), each with its reason. Layout v5 (ENGINE.md 60) encodes
 /// the 42 gaps layout v4 had no room for (58.10); one gap is left, found by
 /// the Delver mirror's delve choices (ENGINE.md 65): the graveyard's order,
-/// which the `GRAVEYARD` ids depend on.
+/// which Priority's `GRAVEYARD` ids depend on (the other graveyard choices
+/// moved to the list's ids, ENGINE.md 65.10).
 pub fn limits() -> Vec<Limit> {
     use LimitKind::{Design, NextLayout};
     let l = |name, kind, why| Limit { name, kind, why };
     vec![
-        l("two graveyard cards swap places", NextLayout, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2), but a GRAVEYARD action id is a graveyard position (ENGINE.md 11) scored from the pooled state, no token: every graveyard choice (delve, flashback, escape, a graveyard target, Exhume) is made without seeing which card an id is (ENGINE.md 65: the options need an action-id or layout change)"),
+        l("two graveyard cards swap places", NextLayout, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), but Priority's casts and plays from the graveyard (flashback, escape, retrace, Crucible's lands) keep GRAVEYARD ids, a graveyard position scored from the pooled state with no token: made without seeing which card an id is, and the order is not in the input otherwise (option C of ENGINE.md 65.7, a layout change, closes it)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),

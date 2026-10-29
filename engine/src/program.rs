@@ -240,7 +240,8 @@ pub enum Ext {
     FromGraveyard { tgt: u8, to_battlefield: bool, yours: bool, tapped: bool, counter: Option<crate::db::Counter> },
     /// Each player in APNAP order chooses a card matching `filter` in
     /// their graveyard (if any); then those cards are put onto the
-    /// battlefield at once (CR 101.4). Choice: a `GRAVEYARD` slot.
+    /// battlefield at once (CR 101.4). Choice: a graveyard card (its slot
+    /// in the graveyard list, ENGINE.md 65.10).
     EachPutFromGraveyard { filter: Filter },
     /// Exile every card in `who`'s graveyard.
     ExileGraveyard { who: Who },
@@ -410,7 +411,7 @@ pub enum Ext {
     SacrificeSourceThen { skip: u16 },
     /// "You may mill that many cards. If you do, you may put a creature
     /// card from among them into your hand" (the event's amount). Choice:
-    /// yes/no, then a `GRAVEYARD` slot or `PASS`.
+    /// yes/no, then a graveyard card (its graveyard list slot) or `PASS`.
     MayMillThenTakeCreature,
     /// Each creature card exiled with the source (CR 607.2a) is put onto
     /// the battlefield under the controller's control [with a flying
@@ -478,7 +479,7 @@ pub enum Ext {
     ExtraLoyaltyActivations { n: u8 },
     /// The controller chooses a card matching `filter` in their graveyard
     /// (not targeted) and puts it into their hand; nothing if none. Choice:
-    /// a `GRAVEYARD` slot.
+    /// a graveyard card (its graveyard list slot, ENGINE.md 65.10).
     ChooseFromGraveyardToHand { filter: Filter },
     /// The source deals `amount` damage to a creature or player the
     /// controller chooses as it resolves (not targeted). Choice: `PLAYER` or

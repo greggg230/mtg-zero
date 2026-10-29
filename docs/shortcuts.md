@@ -12,7 +12,7 @@ Classes:
   part 2, branch `m7e-pay`, the payment model, tests in `engine/tests/rules_payment.rs`).
 * **B**: an engineering limit kept on purpose, mostly tied to the frozen action-id layout
   (layout v3: `NUMBER` 0..31, 96 permanent slots, 4 `ACTIVATE` slots, 16 `TRIGGER` slots, 64
-  tokens; 32 `STACK` and 32 `EXILE` slots, 64 hand, library-list and graveyard slots: ENGINE.md 58) or to the search model.
+  tokens; 32 `STACK` and 32 `EXILE` slots, 64 hand, library-list and graveyard slots: ENGINE.md 58; a graveyard choice's list, 64 cards: ENGINE.md 65.10) or to the search model.
 * **C**: rules-equivalent (a representation that offers the same choices or results: definitions
   instead of cards in a search, modes as multisets, dominated options left out) or not reachable
   with the cube's cards.
@@ -119,6 +119,7 @@ Classes:
 | 58.1 | (ENGINE.md 58.1) A spell's or an ability's target on the stack is one of the 31 stack items below it: the deeper (older) items of a stack taller than 32 can't be targeted (CR 115.1 has no such limit) | B | kept: the 32 `STACK` slots (layout v4); was a panic (`stack slot 38 out of range`, a `delver-smoke` worker, ENGINE.md 56.11). The checks before a cast, an activation or a trigger use the same items (`Game::stack_in_reach`, `Game::targeting`), so a spell whose only target is deeper is not offered and a trigger with none in reach is removed (603.3d); a copy keeps a deeper target by `PASS` | `cast.rs` (`stack_in_reach`, `target_candidates`, `has_candidates`), `copies.rs`; `tests/limits.rs` |
 | 58.3 | (ENGINE.md 58.3) A deck has at most 64 cards, 63 with a companion in its sideboard (CR 100.2a has no maximum) | B | kept: a hand, a library list and a graveyard have 64 action slots; every decklist of an `mtg` spec is checked (constructed, limited, drafted), a larger one refused | `az/constructed.rs` (`check_size`), `az/mod.rs`; `tests/limits.rs` |
 | 58.4 | (ENGINE.md 58.4) At priority, and for an effect's choice of exiled cards, the first 32 exiled cards the player may play or choose are offered (exile order) | B | kept: the 32 `EXILE` slots; more than 32 playable exiled cards at once needs a pile of impulse draws | `cast.rs`, `faces.rs`, `resolve_m7d.rs`, `resolve_tail2.rs`, `resolve_tail3.rs`, `resolve_walkers.rs` |
+| 65.10 | (ENGINE.md 65.10) A graveyard-card choice or target is `LIBRARY` + the card's slot in the decision's graveyard list (64 slots): more than 64 graveyard cards offered at once from both graveyards fails loudly (an assert in `Game::ask` naming the counts; CR 115.1 has no such limit) | B | kept: the list block's 64 slots (layout v5, no layout change). One graveyard always fits (64 cards a player, 58.3) and a choice over both lists the offered cards only, so only an "any card in a graveyard" target (Lion Sash) with more than 64 cards in the two graveyards reaches it: the default fuzz's most is 57 (20,000 games, 52,013 graveyard-list decisions); the Delver mirror has no choice over both graveyards. Never an id beyond the list or a card left out | `decision.rs` (`graveyard_list`, `name_graveyard_options`); `tests/limits.rs` (`graveyard_targets_fill_the_64_list_slots_then_fail_loudly_65_10`) |
 
 ## Notes on the new mechanisms
 

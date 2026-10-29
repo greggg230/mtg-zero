@@ -27,6 +27,16 @@
 //! encoding (`encode::v4_projection`) and prints the combined digest only:
 //! layout v4's recorded 317b5ba05dc569fb (ENGINE.md 58.11) while every v4
 //! float of layout v5 is v4's (ENGINE.md 60.2).
+//!
+//! `DIGEST_IDS=choices` (ENGINE.md 65.11): an id-agnostic trace of the same
+//! games, to compare across a change that renames action ids and nothing
+//! else (run on both sides): every action id (the legal ones, the one
+//! taken, in the game and in the determinized clones) is hashed as the
+//! choice it names (`Game::describe_choice`: the card by name and index, the
+//! target, the number, ...) instead of the id, and a `KEY_AUTO` chance key
+//! without its action (its decision kind and player kept); the encodings are
+//! left out (they are hashed ids' neighbours: the list block). It prints the
+//! combined digest only.
 
 mod common;
 
@@ -69,6 +79,39 @@ fn decks(seed: u64) -> (Vec<u16>, Vec<u16>) {
     (common::random_deck(db, &mut rng), common::random_deck(db, &mut rng))
 }
 
+/// `DIGEST_IDS=choices`: actions hashed as the choices they name.
+fn by_choice() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("DIGEST_IDS").is_ok_and(|v| v == "choices"))
+}
+
+/// Action `a` of the pending decision as hashed: its id, or
+/// (`DIGEST_IDS=choices`) a hash of the choice it names.
+fn action_word(g: &Game, a: u16) -> u64 {
+    if !by_choice() {
+        return a as u64;
+    }
+    let c = g.pending_decision().and_then(|d| d.choice_of(a)).expect("a legal action");
+    let mut h = H::new();
+    for b in g.describe_choice(c).bytes() {
+        h.u64(b as u64);
+    }
+    h.0
+}
+
+/// The chance keys of a transition (`DIGEST_IDS=choices`: a `KEY_AUTO`
+/// without its action, ENGINE.md 10).
+fn hash_keys(h: &mut H, keys: &[u64]) {
+    if !by_choice() {
+        h.slice64(keys);
+        return;
+    }
+    h.u64(keys.len() as u64);
+    for &k in keys {
+        h.u64(if engine::hidden::key_kind(k) == engine::hidden::KEY_AUTO { k & !0xFFFF } else { k });
+    }
+}
+
 /// The pending decision's kind and player, and the legal actions.
 fn hash_decision(h: &mut H, g: &Game, legal: &mut Vec<u16>) {
     g.legal_actions(legal);
@@ -79,7 +122,14 @@ fn hash_decision(h: &mut H, g: &Game, legal: &mut Vec<u16>) {
         }
         None => h.u64(0xFFFF),
     }
-    h.slice16(legal);
+    if by_choice() {
+        h.u64(legal.len() as u64);
+        for &a in legal.iter() {
+            h.u64(action_word(g, a));
+        }
+    } else {
+        h.slice16(legal);
+    }
 }
 
 fn hash_zones(h: &mut H, g: &Game) {
@@ -110,10 +160,11 @@ fn hash_determinized(h: &mut H, g: &Game, seed: u64, step: u32, legal: &mut Vec<
         }
         d.legal_actions(legal);
         let a = legal[rng.below(legal.len() as u32) as usize];
+        let w = action_word(&d, a);
         keys.clear();
         d.apply(a, keys).unwrap();
-        h.u64(a as u64);
-        h.slice64(keys);
+        h.u64(w);
+        hash_keys(h, keys);
         hash_decision(h, &d, legal);
     }
 }
@@ -121,7 +172,7 @@ fn hash_determinized(h: &mut H, g: &Game, seed: u64, step: u32, legal: &mut Vec<
 fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
     // `DIGEST_ENCODING=0`: leave the encodings out (the behaviour alone, to
     // compare across a layout change: ENGINE.md 36.9).
-    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0") {
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0") || by_choice() {
         return;
     }
     let Some(viewer) = g.to_move() else { return };
@@ -166,10 +217,11 @@ fn play(seed: u64, bot: Option<u8>, buf: &mut [f32]) -> u64 {
         } else {
             legal[rng.below(legal.len() as u32) as usize]
         };
+        let w = action_word(&g, a);
         keys.clear();
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
-        h.u64(a as u64);
-        h.slice64(&keys);
+        h.u64(w);
+        hash_keys(&mut h, &keys);
         step += 1;
         assert!(step < 100_000, "seed {seed}: game does not end");
     }
@@ -210,7 +262,7 @@ fn behaviour_digests() {
         t.elapsed().as_secs_f64(),
         all.0
     );
-    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4") {
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4") || by_choice() {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/digests.txt");

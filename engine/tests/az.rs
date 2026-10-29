@@ -344,7 +344,7 @@ fn encoding_slots_name_the_action_slots() {
                 assert_eq!(x[o + CODE + encode::perm::OPTION] == 1.0, l.contains(&(range + s as u16)));
             }
         }
-        // the LIBRARY list of a search / pile / seen hand
+        // the LIBRARY list of a search / pile / seen hand / graveyard choice or target
         let d = g.g.pending_decision().unwrap();
         for o in &d.options {
             if (act::LIBRARY..act::LIBRARY + encode::LIST as u16).contains(&o.action) {
@@ -355,6 +355,8 @@ fn encoding_slots_name_the_action_slots() {
                     engine::Choice::Card(c) => ident(g.g.obj(c).def),
                     // Bolas's Citadel: cast or play the top card (LIBRARY + 0)
                     engine::Choice::Cast(c) | engine::Choice::Play(c) => ident(g.g.obj(c).def),
+                    // a graveyard card targeted: its graveyard list's slot (ENGINE.md 65.10)
+                    engine::Choice::Target(engine::Target::Obj(r)) => ident(g.g.obj(r.idx).def),
                     _ => unreachable!(),
                 };
                 assert_eq!(decode_id(&x[off..off + CODE]), want);
@@ -1472,52 +1474,119 @@ fn the_v5_facts_are_encoded() {
     }
 }
 
-// ---- Delve's choices (ENGINE.md 65) ----
+// ---- Graveyard choices on the list's ids (ENGINE.md 65) ----
+
+/// The card a graveyard-list option names (ENGINE.md 65.10): chosen or
+/// targeted in a graveyard.
+fn gy_card(g: &engine::Game, c: engine::Choice) -> Option<engine::CardIdx> {
+    use engine::{Choice, Target, Zone};
+    let i = match c {
+        Choice::Card(i) => i,
+        Choice::Target(Target::Obj(r)) => r.idx,
+        _ => return None,
+    };
+    (g.obj(i).zone == Zone::Graveyard).then_some(i)
+}
+
+/// The pending decision's graveyard list (ENGINE.md 65.10), checked card by
+/// card against the network's input: the list is the graveyard of the
+/// offered cards, whole and in order, or with offered cards in both
+/// graveyards the offered cards only, the decider's first, each graveyard in
+/// order; each option naming a graveyard card is `LIBRARY` + k, the list
+/// segment's pointer action of slot k (the layout's), and the decider's list
+/// token in slot k is exactly that card (its identity, present, an option,
+/// whose graveyard); every other slot up to the list's end holds the next
+/// card of the list, not an option, and the slots after it are empty; the
+/// other viewer's list block is empty (not its decision); no option keeps a
+/// `GRAVEYARD` id. Returns the list.
+fn check_graveyard_list(g: &engine::Game, what: &str) -> Vec<engine::CardIdx> {
+    use encode::{list, LIST, LIST_W, O_LIST};
+    let d = g.pending_decision().expect("a decision").clone();
+    let p = d.player;
+    let ids = identity::identities(g.db());
+    let offered: Vec<engine::CardIdx> = d.options.iter().filter_map(|o| gy_card(g, o.choice)).collect();
+    let sides: Vec<u8> = [p, 1 - p].into_iter().filter(|&q| offered.iter().any(|&c| g.obj(c).owner == q)).collect();
+    let mut want: Vec<engine::CardIdx> = sides.iter().flat_map(|&q| g.player(q).graveyard.iter().copied()).collect();
+    if sides.len() == 2 {
+        want.retain(|c| offered.contains(c));
+    }
+    assert!(!want.is_empty(), "{what}: no graveyard card offered: {}", g.options_desc().join(" | "));
+    assert_eq!(g.graveyard_list(p, d.kind, &d.options), want, "{what}: the graveyard list");
+    // The layout: list slot k scores LIBRARY + k from its token.
+    let layout: serde_json::Value = serde_json::from_str(&encode::layout_json(g.db())).unwrap();
+    let seg = layout["segments"].as_array().unwrap().iter().find(|s| s["name"] == "list").unwrap().clone();
+    assert_eq!((seg["offset"].as_u64(), seg["count"].as_u64(), seg["width"].as_u64()), (Some(O_LIST as u64), Some(LIST as u64), Some(LIST_W as u64)));
+    assert_eq!(seg["actions"], serde_json::json!([[act::LIBRARY, 1]]));
+    let x = features(g, p);
+    let mut named = 0;
+    for o in &d.options {
+        assert!(
+            !(act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&o.action),
+            "{what}: {:?} keeps a GRAVEYARD id",
+            o.choice
+        );
+        let Some(c) = gy_card(g, o.choice) else {
+            assert!(!(act::LIBRARY..act::LIBRARY + act::LIBRARY_N).contains(&o.action), "{what}: {:?}", o.choice);
+            continue;
+        };
+        let k = want.iter().position(|&y| y == c).unwrap();
+        assert_eq!(o.action, act::LIBRARY + k as u16, "{what}: {} is list slot {k}", g.name(c));
+        let s = &x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W];
+        assert_eq!(decode_id(&s[..CODE]), ids[g.obj(c).def as usize] as usize, "{what}: slot {k}'s token is {}", g.name(c));
+        assert_eq!((s[CODE + list::PRESENT], s[CODE + list::OPTION]), (1.0, 1.0), "{what}: {}", g.name(c));
+        assert_eq!(s[CODE + list::THEIRS], (g.obj(c).owner != p) as u8 as f32, "{what}: {}'s graveyard", g.name(c));
+        named += 1;
+    }
+    assert!(named > 0);
+    for k in 0..LIST {
+        let s = &x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W];
+        match want.get(k) {
+            Some(&c) => {
+                assert_eq!(decode_id(&s[..CODE]), ids[g.obj(c).def as usize] as usize, "{what}: slot {k}");
+                assert_eq!(s[CODE + list::PRESENT], 1.0);
+                assert_eq!(s[CODE + list::OPTION] == 1.0, d.options.iter().any(|o| o.action == act::LIBRARY + k as u16), "{what}: slot {k}");
+                assert_eq!(s[CODE + list::THEIRS], (g.obj(c).owner != p) as u8 as f32);
+                let copies = want.iter().filter(|&&y| g.obj(y).def == g.obj(c).def).count();
+                assert_eq!(s[CODE + list::COPIES], copies as f32 / 4.0);
+            }
+            None => assert!(s.iter().all(|&v| v == 0.0), "{what}: slot {k} after the list"),
+        }
+    }
+    let y = features(g, 1 - p);
+    assert!(y[O_LIST..O_LIST + LIST * LIST_W].iter().all(|&v| v == 0.0), "{what}: P{}'s list block (not its decision)", 1 - p);
+    want
+}
 
 /// A real Murktide Regent delve, the graveyard of the Delver mirror's replay
 /// 20261029-080154_002 at turn 8 (Ponder, Daze, Mishra's Bauble, Misty
 /// Rainforest, Lightning Bolt, Volcanic Island, Brainstorm, Polluted Delta;
 /// two Islands: five cards to delve), picked Ponder, Daze, Bolt, Brainstorm,
-/// Delta. At every pick, for both viewers:
-/// * the action mapping (ENGINE.md 11): each option is `GRAVEYARD` + the
-///   position of exactly its card in the caster's graveyard (bottom first;
-///   the other player's id for it 64 higher), the option's text names that
-///   card, and the positions are stable while picking (the chosen cards stay
-///   in the graveyard until the payment ends, ENGINE.md 51.6); the options
-///   are the positions above the last pick that leave enough cards for the
-///   picks still needed (each set once);
-/// * the encoding: the context's card is the Regent (the context token's
-///   identity), its cost floats the mana cost left ({5}{U}{U} less one
-///   generic per pick), the stack slot's cards delved, and each card chosen
-///   so far is in its owner's exile bag, out of the graveyard bag;
-/// * the gap: no token of layout v5 scores a `GRAVEYARD` id (they are
-///   generic logits of the pooled state, and the graveyard is a bag: the
-///   network cannot see which card an id is).
+/// Delta, cast by each player in turn (the other's graveyard holds two cards,
+/// not offered). At every pick:
+/// * the action mapping (ENGINE.md 65.10): the list is the caster's graveyard
+///   in order (bottom first; the other's isn't offered, so not in it); each
+///   option is `LIBRARY` + its card's position, the list token there is that
+///   card for the caster's encoding (`check_graveyard_list`), the option's
+///   text names it, and the positions are stable while picking (the chosen
+///   cards stay in the graveyard until the payment ends, ENGINE.md 51.6); the
+///   options are the positions above the last pick that leave enough cards
+///   for the picks still needed (each set once); the cards chosen so far are
+///   `list::CHOSEN`, the passed ones below the last pick present and not
+///   options;
+/// * the encoding (ENGINE.md 65.3, both viewers): the context's card is the
+///   Regent, its cost floats the mana cost left ({5}{U}{U} less one generic
+///   per pick), the stack slot's cards delved, and each card chosen so far is
+///   in its owner's exile bag, out of the graveyard bag;
+/// * what stays blind: no segment scores a `GRAVEYARD` id (Priority's casts
+///   from a graveyard: flashback, escape, ENGINE.md 65.10).
 /// The Regent enters with four counters (the four instants and sorceries).
 #[test]
 fn murktide_delve_maps_each_graveyard_id_to_its_card_and_encodes_the_picks() {
-    use encode::{bag, ctx, stack, CONTEXT, O_BAGS, O_CONTEXT, O_STACK};
+    use encode::{bag, ctx, list, stack, CONTEXT, LIST_W, O_BAGS, O_CONTEXT, O_LIST, O_STACK};
     use engine::testkit::Scenario;
     use engine::{Choice, DecisionKind, Step, Zone};
     let db = CardDb::constructed();
     let ids = identity::identities(db);
-    let names = ["Ponder", "Daze", "Mishra's Bauble", "Misty Rainforest", "Lightning Bolt", "Volcanic Island", "Brainstorm", "Polluted Delta"];
-    let mut g = Scenario::new(db)
-        .spec(|s| s.auto_single = false)
-        .library(0, &["Island"; 10])
-        .library(1, &["Island"; 10])
-        .battlefield(0, &["Island", "Island"])
-        .graveyard(0, &names)
-        .hand(0, &["Murktide Regent"])
-        .at(Step::Main1, 0)
-        .start();
-    let gy = g.player(0).graveyard.clone();
-    assert_eq!(gy.iter().map(|&c| g.name(c)).collect::<Vec<_>>(), names, "bottom first");
-    let m = g.card(0, "Murktide Regent", Zone::Hand);
-    let regent = ids[g.obj(m).def as usize] as usize;
-    let idents: Vec<usize> = gy.iter().map(|&c| ids[g.obj(c).def as usize] as usize).collect();
-    g.choose(Choice::Cast(m));
-    to_choice(&mut g, DecisionKind::ChooseGraveyardCard);
     // (The layout's pointer actions: [base, stride] per segment slot.)
     let layout: serde_json::Value = serde_json::from_str(&encode::layout_json(db)).unwrap();
     for s in layout["segments"].as_array().unwrap() {
@@ -1526,60 +1595,229 @@ fn murktide_delve_maps_each_graveyard_id_to_its_card_and_encodes_the_picks() {
             let (base, stride) = (pair[0].as_u64().unwrap() as u16, pair[1].as_u64().unwrap() as u16);
             assert!(
                 !(0..count).any(|k| (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&(base + k * stride))),
-                "segment {} scores GRAVEYARD ids: ENGINE.md 65's gap is closed, update this test",
+                "segment {} scores GRAVEYARD ids: Priority's graveyard casts are no longer blind (ENGINE.md 65.10), update this test",
                 s["name"]
             );
         }
         assert!(s.get("id_actions").is_none());
     }
-    let picks = [0usize, 1, 4, 6, 7];
-    let mut floor = 0;
-    for (n, &pick) in picks.iter().enumerate() {
-        assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard), "pick {n}: {}", g.options_desc().join(" | "));
-        assert_eq!(g.player(0).graveyard, gy, "pick {n}: the chosen cards stay in place");
-        let d = g.pending_decision().unwrap().clone();
-        assert_eq!(d.player, 0);
-        let view = g.spectator_view();
-        let text = |a: u16| -> String {
-            let o = view["decision"]["options"].as_array().unwrap().iter().find(|o| o["a"] == a).unwrap();
-            o["t"].as_str().unwrap().to_string()
-        };
-        let left = picks.len() - n;
-        let want: Vec<u16> = (floor..=gy.len() - left).map(|k| act::GRAVEYARD + k as u16).collect();
-        assert_eq!(d.options.iter().map(|o| o.action).collect::<Vec<_>>(), want, "pick {n}: above the last pick, {left} still needed");
-        for o in &d.options {
-            let Choice::Card(c) = o.choice else { panic!("pick {n}: {:?}", o.choice) };
-            let k = gy.iter().position(|&x| x == c).unwrap();
-            assert_eq!(o.action, act::GRAVEYARD + k as u16, "pick {n}: {} is graveyard position {k}", g.name(c));
-            assert_eq!(g.graveyard_action(0, c), o.action);
-            assert_eq!(g.graveyard_action(1, c), act::GRAVEYARD + act::GRAVEYARD_N + k as u16, "the other player's id for it");
-            assert_eq!(text(o.action), format!("Choose {}", names[k]), "pick {n}: the option's text names its card");
-            assert_eq!(ids[g.obj(c).def as usize] as usize, idents[k]);
-        }
-        for v in 0..2u8 {
-            let x = features(&g, v);
-            let c = &x[O_CONTEXT..O_CONTEXT + CONTEXT];
-            assert_eq!(c[ctx::KIND + DecisionKind::ChooseGraveyardCard as usize], 1.0);
-            assert_eq!((c[ctx::HAS_CARD], decode_id(&c[ctx::CARD..ctx::CARD + CODE])), (1.0, regent), "P{v}, pick {n}: the context's card");
-            let cost: Vec<f32> = (0..9).map(|k| c[ctx::COST + k]).collect();
-            assert_eq!(cost, [(5 - n) as f32 / 8.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "P{v}, pick {n}: {{{}}}{{U}}{{U}} left", 5 - n);
-            assert_eq!(x[O_STACK + CODE + stack::DELVED], n as f32 / 4.0, "P{v}, pick {n}: cards delved");
-            let (gb, eb) = if v == 0 { (bag::MY_GRAVEYARD, bag::MY_EXILE) } else { (bag::OPP_GRAVEYARD, bag::OPP_EXILE) };
-            for (k, &id) in idents.iter().enumerate() {
-                let chosen = picks[..n].contains(&k);
-                let at = |b: usize| x[O_BAGS + b * encode::D + id];
-                assert_eq!((at(gb), at(eb)), if chosen { (0.0, 0.25) } else { (0.25, 0.0) }, "P{v}, pick {n}: {} chosen {chosen}", names[k]);
+    let names = ["Ponder", "Daze", "Mishra's Bauble", "Misty Rainforest", "Lightning Bolt", "Volcanic Island", "Brainstorm", "Polluted Delta"];
+    for caster in 0..2u8 {
+        let other = 1 - caster;
+        let mut g = Scenario::new(db)
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 10])
+            .library(1, &["Island"; 10])
+            .battlefield(caster, &["Island", "Island"])
+            .graveyard(caster, &names)
+            .graveyard(other, &["Brainstorm", "Island"])
+            .hand(caster, &["Murktide Regent"])
+            .at(Step::Main1, caster)
+            .start();
+        let gy = g.player(caster).graveyard.clone();
+        assert_eq!(gy.iter().map(|&c| g.name(c)).collect::<Vec<_>>(), names, "bottom first");
+        let m = g.card(caster, "Murktide Regent", Zone::Hand);
+        let regent = ids[g.obj(m).def as usize] as usize;
+        let idents: Vec<usize> = gy.iter().map(|&c| ids[g.obj(c).def as usize] as usize).collect();
+        g.choose(Choice::Cast(m));
+        to_choice(&mut g, DecisionKind::ChooseGraveyardCard);
+        let picks = [0usize, 1, 4, 6, 7];
+        let mut floor = 0;
+        for (n, &pick) in picks.iter().enumerate() {
+            let what = format!("P{caster}'s Regent, pick {n}");
+            assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard), "{what}: {}", g.options_desc().join(" | "));
+            assert_eq!(g.player(caster).graveyard, gy, "{what}: the chosen cards stay in place");
+            let d = g.pending_decision().unwrap().clone();
+            assert_eq!(d.player, caster);
+            assert_eq!(check_graveyard_list(&g, &what), gy, "{what}: the list is the caster's graveyard");
+            let view = g.spectator_view();
+            let text = |a: u16| -> String {
+                let o = view["decision"]["options"].as_array().unwrap().iter().find(|o| o["a"] == a).unwrap();
+                o["t"].as_str().unwrap().to_string()
+            };
+            let left = picks.len() - n;
+            let want: Vec<u16> = (floor..=gy.len() - left).map(|k| act::LIBRARY + k as u16).collect();
+            assert_eq!(d.options.iter().map(|o| o.action).collect::<Vec<_>>(), want, "{what}: above the last pick, {left} still needed");
+            for o in &d.options {
+                let Choice::Card(c) = o.choice else { panic!("{what}: {:?}", o.choice) };
+                let k = gy.iter().position(|&x| x == c).unwrap();
+                assert_eq!(o.action, act::LIBRARY + k as u16, "{what}: {} is graveyard position {k}", g.name(c));
+                assert_eq!(text(o.action), format!("Choose {}", names[k]), "{what}: the option's text names its card");
+                assert_eq!(ids[g.obj(c).def as usize] as usize, idents[k]);
             }
+            for v in [caster, other] {
+                let x = features(&g, v);
+                let c = &x[O_CONTEXT..O_CONTEXT + CONTEXT];
+                assert_eq!(c[ctx::KIND + DecisionKind::ChooseGraveyardCard as usize], 1.0);
+                assert_eq!((c[ctx::HAS_CARD], decode_id(&c[ctx::CARD..ctx::CARD + CODE])), (1.0, regent), "P{v}, {what}: the context's card");
+                let cost: Vec<f32> = (0..9).map(|k| c[ctx::COST + k]).collect();
+                assert_eq!(cost, [(5 - n) as f32 / 8.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "P{v}, {what}: {{{}}}{{U}}{{U}} left", 5 - n);
+                assert_eq!(x[O_STACK + CODE + stack::DELVED], n as f32 / 4.0, "P{v}, {what}: cards delved");
+                let (gb, eb) = if v == caster { (bag::MY_GRAVEYARD, bag::MY_EXILE) } else { (bag::OPP_GRAVEYARD, bag::OPP_EXILE) };
+                for (k, &id) in idents.iter().enumerate() {
+                    let chosen = picks[..n].contains(&k);
+                    // (The other player's Brainstorm is in its owner's bag.)
+                    let at = |b: usize| x[O_BAGS + b * encode::D + id];
+                    assert_eq!((at(gb), at(eb)), if chosen { (0.0, 0.25) } else { (0.25, 0.0) }, "P{v}, {what}: {} chosen {chosen}", names[k]);
+                }
+                // The list's chosen cards: the caster's only.
+                for k in 0..gy.len() {
+                    let s = &x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W];
+                    let chosen = picks[..n].contains(&k);
+                    if v == caster {
+                        assert_eq!(s[CODE + list::CHOSEN], chosen as u8 as f32, "{what}: slot {k} ({}) chosen {chosen}", names[k]);
+                        assert_eq!(s[CODE + list::OPTION] == 1.0, k >= floor && k <= gy.len() - left, "{what}: slot {k}");
+                    }
+                }
+            }
+            g.choose(Choice::Card(gy[pick]));
+            floor = pick + 1;
         }
-        g.choose(Choice::Card(gy[pick]));
-        floor = pick + 1;
+        // The payment ends: the five exiled (the bags as during the picks), the Regent resolves.
+        to_priority(&mut g, |_| None);
+        assert!(gy.iter().enumerate().all(|(k, &c)| (g.obj(c).zone == Zone::Exile) == picks.contains(&k)), "{}", g.log_lines().join("\n"));
+        settle(&mut g, |_| None);
+        let m = g.card(caster, "Murktide Regent", Zone::Battlefield);
+        assert_eq!(g.counters_on(m, engine::db::Counter::P1P1), 4, "{}", g.log_lines().join("\n"));
     }
-    // The payment ends: the five exiled (the bags as during the picks), the Regent resolves.
-    to_priority(&mut g, |_| None);
-    assert!(gy.iter().enumerate().all(|(k, &c)| (g.obj(c).zone == Zone::Exile) == picks.contains(&k)), "{}", g.log_lines().join("\n"));
-    settle(&mut g, |_| None);
-    let m = g.card(0, "Murktide Regent", Zone::Battlefield);
-    assert_eq!(g.counters_on(m, engine::db::Counter::P1P1), 4, "{}", g.log_lines().join("\n"));
+}
+
+/// Tamiyo, Seasoned Scholar's -3 ("return target instant or sorcery card
+/// from your graveyard to your hand"; the Delver mirror's other graveyard
+/// choice, ENGINE.md 65.1): a `Target` decision whose options are list ids
+/// (ENGINE.md 65.10), for each player as the controller. The list is the
+/// controller's graveyard in order (its lands and creatures present, not
+/// options; the other graveyard's instants aren't targets of "your
+/// graveyard": not in it), each target `LIBRARY` + its card's position,
+/// pointing at that card's token; the chosen card returns.
+#[test]
+fn tamiyo_minus_three_targets_each_graveyard_card_by_its_list_token() {
+    use engine::db::Counter;
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    const TAMIYO: &str = "Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar";
+    const SCHOLAR: &str = "Tamiyo, Seasoned Scholar";
+    let names = ["Ponder", "Island", "Force of Will", "Dragon's Rage Channeler", "Lightning Bolt", "Ponder"];
+    for p in 0..2u8 {
+        let mut g = Scenario::new(CardDb::constructed())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Island"; 10])
+            .library(1, &["Island"; 10])
+            .battlefield(p, &[TAMIYO])
+            .transformed(p, TAMIYO)
+            .counters(p, SCHOLAR, Counter::Loyalty, 3)
+            .graveyard(p, &names)
+            .graveyard(1 - p, &["Brainstorm", "Daze"])
+            .at(Step::Main1, p)
+            .start();
+        let t = g.card(p, SCHOLAR, Zone::Battlefield);
+        let gy = g.player(p).graveyard.clone();
+        let ability = g
+            .pending_decision()
+            .unwrap()
+            .options
+            .iter()
+            .filter_map(|o| match o.choice {
+                Choice::Ability(c, s) if c == t => Some(Choice::Ability(c, s)),
+                _ => None,
+            })
+            .nth(1)
+            .expect("the -3");
+        g.choose(ability);
+        assert_eq!(g.kind(), Some(DecisionKind::Target), "{}", g.options_desc().join(" | "));
+        let what = format!("P{p}'s Tamiyo -3");
+        assert_eq!(check_graveyard_list(&g, &what), gy, "{what}: the list is the controller's graveyard");
+        let d = g.pending_decision().unwrap().clone();
+        let offered: Vec<usize> = d.options.iter().filter_map(|o| gy_card(&g, o.choice)).map(|c| gy.iter().position(|&x| x == c).unwrap()).collect();
+        assert_eq!(offered, [0, 2, 4, 5], "{what}: the instants and sorceries ({})", g.options_desc().join(" | "));
+        // The second Ponder: its own slot (graveyard cards are not deduplicated).
+        let bolt = gy[4];
+        g.choose(g.tgt(bolt));
+        settle(&mut g, |_| None);
+        assert_eq!(g.obj(bolt).zone, Zone::Hand, "{}", g.log_lines().join("\n"));
+    }
+}
+
+/// Graveyard choices over both graveyards (ENGINE.md 65.10). Reanimate
+/// ("put target creature card from a graveyard onto the battlefield under
+/// your control"): the list is the offered cards, the caster's graveyard's
+/// then the other's, each in order (the other's `list::THEIRS`); each target
+/// points at its token, for each player as the caster. Exhume (each player
+/// chooses a creature card in their own graveyard, the active player first):
+/// each decider's list is their own graveyard whole, the non-active player
+/// choosing during the active player's spell.
+#[test]
+fn graveyard_targets_and_choices_over_both_graveyards_use_the_list() {
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let db = CardDb::cube();
+    for p in 0..2u8 {
+        let mut g = Scenario::new(db)
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Swamp"; 10])
+            .library(1, &["Swamp"; 10])
+            .battlefield(p, &["Swamp"])
+            .graveyard(p, &["Island", "Griselbrand", "Lightning Bolt"])
+            .graveyard(1 - p, &["Archon of Cruelty", "Swamp", "Griselbrand"])
+            .hand(p, &["Reanimate"])
+            .at(Step::Main1, p)
+            .start();
+        let r = g.card(p, "Reanimate", Zone::Hand);
+        g.choose(Choice::Cast(r));
+        assert_eq!(g.kind(), Some(DecisionKind::Target), "{}", g.options_desc().join(" | "));
+        let what = format!("P{p}'s Reanimate");
+        let list = check_graveyard_list(&g, &what);
+        let mine = g.card(p, "Griselbrand", Zone::Graveyard);
+        let theirs = g.card(1 - p, "Griselbrand", Zone::Graveyard);
+        let archon = g.card(1 - p, "Archon of Cruelty", Zone::Graveyard);
+        assert_eq!(list, [mine, archon, theirs], "{what}: the creature cards, the caster's first");
+        let ids: Vec<u16> = g.pending_decision().unwrap().options.iter().map(|o| o.action).collect();
+        assert_eq!(ids, [act::LIBRARY, act::LIBRARY + 1, act::LIBRARY + 2], "{what}: the creature cards' slots");
+        g.choose(g.tgt(archon));
+        to_priority(&mut g, |_| None);
+        settle(&mut g, |_| None);
+        assert_eq!((g.obj(archon).zone, g.obj(archon).controller), (Zone::Battlefield, p), "{}", g.log_lines().join("\n"));
+    }
+    // Exhume: P0 casts it; P0 then P1 choose from their own graveyards.
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Swamp"; 10])
+        .library(1, &["Swamp"; 10])
+        .battlefield(0, &["Swamp", "Swamp"])
+        .graveyard(0, &["Island", "Griselbrand", "Lightning Bolt", "Archon of Cruelty"])
+        .graveyard(1, &["Swamp", "Griselbrand", "Brainstorm", "Archon of Cruelty"])
+        .hand(0, &["Exhume"])
+        .at(Step::Main1, 0)
+        .start();
+    let e = g.card(0, "Exhume", Zone::Hand);
+    g.choose(Choice::Cast(e));
+    to_choice(&mut g, DecisionKind::ChooseGraveyardCard);
+    let mut deciders = Vec::new();
+    while g.kind() == Some(DecisionKind::ChooseGraveyardCard) {
+        let p = g.pending_decision().unwrap().player;
+        let what = format!("Exhume, P{p}'s choice");
+        assert_eq!(check_graveyard_list(&g, &what), g.player(p).graveyard, "{what}: the decider's own graveyard");
+        let ids: Vec<u16> = g.pending_decision().unwrap().options.iter().map(|o| o.action).collect();
+        assert_eq!(ids, [act::LIBRARY + 1, act::LIBRARY + 3], "{what}");
+        deciders.push(p);
+        let c = g.card(p, "Archon of Cruelty", Zone::Graveyard);
+        g.choose(Choice::Card(c));
+        to_choice_or_priority(&mut g, DecisionKind::ChooseGraveyardCard);
+    }
+    assert_eq!(deciders, [0, 1]);
+}
+
+/// Answer decisions (the first option) until one of kind `k` or priority.
+fn to_choice_or_priority(g: &mut engine::Game, k: engine::DecisionKind) {
+    for _ in 0..50 {
+        let Some(d) = g.pending_decision() else { return };
+        if d.kind == k || d.kind == engine::DecisionKind::Priority {
+            return;
+        }
+        let c = d.options[0].choice;
+        g.choose(c);
+    }
+    panic!("no {k:?} decision\n{}", g.log_lines().join("\n"));
 }
 
 /// Answer decisions (the first option) until one of kind `k`.

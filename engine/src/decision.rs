@@ -36,10 +36,14 @@ pub mod act {
     /// The decider's waiting triggers, slot 0..15.
     pub const TRIGGER: u16 = 324;
     pub const TRIGGER_N: u16 = 16;
-    /// A searched / looked-at pile, slot 0..63 (M4b).
+    /// A searched / looked-at pile, slot 0..63 (M4b); a graveyard-card
+    /// choice or target: its slot in the decision's graveyard list
+    /// (`Game::graveyard_list`, ENGINE.md 65.10).
     pub const LIBRARY: u16 = 340;
     pub const LIBRARY_N: u16 = 64;
-    /// Graveyards: the decider's 0..63, the opponent's 64..127 (M4b).
+    /// Graveyards: the decider's 0..63, the opponent's 64..127 (M4b). Only
+    /// Priority's casts and plays from the decider's graveyard use them
+    /// (ENGINE.md 65.10): every other graveyard choice is a list id.
     pub const GRAVEYARD: u16 = 404;
     /// Slots per graveyard.
     pub const GRAVEYARD_N: u16 = 64;
@@ -129,7 +133,9 @@ pub enum DecisionKind {
     /// A permanent chosen by an effect (not targeted), one per decision in
     /// increasing slot order; `PASS` = no more.
     ChoosePermanent,
-    /// A card in the decider's graveyard (`GRAVEYARD` slot).
+    /// A card in a graveyard chosen by an effect or a cost (delve, Exhume, a
+    /// graveyard exile cost): `LIBRARY` + its slot in the decision's
+    /// graveyard list (`Game::graveyard_list`, ENGINE.md 65.10).
     ChooseGraveyardCard,
     /// Which cost to cast a spell for: `NUMBER` 0 = its mana cost, k + 1 =
     /// alternative cost k (CR 118.9, 601.2b).
@@ -398,12 +404,97 @@ impl Game {
     }
 
     /// `GRAVEYARD` slot of a card: its position in its owner's graveyard
-    /// (0 = bottom), the decider's first (ENGINE.md 11).
+    /// (0 = bottom), the decider's first (ENGINE.md 11). Priority's casts
+    /// and plays from the graveyard keep these ids; every other decision
+    /// renames them to the card's slot in its graveyard list
+    /// ([`graveyard_list`](Self::graveyard_list), ENGINE.md 65.10).
     pub fn graveyard_action(&self, viewer: PlayerId, idx: CardIdx) -> u16 {
         let owner = self.objs[idx.i()].owner;
         let pos = self.players[owner as usize].graveyard.iter().position(|&c| c == idx).expect("card in a graveyard");
         assert!(pos < act::GRAVEYARD_N as usize, "graveyard slot {pos} out of range");
         act::GRAVEYARD + if owner == viewer { 0 } else { act::GRAVEYARD_N } + pos as u16
+    }
+
+    /// The card in a graveyard an option of a graveyard-list decision names
+    /// (ENGINE.md 65.10): a card chosen (`Choice::Card`) or targeted
+    /// (`Choice::Target`) there. A graveyard is public: the choice names the
+    /// card itself (ENGINE.md 10's rule is for hidden zones).
+    fn graveyard_choice(&self, c: Choice) -> Option<CardIdx> {
+        let idx = match c {
+            Choice::Card(i) => i,
+            Choice::Target(Target::Obj(r)) => r.idx,
+            _ => return None,
+        };
+        (self.objs[idx.i()].zone == Zone::Graveyard).then_some(idx)
+    }
+
+    /// The graveyard list of a decision of `kind` for `p` with these
+    /// options (ENGINE.md 65.10), for a `ChooseGraveyardCard`, `Target` or
+    /// `NewTarget` decision offering a card in a graveyard: when the offered
+    /// cards are in one graveyard, that graveyard whole, in order (bottom
+    /// first: the cards passed, chosen and still to come of a set picked in
+    /// increasing position, delve's); when they are in both, the offered
+    /// cards only, `p`'s graveyard first, each in order. A graveyard card's
+    /// option is `LIBRARY` + its slot here, and the list is what the
+    /// network's list block holds while the decision is pending, so each
+    /// such option is scored by its card's token. Empty for every other
+    /// decision (Priority's casts from the graveyard keep their `GRAVEYARD`
+    /// ids). At most 64 cards (the list's slots), asserted when the decision
+    /// is asked: one graveyard holds at most 64 (the deck limit, ENGINE.md
+    /// 58.3); more than 64 cards offered from both is a loud failure
+    /// (docs/shortcuts.md 65.10).
+    pub fn graveyard_list(&self, p: PlayerId, kind: DecisionKind, options: &[Opt]) -> Vec<CardIdx> {
+        use DecisionKind as K;
+        if !matches!(kind, K::ChooseGraveyardCard | K::Target | K::NewTarget) {
+            return Vec::new();
+        }
+        let offered: SVec<CardIdx, 16> = options.iter().filter_map(|o| self.graveyard_choice(o.choice)).collect();
+        let mine = offered.iter().any(|&c| self.objs[c.i()].owner == p);
+        let theirs = offered.iter().any(|&c| self.objs[c.i()].owner != p);
+        let gy = |q: PlayerId| &self.players[q as usize].graveyard;
+        match (mine, theirs) {
+            (false, false) => Vec::new(),
+            (true, false) => gy(p).clone(),
+            (false, true) => gy(crate::ids::opp(p)).clone(),
+            (true, true) => gy(p).iter().chain(gy(crate::ids::opp(p))).copied().filter(|c| offered.contains(c)).collect(),
+        }
+    }
+
+    /// `ask`'s renaming (ENGINE.md 65.10): every option of a graveyard-list
+    /// decision that names a graveyard card (offered with its `GRAVEYARD`
+    /// id) gets `LIBRARY` + its slot in the decision's graveyard list. The
+    /// list is the decider's graveyard then the other player's, each in
+    /// order, so the renaming keeps the options' order (only `PASS`,
+    /// `PLAYER`, permanent and stack ids, all below `LIBRARY`, share these
+    /// decisions). Any other decision but Priority must not offer a
+    /// `GRAVEYARD` id.
+    pub(crate) fn name_graveyard_options(&self, p: PlayerId, kind: DecisionKind, options: &mut [Opt]) {
+        if kind == DecisionKind::Priority {
+            return;
+        }
+        let list = self.graveyard_list(p, kind, options);
+        if !list.is_empty() {
+            assert!(
+                list.len() <= act::LIBRARY_N as usize,
+                "{kind:?} for P{p}: {} graveyard cards offered from both graveyards (they hold {} and {}): more than the list's {} slots \
+                 (docs/shortcuts.md 65.10)",
+                list.len(),
+                self.players[p as usize].graveyard.len(),
+                self.players[crate::ids::opp(p) as usize].graveyard.len(),
+                act::LIBRARY_N
+            );
+            for o in options.iter_mut() {
+                if let Some(c) = self.graveyard_choice(o.choice) {
+                    assert_eq!(o.action, self.graveyard_action(p, c), "{kind:?}: a graveyard card's option is offered with its GRAVEYARD id");
+                    let k = list.iter().position(|&x| x == c).expect("an offered card is in its graveyard list");
+                    o.action = act::LIBRARY + k as u16;
+                }
+            }
+        }
+        assert!(
+            !options.iter().any(|o| (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&o.action)),
+            "{kind:?} offers a GRAVEYARD id: only Priority's casts keep them (ENGINE.md 65.10)"
+        );
     }
 
     /// Human-readable description of an option (tests, logs).

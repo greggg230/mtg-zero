@@ -19,7 +19,7 @@
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
 //! | stack | 8 x 124 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability; 58.8: X; **v5** status 32-71: the modes chosen, the alternative cost, how and from where it was cast, cards delved, a trigger's event amount, exiled as it leaves, flashback, noted permanents, divided damage, a ninjutsu attack, splices (8 spare) |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
-//! | list | 64 x 60 | `LIBRARY` slots 0..63 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition; M8b: sideboarding's pool list (`list::*`: copies in the pool, in the deck, in the deck at the start, a first pick, a basic land, already decided) |
+//! | list | 64 x 60 | `LIBRARY` slots 0..63 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition; M8b: sideboarding's pool list (`list::*`: copies in the pool, in the deck, in the deck at the start, a first pick, a basic land, already decided); a graveyard-card choice or target (ENGINE.md 65.10): the graveyards holding an offered card, in order, the viewer's first (`list::THEIRS`, `list::CHOSEN`: chosen for a delve in progress) |
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
 //! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
@@ -227,12 +227,21 @@ pub fn squash(v: f32) -> f32 {
 /// Offsets inside a list slot (after its card code). A decision's list:
 /// `PRESENT`, `OPTION`, `COPIES` (copies in the list / 4). Sideboarding's
 /// pool list (M8b, ENGINE.md 36.7): `COPIES` = copies in the pool / 4 (0 for
-/// a basic land: any number), the rest below.
+/// a basic land: any number), the rest below. A graveyard list (ENGINE.md
+/// 65.10: a graveyard-card choice or target), the graveyards in order, the
+/// viewer's first: `THEIRS`, `CHOSEN` in the floats a pool list's
+/// `IN_DECK` and `AT_START` use (a list is one or the other).
 pub mod list {
     pub const PRESENT: usize = 0;
     /// Its `LIBRARY` id is an option of the viewer's decision.
     pub const OPTION: usize = 1;
     pub const COPIES: usize = 2;
+    /// A graveyard list: the card is in the opponent's graveyard (else the
+    /// viewer's).
+    pub const THEIRS: usize = 3;
+    /// A graveyard list: the card is chosen for a delve in progress
+    /// (`Mark::DelveExile`: exiled as the payment ends, ENGINE.md 65.3).
+    pub const CHOSEN: usize = 4;
     /// Copies in the deck being built / 4.
     pub const IN_DECK: usize = 3;
     /// Copies in the deck of the last game / 4.
@@ -1211,14 +1220,33 @@ impl Game {
             out[o + CODE + 2] = legal(act::TRIGGER + k as u16) as u8 as f32;
         }
         // The `LIBRARY` list of the viewer's own decision.
-        if mine_to_decide {
-            let list = self.decision_list(me);
-            for (k, &def) in list.iter().enumerate().take(LIST) {
-                let o = O_LIST + k * LIST_W;
-                code(&mut out[o..o + CODE], self.db, ids, def);
-                out[o + CODE] = 1.0;
-                out[o + CODE + 1] = legal(act::LIBRARY + k as u16) as u8 as f32;
-                out[o + CODE + 2] = list.iter().filter(|&&x| x == def).count() as f32 / 4.0;
+        if let Some(d) = decision.filter(|_| mine_to_decide) {
+            // A graveyard list (ENGINE.md 65.10): the graveyards holding a card
+            // the decision offers, whole, in order, the viewer's first; an
+            // offered card is `LIBRARY` + its slot (`Game::graveyard_list`).
+            let gy = self.graveyard_list(me, d.kind, &d.options);
+            if !gy.is_empty() {
+                for (k, &c) in gy.iter().enumerate().take(LIST) {
+                    let def = self.objs[c.i()].def;
+                    let o = O_LIST + k * LIST_W;
+                    code(&mut out[o..o + CODE], self.db, ids, def);
+                    let copies = gy.iter().filter(|&&x| self.objs[x.i()].def == def).count();
+                    let s = &mut out[o + CODE..o + LIST_W];
+                    s[list::PRESENT] = 1.0;
+                    s[list::OPTION] = legal(act::LIBRARY + k as u16) as u8 as f32;
+                    s[list::COPIES] = copies as f32 / 4.0;
+                    s[list::THEIRS] = (self.objs[c.i()].owner != me) as u8 as f32;
+                    s[list::CHOSEN] = self.delve_exiling(c) as u8 as f32;
+                }
+            } else {
+                let list = self.decision_list(me);
+                for (k, &def) in list.iter().enumerate().take(LIST) {
+                    let o = O_LIST + k * LIST_W;
+                    code(&mut out[o..o + CODE], self.db, ids, def);
+                    out[o + CODE] = 1.0;
+                    out[o + CODE + 1] = legal(act::LIBRARY + k as u16) as u8 as f32;
+                    out[o + CODE + 2] = list.iter().filter(|&&x| x == def).count() as f32 / 4.0;
+                }
             }
         }
         // The cards in the viewer's graveyard with a graveyard ability (the
@@ -1548,6 +1576,20 @@ impl Game {
         if d.kind == K::RevealCompanion {
             return self.companion_candidates(p);
         }
+        // "As this enters, look at an opponent's hand, then choose any card
+        // name" (`Game::choose_name_as_enters`): `LIBRARY` + k is the k-th
+        // name of the opponent's cards by definition, not a library slot
+        // (ENGINE.md 65.10: the list was the namer's library).
+        if d.kind == K::NameCard && matches!(self.agenda.last(), Some(Task::AsEnters { .. })) {
+            return d
+                .options
+                .iter()
+                .filter_map(|o| match o.choice {
+                    crate::decision::Choice::Def(x) if o.action >= act::LIBRARY => Some(x),
+                    _ => None,
+                })
+                .collect();
+        }
         let cards: Vec<CardIdx> = match d.kind {
             K::SearchLibrary | K::NameCard => self.library_sorted(p),
             K::PutOnTop | K::PutOnBottom | K::PutInGraveyard | K::PutInHand | K::PutOntoBattlefield => match self.agenda.last() {
@@ -1559,11 +1601,14 @@ impl Game {
                 _ => Vec::new(),
             },
             K::ChooseDiscard => {
+                // (Whose hand: an option's card there. A permanent may be
+                // offered too, before them in id order: "exile a card from
+                // their hand or target permanent", ENGINE.md 65.10.)
                 let owner = d
                     .options
                     .iter()
                     .find_map(|o| match o.choice {
-                        crate::decision::Choice::Card(c) => Some(self.objs[c.i()].owner),
+                        crate::decision::Choice::Card(c) if self.objs[c.i()].zone == Zone::Hand => Some(self.objs[c.i()].owner),
                         _ => None,
                     })
                     .unwrap_or(opp(p));
@@ -1571,12 +1616,18 @@ impl Game {
             }
             // Bolas's Citadel (ENGINE.md 31): the top card of the decider's
             // library, which they may look at any time, cast or played at
-            // `LIBRARY` + 0.
+            // `LIBRARY` + 0 (either face: ENGINE.md 65.10).
             K::Priority => d
                 .options
                 .iter()
                 .find_map(|o| match o.choice {
-                    crate::decision::Choice::Cast(c) | crate::decision::Choice::Play(c) if o.action == act::LIBRARY => {
+                    crate::decision::Choice::Cast(c)
+                    | crate::decision::Choice::Play(c)
+                    | crate::decision::Choice::CastFace(c)
+                    | crate::decision::Choice::PlayFace(c)
+                    | crate::decision::Choice::Faces(c, _)
+                        if o.action == act::LIBRARY =>
+                    {
                         Some(vec![c])
                     }
                     _ => None,

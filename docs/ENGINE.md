@@ -554,8 +554,8 @@ to the decider:
 | `OPP_PERM` | 196-291 | opponent's permanents, slot 0..95 (target, block this attacker) |
 | `STACK` | 292-323 | stack slot 0..31, 0 = top (target spell; a target is one of the 31 items below the targeting spell or ability, section 58.1) |
 | `TRIGGER` | 324-339 | decider's waiting triggers, slot 0..15 (order triggers) |
-| `LIBRARY` | 340-403 | slot 0..63 of a list sorted by (definition, card index): a searched library (a definition, at its first slot), a looked-at pile, another player's seen hand |
-| `GRAVEYARD` | 404-531 | decider's 0..63, opponent's 64..127 (M4b) |
+| `LIBRARY` | 340-403 | slot 0..63 of a list sorted by (definition, card index): a searched library (a definition, at its first slot), a looked-at pile, another player's seen hand; a graveyard-card choice or target: the card's slot in the decision's graveyard list (section 65.10) |
+| `GRAVEYARD` | 404-531 | decider's 0..63, opponent's 64..127 (M4b); since section 65.10 only Priority's casts and plays from the decider's graveyard (404..467) |
 | `ACTIVATE` | 532-915 | `MY_PERM` slot * 4 + ability index: activate at priority; a mana source while paying |
 | `HAND_ABILITY` | 916-979 | the ability of the card in the decider's hand slot 0..63 (cycling; a Spirit Guide while paying) |
 | `EXILE` | 980-1011 | at priority: play or cast the k-th card in exile the decider may play (exile order; M7a); `ChooseExiled`: the k-th offered card (M7b) |
@@ -584,12 +584,14 @@ next pile card, in order; `PASS` ends a scry's bottom part), `PutInGraveyard` / 
 hand), `ChooseMode` (`NUMBER` = mode index; `PASS` = no more). Activating an ability is
 `Choice::Ability(card, slot)`. M7a: `ChooseColor` (`NUMBER` = W U B R G, 5 = colorless),
 `ChoosePermanent` (a permanent chosen without targeting, a vote, crew, an Army; `PASS` = no
-more), `ChooseGraveyardCard` (`GRAVEYARD` slots: Exhume, a graveyard cost, delve, a milled
-creature), `ChooseAltCost` (`NUMBER` 0 = the mana cost, k + 1 = alternative cost k),
+more), `ChooseGraveyardCard` (Exhume, a graveyard cost, delve, a milled creature: `LIBRARY` + the
+card's slot in the decision's graveyard list since section 65.10, before it `GRAVEYARD` slots; a
+target in a graveyard likewise), `ChooseAltCost` (`NUMBER` 0 = the mana cost, k + 1 = alternative cost k),
 `ExileCost` and `BounceCost` (one card per decision), `DivideDamage` (`NUMBER` = the amount
 for the next target); X, a counter kind, an energy amount and tap-or-untap use `ChooseMode`;
 "top or bottom" is a `YesNo`. Priority also offers graveyard cards (`GRAVEYARD`: flashback,
-escape, lands with Crucible of Worlds) and exiled cards with a permission (`EXILE`). M7b:
+escape, lands with Crucible of Worlds; the only `GRAVEYARD` ids left, section 65.10) and exiled
+cards with a permission (`EXILE`). M7b:
 `AttackTarget` (what the attacker just declared, or just put onto the battlefield attacking,
 attacks: `PLAYER` + 1 = the defending player, `OPP_PERM` = a planeswalker they control; asked
 only when they control one), `ChooseExiled` (`EXILE` + k: a card in exile an effect picks, Karn's
@@ -1268,7 +1270,10 @@ zone invariant ("card is nowhere"); the invariant now allows it with its pending
 46): the decider's encoding at every decision, both players' at the checkpoints (the game and every
 determinized world) have every value finite and within `encode::FEATURE_BOUND` (256);
 `FUZZ_POOL=exponential` drives exponential boards (`GROWTH`'s cards, life 1,000,000,000, attacks one
-time in four) to the class-B bounds of section 46.3.
+time in four) to the class-B bounds of section 46.3. Section 65.10-65.12: at every decision every
+`LIBRARY` option points at a list token of the card or definition it names (the decider's
+encoding: its identity, present, an option), a graveyard-list decision's options at their cards'
+slots, and no decision but Priority offers a `GRAVEYARD` id.
 
 **Option completion** (M7c, branch `m7c-payfix`). Sections 6 and 18 promise that a cast, an
 activation or an alternative cost is offered only if it can be completed; the fuzzer checks it
@@ -1374,7 +1379,9 @@ CR 701.40b: 50 games differ), 646d779580df7517, and for the declared mulligan in
 games' encodings, chiefly the spells cast this turn), 317b5ba05dc569fb), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
 prints the combined digest alone: compare it before and after a layout change (M8b: 3fb15384404c7428
 on both sides, section 36.8; part b: the same without the face-up change, e4783eb5c6705fc3 with it,
-section 36.11). `DIGEST_WRITE=1` records
+section 36.11). `DIGEST_IDS=choices` (section 65.11) hashes every action id as the choice it names
+and a `KEY_AUTO` key without its action, and leaves the encodings out: compare it before and after
+a change that renames action ids. `DIGEST_WRITE=1` records
 the file instead: only when behaviour is meant to change (a rules fix, a bot change, a new
 supported card: the pool deals the random decks), then the digests of the next performance change
 are compared with the new file. `DIGEST_RANDOM=n` / `DIGEST_HEURISTIC=n` play fewer games. Every
@@ -12764,7 +12771,9 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates), all 
 
 Branch `delve-encoding` (main 0b476e0), 2026-10-29, CPU only, `runs/delver2` and an A/B round live
 on the GPU and the Mac; every run directory only read. Tier "encoding-only" (the layout is
-unchanged).
+unchanged). 65.1-65.9: the finding and the encoding of a delve's picks (the branch's first part);
+65.10-65.15: option A of 65.7, the user's choice (2026-10-29): graveyard choices and targets on the
+list's ids (rebased on main 87ea619; tier "engine + decision-id change").
 
 ### 65.1 The finding
 
@@ -12819,7 +12828,8 @@ made this way: delve, flashback and escape casts at priority, a graveyard card a
 -3), Exhume-like choices, a graveyard cost. The public-state gate listed the graveyard's order as a
 deliberate limit ("the order matters to a few cards only", 58.9); it is a gap: the order is what the
 `GRAVEYARD` ids mean. `public_state::limits` now classifies "two graveyard cards swap places" as
-`NextLayout`, and the gate asserts that it is the only gap (65.6). The search sees the difference
+`NextLayout`, and the gate asserts that it is the only gap (65.6; since 65.10 the gap is
+Priority's `GRAVEYARD` ids only). The search sees the difference
 only through its values (Q differences of 0.01-0.03 at 64 simulations), which is why it sometimes
 finds the right card anyway.
 
@@ -12842,7 +12852,8 @@ and no cost (its cost floats were a mana payment's only). Now, in floats that we
   with two picks is 3/8 and 2/4 blue.
 
 The delve's floor (the positions already passed) is not in the input: no float per graveyard
-position exists in layout v5 (65.7 adds one with the options). Gate: the new perturbation "a graveyard
+position exists in layout v5 (65.7 adds one with the options; 65.10: the list holds the graveyard
+in order, the passed cards present and not options). Gate: the new perturbation "a graveyard
 card is chosen for delve" (`Game.marks`, a `DelveExile` mark on a random graveyard card) changes
 both views and both encodings in all 233 positions it applies to.
 
@@ -12886,6 +12897,8 @@ definition (`objs[c].def`) - the same object (`Choice::Card(c)`), in every zone;
 
 ### 65.7 The options for the gap (an action-id or layout change: the user's decision)
 
+(The user chose A on 2026-10-29: 65.10.)
+
 None fits layout v5 with its action ids: a `GRAVEYARD` id needs a token to point from, and v5's
 spare floats (8 per permanent and stack slot, some globals, the context's last 10) have no room
 for a float per graveyard position, let alone a card code.
@@ -12918,7 +12931,8 @@ for a float per graveyard position, let alone a card code.
 
 ### 65.8 Checks
 
-On the rebased head (main 0b476e0, zero-core 437cef0), the desktop CPU at below-normal priority:
+(The branch's first part, before option A; option A's checks are 65.14.) On the rebased head (main
+0b476e0, zero-core 437cef0), the desktop CPU at below-normal priority:
 
 * **Build**: own target dir (`E:/cargo-target/mtg-zero/delve-encoding`), `bash tools/build_py.sh`
   (1 min 25 s).
@@ -12945,6 +12959,8 @@ On the rebased head (main 0b476e0, zero-core 437cef0), the desktop CPU at below-
 
 ### 65.9 Runs
 
+(The first part; with option A see 65.15.)
+
 * **Re-pinning onto this branch**: the layout is v5 and every float keeps its offset, so a running
   network loads and resumes (the encoding guard passes; no widen, no fork). Its inputs differ at
   delve decisions and during a delve's payment only (the context's card and cost, the bags);
@@ -12955,3 +12971,189 @@ On the rebased head (main 0b476e0, zero-core 437cef0), the desktop CPU at below-
   (~4 a game in the replays) and their value differences small (a +1/+1 counter); and the trade-offs
   (delirium's card types, Tamiyo's -3 targets, Regent counters later from instants leaving the
   graveyard) have to be learned from the value head.
+
+### 65.10 Option A: graveyard choices and targets on the list's ids
+
+Layout v5 is unchanged (37,620 floats, `mtgz/az/layout_v5.json` the same, the encoding guard passes):
+what changes is the action ids of graveyard choices and the list block's contents while one is
+pending.
+
+* **Which decisions.** `ChooseGraveyardCard` (an effect's or a cost's choice of a graveyard card:
+  delve; a graveyard exile cost, escape's or an ability's; Exhume's "each player"; "return a card
+  from your graveyard" without targeting; an Aura entering attached to a graveyard card; "enter as a
+  copy of a card in a graveyard"; "cast a card from your graveyard now"; a milled card taken), and
+  `Target` and `NewTarget` (a target in a graveyard: Tamiyo, Seasoned Scholar's -3, Reanimate,
+  Animate Dead, Lion Sash; a copy's new target). A graveyard
+  card's option in them is `LIBRARY` + its slot in the decision's **graveyard list**
+  (`Game::graveyard_list`). The other options keep their ids: `PASS`, `PLAYER`, permanents (delve's
+  Lotus Petal), stack items, all below `LIBRARY`, so the renaming keeps the order of every
+  decision's options.
+* **The list.** Offered cards in one graveyard: that graveyard whole, in order (bottom first), so
+  the cards passed, chosen and still to come of a set picked in increasing position are all in it
+  (delve's floor: the passed cards present, not options). A player's graveyard holds at most 64
+  cards (the deck limit, 58.3): it always fits. Offered cards in both graveyards (Reanimate, Lion
+  Sash): the offered cards only, the decider's graveyard's first, each graveyard in order. The
+  list is public and deterministic (the same in every world `determinize` makes; a refreshed
+  decision of the other player gets the same ids). The list block holds it for the decider only,
+  as every list (the viewer's own decision): slot k is `LIBRARY` + k, the list segment's pointer
+  action (`[340, 1]`), so the network scores each graveyard option from its card's token.
+* **The list's floats.** The card code (identity and descriptor, as in the bags), `list::PRESENT`,
+  `list::OPTION` (its id is an option now), `list::COPIES` (copies of its definition in the list /
+  4), and two in the floats a sideboarding pool list uses for `IN_DECK` and `AT_START` (a list is
+  one or the other): `list::THEIRS` (in the opponent's graveyard) and `list::CHOSEN` (chosen for
+  the delve in progress, `Mark::DelveExile`; also counted in its owner's exile bag, 65.3).
+* **Naming a card.** The choice is the card itself (`Choice::Card`, `Choice::Target`), as before:
+  graveyards are public, and section 10's rule (a choice of a hidden card names its definition) is
+  for hidden zones. Equal cards are not merged: each keeps its own option and slot, so the
+  decisions offer exactly what they offered.
+* **The limit** (class B, docs/shortcuts.md 65.10). At most 64 graveyard cards offered at once
+  from both graveyards; more is a loud failure (an assert in `Game::ask` naming the counts), never
+  an id beyond the list or a card left out. Only an "any card in a graveyard" target reaches it,
+  with more than 64 cards in the two graveyards together (two 40-card decks hold 80): the default
+  fuzz's most is 57 cards offered (Lion Sash, 5,000 games; the same in 20,000 games and 52,013
+  graveyard-list decisions, the Mac). The Delver mirror has no choice over both graveyards (its
+  longest list: 46 cards of one graveyard, 20,000 games and 58,446 decisions). Whole graveyards for
+  both (this branch's first try) gave the same 57 for Lion Sash and longer lists for every other
+  choice over both: the offered cards are the shortest list with one id per option.
+* **What stays on `GRAVEYARD` ids.** Priority's casts and plays from the graveyard (flashback,
+  escape, retrace, mayhem, Yawgmoth's Will, Lurrus, Serra Paragon, lands with Crucible
+  of Worlds): `GRAVEYARD` + the card's position in the decider's graveyard (the opponent's range
+  468..531 is now unused), still a generic logit of the pooled state, blind as before (65.2). None
+  is in the Delver mirror. `GY_ABILITY` (a graveyard card's ability: its own segment) is
+  unchanged. `Game::name_graveyard_options` asserts that no other decision offers a `GRAVEYARD`
+  id, and that a graveyard card's option arrives with its `GRAVEYARD` id (every asker builds it so).
+* **The gate.** "Two graveyard cards swap places" stays the one `NextLayout` gap, now for
+  Priority's ids: 178 of its 179 applications encode the same for each viewer (the others: a
+  graveyard choice pending for the viewer, whose list shows the order). Option C (65.7, a layout
+  change) closes it.
+* **Code.** `Game::graveyard_list` and `Game::name_graveyard_options` (`decision.rs`), called by
+  `Game::ask` before it sorts the options; the list block (`encode.rs`); `list::THEIRS`,
+  `list::CHOSEN`.
+
+### 65.11 The proof: the same games, only the ids renamed
+
+The encoding-free digest hashes the ids, so it changes: 5f0579aa50453818 -> **c62a5ce5f290814e**.
+A new digest mode, `DIGEST_IDS=choices` (`tests/digest.rs`), hashes the same 2,500 games id-free: every
+action id (the legal ones and the one taken, in the game and in the determinized clones) as the
+choice it names (`Game::describe_choice`: the card by name and index, the target, the number), a
+`KEY_AUTO` chance key without its action (its decision kind and player kept), no encodings. The
+default mode is unchanged (main's engine with this branch's digest test: 5f0579aa50453818). On
+this branch's head (main 87ea619), the desktop:
+
+| engine | `DIGEST_ENCODING=0` | `DIGEST_IDS=choices` |
+|---|---|---|
+| main 87ea619's (this branch's `tests/digest.rs`) | 5f0579aa50453818 (main's) | 4c1b03a561402745 |
+| this branch, the renaming switched off (a scratch build: `ask` keeps the `GRAVEYARD` ids) | 5f0579aa50453818 | 4c1b03a561402745 |
+| this branch | c62a5ce5f290814e | 4c1b03a561402745 |
+
+With the renaming off, every id, chance key and decision of the 2,500 games is main's bit for bit:
+nothing else in the branch plays differently. With it on, the games take the same choices among the
+same options, with the same chance keys and outcomes: only the ids changed. (Random play picks by
+index and the heuristic bot breaks ties by id order: the renaming keeps both.) The full digest
+65e8a5155bd2000c is re-recorded (`tests/data/digests.txt`: 1,543 of 2,500 games differ from main's
+file, those with a graveyard choice or target or a changed encoding; 808de5cb10665e48 on main,
+e7c1f39597f90ed7 after 65.8).
+
+### 65.12 Three more list mismatches, found by the new fuzz check
+
+The fuzzer now checks, at every decision, that every `LIBRARY` option points at a list token of the
+card or definition it names (`check_list_options`). It found two encoder bugs older than this
+branch, and reading the code a third; each fixed in `decision_list` (encoding only):
+
+* `NameCard` as a permanent enters ("look at an opponent's hand, then choose any card name":
+  Anointed Peacekeeper, `choose_name_as_enters`): `LIBRARY` + k is the k-th name of the opponent's
+  cards, but the list held the namer's own library (fuzz seed 32: the option "Abrupt Decay"
+  pointed at another card). Now the options' names.
+* `ChooseDiscard` with a permanent among its options ("exile a nonland card from their hand or the
+  chosen creature", Cloak and Dagger, `ExileHandCardOrTargetUntil`): the list's hand was the owner's
+  of the first card option in id order, the permanent (seed 2884: a creature its controller doesn't
+  own). Now the owner of a card in a hand.
+* Bolas's Citadel's top card with two faces to cast or play (`Choice::Faces`, `CastFace`,
+  `PlayFace` at `LIBRARY` + 0) had no list token. Now it has.
+
+### 65.13 Tests
+
+* `murktide_delve_maps_each_graveyard_id_to_its_card_and_encodes_the_picks` (`tests/az.rs`, the
+  successor of 65.6's): the replay's delve cast by each player in turn (the other's graveyard holds
+  two cards, not offered): at each pick the list is the caster's graveyard, each option `LIBRARY` +
+  its card's position, its text that card, the options the positions above the last pick that
+  leave enough, `list::CHOSEN` the picks so far, the passed cards present and not options; the
+  context, cost, bags and stack floats of 65.3 for both viewers; no segment scores a `GRAVEYARD` id
+  (Priority's, blind: the assert fails when they get a token); four counters.
+* `check_graveyard_list` (`tests/az.rs`), used at each such decision: the list against the rule,
+  each option's id against the layout's list pointer (`[340, 1]`), the decider's token in that slot
+  against the card (identity, present, option, `THEIRS`), every other slot (`COPIES`, `OPTION`),
+  the slots after the list empty, the other viewer's list block empty, no `GRAVEYARD` id.
+* `tamiyo_minus_three_targets_each_graveyard_card_by_its_list_token`: the -3 for each player, the
+  controller's graveyard whole (lands and creatures present, not targets; two Ponders, two slots),
+  Lightning Bolt returned.
+* `graveyard_targets_and_choices_over_both_graveyards_use_the_list`: Reanimate for each player (the
+  three creature cards of both graveyards, the caster's first), Archon of Cruelty reanimated;
+  Exhume (each player's own graveyard whole, the non-active player deciding in the active
+  player's spell).
+* `encoding_slots_name_the_action_slots` accepts a graveyard target in the list;
+  `reanimate_targets_a_card_in_any_graveyard_by_its_graveyard_list_slot` (`cards_m7a.rs`): the new
+  ids.
+* `graveyard_targets_fill_the_64_list_slots_then_fail_loudly_65_10` (`tests/limits.rs`): Lion Sash
+  with 32 + 32 graveyard cards offers `LIBRARY` .. `LIBRARY` + 63 (the opponent's last card the
+  last slot, exiled); with 33 + 32 the activation panics naming the limit.
+* The fuzzer (`tests/fuzz.rs`): at every decision a graveyard-list decision's options at their
+  cards' slots (and a list over both graveyards holding the offered cards only), every `LIBRARY`
+  option at its card's token (65.12), no `GRAVEYARD` id outside Priority; it reports the
+  decisions checked and the longest lists.
+
+### 65.14 Checks
+
+On main 87ea619 (zero-core b486d36), tier "engine + decision-id change": CPU only, the Mac at
+`nice -n 19` one job at a time, the desktop at below-normal priority with `CARGO_BUILD_JOBS=6`.
+
+* **Full Rust suite** (the Mac, `cargo test --release --no-fail-fast`): 111 test binaries, **1,469
+  passed, 0 failed** (15 ignored).
+* **Fuzz** (the Mac): the default pool, 20,000 games, **no failure** (235 s; 5,651,735 options
+  completed; 52,013 graveyard-list decisions checked, the longest list 57, at most 57 cards offered
+  from both graveyards); `FUZZ_POOL=delver`, 20,000 games, **no failure** (163 s; 4,399,041 options
+  completed, the determinize and information-set checks of every mode; 58,446 graveyard-list
+  decisions, the longest 46, none over both graveyards; Murktide Regent cast 16,376 times). Both
+  with 65.12's every-`LIBRARY`-option check.
+* `cargo test --release -p engine --test az --test limits --test hidden` (the desktop): **30 + 9 +
+  11 passed**; the public-state gate: 240 positions, 141 perturbations, 132 encoded, 3 deliberate
+  limits, 1 gap (the swap, 178 of 179 applications the same).
+* **Digests**: 65.11's table; the full digest re-recorded, **65e8a5155bd2000c**.
+* `python -m pytest -q tests`: **49 passed** (2 min 9 s).
+* **Search smoke** (the desktop, 4 threads): `python tools/search_smoke.py --specs delver --preset
+  delver-mirror --threads 4`: **0 failed of 4 configurations** (seeds 0-3, 400 games each, 0
+  unfinished, 114,339-116,708 decisions and 3.15-3.23 million simulations a configuration; 510 s).
+* **A running network on this build**: a copy of `runs/delver2/models/iter_0041.pt` (the newest;
+  sha256 ab0827e48aced1e4...) passes the encoding guard (`mtgz.az.replays.check_encoding`: layout v5)
+  and plays on the CPU (`third_party/zero-core/tools/selfplay_digest.py --package mtgz`, the
+  delver2 spec, 32 simulations): 8 self-play games per target (visits and cq, 686 samples each)
+  and **8 of 8** won against the random bot.
+
+### 65.15 Runs: re-pinning, and what the policy head must relearn
+
+* **Re-pinning is direct.** The layout is v5 and every float keeps its offset: a running network
+  (delver2, the A/B round's arms) loads (the encoding guard passes) and resumes; no widen, no fork,
+  no new iteration numbering. The change is an engine and decision-id change (its gates are 65.14),
+  so a run moves to it once it is on main.
+* **What the policy must relearn.** Only the graveyard choices' logits move. Their old ids
+  (404..531) were generic logits of the pooled state (one weight row per id: the per-position bias
+  of 65.1); in the Delver mirror those decisions are delve's picks (~4 a game) and Tamiyo's -3
+  targets. Now they are the list segment's pointer logits from the cards' tokens. That column was
+  trained on the other lists (the Delver networks: their fetch lands' searches and Ponder's pile;
+  the cube's: searches, piles, seen hands), so at first it scores graveyard cards with what it
+  learned there, not with the old position bias, and the visit targets of these decisions then
+  train it on graveyard choices. The generic rows of 404..531 are no longer read by them (Priority's
+  casts still read 404..467). The value head is untouched, so the search's Q values still find the
+  better card where they see a difference (65.2). `list::THEIRS` and `list::CHOSEN` are new inputs
+  of the list's token map (for the Delver networks those weights never met a non-zero input: a small
+  random term until trained).
+* **Still a learning problem** (65.9): the first pick of a delve decides the set; the value
+  differences are small (a +1/+1 counter); delirium and Tamiyo's -3 trade-offs come from the value
+  head. A gameplay review after some iterations should compare the counters lost per Regent (0.84
+  before) and the share of instants delved.
+* **Cube runs** (mtg5, td1, paused): the same re-pin; their games have choices over both
+  graveyards (Reanimate, Lion Sash), whose lists are the offered cards. The 64 limit is a loud
+  failure: a Lion Sash with more than 64 cards in the two graveyards stops the worker (watch_run
+  sees it). The fuzz's most is 57 in 20,000 random games (65.10), so it is reachable in a long
+  milling game; if it happens, the class-B alternative is 58.4's (offer the first 64), a rules
+  departure the user would have to accept.

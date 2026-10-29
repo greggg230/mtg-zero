@@ -6,7 +6,9 @@
 //! below the targeting spell or ability, the deeper (older) items can't be
 //! targeted, and a cast or a trigger is offered only with a target in reach.
 //! 58.2: 96 permanents a player (a control change or another player's card
-//! entering). 58.3: the deck limit counts a companion.
+//! entering). 58.3: the deck limit counts a companion. 65.10: the graveyard
+//! cards a choice or a target offers fill the 64 list slots; more fail
+//! loudly.
 
 mod common;
 
@@ -343,5 +345,52 @@ fn a_copy_of_a_permanent_spell_beyond_96_ceases_to_exist_58_2() {
         let sages = g.permanents_of(0).filter(|&c| g.name(c) == "Sage of the Skies").count();
         assert_eq!(sages, 1 + copies, "{islands} Islands: {}", g.log_lines().join("\n"));
         assert!(g.permanents_of(0).count() <= act::PERM_N as usize);
+    }
+}
+
+/// ENGINE.md 65.10: a graveyard-card choice or target is `LIBRARY` + the
+/// card's slot in the decision's graveyard list, at most 64 cards. With
+/// offered cards in both graveyards the list holds the offered cards only,
+/// the decider's first; more than 64 fails loudly (an assert naming the
+/// limit, docs/shortcuts.md 65.10), never an id beyond the list or a card left
+/// out. Lion Sash ("{W}: exile target card from a graveyard", any card) with
+/// 32 cards in each graveyard: 64 targets, `LIBRARY` .. `LIBRARY` + 63, the
+/// other player's last card the last slot; with 33 and 32 the activation
+/// panics at its target.
+#[test]
+fn graveyard_targets_fill_the_64_list_slots_then_fail_loudly_65_10() {
+    use engine::Step;
+    for (mine, theirs) in [(32usize, 32usize), (33, 32)] {
+        let mut g = scen()
+            .battlefield(0, &["Lion Sash", "Plains"])
+            .graveyard(0, &vec!["Lightning Bolt"; mine])
+            .graveyard(1, &vec!["Swamp"; theirs])
+            .at(Step::Main1, 0)
+            .start();
+        let sash = g.card(0, "Lion Sash", Zone::Battlefield);
+        let activate = Choice::Ability(sash, AbilitySlot::Activated(0));
+        assert!(g.has_option(activate));
+        if mine + theirs <= act::LIBRARY_N as usize {
+            g.choose(activate);
+            g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+            let want: Vec<u16> = (0..64).map(|k| act::LIBRARY + k).collect();
+            assert_eq!(actions(&g), want, "every card of both graveyards, the decider's first");
+            let last = *g.player(1).graveyard.last().unwrap();
+            assert_eq!(g.pending_decision().unwrap().action_of(g.tgt(last)), Some(act::LIBRARY + 63));
+            g.choose(g.tgt(last));
+            finish(&mut g, |_| None);
+            g.pass();
+            g.pass();
+            g.drive_until(at_priority);
+            assert_eq!(g.obj(last).zone, Zone::Exile, "{}", g.log_lines().join("\n"));
+        } else {
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                g.choose(activate);
+                g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+            }));
+            let e = r.expect_err("65 graveyard targets must fail loudly");
+            let msg = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+            assert!(msg.contains("65 graveyard cards offered from both graveyards") && msg.contains("64 slots"), "{msg}");
+        }
     }
 }

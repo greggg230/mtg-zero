@@ -357,6 +357,116 @@ fn check_bounded(x: &[f32], what: &dyn Fn() -> String) {
     SQUASHED.fetch_add(squashed as u64, Ordering::Relaxed);
 }
 
+/// Graveyard-list decisions checked, the longest list, the most cards
+/// offered from both graveyards (ENGINE.md 65.10: the list then holds the
+/// offered cards only; more than 64 fails loudly).
+static GY_LISTS: AtomicU64 = AtomicU64::new(0);
+static GY_LIST_MAX: AtomicU64 = AtomicU64::new(0);
+static GY_LIST_BOTH_MAX: AtomicU64 = AtomicU64::new(0);
+
+/// The pending decision's graveyard list (ENGINE.md 65.10) in the decider's
+/// encoding `x`: each option naming a card in a graveyard is `LIBRARY` + k,
+/// k that card's slot in the list (the offered cards' graveyard whole, in
+/// order; offered cards in both: those only, the decider's first), and the
+/// list token in slot k is
+/// that card (its identity, present, an option, whose graveyard); the slots
+/// after the list are empty; no option of any decision but Priority keeps a
+/// `GRAVEYARD` id.
+fn check_graveyard_list(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
+    use engine::act;
+    use engine::az::encode::{list, CODE, LIST, LIST_W, O_LIST};
+    use engine::{Target, Zone};
+    let Some(d) = g.pending_decision() else { return };
+    if d.kind != DecisionKind::Priority {
+        assert!(
+            !d.options.iter().any(|o| (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&o.action)),
+            "{}: {:?} keeps a GRAVEYARD id",
+            what(),
+            d.kind
+        );
+    }
+    let gy = g.graveyard_list(d.player, d.kind, &d.options);
+    if gy.is_empty() {
+        return;
+    }
+    GY_LISTS.fetch_add(1, Ordering::Relaxed);
+    GY_LIST_MAX.fetch_max(gy.len() as u64, Ordering::Relaxed);
+    if gy.iter().any(|&c| g.obj(c).owner == d.player) && gy.iter().any(|&c| g.obj(c).owner != d.player) {
+        GY_LIST_BOTH_MAX.fetch_max(gy.len() as u64, Ordering::Relaxed);
+        assert!(
+            gy.iter().all(|&c| d.options.iter().any(|o| o.action != act::PASS && matches!(o.choice, Choice::Card(x) if x == c) || matches!(o.choice, Choice::Target(Target::Obj(r)) if r.idx == c))),
+            "{}: a list over both graveyards holds the offered cards only",
+            what()
+        );
+    }
+    let ids = engine::az::identity::identities(g.db());
+    let id_at = |k: usize| -> usize {
+        let c = &x[O_LIST + k * LIST_W..O_LIST + k * LIST_W + 32];
+        let a = c[..16].iter().position(|&v| v == 1.0).unwrap_or(99);
+        let b = c[16..24].iter().position(|&v| v == 1.0).unwrap_or(99);
+        let e = c[24..32].iter().position(|&v| v == 1.0).unwrap_or(99);
+        a * 64 + b * 8 + e
+    };
+    let mut named = 0;
+    for o in &d.options {
+        let c = match o.choice {
+            Choice::Card(i) => i,
+            Choice::Target(Target::Obj(r)) => r.idx,
+            _ => continue,
+        };
+        if g.obj(c).zone != Zone::Graveyard {
+            continue;
+        }
+        let k = gy.iter().position(|&y| y == c).unwrap_or_else(|| panic!("{}: {} not in its graveyard list", what(), g.name(c)));
+        assert_eq!(o.action, act::LIBRARY + k as u16, "{}: {:?} {} is list slot {k}", what(), d.kind, g.name(c));
+        let s = &x[O_LIST + k * LIST_W + CODE..O_LIST + (k + 1) * LIST_W];
+        assert_eq!(id_at(k), ids[g.obj(c).def as usize] as usize, "{}: {:?} slot {k}'s token isn't {}", what(), d.kind, g.name(c));
+        assert_eq!((s[list::PRESENT], s[list::OPTION]), (1.0, 1.0), "{}: {:?} slot {k}", what(), d.kind);
+        assert_eq!(s[list::THEIRS], (g.obj(c).owner != d.player) as u8 as f32, "{}: slot {k}", what());
+        named += 1;
+    }
+    assert!(named > 0, "{}: a graveyard list without a graveyard option", what());
+    for k in gy.len()..LIST {
+        assert!(x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W].iter().all(|&v| v == 0.0), "{}: list slot {k} after the list", what());
+    }
+}
+
+/// Every `LIBRARY` option of the pending decision points at a list token
+/// of the card it names (ENGINE.md 11, 65.10): the decider's list slot k
+/// (`x`) is present, an option, and the identity of the option's card or
+/// definition (a searched library, a pile, a seen hand, a name, a companion,
+/// the Citadel's top card, a graveyard card).
+fn check_list_options(g: &Game, x: &[f32], what: &dyn Fn() -> String) {
+    use engine::act;
+    use engine::az::encode::{list, CODE, LIST_W, O_LIST};
+    use engine::Target;
+    let Some(d) = g.pending_decision() else { return };
+    let ids = engine::az::identity::identities(g.db());
+    for o in d.options.iter().filter(|o| (act::LIBRARY..act::LIBRARY + act::LIBRARY_N).contains(&o.action)) {
+        let k = (o.action - act::LIBRARY) as usize;
+        let def = match o.choice {
+            Choice::Def(d) => d,
+            Choice::Card(c) | Choice::Cast(c) | Choice::Play(c) | Choice::CastFace(c) | Choice::PlayFace(c) | Choice::Faces(c, _) => g.obj(c).def,
+            Choice::Target(Target::Obj(r)) => g.obj(r.idx).def,
+            other => panic!("{}: {:?}'s LIBRARY option {other:?}", what(), d.kind),
+        };
+        let s = &x[O_LIST + k * LIST_W..O_LIST + (k + 1) * LIST_W];
+        let digit = |a: usize, n: usize| s[a..a + n].iter().position(|&v| v == 1.0).unwrap_or(99);
+        let id = digit(0, 16) * 64 + digit(16, 8) * 8 + digit(24, 8);
+        assert!(
+            id == ids[def as usize] as usize && s[CODE + list::PRESENT] == 1.0 && s[CODE + list::OPTION] == 1.0,
+            "{}: {:?} option {} ({}) points at list slot {k} (identity {id}, present {}, option {}), not its card's token ({})",
+            what(),
+            d.kind,
+            o.action,
+            g.describe_choice(o.choice),
+            s[CODE + list::PRESENT],
+            s[CODE + list::OPTION],
+            ids[def as usize]
+        );
+    }
+}
+
 /// `viewer`'s encoding of `g` (`buf`: a scratch vector) is bounded.
 fn check_encoding(g: &Game, viewer: u8, buf: &mut Vec<f32>, what: &dyn Fn() -> String) {
     buf.clear();
@@ -533,8 +643,12 @@ fn play(seed: u64, checks: bool) -> Played {
         };
         if checks {
             count_kind(g.kind());
-            // The decider's encoding is finite and bounded (ENGINE.md 46).
+            // The decider's encoding is finite and bounded (ENGINE.md 46);
+            // a graveyard card's option points at its list token (ENGINE.md
+            // 65.10).
             check_encoding(&g, g.to_move().unwrap(), &mut buf, &|| format!("seed {seed} step {steps}"));
+            check_graveyard_list(&g, &buf, &|| format!("seed {seed} step {steps}"));
+            check_list_options(&g, &buf, &|| format!("seed {seed} step {steps}"));
             record_extremes(&g);
         }
         if checks && rng.below(40) == 0 {
@@ -815,6 +929,15 @@ fn fuzz_random_games() {
         assert!(MAX_POWER.load(Ordering::Relaxed) > 65_535, "no board past 65,535 power: {}", extremes_report());
     }
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
+    println!(
+        "graveyard lists (ENGINE.md 65.10): {} decisions checked, longest {} (cards offered from both graveyards: at most {}; the limit 64)",
+        GY_LISTS.load(Ordering::Relaxed),
+        GY_LIST_MAX.load(Ordering::Relaxed),
+        GY_LIST_BOTH_MAX.load(Ordering::Relaxed)
+    );
+    if n >= 200 {
+        assert!(GY_LISTS.load(Ordering::Relaxed) > 0, "no graveyard-list decision in {n} games");
+    }
     if delver_mode() {
         let (m, t, c) =
             (DELVER_MURKTIDES.load(Ordering::Relaxed), DELVER_MURK_TRIGGERS.load(Ordering::Relaxed), DELVER_CHARMS.load(Ordering::Relaxed));

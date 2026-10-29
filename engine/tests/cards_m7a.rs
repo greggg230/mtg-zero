@@ -356,7 +356,7 @@ fn frantic_search_untaps_up_to_three_lands_one_set_at_a_time() {
 }
 
 #[test]
-fn reanimate_targets_a_card_in_any_graveyard_by_its_graveyard_slot() {
+fn reanimate_targets_a_card_in_any_graveyard_by_its_graveyard_list_slot() {
     let mut g = scen()
         .battlefield(0, &["Swamp"])
         .graveyard(0, &["Island", "Test Bear"])
@@ -368,11 +368,12 @@ fn reanimate_targets_a_card_in_any_graveyard_by_its_graveyard_slot() {
     let bear = g.card(0, "Test Bear", Zone::Graveyard);
     cast(&mut g, 0, "Reanimate");
     assert_eq!(g.kind(), Some(DecisionKind::Target));
-    // GRAVEYARD ids: the decider's slots 0..63 (Test Bear is slot 1), the
-    // opponent's from 64. A land is not a creature card.
+    // The graveyard list's ids (ENGINE.md 65.10): creature cards in both
+    // graveyards, so the offered cards, the decider's first (Test Bear is
+    // slot 0, Griselbrand slot 1). A land is not a creature card.
     let d = g.pending_decision().unwrap();
     let ids: Vec<u16> = d.options.iter().map(|o| o.action).collect();
-    assert_eq!(ids, vec![engine::act::GRAVEYARD + 1, engine::act::GRAVEYARD + 64]);
+    assert_eq!(ids, vec![engine::act::LIBRARY, engine::act::LIBRARY + 1]);
     g.choose(g.tgt(gris));
     g.drive_until(at_priority);
     pay(&mut g);
