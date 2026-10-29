@@ -10788,8 +10788,8 @@ most 8 test threads, own cargo targets `E:/cargo-target/zero-core/shared-queue2`
   quota exact, no shard late, no requeue or duplicate.
 * **smoke_all** (`SKIP_CORE=1 SMOKE_TARGET=shared-queue2-smoke bash tools/smoke_all.sh
   --with-this-core` with Glass Road Zero c1f56dc, Caverna Zero a6fad73 and Kingdom Builder Zero
-  4202a4a at 9453e18): in the background (the merge report has its result); needed only before
-  zero-core's main moves.
+  4202a4a at 9453e18): **GREEN**, 12 of 12 steps (each game's build, cargo test, pytest - 33, 32
+  and 45 passed - and smoke run), 480 s; needed only before zero-core's main moves.
 
 ### 56.8 Measured on this machine (no Mac)
 
