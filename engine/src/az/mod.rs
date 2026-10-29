@@ -20,6 +20,7 @@
 //! event, deckbuilding, the deferred terminal), `draft_encode.rs` (layout
 //! `draft_v2`), `draft_bots.rs` (`consensus`, heuristic-played matches).
 
+pub mod belief;
 pub mod bots;
 pub mod constructed;
 pub mod decks;
@@ -598,5 +599,14 @@ impl SearchGame for MtgAz {
         for &c in &self.g.player(1 - viewer as u8).hand {
             out[ids[self.g.obj(c).def as usize] as usize] += 1.0;
         }
+    }
+
+    /// `determinize` dealt by the root's belief (ENGINE.md 69, zero-core docs/search.md 3.8): the
+    /// same constraints, the best-of-three hidden pool first, then the opponent's hand's unknown
+    /// slots drawn by the weights of `belief::deal_weights` (the head's distribution over their
+    /// hand's cards against the uniform deal's, tilted and clipped). Between the games of a match
+    /// (no hand to deal): `determinize`.
+    fn determinize_with(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, belief: &zero_search::game::Belief) {
+        self.determinize_belief(viewer, rng, belief);
     }
 }

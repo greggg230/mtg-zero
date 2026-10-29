@@ -92,6 +92,32 @@ fn seen_bits_of(db: &'static crate::db::CardDb) -> &'static [u16] {
     &b.1
 }
 
+/// `k` sequential draws without replacement from the sorted multiset
+/// `pool` (removed from it, which stays sorted), each card of identity d
+/// with probability proportional to `w(d)` (Wallenius' urn; ENGINE.md 69.2):
+/// a function of the multiset and `rng` only, never of where the cards lie.
+fn weighted_draws(pool: &mut Vec<DefId>, k: usize, w: &dyn Fn(DefId) -> f64, rng: &mut Rng) -> Vec<DefId> {
+    let mut out = Vec::with_capacity(k);
+    let mut wt: Vec<f64> = pool.iter().map(|&d| w(d)).collect();
+    debug_assert!(wt.iter().all(|x| x.is_finite() && *x > 0.0), "deal weights finite and > 0");
+    for _ in 0..k.min(pool.len()) {
+        let tot: f64 = wt.iter().sum();
+        // (a uniform in [0, 1) from 53 bits)
+        let mut x = (rng.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64) * tot;
+        let mut pick = pool.len() - 1;
+        for (j, &q) in wt.iter().enumerate() {
+            x -= q;
+            if x < 0.0 {
+                pick = j;
+                break;
+            }
+        }
+        wt.remove(pick);
+        out.push(pool.remove(pick));
+    }
+    out
+}
+
 /// Remove one `d` from a sorted multiset; false if absent.
 fn take_one(v: &mut Vec<DefId>, d: DefId) -> bool {
     match v.binary_search(&d) {
@@ -559,6 +585,39 @@ impl Game {
     pub fn determinize(&mut self, viewer: PlayerId, rng: &mut Rng) {
         let payer = self.payment_in_progress();
         self.deal_hidden(viewer, payer, rng);
+        self.after_deal(viewer, rng);
+    }
+
+    /// `determinize` with the hand of `viewer`'s opponent dealt by weights
+    /// (ENGINE.md 69: zero-core's belief-weighted determinization): every
+    /// constraint of `determinize` kept - known cards, clouds, pinned cards,
+    /// the public zones, the hand size -, the reseeding and the refresh the
+    /// same; the opponent's hand slots that no cloud covers are filled by
+    /// sequential sampling without replacement from the hidden pool, each
+    /// draw taking a card of identity d with probability proportional to
+    /// `w(d)` x its copies left (Wallenius' urn); a cloud that covers the
+    /// hand places its listed cards in its domain as before, then deals its
+    /// hand slots from its cards by the same weights; everything else
+    /// (libraries, face-down cards, the viewer's own unknown cards) is
+    /// shuffled uniformly as `determinize` does. Weights all equal: the
+    /// uniform deal's distribution (another random stream). `w` must be
+    /// finite and > 0.
+    pub fn determinize_weighted(&mut self, viewer: PlayerId, rng: &mut Rng, w: &dyn Fn(DefId) -> f64) {
+        let payer = self.payment_in_progress();
+        for owner in 0..2u8 {
+            if owner == viewer {
+                self.deal_owner(viewer, owner, payer, rng);
+            } else {
+                let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
+                let defs: Vec<DefId> = slots.iter().map(|&c| self.ident(c)).collect();
+                self.resample_weighted(viewer, owner, &slots, &pinned, defs, rng, w);
+            }
+        }
+        self.after_deal(viewer, rng);
+    }
+
+    /// What `determinize` does after its deal: reseed, observe, refresh.
+    fn after_deal(&mut self, viewer: PlayerId, rng: &mut Rng) {
         self.rng = Rng::new(rng.next_u64());
         self.observer = Some(viewer);
         // The viewer's own options never name a card whose identity was
@@ -579,16 +638,84 @@ impl Game {
     /// again (but the cards a payment in progress by `payer` pins).
     fn deal_hidden(&mut self, viewer: PlayerId, payer: Option<PlayerId>, rng: &mut Rng) {
         for owner in 0..2u8 {
-            let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
-            let mut defs: SVec<DefId, 64> = slots.iter().map(|&c| self.ident(c)).collect();
-            if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
-                rng.shuffle(&mut defs);
-                for (&c, &d) in slots.iter().zip(defs.iter()) {
-                    self.set_ident(c, d);
-                }
-                continue;
+            self.deal_owner(viewer, owner, payer, rng);
+        }
+    }
+
+    /// `deal_hidden` of one owner's cards.
+    fn deal_owner(&mut self, viewer: PlayerId, owner: PlayerId, payer: Option<PlayerId>, rng: &mut Rng) {
+        let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
+        let mut defs: SVec<DefId, 64> = slots.iter().map(|&c| self.ident(c)).collect();
+        if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
+            rng.shuffle(&mut defs);
+            for (&c, &d) in slots.iter().zip(defs.iter()) {
+                self.set_ident(c, d);
             }
-            self.resample_with_clouds(viewer, owner, &slots, &pinned, defs.to_vec(), rng);
+            return;
+        }
+        self.resample_with_clouds(viewer, owner, &slots, &pinned, defs.to_vec(), rng);
+    }
+
+    /// `determinize_weighted`'s deal of `owner`'s cards `slots` (identities
+    /// `defs`): `resample_with_clouds` with the hand weighted (ENGINE.md 69.2).
+    #[allow(clippy::too_many_arguments)]
+    fn resample_weighted(
+        &mut self,
+        viewer: PlayerId,
+        owner: PlayerId,
+        slots: &[CardIdx],
+        pinned: &[CardIdx],
+        defs: Vec<DefId>,
+        rng: &mut Rng,
+        w: &dyn Fn(DefId) -> f64,
+    ) {
+        let mut pool = defs;
+        pool.sort_unstable();
+        let clouds = self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner);
+        let (home, needs) = if clouds { self.cloud_needs(viewer, owner, slots, pinned) } else { (vec![None; slots.len()], Vec::new()) };
+        for need in &needs {
+            for &d in need {
+                assert!(take_one(&mut pool, d), "determinize: a cloud's card {d} is not among P{owner}'s hidden cards for P{viewer}");
+            }
+        }
+        let in_hand: Vec<bool> = slots.iter().map(|&c| self.objs[c.i()].zone == Zone::Hand).collect();
+        // The hand's slots outside every cloud (the hand is one pool: a cloud
+        // covers all of it or none): weighted draws from the pool.
+        let free_hand = (0..slots.len()).filter(|&i| in_hand[i] && home[i].is_none()).count();
+        let hand_ids = weighted_draws(&mut pool, free_hand, w, rng);
+        rng.shuffle(&mut pool);
+        let mut free = pool.into_iter();
+        let mut per_cloud: Vec<Vec<DefId>> = needs;
+        for (ki, v) in per_cloud.iter_mut().enumerate() {
+            let mine: Vec<usize> = (0..slots.len()).filter(|&i| home[i] == Some(ki)).collect();
+            while v.len() < mine.len() {
+                v.push(free.next().expect("pool covers every place"));
+            }
+            // its hand slots (in its slot order) by the weights, the rest uniform
+            let hand_pos: Vec<usize> = mine.iter().enumerate().filter(|&(_, &i)| in_hand[i]).map(|(k, _)| k).collect();
+            if hand_pos.is_empty() {
+                rng.shuffle(v);
+            } else {
+                v.sort_unstable();
+                let drawn = weighted_draws(v, hand_pos.len(), w, rng);
+                rng.shuffle(v);
+                let mut rest = std::mem::take(v).into_iter();
+                let mut d = drawn.into_iter();
+                *v = (0..mine.len()).map(|k| (if hand_pos.contains(&k) { d.next() } else { rest.next() }).expect("a cloud's cards fill its places")).collect();
+            }
+        }
+        let mut next = vec![0usize; per_cloud.len()];
+        let mut hand_next = hand_ids.into_iter();
+        for (i, &c) in slots.iter().enumerate() {
+            let d = match home[i] {
+                Some(ki) => {
+                    next[ki] += 1;
+                    per_cloud[ki][next[ki] - 1]
+                }
+                None if in_hand[i] => hand_next.next().expect("a draw for every hand slot"),
+                None => free.next().expect("pool covers every place"),
+            };
+            self.set_ident(c, d);
         }
     }
 

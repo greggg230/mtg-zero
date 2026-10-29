@@ -554,3 +554,173 @@ fn a_non_deciding_viewers_features_ignore_pinned_cards_of_a_payment() {
     println!("{checked} worlds, {pinned_seen} decisions with pinned cards");
     assert!(pinned_seen >= 2, "{pinned_seen}");
 }
+
+// ---- Belief-weighted deals (ENGINE.md 69) ----------------------------------
+
+/// P0 to act; P1 holds two cards P0 cannot see, its library three: the hidden
+/// pool {Lightning Bolt 1, Island 3, Counterspell 1} for a hand of 2.
+fn urn_game() -> Game {
+    Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island"])
+        .hand(0, &["Mountain"])
+        .library(0, &["Forest", "Plains", "Swamp", "Island"])
+        .hand(1, &["Lightning Bolt", "Island"])
+        .library(1, &["Island", "Island", "Counterspell"])
+        .at(Step::Main1, 0)
+        .start()
+}
+
+/// P(the hand holds the multiset {x, y}) when 2 cards are drawn one at a time
+/// without replacement from `counts`, each card with probability proportional
+/// to `w` (Wallenius' urn).
+fn wallenius2(counts: &[(u16, u32)], w: &dyn Fn(u16) -> f64) -> Vec<((u16, u16), f64)> {
+    let mut out: Vec<((u16, u16), f64)> = Vec::new();
+    let tot: f64 = counts.iter().map(|&(d, c)| c as f64 * w(d)).sum();
+    for &(x, cx) in counts {
+        let p1 = cx as f64 * w(x) / tot;
+        let tot2 = tot - w(x);
+        for &(y, cy) in counts {
+            let left = if y == x { cy - 1 } else { cy };
+            let p2 = left as f64 * w(y) / tot2;
+            let key = if x <= y { (x, y) } else { (y, x) };
+            match out.iter_mut().find(|e| e.0 == key) {
+                Some(e) => e.1 += p1 * p2,
+                None => out.push((key, p1 * p2)),
+            }
+        }
+    }
+    out
+}
+
+fn hand_pair(g: &Game, p: PlayerId) -> (u16, u16) {
+    let mut h: Vec<u16> = g.player(p).hand.iter().map(|&c| g.ident(c)).collect();
+    h.sort();
+    (h[0], h[1])
+}
+
+/// `determinize_weighted` draws the opponent's unknown hand slots from its
+/// hidden pool by sequential weighted sampling: the hand's composition follows
+/// Wallenius' urn exactly (20k deals of a 5-card pool), weights all 1 give
+/// `determinize`'s (hypergeometric) distribution, and every constraint holds:
+/// the viewer's actions and view, its own hand, every owner's cards.
+#[test]
+fn a_weighted_deal_follows_the_wallenius_urn() {
+    let g = urn_game();
+    let id = |n: &str| db().expect_id(n).unwrap();
+    let (bolt, island, cs) = (id("Lightning Bolt"), id("Island"), id("Counterspell"));
+    let counts = [(bolt, 1), (island, 3), (cs, 1)];
+    let mut legal = Vec::new();
+    g.legal_actions(&mut legal);
+    let n = 20_000;
+    let weights: [&dyn Fn(u16) -> f64; 3] = [
+        &|d| if d == bolt { 6.0 } else if d == cs { 1.0 } else { 0.25 },
+        &|d| if d == island { 3.0 } else { 0.5 },
+        &|_| 1.0,
+    ];
+    for (k, w) in weights.iter().enumerate() {
+        let want = wallenius2(&counts, *w);
+        let mut seen: std::collections::HashMap<(u16, u16), u32> = Default::default();
+        let mut uni: std::collections::HashMap<(u16, u16), u32> = Default::default();
+        for s in 0..n {
+            let mut d = g.clone();
+            d.determinize_weighted(0, &mut Rng::new(s), *w);
+            *seen.entry(hand_pair(&d, 1)).or_default() += 1;
+            if s < 400 {
+                let mut l2 = Vec::new();
+                d.legal_actions(&mut l2);
+                assert_eq!(legal, l2, "the viewer's actions");
+                assert_eq!(public_view(&g), public_view(&d));
+                for p in 0..2 {
+                    assert_eq!(defs_of(&g, p), defs_of(&d, p), "P{p}'s cards");
+                }
+                assert_eq!(g.player(0).hand.iter().map(|&c| g.obj(c).def).collect::<Vec<_>>(), d.player(0).hand.iter().map(|&c| d.obj(c).def).collect::<Vec<_>>());
+                d.check_invariants().unwrap();
+            }
+            if k == 2 {
+                let mut e = g.clone();
+                e.determinize(0, &mut Rng::new(s + 1_000_000));
+                *uni.entry(hand_pair(&e, 1)).or_default() += 1;
+            }
+        }
+        for (key, p) in &want {
+            let f = *seen.get(key).unwrap_or(&0) as f64 / n as f64;
+            let se = (p * (1.0 - p) / n as f64).sqrt();
+            assert!((f - p).abs() < 4.0 * se + 1e-3, "weights {k}: {key:?} dealt {f:.4}, Wallenius {p:.4}");
+            if k == 2 {
+                let fu = *uni.get(key).unwrap_or(&0) as f64 / n as f64;
+                assert!((fu - p).abs() < 4.0 * se + 1e-3, "determinize: {key:?} dealt {fu:.4}, hypergeometric {p:.4}");
+            }
+        }
+        assert_eq!(seen.values().sum::<u32>() as u64, n);
+    }
+}
+
+/// A cloud over the hand (P1 saw a card of P0's hand, then P0 Brainstormed:
+/// it is in P0's hand or among the two cards put back) keeps its card in its
+/// domain whatever the weights, and the weights move it between the hand and
+/// the top of the library.
+#[test]
+fn a_weighted_deal_keeps_a_clouds_card_in_its_domain() {
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island"])
+        .hand(0, &["Brainstorm", "Mountain"])
+        .hand_known(0, &["Test Bear"])
+        .library(0, &["Forest", "Plains", "Swamp", "Island", "Lightning Bolt", "Counterspell", "Forest", "Forest"])
+        .library(1, &["Island"; 6])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    let bear_def = g.obj(bear).def;
+    let bs = g.card(0, "Brainstorm", Zone::Hand);
+    g.choose(Choice::Cast(bs));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard));
+    g.choose(Choice::Card(bear));
+    let mountain = g.card(0, "Mountain", Zone::Hand);
+    g.choose(Choice::Card(mountain));
+    assert_eq!(g.clouds().len(), 1);
+    let top2: Vec<CardIdx> = g.player(0).library.iter().rev().take(2).copied().collect();
+    let mut in_hand = [0u32; 3];
+    for (k, wb) in [1.0, 50.0, 0.02].into_iter().enumerate() {
+        let w = move |d: u16| if d == bear_def { wb } else { 1.0 };
+        for s in 0..600 {
+            let mut d = g.clone();
+            d.determinize_weighted(1, &mut Rng::new(s), &w);
+            d.check_invariants().unwrap();
+            d.check_knowledge().unwrap();
+            for p in 0..2 {
+                assert_eq!(defs_of(&g, p), defs_of(&d, p), "P{p}'s cards");
+            }
+            let at = slots_with(&d, 0, bear_def);
+            assert!(at.iter().any(|c| d.player(0).hand.contains(c) || top2.contains(c)), "seed {s}: the Bear left its domain");
+            in_hand[k] += at.iter().any(|c| d.player(0).hand.contains(c)) as u32;
+        }
+    }
+    assert!(in_hand[1] > in_hand[0] + 60 && in_hand[2] + 60 < in_hand[0], "the Bear in hand: {in_hand:?} (weights 1, 50, 1/50)");
+}
+
+/// The deal's weights read only the viewer's information (ENGINE.md 69.2): in
+/// worlds `determinize(viewer)` deals - which differ in the opponent's hidden
+/// cards - the weights for one belief are the same, bit for bit.
+#[test]
+fn deal_weights_ignore_the_opponents_hidden_cards() {
+    let (mut worlds, mut differ) = (0, 0);
+    for seed in 0..40 {
+        let g = random_game(seed, 20 + (seed as usize % 7) * 15);
+        let Some(viewer) = g.to_move() else { continue };
+        let mut r = Rng::new(seed);
+        let p: Vec<f32> = (0..engine::az::identity::D).map(|_| r.below(1000) as f32 + 1.0).collect();
+        let s: f32 = p.iter().sum();
+        let p: Vec<f32> = p.iter().map(|x| x / s).collect();
+        let w0 = engine::az::belief::deal_weights(&g, viewer, &p, 1.0, 20.0);
+        for k in 0..4 {
+            let mut d = g.clone();
+            d.determinize(viewer, &mut Rng::new(seed * 10 + k));
+            differ += (g.player(1 - viewer).hand.iter().any(|&c| g.ident(c) != d.ident(c))) as u32;
+            assert_eq!(w0, engine::az::belief::deal_weights(&d, viewer, &p, 1.0, 20.0), "seed {seed}: the weights read a hidden card");
+            worlds += 1;
+        }
+    }
+    assert!(worlds > 100 && differ > worlds / 3, "{worlds} worlds, {differ} with another opponent hand");
+}

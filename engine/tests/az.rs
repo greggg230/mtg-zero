@@ -2128,3 +2128,192 @@ fn root_view_leaves_encode_alike_whatever_the_deciders_options() {
     println!("compared {compared} positions of the other player, {other_options} with other options in the two worlds");
     assert!(compared > 300 && other_options > 10, "{compared} {other_options}");
 }
+
+// ---- Belief-weighted determinization (ENGINE.md 69) -------------------------
+
+/// A random belief over the identities (a Dirichlet-like draw, sharpened by `sharp`).
+fn random_belief(rng: &mut Rng, sharp: u32) -> Vec<f32> {
+    let mut p: Vec<f32> = (0..identity::D).map(|_| (rng.below(1000) as f32 + 1.0).powi(sharp as i32)).collect();
+    let s: f32 = p.iter().sum();
+    p.iter_mut().for_each(|x| *x /= s);
+    p
+}
+
+fn zbelief(pred: Vec<f32>, tilt: f64, clip: f64) -> zero_search::game::Belief {
+    zero_search::game::Belief { pred, tilt, clip }
+}
+
+/// Every card `owner` has in the game, by identity (sorted).
+fn cards_of(g: &MtgAz, owner: u8) -> Vec<u16> {
+    let mut v: Vec<u16> = g.g.objs().iter().enumerate().filter(|(_, o)| o.owner == owner).map(|(i, _)| g.g.ident(engine::CardIdx(i as u16))).collect();
+    v.sort();
+    v
+}
+
+/// `determinize_with` keeps every invariant `determinize` keeps, whatever the belief: on the
+/// public-state gate's positions (the cube, the Delver mirror, best-of-three, a drafted match) and
+/// random beliefs at tilts 0.5 / 1 / 8 (clip 20 or 1e6), for both viewers - the decider's actions,
+/// each viewer's features, the cards it knows where they are, the game's invariants and clouds, every
+/// player's cards (best-of-one: the same multiset; best-of-three: the sampled deck's), hand sizes.
+#[test]
+fn belief_deals_keep_every_determinize_invariant() {
+    let mut rng = Rng::new(69);
+    let (mut worlds, mut moved) = (0, 0);
+    for (name, g) in gate_positions(scale(20) as usize, 69) {
+        let mover = g.to_move().unwrap();
+        for viewer in [mover, 1 - mover] {
+            let x0 = enc(&g, viewer);
+            for (tilt, clip) in [(0.5, 20.0), (1.0, 20.0), (8.0, 1e6)] {
+                let b = zbelief(random_belief(&mut rng, 3), tilt, clip);
+                let mut d = g.clone();
+                let w = d.determinize_belief(viewer, &mut zero_search::rng::Rng::new(rng.next_u64()), &b);
+                assert!(w.is_some(), "{name}: a game in progress takes the belief");
+                assert_eq!(d.to_move(), Some(mover), "{name}");
+                if viewer == mover {
+                    assert_eq!(legal(&g), legal(&d), "{name}: the decider's actions changed");
+                }
+                let x1 = enc(&d, viewer);
+                if let Some(i) = (0..NUM_FEATURES).find(|&i| x0[i] != x1[i]) {
+                    panic!("{name}: feature {i} of P{viewer} changed in a belief-dealt world ({} -> {})", x0[i], x1[i]);
+                }
+                for (i, o) in g.g.objs().iter().enumerate() {
+                    let c = engine::CardIdx(i as u16);
+                    if g.g.knows(viewer as u8, c) {
+                        assert_eq!((o.def, g.g.ident(c)), (d.g.obj(c).def, d.g.ident(c)), "{name}: a card P{viewer} knows was dealt again");
+                    }
+                }
+                d.g.check_invariants().unwrap_or_else(|e| panic!("{name}: {e}"));
+                d.g.check_knowledge().unwrap_or_else(|e| panic!("{name}: {e}"));
+                for p in 0..2u8 {
+                    assert_eq!(g.g.player(p).hand.len(), d.g.player(p).hand.len(), "{name}: hand size");
+                    if name != "bo3" && name != "drafted" {
+                        assert_eq!(cards_of(&g, p), cards_of(&d, p), "{name}: P{p}'s cards");
+                    }
+                }
+                moved += (g.g.player(1 - viewer as u8).hand.iter().any(|&c| g.g.ident(c) != d.g.ident(c))) as u32;
+                worlds += 1;
+            }
+        }
+    }
+    println!("{worlds} belief-dealt worlds, {moved} with another opponent hand");
+    assert!(worlds > 300 && moved > worlds / 3, "{worlds} {moved}");
+}
+
+/// The belief only steers the deal: at tilt 0 `determinize_with` is `determinize` bit for bit (the
+/// same world, the same generators).
+#[test]
+fn tilt_zero_is_determinize() {
+    for (name, g) in gate_positions(4, 70) {
+        let v = g.to_move().unwrap();
+        let (mut a, mut b) = (g.clone(), g.clone());
+        a.determinize(v, &mut zero_search::rng::Rng::new(5));
+        b.determinize_with(v, &mut zero_search::rng::Rng::new(5), &zbelief(vec![1.0 / identity::D as f32; identity::D], 0.0, 20.0));
+        assert_eq!(a.g.fingerprint(), b.g.fingerprint(), "{name}");
+        assert_eq!(enc(&a, 1 - v), enc(&b, 1 - v), "{name}");
+        let (mut ka, mut kb) = (Vec::new(), Vec::new());
+        let l = legal(&a);
+        a.step(l[0], &mut ka).unwrap();
+        b.step(l[0], &mut kb).unwrap();
+        assert_eq!((ka, a.g.fingerprint()), (kb, b.g.fingerprint()), "{name}: the reseeded generators");
+    }
+}
+
+/// The opponent's hand by identity in `g`, for `viewer`.
+fn hand_counts(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    opponent_hand(g, viewer)
+}
+
+/// The weighting works (ENGINE.md 69.4): on Delver positions where the opponent's hand has unknown
+/// cards, a belief whose ratio to the uniform deal is exactly 1 deals the uniform expected counts; a
+/// belief on one identity of the hidden pool at a high tilt and clip deals as many of its copies as
+/// fit (min(copies, unknown hand slots)) in nearly every world, one that rules it out deals almost
+/// none - every constraint held (`belief_deals_keep_every_determinize_invariant` covers those).
+#[test]
+fn a_sharp_belief_concentrates_the_deal() {
+    let mut checked = 0;
+    for (name, g) in gate_positions(scale(30) as usize, 71).into_iter().filter(|(n, _)| *n == "delver") {
+        let ids = identity::identities(g.g.db());
+        let v = g.to_move().unwrap();
+        let o = 1 - v as u8;
+        let hand = &g.g.player(o).hand;
+        let unknown: Vec<_> = hand.iter().filter(|&&c| !g.g.knows(v as u8, c)).copied().collect();
+        let m = unknown.len();
+        if m < 2 {
+            continue;
+        }
+        let pool = g.g.unknown_to(v as u8, o);
+        let mut h = vec![0u32; identity::D];
+        for &c in &pool {
+            h[ids[g.g.ident(c) as usize] as usize] += 1;
+        }
+        let mut known = vec![0f32; identity::D];
+        for &c in hand.iter().filter(|&&c| g.g.knows(v as u8, c)) {
+            known[ids[g.g.ident(c) as usize] as usize] += 1.0;
+        }
+        let n = hand.len() as f32;
+        let big_h = pool.len() as f32;
+        // the identity of the pool with the fewest copies (the hardest to concentrate on: least likely uniformly)
+        let j = (0..identity::D).filter(|&k| h[k] > 0).min_by_key(|&k| (h[k], k)).unwrap();
+        let fit = (h[j] as usize).min(m) as f32;
+        let uni = m as f32 * h[j] as f32 / big_h;
+        // exactly the uniform deal's expected counts: weights 1
+        let p_uni: Vec<f32> = (0..identity::D).map(|k| (known[k] + m as f32 * h[k] as f32 / big_h) / n).collect();
+        // on j / ruling j out
+        let mut p_on = vec![1e-6f32; identity::D];
+        p_on[j] = 1.0;
+        let mut p_off = p_uni.clone();
+        p_off[j] = 0.0;
+        let reps = 300;
+        let mut mean = [0f32; 3];
+        for (k, p) in [p_uni, p_on, p_off].into_iter().enumerate() {
+            let b = zbelief(p, if k == 0 { 1.0 } else { 8.0 }, if k == 0 { 20.0 } else { 1e6 });
+            for s in 0..reps {
+                let mut d = g.clone();
+                d.determinize_with(v, &mut zero_search::rng::Rng::new(s * 31 + k as u64), &b);
+                mean[k] += (hand_counts(&d, v)[j] - known[j]) / reps as f32;
+            }
+        }
+        let se = (uni.max(0.05) / reps as f32).sqrt();
+        assert!((mean[0] - uni).abs() < 5.0 * se + 0.02, "{name}: ratio-1 belief dealt {} of identity {j}, uniform {uni}", mean[0]);
+        assert!(mean[1] > 0.9 * fit, "{name}: a sharp belief dealt {} of {fit} possible (uniform {uni})", mean[1]);
+        assert!(mean[2] < 0.05 * uni.max(0.2) + 0.02, "{name}: a belief ruling it out dealt {} (uniform {uni})", mean[2]);
+        checked += 1;
+    }
+    println!("{checked} Delver positions with >= 2 unknown hand cards");
+    assert!(checked >= 5, "{checked} Delver positions with >= 2 unknown hand cards");
+}
+
+/// The belief's input and weights read only the decider's information (ENGINE.md 69.2): worlds
+/// `determinize(decider)` deals - other opponent hands, other best-of-three decks - give the decider
+/// the same features (so the head's prediction is the same) and, for one prediction, the same
+/// weights: best-of-one bit for bit; best-of-three after the hidden pool is sampled with one seed
+/// (the deal samples it first, from what the decider knows).
+#[test]
+fn the_belief_weights_ignore_the_opponents_hidden_cards() {
+    let mut rng = Rng::new(72);
+    let (mut worlds, mut differ) = (0, 0);
+    for (name, g) in gate_positions(scale(24) as usize, 72) {
+        let v = g.to_move().unwrap();
+        let p = random_belief(&mut rng, 2);
+        let x = enc(&g, v);
+        let bo3 = g.m.format == engine::az::Format::Bo3;
+        let weights = |w: &MtgAz| -> Vec<f64> {
+            let mut w = w.clone();
+            if bo3 {
+                w.sample_hidden_pool_for(v as u8, &mut Rng::new(9));
+            }
+            engine::az::belief::deal_weights(&w.g, v as u8, &p, 1.0, 20.0)
+        };
+        let w0 = weights(&g);
+        for k in 0..3 {
+            let mut d = g.clone();
+            d.determinize(v, &mut zero_search::rng::Rng::new(rng.next_u64() ^ k));
+            assert_eq!(enc(&d, v), x, "{name}: the decider's features");
+            differ += (opponent_hand(&d, v) != opponent_hand(&g, v)) as u32;
+            assert_eq!(weights(&d), w0, "{name}: the weights read the opponent's hidden cards");
+            worlds += 1;
+        }
+    }
+    println!("{worlds} worlds, {differ} with another opponent hand");
+    assert!(worlds > 200 && differ > worlds / 3, "{worlds} {differ}");
+}
