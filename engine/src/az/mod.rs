@@ -581,4 +581,22 @@ impl SearchGame for MtgAz {
             _ => None,
         }
     }
+
+    /// One auxiliary target (ENGINE.md 66, zero-core docs/az.md 15): `belief`, the decider's
+    /// opponent's hand as counts per card identity (the `identity::D` identities of the
+    /// encoding, ENGINE.md 22.2: the cube's, the legacy cards', the tokens'). The TRUE hand -
+    /// a training label that zero-core records with a sample when a run's `aux_belief_w` is on,
+    /// never an input: `encode` shows the viewer only what it knows (ENGINE.md 10). Empty
+    /// (no target) while sideboarding, between the games of a match.
+    const AUX: &'static [(&'static str, usize)] = &[("belief", identity::D)];
+
+    fn aux_target(&self, viewer: usize, out: &mut [f32]) {
+        if self.m.sb.is_some() {
+            return;
+        }
+        let ids = identity::identities(self.g.db());
+        for &c in &self.g.player(1 - viewer as u8).hand {
+            out[ids[self.g.obj(c).def as usize] as usize] += 1.0;
+        }
+    }
 }

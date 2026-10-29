@@ -1919,3 +1919,117 @@ fn the_v5_facts_encode_no_hidden_information() {
     }
     assert!(resampled, "the card was resampled for P1");
 }
+
+// ---- The belief target (ENGINE.md 66) ----
+
+fn belief(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    let mut t = vec![0.0; MtgAz::aux_width()];
+    g.aux_target(viewer, &mut t);
+    t
+}
+
+/// The opponent's actual hand of `viewer` by identity (what the target must be).
+fn opponent_hand(g: &MtgAz, viewer: usize) -> Vec<f32> {
+    let ids = identity::identities(g.g.db());
+    let mut t = vec![0.0; identity::D];
+    for &c in &g.g.player(1 - viewer as u8).hand {
+        t[ids[g.g.obj(c).def as usize] as usize] += 1.0;
+    }
+    t
+}
+
+/// The auxiliary target `belief` (zero-core docs/az.md 15) is the decider's opponent's TRUE hand
+/// by card identity and never an input: in the openings and mid-game positions of the cube, best-of-
+/// three, the Delver mirror and a drafted match, worlds determinized for the decider - whose
+/// opponent hands differ - encode identically for it while their targets differ, each that world's
+/// own hand (never the decider's); between the games of a match there is none.
+#[test]
+fn the_belief_target_is_the_true_opponent_hand_and_never_an_input() {
+    assert_eq!(MtgAz::AUX, &[("belief", identity::D)]);
+    let mut zr = zero_search::rng::Rng::new(66);
+    let mut pos: Vec<(&'static str, MtgAz)> = gate_positions(scale(40) as usize, 66);
+    for (name, sp) in opening_specs() {
+        pos.extend(opening_states(&sp, 8, 66).into_iter().map(|g| (name, g)));
+    }
+    let (mut worlds, mut differ, mut nonempty) = (0, 0, 0);
+    for (name, g) in &pos {
+        let mover = g.to_move().unwrap();
+        let t = belief(g, mover);
+        assert_eq!(t, opponent_hand(g, mover), "{name}: the target is the opponent's hand");
+        assert_eq!(t.iter().sum::<f32>() as usize, g.g.player(1 - mover as u8).hand.len());
+        nonempty += (t.iter().sum::<f32>() > 0.0) as u32;
+        let x = enc(g, mover);
+        for _ in 0..3 {
+            let mut d = g.clone();
+            d.determinize(mover, &mut zr);
+            let y = enc(&d, mover);
+            if let Some(i) = (0..NUM_FEATURES).find(|&i| x[i] != y[i]) {
+                panic!("{name}: feature {i} of P{mover} changed in a world of another opponent hand");
+            }
+            let td = belief(&d, mover);
+            assert_eq!(td, opponent_hand(&d, mover), "{name}: a world's target is its own opponent hand");
+            differ += (td != t) as u32;
+            worlds += 1;
+        }
+    }
+    println!("{} positions, {worlds} worlds, {differ} with another opponent hand, {nonempty} non-empty targets", pos.len());
+    // (the openings start before the deal: the play-or-draw choice)
+    assert!(worlds > 600 && differ > worlds / 2 && nonempty as usize > pos.len() * 7 / 10, "{worlds} {differ} {nonempty}");
+    // between the games of a best-of-three match: no target
+    let sp = MtgSpec::parse(r#"{"format": "bo3"}"#).unwrap();
+    let (mut rng, mut h, mut keys) = (Rng::new(67), Heuristic::new(67), Vec::new());
+    let mut g = MtgAz::new_game(&sp, 2, 67).unwrap();
+    while g.sideboarding().is_none() {
+        let a = mixed(&g, &mut h, &mut rng);
+        g.step(a, &mut keys).unwrap();
+    }
+    let p = g.to_move().unwrap();
+    assert!(belief(&g, p).iter().all(|&v| v == 0.0) && belief(&g, 1 - p).iter().all(|&v| v == 0.0));
+}
+
+/// zero-core's driver with `aux` records the decider's opponent's hand with every sample of the
+/// Delver mirror (the same records otherwise), and the team draft has no target.
+#[test]
+fn selfplay_records_the_belief_target_with_the_samples() {
+    use zero_search::driver::{Driver, DriverCfg, KeyKind, NnSeat, SeatCfg};
+    let names = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let spec = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
+    let run = |aux: bool| {
+        let mut s = NnSeat::eval(0, 4);
+        s.selfplay = true;
+        s.sims_fast = Some(2);
+        s.p_full = 0.5;
+        let cfg = DriverCfg { spec: spec.clone(), seats: vec![SeatCfg::Nn(s)], games: vec![vec![0, 0]; 2], keys: vec![("m".into(), KeyKind::Nn)],
+                              concurrency: 2, seed: 5, record: true, threads: 2, groups: 1, max_steps: 100_000, rolling: false, net: 0,
+                              queue_only: false, move_log: 0, aux };
+        let mut d = Driver::<MtgAz>::new(cfg).unwrap();
+        let mut recs = Vec::new();
+        while let Some(b) = d.next_batch(true).unwrap() {
+            let mut pri = Vec::new();
+            for r in 0..b.b {
+                let k = (b.opt_off[r + 1] - b.opt_off[r]) as usize;
+                pri.extend(std::iter::repeat_n(1.0 / k as f32, k));
+            }
+            let mut v = vec![0.0; b.b * 8];
+            for r in 0..b.b {
+                v[r * 8] = 0.5;
+                v[r * 8 + 1] = 0.5;
+            }
+            d.submit(b.id, &pri, &v, &vec![0.0; b.b * 8]).unwrap();
+            recs.extend(d.take_samples());
+        }
+        recs.extend(d.take_samples());
+        recs
+    };
+    let (r0, r1) = (run(false), run(true));
+    assert_eq!(r0.len(), r1.len());
+    assert!(!r1.is_empty());
+    for (a, b) in r0.iter().zip(&r1) {
+        assert_eq!((&a.x, &a.pi, a.player), (&b.x, &b.pi, b.player));
+        assert!(a.aux.is_empty() && b.aux.len() == identity::D);
+        let n: f32 = b.aux.iter().sum();
+        assert!((0.0..=12.0).contains(&n) && b.aux.iter().all(|&v| v >= 0.0 && v.fract() == 0.0));
+    }
+    assert!(r1.iter().filter(|r| r.aux.iter().sum::<f32>() > 0.0).count() > r1.len() / 2);
+    assert!(engine::az::draft::TeamDraftAz::aux_width() == 0);
+}

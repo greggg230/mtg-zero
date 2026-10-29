@@ -195,6 +195,11 @@ PRESETS['delver-smoke'] = dict(PRESETS['mtg-smoke'], spec=SPEC_DELVER, eval_spec
 
 PACKAGE = register(GamePackage(
     'mtgz', 'MTG Zero', ROOT, engine='mtgz._engine', run_module='mtgz.az.run', game='mtg',
+    # the belief target (docs/ENGINE.md 66, zero-core docs/az.md 15): the decider's opponent's hand by
+    # card identity, learned as a distribution by an auxiliary head (run setting aux_belief_w, 0 = off);
+    # replays of a checkpoint with the head show it per network decision (`mtgz.az.belief.render`)
+    aux={'mtg': [{'name': 'belief', 'width': 1024, 'loss': 'multinomial'}]},
+    replay_aux={'mtg': 'mtgz.az.belief:render'},
     # team_draft's deferred results and its other yardstick (M6 part 3, docs/ENGINE.md 45)
     deferred={'team_draft': 'mtgz.az.drafted:GLUE'}, evals={'team_draft': 'mtgz.az.human_picks:EVALS'},
     specs={'mtg': SPEC, 'team_draft': SPEC_DRAFT}, dashboard_port=5340, hub_id='mtg_zero', env_prefix='MTGZ',
