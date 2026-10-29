@@ -10372,6 +10372,9 @@ iteration 15 (1,451 steps, 163 s of it loading a 20 GB window), 70-225 s at 150 
 `load_s` each). Sample staleness (rows by `net`) with 768 desktop / 1,536 Mac games in flight: 3-4 iterations at
 `--games 100`, 0.6-1.2 at `--games 150 --conc 192` (iterations 18-20).
 
+(Its evaluation from the next re-pin: the completed-Q move rule and Elo against the checkpoints 1,
+2, 4 and 8 iterations back, without random games: section 57.)
+
 ## 55. The declared mulligan in the encoding
 
 Branch `mull-declared` (from main at 05e37bb). The London mulligan's declarations (CR 103.5) are
@@ -10953,3 +10956,211 @@ matches beyond what is in flight, so drafted events could wait several iteration
   in delver1's log so far, not in the 4 x 400-game search smoke; not fixed here (an engine change,
   its own tier).
 * **Not reproducible**, as 52.8 (more so: which games the quota accepts first depends on timing).
+
+## 57. The evaluation move rule: completed Q instead of visit counts; Elo against recent iterations (delver1)
+
+`runs/delver1` (54.9) evaluates at `eval_sims` 32, where the prior's favourite collects most of the
+visits even where the search found it worse, so "the most visited option" mostly plays the prior.
+An experiment (zero-core branch `exp/select-rule`, this repo's `exp/select-rule` 102083d,
+`tools/exp_select.py`; zero-core docs/az.md 12.1) found that choosing the evaluation move by the
+**completed-Q improved policy** - the argmax of the 'cq' training target's logits, Gumbel AlphaZero's
+final-move rule - won 57-61% against the heuristic where visit counts won 42-52%. The user's
+decision (2026-10-28): an opt-in rule, today's the default everywhere; delver1's evaluation switches
+at its next re-pin; self-play later, by a forked A/B run. With it, two changes to delver1's Elo: its
+checkpoints play the ones 1, 2, 4 and 8 iterations back instead of 8 and 16, and no more games
+against the random bot (won 98-100% since iteration 8: no information).
+
+### 57.1 What was built (zero-core `feat/select-rule`, on main as `feat/select-rule-on-queue`)
+
+zero-core docs/search.md 3.3 (the rule in the driver), docs/az.md 5.4 (the settings, the pools) and
+12 (the experiment, the checks). Run settings, every default today's behaviour bit for bit:
+
+| Setting | Default | What |
+|---|---|---|
+| `eval_select`, `eval_select_min_visits` | visits, 0 | every evaluation seat's move: 'visits' = argmax (N, P0); 'cq' = argmax of ln P0 + (c_visit + max N) c_scale completedQ (`cq_c_visit`, `cq_c_scale`: 50, 1) among the options with at least `eval_select_min_visits` visits (when none has that many, the most visited ones). The yardstick, random and Elo matches, here or on the `eval_remote` (its config is the run's), co-training's evaluations; `mtgz.az.h2h` / `mtgz.az.replays` take a checkpoint's run's rule unless `--select` says otherwise |
+| `selfplay_select`, `selfplay_select_min_visits` | visits, 0 | the same for self-play's moves after `temp_moves` (the recorded targets stay `policy_target`'s); for a forked A/B, not delver1's re-pin |
+| `elo_offsets` | '' | '1,2,4,8': each evaluated checkpoint k plays k-1, k-2, k-4, k-8 (raw iterations: every iteration writes a checkpoint) whatever `eval_every`; `elo_opponents` unused. '' = the evaluations-back offsets (with `eval_every` 8 and `elo_opponents` 2: k-8, k-16) |
+| `eval_random_games` | 50 (delver1) | 0 now works without random rows anywhere (Elo, dashboards, the remote) |
+
+* **One Elo pool per rule.** A checkpoint that moves by another rule is another player: 'visits'
+  keeps `elo/` (delver1's whole history), another rule gets `elo/<rule>/` (`cq`, `cq-n4`: the
+  guard; results.json + `select`, `since`). A pool takes only its rule's evaluations (each
+  evaluation and Elo row records `select`, absent = 'visits'), so a run that changes its rule at a
+  restart leaves `elo/` byte for byte as it was; the new pool begins at its first evaluation
+  (`since`) and replays no history.
+* **Checkpoints rated through Elo matches only** (the raw offsets' never-evaluated opponents; a pool
+  begun mid-run's older opponents) carry `"evaluated": false` in the pool's ratings.json and in
+  models/index.json and are never `best.pt` nor either dashboard's best.
+* **The remote** plays the run's rule (the mirror's config.json), owns its pool (copied back) and
+  ships the raw offsets' checkpoints; a result naming another rule (a Mac checkout without the
+  rule) is refused before anything is recorded and retried as a failure.
+* **The dashboards** (`mtgz.az.dashboard`, zerodash) read the current rule's pool; `mtgz.az.dashboard`
+  draws the other pools as their own lines (one chart, never one fit).
+* In this repo: nothing game-specific - the pin, `engine/tests/draft_deferred.rs` (DriverCfg's new
+  `move_log` field), and `tools/select_eval.py` (57.2).
+
+### 57.2 Measured on the production path (`tools/select_eval.py`)
+
+`python tools/select_eval.py --run runs/delver1 --iter K --rules visits,cq,cq-n2,cq-n4 --games 200
+--out E:/exp-select2` evaluates a copy of checkpoint K with `Run.evaluate` - the code a run and its
+`eval_remote` run - once per rule on a scratch mirror (the run's settings, the rule, 200 games
+against the heuristic, no random games, CPU, 6 search threads; the run directory only read). Every
+rule plays the run's seeds (`7919 x K + 1`), so game g has the same deal under every rule (paired).
+Results (`E:/exp-select2/select_eval.jsonl`, 2026-10-28):
+
+| Checkpoint | visits | cq | cq, >= 2 visits | cq, >= 4 visits |
+|---|---|---|---|---|
+| delver1 iter 12 | 46.0% | **61.5%** | - | - |
+| iter 26 | 71.0% | 77.0% | **77.5%** | 76.5% |
+| iter 27 | 71.0% | 73.0% | 73.5% | **76.5%** |
+
+| Paired against visits (score points, +- 1 se) | iter 12 | iter 26 | iter 27 | 26 + 27 (400 games) |
+|---|---|---|---|---|
+| cq | +15.5 +- 4.9 | +6.0 +- 3.7 | +2.0 +- 3.6 | +4.0 +- 2.6 |
+| cq-n2 | - | +6.5 +- 3.7 | +2.5 +- 3.6 | +4.5 +- 2.6 |
+| cq-n4 | - | +5.5 +- 3.8 | +5.5 +- 3.2 | +5.5 +- 2.5 |
+
+Between the guards (26 + 27, paired): cq -> cq-n2 +0.5 +- 1.4, cq -> cq-n4 +1.5 +- 2.0, cq-n2 ->
+cq-n4 +1.0 +- 1.8. Head to head, iteration 27 against itself (`zero.h2h`-style, cq vs visits, 200
+games, 32 simulations): **51.0 +- 3.5%** (+7 Elo). Games under 'cq' were a little shorter (15.4-16.4
+rounds against 16.8-17.2).
+
+**The gain shrinks as the network improves**: +15.5 points at iteration 12, +2 to +6 at 26-27, and
+nothing measurable head to head at 27. The rule fixes a weak network's habit of playing its prior at
+32 simulations; as the prior and the search agree more, there is less to fix. It costs nothing
+(the search is the same; the moves are chosen from the same root statistics).
+
+### 57.3 Which guard: 4 visits
+
+None of the guards differs significantly from another (57.2). `eval_select_min_visits` 4 is the
+recommendation: it has the best pooled estimate against visits (+5.5 +- 2.5, the only rule more than
+2 se above it) and the most one-sided paired record (iteration 27: 26 games better, 15 worse,
+against 28 / 23 for cq-n2); and it is the least noise-prone choice by construction - at 32
+simulations an option's Q from one or two visits is one or two leaf values, and the rule's scale
+((50 + max N) x Q, ~70 Q) lets a Q lucky by 0.03 outweigh an 8-fold prior; with 4 visits Q is an
+average of four. Without a guard an unvisited option, completed at v_mix, can even be chosen. The
+guard keeps the rule's intent (Q overrules the prior's favourite among the options the search
+looked at) and drops its noisiest picks; its rule name, and the pool, is `cq-n4`.
+
+### 57.4 Elo against recent iterations, and the Mac's evaluation time
+
+With `eval_every` 8 and `elo_opponents` 2, delver1's checkpoint k played k-8 and k-16 only; at
+`elo_offsets` '1,2,4,8' it plays k-1, k-2, k-4 and k-8 - the recent progress, from checkpoints that
+exist anyway (k-1, k-2, k-4 rated through these games only: "evaluated": false). The random bot's
+50 games go (`eval_random_games` 0); the reference games (random vs the heuristic, bots only) are
+played once in the new pool.
+
+`tools/select_eval.py --run runs/delver1 --iter 24 --elo-timing` timed the two Elo settings on the
+desktop's CPU (6 threads, both at 'cq', the yardstick games left out - the same 100 in both):
+
+| | games | random phase | Elo phase | total |
+|---|---|---|---|---|
+| today: 50 random; Elo vs 16, 8 at 20 games | 50 + 40 | 144.5 s | 222.2 s | 366.7 s |
+| re-pin: no random; Elo vs 23, 22, 20, 16 at 25 games | 0 + 100 | 0 | 427.7 s | 427.7 s |
+
+With the yardstick's 100 games (~180-280 s on that CPU, from 57.2's timings) an evaluation goes from
+~550-650 s to ~610-710 s: **+10-11%** (+61 s). The Mac's evaluations took 193-384 s (evals.jsonl,
+iterations 1-56; 193 s at 56): expected ~210-420 s, about the same, once every 8 iterations (~30
+minutes). Once, at the switch: the 100 reference games and the uploads of the raw offsets'
+checkpoints the mirror lacks (k-1, k-2, k-4 of every evaluated k so far: ~20 files of 6 MB at
+iteration 64). `--elo-games 20` (80 Elo games) would keep the time equal (the Elo phase ~3.4 s a
+game here past a fixed ~85 s); 25 is the user's choice.
+
+### 57.5 Re-pinning delver1 (at an iteration boundary)
+
+Branch `select-rule-on-queue` (this repo, on main 5c18d35: the shared queue and this feature) pins
+zero-core `feat/select-rule-on-queue` (the feature on main 9453e18). The procedure as 56.10: a pinned
+worktree of the merged commit, `bash tools/build_py.sh` there, `bash tools/mac.sh --eval-checkout`
+(the Mac's evaluation checkout must have the rule: an older one's results are refused, 57.1), `touch
+runs/delver1/STOP` during an iteration, then from the new worktree:
+
+```
+python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/delver1/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/delver1" --preset delver-mirror --seed 1 \
+  --games 800 --conc 192 --eval-every 8 --ram-budget-gb 20 --iters 400 \
+  --selfplay-remote mac --eval-remote mac --selfplay-remote-linger 1 \
+  --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25
+```
+
+(The run's other settings stay those of its config.json: `eval_games` 100, `elo_together` 1,
+`ref_games` 100; `elo_opponents` 2 is no longer used.)
+Self-play is unchanged (`selfplay_select` stays 'visits'). At the next evaluated iteration K (a
+multiple of 8) the Mac's mirror begins `elo/cq-n4/` (`since` K): the reference games, K's 100
+yardstick games at 'cq-n4', its Elo matches against K-1, K-2, K-4, K-8 (25 games each, both seats
+'cq-n4'); `elo/` and the metrics' older `elo` values stay as they were. What to check: the run's log
+`iter K vs heuristic (remote mac, ...s): {... 'select': 'cq-n4'}` and `iter K elo ... (pool cq-n4)
+(remote mac)`; evals.jsonl's row K with `"select": "cq-n4"` and no `eval_random`; `runs/delver1/elo/cq-n4/`;
+the dashboard's Elo chart (the cq-n4 line, the 'visits' line beside it); the evaluation's seconds
+(57.4); `watch_run` as after every re-pin. The new pool's Elo is not comparable with the old pool's
+(another player, other opponents): the yardstick's win rate is the continuous series.
+
+**The delverai publisher** (`tools/delverai_publish.py`, another session's) reads `elo/ratings.json`
+for its ratings and `models/index.json` for its best: after the switch the first stops at the last
+'visits' evaluation while the second follows the cq-n4 pool. It should read the run's current pool
+(`zero.elo.active_pool(run)` on a core that has it; else `elo/<rule>/` from config.json's
+`eval_select`, guard `-n<k>`) before or at the re-pin; the first select-rule agent's 5-line change
+(branch `wip/select-rule-eval` 39e7a75) shows how. Not done here. Its replays (`mtgz.az.replays`)
+follow the run's `eval_select` by themselves once its checkout's core has the rule (zero-core
+`zero.replay`: the checkpoint's run's rule unless `--select`), 'visits' until then.
+
+### 57.6 Checks (the tier "opt-in core feature with byte-identical defaults")
+
+Recorded on this desktop, 2026-10-28 (the live delver1 run on the GPU and the Mac meanwhile;
+`CARGO_BUILD_JOBS` 8, toy runs at 2 search threads).
+
+**zero-core `feat/select-rule-on-queue` 070fa1b** (the merge candidate: the feature on main
+0638e94):
+
+* `cargo test --release`: zero_search 49 passed (the 5 new `select_*` tests and the golden records
+  among them: `visits_records_unchanged`, the evaluation-match golden at the default rule
+  12492034373733022939, the 'cq' goldens), zero_webnet 3; ~40 s. Two tests of the queue
+  (`queued_setups_are_shared_between_the_groups`, `queued_setups_fill_every_free_slot_when_the_queue_is_long`)
+  failed in 3 of 7 runs - and in 4 of 8 runs at main 0638e94 itself: their batch-size assertions
+  depend on thread timing on a loaded machine (not this feature's; main's flake).
+* `pytest tests`: 170 passed in 11 min 30 s (test_select.py's 15 among them; the queue's and the
+  window load's tests too).
+* Defaults byte for byte against main 0638e94 (three toy-smoke runs - classic; rolling; margin_w 0.2
+  + chance_k 2 + cq targets + `eval_every` 2 - each with the new settings left out and given at
+  their defaults): 9 / 9 / 11 shards and checkpoints identical (checkpoints by zip member),
+  metrics.jsonl equal (timing aside), elo/results.json and models/index.json byte for byte,
+  elo/ratings.json equal (`updated` aside), no elo/ subdirectory, config.json's old keys equal (+ the
+  five new ones). One earlier round at 9453e18 differed in a rolling run's `leaves` /
+  `rolling.dropped_leaves` only (7,260 / 23 against 7,248 / 11, the shards equal): 9453e18 itself
+  gives either under load (3 parallel runs: one of three 7,440 / 23).
+* `tools/check_checkpoint_compat.py --package zero` against 0638e94 (random, uniform and a toy
+  checkpoint's evaluator: self-play records + results for 'visits' and 'cq' targets, the match vs
+  random): identical, ~6 s each.
+* The toy rehearsal of delver1's re-pin (zero-core docs/az.md 12.3: a run evaluated by the remote
+  'local', iterations 0-4 at the default rule, restarted at iteration 5 with 57.5's evaluation
+  flags): 16 checks ok in 47 s - the run's and the mirror's `elo/` byte for byte, `elo/cq-n4/` since 6
+  with iterations 6 and 8 logged, their raw-offset matches (k-1, k-2, k-4, k-8 that exist) of 25 games,
+  the reference games once, the flags, evals.jsonl rows tagged without random games, index.json's
+  best evaluated, both dashboards on the new pool.
+* The other games build against it (build only: Glass Road Zero, Caverna Zero, Kingdom Builder Zero
+  at their HEADs, exported with this core in third_party/zero-core; the PyO3 crate, every test
+  compiled, the package imported with this core): all three ok, 48 / 73 / 81 s.
+
+**zero-core `feat/select-rule` 85f1799** (the same feature on 3c26d9f): `cargo test` 49 + 3 passed
+(36fc6d1; the Rust unchanged since), `pytest tests` 148 passed in 8 min 10 s (a167ee2; docs since),
+the defaults byte for byte against 3c26d9f (the same three runs x 2) and check_checkpoint_compat
+identical (x 3).
+
+**This repo, `select-rule-on-queue` 3154a9c** (main 56061c5 + the pin of 070fa1b + the tool):
+`bash tools/build_py.sh` (2 min 22 s from an empty target at the pin's predecessor 6eb7330, whose
+Rust is 070fa1b's; at 3154a9c nothing to rebuild), `cargo test --release -p engine --test az` 21
+passed, `pytest tests` 46 passed in 1 min 41 s. `tools/select_eval.py`: py_compile (it ran the
+measurements of 57.2 and 57.4 at the first agent's WIP, zero-core 36fc6d1: the rule's code
+unchanged since).
+
+### 57.7 Limits and open questions
+
+* **200 games a cell** (+- 3.2-3.8 points paired): the guards are not told apart, and the rule's
+  effect at iteration 27 (+2 to +5.5) is within 2 se of zero for two of the three rules.
+* **No head-to-head gain at iteration 27** (51 +- 3.5%): against the heuristic the rule still helps
+  (the bot's play exposes the prior's blind spots), against the same network it is even. Elo in the
+  new pool measures checkpoints at 'cq-n4' against each other, as the old pool did at 'visits'.
+* **Self-play is untouched**: `selfplay_select cq` (an A/B by fork, zero-core docs/az.md 12.4) is not
+  run; the self-play targets are 'cq' already (`policy_target`).
+* **Every evaluated pool begins with no history**: the cq-n4 pool's first ratings rest on one
+  checkpoint's yardstick games and its four Elo matches; they sharpen as evaluations accumulate.
+* **The publisher** (57.5).
