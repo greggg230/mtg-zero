@@ -558,18 +558,7 @@ impl Game {
     /// masked for `viewer`; the pending decision is recomputed.
     pub fn determinize(&mut self, viewer: PlayerId, rng: &mut Rng) {
         let payer = self.payment_in_progress();
-        for owner in 0..2u8 {
-            let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
-            let mut defs: SVec<DefId, 64> = slots.iter().map(|&c| self.ident(c)).collect();
-            if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
-                rng.shuffle(&mut defs);
-                for (&c, &d) in slots.iter().zip(defs.iter()) {
-                    self.set_ident(c, d);
-                }
-                continue;
-            }
-            self.resample_with_clouds(viewer, owner, &slots, &pinned, defs.to_vec(), rng);
-        }
+        self.deal_hidden(viewer, payer, rng);
         self.rng = Rng::new(rng.next_u64());
         self.observer = Some(viewer);
         // The viewer's own options never name a card whose identity was
@@ -584,6 +573,46 @@ impl Game {
             c.refresh_pending();
             assert_eq!(c.pending, self.pending, "determinize changed the viewer's decision");
         }
+    }
+
+    /// `determinize`'s deal: every owner's cards hidden from `viewer` dealt
+    /// again (but the cards a payment in progress by `payer` pins).
+    fn deal_hidden(&mut self, viewer: PlayerId, payer: Option<PlayerId>, rng: &mut Rng) {
+        for owner in 0..2u8 {
+            let (slots, pinned) = self.hidden_slots_with(viewer, owner, payer);
+            let mut defs: SVec<DefId, 64> = slots.iter().map(|&c| self.ident(c)).collect();
+            if !self.clouds.iter().any(|k| k.viewer == viewer && k.owner == owner) {
+                rng.shuffle(&mut defs);
+                for (&c, &d) in slots.iter().zip(defs.iter()) {
+                    self.set_ident(c, d);
+                }
+                continue;
+            }
+            self.resample_with_clouds(viewer, owner, &slots, &pinned, defs.to_vec(), rng);
+        }
+    }
+
+    /// Tests and analysis (ENGINE.md 67): `determinize`'s deal of every card
+    /// hidden from `viewer` **including** the ones a payment in progress pins
+    /// (the payer's mana sources in hand, the cards a cost may exile from
+    /// it), and nothing else: no reseeding, no observer, the pending decision
+    /// left as it is (the world may be one that could not ask it). What
+    /// `viewer` sees cannot depend on any of those cards, so its encoding
+    /// must be the same: the leak check of a non-deciding viewer's encoding
+    /// (zero-core's root-view leaf values evaluate positions from it), which
+    /// `determinize` alone cannot make for the pinned cards.
+    #[doc(hidden)]
+    pub fn resample_unpinned(&mut self, viewer: PlayerId, rng: &mut Rng) {
+        self.deal_hidden(viewer, None, rng);
+    }
+
+    /// Tests and analysis: the cards `determinize(viewer)` keeps for a
+    /// payment in progress (ENGINE.md 10's pinned cards; none for the payer
+    /// itself).
+    #[doc(hidden)]
+    pub fn pinned_for(&self, viewer: PlayerId) -> Vec<CardIdx> {
+        let payer = self.payment_in_progress();
+        (0..2u8).flat_map(|o| self.hidden_slots_with(viewer, o, payer).1).collect()
     }
 
     /// The cards of `owner` whose identities `determinize(viewer)` deals

@@ -452,3 +452,105 @@ fn casting_a_known_card_is_keyed() {
     let keys = g.choose(Choice::Cast(bolt));
     assert!(keys.iter().any(|&k| key_kind(k) == engine::hidden::KEY_REVEAL && key_payload(k) == g.obj(bolt).def as u64));
 }
+
+// ---- A non-deciding viewer's encoding (ENGINE.md 67) ------------------------
+
+fn features_of(g: &Game, viewer: PlayerId) -> Vec<f32> {
+    let mut x = vec![0.0; engine::az::encode::NUM_FEATURES];
+    g.encode_features(viewer, &mut x);
+    x
+}
+
+/// zero-core's root-view leaf values evaluate positions where the other
+/// player decides from the root player's view, so a non-deciding viewer's
+/// encoding must hold nothing of the decider's hidden cards - not even the
+/// cards a payment in progress pins, which `determinize` keeps (ENGINE.md
+/// 10) and so cannot test. `resample_unpinned` deals all of them again: the
+/// viewer's features stay the same in every such world, during a payment
+/// too. Random cube decks.
+#[test]
+fn a_non_deciding_viewers_features_ignore_the_deciders_hidden_cards() {
+    let (mut worlds, mut changed, mut pinned) = (0, 0, 0);
+    for seed in 0..60 {
+        let g = random_game(seed, 20 + (seed as usize % 7) * 15);
+        let Some(mover) = g.to_move() else { continue };
+        let viewer = 1 - mover;
+        let x = features_of(&g, viewer);
+        pinned += !g.pinned_for(viewer).is_empty() as u32;
+        for r in 0..4 {
+            let mut d = g.clone();
+            d.resample_unpinned(viewer, &mut Rng::new(seed * 31 + r));
+            changed += g.player(mover).hand.iter().any(|&c| g.obj(c).def != d.obj(c).def) as u32;
+            let y = features_of(&d, viewer);
+            if let Some(i) = (0..x.len()).find(|&i| x[i] != y[i]) {
+                panic!("seed {seed}: P{viewer}'s feature {i} reads P{mover}'s hidden cards ({} -> {})", x[i], y[i]);
+            }
+            worlds += 1;
+        }
+    }
+    println!("{worlds} worlds, the decider's hand resampled in {changed}, {pinned} positions with pinned cards");
+    assert!(worlds > 200 && changed > worlds / 2, "{worlds} {changed}");
+}
+
+/// The same while Force of Will's alternative cost is being paid (the blue
+/// cards it may exile from P1's hand are pinned for P0) and while P1 pays
+/// mana with a Simian Spirit Guide in hand: P0's features ignore P1's whole
+/// hand, the pinned cards too, at every decision of the cast.
+#[test]
+fn a_non_deciding_viewers_features_ignore_pinned_cards_of_a_payment() {
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island"])
+        .hand(0, &["Lightning Bolt", "Mountain"])
+        .battlefield(1, &["Island", "Island"])
+        .hand(1, &["Force of Will", "Brainstorm", "Counterspell", "Simian Spirit Guide", "Test Double", "Mountain"])
+        .library(0, &["Island"; 6])
+        .library(1, &["Forest", "Mountain", "Plains", "Swamp", "Lightning Bolt", "Counterspell"])
+        .at(Step::Main1, 1)
+        .start();
+    let (mut checked, mut pinned_seen) = (0, 0);
+    let mut check = |g: &Game, what: &str| {
+        let Some(mover) = g.to_move() else { return };
+        let viewer = 1 - mover;
+        let x = features_of(g, viewer);
+        let pins = g.pinned_for(viewer);
+        pinned_seen += !pins.is_empty() as u32;
+        let mut moved_pin = pins.is_empty();
+        for s in 0..24 {
+            let mut d = g.clone();
+            d.resample_unpinned(viewer, &mut Rng::new(s));
+            moved_pin |= pins.iter().any(|&c| d.obj(c).def != g.obj(c).def);
+            assert_eq!(x, features_of(&d, viewer), "{what}: P{viewer}'s features read P{mover}'s hidden cards");
+            checked += 1;
+        }
+        assert!(moved_pin, "{what}: the pinned cards were never dealt again");
+    };
+    // P1 casts Test Double ({2}{R}) with two Islands and the guide: the payment pins the guide
+    let dbl = g.card(1, "Test Double", Zone::Hand);
+    g.choose(Choice::Cast(dbl));
+    for k in 0..6 {
+        if g.kind() != Some(DecisionKind::PayMana) {
+            break;
+        }
+        check(&g, &format!("paying for Test Double, step {k}"));
+        let c = g.pending_decision().unwrap().options[0].choice;
+        g.choose(c);
+    }
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Priority) && g.to_move() == Some(1));
+    // P0 answers with Lightning Bolt at the double? (Not needed: P1 holds priority.) P1 casts Force of
+    // Will on its own spell by its alternative cost: exiling a blue card from hand
+    if let Some(fow) = g.find_card(1, "Force of Will", Zone::Hand) {
+        g.choose(Choice::Cast(fow));
+        for k in 0..8 {
+            let Some(kind) = g.kind() else { break };
+            if kind == DecisionKind::Priority && g.stack().len() >= 2 {
+                break;
+            }
+            check(&g, &format!("casting Force of Will, step {k} ({kind:?})"));
+            let c = g.pending_decision().unwrap().options.last().unwrap().choice;
+            g.choose(c);
+        }
+    }
+    println!("{checked} worlds, {pinned_seen} decisions with pinned cards");
+    assert!(pinned_seen >= 2, "{pinned_seen}");
+}

@@ -2033,3 +2033,98 @@ fn selfplay_records_the_belief_target_with_the_samples() {
     assert!(r1.iter().filter(|r| r.aux.iter().sum::<f32>() > 0.0).count() > r1.len() / 2);
     assert!(engine::az::draft::TeamDraftAz::aux_width() == 0);
 }
+
+// ---- A non-deciding viewer's encoding (ENGINE.md 67) ------------------------
+
+/// zero-core's root-view leaf values (its docs/search.md 3.6) evaluate a
+/// position the other player decides from the root player's view. On the
+/// public-state gate's positions (the cube, the Delver mirror, best-of-three,
+/// a drafted match), the non-deciding player's encoding is the same in every
+/// world that deals the decider's hidden cards again - including the cards a
+/// payment in progress pins, which `determinize` keeps (`resample_unpinned`).
+#[test]
+fn a_non_deciding_viewers_encoding_ignores_the_deciders_hidden_cards() {
+    let mut rng = Rng::new(67);
+    let (mut worlds, mut changed) = (0, 0);
+    let mut kinds = std::collections::BTreeMap::new();
+    for (spec, g) in gate_positions(scale(40) as usize, 67) {
+        let mover = g.to_move().unwrap();
+        let viewer = 1 - mover;
+        let x = enc(&g, viewer);
+        *kinds.entry(spec).or_insert(0) += 1;
+        for _ in 0..3 {
+            let mut d = g.clone();
+            d.g.resample_unpinned(viewer as u8, &mut rng);
+            changed += g.g.objs().iter().zip(d.g.objs()).any(|(a, b)| a.def != b.def) as u32;
+            let y = enc(&d, viewer);
+            if let Some(i) = (0..NUM_FEATURES).find(|&i| x[i] != y[i]) {
+                panic!("{spec}: P{viewer}'s feature {i} reads the decider's hidden cards ({} -> {})", x[i], y[i]);
+            }
+            worlds += 1;
+        }
+    }
+    println!("{worlds} worlds of {kinds:?} positions, {changed} with cards dealt again");
+    assert!(worlds > 400 && changed > worlds / 2, "{worlds} {changed}");
+}
+
+/// The search's own case: worlds sampled for the root decider at its
+/// decision, played on with the same actions while their chance keys agree;
+/// at every position where the OTHER player decides, the root decider's
+/// encoding is the same in both worlds even when that player's options
+/// differ (they follow its sampled hand: different tree nodes, one
+/// information state of the root decider) - a root-view leaf's value is a
+/// function of what the root decider knows. (`equal_keys_mean_equal_features`
+/// compares only while the options agree.)
+#[test]
+fn root_view_leaves_encode_alike_whatever_the_deciders_options() {
+    let mut rng = Rng::new(68);
+    let mut zr = zero_search::rng::Rng::new(68);
+    let (mut compared, mut other_options) = (0, 0);
+    let names = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let mirror = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
+    let delver = MtgSpec::parse(&mirror).unwrap();
+    let mut all = states(scale(14), 16, 68);
+    let mut h = Heuristic::new(68);
+    for s in 0..scale(14) {
+        let mut g = MtgAz::new_game(&delver, 2, 680_000 + s).unwrap();
+        let mut keys = Vec::new();
+        let mut k = 0;
+        while g.to_move().is_some() && k < 400 {
+            if k % 16 == 15 {
+                all.push(g.clone());
+            }
+            let a = mixed(&g, &mut h, &mut rng);
+            g.step(a, &mut keys).unwrap();
+            k += 1;
+        }
+    }
+    for g in all {
+        let viewer = g.to_move().unwrap();
+        let (mut a, mut b) = (g.clone(), g.clone());
+        a.determinize(viewer, &mut zr);
+        b.determinize(viewer, &mut zr);
+        for _ in 0..30 {
+            let (la, lb) = (legal(&a), legal(&b));
+            if a.to_move() != b.to_move() {
+                break;
+            }
+            if a.to_move().is_some_and(|p| p != viewer) {
+                assert_eq!(enc(&a, viewer), enc(&b, viewer), "the root decider's encoding of the other player's decision differs");
+                compared += 1;
+                other_options += (la != lb) as u32;
+            }
+            if la != lb || a.to_move().is_none() {
+                break;
+            }
+            let x = la[rng.below(la.len() as u32) as usize];
+            let (mut ka, mut kb) = (Vec::new(), Vec::new());
+            a.step(x, &mut ka).unwrap();
+            b.step(x, &mut kb).unwrap();
+            if ka != kb {
+                break;
+            }
+        }
+    }
+    println!("compared {compared} positions of the other player, {other_options} with other options in the two worlds");
+    assert!(compared > 300 && other_options > 10, "{compared} {other_options}");
+}
