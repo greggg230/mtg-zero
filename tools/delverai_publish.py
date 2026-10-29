@@ -19,7 +19,9 @@ Each pass:
     not back-filled. The recorded iterations are kept in <run>/delverai.json.
 
 `--loop N`: repeat every N seconds (default: one pass), waiting for a run that has not started
-yet. The upload key: --key-file,
+yet. `--follow STATE`: publish the run a JSON file names as its "main" (the A/B experiments'
+runs/ab/state.json: the main line moves to a fork's directory when the fork wins), read at every
+pass; the run argument is the fallback. The upload key: --key-file,
 $MTGZ_DELVERAI_KEY or ~/delverai/.upload_key (the site's Worker secret UPLOAD_KEY).
 Recording runs on the CPU by default (`--threads` torch threads): zero.replay's Python driver
 sends batches of a few positions, which on a GPU shared with the run (and other projects) wait
@@ -263,11 +265,23 @@ def one_pass(run, a, key, log=print, kick=None):
     return True
 
 
-def progress_loop(run, a, key, log, kick):
+def current_run(a, log=None):
+    """The run to publish: --follow's "main" when it names a run directory, else the run argument."""
+    if a.follow:
+        main = (_json(a.follow, {}) or {}).get('main')
+        if main and os.path.isdir(main):
+            if log and os.path.normcase(os.path.abspath(main)) != os.path.normcase(os.path.abspath(a.run)):
+                log(f'following the main line: {main}')
+            a.run = main
+    return a.run
+
+
+def progress_loop(a, key, log, kick):
     """Post the progress every --progress-every seconds, and at once when kicked."""
     while True:
         kick.wait(a.progress_every)
         kick.clear()
+        run = a.run
         if not os.path.exists(os.path.join(run, 'config.json')):
             continue
         try:
@@ -287,10 +301,12 @@ def main(argv=None):
     ap.add_argument('--threads', type=int, default=4, help='torch threads for CPU inference')
     ap.add_argument('--min-iter', type=int, default=None, help='record no checkpoint older than this')
     ap.add_argument('--every', type=int, default=1, help='record only iterations divisible by this (2: even ones)')
+    ap.add_argument('--follow', default=None, help='a JSON file whose "main" names the run to publish (runs/ab/state.json)')
     ap.add_argument('--url', default=replays.SITE)
     ap.add_argument('--key-file', default=None)
     ap.add_argument('--dry-run', action='store_true', help='record, but upload nothing')
     a = ap.parse_args(argv)
+    current_run(a)
     if not os.path.isdir(a.run) and a.loop is None:
         raise SystemExit(f'{a.run}: no such run directory')
     key = None if a.dry_run else replays.upload_key(a.key_file)
@@ -307,10 +323,11 @@ def main(argv=None):
     kick = None
     if a.loop is not None:
         kick = threading.Event()
-        threading.Thread(target=progress_loop, args=(a.run, a, key, log, kick), daemon=True).start()
+        threading.Thread(target=progress_loop, args=(a, key, log, kick), daemon=True).start()
         kick.set()
     waiting = False
     while True:
+        current_run(a, log)
         if not os.path.exists(os.path.join(a.run, 'config.json')):    # not launched yet (--loop)
             if not waiting:
                 log(f'waiting for {a.run} to start')
