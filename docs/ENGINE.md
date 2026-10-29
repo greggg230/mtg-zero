@@ -12372,3 +12372,163 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates): the 
   bigger network's iterations take ~2x as long, so a per-hour comparison is the fork's K + N against
   the control's K + 2N.
 * `fork_run --net` drops K's Elo results; the fork's Elo pool rates the student from its own games on.
+
+## 63. The self-play league: past checkpoints in the Delver mirror
+
+Branch `league` (main 0b476e0), zero-core `feat/league` 5099f00 (code) + d507df8, f57ee57 (docs: its
+docs/az.md 14) on zero-core main 437cef0, 2026-10-29, CPU only (`CUDA_VISIBLE_DEVICES=`, below-normal
+priority, at most 8 threads), the A/B round 2 (`runs/ab-r2`, `runs/delver2`, `runs/r2-*`) live on the GPU and the Mac;
+every run directory only read.
+
+### 63.1 Why
+
+The Delver main line `runs/delver2` (59, 60) gains about +1 Elo per iteration in head-to-heads
+(`runs/ab/results.md`, round 2 under way), and against a different opponent it slips: its
+evaluations on the Mac rate iterations 0 / 8 / 16 at 1477 / 1409 / 1312 (pool cq-n4-v50-s0.3), 94% /
+91% / 86% against the heuristic. In a mirror, pure self-play trains the network against its own
+current habits only - what beats them is learned, the habits it exploited fade, and nothing holds the
+policy to what it already knew. Fictitious self-play and AlphaStar's league play part of the games
+against past versions instead. zero-core's run setting `selfplay_league` is that, opt-in.
+
+### 63.2 What zero-core built (its docs/az.md 14)
+
+* `--selfplay-league F` (0 = off, the default): a share F of the self-play games - exactly over each
+  driver's started games, spread evenly, seats alternating - puts a past checkpoint in one seat.
+  `--selfplay-league-pool` (default `2,4,8,16,32`: raw offsets back from the self-playing checkpoint
+  i-1, i.e. i-3, i-5, i-9, i-17, i-33, those that exist; or `all`), `--selfplay-league-slots` (1: one
+  past checkpoint per iteration, its own evaluator key `L0`), `--selfplay-league-pick` (`uniform`, or
+  `pfsp`: weighted by (1 - x)^2, x = the current networks' recent score against it).
+* **Samples: the current network's decisions only.** The past network's seat searches with the
+  self-play settings (noise, temperature, playout cap: it plays as in its own self-play) but records
+  nothing (the Rust seat's new `record` flag); `z` is the game's result from the current network's
+  seat, `q` its own search's root value. The past network's targets would pull the policy back to the
+  habits the league is meant to keep it from settling into, and its values are an older head's.
+* The past checkpoints load through the encoding guard (61): a past network of another layout is
+  refused. Delver2's own checkpoints are all layout v5 (its iteration 0 is the widen of
+  ab2-cqscale03's 137, 60.5), so the whole run is the pool; the v4 runs before it never are.
+* Remote self-play on the Mac (52, 56): the phase line names the slot's checkpoint, the run ships it
+  into the mirror with checkpoint i-1, the workers keep it through their clean-up, play the run's
+  league table and report their accepted league games. A Mac checkout without the league would be
+  refused (it would record both seats); the `mac` remote runs exactly the run's commit anyway
+  (RunCommitRemote, 44).
+* Metrics (`selfplay.league` per iteration): the share, the current network's score against the
+  league and per checkpoint, the slots, the candidates, this machine's / the remote's league games;
+  a log line `iter N league: ...`. `tools/fork_run.py --set selfplay_league=...` links every
+  checkpoint the fork's league may play.
+* Co-training (td1) refuses the setting; a run without it plays exactly as before (zero-core's
+  az.md 14.5: byte for byte against edf4b89 and 437cef0).
+
+### 63.3 This repo
+
+Only the pin moves (zero-core f57ee57): no engine, encoding or package change. Digests and layout v5
+unchanged (the engine is not touched).
+
+### 63.4 Evidence on MTG (CPU)
+
+* `delver-smoke` with the league on (`--iters 4 --selfplay-league 0.25 --selfplay-league-pool 1,2`,
+  E:/mtg-zero-scratch/league/ds1 and, on the rebased branch, ds1b: 37-42 s): 4 of 16 games every
+  iteration were league games (exactly 25%); iteration 1 played its own checkpoint 0 (`self`: no past
+  checkpoint yet), iteration 2 checkpoint 0 (the one candidate), 3 checkpoint 0 of {1, 0}, 4 checkpoint
+  1; 743 / 709 / 636 / 768 samples - the same on both builds (a classic driver is deterministic); Elo
+  matches and evaluation as before.
+* The same with the remote 'local' (`--rolling 1 --games 48 --conc 24 --selfplay-remote local
+  --selfplay-remote-linger 1`; ds2 before the rebase and ds2b on this branch: a worker process on the desktop
+  running the committed checkout, `MTGZ_REMOTE_COMMIT` and the engine stamp set as tools/mac.sh does):
+  the quota 48 exact every iteration (ds2b: here 38 / 5 / 0 / 0, the worker 10 / 43 / 48 / 48 - the
+  worker starts its phases early and lingers, so it took the toy-sized quota), league games 11 / 12 /
+  13 / 8 (17-27% of the accepted games; the started games' share is exact), of them the worker's 2 /
+  11 / 13 / 8; the mirror held checkpoints 1-3 after the last phase; iteration 4's league games split
+  between checkpoint 0 (5: lingering games of phase 3, played against phase 3's slot) and checkpoint 1
+  (3), as attributed; ds2: staleness mean 0-0.57, every row within one checkpoint.
+* Throughput (zero-core az.md 14.3; the desktop's CPU, 96 games in flight, 4 search + 2 torch
+  threads, delver2's iterations 23 and 11 as the current / past network, phases of 60-90 s next to the
+  A/B arms): leaves/s off 1,824 / 2,034 / 1,757 / 1,330 (mean 1,736), F 0.25 one slot 1,642 / 1,344 /
+  1,770 / 1,296 (mean 1,513, -13%), two slots 1,395 / 1,233 (-24%). A slot's call of ~6 leaves costs
+  ~12 ms against ~46 ms for the current network's ~42 leaves.
+
+### 63.5 Costs on the Delver line (estimates from 63.4 and delver2's iterations 18-23)
+
+* **Self-play time**: the Mac plays ~85% of the 800 games (two CPU workers, ~25k leaves/s), the
+  desktop's GPU the rest (~5k leaves/s, batches of 96). One slot at F 0.25: about -13% of the Mac's
+  leaves per second (its workers infer on the CPU; measured on the desktop's CPU, 63.4), the desktop one more small CUDA graph replay per group
+  dispatch (not measured: the GPU is the A/B's). The self-play phase (~175 s) grows by ~15% (~25 s);
+  an iteration (~210 s) by ~10%.
+* **Samples**: a league game records one side: ~12.5% fewer samples per iteration at F 0.25 (~48k
+  instead of ~55k), training's steps with them (-5 s).
+* **Mac traffic**: one more checkpoint per iteration into the mirror, 6.2 MB (the iteration's own
+  checkpoint is 6.2 MB, the shards coming back ~50 MB compressed).
+* **Memory**: one more 6.2 MB network per self-playing process (the desktop's driver, each Mac
+  worker), inference only; nothing per game.
+
+### 63.6 The A/B (flags)
+
+As round 2 (`runs/ab-r2/ab_driver.py`): fork the main line at its newest checkpoint K with the league
+on, run the fork then the control K -> K + 10 on the same build, h2h of the two K + 10 checkpoints (600
+games, both sides `--select cq --select-min-visits 4` at scale 0.3); the fork wins at >= 0.5 + 2 se.
+The build: a pinned run worktree of the merged main (`git worktree add --detach
+~/mtg-zero-wt/run-<sha> <sha>`, `CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/run-<sha> bash
+tools/build_py.sh`, then `bash tools/mac.sh --eval-checkout` there: the Mac's `run-<sha12>` serves the
+evaluations and the self-play). With the league off that build plays as the main line's (zero-core
+az.md 14.5), so the control continues delver2 unchanged. The experiment entry for an `ab_config.json`
+(the driver's `requires` waits for a build that has the flag; `set` goes to fork_run, so the fork
+links the pool's checkpoints, `flags` to the fork's supervisor):
+
+```json
+{"name": "league25", "requires": "--selfplay-league",
+ "flags": ["--selfplay-league", "0.25", "--selfplay-league-pool", "2,4,8,16,32",
+           "--selfplay-league-slots", "1", "--selfplay-league-pick", "uniform"],
+ "set": ["selfplay_league=0.25", "selfplay_league_pool=2,4,8,16,32",
+         "selfplay_league_slots=1", "selfplay_league_pick=uniform"]}
+```
+
+By hand (K = delver2's newest checkpoint after a STOP; `$BASE` = round 2's `base_flags`):
+
+```
+BASE="--preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 \
+  --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 \
+  --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25 --window-cache 1 --train-prefetch 2"
+python tools/fork_run.py --source runs/delver2 --dest runs/r3-1-league25 --iter K \
+  --set selfplay_league=0.25 --set selfplay_league_pool=2,4,8,16,32 --set selfplay_league_slots=1 \
+  --set selfplay_league_pick=uniform
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py runs/r3-1-league25/supervisor_console.txt \
+  python tools/supervise.py runs/r3-1-league25 $BASE --iters $((K+10)) --eval-every 1000 \
+  --selfplay-league 0.25 --selfplay-league-pool 2,4,8,16,32 --selfplay-league-slots 1 --selfplay-league-pick uniform
+# when it has iteration K+10: the control, the same flags without the league
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py runs/delver2/supervisor_console.txt \
+  python tools/supervise.py runs/delver2 $BASE --iters $((K+10)) --eval-every 1000
+N=$(printf %04d $((K+10)))
+python -m mtgz.az.h2h runs/r3-1-league25/models/iter_$N.pt runs/delver2/models/iter_$N.pt \
+  --games 600 --sims 32 --spec "$(python -c "import json; print(json.load(open('runs/delver2/config.json'))['spec'])")" \
+  --device cuda --threads 8 --seed 7 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 0.3
+```
+
+Read alongside the verdict: the fork's `selfplay.league.win` per
+iteration (its score against its own past; a run that forgets shows it falling against some
+checkpoints), both arms against the heuristic (their next evaluations: 63.1's slide), and the arms'
+K + 10 against an older main-line checkpoint (e.g. K - 16, the same h2h flags) - the league's aim is
+robustness, which a head-to-head of the two arms alone may not show in 10 iterations. Expect the fork
+to be ~10% slower per iteration (63.5). Follow-ups if it helps: `--selfplay-league-pick pfsp`, share
+0.5, `--selfplay-league-pool all`.
+
+### 63.7 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (feedback_tiered_gates). Rebased onto main
+0b476e0 / zero-core 437cef0 (feat/bignet) and checked again there:
+
+* zero-core (code 5099f00, docs d507df8 + f57ee57; first checked as 8295152 on edf4b89): `cargo test
+  --release` 51 + 3 passed (on 5099f00 one run had the timing-dependent
+  `queued_setups_are_shared_between_the_groups` fail: 1 of 60 interleaved runs here, 4 of 60 on
+  437cef0); `pytest tests` 220 passed, the 2 CUDA-only tests failing as on the base with no visible
+  device and one co-training back-off test failing under load (3 of 3 alone); `tests/test_league.py` 13
+  passed; byte identity against edf4b89 and 437cef0 (four toy configurations incl. the Delver line's
+  shape, unset and at the defaults; `check_checkpoint_compat` random / uniform / MLP / token:
+  identical); Glass Road c1f56dc, Caverna a6fad73, Kingdom Builder 4202a4a build against it (its
+  az.md 14.5).
+* This repo (league cf923be = pin f57ee57; this commit adds the section): `bash tools/build_py.sh` (76
+  s), `cargo test --release -p engine --test az` **27 passed**, `pytest tests` **49 passed** (1 min 17
+  s); the two delver-smokes (63.4). Before the rebase (pin 8295152 on main 4a96a8e): 27 and 48 passed,
+  ds1 and ds2.
+* No search smoke, no digest re-record: the engine is unchanged, and the core plays every run without
+  the setting as before.
+* Re-pinning delver2 onto this core (league off) is the tier "re-pin onto an already-verified commit";
+  turning the league on is the A/B above, never on the live main line directly.
