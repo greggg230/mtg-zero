@@ -21,7 +21,14 @@ Each pass:
 `--loop N`: repeat every N seconds (default: one pass), waiting for a run that has not started
 yet. `--follow STATE`: publish the run a JSON file names as its "main" (the A/B experiments'
 runs/ab/state.json: the main line moves to a fork's directory when the fork wins), read at every
-pass; the run argument is the fallback. The upload key: --key-file,
+pass; the run argument is the fallback.
+
+Lineage (`lineage` in the progress record): the run's history since its first ancestor, for the
+site's charts from the beginning. A fork (the A/B experiments' `done` entries of --follow's file:
+the fork's directory, the run it forked from and at which iteration, its changed setting) keeps
+its parent's numbering; a migration (MIGRATED_FROM.json: a layout widen) starts again at 0 with
+the source's checkpoint, so its rows get a global generation = the source's + its own. Each
+segment's rows are read from its own run directory, up to where its child took over. The upload key: --key-file,
 $MTGZ_DELVERAI_KEY or ~/delverai/.upload_key (the site's Worker secret UPLOAD_KEY).
 Recording runs on the CPU by default (`--threads` torch threads): zero.replay's Python driver
 sends batches of a few positions, which on a GPU shared with the run (and other projects) wait
@@ -181,6 +188,81 @@ def deck_of(cfg):
     return info
 
 
+def _norm(path):
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _label(flag):
+    """'--value-q 0.6' -> 'value_q 0.6'."""
+    parts = str(flag).split()
+    return ' '.join([parts[0].lstrip('-').replace('-', '_')] + parts[1:]) if parts else str(flag)
+
+
+def fork_registry(path):
+    """The A/B experiments' forks (their state file's `done`): fork run directory ->
+    {parent, at, label, won}."""
+    out = {}
+    for d in ((_json(path, {}) or {}).get('done') or []) if path else []:
+        a = (d.get('raw') or {}).get('a')
+        if not a or d.get('k') is None or not d.get('main_before'):
+            continue
+        fork = os.path.dirname(os.path.dirname(a.replace('\\', '/')))
+        out[_norm(fork)] = {'parent': d['main_before'], 'at': int(d['k']), 'label': _label(d.get('flag') or d.get('name')),
+                            'won': _norm(d.get('main_after') or '') == _norm(fork)}
+    return out
+
+
+def lineage(run, forks, depth=0):
+    """The run's segments from its first ancestor: [{dir, run, label, kind (root / fork /
+    migrate), first, last (its own iterations: None = to the end), offset (global generation =
+    offset + its iteration)}]."""
+    name = os.path.basename(os.path.abspath(run))
+    if depth > 20:
+        return [{'dir': run, 'run': name, 'label': name, 'kind': 'root', 'first': 0, 'last': None, 'offset': 0}]
+    mig = _json(os.path.join(run, 'MIGRATED_FROM.json'))
+    if isinstance(mig, dict) and mig.get('migrated_from'):
+        src = mig['migrated_from'].replace('\\', '/')
+        m = re.search(r'iter_(\d+)\.pt$', src)
+        src_run = os.path.dirname(os.path.dirname(src))
+        if m and os.path.isdir(src_run):
+            k = int(m.group(1))
+            segs = _cut(lineage(src_run, forks, depth + 1), k)
+            layout = str(mig.get('layout') or '')
+            lab = 'layout ' + layout.split('->')[-1].split('(')[0].strip() if '->' in layout else 'widened'
+            return segs + [{'dir': run, 'run': name, 'label': lab, 'kind': 'migrate', 'first': 0, 'last': None,
+                            'offset': segs[-1]['offset'] + k}]
+    f = forks.get(_norm(run))
+    if f and os.path.isdir(f['parent']):
+        segs = _cut(lineage(f['parent'], forks, depth + 1), f['at'])
+        return segs + [{'dir': run, 'run': name, 'label': f['label'], 'kind': 'fork', 'first': f['at'] + 1, 'last': None,
+                        'offset': segs[-1]['offset']}]
+    return [{'dir': run, 'run': name, 'label': name, 'kind': 'root', 'first': 0, 'last': None, 'offset': 0}]
+
+
+def _cut(segs, k):
+    """The segments up to the last one's iteration k (where a child took over)."""
+    segs = [dict(x) for x in segs]
+    segs[-1]['last'] = k
+    return segs
+
+
+def lineage_record(run, forks):
+    """The progress record's `lineage`: the segments and every row of them, each with its global
+    generation `g`, its run and its own iteration `gen`. None for a run without ancestors."""
+    segs = lineage(run, forks)
+    if len(segs) < 2:
+        return None
+    rows = []
+    for k, sg in enumerate(segs):
+        for r in iteration_rows(sg['dir']):
+            it = r.get('iter')
+            if not isinstance(it, int) or it < sg['first'] or (sg['last'] is not None and it > sg['last']):
+                continue
+            rows.append(dict(r, g=sg['offset'] + it, gen=it, run=sg['run'], seg=k))
+    return {'segments': [{x: sg[x] for x in ('run', 'label', 'kind', 'first', 'last', 'offset')}
+                         | {'from_g': sg['offset'] + sg['first']} for sg in segs], 'rows': rows}
+
+
 def migrated_from(run):
     """A run continuing another's network (MIGRATED_FROM.json, e.g. a layout widen: runs/delver2
     from ab2-cqscale03's iter_0137): {run, iter, layout, time} of the source, else None."""
@@ -193,8 +275,9 @@ def migrated_from(run):
             'layout': m.get('layout'), 'time': m.get('time')}
 
 
-def progress(run, every=1):
-    """The site's progress record of a run (`every`: which iterations get games recorded)."""
+def progress(run, every=1, forks=None):
+    """The site's progress record of a run (`every`: which iterations get games recorded;
+    `forks`: fork_registry, for the lineage)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
     st = runctl.run_status(run)
     prog = _json(os.path.join(run, 'progress.json'))
@@ -214,6 +297,7 @@ def progress(run, every=1):
                     for k, v in (ratings.get('ratings') or {}).items()},
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
         'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
+        'lineage': lineage_record(run, forks or {}),
     }
 
 
@@ -232,7 +316,7 @@ def latest_checkpoint(run, every=1, settle_s=30):
 
 
 def post_progress(run, a, key, log=print):
-    p = progress(run, a.every)
+    p = progress(run, a.every, fork_registry(a.follow))
     if a.dry_run:
         log(json.dumps({k: v for k, v in p.items() if k != 'iters'})[:800])
         log(f'{len(p["iters"])} iteration rows')
