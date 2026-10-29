@@ -1212,7 +1212,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_farm.rs` | M6 (section 51): the fuzz farm's first bugs, each state built on cube cards: the hidden pool's deal holds the clouds while the opponent pays (Elvish Spirit Guide, a best-of-three match from a scenario: every world is the sampled deck), 400.3 (an opponent's Lotus Petal is not in your graveyard: no Psychic Frog exile, no delve for Treasure Cruise), 605.3a (Gaea's Cradle animated by Nissa with 28 creatures and Aang's waterbend: checked and paid within 30 s on a thread), 701.25a (a surveiled Blightsteel Colossus shuffles the library after the pile is placed: the decider's worlds and encoding keep the other card), 709.3 (Life // Death from Shelldock Isle revealed before the half is chosen: fixed by 49.6, fails on 075649c), 601.2g-h (delve's cards exiled after the mana abilities: Fanatic of Rhonas with a delirious Dragon's Rage Channeler pays Dig Through Time); five fail on ab02574, all six on 075649c; `pay.rs` unit tests: `covers` on 255 units and an augmenting path, an exhausted search's panic |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
-| `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games) |
+| `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games); the opening (section 55: the declared mulligan encoded, seen by the second player, cleared once taken, kept by clones and `determinize`; the opening's other floats bit for bit as before; no hidden information in any opening state) |
 | `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b; decks of 5-7 cards and of exactly 6, `PASS` only at a legal size); a pool's deck is sideboarded to exactly 40 cards (section 42: every 40-card deck of generated, evaluation and M8a pools by its canonical path, the two extremes, no 39- or 41-card deck, `PASS` only at 40, the heuristic's answers legal from any point); a spec decklist of another size keeps its size; sideboarded decks are legal (40 cards) and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
@@ -1368,7 +1368,8 @@ other decks, every game differs; and for M7e part 1's rules fixes and its three 
 play-or-draw decision first, the shuffles after it: every game differs; the digest games have
 no sideboards), 076e92a6939c6798, and for M8b's layout additions, the encodings only:
 63d5bd84a9f7c19b, and for M8b part b's turning face up (the card shown before its cost is paid,
-CR 701.40b: 50 games differ), 646d779580df7517), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
+CR 701.40b: 50 games differ), 646d779580df7517, and for the declared mulligan in the encoding
+(section 55: 11 games' encodings), 0052143696be4ce3), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
 prints the combined digest alone: compare it before and after a layout change (M8b: 3fb15384404c7428
 on both sides, section 36.8; part b: the same without the face-up change, e4783eb5c6705fc3 with it,
 section 36.11). `DIGEST_WRITE=1` records
@@ -2584,7 +2585,8 @@ sideboarding).
 segments, 17 bags, 1024 identities; part b changed no width (its hidden-pool model fills the
 same bags from what the viewer knows). The first run of layout v4 is `runs/mtg4` (preset
 `mtg-4`, best-of-three matches). From here a change to a width, offset, segment or identity is
-layout v5; newly appended token keys keep v4.
+layout v5; newly appended token keys keep v4. A new field in a spare float keeps v4 too (section
+55: the declared mulligan in globals 125-126; old checkpoints load and see a new non-zero input).
 
 ### 22.8 The third and fourth runs (`runs/mtg3`, `runs/mtg4`)
 
@@ -10346,3 +10348,194 @@ ENGINE.md 15). Checks at daedbca: `cargo test --release -p engine -p card_ir --n
 Mac) **1,439 passed, 0 failed, 14 ignored**; the digests 804002969bdd0938 (unchanged);
 `FUZZ_POOL=delver FUZZ_GAMES=20000` (the Mac) no failure, the same numbers as 54.7 to the option;
 `bash tools/build_py.sh`, `python -m pytest -q tests` 45 passed.
+
+## 55. The declared mulligan in the encoding
+
+Branch `mull-declared` (from main at 05e37bb). The London mulligan's declarations (CR 103.5) are
+public, and one of them was not in the network's input. The fix fills two of layout v4's spare
+globals: layout v4 is unchanged (33,652 floats, `mtgz/az/layout_v4.json` unchanged), checkpoints of
+every v4 run load as they are, and the rules engine is untouched (the behaviour digests without
+encodings are equal). The opening sequence was audited for gaps of the same kind (55.4).
+
+### 55.1 The gap
+
+In turn order each player who has not kept declares keep (`PASS`) or mulligan (`YES`); then every
+player who declared a mulligan takes it (section 5). `Game::mulligan_declare` sets
+`Player::mulligan_declared` for a mulligan and `Player::kept` for a keep; `mulligan_run` takes the
+mulligans once both have declared (the flag cleared, `mulligans` + 1, seven new cards) and the
+bottoms follow. The encoding had per player `mulligans` / 4 (per-player global 12) and `kept` (13),
+not the declaration. So after the starting player declared a mulligan, the next position (the
+other player's declaration) encoded, outside the decision's context block, **exactly** as the
+position before the declaration (measured on main's encoding: 240 of 240 cases, three specs, 40
+seeds, both viewers): the same hands, the same counts, `kept` 0; only the context's decider (and,
+for the decider, its option count) differed. "Keep" set `kept`. Two consequences:
+
+1. The search's first leaf after the starting player's "Mulligan" read like the undecided root,
+   with the hand it would throw away, while "Keep" was visible: the mulligan's cost (a card) was
+   in that leaf's input only through the order (below). This matters most for the Delver mirror (`runs/delver1`, 54.9), whose early
+   networks mulligan to zero, and for the cube's `mtg` and `team_draft` play.
+2. The second player declared without the first player's declaration in the state (public in real
+   play).
+
+The declaration was inferable, but only through the order: at the second player's declaration the
+starting player has always either kept or declared (a player at seven mulligans keeps without a
+decision), so `kept` = 0 there means a declared mulligan. A network had to learn that conjunction
+(the kind `Mulligan`, the decider not the starting player, `g[18]`, and the starting player's
+`kept`); a fresh one does not know it. Only that one state is affected: the second player's own
+declaration of a mulligan is taken at once (the next position shows `mulligans` + 1), and nothing
+else is decided while a declaration waits.
+
+### 55.2 The fix: two spare globals
+
+Where a float was free (22.6-22.7: a change to a width, offset, segment or identity is layout v5;
+a field in a spare float keeps v4):
+
+| Block | Used | Free |
+|---|---|---|
+| per-player globals (`g[24 + 40 side..]`) | 0-37, v4's 38-39 | none |
+| globals | 0-23, the per-player 24-103, day and night 104-105, the rooms 106-123, `CHOOSER` 124 | **125-127** |
+| context (256) | 0-245 (`ctx::END`) | 246-255, the decision's, not the game's |
+| match (32) | 0-26 (`mtch::END`) | 27-31, the match's |
+
+`glob::MULLIGAN_DECLARED` = 125: `g[125 + side]` (viewer first, as the rooms' `9 side`) is that
+player's `mulligan_declared`, for both viewers (public); 127 stays spare. A const assert keeps 125-126
+clear of the rooms and the chooser and inside the 128 globals. `layout_v4.json` describes the
+segments and bags only (every other float is a global), so it is unchanged, and `NUM_FEATURES`,
+the action ids and every other feature's meaning and offset are main's. The flag is 1 only in the
+state of 55.1; every other state encodes bit for bit as before (55.3, 55.5).
+
+**What a v4 checkpoint sees.** The token network reads the globals through one linear map
+(`TokenNet.g`: 160 inputs, the 128 globals and the match block) into the global token. Inputs 125
+and 126 were always 0 in training, so AdamW never moved their weight columns but for weight decay
+(delver1: 1e-4 at lr 1e-3, a factor 1 - 1e-7 a step): they are still their initialisation. A checkpoint loads
+and plays unchanged; in the declared state it adds an untrained direction to the global token
+(measured in 55.6) until training gives the input a meaning.
+
+**`Game::view_of`** (testkit: the observable view the hidden-information checks compare across
+worlds) also left the mulligan state out: `mulligans`, `kept` and `mulligan_declared` are in it now
+(Keep and Mulligan looked the same there). No behaviour or encoding depends on it.
+
+### 55.3 Tests
+
+`tests/az.rs`, on three specs (the cube's random best-of-one decks, a best-of-three match's first
+game, the Delver mirror):
+
+* `cr_103_5_a_declared_mulligan_is_encoded`: for both viewers, after the starting player's
+  "Mulligan" the encoding differs from the one before the declaration outside the context block in
+  exactly the declared flag (main: no float), and from "Keep" in exactly `kept` and the flag; the
+  views of Keep and Mulligan differ.
+* `cr_103_5_the_second_player_sees_the_declaration_and_it_clears`: the second player's decision
+  shows the opponent's declaration, in round 1 and round 2; when both declare the mulligans are taken
+  at once (seven new cards each, counts 1), the flags are clear through the bottoms, before round 2's
+  declaration and after the starting player's second mulligan.
+* `cr_103_5_the_declared_flags_follow_the_game`: in every sampled opening state, both viewers, the
+  flags are the players' `mulligan_declared`, set only at the second player's declaration after the
+  starting player's mulligan.
+* `the_declared_mulligan_survives_clones_and_determinize`: a clone and a game rebuilt from its
+  seed and replayed encode equally; `determinize` for either viewer keeps the flag and the viewer's
+  encoding, and every world takes the declared mulligan when the other player keeps; two worlds of
+  the starting player after the same declaration encode equally (zero-core's child signature).
+* `opening_encodings_but_the_declaration_are_unchanged`: the encodings of every state of 40 seeded
+  openings per spec (the play-or-draw choice to turn 1, both viewers), with globals 125-126 masked,
+  hash to the values recorded on main at 05e37bb (cube 6f267cb231046dd1, bo3 03550aad88c4a965,
+  delver cb3395e062b2fd8f): the flag changed no other float.
+* `the_opening_encodes_no_hidden_information` (55.4).
+
+Without the flag's line in `encode_globals`, the first four fail and the fifth passes; without the
+`view_of` change, the first fails. Six tests in all, `az.rs` 15 -> 21.
+
+### 55.4 The opening audit
+
+Every decision before turn 1 (`Task::PlayDraw`, `RevealCompanion`, `DrawHands`, `MulliganDeclare`,
+`MulliganRun`, `MulliganBottom`, `Opening`; sideboarding comes between the games of a match, 36.2),
+for what each outcome leaves in the encoding and what the other player sees:
+
+| Decision | Outcome in the encoding | Hidden from the other player |
+|---|---|---|
+| play or draw (103.1) | `g[18]` the viewer starts, `g[124]` the viewer chose | nothing hidden yet (the hands are drawn after it) |
+| companion reveal (103.2b) | the companion segments, `glob::COMPANION`; a decline changes nothing (no companion) | whether asked: the deck and sideboard, public with open decklists; asked always with hidden decks (35.5, 36.11); options only for the decider |
+| opening hands (103.5) | hand sizes; the viewer's own hand | the cards (keyed `KEY_DRAW`, private) |
+| keep or mulligan (103.5) | `kept`; **the declaration (new)**; `mulligans` once taken | the hand |
+| bottoms (103.5) | hand and library sizes; `ctx::BOTTOMS_LEFT` (public) | which card (a private choice: `scramble`) |
+| opening-hand actions (103.6: Gemstone Caverns) | the permanent, the exiled card (public); a decline changes nothing | whether its card is in the hand: asked whenever the deck (with hidden decks: the known pool) holds one |
+
+Findings:
+
+* **No other public outcome is missing.** A probe over 400 seeded openings per spec (every legal
+  action at every opening decision, both viewers) found the encoding unchanged outside the context
+  only for outcomes that change no game state: declining a companion or an opening-hand action
+  before the other player's turn to decide, and choosing to play first when the next decision comes
+  before the hands are drawn (best-of-three: the reveal is always asked). Then `g[18]` already read 1
+  for the chooser while the choice was pending (`turn.starting` is provisional until then); the
+  pending kind `PlayDraw` tells the two apart, and no other decision comes between, unlike 55.1.
+* **No private information in the opponent's encoding or view**: the new test
+  `the_opening_encodes_no_hidden_information` checks, in every sampled opening state of the three
+  specs (40 games each: 4,476 worlds), that both players' encodings and views are the same in every
+  world `determinize` makes for them, and that two worlds of the decider played with the same action
+  encode equally while the keys, the next decider and its options agree (692 pairs). The gap of 55.1
+  was a missing public fact, not a leak.
+* Not changed, recorded: when Gemstone Caverns' question (asked whenever the deck holds one) has
+  only `PASS` (none in the hand), `auto_single` answers it with a public `KEY_AUTO`, so a search's
+  tree branches on whether the hand holds one; that is section 10's general treatment of a
+  single-option decision, not the encoding (the Delver mirror has no opening-hand card). The
+  spectator / UI view (`az/view.rs`, JSON) shows `mulligans` but not `kept` or a declaration; no
+  network or check reads it.
+
+### 55.5 Behaviour digests
+
+`DIGEST_ENCODING=0` (the behaviour alone): combined digest **5f0579aa50453818 before (05e37bb) and
+after**: no game plays differently. With the encodings, 804002969bdd0938 before (every game equal to
+`tests/data/digests.txt`) and **0052143696be4ce3** after, re-recorded with `DIGEST_WRITE=1`: 11 of the
+2,500 games differ (r 147, 291, 376, 472, 555, 984, 1106, 1494, 1681, 1902, 1983), exactly the games
+whose hashed encodings (every 10th decision) include a state with a declared mulligan (a probe listed
+them).
+
+### 55.6 Checkpoints and runs
+
+On this build (`bash tools/build_py.sh`), copies of `runs/delver1/models/iter_0002.pt` and
+`iter_0004.pt`, `runs/mtg5/models/iter_0015.pt` and td1's play network
+(`runs/td1/resolver/models/iter_0006.pt`) load (`zero.net.load`; features 33,652, the segments of
+`layout_v4.json`) and evaluate the new encodings of 24 uniform-random games' states (both viewers),
+every policy and value finite; then the declared state of 32 games (the second player's decision,
+its own encoding), with the flag and with it masked (the old build's encoding):
+
+| Checkpoint | States | `TokenNet.g` column norms: kept (own / opp), chooser; 125, 126, 127 (median of 160) | Declared state: the decider's P(win) masked, mean shift with the flag (largest) |
+|---|---:|---|---|
+| delver1 iter 2 | 7,970 | 0.499 / 0.509, 0.519; 0.548, 0.504, 0.545 (0.523) | 0.509, -0.0063 (0.0116) |
+| delver1 iter 4 | 7,970 | 0.499 / 0.571, 0.672; 0.547, 0.504, 0.545 (0.533) | 0.530, -0.0053 (0.0127) |
+| mtg5 iter 15 | 8,728 | 0.491 / 0.650, 0.628; 0.547, 0.503, 0.545 (0.659) | 0.498, -0.0036 (0.0146) |
+| td1 resolver iter 6 | 8,728 | 0.525 / 0.830, 1.009; 0.547, 0.503, 0.544 (0.891) | 0.529, -0.0032 (0.0119) |
+
+Columns 125-127 are the same in all four, the runs' common initialisation (seed 1; td1's resolver
+started from mtg5's iteration 14), where trained columns moved (the chooser's 0.52 to 1.01): the new
+input's weights are untrained, as 55.2 says, and shift the decider's value by at most 0.015. Through
+zero-core's search driver (`python -m mtgz.az.h2h`, CPU, 16 simulations, 8 games each): delver1
+iteration 4 against iteration 2 on the mirror's spec, and mtg5 iteration 15 against td1's resolver
+iteration 6, every game finished.
+
+**`runs/delver1`** (and mtg5, td1's resolver) can move to this build at an iteration boundary, as a
+re-pin (44.5, 53.4): the layout, the action ids and the shards' width are unchanged, so checkpoints,
+the optimiser state and the window's shards load as they are. The window's older samples carry the
+old encoding of the declared state (flag 0 where this build writes 1); that input (the second
+player's declaration with the starting player neither kept nor flagged) never occurs on this build,
+so those samples teach nothing that contradicts the new ones and leave the window with its rotation
+(6 iterations). No fresh start is needed. The re-pin: this branch merged, a pinned worktree of the
+merged commit built (`bash tools/build_py.sh`), the search smoke there, `bash tools/mac.sh
+--eval-checkout` (the Mac's evaluation and self-play checkout of that commit), `touch runs/delver1/STOP`
+during an iteration, then the supervisor's command from the new worktree.
+
+### 55.7 Checks
+
+* **Rust** (`cargo test --release -p engine -p card_ir --no-fail-fast`, every binary including `az`;
+  on the desktop with `CARGO_BUILD_JOBS=8 RUST_TEST_THREADS=8`, since the Mac's cores were running
+  delver1's remote self-play): **1,447 passed, 0 failed, 15 ignored**; `az.rs` 21 (6 new).
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): 46 passed.
+* **The search smoke** (`python tools/search_smoke.py --specs random,eval,match,delver --preset
+  delver-mirror`): 0 failed of 16 configurations (seeds 0-3; 6,400 games and matches, 3,340,929
+  decisions, 87.9 million simulations, 2,616 s). Every spec's decisions are 54.7's exactly (random
+  658,117, eval 704,510, match 1,515,641, delver 462,661; the simulations 16.9, 18.0, 40.2 and 12.8
+  million as there: the mirror preset's seat is mtg-3's): the search plays the same games. The full gate was run (ENGINE.md names no smaller one for
+  an encoding-only change); the digests already show the behaviour unchanged, and the smoke adds the
+  search's determinized worlds and records on the new build.
+* **Digests** (55.5), the **checkpoints** (55.6), `layout_json_is_checked_in` (`layout_v4.json`
+  unchanged).
