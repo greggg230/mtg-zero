@@ -11973,7 +11973,7 @@ runs/td1/resolver/models/iter_0006.pt runs/td1-v5/resolver` writes `resolver/mod
 the run starts after iteration 0 and bootstraps nothing, and its `resolver_init` is a record only.
 `init_resolver`'s widen itself is right (that run's resolver iteration 0 equals fork_run's tensor
 for tensor). A zero-core fix, not made here: the bootstrap should keep (or refuse) an existing
-checkpoint 0 of either network.
+checkpoint 0 of either network (made since: zero-core 7132cb8, 61.5).
 
 **Exactness** (`E:/mtg-zero-scratch/migrate-v5/collect.py`, `compare.py`, `result.json`; 60.2's
 method): the v4 build (a6bb3bc, `E:/mtg-zero-scratch/migrate-v5/v4ref`) and this build played the
@@ -12018,3 +12018,114 @@ td1's resolver iter_0006, `--lr 0.001 --value-q-warmup 0`, `MTGZ_SUPERVISE_STALL
 `--draft-eval-net-remote mac` optional), then `python tools/pause_run.py <run> --resume`. Never
 delete one of td1-v5's iteration-0 checkpoints (the bootstrap above), and never resume
 `runs/mtg5` or `runs/td1` on a v5 build (60.5).
+
+## 61. The checkpoint / layout mismatch guard (zero-core's encoding guard)
+
+Branch `ckpt-guard` (main b903fa2), zero-core `feat/ckpt-guard` 7132cb8 (code) + edf4b89 (docs),
+2026-10-29, CPU only, `runs/delver2` live on the GPU and the Mac; every run directory only read.
+
+### 61.1 Why
+
+Layout v5 (60) is 37,620 floats, v4 33,652. A v4 token network loaded by a v5 build was **misread
+without an error**: `TokenNet` takes the first 33,652 floats of each row (`x[:, :features]`) and
+reads its slots and globals where v4 had them - the permanents' slots start 2,048 floats later in
+v5 and are 24 floats wider. The only safe move across a layout change is `tools/fork_run.py`'s widen
+into a new run (60.2, 60.5). `mtgz.az.replays.check_encoding` (fce517e) refused such checkpoints in
+the replay recorder alone; zero-core now refuses them at every load, for every game (its docs/az.md
+10.4).
+
+### 61.2 What zero-core checks, and where
+
+`zero.net.check_encoding(config, game)`: a checkpoint's config against this build's game - the game,
+`num_features` / `num_actions`, and for a token network the layout's segments, bags and vocabulary
+(not the declared global blocks) and the layout `version` when the checkpoint and the build both
+carry one. Every `zero.net.load` runs it (so every load site: the run's evaluators - self-play, the
+yardstick, the Elo matches -, training's checkpoint, co-training's both networks, the remote
+evaluation and remote self-play on the Mac, h2h, replay, targets, bench, this repo's human picks and
+`tools/match_noise.py`), the run checks its newest checkpoint before it resumes, the evaluator
+refuses leaf batches of another width, and an optimizer state that does not fit the network is not
+loaded. A refused resume exits with **status 78** (`runctl.EXIT_REFUSED`; `run_state.json`
+`refused`), and the supervisor does not restart it. On the Mac: a refused remote evaluation is one
+line `ZERO_REMOTE_REFUSED` there and `remote eval mac iter N REFUSED by the remote's build ...` in
+the run's log (retried every 5 minutes: `bash tools/mac.sh --eval-checkout` fixes the checkout); a
+refusing self-play worker is `worker k REFUSED the run's checkpoint ...` in the run's log while the
+desktop plays every game. The opt-outs (`allow_mismatch=True`): fork_run's widen and co-training's
+`resolver_init` (both check the network they write), `selfplay_digest.py` (check_checkpoint_compat).
+
+### 61.3 This repo
+
+* `mtgz.az.replays.check_encoding(ckpt)` is zero-core's `check_checkpoint(ckpt)` now (the same
+  refusal, the same place: before anything is played; the message names both sides).
+* **The layout version is recorded**: zero-core's normalised layout keeps a layout's `name` /
+  `version` (only when set), so a network made from now on (`make_net`, a fork_run widen onto
+  `layout_v5.json`) carries `"version": 5` (the draft network `"version": 2`) in its checkpoint
+  config, and the guard compares it with the build's when both have one. Networks from before (every
+  v4 run, delver2, mtg5-v5, td1-v5) carry none and are judged by their structure, which tells v4
+  from v5 already. A resumed run keeps its checkpoint's config: delver2's checkpoints stay as they
+  are.
+* `tests/test_mtg_az.py::test_the_encoding_guard_refuses_a_v4_network_and_takes_a_v5_one`: a
+  layout_v4.json network refused by `load`, a run's evaluator and the replay recorder (the message:
+  33652 -> 37620, layout v4 vs v5, fork_run); its widen accepted and recorded as v5; a new network
+  v5; a v5 network recorded as another version refused; one without a version accepted; the draft
+  network v2, and refused as an `mtg` network.
+
+### 61.4 The real checkpoints (copies; sha256 equal to the originals)
+
+| Checkpoint | Run resume (`python -m mtgz.az.run --run <scratch run> --preset mtg-smoke --iters 0`) | Evaluator (`Run.evaluator` + a real driver's leaf batches) |
+|---|---|---|
+| `runs/ab2-cqscale03/models/iter_0137.pt` (v4, sha256 a04543f6...) | **refused**: exit 78 in 1.8 s, `run_state` refused, nothing written | **refused** (EncodingMismatch) |
+| `runs/delver2/models/iter_0000.pt` (v5, sha256 2ffd293b...) | **accepted**: "starting after iter 0", exit 0 | **accepted**: 20 leaf batches of 37,620 features answered |
+
+The refusal, as logged: `run REFUSED (exit status 78: the supervisor does not restart it):
+.../iter_0000.pt: a network of another encoding than this build's (features 33652 -> 37620; token
+layout: segment tops: offset 17792 -> 19840; segment my_permanents: offset 18116 -> 20164, width 148
+-> 172; segment opponent_permanents: offset 22852 -> 25668, width 148 -> 172; 8 more). The network:
+'mtg': 33,652 features, 1,024 actions, token layout without a version (11 segments, 1 bag), arch
+'tokens'. This build: 'mtg': 37,620 features, 1,024 actions, token layout v5 (11 segments, 1 bag).
+Fed this build's inputs it would misread them without an error. Move a run across an encoding
+change with python tools/fork_run.py <checkpoint> <new run> (...)`.
+
+Every run's newest checkpoint on this build (read-only): **accepted** - delver2 (iter_0016, the
+live main line), mtg5-v5, td1-v5 and its resolver, td1's draft network (draft_v2, unchanged);
+**refused** - ab1-valueq06, ab2-cqscale03, ab3-pfull05, ab4-selfplaycq, delver1, mtg4, mtg5, td1's
+resolver (v4), mtg3 (v3), mtg1, mtg2, mtg2a/b/c, mtg2n (13,532 features). The refused ones are the
+runs 60.5 says never to resume on a v5 build; none of them is a legitimate v5 resume. delver2's
+`opt_latest.pt` (iteration 16) fits its checkpoint (the new optimizer-state check: no mismatch).
+
+### 61.5 Co-training's first start no longer overwrites a forked network
+
+60.7's hazard is fixed in zero-core (`CoRun.first_checkpoints`): with no iteration holding both
+checkpoints, an existing checkpoint 0 of either network is kept (logged `primary iteration 0 = the
+checkpoint already there, kept`), the missing one created (the primary fresh, the resolver from
+`resolver_init`, else fresh), both checked by the guard; refused (nothing written) when the
+resolver has a checkpoint 0 and `resolver_init` is set too, or when a network has checkpoints after
+0 but no iteration has both. So 60.5's route (draft network by fork_run, play network by
+`resolver_init`) works as written; td1-v5 (both iteration-0 checkpoints from fork_run) resumes
+through the normal path (iteration 0 has both) and is unaffected. zero-core's test: a primary forked
+into iteration 0 survives bit for bit a start with `resolver_init`.
+
+### 61.6 Checks
+
+Tier "core behaviour, byte-identical defaults for matching checkpoints" (the tiered gates):
+
+* zero-core (7132cb8): `cargo test --release` 50 + 3 passed; `pytest tests` 202 passed (15 new:
+  `tests/test_encoding_guard.py`); toy runs and `check_checkpoint_compat` against f3f5535 identical
+  (its az.md 10.4); Glass Road c1f56dc, Caverna a6fad73, Kingdom Builder 4202a4a build against it;
+  every game's paused run accepted with the worktree it resumes from, every other run with its
+  game's build (az.md 10.4).
+* This repo (ckpt-guard, pinned to 7132cb8 for the checks; the docs commit edf4b89 changes no code):
+  `bash tools/build_py.sh` (1 min 26 s), `cargo test --release -p engine --test az` **27 passed**,
+  `pytest tests` **48 passed** (1 min 11 s).
+* No search smoke, no digest re-record: no game plays differently (the guard only reads configs;
+  the engine is unchanged).
+
+### 61.7 Re-pinning delver2
+
+delver2 can re-pin onto this core at an iteration boundary once it is merged (tier "re-pin onto an
+already-verified commit"): its checkpoints and optimizer state pass the guard on the v5 build, and
+nothing it runs behaves differently (the changed code paths are the checks, the refusals, fork_run,
+co-training's first start and widen's same-layout case, which a resumed single-game run never
+takes). Procedure as 59.3 / 60.5: a pinned worktree of the merged main, `bash tools/build_py.sh`,
+`bash tools/mac.sh --eval-checkout` (the Mac's evaluation and self-play checkout must have the same
+layout: with the guard a stale one refuses loudly instead of misreading), stop at an iteration
+boundary (STOP), relaunch the supervisor from the new worktree with the same command, watch_run.

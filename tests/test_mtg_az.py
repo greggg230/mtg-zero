@@ -280,3 +280,53 @@ def test_a_v4_token_network_widens_onto_layout_v5_exactly(tmp_path):
         r = new(noisy, n)
     for a, b, c in zip(p, q, r):
         assert torch.allclose(a, b, atol=1e-5) and torch.allclose(a, c, atol=1e-5)
+
+
+def test_the_encoding_guard_refuses_a_v4_network_and_takes_a_v5_one(tmp_path):
+    """ENGINE.md 61: zero-core's encoding guard (`zero.net.check_encoding`, its docs/az.md 10.4) on
+    this build (layout v5): a layout v4 token network is refused wherever it is loaded - net.load,
+    a run's evaluator, the replay recorder - naming both sides (33,652 -> 37,620 features, the
+    segments that moved, layout v5); its fork_run widen is taken and written as a v5 network; a new
+    network records layout version 5, and a v5 network recorded as another version is refused."""
+    import os
+    import torch
+    import mtgz.az as A
+    from mtgz.az import replays
+    from zero.net import (EncodingMismatch, TokenNet, check_checkpoint, check_encoding, encoding_mismatch, load,
+                          make_net, save, widen)
+    info = G.info('mtg')
+    with open(os.path.join(os.path.dirname(A.__file__), 'layout_v4.json'), encoding='utf-8') as f:
+        v4 = json.load(f)
+    torch.manual_seed(4)
+    old = TokenNet(33652, info['num_actions'], v4, d=16, layers=1, heads=2, ff=32, game='mtg').eval()
+    p4 = str(tmp_path / 'v4.pt')
+    save(old, p4, {'iter': 3})
+    with pytest.raises(EncodingMismatch) as e:
+        load(p4)
+    msg = str(e.value)
+    assert 'features 33652 -> 37620' in msg and 'token layout v4 (11 segments' in msg and 'token layout v5 (11' in msg
+    assert 'tools/fork_run.py' in msg
+    R = run.Run(str(tmp_path / 'r'), run.resolve_config(run.parse(['--run', 'x', '--preset', 'mtg-smoke']), {}))
+    with pytest.raises(EncodingMismatch):
+        R.evaluator(p4)
+    with pytest.raises(EncodingMismatch):
+        replays.check_encoding(p4)
+    # fork_run's route: widened, then a network of this build's encoding (recording layout v5)
+    new = widen(old, info['num_features'], info['num_actions'], layout=A.LAYOUT)
+    assert new.config['layout']['version'] == 5 and encoding_mismatch(new.config) is None
+    p5 = str(tmp_path / 'v5.pt')
+    save(new, p5)
+    check_checkpoint(p5)
+    replays.check_encoding(p5)
+    load(p5, game='mtg')
+    m = make_net(info, 'mtg', 'tokens', 16, 1, heads=2)
+    assert m.config['layout']['version'] == 5 and encoding_mismatch(m.config) is None
+    with pytest.raises(EncodingMismatch, match='token layout version 6 -> 5'):
+        check_encoding(dict(m.config, layout=dict(m.config['layout'], version=6)))
+    # a v5 network from before the version was recorded (delver2's): judged by its structure
+    assert encoding_mismatch(dict(m.config, layout={k: v for k, v in m.config['layout'].items() if k != 'version'})) is None
+    # the draft network: its own game and layout (draft_v2)
+    d = make_net(G.info('team_draft'), 'team_draft', 'tokens', 16, 1, heads=2)
+    assert d.config['layout']['version'] == 2 and encoding_mismatch(d.config) is None
+    with pytest.raises(EncodingMismatch, match="game 'team_draft' -> 'mtg'"):
+        check_encoding(d.config, 'mtg')
