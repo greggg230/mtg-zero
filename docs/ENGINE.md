@@ -12132,8 +12132,8 @@ boundary (STOP), relaunch the supervisor from the new worktree with the same com
 
 ## 62. A bigger network for the Delver mirror: sizes, throughput, a distilled warm start
 
-Branch `bignet` (main e5483aa), zero-core `feat/bignet` (code c539d8f + 907bad6, docs f1cdbd9, on
-main edf4b89; its docs/az.md 10.5, 13), 2026-10-29, **CPU only**: the round-2 A/B (`runs/ab-r2`) held
+Branch `bignet` (main e5483aa), zero-core `feat/bignet` (code c539d8f + 907bad6, docs f1cdbd9, a device fix
+437cef0; on main edf4b89; its docs/az.md 10.5, 13), 2026-10-29, **CPU only**: the round-2 A/B (`runs/ab-r2`) held
 the desktop GPU, the Mac and the desktop's self-play driver; every run directory only read (copies in
 `E:/mtg-zero-scratch/bignet`).
 Nothing here was trained or played on the GPU: 62.6 is the plan for it.
@@ -12347,7 +12347,8 @@ and a build with this branch (a re-pin, both arms on it).
 
 Tier "opt-in core feature with byte-identical defaults" (the tiered gates): the run path is unchanged.
 
-* **This repo** (bignet, zero-core pinned at f1cdbd9): `bash tools/build_py.sh` (1 min 33 s, its own
+* **This repo** (bignet, zero-core pinned at 437cef0; the suites ran at 907bad6, the fix's own test
+  and this repo's distillation and guard tests again at 437cef0): `bash tools/build_py.sh` (1 min 33 s, its own
   target dir), `cargo test --release -p engine --test az` **27 passed**, `pytest tests` **49 passed**
   (1 min 36 s; `test_a_bigger_network_distilled_on_delver_shards_reads_layout_v5` is new).
 * **Existing networks unchanged**: `third_party/zero-core/tools/check_checkpoint_compat.py --package
