@@ -191,5 +191,6 @@ def test_cotraining_presets():
     assert mac4['resolver_cfg'] == dict(run['resolver_cfg'], selfplay_remote='mac')
     # the draft network's play-network-played evaluation on the Mac (ENGINE.md 53): the -mac preset only
     assert [n for n in PRESETS if PRESETS[n].get('draft_eval_net_remote')] == ['team_draft-4v4-mac']
-    assert PRESETS['mtg-4-mac'] == dict(PRESETS['mtg-4'], games=200, selfplay_remote='mac')
+    # `games` is the total of both machines since the shared queue (ENGINE.md 56): mtg-4's 600
+    assert PRESETS['mtg-4-mac'] == dict(PRESETS['mtg-4'], selfplay_remote='mac')
     assert all(not PRESETS[n].get('selfplay_remote') for n in PRESETS if not n.endswith('-mac'))

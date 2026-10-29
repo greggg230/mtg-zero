@@ -152,16 +152,18 @@ PRESETS['team_draft-gpu-smoke'] = dict(
 # The CPU smoke (M6 part 3): 2v2 events (4 seats, 4 matches each: both rotations) with tiny token
 # networks for both games, few simulations, a few events per iteration; no GPU, everything evaluated here
 # (the remote's end-to-end check adds "eval_remote": "mac" to its resolver_cfg, ENGINE.md 48).
-# Remote self-play on the Mac (docs/ENGINE.md 52, zero-core docs/az.md 5.3 and 11.6), opt-in: the MacBook
-# self-plays with the run's checkpoint i-1 while the desktop plays its quota (its samples come back as
-# compressed shards into data/iter_i/), or in a co-training run plays a share of the play network's
-# queued matches. mtg-4-mac: mtg-4 with a desktop quota of 200 matches (the Mac adds its share on top:
-# ENGINE.md 50.3's single-game plan); team_draft-4v4-mac: team_draft-4v4 with the play network's
+# Remote self-play on the Mac (docs/ENGINE.md 52, 56, zero-core docs/az.md 5.3 and 11.6), opt-in: the
+# MacBook and the desktop pull an iteration's games from one shared queue (zero-core's zero/workqueue.py),
+# each with its measured throughput's share in flight, all with the run's checkpoint i-1 (the Mac's
+# samples come back as compressed shards into data/iter_i/), or in a co-training run the Mac plays a
+# share of the play network's queued matches. mtg-4-mac: mtg-4 with the Mac (its 600 matches an
+# iteration are the total of both machines since ENGINE.md 56: the same data per iteration, sooner);
+# team_draft-4v4-mac: team_draft-4v4 with the play network's
 # matches on the Mac too, and the draft network's evaluation whose matches the play network plays
 # (eval_yard_net: run setting draft_eval_net_remote, ENGINE.md 53). The run's checkout needs `bash tools/mac.sh --eval-checkout` before it starts
 # (the same checkout as the evaluations). A running run turns it on at a restart with a flag
 # (ENGINE.md 52.5): presets fill only settings a run has not saved.
-PRESETS['mtg-4-mac'] = dict(PRESETS['mtg-4'], games=200, selfplay_remote='mac')
+PRESETS['mtg-4-mac'] = dict(PRESETS['mtg-4'], selfplay_remote='mac')
 PRESETS['team_draft-4v4-mac'] = dict(
     PRESETS['team_draft-4v4'], resolver_cfg=dict(PRESETS['team_draft-4v4']['resolver_cfg'], selfplay_remote='mac'),
     draft_eval_net_remote='mac')
