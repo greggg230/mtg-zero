@@ -9395,6 +9395,10 @@ At 8e1211f, the branch's last engine code (f7f61be adds a test; the documentatio
 
 ## 52. Remote self-play: the Mac self-plays for a run (M6)
 
+(Its quotas and splits are superseded by section 56: one shared work queue for both run types - a
+single-game run's `games` is the total of both machines, each machine's in-flight capped by its
+measured throughput.)
+
 Branch `m6-remoteselfplay` (from main 692a52c; tools, presets, tests and docs: the engine is main's),
 zero-core pinned at `feat/remote-selfplay` (from core main af44741; its docs/az.md 5.3 and 11.6). The
 user's decision of 2026-10-28: build 50.3's design. Why: the MacBook (M4 Max, CPU inference of the
@@ -9753,7 +9757,7 @@ docs; the core's Rust is af44741's):
   worker's games are reproducible per session (its driver's seed is `seed x 7919 + i0 + 7,777,777 x
   (K + 1)`); every sample carries its search's `net`, every remote shard's meta its worker and
   session; the games themselves are not recorded (nor are the desktop's).
-* **Single-game runs: more data, not shorter iterations**, unless the desktop's quota is lowered
+* **Single-game runs: more data, not shorter iterations** (until 56's shared queue), unless the desktop's quota is lowered
   (the quota stays the desktop's by design; `mtg-4-mac` has 200 matches): with the same quota an
   iteration is as long as before plus its training on several times the samples (52.3).
 * **Co-training's split favours the desktop at a phase's start**: the local driver's free slots take
@@ -10558,3 +10562,394 @@ during an iteration, then the supervisor's command from the new worktree.
   search's determinized worlds and records on the new build.
 * **Digests** (55.5), the **checkpoints** (55.6), `layout_json_is_checked_in` (`layout_v4.json`
   unchanged).
+
+## 56. One shared work queue for remote self-play (M6)
+
+Branch `shared-queue` (from main 44e9dd5, rebased onto a21b977), zero-core pinned at
+`feat/shared-queue` (from core main 3c26d9f; its `zero/workqueue.py`, docs/az.md 5.3 and 11.6):
+first at 213a9c0 (the branch's b333920 / cc314f2 before the rebase - **runs/delver1's code from its
+iteration 30**, 56.4), then at 9453e18 (the batch-bound rule, 56.5). The requirements of 2026-10-28
+(the user and the main session): one pull model for single-game and co-training runs, per-machine
+in-flight caps from measured throughput so that a game starts and finishes within about one
+iteration, the desktop never starved, a backing-off remote giving its work back, the invariants of
+52 kept, an optional "keep playing while the desktop trains". The engine is main's: this branch
+changes the pin, a preset, two tests and this file.
+
+### 56.1 Why: both of 52's designs, measured
+
+* **Single-game ("the desktop's quota + the Mac's extras", 52.1).** `runs/delver1` (`log.txt`,
+  `metrics.jsonl`, the `net` column of `data/iter_*/*.npz`: the checkpoint that searched each row):
+  with `--games 100` and 768 desktop / 1,536 Mac games in flight the rows were 3-4 iterations stale
+  (iteration 13's desktop shard: nets 4-12, 20% from net 4, 8% from the newest); with `--games 400`
+  the desktop's quota set a 25-40 minute iteration while the Mac finished 4,120 games / 348k samples,
+  more than the 20 GB window holds (296k), and training took 9 minutes with both machines idle. At
+  today's settings (`--games 150 --conc 192`, 2 Mac workers of 768) iteration 22's rows: the
+  desktop's mean lag 0.77 checkpoints (max 3, 86% within one), **the Mac's 1.44 (max 4, 59% within
+  one)**; an iteration of ~5 minutes takes 150 desktop + ~700 Mac games (~72k samples, of which the
+  window keeps 296k of 360-495k). The Mac idles through every training phase and backs off during
+  the evaluations (iteration 25: 206 s). (54.11 has the run's throughput.)
+* **Co-training (a shared queue already, 52.1).** td1's iteration 7: the Mac's 3 workers, each
+  allowed 960 outstanding, drained the queue; the desktop's GPU played 0 of 1,812 matches, the Mac
+  ran at 6.9k leaves/s and spent 366 s backing off for the remote evaluation's lock holding those
+  matches (requeued only after 3,600 s of running time); the iteration took 62 minutes against
+  28-38 without the Mac. In iteration 6 the split was 2,083 Mac / 520 desktop at 19.2k leaves/s.
+
+### 56.2 The design (zero-core `feat/shared-queue`: docs/az.md 5.3, 11.6)
+
+* **The queue and the caps.** An iteration needs `units`: a single-game run's `games` - **the
+  finished games of the iteration across every machine** - or a co-training run's matches (its
+  `games` events x the matches per event). Each consumer - the desktop's driver and every Mac
+  worker - takes work as it has room under its in-flight cap, `cap = inflight x rate x (lead + P)`,
+  `P = (units - sum rate x lead) / total rate`: its measured throughput (leaves per running second
+  over the leaves per finished game, an EWMA; so a worker whose games outlast a phase is measured
+  too) times its share of the iteration's running time (`lead`: a remote's head start before the
+  desktop's phase), bounded by a few games per group and its slots (`conc`). The caps sum to
+  `inflight x units`: one iteration's worth with `selfplay_remote_inflight` 1 (the default), so a game
+  takes about one iteration. A worker backing off or offline is no consumer: its cap is 0 and the
+  others' grow at once (the desktop alone: the whole quota, up to its slots). Before a measurement
+  the rates follow the slots, a remote at a quarter of that until its first measurement; a restart
+  takes them from the last metrics row (delver1's first row on this code: from its 52-design
+  `selfplay.remote`).
+* **Batch-bound consumers** (zero-core fac4a70, 56.5): a consumer whose inference is CUDA / MPS -
+  the desktop's driver - keeps its **slots** while its games take at most
+  `selfplay_remote_batch_inflight` (2) iterations, `cap = max(inflight x share, min(slots,
+  batch_inflight x share))` with `share = rate x (lead + P)`: its throughput grows with its games in
+  flight, so the share alone starved it (56.4). The CPU workers keep the share exactly.
+* **Single-game: an exact shared quota.** Both machines play rolling `queue_only` drivers fed one
+  setup of the run's spec per game they may start. A finished game counts only once the desktop's
+  quota accepts it (its own at once, a worker's in answer to its `fin` line); the iteration ends at
+  exactly `games`; games finishing beyond the quota wait with their samples for the next iteration
+  (the driver hands out each game's rows and samples together: `workqueue.split_games` cuts them
+  per game). A worker holds no share of the quota, so a back-off, a sleep or a death leaves the rest
+  to the desktop; a worker that dies with accepted games not yet in a shard gives them back while the
+  desktop still plays.
+* **Co-training: the desktop's share in reserve.** The coordinator keeps the local resolver
+  driver's room under its cap queued for it; a worker takes only what is queued beyond that, up to
+  its own cap. A worker backing off for `selfplay_remote_giveback` (30) s gives its outstanding
+  matches back (requeued at the front, a late second copy dropped); a match outstanding longer than
+  `selfplay_remote_overdue` (3) x its worker's expected latency (at least 120 s, at most
+  `selfplay_remote_timeout`) is requeued. The events and their exact quota are the coordinator's as
+  before.
+* **Linger** (`selfplay_remote_linger` 1, opt-in, default off): the workers play on with their
+  checkpoint while the desktop trains and evaluates; those games count for the next iteration, one
+  checkpoint behind it.
+* **Kept**: same-phase shards (a shard of phase i only into `data/iter_i/`), the exact quota (now of
+  both machines), `pending_max` (its default formula too), duplicate drops, requeue on a session's
+  or worker's death, the head start (the remote's phase begins when the checkpoint is written) and
+  the mirrors (`~/mtgz-selfplay/<run>`, `<run>.resolver`), the back-off modes and busy markers; a run
+  without a remote plays exactly as before (zero-core's shards byte for byte, 56.7).
+* **Settings and compatibility.** New: `selfplay_remote_inflight` (1.0), `selfplay_remote_giveback`
+  (30), `selfplay_remote_overdue` (3), `selfplay_remote_linger` (0), `selfplay_remote_batch` ('auto':
+  by the device; 'local', 'remote', 'all', 'none') and `selfplay_remote_batch_inflight` (2.0); kept:
+  `selfplay_remote_procs`, `selfplay_remote_wait`, `selfplay_remote_timeout` (3,600: now the ceiling
+  of the overdue limit, saved so in every run's config). Every `runs/*/config.json` loads (delver1, td1, mtg1-5, and
+  Kingdom Builder Zero's 21 by their keys); a saved config gets the new settings' defaults. **An
+  existing run's `games`** means the total of both machines from its first iteration on this code:
+  the cleanest reading (one number for an iteration's data, with or without the Mac; a run without a
+  remote is unchanged), so delver1 changed `--games` to 800 at its re-pin (56.4). The first
+  design's "the desktop's quota + extras" is gone.
+
+### 56.3 mtgz
+
+* The pin; **`mtg-4-mac`** = mtg-4 + the Mac (its 600 matches are the total now: mtg-4's data per
+  iteration, sooner), 52's `games=200` dropped (`tests/test_drafted.py`).
+* `tests/test_mac_remote.py`'s worker test plays self-play under a `cap` of 3 and accepts the games
+  it reports (`fin`): the shards hold the accepted games, the worker's `end` counts them.
+* The Mac's remote spec is unchanged: its `conc` 768 per worker is now the caps' ceiling (`hi`), not
+  the in-flight; 4 groups of 192 slots, 12 threads, 4 inference workers, CPU inference (not
+  batch-bound: `auto` leaves its caps the throughput share). At delver1's caps (325-370 per worker,
+  56.4) a group's batches hold ~85 games instead of 192, and the Mac's leaves per running second
+  fell from 27.8-29.7k to 24.7-26.7k (-10 to -15%): whether 2 groups win that back is for a Mac
+  measurement (56.11).
+
+### 56.4 What delver1 measured on the shared queue (zero-core 213a9c0, iterations 30-53)
+
+delver1 was re-pinned on 2026-10-28 at iteration 30 onto this branch's cc314f2 (zero-core 213a9c0)
+with `--games 800` (the total; its supervisor's flags otherwise unchanged: `--preset delver-mirror
+--seed 1 --eval-remote mac --selfplay-remote mac --conc 192 --eval-every 8 --ram-budget-gb 20`).
+From `log.txt`'s `shared queue` lines and `metrics.jsonl`'s `selfplay.queue` (iterations 33 and 49:
+the Mac backed off ~285 s for an evaluation; 30 and 41 began a session, lag 0 by construction):
+
+| iterations | 19-28 (52's design: `--games 150`) | 30-32 | 34-40 | 42-48 | 50-53 |
+|---|---|---|---|---|---|
+| desktop games / Mac games | 150 (its quota) / 10-720 | 61-84 / 716-739 | 82-105 / 695-718 | 109-141 / 659-691 | 130-147 / 653-670 |
+| desktop share of the 800 | - | 8-10% | 10-13% | 14-18% | 16-18% |
+| desktop cap (mean in the phase; its slots 192) | 191 in flight | 75-83 | 82-102 | 113-131 | 138-141 |
+| desktop leaves/s | 5.6-6.8k | 2.0-3.5k | 2.7-3.9k | 4.2-5.3k | 5.2-5.3k |
+| desktop games/s (measured) | - | 0.21-0.32 | 0.35-0.53 | 0.62-0.77 | 0.81-0.85 |
+| each Mac worker: cap (of 768); games/s | 768; - | 348-370; 1.30-1.49 | 347-361; 1.46-1.78 | 333-344; 1.70-1.94 | 325-339; 1.91-2.08 |
+| the Mac's leaves per running second (2 workers) | 27.8-29.7k | 26.0-30.0k | 24.9-25.9k | 25.3-26.7k | 24.7-25.8k |
+| self-play phase; iteration | 203-257 s; 267-382 s | 235-290 s; 371-404 s | 190-234 s; 268-353 s | 170-186 s; 240-261 s | 161-177 s; 225-244 s |
+| rows' mean lag / within one / max | 0.6-1.2 (54.11; iteration 22: the Mac's 1.44, 59% within one) | 0.56-0.64 / 89-100% / 1-2 | 0.62-0.73 / 84-92% / 3-5 | 0.51-0.65 / 91-100% / 1-4 | 0.57-0.69 / 88-94% / 4-5 |
+
+* **The staleness goal is met**: over iterations 30-53, 1.23M rows, 50.0% at lag 0, 42.4% at 1, 6.7%
+  at 2, 0.8% at 3, 0.09% at 4, 0.01% at 5 (mean 0.59; the desktop's 0.54, the Mac's 0.60), against
+  the Mac's mean of 1.44 (59% within one) in 52's design.
+* **The desktop is starved.** Its leaves per second follow its games in flight: ~26-52 leaves/s per
+  game at 75-141 in flight, ~29-36 at 191 (iterations 19-28). Its CUDA batches (2 groups: batches of
+  half its in-flight) cost about the same per call whatever their size, so its games take about as
+  long at any in-flight. The cap of 213a9c0 is its measured throughput's share of the phase: a cap
+  that starts small measures a small rate, which gives a small cap again; it only settles where the
+  desktop's games last one phase, a point that moves with the games' length. From iteration 30's
+  restored 52-design rates it started at 82 and fell to 75 (2.0k leaves/s), and crept back to
+  138-141 as the games got shorter (decisions per game 300-360 -> 210-260): still 72% of its slots,
+  at 5.2-5.3k leaves/s against 6.1-6.8k with all 192.
+* **The Mac's CPU workers are not.** Their rate is their cores': 24.7-26.7k leaves per running
+  second at 325-370 in flight each against 27.8-29.7k at 768 (-10 to -15%: some batch effect, 4
+  groups of ~85 games against 192), so the throughput share is the right cap for them; they make
+  ~82% of the data.
+
+### 56.5 The fix: a batch-bound consumer keeps its slots (zero-core fac4a70)
+
+**The rule** (docs/az.md 5.3): a consumer whose inference is batched on CUDA / MPS (run setting
+`selfplay_remote_batch` 'auto', the default; 'local', 'remote', 'all', 'none' choose explicitly)
+has the cap
+
+```
+cap = clamp(ceil(max(inflight x share, min(slots, batch_inflight x share))), lo, hi)      share = rate x (lead + P)
+```
+
+`batch_inflight` = run setting `selfplay_remote_batch_inflight` (default 2.0; 1 = as the others).
+By Little's law a consumer's in-flight over its rate is its games' latency, so `batch_inflight x
+share` is the in-flight at which its games last `batch_inflight` horizons: the desktop holds its
+slots while its games finish within 2 iterations, and a batch-bound consumer too slow for that even
+at its floor falls to `lo` like any other (no GPU fills the data with stale rows). `slots` = its
+driver's `conc` (a co-training resolver driver's `hi` adds a queue beyond its slots, where a match
+only waits; the rule never fills it). A consumer that is not batch-bound - the Mac's CPU workers -
+keeps the throughput share exactly, and a run without a remote is untouched.
+
+**Why this one.** The task's two options were a floor sized for efficient batches, or letting a
+consumer whose rate rises with its cap grow toward its slots while the staleness stays within ~1
+iteration. This is both: the floor is the slots the run's `conc` sized for the GPU (`conc / groups`
+games per batch), and `batch_inflight` is the staleness guard - one line of the caps' model, with
+the consumer's kind from its device. Rejected: a fixed floor (no guard against a consumer too slow
+for the iterations); the stopped agent's draft (`wip/shared-queue-capfix` e2a4672, unverified, kept
+for reference): a per-consumer latency controller with an elasticity estimated from phases at
+different caps, six new constants and another model for the CPU workers too - noisy when the games'
+length changes between iterations (as delver1's did, 56.4), able to learn the curve only by moving
+the cap, and changing the throughput-bound workers' caps, which were right. **The cost**: the
+desktop's rows may lag up to 2 checkpoints instead of ~1 (at its slots its games are ~1.15 phases,
+56.10); with it ~20% of the data, the run's mean lag moves by a few hundredths.
+
+**Simulated** (zero-core `tests/test_workqueue.py`, delver1's consumers: the desktop's games
+180-200 s at any in-flight, each Mac worker 1.85 games/s at any in-flight, 800 games): the cap of
+213a9c0 settles at 111-116 of 192 whether it starts at 75 or 181, the desktop at ~0.6 games/s;
+batch-bound it is at 192 one phase later and stays, at 0.96 games/s (1.6x), its games 1.14 phases,
+the phase 191 -> 175 s; the Mac workers' caps stay one phase of their throughput. A batch-bound
+worker whose games take 1,400 s against ~200-s phases falls to its floor.
+
+### 56.6 Choosing `games` for a run
+
+* **`games` is the total of both machines per iteration** (56.2): the same data per iteration with
+  or without the Mac; the Mac makes it sooner.
+* **The batch-bound desktop keeps its slots while it plays at least `slots / batch_inflight` games
+  an iteration** (its latency in phases is its in-flight over its games per phase): `games >= slots
+  / (batch_inflight x its share of the throughput)`. delver1: 192 / (2 x ~0.2) ~ 480, so its 800
+  leave a margin of ~1.7x; below that the desktop holds fewer than its slots (twice its share: still
+  not the spiral). A Mac back-off only raises the desktop's share.
+* **The staleness does not depend on `games`** (the caps scale with the phase: ~0.6 mean lag at 800
+  as at 600). What `games` sets is the iteration's length - checkpoints per hour against the data
+  each is trained on - and the window's depth: delver1's 20 GB hold ~296k samples, ~6 iterations of
+  800 games (~46k samples each at today's ~220-260 decisions a game).
+* **A co-training run's units are its events' matches**; its `games` stays the primary's event quota.
+
+**The stragglers** (lag 3-5: 0.9% of delver1's rows, 56.4) are the long tail of game length - a game
+three times the mean outlasts three phases whatever its consumer's cap - on both machines alike. A
+cap (dropping or down-weighting rows older than N checkpoints) would touch the training window's
+path (net_data) or need a weight column; at 0.9% of the rows, whose value targets are still the
+games' real outcomes, it is not worth it now: not done.
+
+### 56.7 Checks
+
+Tier "search / core behaviour" (2026-10-28, the desktop shared with delver1; CARGO_BUILD_JOBS 8, at
+most 8 test threads, own cargo targets `E:/cargo-target/zero-core/shared-queue2` and
+`E:/cargo-target/mtg-zero/shared-queue2`):
+
+* **zero-core** (`feat/shared-queue` 9453e18; its Rust unchanged since a876ae7): `cargo test
+  --release` **47 passed** (44 + 3; 34 s). `python -m pytest tests` on cbfaef5: **154 passed, 1
+  failed** in 463 s - the new batch-bound driver test's over-strict check of the worker's cap (30
+  against its share's 31: the metrics row rounds the rates) - fixed in 9453e18 (that test only), where
+  `tests/test_remoteplay.py` + `tests/test_workqueue.py` **39 passed** in 257 s. 155 tests in all, 7
+  new: in `test_workqueue.py` delver1's consumers simulated (the spiral of 213a9c0 against the rule),
+  a too-slow batch-bound worker at its floor, the formula's bounds and `slots`, a back-off; in
+  `test_remoteplay.py` a batch-bound driver end to end, a batch-bound co-training resolver driver,
+  the setting checked. `tools/check_checkpoint_compat.py`: does not apply (its digests play the
+  search and the seats through `selfplay_digest.py`, which the queue is not on). **Byte for byte
+  without a remote**: the stopped agent's check at 213a9c0 (toy-smoke rolling, and classic with
+  `margin_w`, `chance_k` and cq targets, 3 iterations against 3c26d9f: every shard identical, every
+  checkpoint's and optimiser state's tensors equal); fac4a70 changes no code a run without a remote
+  runs (its `config.json` gains the two settings).
+* **mtg-zero** (this branch at ba40f15, the pin): `cargo test --release -p engine --test az` **21
+  passed** (75 s with the build); `python -m pytest tests` **46 passed** (74 s); the search smoke
+  `python tools/search_smoke.py --specs delver --preset delver-mirror` **0 failed of 4
+  configurations** (seeds 0-3, 400 games each, 0 unfinished, 114-117k decisions, 54-55 s each; 225 s).
+* **Run-loop smokes** with the remote 'local' (56.8): `delver-smoke` and `team_draft-smoke`, each
+  with 'auto' and with the batch rule on this machine's driver: **4 of 4 exit 0** (92-262 s), every
+  quota exact, no shard late, no requeue or duplicate.
+* **smoke_all** (`SKIP_CORE=1 SMOKE_TARGET=shared-queue2-smoke bash tools/smoke_all.sh
+  --with-this-core` with Glass Road Zero c1f56dc, Caverna Zero a6fad73 and Kingdom Builder Zero
+  4202a4a at 9453e18): **GREEN**, 12 of 12 steps (each game's build, cargo test, pytest - 33, 32
+  and 45 passed - and smoke run), 480 s; needed only before zero-core's main moves.
+
+### 56.8 Measured on this machine (no Mac)
+
+**The toy** (zero-core's docs/az.md 5.3: 192 games an iteration, 768 slots each for the desktop's
+driver and a worker process on the same CPU, which plays at about half its rate; zero-core 213a9c0):
+
+| | shared queue (`inflight` 1) | every slot full (the first design's in-flight) |
+|---|---|---|
+| rows' mean lag / max / within one checkpoint, iterations 2-6 | 0.29-0.44 / 2 / 98.3-100% | 0.84 -> 2.89 / 5 / 22-38% from iteration 3 |
+| games desktop / worker, iteration 6 | 109 / 83 (caps 131 / 62) | 0 / 192 (the worker's head start fills the quota) |
+
+A worker 10 ms per batch slower is measured at 3% of the desktop's rate and capped at 5-6 games.
+**Linger**, with training ~70% of the toy's iteration: the worker's share of the 192 games grows
+from 30-70 to 54-95, the self-play phases are ~25% shorter, the rows' mean lag 0.54-0.67 against
+0.28-0.44. **Batch-bound on the toy** (fac4a70, the pair at 256 slots with
+`--selfplay-remote-batch local`, this machine's CPU driver taken for batch-bound): its cap is its 256
+slots from iteration 2, the rows' mean lag 0.41-0.65 (max 2, 91-100% within one) against the pair's
+0.29-0.44 - what the rule costs a consumer that is not batch-bound (twice its latency for no
+throughput), which is why `auto` goes by the device.
+
+**MTG on the CPU, zero-core 213a9c0** (`E:/mtg-zero-scratch/shared-queue/`, the stopped agent's
+runs, `CUDA_VISIBLE_DEVICES=` hidden, the remote 'local': worker subprocesses running `python -m
+mtgz.az.remote selfplay`, whose checkout check passes with the worktree's engine stamped at its HEAD
+as `tools/mac.sh --eval-checkout` stamps the Mac's; the same runs without the remote as the
+baseline):
+
+| `mtg-smoke --iters 4 --games 128 --conc 64` | iteration 1 | 2 | 3 | 4 |
+|---|---:|---:|---:|---:|
+| games desktop / worker (exactly 128) | 90 / 38 | 38 / 90 | 18 / 110 | 1 / 127 |
+| caps desktop / worker (mean in the phase) | 64 / 14 | 64 / 46 | 64 / 64 | 43 / 64 |
+| the worker's head start (during the evaluation) | 0 s | 2 s | 4 s | 5 s |
+| rows' mean lag / max / within one | 0 / 0 / 100% | 0.36 / 1 / 100% | 0.36 / 2 / 95.0% | 0.35 / 3 / 99.3% |
+| iteration with the worker / without | 14.0 / 18.7 s | 14.5 / 22.8 s | 14.4 / 20.2 s | 17.8 / 27.8 s |
+
+| `team_draft-smoke --iters 3 --games 8` (resolver `selfplay_remote` 'local') | iteration 1 | 2 | 3 |
+|---|---:|---:|---:|
+| events (exactly 8); matches desktop / worker | 8; 27 / 10 | 8; 16 / 33 | 8; 8 / 25 |
+| caps desktop / worker (mean; next) | 21 / 4 (23 / 10) | 23 / 10 (19 / 14) | 19 / 14 (16 / 17) |
+| resolver rows' mean lag / max / within one | 0 / 0 / 100% | 0.40 / 1 / 100% | 0.36 / 2 / 97.1% |
+| iteration with the worker / without | 79 / 71 s | 67 / 97 s | 42 / 47 s |
+
+In the single-game run the worker's head start through each evaluation grows its share until it
+fills nearly the whole quota (the desktop's phase then ends within seconds); in the co-training run
+the worker started at a quarter of its slots and grew by its measured rate. No duplicate, no
+requeue, no shard late or lost; the end of a phase waited 0-2.3 s for the last shards.
+
+**MTG on the CPU, this branch** (ba40f15: zero-core 9453e18; `E:/mtg-zero-scratch/shared-queue2/`,
+`local_smoke.sh` there, set up as above; `dv_*` = `delver-smoke --iters 4 --games 128 --conc 64
+--selfplay-remote local`, `td_*` = `team_draft-smoke --iters 3 --games 8` with the resolver's
+`selfplay_remote` 'local'; `*_batch` with `selfplay_remote_batch` 'local' - this machine's CPU driver
+taken for batch-bound, as 'auto' takes a CUDA one; dv_local shared the CPU with the search smoke):
+
+| | iteration 1 | 2 | 3 | 4 |
+|---|---:|---:|---:|---:|
+| dv_local: games desktop / worker (exactly 128); caps (mean) | 86 / 42; 64 / 14 | 52 / 76; 64 / 46 | 23 / 105; 64 / 62 | 105 / 23; 50 / 54 |
+| dv_local: rows' mean lag / max / within one | 0 / 0 / 100% | 0.29 / 1 / 100% | 0.35 / 2 / 97.5% | 0.43 / 3 / 84.8% |
+| dv_batch: games; caps (the desktop at its 64 slots in every phase) | 86 / 42; 64 / 14 | 39 / 89; 64 / 46 | 10 / 118; 64 / 64 | 4 / 124; 64 / 64 |
+| dv_batch: rows' mean lag / max / within one | 0 / 0 / 100% | 0.28 / 1 / 100% | 0.33 / 2 / 96.2% | 0.34 / 3 / 97.8% |
+
+| | iteration 1 | 2 | 3 |
+|---|---:|---:|---:|
+| td_local: events (exactly 8); matches desktop / worker; caps (next) | 8; 27 / 9; 21 / 4 (24 / 9) | 8; 15 / 23; 24 / 9 (21 / 12) | 8; 8 / 38; 21 / 12 (18 / 15) |
+| td_batch (the desktop's slots 16, its bound 32): the same | 8; 27 / 9; 21 / 5 (23 / 10) | 8; 14 / 35; 23 / 10 (19 / 14) | 8; 5 / 28; 19 / 14 (16 / 17) |
+| resolver rows' mean lag / max / within one: td_local; td_batch | 0 / 0 / 100%; the same | 0.35 / 1 / 100%; the same | 0.25 / 2 / 97.6%; 0.31 / 2 / 97.0% |
+
+dv_local's worker died in iteration 4 on an engine panic (`search worker panicked: stack slot 38 out
+of range`, 56.11): its 106 accepted games went back to the quota and this machine played them (105 /
+23), the quota stayed exact, the worker was up again 8 s later. In td_batch the desktop's throughput share
+was at or above its 16 slots in every phase (next caps 23, 19, 16, up to its bound 32 as without
+the rule), so the rule changed no cap there (each equals the share-only model's); the slots bound
+itself is zero-core's `test_workqueue.py`.
+
+### 56.9 The end-to-end runs with the Mac (not run: delver1's self-play is on the Mac)
+
+From this worktree (committed, clean), after `bash tools/mac.sh --eval-checkout` (~40 s, the Mac's
+`~/mtg-zero-wt/run-<sha12>`; it builds there), with test mirrors beside delver1's (52.3; Git Bash:
+`MSYS2_ENV_CONV_EXCL` keeps the workdir a Mac path); CUDA visible, so the desktop's drivers are
+batch-bound as in a real run (`auto`):
+
+```
+cd "C:/Users/Gregg Keithley/mtg-zero-wt/shared-queue"
+bash tools/build_py.sh && bash tools/mac.sh --eval-checkout
+export MSYS2_ENV_CONV_EXCL=ZERO_SELFPLAY_WORKDIR ZERO_SELFPLAY_WORKDIR=/Users/greggkeithley/mtgz-selfplay-test
+# co-training: the resolver's matches shared with the Mac (the mode delver1 does not exercise)
+RCFG=$(python -c "import json, mtgz.az as a; print(json.dumps(dict(a.PRESETS['team_draft-smoke']['resolver_cfg'], selfplay_remote='mac', infer_device='cuda')))")
+python -m mtgz.az.run --run E:/mtg-zero-scratch/shared-queue2/td_mac --preset team_draft-smoke --iters 3 --games 8 \
+  --resolver-cfg "$RCFG"
+# single-game (optional: delver1 is that check, live)
+python -m mtgz.az.run --run E:/mtg-zero-scratch/shared-queue2/sg_mac --preset delver-smoke --iters 4 --games 256 \
+  --conc 64 --infer-device cuda --selfplay-remote mac
+```
+
+Expected: each 3-6 minutes; on the Mac 2 worker processes at nice 5 for the runs' length (they back
+off while delver1's evaluation holds `~/mtgz-remote/.eval.lock`, and share the cores with delver1's
+own two workers meanwhile: its self-play slows for those minutes). What to look at: `[resolver]
+episodes also on the remote 'mac' (...); batch-bound (local): its slots while its games take at most
+2 iterations`, `[resolver] iter N shared queue:` (exact event quotas, the caps: the desktop's at
+most its 16 slots by the batch rule, the Mac's its share), `[resolver] iter N remote self-play:`
+(`requeued` 0 + 0 + 0 without a back-off, no `late`, `duplicates_dropped` 0), and `metrics.jsonl`'s
+`selfplay.queue` in `td_mac/resolver/`. Afterwards: `ssh greggkeithley@100.95.248.116 'rm -rf
+~/mtgz-selfplay-test'`.
+
+### 56.10 Re-pinning delver1 onto this branch (at an iteration boundary)
+
+The flags stay as they are (`--games 800` the total): the new rule needs no setting (`auto`: the
+desktop's driver is CUDA, the Mac's workers CPU). The procedure (52.6, 55.6): a pinned worktree of
+this branch's head, `bash tools/build_py.sh` there; `bash tools/mac.sh --eval-checkout`; `touch
+runs/delver1/STOP` during an iteration; the supervisor's command from the new worktree. The first
+caps follow the last metrics row (its rates: desktop ~0.82 games/s, each Mac worker ~1.95), so the
+desktop's cap is its 192 slots from the first phase. Expected, at iterations 50-53's rates:
+
+| | today (213a9c0, iterations 50-53) | on this branch |
+|---|---|---|
+| desktop cap / leaves/s | 138-141 / 5.2-5.3k | 192 / ~6.1-7.3k (6.1-6.8k with all 192 at iterations 19-28; ~38 leaves/s per game now) |
+| desktop games/s; share of the 800 | 0.81-0.85; 16-18% (130-147 games) | ~0.95-1.15; ~20-23% (~160-180 games) |
+| Mac: caps per worker; games/s | 325-339; ~3.9-4.0 for both | ~300-320 (its phase shorter); the same rate |
+| self-play phase; iteration | 161-177 s; 225-244 s | ~155-165 s (~4-6% shorter); ~220-235 s |
+| the desktop's games, in phases | ~1.0 | ~1.15 (192 / ~165 games a phase) |
+| rows' mean lag / within one / max | 0.57-0.69 / 88-94% / 4-5 | ~0.6-0.7 / ~88-93% / 4-5 (the desktop's rows ~0.55 -> ~0.65) |
+
+What to check after the re-pin: the start line's `batch-bound (local)` note; `iter N shared queue:
+... caps local 192.0 -> 192` every iteration; the desktop's `leaves_per_s` 6k+; the staleness summary
+(mean <= ~0.7); `remote self-play: ... late` / `lost` 0; `watch_run` as after every re-pin.
+
+**td1** (paused; not resumed here): at a re-pin its resolver's queue follows its iteration-6 rates
+(desktop 20%, Mac 80% of ~576 matches); its desktop resolver driver is CUDA (mtg-4: 768 slots,
+`hi` 960 with the queue), so batch-bound: twice its share up to its slots - ~230 matches at those
+rates instead of ~115, never the queue. A Mac back-off gives its matches back after 30 s, an
+overdue match is requeued after 3 x its expected latency. Its `pending_max` (0 = 2 x 768 + 3 x 960 = 4,416) lets the queue hold ~7 iterations of
+matches beyond what is in flight, so drafted events could wait several iterations: `--pending-max
+1152` (2 x 576) at the same restart is suggested (the primary's `cotrain.staleness` shows its lag).
+
+### 56.11 Limits and open questions
+
+* **`inflight` 1 sizes the mean game to one iteration**: 6.7% of delver1's rows are 2 checkpoints
+  behind, 0.9% 3-5 (the long games, 56.6); `selfplay_remote_inflight` 0.5-0.75 makes it strict at
+  some throughput. The caps follow the rates a phase late (an EWMA); a remote that starts unmeasured
+  plays at a quarter of its guessed share for one phase.
+* **Batch-bound is the device's word**, not measured: a CUDA consumer that is in fact
+  throughput-bound (a GPU saturated below its slots) would hold up to twice its share in flight for
+  nothing (the toy's CPU driver forced batch-bound: mean lag 0.41-0.65 against 0.29-0.44);
+  `selfplay_remote_batch 'none'` or `selfplay_remote_batch_inflight 1` turns it off.
+* **The Mac's workers lost 10-15% of their leaves/s** at their caps (4 groups of ~85 games): 2
+  groups might win it back; not measured (no ssh jobs on the Mac from this branch's session).
+* **A back-off is seen at a worker's next status line** (it checks its locks in a phase only): the
+  first seconds of a phase count it as taking work.
+* **A shard lost after the phase** (late past `selfplay_remote_wait`, a failed copy) leaves the
+  iteration short by its games (`short` in the metrics, logged); a worker dying mid-phase is
+  covered (its accepted games are played again here).
+* **Linger** is single-switch for both modes, measured on the toy only; on delver1 it would turn the
+  Mac's ~65 s of training-time idling into ~250 games of the next iteration at lag 1.
+* **Co-training with a CUDA resolver and the Mac** is tested on the toy and the CPU (56.7, 56.8)
+  only; 56.9 has the commands.
+* **An engine panic in the delver mirror** (found by dv_local's worker, 56.8; not the queue's):
+  `Game::stack_action` asserts that a stack item's slot is below `STACK_N` (32,
+  engine/src/decision.rs:373), and a stack of 39+ items with a target below slot 31 panicked the
+  worker's search (`stack slot 38 out of range`, game 348 of setup "8883:348", driver seed
+  7777778, the network of iteration 3 of a `delver-smoke` run). The queue handled it (the worker's
+  accepted games played here, the quota exact, the worker restarted); on delver1 a Mac worker would
+  do the same, while a panic in the desktop's driver fails the run (its supervisor restarts it). Not
+  in delver1's log so far, not in the 4 x 400-game search smoke; not fixed here (an engine change,
+  its own tier).
+* **Not reproducible**, as 52.8 (more so: which games the quota accepts first depends on timing).

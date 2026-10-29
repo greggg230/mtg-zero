@@ -220,9 +220,11 @@ def _worker(mirror, cfg, mode):
 
 @pytest.mark.parametrize('mode', ['selfplay', 'matches'])
 def test_a_worker_plays_mtg(tmp_path, mode):
-    """A self-play worker with mtg-smoke's settings (self-play: generated decks; matches: queued
-    best-of-three specs with tags, as a co-training run's resolver episodes) plays with checkpoint 0,
-    writes compressed shards of mtg samples, answers rows by tag and ends its phase on request."""
+    """A self-play worker with mtg-smoke's settings (self-play: generated decks, a setup of the run's
+    spec queued for every game its cap allows, each finished game held until the run accepts it;
+    matches: queued best-of-three specs with tags, as a co-training run's resolver episodes) plays
+    with checkpoint 0, writes compressed shards of mtg samples (self-play: the accepted games'),
+    answers rows by tag and ends its phase on request (zero-core's shared queue, ENGINE.md 56)."""
     from zero.data import read_shard
     from zero.run import DEFAULTS, PRESETS
     from mtgz.az import SPEC_BO3
@@ -238,7 +240,10 @@ def test_a_worker_plays_mtg(tmp_path, mode):
                 send(cmd='enqueue', tag=f'7/{k}', spec=json.dumps(dict(json.loads(SPEC_BO3), seed=100 + k)))
             wait_for(lambda e: sum(x['ev'] == 'row' for x in events) >= 3, 600)    # in any order
         else:
-            wait_for(lambda e: e['ev'] == 'status' and e.get('games', 0) >= 2, 600)
+            send(cmd='cap', n=3)
+            wait_for(lambda e: sum(x.get('n', 0) for x in events if x['ev'] == 'fin') >= 2, 600)
+            fin = sum(x.get('n', 0) for x in events if x['ev'] == 'fin')
+            send(cmd='accept', iter=1, n=fin)       # the run's answer: these count for its iteration
         send(cmd='end', iter=1)
         wait_for(lambda e: e['ev'] == 'end', 300)
         send(cmd='quit')
@@ -249,13 +254,17 @@ def test_a_worker_plays_mtg(tmp_path, mode):
     end = next(e for e in events if e['ev'] == 'end')
     shards = [e for e in events if e['ev'] == 'shard']
     assert end['iter'] == 1 and end['games'] >= 2 and end['samples'] > 0 and end['shards'] == len(shards) >= 1
+    if mode == 'selfplay':
+        assert end['accepted'] == fin and sum(e['games'] for e in shards) + end['unshipped'] == fin
+        assert all(e.get('cap') in (None, 3) for e in events if e['ev'] == 'status')
     rows = 0
     for e in shards:
         sh = read_shard(e['path'])
         assert sh['meta']['game'] == 'mtg' and sh['meta']['source'] == 'remote' and sh['meta']['iter'] == 1
         assert sh['x'].shape[1] == sh['meta']['features'] and int(sh['net'].max()) == 0
         rows += len(sh['player'])
-    assert rows == end['samples']
+    # self-play: the accepted games' samples (a game finished after the accept waits, held)
+    assert rows == end['samples'] if mode == 'matches' else 0 < rows <= end['samples']
     if mode == 'matches':
         tags = sorted(e['row']['tag'] for e in events if e['ev'] == 'row')
         assert tags == ['7/0', '7/1', '7/2']
