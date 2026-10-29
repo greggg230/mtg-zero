@@ -12532,3 +12532,229 @@ Tier "opt-in core feature with byte-identical defaults" (feedback_tiered_gates).
   the setting as before.
 * Re-pinning delver2 onto this core (league off) is the tier "re-pin onto an already-verified commit";
   turning the league on is the A/B above, never on the live main line directly.
+
+## 64. Root minimum visits at the Delver mirror's small decisions (zero-core `root_min_visits`)
+
+Branch `root-min-visits` (from main 3b2e6f4): zero-core pinned at **abb0bbc** (feat/root-min-visits:
+5ce50d4 + docs abb0bbc, on main f57ee57 = the league), `tools/mull_floor.py`, this section. Nothing of this repo's engine
+changed; with the new settings off a run is the run of before, byte for byte.
+
+### 64.1 Why
+
+Fable's gameplay review of the Delver line (2026-10-29): at the mulligan (Keep / Mulligan) the
+network's prior is >= 0.98 in 433 of 444 seven-card decisions, so at 64 simulations the option it
+does not favour gets no visit, its Q is never estimated, and with completed-Q targets (section 22,
+zero-core docs/search.md 3.1) an unvisited option is completed at v_mix - about the visited option's
+Q - so its target stays at its prior: it cannot recover. The run keeps 0-land hands 58% of the time
+and 1-land hands 87%, while the value head rates those hands 0.38 / 0.49 against 0.52 for normal
+ones. The same starvation can hit any small decision under a saturated prior (attack or not, pay
+for Daze, yes / no).
+
+### 64.2 What zero-core does (its docs/search.md 3.5, az.md 1.2 and 9.2)
+
+* **The floor.** A full search whose root has 2 .. `root_min_visits_max_actions` (default 4) options
+  gives each at least k visits, when its budget allows (2 x options x k <= its simulations): a walk
+  keeps PUCT's root option unless that option already has k visits and another has fewer, then it
+  takes the least-visited one - a *forced walk*. Full searches only: the self-play seat's recorded
+  ones (`sims`, the `p_full` share) and every search of an evaluation seat, never a fast
+  (`sims_fast`) or minor (`sims_minor`, the mana payments) search. With this line's 64 / 16 / 4, k 4
+  or 8 reaches every root of 2-4 options of the full searches.
+* **What reads what.** Q, the 'cq' target and the 'cq' rule (and its guard) use every visit: a forced
+  walk is a Q measurement; every option of a forced root is visited, so the target is softmax(ln P0 +
+  sigma Q) over measured Q's. The visit counts - the 'visits' target, temperature sampling (this
+  line's first 60 searched decisions, the mulligan among them), the 'visits' rule - and the root value
+  target q leave the forced walks out exactly (`root_visits_pruned`, `root_win_pruned`): a move is
+  sampled or wins the count only through PUCT's own visits, including those PUCT gives it once the
+  forced walks have shown a good Q.
+* **Settings.** `selfplay_root_min_visits` (self-play), `eval_root_min_visits` (every evaluation
+  seat; its Elo pool is named after it: `cq-n4-v50-s0.3-f4`), `root_min_visits_max_actions`; 0 / 0 /
+  4 by default. Seat keys `root_min_visits`, `root_min_visits_max_actions` (the Mac's checkout must
+  have this core for remote self-play or evaluation with the floor on: an older one refuses the
+  unknown seat key).
+* **Tests and parity** (zero-core): the Rust tree (a 2-option root at 0.999 / 0.001 gets >= k visits
+  on both, the cq target, the pruned counts and root value), the driver (a keep-or-mulligan test
+  game: targets, sampled moves, the move rules, fast searches untouched; the golden records and match
+  unchanged with the floor off), Rust vs Python trees and drivers at the noise floor, toy runs byte
+  for byte with the settings at their defaults.
+
+### 64.3 The demonstration: delver2's iteration 21 at the mulligan (CPU)
+
+`python tools/mull_floor.py --model <copy of runs/delver2/models/iter_0021.pt> --zero 50 --one 100
+--control 50 --reps 2 --small 300` (a copy, sha256 fcdf2116...; CPU, 4 torch threads, below normal;
+45 s): seven-card hands at the mulligan declaration from games of the mirror's spec (the PlayDraw
+choice at random; the starting player's declaration and, after it keeps, the other player's), 50
+with no land, 100 with one, 50 with 2-4 as a control; each searched twice (two seeds) by the Rust
+tree at 64 simulations without root noise (an evaluation's search), with the floor k = 0 (today), 4
+and 8. Means over the searches:
+
+| hands | k | prior on Mulligan | value of the hand | Mulligan's visits (forced + PUCT's) | Q Keep | Q Mulligan | cq target on Mulligan (s 0.3 / 1.0) | keep: 'visits' rule | keep: sampled | keep: cq4 s0.3 (this line's rule) | keep: cq4 s1.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 lands | 0 | 0.418 | 0.383 | 25.5 (0 + 25.5) | 0.439 | 0.356 | 0.376 / 0.230 | 58% | 59.5% | 58% | 69% |
+| 0 lands | 4 | | | 27.2 (2.3 + 24.9) | 0.432 | 0.375 | 0.376 / 0.242 | 58% | 57.8% | 58% | 75% |
+| 0 lands | 8 | | | 28.0 (4.5 + 23.4) | 0.429 | 0.375 | 0.382 / 0.279 | 58% | 57.8% | 59% | 73% |
+| 1 land | 0 | 0.078 | 0.488 | 4.8 (0 + 4.8) | 0.501 | 0.338 | 0.072 / 0.053 | 91% | 92.4% | 91.5% | 94.5% |
+| 1 land | 4 | | | 8.4 (3.6 + 4.8) | 0.501 | 0.375 | 0.071 / 0.048 | 91% | 92.0% | 91.5% | 95% |
+| 1 land | 8 | | | 11.9 (7.3 + 4.7) | 0.500 | 0.368 | 0.075 / 0.064 | 91% | 91.8% | 91.5% | 93% |
+| 2-4 lands | 0 | 0.009 | 0.513 | 0.4 (0 + 0.4) | 0.522 | 0.323 (2 searches) | 0.002 / 0.000 | 100% | 99.4% | 100% | 100% |
+| 2-4 lands | 4 | | | 4.3 (3.9 + 0.4) | 0.521 | 0.378 | 0.002 / 0.000 | 100% | 99.4% | 100% | 100% |
+| 2-4 lands | 8 | | | 8.3 (7.9 + 0.3) | 0.521 | 0.370 | 0.003 / 0.000 | 100% | 99.4% | 100% | 100% |
+
+(Q Mulligan at k 0: the mean over the searches that visited it. "Sampled": 1 - Mulligan's share of
+the visit counts without the forced walks, the temperature move's keep rate.)
+
+* **The starvation is real.** The prior on Keep is >= 0.98 for 89 of the 100 one-land hands (42% of
+  the 0-land ones, 98% of the controls), and at k 0 Mulligan got no visit in either search for 89 of
+  the 100 one-land hands, 21 of the 50 zero-land ones and 49 of the 50 controls. The value of the
+  hands is the review's: 0.38 / 0.49 / 0.51.
+* **The floor measures what was missing**: with k 4 every starved hand's Mulligan gets its 4 visits
+  (8 with k 8), PUCT's own visits stay as they were.
+* **But the network's Q says keep.** Measured, Mulligan's Q is below Keep's in **every** starved
+  low-land hand: by 0.087 on average for the 21 zero-land ones, by 0.137 for the 89 one-land ones
+  (k 4; k 8 the same). A mulligan to six is worth ~0.37-0.40 to this network, below its estimate of
+  keeping (0.43 with no land, 0.50 with one). So the cq target barely moves (1 land 0.072 -> 0.071 at
+  scale 0.3) and **the keep rates do not move**: 0 lands 58% at k 0, 4 and 8 ('visits' rule; this
+  line's cq4 s0.3 rule 58 / 58 / 59%), 1 land 91% (cq4 s0.3 91.5%). The review's 58% and 87% are the
+  network's judgement, not the search's starvation.
+* **Where Q favours Mulligan the search follows it**: the 5 (k 4) to 7 (k 8) zero-land hands whose
+  measured Q favours Mulligan are mulliganed by every rule and their cq target (s 1.0) goes 0.71 ->
+  0.95 - but those hands' priors already favoured Mulligan (none was starved at k 0).
+* **Iteration 29** (a copy; the same command): the same picture - 0 lands keep 58% at k 0 and 4, 1 land
+  91%; 23 of 50 zero-land and 91 of 100 one-land hands starved at k 0; Mulligan's measured Q below
+  Keep's in all of them but one (one-land; gaps -0.097 / -0.128).
+
+### 64.4 Where the keeps come from: on the draw, and the opponent's view
+
+Split by the declaration (the same rows, k 4):
+
+| hands | declares | hands | value of the hand | Q Keep | Q Mulligan | keep ('visits' rule) |
+|---|---|---|---|---|---|---|
+| 0 lands | first (on the play) | 21 | 0.351 | 0.362 | 0.340 | **0%** |
+| 0 lands | second (on the draw) | 29 | 0.406 | 0.483 | 0.400 | **100%** |
+| 1 land | first | 51 | 0.484 | 0.509 | 0.352 | 82% |
+| 1 land | second | 49 | 0.492 | 0.492 | 0.399 | 100% |
+
+The 58% is not a coin: the starting player mulligans every 0-land hand, the player on the draw keeps
+every one (and every 1-land hand). Two things show in the network's values after Keep (the value
+head on the state after the keep, from the keeper's own view and from the view of the player to move
+next, who cannot see the keeper's hand):
+
+| hands | declares | keeper's P(win): before | after Keep, own view | after Keep, the next decider's view |
+|---|---|---|---|---|
+| 0 lands | first | 0.351 | 0.356 | 0.509 |
+| 0 lands | second | 0.406 | 0.469 | 0.475 |
+| 1 land | first | 0.484 | 0.491 | 0.522 |
+| 1 land | second | 0.492 | 0.604 | 0.480 |
+| 2-4 lands | first | 0.529 | 0.539 | 0.521 |
+| 2-4 lands | second | 0.493 | 0.611 | 0.478 |
+
+* **The opponent's view is blind to the hand.** The search evaluates a leaf from its decider's view
+  (zero-core's `encode(decider)`): after the starting player keeps a 0-lander, the next leaf is the
+  other player's declaration, valued 0.509 for the keeper - a normal hand's value - against 0.356 from
+  the keeper's own view. For the first declarer the search soon reaches its own turn (it plays first),
+  so its Q Keep is right (0.36). For the second declarer the keep is followed by the opponent's whole
+  first turn, all of it valued from the opponent's view, so at 64 simulations Q Keep is mostly what
+  the opponent's view says.
+* **The value head itself over-rates a landless keep on the draw**: from the keeper's own view 0.469
+  after the keep (0.611 for a normal hand, 0.604 for one land), above its 0.40 for a mulligan to six.
+  If kept 0-landers mostly lose, the outcomes should correct it, but this line's value target is 60%
+  the search's own root value (`value_q` 0.6), which the opponent's-view leaves may keep up (not
+  measured here: the outcomes of kept 0-landers in delver2's games would tell).
+
+So the root minimum visits are not the fix for the mulligan: the floor gives Mulligan its Q and the
+Q is low. The levers are the value of the post-keep positions (the outcomes' weight, `value_q`) and
+the search's leaf view of the root player's private information (a zero-core design question: a
+leaf valued from the root decider's view needs an encoding of a position from a non-deciding seat's
+view, which the network was never trained on).
+
+### 64.5 The floor on the other small decisions
+
+`--small 300`: 300 decisions of 2-4 options (mana payments left out), one in six of those met in 48
+games played by the network's sampled prior (219 priority decisions, 22 library searches, 18
+mulligans, 13 targets, 8 play / draw, 5 yes / no, 5 attacks ...), each searched once per k:
+
+| | iteration 21, k 4 | k 8 | iteration 29, k 4 | k 8 |
+|---|---|---|---|---|
+| an option without a visit at k 0 | 62% | | 63% | |
+| the cq target (s 0.3) moved by > 0.1 total variation | 10.7% | 10.0% | 13.3% | 12.0% |
+| the cq4 s0.3 move changed | 2.7% | 3.0% | 3.7% | 4.0% |
+| a forced option's measured Q above the most visited option's | 28% | 29% | 30% | 29% |
+| forced walks per search (of 63) | 5.7 | 11.4 | 5.5 | 10.9 |
+
+Of the decisions with more than one option met in those games (1,968, the games' early turns: the
+sampling stopped at 300), 93% had 2-4 options and were not mana payments (4 were) - small roots are
+most of this deck's decisions.
+
+So in self-play the floor would change the training target materially at about one small decision in
+nine or eight - the decisions where a starved option's Q is high enough to beat the log-prior gap -
+and an evaluation's move at about one in thirty.
+
+### 64.6 The A/B (flags; not run)
+
+As round 2 and 63.6 (`runs/ab-r2/ab_driver.py`): fork the main line at its newest checkpoint K with
+the floor on in self-play, run the fork then the control K -> K + 10 on the same build, h2h of the two
+K + 10 checkpoints (600 games, both sides `--select cq --select-min-visits 4` at scale 0.3, no floor);
+the fork wins at >= 0.5 + 2 se. The experiment entry for an `ab_config.json` (`requires`: the driver
+waits for a build that has the flag):
+
+```json
+{"name": "rootmin4", "requires": "--selfplay-root-min-visits",
+ "flags": ["--selfplay-root-min-visits", "4"],
+ "set": ["selfplay_root_min_visits=4"]}
+```
+
+By hand (`$BASE` = round 2's `base_flags`, as in 63.6):
+
+```
+python tools/fork_run.py --source runs/delver2 --dest runs/r3-2-rootmin4 --iter K --set selfplay_root_min_visits=4
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py runs/r3-2-rootmin4/supervisor_console.txt   python tools/supervise.py runs/r3-2-rootmin4 $BASE --iters $((K+10)) --eval-every 1000 --selfplay-root-min-visits 4
+# then the control: the same flags without the floor (as 63.6), and the h2h of the two K + 10 checkpoints
+```
+
+* **Only self-play changes.** `eval_root_min_visits` stays 0 on both arms: the same evaluation rule
+  in the same pool (`cq-n4-v50-s0.3`), and `mtgz.az.h2h` follows a run's `eval_root_min_visits` only
+  (0 here), so the head to head has no floor either. `root_min_visits_max_actions` 4 (the default):
+  roots of 2-4 options. A league opponent's unrecorded seat (63) is the self-play seat and would take
+  the floor too, if both experiments were ever combined.
+* **The build**: a pinned run worktree of the merged main and its Mac checkout (`bash tools/mac.sh
+  --eval-checkout`): remote self-play ships the fork's seat with the new keys, which an older checkout
+  refuses. With the floor off the build searches as the main line's, byte for byte (64.7), so the
+  control continues delver2 unchanged.
+* **Throughput cost**: none in leaves per second or games per hour - no extra simulation, no extra
+  network call. The cost is the budget the forced walks take from PUCT inside the full searches it
+  applies to. Measured (64.5, fresh trees): 5.7 of a forced search's 63 walks with k 4 (11.4 with k
+  8); 93% of the multi-option decisions are forceable (2-4 options); the full searches are the `p_full`
+  0.25 share at 64 simulations against 16 for the fast ones, i.e. 16 of the 28 simulations a searched
+  decision gets on average. So the floor takes ~8% (k 4; ~17% with k 8) of the full searches' walks
+  from PUCT, **~4.7% of all self-play simulations with k 4, ~9.5% with k 8** - an upper bound: a
+  reused root already holds visits, and a root where PUCT gives every option k visits pays nothing.
+  The fast searches, which play three quarters of the moves, are untouched.
+* **What to read**: the verdict; the mulligan keep rates of both arms' K + 10 (`tools/mull_floor.py
+  --ks 0`, 64.3: expected unchanged, the value head drives them); `train.entropy` and the policy loss
+  (the floor gives the cq target Q for starved options: its entropy should not fall faster than the
+  control's); both arms against the heuristic. If k 4 shows nothing, k 8 is the variant (2 x 4 x 8 =
+  64: still inside every 2-4 option root's budget). The expectation from 64.3-64.5: nothing for the
+  mulligan, a target change at ~1 in 9 of the other small decisions - a small effect; the mulligan's
+  levers are 64.4's.
+
+### 64.7 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (the tiered gates), all CPU-only
+(`CUDA_VISIBLE_DEVICES=-1`), below normal, <= 6 threads, nothing on the Mac.
+
+* **zero-core** at abb0bbc (its docs/search.md 3.5, az.md 9.2): `cargo test --release --workspace`
+  59 + 3 passed (8 new; the feature's 9 also in a debug build, its `debug_assert`s on); `pytest
+  tests` 228 passed, 3 CUDA tests skipped; the golden records and match unchanged (with the floor at
+  0 and at an unpayable k); toy-smoke runs (classic, rolling, margin_w 0.2 + chance_k 2 + cq targets +
+  eval_every 2) byte for byte against main f57ee57 with the settings left out and given at their
+  defaults - shards, checkpoints (zip members), optimizer states, Elo files, models/index.json,
+  metrics (timing aside); `check_checkpoint_compat --package zero` (random, uniform, a toy
+  checkpoint) identical; Glass Road Zero, Caverna Zero (and its wasm crate, `cargo check`) and Kingdom
+  Builder Zero build against it.
+* **This repo** (zero-core pinned abb0bbc): `bash tools/build_py.sh` (1 min 13 s, its own target
+  dir), `cargo test --release -p engine --test az` **27 passed**, `pytest tests` **49 passed**;
+  `check_checkpoint_compat --package mtgz` with delver2's iteration 21 (a copy, sha256 fcdf2116...)
+  on main 3b2e6f4's build (zero-core f57ee57) against this one, the Delver spec, 8 self-play games per
+  target and 8 against random: **identical** (records visits a7d26311e198c8f5 and cq cf85c9bc94a45506,
+  results 6386f14460acea0d, 8 / 8 against random - the values of 62.7).
+* No engine change, no digest re-record, no search smoke: with the settings at their defaults no
+  game plays differently.
