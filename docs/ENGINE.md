@@ -11491,3 +11491,152 @@ re-pin: this branch merged, a pinned worktree of the merged commit built (`bash 
 317b5ba05dc569fb, one smoke configuration on the run's spec), `touch runs/<run>/STOP` during an
 iteration, then the supervisor's command from the new worktree; `runs/delver1` and the A/B runs are
 the user's call (not done here).
+
+## 59. The selection scale apart from the training scale (the Delver main line)
+
+The 'cq' evaluation rule of section 57 chooses a move by the argmax of the 'cq' training target's
+logits, `ln P0 + (c_visit + max N) c_scale completedQ`, and until now it read the run's own
+`cq_c_scale`, the training target's scale. So one knob set both the training target and the move
+rule. The overnight A/B series (`runs/ab/results.md`, 2026-10-28/29) showed what that costs:
+experiment 2, `--cq-c-scale 0.3` forked from `ab1-valueq06` at iteration 72, won its head to head at
+iteration 82 with **64.2 +- 2.4%** and became the main line (`runs/ab2-cqscale03`). But the fork
+also *selected* its moves at 0.3 (`select_a` 'cq-n4-v50-s0.3') while the control selected at 1.0
+(`select_b` 'cq-n4'). The same checkpoints with both sides at `--select visits` (400 games):
+**49.0 +- 2.5%**, no training effect. The 64% came from selecting with cq at scale 0.3 instead of
+1.0. The user's decision (2026-10-29): the selection scale and the training scale become two
+settings, so a training A/B never silently changes the evaluation rule.
+
+### 59.1 What was built (zero-core `feat/select-scale` c8110c1, on main 45885aa)
+
+zero-core docs/az.md 1.2, 5.4 (the transform, the pools, what "unset" should mean) and 12.5 (the
+build and the checks); docs/search.md 3.3. Run settings:
+
+| Setting | Default | What |
+|---|---|---|
+| `eval_select_c_scale`, `eval_select_c_visit` | unset (null) | the evaluation 'cq' rule's own completed-Q transform; unset = `cq_c_scale` / `cq_c_visit` (the training target's: one knob, today's behaviour byte for byte). Every evaluation seat (the yardstick, Elo, the `eval_remote`, co-training's evaluations), and `mtgz.az.h2h` / `mtgz.az.replays` of the run's checkpoints. The rule 'cq' only; `none` on the command line unsets a saved value |
+| `selfplay_select_c_scale`, `selfplay_select_c_visit` | unset (null) | the same for `selfplay_select` 'cq' (self-play after `temp_moves`); the recorded targets keep `cq_c_scale` / `cq_c_visit` whatever these are |
+
+* **The pool follows the effective selection transform.** The rule's name (its evaluations'
+  `select`, its Elo pool `elo/<rule>/`) carries the transform it actually selects with:
+  `cq-n4-v50-s0.3` whether the 0.3 comes from `cq_c_scale` or from `eval_select_c_scale`, `cq-n4` at
+  50 / 1. A run whose selection scale is pinned keeps its pool when only `cq_c_scale` changes; a run
+  with it unset changes pool with `cq_c_scale`, as before.
+* **The training targets never read the new settings**: in the Rust driver `Select::Cq` and
+  `PolicyTarget::CompletedQ` already held their own transforms; the bindings' new seat keys
+  `select_c_visit` / `select_c_scale` feed the first only.
+* **`mtgz.az.h2h`** (zero.h2h): a checkpoint's run's rule now comes with its effective transform;
+  `--cq-c-scale` / `--cq-c-visit` for both sides and, new, per side `--a-cq-c-scale`,
+  `--b-cq-c-scale`, `--a-cq-c-visit`, `--b-cq-c-visit`. One checkpoint at two selection scales:
+
+  ```
+  python -m mtgz.az.h2h runs/ab2-cqscale03/models/iter_0120.pt runs/ab2-cqscale03/models/iter_0120.pt \
+    --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 1.0 --sims 32 --games 400
+  ```
+  (`select_a` 'cq-n4-v50-s0.3', `select_b` 'cq-n4'). Without `--select` the per-side flags apply
+  over each side's run rule; a transform for a 'visits' side is an error, as are both-sides flags
+  when neither side plays 'cq' (before, `--cq-c-scale` without `--select` was silently ignored).
+* **`mtgz.az.replays`**: the run's rule with its transform; `--cq-c-visit` / `--cq-c-scale`.
+* In this repo: nothing game-specific, only the pin (c15a22d).
+
+### 59.2 Defaults, and what "unset" should mean long-term
+
+Unset follows `cq_c_scale` (today's behaviour) and stays the default for now: every existing run and
+config evaluates, trains and names its pools bit for bit as before (59.4). The recommendation for
+later (zero-core docs/az.md 5.4): **unset = a fixed transform** (50 / 1, or the value the selection
+measurement settles on) instead of following the target. The two knobs act separately (the A/B
+above: training at 0.3 changed nothing measurable, selecting at 0.3 instead of 1.0 was ~+100 Elo
+head to head), and following turns every training A/B of `cq_c_scale` into an A/B of the
+evaluation rule. Flipping the default needs one migration first: every run config with a 'cq' rule
+and a `cq_c_*` other than the new default gets its current effective value written in (e.g.
+`ab2-cqscale03`: `eval_select_c_scale` 0.3), so no run changes moves or pool. Until then: pin the
+selection scale on every run whose `cq_c_scale` an A/B may change, and give both arms of such an A/B
+the same `--eval-select-c-scale` (or read it with both sides at one `--select` and one
+`--cq-c-scale`).
+
+### 59.3 Giving the main line (`runs/ab2-cqscale03`) its own selection scale
+
+Its training stays exactly as it is: `cq_c_scale` 0.3 (saved in its config.json since the fork), the
+'cq' targets, `selfplay_select` 'visits' (no self-play scale to set: `--selfplay-select-c-scale`
+would be an error with 'visits'). Only the evaluation's selection scale gets its own value S (the
+user's choice from the running h2h measurement). Procedure as 56.10 / 57.5: zero-core
+`feat/select-scale` and this branch merged, a pinned worktree of the merged commit built (`bash
+tools/build_py.sh`; the engine is a6bb3bc's, so the tier is "re-pin onto an already-verified
+commit": digest equal to main's recorded 317b5ba05dc569fb, one smoke configuration), `bash
+tools/mac.sh --eval-checkout` from that worktree (the Mac's evaluation checkout must have the
+setting: an older one selects at `cq_c_scale` and, when S is not 0.3, its results name another rule
+and are refused, 57.1), `touch runs/ab2-cqscale03/STOP` during an iteration, then from the new
+worktree the run's current command plus one flag:
+
+```
+python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03/supervisor_console.txt" \
+  python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/ab2-cqscale03" --preset delver-mirror --seed 1 \
+  --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --ram-budget-gb 20 --selfplay-remote-linger 1 \
+  --eval-select cq --eval-select-min-visits 4 --eval-random-games 0 --elo-offsets 1,2,4,8 --elo-games 25 \
+  --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 \
+  --eval-select-c-scale S
+```
+
+(`--eval-select-c-visit` stays unset: 50, the run's `cq_c_visit`.) What happens at the next
+evaluated iteration K (a multiple of 8):
+
+* **S = 0.3**: nothing changes - the same moves, the same pool `elo/cq-n4-v50-s0.3/` (since 72), the
+  same files (59.4's cq-rule run: byte for byte). The scale is then pinned: a later training A/B of
+  `cq_c_scale` forked from this run keeps selecting at 0.3.
+* **S = 1.0**: the evaluations select at 1.0 and begin the pool `elo/cq-n4/` (since K: the reference
+  games once, K's yardstick games, its raw-offset Elo matches; 57.5).
+* **another S**: likewise, the pool `elo/cq-n4-v50-s<S>/` (e.g. `cq-n4-v50-s0.1`).
+
+What to check: the log's `iter K vs heuristic (remote mac, ...): {... 'select': '<rule>'}` and `iter K
+elo ... (pool <rule>) (remote mac)`; evals.jsonl's row K with `"select": "<rule>"`; the pool directory;
+the next iteration's `selfplay` / `train` rows as before (the training is untouched: same targets,
+same `cq_c_scale`); `watch_run`. A new pool's Elo is not comparable with the old pool's; the
+yardstick's win rate is the continuous series. **The delverai publisher** (`tools/delverai_publish.py`)
+reads the pool through `zero.elo` of its own checkout: on a core without this change it would compute
+the old rule's name (from `cq_c_scale`) and keep reading `cq-n4-v50-s0.3` once S is not 0.3; its
+checkout needs the new pin too (or its settings list `SETTINGS` the new key, for the page).
+
+### 59.4 Checks (the tier "opt-in core feature with byte-identical defaults")
+
+Recorded on this desktop, 2026-10-29 (`runs/ab2-cqscale03` live on the GPU and the Mac and an h2h
+measurement on the GPU meanwhile; `CARGO_BUILD_JOBS` 8, CPU only, nothing on the Mac).
+
+**zero-core `feat/select-scale` c8110c1** (on main 45885aa):
+
+* `cargo test --release`: zero_search 50 passed (the new
+  `select_transform_moves_only_the_moves_never_the_targets` and the goldens among them), zero_webnet 3.
+* `pytest tests`: 183 passed in 11 min 33 s (`tests/test_select_scale.py`'s 10 among them).
+* Defaults byte for byte against main 45885aa: the three toy-smoke runs of 57.6 (classic; rolling;
+  margin_w 0.2 + chance_k 2 + cq targets + `eval_every` 2), each with the new settings left out and
+  given explicitly as `none`: 9 / 9 / 11 shards and checkpoints identical (by zip member), metrics
+  equal (timing aside), elo/results.json and models/index.json byte for byte, ratings equal
+  (`updated` aside), no elo/ subdirectory; config.json's old keys equal (+ the four new ones, null).
+  And a run at the main line's rule shape (cq targets, `cq_c_scale` 0.3, `eval_select cq` guard 2,
+  `selfplay_select cq`, raw offsets 1,2, 4 iterations), unset and given equal to 0.3: 11 files
+  identical, pool `cq-n2-v50-s0.3` byte for byte.
+* `tools/check_checkpoint_compat.py --package zero` against 45885aa (random, uniform, a toy
+  checkpoint): identical.
+* Feature tests (`tests/test_select_scale.py`): unset vs given equal to `cq_c_scale` (a toy run:
+  every shard, checkpoint and Elo file identical, the seat dicts key for key); the evaluation's
+  selection scale alone changes the evaluations only (identical shards and checkpoints, another
+  pool); the training scale alone with the selection pinned keeps the pool name; self-play's
+  selection scale moves the games, never the targets (the Rust driver through the bindings, the
+  Python driver's 'py' and 'rs' seats, a Rust unit test: target 1.0 + rule 0.3 plays the games of
+  target 0.3 + rule 0.3, and its targets are the 1.0 targets of the same roots); Rust vs Python at
+  (cq, guard 4, 0.3 beside a 1.0 target): the formula on Rust roots on every case, 300 games of a
+  Rust-tree seat against a Python-tree seat ~50%; h2h per side; replays; the CLI's `none`.
+* The other games build against it (build only: Glass Road Zero c1f56dc, Caverna Zero a6fad73,
+  Kingdom Builder Zero 4202a4a at their HEADs, exported with this core in third_party/zero-core;
+  the PyO3 crate, every test compiled, the package imported): all three ok, 46 / 75 / 91 s.
+
+**This repo, `select-scale` c15a22d** (main a6bb3bc + the pin of c8110c1): `bash tools/build_py.sh`
+(1 min 41 s from an empty target), `cargo test --release -p engine --test az` 24 passed, `pytest
+tests` 46 passed in 1 min 32 s.
+
+### 59.5 Limits
+
+* **Unset still follows** `cq_c_scale` (59.2): an A/B of `cq_c_scale` on a run without a pinned
+  selection scale is still confounded. Pin it, or read the A/B with one rule on both sides.
+* **Remote self-play** has no rule check: a Mac self-play checkout without the setting would select
+  at `cq_c_scale` (only `selfplay_select_c_*` is affected; the main line sets neither). The re-pin
+  updates the Mac's checkouts.
+* **Which S** is the h2h measurement's question (not answered here).
