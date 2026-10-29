@@ -181,6 +181,18 @@ def deck_of(cfg):
     return info
 
 
+def migrated_from(run):
+    """A run continuing another's network (MIGRATED_FROM.json, e.g. a layout widen: runs/delver2
+    from ab2-cqscale03's iter_0137): {run, iter, layout, time} of the source, else None."""
+    m = _json(os.path.join(run, 'MIGRATED_FROM.json'))
+    if not isinstance(m, dict) or not m.get('migrated_from'):
+        return None
+    src = m['migrated_from'].replace(os.sep, '/').replace('\\', '/')
+    it = re.search(r'iter_(\d+)\.pt$', src)
+    return {'run': os.path.basename(os.path.dirname(os.path.dirname(src))), 'iter': int(it.group(1)) if it else None,
+            'layout': m.get('layout'), 'time': m.get('time')}
+
+
 def progress(run, every=1):
     """The site's progress record of a run (`every`: which iterations get games recorded)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
@@ -201,7 +213,7 @@ def progress(run, every=1):
         'ratings': {k: {'elo': _r(v.get('elo'), 1), 'se': _r(v.get('se'), 1), 'games': v.get('games')}
                     for k, v in (ratings.get('ratings') or {}).items()},
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
-        'replayed': state.get('replayed', []), 'record_every': every,
+        'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
     }
 
 
