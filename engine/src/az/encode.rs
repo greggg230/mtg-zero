@@ -1,25 +1,29 @@
 //! The network input of the `mtg` game (ENGINE.md 21.2, 22.2, 24): a fixed-width
-//! f32 vector for a viewer, with no hidden information. Layout v4 (33,652
-//! floats; M8a and M8b, ENGINE.md 35.6, 36.7: open until the matches of
-//! phase 2 are done) is layout v3 (29,860 floats; frozen at the end of the
-//! M7b card batch, ENGINE.md 22.6) plus the companions block, a global and
-//! two per-player globals (M8a), and (M8b) a list block of 64 slots with
-//! four more floats each, two more bags and the match block; in order:
+//! f32 vector for a viewer, with no hidden information. **Layout v5**
+//! ([`NUM_FEATURES`] = 37,620 floats; ENGINE.md 60) is layout v4 (33,652
+//! floats; frozen at the end of M8b, ENGINE.md 22.7, with the spare floats of
+//! 55 and 58.8) with additions only, so that a v4 token network widens onto it
+//! exactly (zero-core `net.widen` with this layout; every v4 float keeps its
+//! meaning, [`v4_projection`]): wider permanent and stack slots (the new
+//! status floats at the slots' ends), two more bags, and a second block of
+//! globals after the match block. Every block in order (v4's description,
+//! then what v5 added):
 //!
 //! | Block | Floats | What |
 //! |---|---:|---|
 //! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash; M7b part 2: poison, cards on an adventure, temporary triggered abilities, no maximum hand size; day and night; part 3b: the initiative, the dungeon room, dungeons completed, experience counters |
 //! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
-//! | bags | 17 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match |
+//! | bags | 19 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match; **v5**: the exiled cards the viewer may play, those the opponent may play (`bag::MY_EXILE_PLAY`, `OPP_EXILE_PLAY`; a face-down one only where the viewer knows it) |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
-//! | permanents | 2 x 32 x 148 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave) |
+//! | permanents | 2 x 32 x 172 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done; 8 spare) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
-//! | stack | 8 x 84 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability |
+//! | stack | 8 x 124 | `STACK` slots 0..7 (top first): source card code, kind, controller, targets (a player, a permanent, a stack item); a copy of a spell, times an additional cost was paid, bestowed; part 3b: targeted by another stack item, can't be countered, the ability's index, a graveyard card's ability; 58.8: X; **v5** status 32-71: the modes chosen, the alternative cost, how and from where it was cast, cards delved, a trigger's event amount, exiled as it leaves, flashback, noted permanents, divided damage, a ninjutsu attack, splices (8 spare) |
 //! | triggers | 4 x 56 | `TRIGGER` slots 0..3 (the viewer's waiting triggers) |
 //! | list | 64 x 60 | `LIBRARY` slots 0..63 of the viewer's own decision: the searched library, the looked-at pile or the seen hand, sorted by definition; M8b: sideboarding's pool list (`list::*`: copies in the pool, in the deck, in the deck at the start, a first pick, a basic land, already decided) |
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
-//! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`) |
+//! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
+//! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn (8 spare); the last normal turn's player, additional combat phases (14 spare) |
 //!
 //! v4's globals (ENGINE.md 35): `g[124]` the viewer chose who takes the first
 //! turn (CR 103.1; `g[18]`: the viewer is the starting player); per player
@@ -36,7 +40,8 @@
 //! block, can't be blocked, other counters, cards exiled with it, protection:
 //! `perm::CANT_BLOCK` ..); a stack item's status 31 (X: `stack::X`); and a
 //! permanent's descriptor shows its card types and colours as they are
-//! (layers 4 and 5), not its card's. `public_state.rs` is the gate that
+//! (layers 4 and 5), not its card's. Layout v5 (ENGINE.md 60) encodes the
+//! gate's 42 gaps that v4 had no room for. `public_state.rs` is the gate that
 //! checks every public field reaches this input.
 //!
 //! A card code (52 floats) is the card's stable identity (`identity.rs`: its
@@ -67,7 +72,7 @@
 use crate::db::{types, AbilitySlot, CardDb, Kw, WardCost};
 use crate::decision::{act, Choice, FACE_CAST, FACE_PLAY, OTHER_CAST, OTHER_PLAY};
 use crate::flow::Task;
-use crate::game::{Game, StackKind};
+use crate::game::{Game, Mark, StackKind};
 use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
 use crate::program::Op;
 
@@ -79,15 +84,23 @@ pub const D: usize = identity::D;
 pub const CODE: usize = 52;
 pub const GLOBALS: usize = 128;
 pub const CONTEXT: usize = 256;
-pub const BAGS: usize = 17;
+/// Layout v5: v4's 17 bags and the exiled cards each player may play
+/// (`bag::MY_EXILE_PLAY`, `bag::OPP_EXILE_PLAY`).
+pub const BAGS: usize = 19;
 pub const TOPS: usize = 3;
 pub const TOP_W: usize = CODE + 2;
 pub const PERMS: usize = 32;
-pub const PERM_W: usize = CODE + 96;
+/// Layout v5: the permanent status floats v5 added at the slot's end
+/// (status 96..119, `perm::MUST_ATTACK` ..; 8 spare).
+pub const PERM_V5: usize = 24;
+pub const PERM_W: usize = CODE + 96 + PERM_V5;
 pub const HANDS: usize = 16;
 pub const HAND_W: usize = CODE + 8;
 pub const STACKS: usize = 8;
-pub const STACK_W: usize = CODE + 32;
+/// Layout v5: the stack status floats v5 added at the slot's end (status
+/// 32..71, `stack::MODES` ..; 8 spare).
+pub const STACK_V5: usize = 40;
+pub const STACK_W: usize = CODE + 32 + STACK_V5;
 pub const TRIGS: usize = 4;
 pub const TRIG_W: usize = CODE + 4;
 /// M8b: 64 slots (every `LIBRARY` id; a sideboarding pool list has up to
@@ -101,6 +114,8 @@ pub const COMPS: usize = 2;
 pub const COMP_W: usize = CODE + 4;
 /// The match block (layout v4, M8b; globals).
 pub const MATCH: usize = 32;
+/// Layout v5: the second block of globals (`g5::*`), after the match block.
+pub const GLOBALS_V5: usize = 64;
 
 pub const O_GLOBALS: usize = 0;
 pub const O_CONTEXT: usize = O_GLOBALS + GLOBALS;
@@ -115,7 +130,71 @@ pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
 pub const O_GYA: usize = O_LIST + LIST * LIST_W;
 pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
 pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
-pub const NUM_FEATURES: usize = O_MATCH + MATCH;
+pub const O_GLOBALS_V5: usize = O_MATCH + MATCH;
+pub const NUM_FEATURES: usize = O_GLOBALS_V5 + GLOBALS_V5;
+const _: () = assert!(NUM_FEATURES == 37_620);
+
+/// Layout v4 (ENGINE.md 22.7, `mtgz/az/layout_v4.json`), as far as the
+/// widening to v5 needs it: its features, its bags and the widths of the
+/// slots v5 widened, and every block's v4 offset.
+pub mod v4 {
+    use super::*;
+    pub const BAGS: usize = 17;
+    pub const PERM_W: usize = CODE + 96;
+    pub const STACK_W: usize = CODE + 32;
+    pub const O_BAGS: usize = O_CONTEXT + CONTEXT;
+    pub const O_TOPS: usize = O_BAGS + BAGS * D;
+    pub const O_MY_PERM: usize = O_TOPS + 2 * TOPS * TOP_W;
+    pub const O_OPP_PERM: usize = O_MY_PERM + PERMS * PERM_W;
+    pub const O_HAND: usize = O_OPP_PERM + PERMS * PERM_W;
+    pub const O_STACK: usize = O_HAND + HANDS * HAND_W;
+    pub const O_TRIG: usize = O_STACK + STACKS * STACK_W;
+    pub const O_LIST: usize = O_TRIG + TRIGS * TRIG_W;
+    pub const O_GYA: usize = O_LIST + LIST * LIST_W;
+    pub const O_COMP: usize = O_GYA + GYAS * GYA_W;
+    pub const O_MATCH: usize = O_COMP + COMPS * COMP_W;
+    pub const NUM_FEATURES: usize = O_MATCH + MATCH;
+    const _: () = assert!(NUM_FEATURES == 33_652 && O_TOPS == 17_792 && O_STACK == 28_548 && O_MATCH == 33_620);
+}
+
+/// Where each layout v4 feature is in layout v5 (ENGINE.md 60.2): `p[i]` is
+/// the v5 index of v4 feature `i`, which means what v4's meant. Every block
+/// keeps its order; a v4 slot's floats are the first ones of the v5 slot
+/// (the permanents' 148 of 172, the stack's 84 of 124), v4's bags the first
+/// 17 of v5's 19, and v4's globals (the 128 and the match block) the first
+/// globals of v5 in feature order (v5's own come after the match block).
+/// So the v5 encoding at these indices IS the v4 encoding (the digests
+/// prove it: `DIGEST_ENCODING=v4` hashes this projection and reproduces
+/// layout v4's recorded digest), and zero-core's `net.widen` with
+/// `layout_v5.json` maps a v4 network's input columns the same way.
+pub fn v4_projection() -> Vec<usize> {
+    // (v4 offset, v5 offset, slots, v4 slot width, v5 slot width)
+    let blocks = [
+        (O_GLOBALS, O_GLOBALS, 1, GLOBALS, GLOBALS),
+        (O_CONTEXT, O_CONTEXT, 1, CONTEXT, CONTEXT),
+        (v4::O_BAGS, O_BAGS, 1, v4::BAGS * D, BAGS * D),
+        (v4::O_TOPS, O_TOPS, 2 * TOPS, TOP_W, TOP_W),
+        (v4::O_MY_PERM, O_MY_PERM, PERMS, v4::PERM_W, PERM_W),
+        (v4::O_OPP_PERM, O_OPP_PERM, PERMS, v4::PERM_W, PERM_W),
+        (v4::O_HAND, O_HAND, HANDS, HAND_W, HAND_W),
+        (v4::O_STACK, O_STACK, STACKS, v4::STACK_W, STACK_W),
+        (v4::O_TRIG, O_TRIG, TRIGS, TRIG_W, TRIG_W),
+        (v4::O_LIST, O_LIST, LIST, LIST_W, LIST_W),
+        (v4::O_GYA, O_GYA, GYAS, GYA_W, GYA_W),
+        (v4::O_COMP, O_COMP, COMPS, COMP_W, COMP_W),
+        (v4::O_MATCH, O_MATCH, 1, MATCH, MATCH),
+    ];
+    let mut p = vec![usize::MAX; v4::NUM_FEATURES];
+    for (o4, o5, n, w4, w5) in blocks {
+        for s in 0..n {
+            for j in 0..w4 {
+                p[o4 + s * w4 + j] = o5 + s * w5 + j;
+            }
+        }
+    }
+    assert!(p.iter().all(|&i| i < NUM_FEATURES), "every v4 feature is in a block");
+    p
+}
 
 /// Features are exact within +-`SQUASH_FROM` (ENGINE.md 46): a 1,024-power
 /// creature (P/T / 8), 2,560 total power or life (/ 20), any bag. The
@@ -255,7 +334,15 @@ pub mod bag {
     /// The identities the opponent revealed (made public) in earlier games
     /// of the match.
     pub const OPP_REVEALED: usize = 16;
+    /// Layout v5 (ENGINE.md 60): the cards in exile the viewer may play (a
+    /// permission: impulse draw, Fallen Shinobi, Dauthi Voidwalker, an
+    /// adventure, Elite Spellbinder's; `Game::exile_permission`), and those
+    /// the opponent may play; a face-down one only where the viewer knows it
+    /// (the count of each player's is `g5::EXILE_PLAY`).
+    pub const MY_EXILE_PLAY: usize = 17;
+    pub const OPP_EXILE_PLAY: usize = 18;
 }
+const _: () = assert!(bag::OPP_EXILE_PLAY + 1 == BAGS);
 
 /// Offsets inside a permanent's status (after its card code).
 pub mod perm {
@@ -346,8 +433,39 @@ pub mod perm {
     pub const OTHER_COUNTERS: usize = 93;
     pub const EXILED_WITH: usize = 94;
     pub const PROTECTED: usize = 95;
+    /// Layout v5 (ENGINE.md 60), status 96-119 (the slot's new end): the
+    /// rules effects "it attacks each combat if able" (not goad, `GOADED`)
+    /// and "if it would die, exile it instead" on it / 2 (squashed counts:
+    /// one more always shows); the effects that change its subtypes / 2
+    /// (layer 4: "it's a Zombie in addition", "becomes a 3/3 Elemental"; its
+    /// card's subtypes are its identity's).
+    pub const MUST_ATTACK: usize = 96;
+    pub const EXILE_IF_DIES: usize = 97;
+    pub const SUBTYPES: usize = 98;
+    /// It entered evoked (CR 702.74a), it escaped (702.138c), it is
+    /// monstrous (701.37b).
+    pub const EVOKED: usize = 99;
+    pub const ESCAPED: usize = 100;
+    pub const MONSTROUS: usize = 101;
+    /// The player chosen as it entered (CR 614.12; True-Name Nemesis,
+    /// Dauthi Voidwalker): 1 the viewer, -1 the opponent.
+    pub const CHOSEN_PLAYER: usize = 102;
+    /// Its exhaust abilities activated / 2 (CR 702.177a).
+    pub const EXHAUSTED: usize = 103;
+    /// The colour chosen as it entered (W U B R G, one-hot; CR 614.12).
+    pub const CHOSEN_COLOR: usize = 104;
+    /// Exerted (CR 701.39: it won't untap during its controller's next
+    /// untap step).
+    pub const EXERTED: usize = 109;
+    /// Times its abilities resolved this turn / 4 ("the second time this
+    /// ability has resolved this turn"); its optional "only once each turn"
+    /// actions done this turn / 2.
+    pub const RESOLVED: usize = 110;
+    pub const DONE_ONCE: usize = 111;
+    /// The first spare status float of layout v5 (112..119 spare).
+    pub const V5_END: usize = 112;
 }
-const _: () = assert!(CODE + perm::PROTECTED < PERM_W);
+const _: () = assert!(CODE + perm::PROTECTED + 1 == v4::PERM_W && perm::MUST_ATTACK == 96 && CODE + perm::V5_END <= PERM_W);
 
 /// Offsets inside a stack slot's status (after its card code).
 pub mod stack {
@@ -370,8 +488,102 @@ pub mod stack {
     /// 31: the value of X / 8 (squashed; CR 107.3a: announced as it was cast or
     /// activated).
     pub const X: usize = 31;
+    /// Layout v5 (ENGINE.md 60), status 32-71 (the slot's new end): the
+    /// times mode k was chosen / 2, k = 0..7 (CR 700.2; Prismari Charm,
+    /// Kolaghan's Command; "the same mode more than once": the Confluences).
+    pub const MODES: usize = 32;
+    pub const MODES_N: usize = 8;
+    /// Cast for an alternative cost (CR 118.9: Force of Will's and Daze's
+    /// pitch, evoke, dash, ...), and which one ((k + 1) / 4).
+    pub const ALT: usize = 40;
+    pub const ALT_INDEX: usize = 41;
+    /// How it was cast (`CastFrom`, one-hot; from hand: none): flashback
+    /// (its flashback cost), flashback with the choice of its mana cost too
+    /// (Snapcaster Mage on a card with flashback), escape, with a permission
+    /// from exile (impulse draw, Elite Spellbinder's tax, airbending), another
+    /// graveyard route (retrace, mayhem, Serra Paragon), miracle, the top of
+    /// its library (Bolas's Citadel); without paying its mana cost.
+    pub const FROM: usize = 42;
+    pub const FROM_N: usize = 7;
+    pub const FREE: usize = 49;
+    /// The zone it was cast from (one-hot: a graveyard, exile, a library,
+    /// another zone but a hand; from hand: none).
+    pub const ORIGIN: usize = 50;
+    /// Cards exiled for delve / 4 (CR 702.66; Murktide Regent's counters).
+    pub const DELVED: usize = 54;
+    /// A triggered ability's event amount / 8 ("that much"; squashed).
+    pub const AMOUNT: usize = 55;
+    /// It is exiled instead of being put into a graveyard as it leaves (a
+    /// permission's or an effect's); it was cast with flashback (CR
+    /// 702.34a: exiled too).
+    pub const EXILED_AFTER: usize = 56;
+    pub const FLASHBACK: usize = 57;
+    /// Permanents a trigger noted / 4 (Dack Fayden's emblem).
+    pub const NOTED: usize = 58;
+    /// Divided damage (CR 601.2d): the amounts for its first two targets / 8.
+    pub const DIVISION: usize = 59;
+    /// Ninjutsu (CR 702.49c): the creature it puts onto the battlefield
+    /// attacking, and attacking a planeswalker.
+    pub const ATTACK_AS: usize = 61;
+    pub const ATTACK_WALKER: usize = 62;
+    /// Cards spliced onto it / 4 (CR 702.47).
+    pub const SPLICED: usize = 63;
+    /// The first spare status float of layout v5 (64..71 spare).
+    pub const V5_END: usize = 64;
 }
-const _: () = assert!(CODE + stack::X < STACK_W);
+const _: () = assert!(CODE + stack::X + 1 == v4::STACK_W && stack::MODES == 32 && CODE + stack::V5_END <= STACK_W);
+
+/// Offsets inside the globals of layout v5 (ENGINE.md 60; the block at
+/// [`O_GLOBALS_V5`], after the match block): per player, viewer first
+/// (`g5[PLAYER * side + ..]`), then the game's (`g5[GAME + ..]`).
+pub mod g5 {
+    /// Floats per player (16 used, 8 spare).
+    pub const PLAYER: usize = 24;
+    /// Cards drawn this turn / 4, in the draw step / 2 (Orcish Bowmasters,
+    /// Sylvan Library); noncreature spells cast this turn / 4 (prowess,
+    /// Monastery Mentor); spells cast this game / 16 (all squashed).
+    pub const DRAWN: usize = 0;
+    pub const DRAW_STEP: usize = 1;
+    pub const NONCREATURE: usize = 2;
+    pub const SPELLS_GAME: usize = 3;
+    /// Gained life this turn; can't gain life (Screaming Nemesis).
+    pub const GAINED_LIFE: usize = 4;
+    pub const CANT_GAIN: usize = 5;
+    /// Creatures declared as attackers this turn / 4 (raid; "a turn you
+    /// attacked with a Ninja").
+    pub const ATTACKED: usize = 6;
+    /// May play from their graveyard this turn (Yawgmoth's Will); cards
+    /// going to their graveyard this turn are exiled instead.
+    pub const GY_PLAY: usize = 7;
+    pub const GY_EXILE: usize = 8;
+    /// The city's blessing (CR 702.131b); protection from everything
+    /// (702.16j: The One Ring).
+    pub const CITY: usize = 9;
+    pub const PROTECTED: usize = 10;
+    /// The pool's colorless mana that pays only for artifacts / 4
+    /// (Mishra's Workshop), its red mana that gives haste / 4 (Arena of
+    /// Glory).
+    pub const POOL_ART: usize = 11;
+    pub const POOL_HASTE: usize = 12;
+    /// Their delayed triggered abilities waiting / 4 (CR 603.7: Mana
+    /// Drain's mana, Sneak Attack's sacrifice, a Bauble's draw).
+    pub const DELAYED: usize = 13;
+    /// The cards in exile they may play / 4 (face down included: the
+    /// identities are `bag::*_EXILE_PLAY`).
+    pub const EXILE_PLAY: usize = 14;
+    /// Their graveyard's cards discarded this turn / 4 (mayhem, CR
+    /// 702.187b).
+    pub const DISCARDED: usize = 15;
+    pub const PLAYER_END: usize = 16;
+    /// The game's: the last normal turn was the viewer's (CR 500.7: the
+    /// extra-turn order), additional combat phases to follow / 2 (500.8).
+    pub const GAME: usize = 2 * PLAYER;
+    pub const NORMAL: usize = GAME;
+    pub const EXTRA_COMBATS: usize = GAME + 1;
+    /// The first spare game float (50..63 spare).
+    pub const GAME_END: usize = GAME + 2;
+}
+const _: () = assert!(g5::PLAYER_END <= g5::PLAYER && g5::GAME_END <= GLOBALS_V5);
 
 /// Offsets inside the per-player globals (`g[24 + 40 * side..]`, viewer
 /// first) added in M7b part 3b, and the room one-hots.
@@ -608,6 +820,7 @@ impl Game {
             mine_to_decide && decision.is_some_and(|d| d.options.binary_search_by_key(&a, |o| o.action).is_ok())
         };
         self.encode_globals(me, &mut out[O_GLOBALS..O_GLOBALS + GLOBALS]);
+        self.encode_globals_v5(me, &mut out[O_GLOBALS_V5..O_GLOBALS_V5 + GLOBALS_V5]);
         self.encode_bags(me, ids, out);
         // Tops of the libraries.
         for (side, p) in [me, op_].into_iter().enumerate() {
@@ -790,6 +1003,38 @@ impl Game {
                     st[perm::EXILED_WITH] = squash(n as f32 / 4.0);
                 }
                 st[perm::PROTECTED] = !self.protection_of(c).is_empty() as u8 as f32;
+                // Layout v5 (ENGINE.md 60): status 96-119.
+                let (must, exile_dies, subtypes) = self.effect_counts(c);
+                st[perm::MUST_ATTACK] = squash(must as f32 / 2.0);
+                st[perm::EXILE_IF_DIES] = squash(exile_dies as f32 / 2.0);
+                st[perm::SUBTYPES] = squash(subtypes as f32 / 2.0);
+                st[perm::EVOKED] = ob.evoked as u8 as f32;
+                st[perm::ESCAPED] = ob.escaped as u8 as f32;
+                st[perm::MONSTROUS] = ob.monstrous as u8 as f32;
+                st[perm::CHOSEN_PLAYER] = match ob.chosen_player {
+                    Some(p) if p == me => 1.0,
+                    Some(_) => -1.0,
+                    None => 0.0,
+                };
+                if !self.marks.is_empty() {
+                    let r = self.obj_ref(c);
+                    let mut exhausted = 0u32;
+                    for (_, m) in self.marks.iter().filter(|x| x.0 == r) {
+                        match *m {
+                            Mark::Exhausted(_) => exhausted += 1,
+                            Mark::ChosenColor(k) if (k as usize) < 5 => st[perm::CHOSEN_COLOR + k as usize] = 1.0,
+                            Mark::Exerted => st[perm::EXERTED] = 1.0,
+                            _ => {}
+                        }
+                    }
+                    st[perm::EXHAUSTED] = squash(exhausted as f32 / 2.0);
+                }
+                if !self.resolved.is_empty() || !self.done_once.is_empty() {
+                    let r = self.obj_ref(c);
+                    let n: u32 = self.resolved.iter().filter(|x| x.0 == r).map(|x| x.1 as u32).sum();
+                    st[perm::RESOLVED] = squash(n as f32 / 4.0);
+                    st[perm::DONE_ONCE] = squash(self.done_once.iter().filter(|x| x.0 == r).count() as f32 / 2.0);
+                }
             }
         }
         // The viewer's hand.
@@ -840,6 +1085,56 @@ impl Game {
             st[7] = item.targets.len() as f32 / 4.0;
             // ENGINE.md 58.8 (spare float 31).
             st[stack::X] = squash(item.x as f32 / 8.0);
+            // Layout v5 (ENGINE.md 60): status 32-71.
+            for &m in &item.modes {
+                if (m as usize) < stack::MODES_N {
+                    st[stack::MODES + m as usize] += 0.5;
+                }
+            }
+            if item.alt != 0 {
+                st[stack::ALT] = 1.0;
+                st[stack::ALT_INDEX] = item.alt as f32 / 4.0;
+            }
+            {
+                use crate::game::CastFrom as F;
+                let from = match item.from {
+                    F::Hand => None,
+                    F::Flashback => Some(0),
+                    F::FlashbackMana => Some(1),
+                    F::Escape => Some(2),
+                    F::Permission { .. } | F::Taxed(_) | F::Airbent(_) => Some(3),
+                    F::Retrace | F::Mayhem | F::Paragon => Some(4),
+                    F::Miracle => Some(5),
+                    F::LibraryTop => Some(6),
+                };
+                if let Some(k) = from {
+                    st[stack::FROM + k] = 1.0;
+                }
+                st[stack::FREE] = matches!(item.from, F::Permission { free: true, .. }) as u8 as f32;
+            }
+            let origin = match item.origin {
+                Zone::Hand | Zone::Nowhere => None,
+                Zone::Graveyard => Some(0),
+                Zone::Exile | Zone::FaceDown => Some(1),
+                Zone::Library => Some(2),
+                Zone::Battlefield | Zone::Stack | Zone::Command => Some(3),
+            };
+            if let Some(k) = origin {
+                st[stack::ORIGIN + k] = 1.0;
+            }
+            st[stack::DELVED] = squash(item.delved as f32 / 4.0);
+            st[stack::AMOUNT] = squash(item.ev.amount as f32 / 8.0);
+            st[stack::NOTED] = squash(item.noted.len() as f32 / 4.0);
+            for (k, &n) in item.division.iter().take(2).enumerate() {
+                st[stack::DIVISION + k] = squash(n as f32 / 8.0);
+            }
+            st[stack::ATTACK_AS] = item.attack_as.is_some() as u8 as f32;
+            st[stack::ATTACK_WALKER] = matches!(item.attack_as, Some(Some(_))) as u8 as f32;
+            st[stack::SPLICED] = squash(item.spliced.len() as f32 / 4.0);
+            if let StackKind::Spell { card } = item.kind {
+                st[stack::EXILED_AFTER] = self.gy_exile.contains(&card) as u8 as f32;
+                st[stack::FLASHBACK] = self.objs[card.i()].flashback as u8 as f32;
+            }
             match item.kind {
                 StackKind::Spell { card } => {
                     st[stack::COPY] = self.is_copy_obj(card) as u8 as f32;
@@ -1039,6 +1334,58 @@ impl Game {
                 bag_add(out, ids, b, d);
             }
         }
+        // Layout v5 (ENGINE.md 60): the exiled cards each player may play
+        // (a face-down one where the viewer knows it; their number is
+        // `g5::EXILE_PLAY`).
+        if !self.permissions.is_empty() {
+            for &c in self.exile.iter().chain(self.face_down.iter()) {
+                if self.objs[c.i()].zone == Zone::FaceDown && !self.knows(me, c) {
+                    continue;
+                }
+                for (b, p) in [(bag::MY_EXILE_PLAY, me), (bag::OPP_EXILE_PLAY, op_)] {
+                    if self.exile_permission(p, c).is_some() {
+                        bag_add(out, ids, b, self.objs[c.i()].def);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The globals of layout v5 (ENGINE.md 60, `g5::*`).
+    fn encode_globals_v5(&self, me: PlayerId, g: &mut [f32]) {
+        let t = &self.turn;
+        for (side, p) in [me, opp(me)].into_iter().enumerate() {
+            let pl = &self.players[p as usize];
+            let o = &mut g[g5::PLAYER * side..g5::PLAYER * (side + 1)];
+            o[g5::DRAWN] = squash(pl.drawn as f32 / 4.0);
+            o[g5::DRAW_STEP] = squash(pl.draw_step_draws as f32 / 2.0);
+            o[g5::NONCREATURE] = squash(pl.noncreature_cast as f32 / 4.0);
+            o[g5::SPELLS_GAME] = squash(pl.spells_game as f32 / 16.0);
+            o[g5::GAINED_LIFE] = pl.gained_life as u8 as f32;
+            o[g5::CANT_GAIN] = pl.cant_gain_life as u8 as f32;
+            o[g5::ATTACKED] = squash(pl.attacked_with.len() as f32 / 4.0);
+            o[g5::GY_PLAY] = self.gy_play_now(p) as u8 as f32;
+            o[g5::GY_EXILE] = (pl.gy_exile_turn == t.number && t.number > 0) as u8 as f32;
+            o[g5::CITY] = pl.city_blessing as u8 as f32;
+            o[g5::PROTECTED] = self.player_protected(p) as u8 as f32;
+            o[g5::POOL_ART] = pl.pool.art as f32 / 4.0;
+            o[g5::POOL_HASTE] = pl.pool.haste as f32 / 4.0;
+            o[g5::DELAYED] = squash(self.delayed.iter().filter(|d| d.controller == p).count() as f32 / 4.0);
+            if !self.permissions.is_empty() {
+                let n = self.exile.iter().chain(self.face_down.iter()).filter(|&&c| self.exile_permission(p, c).is_some()).count();
+                o[g5::EXILE_PLAY] = squash(n as f32 / 4.0);
+            }
+            if !self.discarded.is_empty() {
+                let n = self
+                    .discarded
+                    .iter()
+                    .filter(|&&r| self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard && self.objs[r.idx.i()].owner == p)
+                    .count();
+                o[g5::DISCARDED] = squash(n as f32 / 4.0);
+            }
+        }
+        g[g5::NORMAL] = (t.normal == me) as u8 as f32;
+        g[g5::EXTRA_COMBATS] = squash(t.extra_combats as f32 / 2.0);
     }
 
     fn encode_globals(&self, me: PlayerId, g: &mut [f32]) {
@@ -1500,13 +1847,14 @@ pub fn encode_sideboarding(a: &super::MtgAz, viewer: PlayerId, out: &mut [f32]) 
 }
 
 /// The object layout of this encoding for zero-core's token network (arch `tokens`, zero-core
-/// `python/zero/net.py` `TokenNet`; ENGINE.md 22): JSON with the identity capacity as the
+/// `python/zero/net.py` `TokenNet`; ENGINE.md 22, 60): JSON with the identity capacity as the
 /// vocabulary, the object segments (slot offsets and widths, the present flag, the identity as
-/// one-hot digits of 16, 8 and 8, the action ids each slot scores) and the bags (17 multisets of
-/// 1024 identities). Every other feature (the 128 globals and the match block) is the global
-/// token's input.
-/// Checked in as `mtgz/az/layout_v4.json` (a test keeps the two equal). `cards` (the name behind
-/// each identity of `db`, for analysis; null where none) is not read by the network.
+/// one-hot digits of 16, 8 and 8, the action ids each slot scores), the bags (19 multisets of
+/// 1024 identities) and the global blocks (every other feature: the 128 globals, the match block,
+/// v5's globals; the global token's input).
+/// Checked in as `mtgz/az/layout_v5.json` (a test keeps the two equal; v4's file stays, for the
+/// widen of v4 networks). `cards` (the name behind each identity of `db`, for analysis; null where
+/// none) is not read by the network.
 pub fn layout_json(db: &'static CardDb) -> String {
     use serde_json::json;
     let id = json!({"at": 0, "radix": [16, 8, 8]});
@@ -1525,7 +1873,7 @@ pub fn layout_json(db: &'static CardDb) -> String {
         }
     }
     let v = json!({
-        "version": 4,
+        "version": 5,
         "features": NUM_FEATURES,
         "vocab": D,
         "segments": [
@@ -1548,6 +1896,12 @@ pub fn layout_json(db: &'static CardDb) -> String {
             seg("opponent_companion", O_COMP + COMP_W, 1, COMP_W, CODE + comp::PRESENT, json!([])),
         ],
         "bags": [{"name": "bags", "offset": O_BAGS, "count": BAGS, "width": D}],
+        // Layout v5 (ENGINE.md 60): the global blocks, so a widen maps a v5
+        // network's globals by name (zero-core `net.tokens_layout`): v4's
+        // globals and its match block, then v5's.
+        "globals": [{"name": "globals", "offset": O_GLOBALS, "count": GLOBALS},
+                    {"name": "match", "offset": O_MATCH, "count": MATCH},
+                    {"name": "globals_v5", "offset": O_GLOBALS_V5, "count": GLOBALS_V5}],
         "cards": cards,
     });
     serde_json::to_string_pretty(&v).unwrap() + "\n"
@@ -1571,3 +1925,133 @@ const KWS: [Kw; 15] = [
     Kw::Shroud,
     Kw::Indestructible,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testkit::Scenario;
+    use crate::{Choice, DecisionKind, Step};
+
+    fn features(g: &Game, v: PlayerId) -> Vec<f32> {
+        let mut x = vec![0.0; NUM_FEATURES];
+        g.encode_features(v, &mut x);
+        x
+    }
+
+    /// Layout v5's floats of the facts the public-state gate's random
+    /// positions never have (its rare perturbations, ENGINE.md 60.3), set by
+    /// hand on a spell on the stack and a pool and read back for both
+    /// viewers: divided damage, a ninjutsu attack (a planeswalker or not),
+    /// splices, noted permanents, the haste part of the pool's red mana.
+    #[test]
+    fn v5_rare_stack_and_pool_facts_are_encoded() {
+        let mut g = Scenario::new(CardDb::cube())
+            .spec(|s| s.auto_single = false)
+            .library(0, &["Mountain"; 10])
+            .library(1, &["Island"; 10])
+            .battlefield(0, &["Mountain"])
+            .hand(0, &["Lightning Bolt"])
+            .at(Step::Main1, 0)
+            .start();
+        let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+        g.choose(Choice::Cast(bolt));
+        for _ in 0..20 {
+            match g.kind() {
+                Some(DecisionKind::Priority) => break,
+                Some(DecisionKind::Target) => g.choose(Choice::Target(Target::Player(1))),
+                _ => {
+                    let c = g.pending_decision().unwrap().options[0].choice;
+                    g.choose(c)
+                }
+            };
+        }
+        assert_eq!(g.stack.len(), 1);
+        let top = O_STACK + CODE;
+        let base = [features(&g, 0), features(&g, 1)];
+        for x in &base {
+            assert_eq!((x[top + stack::DIVISION], x[top + stack::ATTACK_AS], x[top + stack::SPLICED], x[top + stack::NOTED]), (0.0, 0.0, 0.0, 0.0));
+        }
+        let land = g.permanents_of(0).next().unwrap();
+        let r = g.obj_ref(land);
+        let item = &mut g.stack[0];
+        item.division = vec![3, 1];
+        item.attack_as = Some(Some(r));
+        item.spliced.push(item.spliced.first().copied().unwrap_or(0));
+        item.noted.push(r);
+        g.players[0].pool.amt[3] = 2;
+        g.players[0].pool.haste = 1;
+        for v in 0..2u8 {
+            let x = features(&g, v);
+            assert_eq!((x[top + stack::DIVISION], x[top + stack::DIVISION + 1]), (0.375, 0.125), "P{v}: divided 3 / 1");
+            assert_eq!((x[top + stack::ATTACK_AS], x[top + stack::ATTACK_WALKER]), (1.0, 1.0), "P{v}: attacking a planeswalker");
+            assert_eq!((x[top + stack::SPLICED], x[top + stack::NOTED]), (0.25, 0.25), "P{v}");
+            let side = v as usize;
+            assert_eq!(x[O_GLOBALS_V5 + g5::PLAYER * side + g5::POOL_HASTE], 0.25, "P{v}: P0's haste mana");
+            assert_eq!(x[O_GLOBALS_V5 + g5::PLAYER * (1 - side) + g5::POOL_HASTE], 0.0);
+            // (every other float as before but the pool's red mana)
+            let red = O_GLOBALS + 24 + 40 * side + 6 + 3;
+            let diff: Vec<usize> = (0..NUM_FEATURES).filter(|&i| x[i] != base[v as usize][i]).collect();
+            let want = [red, top + stack::DIVISION, top + stack::DIVISION + 1, top + stack::NOTED, top + stack::ATTACK_AS,
+                        top + stack::ATTACK_WALKER, top + stack::SPLICED, O_GLOBALS_V5 + g5::PLAYER * side + g5::POOL_HASTE];
+            let mut want = want.to_vec();
+            want.sort_unstable();
+            assert_eq!(diff, want, "P{v}");
+        }
+        g.stack[0].attack_as = Some(None);
+        for v in 0..2u8 {
+            let x = features(&g, v);
+            assert_eq!((x[top + stack::ATTACK_AS], x[top + stack::ATTACK_WALKER]), (1.0, 0.0), "P{v}: attacking the player");
+        }
+    }
+
+    /// The modes floats hold every mode of every card of both card tables
+    /// (at most `stack::MODES_N` modes a modal ability).
+    #[test]
+    fn every_mode_has_a_float() {
+        use crate::db::{ActEffect, ActivatedDef, CardDb};
+        let mut most = 0;
+        for db in [CardDb::cube(), CardDb::constructed()] {
+            for d in 0..db.len() as DefId {
+                let def = db.def(d);
+                let acts = def.activated.iter().chain(&def.hand_abilities).chain(&def.gy_abilities);
+                let stack = acts.filter_map(|a: &ActivatedDef| match &a.effect {
+                    ActEffect::Stack(ab) => Some(ab),
+                    ActEffect::Mana(_) => None,
+                });
+                for ab in def.spell.iter().chain(def.triggers.iter().map(|t| &t.ability)).chain(stack) {
+                    most = most.max(ab.modes.as_ref().map_or(0, |m| m.list.len()));
+                }
+            }
+        }
+        println!("the most modes of an ability: {most}");
+        assert!((3..=stack::MODES_N).contains(&most), "{most} modes");
+    }
+
+    /// Every layout v4 feature has one v5 index, and the v5 floats nothing
+    /// maps to are exactly v5's additions (the bags 17-18, the permanents'
+    /// status 96-119, the stack's 32-71, the second globals block).
+    #[test]
+    fn the_v4_projection_leaves_exactly_the_v5_additions() {
+        let p = v4_projection();
+        let mut hit = vec![false; NUM_FEATURES];
+        for &i in &p {
+            assert!(!hit[i]);
+            hit[i] = true;
+        }
+        let mut new = vec![false; NUM_FEATURES];
+        new[O_BAGS + v4::BAGS * D..O_BAGS + BAGS * D].iter_mut().for_each(|x| *x = true);
+        for base in [O_MY_PERM, O_OPP_PERM] {
+            for s in 0..PERMS {
+                new[base + s * PERM_W + v4::PERM_W..base + (s + 1) * PERM_W].iter_mut().for_each(|x| *x = true);
+            }
+        }
+        for s in 0..STACKS {
+            new[O_STACK + s * STACK_W + v4::STACK_W..O_STACK + (s + 1) * STACK_W].iter_mut().for_each(|x| *x = true);
+        }
+        new[O_GLOBALS_V5..].iter_mut().for_each(|x| *x = true);
+        for i in 0..NUM_FEATURES {
+            assert_eq!(hit[i], !new[i], "feature {i}");
+        }
+        assert_eq!(new.iter().filter(|&&x| x).count(), NUM_FEATURES - v4::NUM_FEATURES);
+    }
+}

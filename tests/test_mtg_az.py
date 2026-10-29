@@ -25,7 +25,7 @@ def test_engine_module_registers_the_games():
     from mtgz import _engine as E
     assert G.engine() is E and E.game_names() == ['toy', 'mtg', 'team_draft']
     info = G.info('mtg')
-    assert info['num_actions'] == 1024 and info['num_features'] == 33652
+    assert info['num_actions'] == 1024 and info['num_features'] == 37620      # layout v5 (ENGINE.md 60)
     assert info['min_players'] == info['max_players'] == 2
     assert info['bots'] == ['random', 'heuristic']
 
@@ -174,7 +174,7 @@ def test_evaluation_drivers_use_the_eval_decks():
 
 
 def test_layout_and_token_network_read_the_encoding():
-    """layout_v4.json (encode::layout_json) through zero-core's token network: the identities the
+    """layout_v5.json (encode::layout_json) through zero-core's token network: the identities the
     network decodes are the engine's cards, the pointer actions of the hand and permanent slots
     are their action ids, and a real leaf batch gets a valid answer."""
     import torch
@@ -183,9 +183,10 @@ def test_layout_and_token_network_read_the_encoding():
     from zero.net import make_net, tokens_layout
     info = G.info('mtg')
     lay = tokens_layout(A.LAYOUT, info['num_features'], info['num_actions'])
-    assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 1024 and A.LAYOUT['version'] == 4
+    assert A.LAYOUT['features'] == info['num_features'] and lay['vocab'] == 1024 and A.LAYOUT['version'] == 5
     segs = {s['name']: s for s in lay['segments']}
-    assert segs['list']['count'] == 64 and [b['count'] for b in lay['bags']] == [17]   # M8b
+    assert segs['list']['count'] == 64 and [b['count'] for b in lay['bags']] == [19]   # M8b, v5
+    assert [g['name'] for g in lay['globals']] == ['globals', 'match', 'globals_v5']   # v5 (ENGINE.md 60)
     names = A.LAYOUT['cards']
     torch.manual_seed(0)
     m = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)
@@ -225,3 +226,57 @@ def test_layout_and_token_network_read_the_encoding():
     lb = drv.next_batch()
     pri, val, mar = NetEvaluator(m)(lb)
     protocol.validate_evaluation(lb, pri, val, mar)
+
+
+def test_a_v4_token_network_widens_onto_layout_v5_exactly(tmp_path):
+    """ENGINE.md 60.2: a token network of layout v4 (layout_v4.json, as frozen), widened with
+    zero-core's `net.widen` onto this build's layout v5, computes on any v5 input what it computed
+    on the v4 part of it (`token_feature_map`: the v4 encoding, tests/digest.rs DIGEST_ENCODING=v4);
+    the same tokens. Real encodings of this build (cube and Delver mirror positions), their v5
+    floats then randomised."""
+    import os
+    import torch
+    import mtgz.az as A
+    from mtgz.az import decklists
+    from zero.net import TokenNet, token_feature_map, tokens_layout, widen
+    info = G.info('mtg')
+    with open(os.path.join(os.path.dirname(A.__file__), 'layout_v4.json'), encoding='utf-8') as f:
+        v4 = json.load(f)
+    assert v4['version'] == 4 and v4['features'] == 33652
+    torch.manual_seed(3)
+    old = TokenNet(33652, info['num_actions'], v4, d=32, layers=2, heads=2, ff=64, game='mtg').eval()
+    with torch.no_grad():
+        for lin in (old.gen, old.ptr):
+            lin.weight.normal_(0, 0.3)
+            lin.bias.normal_(0, 0.3)
+    new = widen(old, info['num_features'], info['num_actions'], layout=A.LAYOUT)
+    assert new.n_tok == old.n_tok and new.config['layout']['bags'][0]['count'] == 19
+    fmap = token_feature_map(old.config['layout'], 33652, tokens_layout(A.LAYOUT, info['num_features'], info['num_actions']),
+                             info['num_features'])
+    E = G.engine()
+    rng = np.random.default_rng(60)
+    xs = []
+    for spec in (SPEC, decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)):
+        for seed in range(3):
+            g = E.Game('mtg', spec, 2, seed)
+            k = 0
+            while not g.over and k < 400:
+                if k % 7 == 0:
+                    for v in range(2):
+                        xs.append(np.asarray(g.encode(v)))
+                legal = g.legal()
+                g.step(int(legal[rng.integers(len(legal))]))
+                k += 1
+    x5 = torch.from_numpy(np.stack(xs))
+    x4 = x5[:, fmap]
+    newcols = torch.ones(x5.shape[1], dtype=torch.bool)
+    newcols[fmap] = False
+    assert int(newcols.sum()) == info['num_features'] - 33652 and (x5[:, newcols] != 0).any()   # v5 facts present
+    n = torch.full((x5.shape[0],), 2)
+    with torch.no_grad():
+        p, q = old(x4, n), new(x5, n)
+        noisy = x5.clone()
+        noisy[:, newcols] = torch.rand(x5.shape[0], int(newcols.sum())) * 4 - 2
+        r = new(noisy, n)
+    for a, b, c in zip(p, q, r):
+        assert torch.allclose(a, b, atol=1e-5) and torch.allclose(a, c, atol=1e-5)

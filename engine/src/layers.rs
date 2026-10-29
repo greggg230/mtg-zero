@@ -407,6 +407,28 @@ impl Game {
 
     /// Rules flags from effects and statics ("can't block", "can't be
     /// blocked").
+    /// The encoding's counts of rules effects on `c` (layout v5, ENGINE.md
+    /// 60): "it attacks each combat if able" (`MustAttack`,
+    /// `MustAttackPlayer`; goad is its own float), "if it would die, exile
+    /// it instead", and the effects that change its subtypes (layer 4).
+    /// Counts, so one more always shows.
+    pub(crate) fn effect_counts(&self, c: CardIdx) -> (u32, u32, u32) {
+        let mut n = (0, 0, 0);
+        if self.printed_only(c) {
+            return n;
+        }
+        for (_, m) in self.mods_on(c) {
+            match m {
+                Mod::MustAttack | Mod::MustAttackPlayer => n.0 += 1,
+                Mod::ExileIfDies => n.1 += 1,
+                Mod::Types { subtypes, replace, .. } if *replace || !subtypes.is_empty() => n.2 += 1,
+                Mod::BecomeTypes { .. } => n.2 += 1,
+                _ => {}
+            }
+        }
+        n
+    }
+
     pub fn flags_of(&self, c: CardIdx) -> Flags {
         let mut f = Flags::default();
         if self.printed_only(c) {

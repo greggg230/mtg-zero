@@ -3,7 +3,7 @@ docs/search.md) + what is MTG's, registered here as the process's game package: 
 (engine/src/az, docs/ENGINE.md 21-22, 36: one game of Magic between two random 40-card decks of the
 supported PowerLSV cube cards, or with `"format": "bo3"` a best-of-three match with sideboarding
 between games, decks built from random card pools), its object layout for zero-core's token
-network (arch 'tokens': `layout_v4.json`, written by the engine's `encode::layout_json`), the game
+network (arch 'tokens': `layout_v5.json`, written by the engine's `encode::layout_json`), the game
 `team_draft` (docs/ENGINE.md 41, 43, 45, DESIGN.md 2.3: a team cube draft and deckbuilding up to
 the matches, its deferred terminal; its layout `layout_draft_v2.json`, ENGINE.md 47), the run
 presets (mtg-smoke, mtg-1, mtg-2, mtg-2-mlp, mtg-3, mtg-4, mtg-4-mac; the co-training presets
@@ -46,8 +46,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SPEC = '{"max_turns": 60, "eval_decks": 16, "eval_seed": 1}'
 EVAL_SPEC = eval_spec(SPEC)
 
-# The objects of encode layout v4 for zero-core's token network (docs/ENGINE.md 22, 35)
-with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v4.json'), encoding='utf-8') as _f:
+# The objects of encode layout v5 for zero-core's token network (docs/ENGINE.md 22, 35, 60; v4 + additions
+# only: a v4 network widens onto it exactly, `python tools/fork_run.py <v4 checkpoint> <new run>`). layout_v4.json
+# stays: the layout of the v4 runs' checkpoints (their configs carry it too).
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'layout_v5.json'), encoding='utf-8') as _f:
     LAYOUT = json.load(_f)
 # The team draft's objects (DESIGN.md 2.3.5, docs/ENGINE.md 41, 47: layout draft_v2, the pack and pool
 # slots and 13 bags; `id_actions`: a slot scores its card's identity, the pick or adding it to the deck
@@ -183,7 +185,7 @@ PRESETS['team_draft-smoke'] = dict(
 # cards and Murktide Regent, Prismari Charm). Self-play and every evaluation (the yardstick, the M7c
 # heuristic playing the same deck; random; Elo between iterations) play that one spec: the decks are
 # fixed, so the evaluation spec is the spec. Otherwise mtg-3's settings (the last best-of-one run): the
-# token network 128 x 4 on layout v4 (the legacy cards' identities 546..547 are in v4's free range),
+# token network 128 x 4 on layout v5 (v4 until ENGINE.md 60; the legacy cards' identities 546..547 are in the free range),
 # 64 / 16 simulations, mana payments at 4, completed-Q targets, 600 games an iteration (ENGINE.md 54.6
 # for the measured cost and the configuration recommended while td1 holds the GPU).
 SPEC_DELVER = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)

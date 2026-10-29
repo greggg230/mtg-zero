@@ -24,9 +24,9 @@
 //! 3. **Limits** ([`limits`]): the perturbations whose change the encoding
 //!    leaves out, each with its reason: by design (bag order, what the
 //!    opponent knows of the viewer's cards; the perturbations change objects
-//!    in the encoded slots only: 32 permanents a side, 8 stack items), or a gap
-//!    with no spare float left in layout v4, for a layout v5 (ENGINE.md
-//!    58.10). Anything else that fails is a finding.
+//!    in the encoded slots only: 32 permanents a side, 8 stack items). Layout
+//!    v4's 42 gaps (ENGINE.md 58.10) are layout v5's fixes (60): anything
+//!    else that fails is a finding.
 
 use crate::az::matches::{Format, MatchState};
 use crate::az::MtgAz;
@@ -318,7 +318,7 @@ pub struct Perturbation {
 }
 
 /// A public change the encoding leaves out (`name`: the perturbation's), and
-/// why: by design, or a gap that only a layout v5 can close.
+/// why: by design, or a gap that only a new layout can close.
 pub struct Limit {
     pub name: &'static str,
     pub kind: LimitKind,
@@ -329,9 +329,9 @@ pub struct Limit {
 pub enum LimitKind {
     /// A deliberate limit of the encoding (ENGINE.md 58.9).
     Design,
-    /// A genuine gap with no spare float left in layout v4: for layout v5
-    /// (ENGINE.md 58.10).
-    V5,
+    /// A genuine gap the layout has no room for, for its next version (layout
+    /// v4's 42, ENGINE.md 58.10, are encoded by layout v5, 60; none now).
+    NextLayout,
 }
 
 fn pick<T: Copy>(v: &[T], r: &mut Rng) -> Option<T> {
@@ -703,7 +703,10 @@ pub fn perturbations() -> Vec<Perturbation> {
             Some(format!("of {}", a.g.name(c)))
         }),
         p!("an exiled card may be played this turn", "Game.permissions", |a, r| {
-            let c = pick(&a.g.exile.clone(), r)?;
+            // (A card its owner may not play yet: another permission to play
+            // a card they may play changes nothing they may do.)
+            let cs: Vec<CardIdx> = a.g.exile.iter().copied().filter(|&c| a.g.exile_permission(a.g.objs[c.i()].owner, c).is_none()).collect();
+            let c = pick(&cs, r)?;
             let card = a.g.obj_ref(c);
             let player = a.g.objs[c.i()].owner;
             let kind = crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, attacked_subtype: None };
@@ -1365,59 +1368,66 @@ pub fn perturbations() -> Vec<Perturbation> {
 }
 
 /// The perturbations whose public change the encoding leaves out (ENGINE.md
-/// 58.9 by design, 58.10 for layout v5), each with its reason.
+/// 58.9: by design), each with its reason. Layout v5 (ENGINE.md 60) encodes
+/// the 42 gaps layout v4 had no room for (58.10): none is left.
 pub fn limits() -> Vec<Limit> {
-    use LimitKind::{Design, V5};
+    use LimitKind::Design;
     let l = |name, kind, why| Limit { name, kind, why };
     vec![
         l("two graveyard cards swap places", Design, "bag order: graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); the order matters to a few cards only"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
-        l("a creature attacks each combat", V5, "rules effect MustAttack (MustAttackPlayer; goad is encoded): no spare permanent float"),
-        l("a creature gains a creature type", V5, "subtypes (layer 4 changes of them: 'it's a Zombie in addition'): a card's are its identity's, an effect's are not encoded (tribal cards are rare in the cube)"),
-        l("exiled if it would die", V5, "rules effect ExileIfDies: no spare permanent float"),
-        l("a delayed trigger waits", V5, "delayed triggered abilities (Mana Drain's mana, Sneak Attack's sacrifice, Flickerwisp's return, a Bauble's draw): a per-player count needs globals"),
-        l("an ability resolved this turn", V5, "times abilities resolved this turn: a per-permanent float (rare: 'the second time this ability resolved')"),
-        l("an exiled card may be played this turn", V5, "permissions to play exiled cards (impulse draw, Urza, Fallen Shinobi, Dauthi Voidwalker): no exile segment; the holder sees them as EXILE options when it decides"),
-        l("a once-each-turn action was done", V5, "optional once-each-turn actions done: a per-permanent float (rare)"),
-        l("a graveyard card was discarded this turn", V5, "mayhem's 'discarded this turn' (CR 702.187b): graveyards are bags (rare)"),
-        l("a spell will be exiled instead of put into a graveyard", V5, "where a spell goes as it leaves the stack: the stack's spare float holds X"),
-        l("a permanent was exhausted (an exhaust ability)", V5, "Mark::Exhausted: no spare permanent float (one card)"),
-        l("a colour was chosen as a permanent entered", V5, "Mark::ChosenColor: no spare permanent float (Painter's Servant's colour is in the descriptor's colours, 58.8)"),
-        l("a creature was exerted", V5, "Mark::Exerted (it won't untap next): no spare permanent float (one card)"),
-        l("the last normal turn was the other player's", V5, "the extra-turn order (CR 500.7): a global"),
-        l("an additional combat phase follows", V5, "additional combat phases (CR 500.8): a global"),
-        l("colorless mana for artifacts only", V5, "the artifact-only part of the pool's colorless mana (Mishra's Workshop): a per-player global"),
-        l("red mana that gives haste", V5, "the haste part of the pool's red mana (Arena of Glory): a per-player global"),
-        l("a card drawn this turn", V5, "cards drawn this turn: a per-player global"),
-        l("a noncreature spell cast this turn", V5, "noncreature spells cast this turn: a per-player global (spells cast this turn are encoded, 58.8)"),
-        l("gained life this turn", V5, "a per-player global"),
-        l("can't gain life", V5, "a per-player global (Screaming Nemesis)"),
-        l("a creature attacked this turn", V5, "creatures that attacked this turn (raid; during combat ATTACKING shows them): a per-player global"),
-        l("a card drawn in the draw step", V5, "draws in the draw step this turn (Orcish Bowmasters): a per-player global"),
-        l("a spell cast this game", V5, "a per-player global"),
-        l("may play from their graveyard this turn", V5, "Yawgmoth's Will this turn: a per-player global"),
-        l("cards to their graveyard are exiled this turn", V5, "a per-player global"),
-        l("the city's blessing", V5, "a per-player global (ascend)"),
-        l("protection from everything until their next turn", V5, "The One Ring's protection (CR 702.16j): a per-player global"),
-        l("a permanent entered evoked", V5, "no spare permanent float (its sacrifice trigger is on the stack, encoded)"),
-        l("a permanent escaped", V5, "no spare permanent float"),
-        l("a player was chosen as a permanent entered", V5, "no spare permanent float (True-Name Nemesis, Dauthi Voidwalker)"),
-        l("a creature is monstrous", V5, "no spare permanent float"),
-        l("a spell's mode is another", V5, "which modes were chosen (their count and the targets are encoded): the stack's spare float holds X"),
-        l("a trigger's amount is another", V5, "a triggered ability's event amount ('that much'): no spare stack float"),
-        l("a spell was cast for an alternative cost", V5, "the alternative cost (evoke, dash, Force of Will's pitch): no spare stack float"),
-        l("a spell was cast from a graveyard with flashback", V5, "how a spell was cast (flashback: exiled as it leaves): no spare stack float"),
-        l("a spell was cast with flashback", V5, "as 'a spell was cast from a graveyard with flashback' (Obj::flashback)"),
-        l("a spell was cast from another zone", V5, "the zone a spell was cast from: no spare stack float"),
-        l("a card exiled for delve", V5, "cards exiled for delve (Murktide Regent's counters): no spare stack float"),
-        l("a trigger noted a permanent", V5, "permanents a trigger noted (Dack Fayden's emblem): no spare stack float (rare)"),
-        l("divided damage is divided otherwise", V5, "divided damage (CR 601.2d): no spare stack float (rare)"),
-        l("a ninjutsu creature will attack a planeswalker", V5, "no spare stack float (rare)"),
-        l("a card is spliced onto a spell", V5, "no spare stack float (rare)"),
     ]
 }
+
+/// The perturbations of layout v4's 42 gaps (ENGINE.md 58.10), which layout
+/// v5 encodes (ENGINE.md 60.3): its tests read them back and check that they
+/// hide nothing (`tests/az.rs`).
+pub const V5_FIXED: [&str; 42] = [
+    "a creature attacks each combat",
+    "a creature gains a creature type",
+    "exiled if it would die",
+    "a delayed trigger waits",
+    "an ability resolved this turn",
+    "an exiled card may be played this turn",
+    "a once-each-turn action was done",
+    "a graveyard card was discarded this turn",
+    "a spell will be exiled instead of put into a graveyard",
+    "a permanent was exhausted (an exhaust ability)",
+    "a colour was chosen as a permanent entered",
+    "a creature was exerted",
+    "the last normal turn was the other player's",
+    "an additional combat phase follows",
+    "colorless mana for artifacts only",
+    "red mana that gives haste",
+    "a card drawn this turn",
+    "a noncreature spell cast this turn",
+    "gained life this turn",
+    "can't gain life",
+    "a creature attacked this turn",
+    "a card drawn in the draw step",
+    "a spell cast this game",
+    "may play from their graveyard this turn",
+    "cards to their graveyard are exiled this turn",
+    "the city's blessing",
+    "protection from everything until their next turn",
+    "a permanent entered evoked",
+    "a permanent escaped",
+    "a player was chosen as a permanent entered",
+    "a creature is monstrous",
+    "a spell's mode is another",
+    "a trigger's amount is another",
+    "a spell was cast for an alternative cost",
+    "a spell was cast from a graveyard with flashback",
+    "a spell was cast with flashback",
+    "a spell was cast from another zone",
+    "a card exiled for delve",
+    "a trigger noted a permanent",
+    "divided damage is divided otherwise",
+    "a ninjutsu creature will attack a planeswalker",
+    "a card is spliced onto a spell",
+];
 
 /// What a player can see of the match around the game (`Game::view_of` is
 /// the game's): format, game number, results and who chose and played first,
@@ -1459,6 +1469,10 @@ mod tests {
         assert_eq!(names.len(), ps.len(), "perturbation names are unique");
         for l in limits() {
             assert!(ps.iter().any(|p| p.name == l.name), "limit {} names no perturbation", l.name);
+        }
+        for n in V5_FIXED {
+            assert!(ps.iter().any(|p| p.name == n), "V5_FIXED: {n} names no perturbation");
+            assert!(!limits().iter().any(|l| l.name == n), "V5_FIXED: {n} is still a limit");
         }
     }
 }

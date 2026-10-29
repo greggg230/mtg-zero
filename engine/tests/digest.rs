@@ -23,7 +23,10 @@
 //! subset of the recorded games is still compared). `DIGEST_ENCODING=0`
 //! leaves the encodings out and prints the combined digest only (compare it
 //! across a layout change, run on both sides; the recorded file covers the
-//! encodings).
+//! encodings). `DIGEST_ENCODING=v4` hashes the layout v4 part of each
+//! encoding (`encode::v4_projection`) and prints the combined digest only:
+//! layout v4's recorded 317b5ba05dc569fb (ENGINE.md 58.11) while every v4
+//! float of layout v5 is v4's (ENGINE.md 60.2).
 
 mod common;
 
@@ -125,8 +128,18 @@ fn hash_encoding(h: &mut H, g: &Game, buf: &mut [f32]) {
     buf.fill(0.0);
     g.encode_features(viewer, buf);
     let mut x = H::new();
-    for &f in buf.iter() {
-        x.u64(f.to_bits() as u64);
+    // `DIGEST_ENCODING=v4`: hash the layout v4 part of each encoding (the
+    // v4 projection, ENGINE.md 60.2): the combined digest is then layout v4's
+    // recorded one when every v4 float is what v4 encoded.
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "v4") {
+        static PROJ: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+        for &i in PROJ.get_or_init(engine::az::encode::v4_projection) {
+            x.u64(buf[i].to_bits() as u64);
+        }
+    } else {
+        for &f in buf.iter() {
+            x.u64(f.to_bits() as u64);
+        }
     }
     h.u64(x.0);
 }
@@ -197,7 +210,7 @@ fn behaviour_digests() {
         t.elapsed().as_secs_f64(),
         all.0
     );
-    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0") {
+    if std::env::var("DIGEST_ENCODING").is_ok_and(|v| v == "0" || v == "v4") {
         return;
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/digests.txt");

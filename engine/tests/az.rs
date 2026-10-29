@@ -314,7 +314,7 @@ fn ident(def: engine::ids::DefId) -> usize {
 
 #[test]
 fn encoding_slots_name_the_action_slots() {
-    assert_eq!(NUM_FEATURES, 33_652);
+    assert_eq!(NUM_FEATURES, 37_620);
     let mut lists = 0;
     for g in states(scale(16), 6, 7) {
         let me = g.to_move().unwrap();
@@ -378,9 +378,10 @@ fn encoding_slots_name_the_action_slots() {
 
 #[test]
 fn layout_json_is_checked_in() {
-    // mtgz/az/layout_v4.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it)
+    // mtgz/az/layout_v5.json = encode::layout_json (MTGZ_WRITE_LAYOUT=1 rewrites it; layout_v4.json
+    // stays as it was, for the widen of v4 networks: `layout_v5_widens_layout_v4_exactly`)
     let want = encode::layout_json(CardDb::cube());
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v4.json");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az/layout_v5.json");
     if std::env::var("MTGZ_WRITE_LAYOUT").is_ok_and(|v| v == "1") {
         std::fs::write(&path, &want).unwrap();
     }
@@ -388,7 +389,100 @@ fn layout_json_is_checked_in() {
     assert!(have == want, "{} differs from encode::layout_json (MTGZ_WRITE_LAYOUT=1 cargo test -p engine --test az layout)", path.display());
     let v: serde_json::Value = serde_json::from_str(&want).unwrap();
     assert_eq!(v["features"], NUM_FEATURES);
+    assert_eq!(v["version"], 5);
     assert_eq!(v["cards"].as_array().unwrap().len(), identity::D);
+}
+
+/// The features of a token layout description (`layout_v*.json`) as zero-core's `net.widen`
+/// reads them (its `token_feature_map`): per segment its slots' floats, per bag its rows, the
+/// globals by declared block (else one block of every other feature, in feature order).
+struct Layout {
+    features: usize,
+    segs: Vec<(String, usize, usize, usize, serde_json::Value)>,
+    bags: Vec<(String, usize, usize, usize)>,
+    globals: Vec<(Option<String>, Vec<usize>)>,
+}
+
+fn read_layout(file: &str) -> Layout {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mtgz/az").join(file);
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let u = |x: &serde_json::Value| x.as_u64().unwrap() as usize;
+    let features = u(&v["features"]);
+    let segs: Vec<_> = v["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            let key = serde_json::json!([s["present"], s["id"], s["actions"]]);
+            (s["name"].as_str().unwrap().to_string(), u(&s["offset"]), u(&s["count"]), u(&s["width"]), key)
+        })
+        .collect();
+    let bags: Vec<_> = v["bags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| (b["name"].as_str().unwrap().to_string(), u(&b["offset"]), u(&b["count"]), u(&b["width"])))
+        .collect();
+    let globals = match v.get("globals") {
+        Some(gs) => gs
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| (Some(g["name"].as_str().unwrap().to_string()), (u(&g["offset"])..u(&g["offset"]) + u(&g["count"])).collect()))
+            .collect(),
+        None => {
+            let mut inside = vec![false; features];
+            for &(_, o, n, w, _) in &segs {
+                inside[o..o + n * w].iter_mut().for_each(|x| *x = true);
+            }
+            for &(_, o, n, w) in &bags {
+                inside[o..o + n * w].iter_mut().for_each(|x| *x = true);
+            }
+            vec![(None, (0..features).filter(|&i| !inside[i]).collect())]
+        }
+    };
+    Layout { features, segs, bags, globals }
+}
+
+/// Layout v5 is layout v4 with additions only (ENGINE.md 60.2): the map a widen derives from the
+/// two checked-in descriptions (segments by name with their slots' old floats first, bags by name
+/// with their old rows first, v4's globals as v5's first globals) is `encode::v4_projection`, the
+/// map the v4 digest is reproduced through (tests/digest.rs, `DIGEST_ENCODING=v4`); the tokens are
+/// the same (segments, slot counts, present flags, identities, actions), and layout_v4.json is
+/// layout v4 (33,652 floats, as frozen: ENGINE.md 22.7).
+#[test]
+fn layout_v5_widens_layout_v4_exactly() {
+    let (l4, l5) = (read_layout("layout_v4.json"), read_layout("layout_v5.json"));
+    assert_eq!((l4.features, l5.features), (encode::v4::NUM_FEATURES, NUM_FEATURES));
+    assert_eq!(l4.segs.iter().map(|s| &s.0).collect::<Vec<_>>(), l5.segs.iter().map(|s| &s.0).collect::<Vec<_>>());
+    let mut map = vec![usize::MAX; l4.features];
+    for (a, b) in l4.segs.iter().zip(&l5.segs) {
+        assert_eq!((a.2, &a.4), (b.2, &b.4), "segment {}: the same slots, present flag, identity and actions", a.0);
+        assert!(b.3 >= a.3, "segment {} got narrower", a.0);
+        for s in 0..a.2 {
+            for j in 0..a.3 {
+                map[a.1 + s * a.3 + j] = b.1 + s * b.3 + j;
+            }
+        }
+    }
+    for a in &l4.bags {
+        let b = l5.bags.iter().find(|b| b.0 == a.0).expect("v4's bags are v5's");
+        assert!(b.3 == a.3 && b.2 >= a.2);
+        for i in 0..a.2 * a.3 {
+            map[a.1 + i] = b.1 + i;
+        }
+    }
+    assert!(l4.globals[0].0.is_none(), "layout v4 declares no global blocks");
+    let g5: Vec<usize> = l5.globals.iter().flat_map(|g| g.1.iter().copied()).collect();
+    for (k, &f) in l4.globals[0].1.iter().enumerate() {
+        map[f] = g5[k];
+    }
+    assert_eq!(l4.globals[0].1.len(), encode::GLOBALS + encode::MATCH);
+    assert_eq!(map, encode::v4_projection(), "the widen's map is the v4 projection");
+    let mut seen = map.clone();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), l4.features, "one to one");
 }
 
 #[test]
@@ -646,9 +740,12 @@ impl Fnv {
 /// globals masked, are what they were before the flag (recorded on main at
 /// 05e37bb, which did not encode it): the flag changed no other float of any
 /// opening state. (A later change to the encoding of these states re-records
-/// these values; the failure message prints the new ones.)
+/// these values; the failure message prints the new ones.) Layout v5 (ENGINE.md
+/// 60): through the v4 projection, so the same recorded values say the v5
+/// encodings (`MtgAz::encode`: the game's and the match's) hold v4's exactly.
 #[test]
 fn opening_encodings_but_the_declaration_are_unchanged() {
+    let proj = encode::v4_projection();
     let mut got = Vec::new();
     for (name, sp) in opening_specs() {
         let mut h = Fnv::new();
@@ -658,7 +755,8 @@ fn opening_encodings_but_the_declaration_are_unchanged() {
             declared += (0..2).any(|p| g.g.player(p).mulligan_declared) as u32;
             bottoms += (g.g.kind() == Some(engine::DecisionKind::MulliganBottom)) as u32;
             for v in 0..2 {
-                let mut x = enc(&g, v);
+                let x5 = enc(&g, v);
+                let mut x: Vec<f32> = proj.iter().map(|&i| x5[i]).collect();
                 x[MULL] = 0.0;
                 x[MULL + 1] = 0.0;
                 for f in x {
@@ -981,7 +1079,8 @@ fn public_view(g: &MtgAz, v: u8) -> Vec<u64> {
 /// exhaustive destructuring) and has a perturbation; each perturbation, made
 /// on positions of the four kinds of games, changes the public view for both
 /// players (it is public) and the encoding for both viewers (it reaches the
-/// network), but the deliberate limits (`public_state::limits`).
+/// network), but the deliberate limits (`public_state::limits`; layout v5,
+/// ENGINE.md 60, left no gap).
 #[test]
 fn public_state_reaches_the_encoding() {
     use engine::public_state::{fields, limits, perturbations, Class, LimitKind};
@@ -1030,7 +1129,7 @@ fn public_state_reaches_the_encoding() {
         t0.elapsed().as_secs_f64()
     );
     let mut findings = Vec::new();
-    let (mut ok, mut by_design, mut v5) = (0, 0, 0);
+    let (mut ok, mut by_design, mut next) = (0, 0, 0);
     for (p, x) in ps.iter().zip(&t) {
         let limited = lim.iter().find(|l| l.name == p.name).map(|l| l.kind);
         let view_bad = x.view_same.iter().any(|&n| n > 0);
@@ -1041,7 +1140,7 @@ fn public_state_reaches_the_encoding() {
             (0, ..) => "NOT APPLIED",
             (_, true, ..) => "VIEW GAP",
             (_, false, true, Some(LimitKind::Design)) => "limit (design)",
-            (_, false, true, Some(LimitKind::V5)) => "gap (layout v5)",
+            (_, false, true, Some(LimitKind::NextLayout)) => "gap (next layout)",
             (_, false, true, None) => "ENCODING GAP",
             (_, false, false, Some(_)) => "STALE LIMIT",
             _ => "ok",
@@ -1049,7 +1148,7 @@ fn public_state_reaches_the_encoding() {
         match state {
             "ok" => ok += 1,
             "limit (design)" => by_design += 1,
-            "gap (layout v5)" | "rare limit" => v5 += 1,
+            "gap (next layout)" | "rare limit" => next += 1,
             _ => {}
         }
         println!(
@@ -1061,12 +1160,15 @@ fn public_state_reaches_the_encoding() {
             x.enc_same,
             x.example.as_deref().map(|e| format!(" | {e}")).unwrap_or_default()
         );
-        if !matches!(state, "ok" | "limit (design)" | "gap (layout v5)" | "rare, not applied" | "rare limit") {
+        if !matches!(state, "ok" | "limit (design)" | "gap (next layout)" | "rare, not applied" | "rare limit") {
             findings.push(format!("{state}: {} ({})", p.name, p.field));
         }
     }
-    println!("{ok} perturbations encoded, {by_design} deliberate limits, {v5} gaps for layout v5 (ENGINE.md 58.10)");
+    println!("{ok} perturbations encoded, {by_design} deliberate limits, {next} gaps for the next layout (ENGINE.md 58.10, 60)");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
+    // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps: only the deliberate limits are left.
+    assert!(lim.iter().all(|l| l.kind == LimitKind::Design), "a gap on the allowlist");
+    assert_eq!(next, 0);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
@@ -1210,4 +1312,246 @@ fn the_public_state_fixes_are_encoded() {
         let side = v as usize;
         assert_eq!((x[O_MATCH + mtch::ENERGY + side], x[O_MATCH + mtch::ENERGY + 1 - side]), (0.75, 0.0), "P{v}: P0's three energy");
     }
+}
+
+// ---- Layout v5 (ENGINE.md 60) ----
+
+/// Answer decisions (`answer`, else the first option) until a priority
+/// decision.
+fn to_priority(g: &mut engine::Game, answer: impl Fn(&engine::Game) -> Option<engine::Choice>) {
+    for _ in 0..300 {
+        let Some(d) = g.pending_decision() else { return };
+        if d.kind == engine::DecisionKind::Priority {
+            return;
+        }
+        let c = answer(g).filter(|&c| g.has_option(c)).unwrap_or(d.options[0].choice);
+        g.choose(c);
+    }
+    panic!("to_priority: no progress\n{}", g.log_lines().join("\n"));
+}
+
+/// The facts layout v5 encodes (ENGINE.md 60.3), read back from their floats
+/// for both viewers, for the Delver mirror's cards first: Prismari Charm's
+/// chosen mode, Force of Will's pitch (an alternative cost), the cards
+/// Murktide Regent delved, and the counts of Brainstorm's turn (cards drawn
+/// this turn, noncreature spells this turn, spells this game); then a
+/// permanent's v5 status (the chosen player and colour, exerted, evoked, must
+/// attack, abilities resolved).
+#[test]
+fn the_v5_facts_are_encoded() {
+    use encode::{g5, perm, stack, O_GLOBALS_V5, O_MY_PERM, O_OPP_PERM, O_STACK, PERM_W};
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Target, Zone};
+    let at = |side: usize, k: usize| O_GLOBALS_V5 + g5::PLAYER * side + k;
+    let top = O_STACK + CODE;
+    let scen = || {
+        Scenario::new(CardDb::constructed()).spec(|s| s.auto_single = false).library(0, &["Island"; 10]).library(1, &["Island"; 10])
+    };
+    // Prismari Charm, mode 2 (return target nonland permanent), on the stack.
+    let mut g = scen()
+        .battlefield(0, &["Volcanic Island", "Volcanic Island"])
+        .hand(0, &["Prismari Charm"])
+        .battlefield(1, &["Dragon's Rage Channeler"])
+        .at(Step::Main1, 0)
+        .start();
+    let drc = g.card(1, "Dragon's Rage Channeler", Zone::Battlefield);
+    let t = g.tgt(drc);
+    let charm = g.card(0, "Prismari Charm", Zone::Hand);
+    g.choose(Choice::Cast(charm));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(2));
+    to_priority(&mut g, |g| (g.kind() == Some(DecisionKind::Target)).then_some(t));
+    assert_eq!(g.stack().last().unwrap().modes, vec![2]);
+    for v in 0..2u8 {
+        let x = features(&g, v);
+        let modes: Vec<f32> = (0..stack::MODES_N).map(|k| x[top + stack::MODES + k]).collect();
+        assert_eq!(modes, [0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0], "P{v}: Prismari Charm's mode 2");
+        assert_eq!((x[top + stack::ALT], x[top + stack::DELVED]), (0.0, 0.0));
+        let side = v as usize;
+        assert_eq!(x[at(side, g5::NONCREATURE)], 0.25, "P{v}: P0's noncreature spell this turn");
+        assert_eq!(x[at(side, g5::SPELLS_GAME)], 1.0 / 16.0, "P{v}: P0's spell this game");
+        assert_eq!((x[at(1 - side, g5::NONCREATURE)], x[at(1 - side, g5::SPELLS_GAME)]), (0.0, 0.0));
+    }
+    // Force of Will for its alternative cost (exile a blue card, pay 1 life).
+    let mut g = scen()
+        .battlefield(0, &["Mountain"])
+        .hand(0, &["Lightning Bolt"])
+        .hand(1, &["Force of Will", "Counterspell"])
+        .at(Step::Main1, 0)
+        .start();
+    let bolt = g.card(0, "Lightning Bolt", Zone::Hand);
+    g.choose(Choice::Cast(bolt));
+    to_priority(&mut g, |_| Some(Choice::Target(Target::Player(1))));
+    g.pass();
+    let fow = g.card(1, "Force of Will", Zone::Hand);
+    let cs = g.card(1, "Counterspell", Zone::Hand);
+    g.choose(Choice::Cast(fow));
+    to_priority(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseAltCost) => Some(Choice::Number(1)),
+        Some(DecisionKind::ExileCost) => Some(Choice::Card(cs)),
+        _ => None,
+    });
+    let item = g.stack().last().unwrap();
+    assert_eq!(item.alt, 1, "{}", g.log_lines().join("\n"));
+    for v in 0..2u8 {
+        let x = features(&g, v);
+        assert_eq!((x[top + stack::ALT], x[top + stack::ALT_INDEX]), (1.0, 0.25), "P{v}: Force of Will's pitch");
+        let bolt_slot = top + encode::STACK_W;
+        assert_eq!(x[bolt_slot + stack::ALT], 0.0, "P{v}: the Bolt for its mana cost");
+    }
+    // Murktide Regent delving five cards, on the stack.
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island"])
+        .graveyard(0, &["Brainstorm", "Ponder", "Lightning Bolt", "Volcanic Island", "Mishra's Bauble"])
+        .hand(0, &["Murktide Regent"])
+        .at(Step::Main1, 0)
+        .start();
+    let picks = g.player(0).graveyard.clone();
+    let m = g.card(0, "Murktide Regent", Zone::Hand);
+    g.choose(Choice::Cast(m));
+    let k = std::cell::Cell::new(0);
+    to_priority(&mut g, |g| match g.kind() {
+        Some(DecisionKind::ChooseGraveyardCard) if k.get() < picks.len() => {
+            k.set(k.get() + 1);
+            Some(Choice::Card(picks[k.get() - 1]))
+        }
+        Some(DecisionKind::ChooseGraveyardCard) => Some(Choice::Pass),
+        _ => None,
+    });
+    assert_eq!(g.stack().last().unwrap().delved, 5, "{}", g.log_lines().join("\n"));
+    for v in 0..2u8 {
+        let x = features(&g, v);
+        assert_eq!(x[top + stack::DELVED], 1.25, "P{v}: five cards delved");
+    }
+    // Brainstorm: three cards drawn this turn.
+    let mut g = scen().battlefield(0, &["Island"]).hand(0, &["Brainstorm"]).at(Step::Main1, 0).start();
+    let bs = g.card(0, "Brainstorm", Zone::Hand);
+    g.choose(Choice::Cast(bs));
+    settle(&mut g, |_| None);
+    assert_eq!(g.player(0).drawn, 3, "{}", g.log_lines().join("\n"));
+    for v in 0..2u8 {
+        let x = features(&g, v);
+        let side = v as usize;
+        assert_eq!(x[at(side, g5::DRAWN)], 0.75, "P{v}: P0 drew three");
+        assert_eq!(x[at(1 - side, g5::DRAWN)], 0.0);
+    }
+    // True-Name Nemesis (the chosen player), Painter's Servant (the chosen
+    // colour), and a permanent's other v5 floats set by hand.
+    let mut g = Scenario::new(CardDb::cube())
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Plains"; 10])
+        .library(1, &["Island"; 10])
+        .battlefield(0, &["Island"; 5])
+        .hand(0, &["True-Name Nemesis", "Painter's Servant"])
+        .at(Step::Main1, 0)
+        .start();
+    for name in ["True-Name Nemesis", "Painter's Servant"] {
+        let c = g.card(0, name, Zone::Hand);
+        g.choose(Choice::Cast(c));
+        settle(&mut g, |g| match g.kind() {
+            Some(DecisionKind::Target) => Some(Choice::Target(Target::Player(1))),
+            Some(DecisionKind::ChooseColor) => Some(Choice::Number(3)),
+            _ => None,
+        });
+    }
+    let tnn = g.card(0, "True-Name Nemesis", Zone::Battlefield);
+    let ps = g.card(0, "Painter's Servant", Zone::Battlefield);
+    let slot = |g: &engine::Game, v: u8, c: engine::CardIdx| -> usize {
+        let k = g.permanents_of(0).position(|x| x == c).unwrap();
+        (if v == 0 { O_MY_PERM } else { O_OPP_PERM }) + k * PERM_W + CODE
+    };
+    for (v, chosen) in [(0u8, -1.0f32), (1, 1.0)] {
+        let x = features(&g, v);
+        assert_eq!(x[slot(&g, v, tnn) + perm::CHOSEN_PLAYER], chosen, "P{v}: True-Name Nemesis chose P1\n{}", g.log_lines().join("\n"));
+        let colors: Vec<f32> = (0..5).map(|k| x[slot(&g, v, ps) + perm::CHOSEN_COLOR + k]).collect();
+        assert_eq!(colors, [0.0, 0.0, 0.0, 1.0, 0.0], "P{v}: Painter's Servant chose red");
+        assert_eq!(x[slot(&g, v, ps) + perm::CHOSEN_PLAYER], 0.0);
+    }
+}
+
+/// Layout v5's facts hide nothing (ENGINE.md 60.4): on the gate's positions
+/// (the cube, the Delver mirror, best-of-three, a drafted match) with each of
+/// the 42 perturbations v5 encodes applied, every world `determinize` makes
+/// for a viewer encodes the same for it; and a card exiled face
+/// down that its owner may play (Headliner Scarlett) is in its owner's
+/// playable-from-exile bag only, its count public.
+#[test]
+fn the_v5_facts_encode_no_hidden_information() {
+    use encode::{bag, g5, O_BAGS, O_GLOBALS_V5};
+    use engine::public_state::{perturbations, V5_FIXED};
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let ps = perturbations();
+    let fixed: Vec<_> = ps.iter().filter(|p| V5_FIXED.contains(&p.name)).collect();
+    assert_eq!(fixed.len(), V5_FIXED.len());
+    let mut rng = Rng::new(60);
+    let mut zr = zero_search::rng::Rng::new(60);
+    let (mut worlds, mut applied) = (0, 0);
+    for (spec, a) in gate_positions(scale(24) as usize, 61) {
+        for p in &fixed {
+            let mut b = a.clone();
+            let Some(what) = (p.apply)(&mut b, &mut rng) else { continue };
+            applied += 1;
+            // (Worlds compared with each other: a change made by hand can
+            // leave the other player's pending decision stale, and every world
+            // for a viewer who doesn't decide recomputes it.)
+            for v in 0..2 {
+                let mut first = b.clone();
+                first.determinize(v, &mut zr);
+                let x = enc(&first, v);
+                for _ in 0..2 {
+                    let mut d = b.clone();
+                    d.determinize(v, &mut zr);
+                    let y = enc(&d, v);
+                    if let Some(i) = (0..NUM_FEATURES).find(|&i| x[i] != y[i]) {
+                        panic!("{spec}: {} ({what}): P{v}'s feature {i} differs between worlds ({} / {})", p.name, x[i], y[i]);
+                    }
+                    worlds += 1;
+                }
+            }
+        }
+    }
+    println!("{applied} perturbed positions, {worlds} worlds compared");
+    assert!(applied > 1000 && worlds > 4000, "{applied} {worlds}");
+    // Headliner Scarlett: the top card of P0's library exiled face down, P0
+    // may play it this turn.
+    let mut g = Scenario::new(CardDb::cube())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Headliner Scarlett"])
+        .library(0, &["Island", "Forest", "Lightning Bolt", "Mountain", "Swamp", "Plains", "Island"])
+        .library(1, &["Island"; 10])
+        .at(Step::Main2, 1)
+        .start();
+    for _ in 0..2000 {
+        if g.turn().active == 0 && g.turn().step == Step::Main1 && g.kind() == Some(DecisionKind::Priority) {
+            break;
+        }
+        let d = g.pending_decision().unwrap();
+        let c = match d.kind {
+            DecisionKind::Priority | DecisionKind::DeclareAttackers | DecisionKind::DeclareBlockers => Choice::Pass,
+            _ => d.options[0].choice,
+        };
+        g.choose(c);
+    }
+    let fd: Vec<engine::CardIdx> =
+        g.objs().iter().enumerate().filter(|(_, o)| o.zone == Zone::FaceDown).map(|(i, _)| engine::CardIdx(i as u16)).collect();
+    assert_eq!(fd.len(), 1, "{}", g.log_lines().join("\n"));
+    let c = fd[0];
+    assert!(g.knows(0, c) && !g.knows(1, c));
+    let id = ident(g.obj(c).def);
+    let x0 = features(&g, 0);
+    assert_eq!(x0[O_BAGS + bag::MY_EXILE_PLAY * encode::D + id], 0.25, "P0 may play the card it knows");
+    assert_eq!(x0[O_GLOBALS_V5 + g5::EXILE_PLAY], 0.25);
+    let x1 = features(&g, 1);
+    let bag1 = &x1[O_BAGS + bag::OPP_EXILE_PLAY * encode::D..O_BAGS + (bag::OPP_EXILE_PLAY + 1) * encode::D];
+    assert!(bag1.iter().all(|&f| f == 0.0), "P1 doesn't know the card: not in its bag");
+    assert_eq!(x1[O_GLOBALS_V5 + g5::PLAYER + g5::EXILE_PLAY], 0.25, "P1 sees that P0 may play one");
+    let mut resampled = false;
+    for s in 0..40 {
+        let mut d = g.clone();
+        d.determinize(1, &mut Rng::new(s));
+        assert_eq!(features(&d, 1), x1, "P1's world {s}");
+        resampled |= d.obj(c).def != g.obj(c).def;
+    }
+    assert!(resampled, "the card was resampled for P1");
 }
