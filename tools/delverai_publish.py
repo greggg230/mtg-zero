@@ -13,7 +13,8 @@ Each pass:
     every --progress-every seconds (60), recording or not;
   * games: when models/ holds a checkpoint newer than the last one recorded (and its file has
     settled), `mtgz.az.replays` records `--games` games of it against itself with the run's
-    self-play simulations (evaluation settings: no noise, the most visited option) and uploads
+    self-play simulations (evaluation settings: no noise, the run's evaluation move rule -
+    eval_select, zero-core docs/search.md 3.3: the most visited option by default) and uploads
     them. Only the newest checkpoint is recorded; ones skipped while the publisher was down are
     not back-filled. The recorded iterations are kept in <run>/delverai.json.
 
@@ -36,11 +37,12 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mtgz.az import decklists, replays  # noqa: E402
-from zero import runctl  # noqa: E402
+from zero import elo, runctl  # noqa: E402
 
 SETTINGS = ('preset', 'iters', 'games', 'sims', 'sims_fast', 'p_full', 'sims_minor', 'temp_moves', 'arch', 'hidden',
             'blocks', 'heads', 'ff', 'policy_target', 'eval_games', 'eval_sims', 'eval_random_games', 'elo_games',
-            'elo_sims', 'eval_every', 'yardstick', 'window', 'lr', 'seed')
+            'elo_sims', 'eval_every', 'yardstick', 'window', 'lr', 'seed', 'eval_select', 'eval_select_min_visits',
+            'elo_offsets')
 
 
 def _json(path, default=None):
@@ -179,7 +181,8 @@ def progress(run):
     st = runctl.run_status(run)
     prog = _json(os.path.join(run, 'progress.json'))
     idx = _json(os.path.join(run, 'models', 'index.json'), {}) or {}
-    ratings = (_json(os.path.join(run, 'elo', 'ratings.json'), {}) or {})
+    tag, pool = elo.active_pool(run)                # the Elo pool of the run's evaluation move rule
+    ratings = (_json(os.path.join(pool, 'ratings.json'), {}) or {})
     log = os.path.join(run, 'log.txt')
     rows = iteration_rows(run)
     state = _json(os.path.join(run, 'delverai.json'), {}) or {}
@@ -191,7 +194,7 @@ def progress(run):
         'iters': rows, 'best': idx.get('best'), 'now': now_record(run, cfg, prog, rows, state),
         'ratings': {k: {'elo': _r(v.get('elo'), 1), 'se': _r(v.get('se'), 1), 'games': v.get('games')}
                     for k, v in (ratings.get('ratings') or {}).items()},
-        'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')},
+        'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
         'replayed': state.get('replayed', []),
     }
 
