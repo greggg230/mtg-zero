@@ -1212,7 +1212,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_farm.rs` | M6 (section 51): the fuzz farm's first bugs, each state built on cube cards: the hidden pool's deal holds the clouds while the opponent pays (Elvish Spirit Guide, a best-of-three match from a scenario: every world is the sampled deck), 400.3 (an opponent's Lotus Petal is not in your graveyard: no Psychic Frog exile, no delve for Treasure Cruise), 605.3a (Gaea's Cradle animated by Nissa with 28 creatures and Aang's waterbend: checked and paid within 30 s on a thread), 701.25a (a surveiled Blightsteel Colossus shuffles the library after the pile is placed: the decider's worlds and encoding keep the other card), 709.3 (Life // Death from Shelldock Isle revealed before the half is chosen: fixed by 49.6, fails on 075649c), 601.2g-h (delve's cards exiled after the mana abilities: Fanatic of Rhonas with a delirious Dragon's Rage Channeler pays Dig Through Time); five fail on ab02574, all six on 075649c; `pay.rs` unit tests: `covers` on 255 units and an augmenting path, an exhausted search's panic |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
-| `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games); the opening (section 55: the declared mulligan encoded, seen by the second player, cleared once taken, kept by clones and `determinize`; the opening's other floats bit for bit as before; no hidden information in any opening state); the public-state gate (section 58.6: every public field of the game state classified and perturbed on 240 positions of four kinds of games, the change public and in both viewers' encodings, but the listed limits) and its fixes read back (58.8) |
+| `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games); the opening (section 55: the declared mulligan encoded, seen by the second player, cleared once taken, kept by clones and `determinize`; the opening's other floats bit for bit as before; no hidden information in any opening state); the public-state gate (section 58.6: every public field of the game state classified and perturbed on 240 positions of four kinds of games, the change public and in both viewers' encodings, but the listed limits) and its fixes read back (58.8); a Murktide Regent delve's ids, picks, context and bags (section 65) |
 | `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b; decks of 5-7 cards and of exactly 6, `PASS` only at a legal size); a pool's deck is sideboarded to exactly 40 cards (section 42: every 40-card deck of generated, evaluation and M8a pools by its canonical path, the two extremes, no 39- or 41-card deck, `PASS` only at 40, the heuristic's answers legal from any point); a spec decklist of another size keeps its size; sideboarded decks are legal (40 cards) and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
@@ -11399,7 +11399,8 @@ applied (`Game::prepared`).
 The perturbations whose change the encoding leaves out by design (`LimitKind::Design`):
 
 * **Bag order**: two graveyard cards swapping places (graveyards are bags of identities, 22.2; the
-  order matters to a few cards).
+  order matters to a few cards). **A gap since section 65**: a `GRAVEYARD` id is a graveyard
+  position, so the order is what those ids mean (`LimitKind::NextLayout`).
 * **What the opponent knows of the viewer's own cards**, outside the hand (where `HAND` status 4
   shows it): a card of the viewer's exiled face down is in its exile bag by identity like a face-up
   one, and the viewer's own reveals in earlier games of a match are not encoded for it (the
@@ -12758,3 +12759,199 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates), all 
   results 6386f14460acea0d, 8 / 8 against random - the values of 62.7).
 * No engine change, no digest re-record, no search smoke: with the settings at their defaults no
   game plays differently.
+
+## 65. Murktide Regent's delve choices: a graveyard id is a position the network cannot see
+
+Branch `delve-encoding` (main 0b476e0), 2026-10-29, CPU only, `runs/delver2` and an A/B round live
+on the GPU and the Mac; every run directory only read. Tier "encoding-only" (the layout is
+unchanged).
+
+### 65.1 The finding
+
+A gameplay review of the Delver mirror (2026-10-29): over 301 Murktide Regent casts in recorded
+games, 150 exiled fewer instants and sorceries than the graveyard offered (0.84 counters lost per
+resolved cast; 20 Regents came down as 3/3-4/4 with 5/5+ available). Example: replay
+`runs/delver2/replays/20261029-080154_002.json.gz`, turn 8: P0's graveyard is Ponder, Daze, Mishra's
+Bauble, Misty Rainforest, Lightning Bolt, Volcanic Island, Brainstorm, Polluted Delta (bottom first),
+two Islands untapped, so five cards must be delved; the first pick offers ids 404-407 (positions
+0-3) and the network takes 405 (Daze, prior 0.445; Ponder at 404 had 0.229): Ponder is passed for
+good and the Regent gets 3 counters, not 4.
+
+The network's priors at the Regent's delve decisions with two or more graveyard options, in the 96
+recorded replays (`runs/delver2/replays`, six games each of iterations 0, 2, .., 30; `acts` / `p0`
+of each frame, the option's text for its card), for iterations 16-30 (160 decisions, 961 options;
+all 96 replays: 347 decisions, the same picture):
+
+| | mean prior |
+|---|---|
+| an instant or sorcery card (39% of the options) | 0.154 |
+| any other card (lands, the Baubles, creatures) | 0.174 |
+| the lowest offered position | 0.396 |
+| the second | 0.276 |
+| the third, fourth, fifth, sixth | 0.140, 0.099, 0.087, 0.060 |
+
+The prior's argmax is an instant or sorcery in 49 of the 133 decisions offering both kinds (37%,
+against 39% of the options): the prior does not tell the cards apart and follows the position. The
+13 Target decisions of Tamiyo, Seasoned Scholar's -3 (return an instant or sorcery card from the
+graveyard, `GRAVEYARD` ids too) show the same: in the first, 0.57 on the lowest position (Ponder)
+against 0.07 for Force of Will.
+
+### 65.2 Hypothesis 1, the action mapping: right in the engine, invisible to the network
+
+**The engine side is right.** A graveyard choice's id is `GRAVEYARD` + the card's position in its
+owner's graveyard, bottom first, the decider's 0..63 and the other player's 64..127
+(`Game::graveyard_action`, section 11). During a delve the positions are **stable**: the chosen
+cards stay in the graveyard until the payment ends (`Mark::DelveExile`, 51.6), so nothing is
+renumbered between picks; the picks go up the graveyard (each set once: the options are the
+positions above the last pick that leave enough cards for the picks still needed). The option's
+text ("Choose Ponder", the replay viewer's) and its identity come from the same `Choice::Card`.
+Test `murktide_delve_maps_each_graveyard_id_to_its_card_and_encodes_the_picks` (`tests/az.rs`)
+builds the replay's graveyard and asserts all of it at each of the five picks, for both players'
+ids.
+
+**The network side is the cause.** No segment of layout v5 scores a `GRAVEYARD` id: the token
+network (zero-core `TokenNet`) gives a slot's actions pointer logits from that slot's token, and
+every other action a **generic logit** of the pooled state (`gen(z)`, one weight row per action id;
+22.2). The graveyard is in the input only as two bags of identities (counts, no order). So the
+logit of id 404 + k is a learned per-position weight on a summary of the board: it can learn "the
+lowest position" (the table above), never "the card at position k". Every graveyard choice is
+made this way: delve, flashback and escape casts at priority, a graveyard card as a target (Tamiyo's
+-3), Exhume-like choices, a graveyard cost. The public-state gate listed the graveyard's order as a
+deliberate limit ("the order matters to a few cards only", 58.9); it is a gap: the order is what the
+`GRAVEYARD` ids mean. `public_state::limits` now classifies "two graveyard cards swap places" as
+`NextLayout`, and the gate asserts that it is the only gap (65.6). The search sees the difference
+only through its values (Q differences of 0.01-0.03 at 64 simulations), which is why it sometimes
+finds the right card anyway.
+
+### 65.3 Hypothesis 2, the picks so far: fixed in layout v5's floats
+
+Before this branch a delve decision showed the count of cards chosen (the stack slot's v5 status
+`stack::DELVED`, updated at every pick) but not which: the chosen cards were still in the graveyard
+bag, and the context block had no card (`Task::Delve` was not among the tasks naming a stack item)
+and no cost (its cost floats were a mana payment's only). Now, in floats that were zero there:
+
+* **The committed picks by identity**: a graveyard card chosen for a delve in progress (a live
+  `Mark::DelveExile`) is counted in its owner's exile bag, not the graveyard bag (both viewers;
+  `encode_bags`). They are exiled when the payment ends (CR 601.2h, after the mana abilities of
+  601.2g), so the bags show where they are going; the zone sizes in the globals stay the true ones.
+* **The context's card**: the spell being cast (`frame_card` names `Task::Delve`'s stack item) - so
+  the context token's identity is the Regent (the layout's context segment reads its identity there).
+* **The cost left**: the context's nine cost floats (`ctx::COST`: generic / 8, pips / 4, as a mana
+  payment's) hold the spell's total mana cost less one generic per card chosen
+  (`total_mana(card, item).less_generic(item.delved)`, what `Game::delve` offers from); {5}{U}{U}
+  with two picks is 3/8 and 2/4 blue.
+
+The delve's floor (the positions already passed) is not in the input: no float per graveyard
+position exists in layout v5 (65.7 adds one with the options). Gate: the new perturbation "a graveyard
+card is chosen for delve" (`Game.marks`, a `DelveExile` mark on a random graveyard card) changes
+both views and both encodings in all 233 positions it applies to.
+
+### 65.4 Hypothesis 3, the option's text and the card's identity: consistent
+
+The option text names `Game::name` of the option's card and the encoding's identity is that card's
+definition (`objs[c].def`) - the same object (`Choice::Card(c)`), in every zone; a double-faced card
+(Tamiyo) is named by its full name and encoded by its card's identity. Nothing to fix.
+
+### 65.5 Hypothesis 4, the delve flow: no rules or flow bug
+
+* **Order of picks**: one decision per card in increasing graveyard position (each set of cards
+  once, 23.4); passing a card is final within the delve. Correct, but with blind priors it is what
+  turns the position bias into lost counters (the first pick passes everything below it).
+* **"Stop delving"** (`PASS`) is offered exactly when the rest of the cost can be paid with mana (the
+  fewest more cards needed is 0) or nothing else is offered; never while more cards are needed.
+* **Mana and delve**: delve's cards are chosen first and exiled after the mana abilities (51.6);
+  delving more than needed to keep mana open is offered. Lotus Petal-style sources are `MY_PERM` ids
+  (none in the mirror).
+* The review's metric counts every Regent that exiled a land or an artifact while an instant was
+  left; some of those keep delirium for Dragon's Rage Channeler (four card types) or an instant for
+  Tamiyo's -3, so not all 150 are mistakes.
+* `DIGEST_ENCODING=0` is unchanged (65.8): no game plays differently.
+
+### 65.6 Tests
+
+* `murktide_delve_maps_each_graveyard_id_to_its_card_and_encodes_the_picks` (`tests/az.rs`, new): the
+  replay's graveyard, five picks (Ponder, Daze, Bolt, Brainstorm, Delta); at each pick, for both
+  viewers: each option is `GRAVEYARD` + its card's position (the other player's id 64 higher), its
+  text names the card, the graveyard unchanged while picking, exactly the positions above the last
+  pick that leave enough cards; the context's card is the Regent and its cost floats the cost left;
+  `stack::DELVED` = picks / 4; each chosen card in the owner's exile bag and out of the graveyard
+  bag; the Regent enters with 4 counters. It also asserts the gap (no segment's actions reach
+  404..531; it fails when 65.7 lands, to be updated then). Fails on main (no context card).
+* `public_state_reaches_the_encoding`: the perturbation "a graveyard card is chosen for delve"
+  (141 perturbations: 132 encoded, 3 deliberate limits, 1 gap - "two graveyard cards swap places",
+  179 of 179 applications encode the same); the test asserts that this is the only gap.
+* The encoding reads `total_mana` for a `Task::Delve` context only when the spell's alternative
+  cost index exists (a state the gate perturbed by hand can have `alt` beyond the card's costs; the
+  engine never makes one).
+
+### 65.7 The options for the gap (an action-id or layout change: the user's decision)
+
+None fits layout v5 with its action ids: a `GRAVEYARD` id needs a token to point from, and v5's
+spare floats (8 per permanent and stack slot, some globals, the context's last 10) have no room
+for a float per graveyard position, let alone a card code.
+
+* **A. Graveyard choices on the list's ids (no layout change).** A `ChooseGraveyardCard` decision and
+  a target in a graveyard offer `LIBRARY` + k, the list block holding the offered graveyard cards
+  (graveyard order, or by definition with equal cards offered once, as a searched library: delve's
+  sets by definition), with the list's floats for offered and chosen. The list's pointer column
+  scores each card from its token. Layout v5 and every checkpoint stay valid (the guard passes); a
+  running network re-pins directly (no widen, no fork); its list column (trained on searches, piles,
+  seen hands, sideboarding) starts the scoring. Costs: section 11's table changes (`LIBRARY` gains a
+  meaning, `GRAVEYARD` keeps priority's casts: flashback and escape stay blind, none in the mirror,
+  since the list holds Bolas's Citadel's card there); the encoding-free digest changes (it hashes the
+  ids); a target over both graveyards needs at most 64 offered cards (an assert, as 58.3's limits);
+  engine tests that name `GRAVEYARD` ids change. The smallest and fastest fix.
+* **B. Layout v6: `GRAVEYARD` pointer columns on the list segment.** The ids stay; the list segment
+  gets the action pair `[404, 1]` and the list holds the decider's graveyard during graveyard
+  choices. zero-core's widen refuses new action pairs (its az.md 10.3: a segment's actions must be
+  the same), so a zero-core change (new pointer columns at zero), then 60.5's fork and widen of each
+  run (iteration numbers, Elo pool and window restart). The opponent's graveyard (ids 468..531)
+  needs a second pair or stays blind.
+* **C. Layout v6: two graveyard segments.** 64 slots a side (card code + offered, chosen for delve,
+  castable from there), always filled (public), actions `[404, 1]` / `[468, 1]`: every graveyard
+  choice by card (priority's casts, both graveyards), and the order itself in the input. +7,168
+  floats and up to +128 tokens (the network packs present tokens only: a Delver graveyard holds
+  ~5-15 cards a side, against ~21 tokens a position now, so a large share more attention and
+  feed-forward work); zero-core's widen must accept new segments (refused today) and new pointer
+  columns; 60.5's fork. The most complete; it could ride along a network change already planned
+  (section 62's distilled student is a new network: distilled on re-encoded rows it could be v6).
+
+### 65.8 Checks
+
+On the rebased head (main 0b476e0, zero-core 437cef0), the desktop CPU at below-normal priority:
+
+* **Build**: own target dir (`E:/cargo-target/mtg-zero/delve-encoding`), `bash tools/build_py.sh`
+  (1 min 25 s).
+* **Behaviour digests**: `DIGEST_ENCODING=0` **5f0579aa50453818, unchanged** (main's; on main, on the
+  branch before and after the rebase): no game plays differently. The full digest 808de5cb10665e48
+  -> **e7c1f39597f90ed7**, re-recorded (`tests/data/digests.txt`: 40 of 2,500 games, those whose
+  hashed encodings - every 10th decision - include a delve decision or a delve's payment: the only
+  states the change reads differently). `DIGEST_ENCODING=v4` 317b5ba05dc569fb (58.11) ->
+  7ef67482ba23b305 (the context and the bags are layout v4 floats; nothing compares it any more:
+  the guard refuses v4 networks, 61).
+* `cargo test --release -p engine --test az --test limits --test hidden`: **28 + 8 + 11 passed** (az's
+  new test; the gate: 240 positions, 141 perturbations, 132 encoded, 3 deliberate limits, 1 gap).
+  The new test fails on main (the context has no card).
+* `python -m pytest -q tests`: **49 passed** (78 s).
+* **A running network on this build**: delver2's iteration 21 (a copy, sha256 fcdf2116...) loads (the
+  encoding guard passes: layout v5) and evaluates: `third_party/zero-core/tools/check_checkpoint_compat.py
+  --package mtgz` against the e5483aa build (`mtg-zero-wt/ckpt-guard`), the Delver spec, 8 self-play
+  games per target and 8 against random. The old side reproduces 62.7's digests (records visits
+  a7d26311e198c8f5, cq cf85c9bc94a45506, results 6386f14460acea0d); this build plays other games
+  (visits b2ec665fd6a4fd9e, cq 4855f196129ad4bd, results a5f1f2466118be22, 622 samples against 742)
+  and wins 8 / 8 against random: expected, the network's input differs from the first Regent
+  cast on, and the searches part there.
+* No fuzz and no search smoke (tier "encoding-only": the encoding-free digest is unchanged).
+
+### 65.9 Runs
+
+* **Re-pinning onto this branch**: the layout is v5 and every float keeps its offset, so a running
+  network loads and resumes (the encoding guard passes; no widen, no fork). Its inputs differ at
+  delve decisions and during a delve's payment only (the context's card and cost, the bags);
+  trained with zeros there, it starts from what it learned and adapts. The gain is small on its
+  own: the choice itself stays blind until 65.7.
+* **What remains a learning gap** after a 65.7 fix: the increasing-position enumeration makes the
+  first pick decide the whole set (A's by-definition list softens it); delve decisions are few
+  (~4 a game in the replays) and their value differences small (a +1/+1 counter); and the trade-offs
+  (delirium's card types, Tamiyo's -3 targets, Regent counters later from instants leaving the
+  graveyard) have to be learned from the value head.

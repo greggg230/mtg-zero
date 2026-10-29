@@ -25,7 +25,8 @@
 //!    leaves out, each with its reason: by design (bag order, what the
 //!    opponent knows of the viewer's cards; the perturbations change objects
 //!    in the encoded slots only: 32 permanents a side, 8 stack items). Layout
-//!    v4's 42 gaps (ENGINE.md 58.10) are layout v5's fixes (60): anything
+//!    v4's 42 gaps (ENGINE.md 58.10) are layout v5's fixes (60); one gap is
+//!    left for the next layout, the graveyard's order (ENGINE.md 65): anything
 //!    else that fails is a finding.
 
 use crate::az::matches::{Format, MatchState};
@@ -330,7 +331,9 @@ pub enum LimitKind {
     /// A deliberate limit of the encoding (ENGINE.md 58.9).
     Design,
     /// A genuine gap the layout has no room for, for its next version (layout
-    /// v4's 42, ENGINE.md 58.10, are encoded by layout v5, 60; none now).
+    /// v4's 42, ENGINE.md 58.10, are encoded by layout v5, 60; one now: the
+    /// graveyard's order, which the `GRAVEYARD` action ids depend on, ENGINE.md
+    /// 65).
     NextLayout,
 }
 
@@ -809,6 +812,13 @@ pub fn perturbations() -> Vec<Perturbation> {
         p!("a spell can't be countered", "Game.marks", |a, r| {
             let (_, c) = pick(&stack_spells(&a.g), r)?;
             mark(&mut a.g, c, crate::game::Mark::Uncounterable)
+        }),
+        // A delve in progress (CR 702.66a, 601.2h): a graveyard card chosen,
+        // still in the graveyard until the payment ends (ENGINE.md 51.6, 65).
+        p!("a graveyard card is chosen for delve", "Game.marks", |a, r| {
+            let cards: Vec<CardIdx> = (0..2).flat_map(|p| a.g.players[p].graveyard.clone()).filter(|&c| !a.g.is_token(c)).collect();
+            let c = pick(&cards, r)?;
+            mark(&mut a.g, c, crate::game::Mark::DelveExile)
         }),
         // ---- Dungeon ----
         p!("a player completes a dungeon", "Dungeon.completed", |a, r| {
@@ -1369,12 +1379,14 @@ pub fn perturbations() -> Vec<Perturbation> {
 
 /// The perturbations whose public change the encoding leaves out (ENGINE.md
 /// 58.9: by design), each with its reason. Layout v5 (ENGINE.md 60) encodes
-/// the 42 gaps layout v4 had no room for (58.10): none is left.
+/// the 42 gaps layout v4 had no room for (58.10); one gap is left, found by
+/// the Delver mirror's delve choices (ENGINE.md 65): the graveyard's order,
+/// which the `GRAVEYARD` ids depend on.
 pub fn limits() -> Vec<Limit> {
-    use LimitKind::Design;
+    use LimitKind::{Design, NextLayout};
     let l = |name, kind, why| Limit { name, kind, why };
     vec![
-        l("two graveyard cards swap places", Design, "bag order: graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); the order matters to a few cards only"),
+        l("two graveyard cards swap places", NextLayout, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2), but a GRAVEYARD action id is a graveyard position (ENGINE.md 11) scored from the pooled state, no token: every graveyard choice (delve, flashback, escape, a graveyard target, Exhume) is made without seeing which card an id is (ENGINE.md 65: the options need an action-id or layout change)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),

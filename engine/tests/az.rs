@@ -1166,9 +1166,12 @@ fn public_state_reaches_the_encoding() {
     }
     println!("{ok} perturbations encoded, {by_design} deliberate limits, {next} gaps for the next layout (ENGINE.md 58.10, 60)");
     assert!(findings.is_empty(), "{} findings:\n{}", findings.len(), findings.join("\n"));
-    // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps: only the deliberate limits are left.
-    assert!(lim.iter().all(|l| l.kind == LimitKind::Design), "a gap on the allowlist");
-    assert_eq!(next, 0);
+    // Layout v5 (ENGINE.md 60) encodes layout v4's 42 gaps; one gap is left, the graveyard's
+    // order, which the GRAVEYARD action ids are positions in (ENGINE.md 65: the Delver mirror's
+    // delve choices). Anything else is a deliberate limit.
+    let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
+    assert_eq!(gaps, ["two graveyard cards swap places"], "the gaps on the allowlist");
+    assert_eq!(next, 1);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
@@ -1467,6 +1470,129 @@ fn the_v5_facts_are_encoded() {
         assert_eq!(colors, [0.0, 0.0, 0.0, 1.0, 0.0], "P{v}: Painter's Servant chose red");
         assert_eq!(x[slot(&g, v, ps) + perm::CHOSEN_PLAYER], 0.0);
     }
+}
+
+// ---- Delve's choices (ENGINE.md 65) ----
+
+/// A real Murktide Regent delve, the graveyard of the Delver mirror's replay
+/// 20261029-080154_002 at turn 8 (Ponder, Daze, Mishra's Bauble, Misty
+/// Rainforest, Lightning Bolt, Volcanic Island, Brainstorm, Polluted Delta;
+/// two Islands: five cards to delve), picked Ponder, Daze, Bolt, Brainstorm,
+/// Delta. At every pick, for both viewers:
+/// * the action mapping (ENGINE.md 11): each option is `GRAVEYARD` + the
+///   position of exactly its card in the caster's graveyard (bottom first;
+///   the other player's id for it 64 higher), the option's text names that
+///   card, and the positions are stable while picking (the chosen cards stay
+///   in the graveyard until the payment ends, ENGINE.md 51.6); the options
+///   are the positions above the last pick that leave enough cards for the
+///   picks still needed (each set once);
+/// * the encoding: the context's card is the Regent (the context token's
+///   identity), its cost floats the mana cost left ({5}{U}{U} less one
+///   generic per pick), the stack slot's cards delved, and each card chosen
+///   so far is in its owner's exile bag, out of the graveyard bag;
+/// * the gap: no token of layout v5 scores a `GRAVEYARD` id (they are
+///   generic logits of the pooled state, and the graveyard is a bag: the
+///   network cannot see which card an id is).
+/// The Regent enters with four counters (the four instants and sorceries).
+#[test]
+fn murktide_delve_maps_each_graveyard_id_to_its_card_and_encodes_the_picks() {
+    use encode::{bag, ctx, stack, CONTEXT, O_BAGS, O_CONTEXT, O_STACK};
+    use engine::testkit::Scenario;
+    use engine::{Choice, DecisionKind, Step, Zone};
+    let db = CardDb::constructed();
+    let ids = identity::identities(db);
+    let names = ["Ponder", "Daze", "Mishra's Bauble", "Misty Rainforest", "Lightning Bolt", "Volcanic Island", "Brainstorm", "Polluted Delta"];
+    let mut g = Scenario::new(db)
+        .spec(|s| s.auto_single = false)
+        .library(0, &["Island"; 10])
+        .library(1, &["Island"; 10])
+        .battlefield(0, &["Island", "Island"])
+        .graveyard(0, &names)
+        .hand(0, &["Murktide Regent"])
+        .at(Step::Main1, 0)
+        .start();
+    let gy = g.player(0).graveyard.clone();
+    assert_eq!(gy.iter().map(|&c| g.name(c)).collect::<Vec<_>>(), names, "bottom first");
+    let m = g.card(0, "Murktide Regent", Zone::Hand);
+    let regent = ids[g.obj(m).def as usize] as usize;
+    let idents: Vec<usize> = gy.iter().map(|&c| ids[g.obj(c).def as usize] as usize).collect();
+    g.choose(Choice::Cast(m));
+    to_choice(&mut g, DecisionKind::ChooseGraveyardCard);
+    // (The layout's pointer actions: [base, stride] per segment slot.)
+    let layout: serde_json::Value = serde_json::from_str(&encode::layout_json(db)).unwrap();
+    for s in layout["segments"].as_array().unwrap() {
+        let count = s["count"].as_u64().unwrap() as u16;
+        for pair in s["actions"].as_array().into_iter().flatten() {
+            let (base, stride) = (pair[0].as_u64().unwrap() as u16, pair[1].as_u64().unwrap() as u16);
+            assert!(
+                !(0..count).any(|k| (act::GRAVEYARD..act::GRAVEYARD + 2 * act::GRAVEYARD_N).contains(&(base + k * stride))),
+                "segment {} scores GRAVEYARD ids: ENGINE.md 65's gap is closed, update this test",
+                s["name"]
+            );
+        }
+        assert!(s.get("id_actions").is_none());
+    }
+    let picks = [0usize, 1, 4, 6, 7];
+    let mut floor = 0;
+    for (n, &pick) in picks.iter().enumerate() {
+        assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard), "pick {n}: {}", g.options_desc().join(" | "));
+        assert_eq!(g.player(0).graveyard, gy, "pick {n}: the chosen cards stay in place");
+        let d = g.pending_decision().unwrap().clone();
+        assert_eq!(d.player, 0);
+        let view = g.spectator_view();
+        let text = |a: u16| -> String {
+            let o = view["decision"]["options"].as_array().unwrap().iter().find(|o| o["a"] == a).unwrap();
+            o["t"].as_str().unwrap().to_string()
+        };
+        let left = picks.len() - n;
+        let want: Vec<u16> = (floor..=gy.len() - left).map(|k| act::GRAVEYARD + k as u16).collect();
+        assert_eq!(d.options.iter().map(|o| o.action).collect::<Vec<_>>(), want, "pick {n}: above the last pick, {left} still needed");
+        for o in &d.options {
+            let Choice::Card(c) = o.choice else { panic!("pick {n}: {:?}", o.choice) };
+            let k = gy.iter().position(|&x| x == c).unwrap();
+            assert_eq!(o.action, act::GRAVEYARD + k as u16, "pick {n}: {} is graveyard position {k}", g.name(c));
+            assert_eq!(g.graveyard_action(0, c), o.action);
+            assert_eq!(g.graveyard_action(1, c), act::GRAVEYARD + act::GRAVEYARD_N + k as u16, "the other player's id for it");
+            assert_eq!(text(o.action), format!("Choose {}", names[k]), "pick {n}: the option's text names its card");
+            assert_eq!(ids[g.obj(c).def as usize] as usize, idents[k]);
+        }
+        for v in 0..2u8 {
+            let x = features(&g, v);
+            let c = &x[O_CONTEXT..O_CONTEXT + CONTEXT];
+            assert_eq!(c[ctx::KIND + DecisionKind::ChooseGraveyardCard as usize], 1.0);
+            assert_eq!((c[ctx::HAS_CARD], decode_id(&c[ctx::CARD..ctx::CARD + CODE])), (1.0, regent), "P{v}, pick {n}: the context's card");
+            let cost: Vec<f32> = (0..9).map(|k| c[ctx::COST + k]).collect();
+            assert_eq!(cost, [(5 - n) as f32 / 8.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "P{v}, pick {n}: {{{}}}{{U}}{{U}} left", 5 - n);
+            assert_eq!(x[O_STACK + CODE + stack::DELVED], n as f32 / 4.0, "P{v}, pick {n}: cards delved");
+            let (gb, eb) = if v == 0 { (bag::MY_GRAVEYARD, bag::MY_EXILE) } else { (bag::OPP_GRAVEYARD, bag::OPP_EXILE) };
+            for (k, &id) in idents.iter().enumerate() {
+                let chosen = picks[..n].contains(&k);
+                let at = |b: usize| x[O_BAGS + b * encode::D + id];
+                assert_eq!((at(gb), at(eb)), if chosen { (0.0, 0.25) } else { (0.25, 0.0) }, "P{v}, pick {n}: {} chosen {chosen}", names[k]);
+            }
+        }
+        g.choose(Choice::Card(gy[pick]));
+        floor = pick + 1;
+    }
+    // The payment ends: the five exiled (the bags as during the picks), the Regent resolves.
+    to_priority(&mut g, |_| None);
+    assert!(gy.iter().enumerate().all(|(k, &c)| (g.obj(c).zone == Zone::Exile) == picks.contains(&k)), "{}", g.log_lines().join("\n"));
+    settle(&mut g, |_| None);
+    let m = g.card(0, "Murktide Regent", Zone::Battlefield);
+    assert_eq!(g.counters_on(m, engine::db::Counter::P1P1), 4, "{}", g.log_lines().join("\n"));
+}
+
+/// Answer decisions (the first option) until one of kind `k`.
+fn to_choice(g: &mut engine::Game, k: engine::DecisionKind) {
+    for _ in 0..50 {
+        let d = g.pending_decision().expect("a decision");
+        if d.kind == k {
+            return;
+        }
+        let c = d.options[0].choice;
+        g.choose(c);
+    }
+    panic!("no {k:?} decision\n{}", g.log_lines().join("\n"));
 }
 
 /// Layout v5's facts hide nothing (ENGINE.md 60.4): on the gate's positions

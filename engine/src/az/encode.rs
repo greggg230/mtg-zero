@@ -12,8 +12,8 @@
 //! | Block | Floats | What |
 //! |---|---:|---|
 //! | globals | 128 | turn, step, who is active / has priority, per player (viewer first) life, zone sizes, mana pool, board summary, lost life this turn, sorceries as though they had flash; M7b part 2: poison, cards on an adventure, temporary triggered abilities, no maximum hand size; day and night; part 3b: the initiative, the dungeon room, dungeons completed, experience counters |
-//! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay, damage left, counters of the asking task |
-//! | bags | 19 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards, exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match; **v5**: the exiled cards the viewer may play, those the opponent may play (`bag::MY_EXILE_PLAY`, `OPP_EXILE_PLAY`; a face-down one only where the viewer knows it) |
+//! | context | 256 | the pending decision: kind (64 kinds), decider, the asking task, its card (card code) and ability, the resolving op, the cost left to pay (a mana payment's; delve's picks: the spell's mana cost after the cards chosen so far, ENGINE.md 65), damage left, counters of the asking task |
+//! | bags | 19 x 1024 | per identity counts (0.25 per card): own hand, both battlefields, graveyards (a card chosen for a delve in progress is in its owner's exile bag, ENGINE.md 65), exiles, own library, the opponent's hidden pool, the opponent's hand known exactly and by clouds, own library cards known, the opponent's library known exactly or by clouds, own and the opponent's emblems (by the identity of the card that made them); M8b: the opponent's pool as the viewer knows it, the cards the opponent revealed in earlier games of the match; **v5**: the exiled cards the viewer may play, those the opponent may play (`bag::MY_EXILE_PLAY`, `OPP_EXILE_PLAY`; a face-down one only where the viewer knows it) |
 //! | tops | 2 x 3 x 54 | the top three library positions of each player: present, known to the viewer, the card code |
 //! | permanents | 2 x 32 x 172 | `MY_PERM` / `OPP_PERM` slots 0..31: card code + status (tapped, damage, P/T, sickness, combat and what it attacks, keywords, loyalty, loyalty ability available, decision flags, options, lore counters, back face up; M7b part 3: a copy and the identity of what it copies, what it is attached to; part 3b: ward and its cost, lost all abilities, goaded, exiled if it would leave; 58.8: can't block, can't be blocked, other counters, cards exiled with it, protection; **v5** status 96-119: must attack, exiled if it would die, effects on its subtypes, evoked, escaped, the player chosen as it entered, monstrous, exhausted, the colour chosen as it entered, exerted, abilities resolved this turn, once-each-turn actions done; 8 spare) |
 //! | hand | 16 x 60 | `HAND` slots 0..15 (the viewer's hand sorted by definition): card code, count, options (which face its `HAND` id casts or plays), known to the opponent |
@@ -687,6 +687,17 @@ fn bag_add(out: &mut [f32], ids: &[u16], b: usize, def: DefId) {
     out[O_BAGS + b * D + ids[def as usize] as usize] += 0.25;
 }
 
+/// A mana cost in the context's cost floats (`ctx::COST`, 9): generic / 8,
+/// the six pips / 4, hybrid and Phyrexian pips / 4.
+fn cost_floats(x: &mut [f32], c: &crate::mana::ManaCost) {
+    x[ctx::COST] = c.generic as f32 / 8.0;
+    for k in 0..6 {
+        x[ctx::COST + 1 + k] = c.pips[k] as f32 / 4.0;
+    }
+    x[ctx::COST + 7] = c.hybrid.iter().map(|&n| n as f32).sum::<f32>() / 4.0;
+    x[ctx::COST + 8] = c.phyrexian.iter().map(|&n| n as f32).sum::<f32>() / 4.0;
+}
+
 /// Kinds of the asking task (context block).
 fn task_code(t: &Task) -> usize {
     match t {
@@ -770,7 +781,7 @@ fn op_code(op: &Op) -> usize {
 }
 
 /// The context of the pending decision.
-pub(crate) mod ctx {
+pub mod ctx {
     /// Decision kinds (one-hot; `DecisionKind as usize` must stay below `KINDS`).
     pub const KINDS: usize = 64;
     /// Asking-task codes (`task_code`).
@@ -1277,7 +1288,18 @@ impl Game {
         }
         for p in [me, op_] {
             for &c in &self.players[p as usize].graveyard {
-                bag_add(out, ids, if p == me { bag::MY_GRAVEYARD } else { bag::OPP_GRAVEYARD }, self.objs[c.i()].def);
+                // A card chosen for a delve in progress (`Mark::DelveExile`)
+                // stays in the graveyard until the payment ends (CR 601.2h;
+                // ENGINE.md 51.6) but is committed: it is in its owner's
+                // exile bag, so the picks so far are seen by identity
+                // (ENGINE.md 65).
+                let b = match (p == me, self.delve_exiling(c)) {
+                    (true, false) => bag::MY_GRAVEYARD,
+                    (false, false) => bag::OPP_GRAVEYARD,
+                    (true, true) => bag::MY_EXILE,
+                    (false, true) => bag::OPP_EXILE,
+                };
+                bag_add(out, ids, b, self.objs[c.i()].def);
             }
         }
         for &c in &self.exile {
@@ -1599,7 +1621,9 @@ impl Game {
                 | Task::ActPay { id }
                 | Task::CopyTargets { id, .. }
                 | Task::ChooseTimes { id }
-                | Task::Splice { id } => stack_item(*id),
+                | Task::Splice { id }
+                // Delve's picks: the spell being cast (ENGINE.md 65).
+                | Task::Delve { id } => stack_item(*id),
                 _ => None,
             }
         };
@@ -1619,13 +1643,23 @@ impl Game {
             Task::PayMana(pm) => {
                 // The cost being paid: the nearest task below that names it.
                 card = self.agenda.iter().rev().skip(1).find_map(&frame_card);
-                let c = &pm.cost;
-                x[ctx::COST] = c.generic as f32 / 8.0;
-                for k in 0..6 {
-                    x[ctx::COST + 1 + k] = c.pips[k] as f32 / 4.0;
+                cost_floats(x, &pm.cost);
+            }
+            // Delve's picks (CR 702.66a): the spell, and its mana cost left
+            // after the cards chosen so far, in PayMana's cost floats (each
+            // pick lowers the generic part by one; ENGINE.md 65).
+            Task::Delve { id } => {
+                card = frame_card(task);
+                if let Some(i) = self.item_index(*id) {
+                    let item = &self.stack[i];
+                    // (An alternative cost the card has: always while casting;
+                    // not in a state the public-state gate perturbed by hand.)
+                    if let StackKind::Spell { card: c } = item.kind {
+                        if item.alt as usize <= self.def_of(c).alt_costs.len() {
+                            cost_floats(x, &self.total_mana(c, item).less_generic(item.delved));
+                        }
+                    }
                 }
-                x[ctx::COST + 7] = c.hybrid.iter().map(|&n| n as f32).sum::<f32>() / 4.0;
-                x[ctx::COST + 8] = c.phyrexian.iter().map(|&n| n as f32).sum::<f32>() / 4.0;
             }
             Task::AsEnters { card: c } => card = Some((self.objs[c.i()].def, None, None)),
             Task::AssignDamage { att, left, .. } => {
