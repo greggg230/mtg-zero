@@ -13157,3 +13157,443 @@ On main 87ea619 (zero-core b486d36), tier "engine + decision-id change": CPU onl
   sees it). The fuzz's most is 57 in 20,000 random games (65.10), so it is reachable in a long
   milling game; if it happens, the class-B alternative is 58.4's (offer the first 64), a rules
   departure the user would have to accept.
+
+## 66. A belief head: the opponent's hand from public information (stage 1; zero-core auxiliary targets)
+
+Branch `belief` (on main 590e7fe): zero-core pinned at **a560448** (feat/belief-head on main b486d36: 1549668 the
+feature, 5dbe2ba + 2cb150d two small fixes, the rest docs;
+auxiliary training targets, its docs/az.md 15 and search.md 1.2), the engine's target (`MtgAz::AUX`,
+`aux_target`), `mtgz/az/belief.py` (names, the replay field, the baselines' public facts), the package's
+declaration (`aux`, `replay_aux`), `tools/belief_eval.py`, tests, this section. With the new setting at
+its default (0) a run is the run of before, byte for byte (66.9).
+
+### 66.1 Why
+
+Players never see hidden information (section 10: observer masking; `determinize(viewer)` deals the
+viewer's unknown cards uniformly over the consistent assignments). But a strong player infers: "they
+left blue open and passed: likely Daze or Force of Will". The question is whether the Delver network's
+trunk already carries that inference, and whether training it explicitly helps. Stage 1 (this section)
+builds an auxiliary head that predicts the opponent's hand from public information, trained against the
+true hand (which the simulator knows: a label, never an input), measures it on CPU against the
+uniform prior the search uses today, and gives the A/B flags (66.7). Stage 2 (66.8, designed, not
+built) would deal the search's worlds from the head's prediction instead of uniformly.
+
+### 66.2 The target: the opponent's true hand, by identity
+
+`MtgAz::aux_target(viewer, out)` (the zero-core auxiliary target `belief`): for every card in the hand
+of the decider's opponent, +1 at its identity (`identity::D` = 1,024 columns: the encoding's identity
+space, 22.2 - the cube's 546 cards, the legacy registry's from 546, the tokens' from 768). The TRUE hand
+(`self.g.player(1 - viewer).hand`), so it differs between the worlds `determinize` deals for the
+decider while the decider's encoding does not (tested: 66.9). Empty while sideboarding (no hand
+between a match's games) and before the deal. Why the identity space and not a compact per-game set
+(the Delver list's 21 distinct cards):
+
+* **A fixed width.** zero-core's targets have one width per game (`SearchGame::AUX`), and `mtg` plays
+  the cube's random decks, best-of-three pools, drafted decks and constructed lists with one encoding: a
+  per-deck column set would change with the spec. The identities are the same in every spec and every
+  layout since v2 (stable by construction, 22.2).
+* **The encoding's own vocabulary.** The bags count cards by these identities (`OPP_HIDDEN`, the
+  opponent's unseen cards; `OPP_HAND_KNOWN`; `OPP_HAND_CLOUD`), so column k of the head and identity k
+  of the input are the same card, and the baselines (66.6) read the hidden pool by the same index.
+* **Cheap.** 1,024 float16 a sample (+2.7% of a Delver row; mostly zeros: the Mac's compressed shards
+  barely grow), a 128 x 1,024 last layer. The head learns to put ~0 on identities that never occur (a
+  deck's 21 cards dominate after a few hundred steps).
+
+### 66.3 The loss: a multinomial over identities
+
+The head's 1,024 outputs are a softmax p over identities and the loss is the cross-entropy against the
+hand's composition, -sum_k (t_k / n) log p_k (n = the hand size, t the counts): zero-core's
+'multinomial' loss (az.md 15.2). Why this and not a per-identity expected count with Poisson or MSE:
+
+* **The hand size is public** (the globals encode it), so the only unknown is the composition: the
+  multinomial spends no capacity on n and its prediction is consistent by construction - n x p sums to
+  the hand size exactly. A Poisson or MSE head must also learn n per position and its counts need not add
+  up.
+* **A proper scoring rule over "a card of their hand"**: the cross-entropy is minimised by the true
+  conditional distribution of a random card of the hand given the public state, which is exactly the
+  "what do they hold" a reader wants, and the per-card log-loss is comparable across positions and with
+  the baselines (each is a distribution too).
+* **Stage 2 needs urn weights.** The weighted deal (66.8) draws the hand's unknown cards one at a time
+  from the pool with per-identity weights: a distribution over identities is that, directly.
+* What it does not model: correlations between the hand's cards (two Force of Will vs one) beyond the
+  marginal - the expected count n p_k is right, the joint is the urn's. Fine for a prior.
+
+### 66.4 The head and the carry-over (zero-core az.md 15.2, 15.4)
+
+zero-core's auxiliary head: one MLP from the token network's pooled state z (the global token's output
+and the tokens' mean, 2 x 128 floats - where the value head reads) to 128 to 1,024, built after every
+other parameter, its last layer zero (the first prediction is uniform over the 1,024 identities). The
+search never computes it (only `forward(..., aux=True)`: training, `NetEvaluator.aux`). Run setting
+`aux_belief_w` (default 0 = off: nothing recorded, built or trained). With it on, self-play records the
+target with every sample (shard key `aux`, on the Mac too), a new run's first network has the head, and
+a checkpoint without one - delver2's - gets a fresh head at the run's first training with every other
+weight exactly its own (its policy, value and margin outputs unchanged; the AdamW moments of the trunk
+kept): `tools/fork_run.py --source runs/delver2 --dest <fork> --iter K --set aux_belief_w=0.25` is the
+whole carry-over. The encoding guard (61) accepts the checkpoints with the head (the head reads no
+input). `net.add_aux` does the same by hand (66.6's head-only checkpoint).
+
+### 66.5 Recording and replays: the `belief` field
+
+`python -m mtgz.az.replays <checkpoint with the head>` (and zero-core's `zero.replay`) adds to every
+network decision's frame the head's belief for the decider - one forward pass of the root's features
+after its search (the search's evaluations never compute the head; a reused tree's root was evaluated in
+an earlier search, so the root's own pass is the one every decision has; `mtgz.az.belief.render`):
+
+```json
+"belief": {"for": 1, "n": 5, "cards": [["Force of Will", 1.482], ["Daze", 0.913], ["Island", 0.402], ...]}
+```
+
+`for` = the seat whose hand is predicted (the decider's opponent), `n` = that seat's hand size in the
+frame's state, `cards` = the 12 largest expected counts (the head's distribution x n), largest first,
+rounded to 3 places, card names as the spectator view writes them in a hand (tested against
+`export_state`); they sum to about n (the 1,012 others hold the rest). The seat lists `aux: ["belief"]`.
+A checkpoint without the head: no field (the frames of before). The delverai site renders it as "what I
+think they hold".
+
+### 66.6 Evidence on CPU: what delver2's trunk already reads
+
+All on the desktop's CPU (`CUDA_VISIBLE_DEVICES=-1`, below normal; round 2 of the A/B live on the GPU and
+the Mac), from a copy of **delver2's iteration 41** (the newest when copied; sha256 ab0827e4...) in
+scratch run directories under `E:\mtg-zero-scratch\belief` (`runs/` only read). The shards were made
+for this (delver2's have no target): this branch's self-play with `aux_belief_w` on, the Delver spec,
+iteration 41's network, **32 simulations at every decision, every decision recorded** (`--sims 32
+--p-full 1`: four times delver2's samples per game for a similar budget per game; the run's `temp_moves`
+60, cq targets at scale 0.3), CPU inference, 1,270-2,100 leaves/s.
+
+* **Train**: 600 games (seeds 11, 13, 14; three runs of 200), 147,762 decisions, 139,071 with a
+  non-empty opponent hand (mean 3.7 cards). The head fits on the first 80% of the shards (~480 games)
+  and stops early on the other 20% (another ~120 games: a shard holds whole games but at its edges).
+* **Held out**: 80 other games (seed 12), 21,063 decisions, 19,994 with a hand; 13.7% of them have a
+  card of that hand known to the decider (a Daze returned an Island, a revealed card), 0.7% a cloud.
+* **The models** (`tools/belief_eval.py`, its docstring): *uniform* = today's determinize from the
+  features (the known hand cards + the rest uniform over the hidden-pool bag); *count-matching* = the
+  uniform prior with one weight per identity fitted on the train rows so the mean counts match (what a
+  static per-card bias explains: Force of Will 1.74, Unholy Heat 1.47, Murktide 1.36, Daze 1.27 ...
+  Brainstorm 0.60, Urza's Bauble 0.33, Mishra's Bauble 0.28 - cantrips and Baubles leave the hand,
+  counterspells and finishers wait); *head-only* = zero-core's head (z -> 128 -> 1,024) on iteration
+  41's FROZEN trunk, AdamW 1e-3, wd 0.01, early-stopped (epoch 2); *residual* = count-matching's logits
+  + a fresh head on the frozen trunk (it starts at count-matching: what z adds to the static bias);
+  *joint (run loop)* = scratch run `sp`'s iteration 1: the run loop's own training, the head added to
+  iteration 41 at its first step (the carry-over), 199 steps at the run's lr 1e-4 on 200 of the games;
+  *joint (fine-tune)* = the head-only network trained further by zero-core's training step (the trunk
+  too, policy + value + margin + belief, weight 1) for 400 steps at lr 1e-4 on all 600 train games.
+
+Held-out, per decision with a hand (cross-entropy per card in nats, lower is better; count error = 0.5
+sum_k |n p_k - t_k|, the cards misplaced; top-1 = the most likely card is in the hand):
+
+| model | cross-entropy | count error | top-1 | AUC holds Force of Will | AUC Daze | AUC Bolt | AUC Murktide |
+|---|---|---|---|---|---|---|---|
+| uniform (today's deal) | 2.807 +- 0.003 | 2.843 | 0.400 | 0.661 | 0.751 | 0.754 | 0.724 |
+| count-matching | 2.705 +- 0.003 | 2.750 | 0.552 | 0.661 | 0.752 | 0.753 | 0.725 |
+| head-only, frozen trunk | **2.599** +- 0.004 | 2.665 | 0.500 | 0.695 | 0.770 | 0.788 | 0.792 |
+| residual, frozen trunk | 2.441 +- 0.005 | 2.454 | 0.605 | 0.745 | 0.808 | 0.808 | 0.816 |
+| joint, the run loop's first iteration | 2.865 +- 0.003 | 2.968 | 0.428 | 0.597 | 0.684 | 0.739 | 0.707 |
+| joint fine-tune, its own head (400 steps, weight 1) | 2.375 +- 0.005 | 2.437 | 0.638 | 0.802 | 0.823 | 0.832 | 0.822 |
+| head-only refit on that fine-tuned trunk | 2.283 +- 0.005 | 2.317 | 0.678 | 0.822 | 0.834 | 0.849 | 0.836 |
+| residual on that fine-tuned trunk | **2.200** +- 0.006 | **2.188** | **0.722** | **0.837** | **0.849** | **0.853** | **0.860** |
+| control fine-tune (the same 400 steps, weight 0): head-only refit | 2.542 +- 0.004 | 2.597 | 0.526 | 0.716 | 0.785 | 0.793 | 0.805 |
+| control fine-tune: residual | 2.402 +- 0.005 | 2.404 | 0.622 | 0.757 | 0.811 | 0.805 | 0.835 |
+
+(+- = the standard error over rows; rows of one game are correlated, so the honest error is larger:
+the 80 held-out games' spread. With only the first 200 train games the head-only fit stopped at 2.787
+and the residual at 2.624: both gain with data, the head-only more.)
+
+**Read**: the frozen trunk carries real information about the opponent's hand beyond what a static
+per-card bias explains - the residual head takes 0.26 nats per card off count-matching's 2.71 (0.37 off
+today's uniform deal), misplaces 0.30 fewer cards of a 3.7-card hand, and ranks the hands that hold a
+Force of Will at AUC 0.75 against 0.66. The plain head (zero-core's shape, trained from zero) gets
+there more slowly - with 480 games it beats count-matching by 0.11 nats and overfits after two epochs (a
+game's ~250 decisions share one hand: the trunk's z identifies the game) - so in a run, with thousands
+of games in a window, it should close on the residual; and a joint fine-tune shows the auxiliary loss itself shaping the trunk: 400 steps of zero-core's
+training step with the belief loss (weight 1) on the 600 games leave a trunk from which a fresh head
+reads 2.283 nats (from 2.599 frozen), against 2.542 after the same 400 steps without the loss (the
+control: same rows, seed and steps) - 0.26 nats per card of representation the loss bought, the
+jointly trained head itself at 2.375. Its price on the same held-out positions (the run loop's losses,
+value_q 0.6): policy 0.3739 against the control's 0.3656, value 0.3553 against 0.3516 (iteration 41
+before either: 0.3663 / 0.3913) - small at weight 1, hence 66.7's 0.25. The run loop's own first
+iteration (a fresh head at lr 1e-4, 199 steps) has not learned yet (its loss 6.93 -> 4.95 in training):
+in the A/B the head trains ~200-300 steps an iteration for 10 iterations.
+
+By whose turn and the opponent's untapped lands (held out; mean count of the card in the hand, true
+and predicted):
+
+| stratum | rows | Force of Will: true / uniform / count-m. / head / residual | Daze | Lightning Bolt | Brainstorm |
+|---|---|---|---|---|---|
+| my turn, they 0 untapped | 9,035 | 0.48 / 0.33 / 0.56 / 0.46 / 0.48 | 0.36 / 0.32 / 0.40 / 0.34 / 0.39 | 0.28 / 0.32 / 0.31 / 0.32 / 0.31 | 0.24 / 0.30 / 0.18 / 0.22 / 0.22 |
+| my turn, they 1 untapped | 3,446 | 0.57 / 0.27 / 0.46 / 0.56 / 0.59 | 0.36 / 0.25 / 0.32 / 0.35 / 0.41 | 0.28 / 0.28 / 0.27 / 0.23 / 0.24 | 0.07 / 0.24 / 0.14 / 0.10 / 0.09 |
+| my turn, they 2+ untapped | 2,068 | 0.59 / 0.22 / 0.38 / 0.56 / 0.56 | 0.34 / 0.24 / 0.30 / 0.30 / 0.43 | 0.11 / 0.21 / 0.20 / 0.13 / 0.12 | 0.01 / 0.18 / 0.11 / 0.04 / 0.03 |
+| their turn, they 0 untapped | 2,195 | 0.54 / 0.35 / 0.60 / 0.51 / 0.54 | 0.40 / 0.33 / 0.42 / 0.39 / 0.44 | 0.28 / 0.34 / 0.32 / 0.33 / 0.34 | 0.27 / 0.31 / 0.19 / 0.24 / 0.23 |
+| their turn, they 1 untapped | 1,565 | 0.63 / 0.32 / 0.55 / 0.61 / 0.66 | 0.42 / 0.30 / 0.38 / 0.44 / 0.52 | 0.27 / 0.31 / 0.29 / 0.29 / 0.30 | 0.12 / 0.27 / 0.16 / 0.13 / 0.12 |
+| their turn, they 2+ untapped | 1,685 | 0.57 / 0.31 / 0.53 / 0.63 / 0.68 | 0.42 / 0.31 / 0.38 / 0.45 / 0.57 | 0.18 / 0.28 / 0.27 / 0.21 / 0.22 | 0.12 / 0.24 / 0.14 / 0.08 / 0.08 |
+
+This is the inference the user asked about, in both directions. On my turn with their mana up, a
+held Force of Will is 2.7 times the uniform deal's (0.59 vs 0.22), and count-matching's static bias
+gets only part of it (0.38); the head reads it from the position (0.56). And what they did NOT do: on
+my turn with two lands open they hold a Brainstorm 1% of the time and a Lightning Bolt 11% (they would
+have cast them at my end step or on my creature), where the uniform deal puts 0.18 and 0.21 and
+count-matching 0.11 and 0.20; the head says 0.04 and 0.13. The residual overshoots Daze with mana open
+(0.43-0.57 vs 0.34-0.42): its calibration is not perfect where the strata are small.
+
+Examples (held-out positions where the head's Force of Will + Daze most exceed the uniform deal, hands
+of at most 7; expected counts, the six largest; decoded from the features):
+
+```
+turn 11 (both players' turns count), their draw step; they: 2 lands, both untapped, 5 cards in hand
+    head:     Force of Will 1.92, Daze 1.43, Murktide Regent 0.20, Dragon's Rage Channeler 0.16, ...
+    count-m.: Force of Will 0.74, Daze 0.54, Dragon's Rage Channeler 0.36, Tamiyo 0.34, ...
+    uniform:  Daze 0.43, Dragon's Rage Channeler 0.43, Force of Will 0.43, Tamiyo 0.43, ...
+    true:     Daze 2, Force of Will 2, Wasteland 1
+turn 12, my combat damage step; they: 2 lands untapped, 4 cards
+    head:     Force of Will 1.53, Daze 1.20, Unholy Heat 0.17, Murktide Regent 0.16, ...
+    uniform:  Daze 0.35, Dragon's Rage Channeler 0.35, Force of Will 0.35, Tamiyo 0.35, ...
+    true:     Daze 2, Force of Will 2
+turn 19, their draw; they: 3 lands untapped, 4 cards
+    head:     Daze 1.44, Force of Will 1.08, Wasteland 0.31, Polluted Delta 0.19, ...
+    uniform:  Brainstorm 0.39, Daze 0.39, Dragon's Rage Channeler 0.39, Mishra's Bauble 0.39, ...
+    true:     Daze 2, Force of Will 1, Mishra's Bauble 1
+turn 7, their upkeep, my spell on the stack; they: 2 lands untapped, 5 cards (a miss)
+    head:     Daze 1.79, Force of Will 0.68, Wasteland 0.49, Lightning Bolt 0.28, ...
+    uniform:  Brainstorm 0.37, Daze 0.37, Dragon's Rage Channeler 0.37, Force of Will 0.37, ...
+    true:     Unholy Heat 2, Cori-Steel Cutter 1, Force of Will 1, Ponder 1
+```
+
+(The head-only fit on the frozen trunk; `E:\mtg-zero-scratch\belief\report_600b.json` has these with the
+residual's and count-matching's, and every number of this section; `report_jt.json` / `report_jt0.json`
+the fine-tunes'.) The pattern: a hand of counterspells is held, not cast, so a turn of the opponent's
+that passes with mana up and cards in hand says "Force of Will and Daze" -
+which the uniform deal cannot know and the static bias only half knows.
+
+**Replays**: `python -m mtgz.az.replays E:\mtg-zero-scratch\belief\headonly\models\iter_0041.pt --games 2
+--device cpu --seed 5` (iteration 41's network with the head-only fit; the run config copied next to
+it): `E:\mtg-zero-scratch\belief\replays\20261029-124601_000.json.gz` (764 steps) and `..._001.json.gz`
+(372 steps), every network decision with its `belief`.
+
+### 66.7 The A/B of stage 1 (flags; not run)
+
+Stage 1 changes the search in nothing: the head is trained, never read by self-play or the evaluations.
+Whatever it brings comes through **representation learning** - its gradient shapes the trunk the policy
+and value heads share (as KataGo's ownership target did for Go). So the A/B asks whether the main line
+trains better with the auxiliary loss, at equal iterations, as round 2 asks it of its settings
+(`runs/ab-r2/ab_driver.py`): fork delver2 at its newest checkpoint K with the target on, run the fork
+then the control K -> K + 10 on the same build, h2h of the two K + 10 checkpoints (600 games, both
+sides `--select cq --select-min-visits 4` at scale 0.3); the fork wins at >= 0.5 + 2 se.
+
+* **The weight**: 0.25. The multinomial loss starts at the zero head's ln 1024 = 6.93 and reaches
+  ~2.2-2.6 nats per card on held-out positions (66.6; lower on the window) against the policy loss's
+  ~0.37 and the value loss's ~0.39 (delver2's iteration 41): 0.25 keeps the auxiliary term at ~0.6, of
+  the order of the other two. At weight 1, 400 steps cost +0.008 nats of held-out policy loss and +0.004
+  of value loss against the same fine-tune without it while the trunk gained 0.26 nats of belief
+  (66.6): small, but the A/B's question is the policy, so a quarter of that. 0.1 and 1.0 are the
+  follow-ups if 0.25 shows something (a dose response).
+* **The carry-over**: `fork_run --set aux_belief_w=0.25` makes the fork's config ask for the target;
+  its first self-play records it (from checkpoint K: the head is not needed to record), its first
+  training adds a fresh head to K (zero-core az.md 15.4: every other weight exactly K's, the AdamW
+  moments of the trunk kept) and trains on a window whose delver2 shards have no target (masked: they
+  still train the policy and value as before). The window turns over in 6 iterations, so the share of
+  rows with a target grows 1/6 -> 1 over the first half of the arm (`train.aux.share`).
+* **The build**: a pinned run worktree of the merged main and its Mac checkout (`bash tools/mac.sh
+  --eval-checkout`): the Mac self-plays a share of every iteration, and its workers must record the
+  target (an older checkout's shards come back without it: accepted, logged, masked - zero-core az.md
+  15.2). With the target off the build plays and trains as the main line's, byte for byte (66.9), so
+  the control continues delver2 unchanged.
+* **Costs**: no extra simulation or network call in self-play (the target is read from the game when a
+  decision is recorded: one pass over the opponent's hand); training: the head's forward and backward
+  (256 x 128 + 128 x 1024 multiply-adds a row against the trunk's ~5 M: < 1%); shards +2 KB a row
+  uncompressed (+2.7% of a Delver row; the Mac's compressed shards: sparse, nearly nothing); the
+  window +2 KB a row in RAM (delver2's 265k rows: +0.54 GB of 20 GB).
+* **What to read**: the verdict; `train.aux_belief` and `train.aux_belief_hit` per iteration (the
+  head learning; compare with 66.6's head-only numbers on the same positions); the policy and value
+  losses and `train.entropy` against the control's (the auxiliary gradient must not degrade them);
+  both arms against the heuristic. A null result is informative too: 66.6 says how much of the hand
+  the trunk already reads without the loss.
+
+The experiment entry for an `ab_config.json` (round 2's driver: `requires` waits for a build that has
+the flag, `set` goes to fork_run, `flags` to the fork's supervisor):
+
+```json
+{"name": "belief025", "requires": "--aux-belief-w", "flags": ["--aux-belief-w", "0.25"],
+ "set": ["aux_belief_w=0.25"]}
+```
+
+By hand (K = delver2's newest checkpoint after a STOP; `$BASE` = round 2's `base_flags`, 63.6):
+
+```
+python tools/fork_run.py --source runs/delver2 --dest runs/r3-1-belief025 --iter K --set aux_belief_w=0.25
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py runs/r3-1-belief025/supervisor_console.txt \
+  python tools/supervise.py runs/r3-1-belief025 $BASE --iters $((K+10)) --eval-every 1000 --aux-belief-w 0.25
+# when it has iteration K+10: the control, the same flags without the target
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py runs/delver2/supervisor_console.txt \
+  python tools/supervise.py runs/delver2 $BASE --iters $((K+10)) --eval-every 1000
+N=$(printf %04d $((K+10)))
+python -m mtgz.az.h2h runs/r3-1-belief025/models/iter_$N.pt runs/delver2/models/iter_$N.pt \
+  --games 600 --sims 32 --spec "$(python -c "import json; print(json.load(open('runs/delver2/config.json'))['spec'])")" \
+  --device cuda --threads 8 --seed 7 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 0.3
+```
+
+The fork's K + 10 has the head (its h2h and evaluations never compute it: the same search as a
+network without one); its replays show the belief (66.5).
+
+### 66.8 Stage 2: belief-weighted determinization (the design; not built)
+
+**The idea.** Today every simulation of a search deals the opponent's unseen cards uniformly
+(`Game::determinize`, section 10): every consistent assignment equally likely, Force of Will as likely
+in a hand that passed with UU open as in one that tapped out for a threat. Stage 2 deals them from the
+belief: at the root of each decision, one forward pass gives the head's distribution over the
+opponent's hand, and every simulation of that search samples a world from it instead - so the tree's
+statistics are averaged over the worlds the network finds likely.
+
+**From the head to weights.** The head gives p_k (a random card of the hand is identity k), so
+e_k = n p_k is the expected count (n = the hand size, public). Today's deal has expected count
+u_k = known_k + m h_k / H (known_k: the hand cards the decider knows; m = n - sum known: the hand's
+unknown cards; h_k: the identities of the opponent's cards it has not seen, the hidden pool, H their
+total). The weighted deal tilts the unknown part by one weight per identity,
+w_k = clip(((e_k - known_k)^+ / max(u_k - known_k, eps))^alpha, 1/R, R): alpha the tilt (0 = today's
+deal; a seat setting), R the clip (e.g. 20: no card is ever ruled out or forced). A world's
+probability becomes the uniform one times the product of w over the unknown cards dealt into the hand
+(Fisher's multivariate noncentral hypergeometric, restricted to the consistent assignments).
+
+**The deal, exactly as `Game::determinize` but weighted.** Everything that pins a card stays:
+* the cards the decider knows exactly stay where they are (hand, library positions); the pinned mana
+  sources of a payment in progress stay; public zones are untouched;
+* each cloud (section 10: a Brainstorm put-back, mulligan bottoms, a look at the top, a search, a
+  shuffle) first places its identities inside its domain - uniformly as today, or with the same
+  weights for the cloud's hand-or-library choice (its hand slots weighted by w, its library slots not);
+* the hand's remaining unknown slots (m minus the cloud cards dealt into the hand) are filled by
+  **sequential weighted sampling without replacement** from the remaining pool: each draw takes
+  identity k with probability proportional to w_k x (copies of k left); the hand size is exact by
+  construction, and an identity the pool lacks is never drawn;
+* the pool's rest goes to the library's unknown slots and the face-down cards the decider doesn't
+  know, uniformly ordered (`rng.shuffle`, as today; the library order has no belief);
+* best-of-three's hidden pool (36.11: `sample_hidden_pool`) is sampled first as today, the weights then
+  apply to the hand of the deck it sampled (identities outside it simply have no copies).
+Sequential sampling gives Wallenius' distribution, not Fisher's: the two agree to first order in the
+weights' spread and the sampler is exact in hand size, cheap (n draws over <= 25 identities: well under
+a microsecond against ~15 us for today's deal) and needs no rejection. If the difference ever matters,
+a short Metropolis chain (swap an unknown hand card with an unknown library card, accept with
+min(1, w_new / w_old)) after the uniform deal samples Fisher's exactly with every constraint kept (the
+swaps never touch a pinned, known or cloud-bound card). The weights are fitted to the head by moment
+matching only approximately (the ratio above); a few fixed-point steps on the Wallenius means would
+make the deal's expected counts equal e_k exactly - measure first whether it matters.
+
+**Where the root's belief comes from.** One forward pass at the root per decision: the root's features
+are the decider's view, the same in every world (the encoding is blind to hidden cards), so one belief
+serves the whole search. Mechanics in the Rust driver: when a decision starts (`start`), a slot whose
+seat has the tilt on asks the evaluator for the root's auxiliary output - the root's own expansion row
+when the root is fresh (its pass computes the head for that row), else one extra row in the next batch
+of that key (a reused root was expanded during the previous search, as an inner node, and nodes keep no
+head output); the slot's simulations wait for it (one batch round trip; its other games go on). Minor
+decisions (mana payments) and fast searches may skip it (a seat option; default: full searches only).
+Cost: <= 1 extra row per searched decision - +1.6% of the leaves at 64 simulations, +6% at 16 - and
+the head (< 1% of the pass).
+
+**The zero-core hook.** Additive, default off:
+* `SearchGame::determinize_with(&mut self, viewer, rng, belief: &[f32])` - default `determinize(viewer,
+  rng)` (a game without it ignores the belief): the tree calls it instead of `determinize` in
+  `simulate_with` (and `set_base` without redet) when it holds a belief.
+* `Tree::set_belief(Option<Vec<f32>>)` (the search keeps the root's prediction for its decision; `None`
+  = today's search bit for bit).
+* The leaf-batch protocol: a network batch may flag rows whose auxiliary output is wanted (`aux_rows`),
+  `submit(id, priors, value, margin, aux=None)` returns it for those rows (`NetEvaluator.evaluate(...,
+  aux_rows)`: the head on those rows only). Seat keys `belief_tilt` (alpha; 0 = off), `belief_clip`
+  (R), `belief_mix` (the share of simulations dealt uniformly, a safety net), `belief_fast` (fast and
+  minor searches too). The game's package maps the head's output to the weights (MTG Zero: the formula
+  above in the engine, `MtgAz::determinize_with`, reading the decider's known cards and hidden pool from
+  the game, never from the network).
+* The other agent's root-view values (ENGINE.md 67, zero-core `feat/root-view-values`) touch the same
+  batching interface (a second, value-only pass from the non-mover's view): both are flagged extra rows
+  in the leaf batch, so they should share one mechanism - whichever lands second adds its flag to the
+  other's.
+
+**Risks.**
+* **Overconfidence.** The search can only explore worlds it deals: a hand the belief puts at 0.01 is
+  nearly never searched, so a sharp but wrong head makes the search blind to the punish (the opponent
+  who does have Force of Will). Mitigations: the clip R (no world rarer than 1/R of today's odds per
+  card), the tilt alpha < 1, the uniform share `belief_mix` (e.g. 0.25 of the simulations dealt as
+  today), and the head's calibration measured per card (66.6's AUCs and predicted-vs-actual counts; a
+  reliability table per iteration).
+* **A feedback loop in self-play.** The head learns how this policy plays its hands; a search that
+  believes it exploits this policy's tells; the policy, trained on those searches, learns to hide them;
+  the head lags a window behind. That can cycle or drift into a mirror-specific equilibrium that a real
+  opponent breaks. Mitigations: the league (63) and the heuristic in evaluation (fixed opponents the
+  belief was not trained on), the head's loss per iteration (a sudden rise = the policy moved), alpha
+  kept moderate, and turning the tilt on in evaluation first (no feedback) before self-play.
+* **Cost.** The extra row and the head (above); the weighted deal is cheaper than the shuffle it
+  replaces. Training is unchanged from stage 1.
+* **Correctness.** The deal must keep every invariant the fuzz checks (section 10's checks: the
+  decider's legal actions and observable view, known cards in place, clouds held, every card of the
+  owner's pool exactly once), with a belief or without; `None` must be today's deal bit for bit (the
+  digests and zero-core's golden records unchanged with the tilt at 0).
+
+**Tests.** The deal: invariants on the fuzz positions with random beliefs (legal actions, `view_of`,
+known cards, clouds, the pool's multiset, hand size); weights all 1 -> the uniform deal's distribution
+(a chi-square over 100k deals of a fixed position, against `determinize`'s); a tilt -> the
+Wallenius expectation on small analytic cases (a pool of 3 identities, a hand of 2); a clip honoured
+(the share of worlds with a down-weighted card >= its uniform share / R); best-of-three's hidden pool
+first. The driver: tilt 0 = the golden records; the belief row's cost counted; the root belief equal to
+`NetEvaluator.aux` of the root's features. The fuzz: `determinize_with` at every check point with a
+random belief.
+
+**The A/B.** Two questions, cheapest first.
+1. **Does the belief help the search at all?** No training: the same checkpoint (one with a trained
+   head: the stage 1 fork's, or 66.6's head-only fit) against itself, one side dealing by the belief,
+   600 games of the Delver h2h; then alpha 0.5 / 1 and the mix 0 / 0.25. A positive score here is
+   worth a self-play run; a null one says the search's averaging washes the belief out (or the head is
+   too flat: 66.6's gains over count-matching bound what it can do).
+2. **Does self-play with it learn faster?** A fork of the main line with the tilt in self-play (and
+   in evaluation), against the control, 10 iterations, h2h at the same move rule with each side's own
+   dealing - and both against the heuristic and older checkpoints (the feedback loop's tell is a fork
+   that beats its control but loses ground against fixed opponents).
+
+### 66.9 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (the tiered gates), all CPU only
+(`CUDA_VISIBLE_DEVICES=-1`), below normal, nothing on the Mac.
+
+* **zero-core** feat/belief-head (1549668 the feature, 5dbe2ba a remote-shard log line + docs, 2cb150d
+  `Run.driver` reads the targets with getattr; on main b486d36): `cargo test --release --workspace` **61
+  + 3 passed** (2 new); `pytest tests` **246 passed, 2 skipped** (the CUDA graph-runner test deselected:
+  it fails without a visible device, as on the base), `tests/test_aux.py` 18 passed again at 2cb150d;
+  the golden records unchanged with aux on and off; **byte identity** against main b486d36 (its own
+  worktree and target dir), the settings left out and given at their default (`--aux-next-card-w 0`),
+  with `ZERO_INFLIGHT=1`: toy-smoke MLP vs `ext:toyheur` and tokens (classic, 3 iterations), cq targets
+  + `eval_select cq` guard 2 (rolling, 3), the Delver line's shape (rolling, cq 0.3, guard 4 at 0.3, raw
+  Elo offsets, no random games, value_q 0.6, window_cache, train_prefetch, tokens; 4) - every shard,
+  `elo/results.json`, `ratings.json` (`updated` aside), `models/index.json` byte for byte, every
+  checkpoint and the optimizer state tensor for tensor, the metrics without their timings, config.json
+  = the base's + `aux_next_card_w: 0.0` (14-16 files a run, all identical); `check_checkpoint_compat
+  --package zero` (random, uniform, a toy MLP and a toy token checkpoint): identical; Glass Road Zero
+  c1f56dc (60 s), Caverna Zero a6fad73 (102 s) and Kingdom Builder Zero 4202a4a (133 s) build against
+  it (build_py, every test compiled, the package imported; their packages declare no target).
+* **This repo** (branch `belief` rebased onto main 590e7fe; the suites at pin 2cb150d = a560448's code): `bash tools/build_py.sh`;
+  `cargo test --release -p engine --test az` **32 passed** (2 new), `--test hidden` **11 passed**, the
+  behaviour digests **unchanged: combined 65e8a5155bd2000c** (main 590e7fe's re-recorded value; before
+  the rebase, on 87ea619, 808de5cb10665e48 = that main's); `pytest tests` **55 passed** (6 new; the
+  evaluation-spec test's stand-in Run is why 2cb150d exists); `check_checkpoint_compat --package mtgz`
+  with delver2's iteration 41 (a copy) on main 87ea619's build against this one (before the rebase; the
+  rebase brought only the other session's engine change, whose digests match): the Delver spec, 8
+  self-play games per target, 8 against random: **identical** (records visits a3efe86c768f3d0a, cq
+  b4ad8a713aec8d4c, results 523c7c2eed7f6397, 8 / 8 against random).
+* No digest re-record, no search smoke: with `aux_belief_w` 0 no game plays or trains differently.
+
+### 66.10 Limits, open questions, conflict points
+
+* **The head's input is the pooled state only.** A belief per card would read better from the tokens
+  (attention from a query per identity, or the identity embeddings as the output layer); the MLP on z
+  is zero-core's generic head. The residual over count-matching (66.6) suggests the cheapest gain: give
+  the head the uniform prior (the hidden-pool bag is in the features) as a base. Not built: measure the
+  plain head in a run first.
+* **Self-play data at 32 simulations, every decision recorded** (66.6): the evidence's positions are
+  denser than a run's (p_full 0.25 at 64 / 16); the head-only fits overfit by game in two epochs, so
+  the numbers are a lower bound on what a run's window (thousands of games) gives.
+* **The joint fine-tune trained on the train games' hands**; the held-out games are clean, the refits'
+  early stopping is not (the trunk saw those games): their epoch choice, not their held-out score.
+* **Conflict points.** zero-core: the other session's `feat/root-view-values` (MTG Zero's ENGINE.md
+  67) extends the evaluator / leaf-batch interface; this branch only ADDS `NetEvaluator.aux` and the
+  tolerant `set_weights` (no change to `evaluate`, `launch`, `result`, the protocol), `DriverCfg::aux`
+  (a new field: every struct literal of `DriverCfg` gains it - this repo's `draft_deferred.rs`),
+  `Record::aux`, `DynGame::aux_target`, `GameInfo::aux`, the `SearchDriver(aux=)` keyword, `Run.driver`'s
+  kwargs, `train_model`'s optimizer and loss block, `Window(aux_width=)`, and az.md section 15 (the root
+  view agent may number its section 15 too). Stage 2's protocol change (`aux_rows` in a batch) is
+  where the two meet: one flagged-rows mechanism for both (66.8). This repo: `engine/src/az/mod.rs`'s
+  `SearchGame` impl (two items appended), `mtgz/az/__init__.py`'s `GamePackage(...)` call (two keys),
+  tests appended at the end of `engine/tests/az.rs`; ENGINE.md 66 between 65 and the root-view agent's 67.

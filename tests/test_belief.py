@@ -122,3 +122,5 @@ def test_a_replay_of_a_checkpoint_with_the_head_shows_belief(tmp_path):
         assert all(isinstance(c[0], str) for c in b['cards'])
         assert sum(c[1] for c in b['cards']) <= b['n'] + 1e-6
     assert [s['aux'] for s in reps[0]['seats'] if s['kind'] == 'nn'] == [['belief']]
+    from mtgz.az.replays import summary
+    assert summary(reps[0])['belief'] is True

@@ -12,6 +12,11 @@ play-by-play), its self-play simulations (`sims`) and `chance_k`. Evaluation set
 default (no noise, the most visited option: how the network plays); `--selfplay` = the run's
 self-play noise and temperature for the first `temp_moves` decisions (what training sees).
 
+A checkpoint with the belief head (run setting `aux_belief_w`, docs/ENGINE.md 66) adds to every network
+decision's frame `belief: {for, n, cards: [[name, expected count], ...]}` - the decider's prediction of
+its opponent's hand, the 12 likeliest cards (`mtgz.az.belief.render`, the package's `replay_aux`); its
+seat lists `aux: ["belief"]`, and the listing record (`summary`) says `belief: true`.
+
 Files: `runs/<run>/replays/<stamp>_<k>.json.gz` (format zero-replay/1). `--upload` posts each to
 `<url>/api/replays/upload` (default URL `SITE`) with the key from `--key-file`, the environment
 variable `MTGZ_DELVERAI_KEY` or `~/delverai/.upload_key` (the site's Worker secret UPLOAD_KEY).
@@ -107,7 +112,8 @@ def summary(rep):
             'life': [p.get('life') for p in final.get('players', [])],
             'starting': final.get('starting', first.get('starting')),
             'mulligans': [p.get('mulligans') for p in final.get('players', [])],
-            'frames': len(rep['frames']), 'over': rep['over']}
+            'frames': len(rep['frames']), 'over': rep['over'],
+            'belief': any('belief' in (s.get('aux') or []) for s in rep['seats'])}
 
 
 def public(rep):
