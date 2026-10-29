@@ -133,6 +133,8 @@ def now_record(run, cfg, prog, rows, state):
         if prog.get('remote'):             # remote self-play (zero-core remoteplay): its games this iteration
             r = prog['remote']
             out['selfplay']['remote'] = {k: r.get(k) for k in ('host', 'workers', 'state', 'games')}
+        if 'local' in prog:                # the shared queue: games / target are both machines', local this one's
+            out['selfplay']['local'] = prog['local']
     elif prog.get('phase') in ('train', 'eval', 'remote shards'):
         out['since'] = prog.get('time')
     # The latest checkpoint's evaluation while it runs (a remote one runs beside the next
