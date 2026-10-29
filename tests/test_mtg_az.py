@@ -330,3 +330,46 @@ def test_the_encoding_guard_refuses_a_v4_network_and_takes_a_v5_one(tmp_path):
     assert d.config['layout']['version'] == 2 and encoding_mismatch(d.config) is None
     with pytest.raises(EncodingMismatch, match="game 'team_draft' -> 'mtg'"):
         check_encoding(d.config, 'mtg')
+
+
+def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v5(tmp_path):
+    """ENGINE.md 62: zero-core's distillation (tools/distill.py) on Delver mirror self-play shards of
+    this build: a token network of another size trained on a small teacher's answers, held out on
+    another shard; the student is a layout v5 network (version recorded, the encoding guard accepts
+    it), its record in the checkpoint, and it moved toward its teacher."""
+    import os
+    import sys
+    import torch
+    from mtgz.az import decklists
+    from zero.data import ShardWriter
+    from zero.net import load, make_net, save
+    info = G.info('mtg')
+    spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
+    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions']}
+    for name, seed in (('iter_0001', 3), ('iter_0002', 4)):
+        seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10)
+        drv = G.Driver('mtg', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,
+                       max_steps=20000)
+        w = ShardWriter(str(tmp_path / 'data' / name), 'c00', rows=4096, meta=meta)
+        drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: w.add(drv.take_samples()))
+        w.add(drv.take_samples())
+        assert w.close()['samples'] > 50
+    torch.manual_seed(0)
+    t = make_net(info, 'mtg', 'tokens', 32, 1, heads=2)
+    with torch.no_grad():
+        for lin in (t.gen, t.ptr):                  # a teacher with a policy (they start at zero)
+            lin.weight.normal_(0, 0.3)
+            lin.bias.normal_(0, 0.3)
+    tp, out = str(tmp_path / 'teacher.pt'), str(tmp_path / 'student.pt')
+    save(t, tp, {'iter': 3})
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    import distill
+    assert distill.main([tp, out, '--data', str(tmp_path / 'data' / 'iter_0001'), '--heldout',
+                         str(tmp_path / 'data' / 'iter_0002'), '--hidden', '48', '--blocks', '2', '--heads', '2',
+                         '--steps', '40', '--batch', '64', '--lr', '2e-3', '--warmup', '5', '--eval-every', '0',
+                         '--torch-threads', '1', '--normal-priority']) == 0
+    s, extra = load(out, game='mtg')
+    assert (s.config['d'], s.config['layers'], s.config['layout']['version']) == (48, 2, 5)
+    h = extra['distill']['heldout']
+    assert [x['step'] for x in h] == [0, 40] and h[-1]['policy_kl'] < h[0]['policy_kl']
+    assert extra['teacher_extra'] == {'iter': 3} and extra['distill']['student_net']['params'] == s.n_params()
