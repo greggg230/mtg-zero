@@ -12,7 +12,8 @@ Each pass:
     the site's estimates), POSTed to <url>/api/progress/upload; with --loop, from its own thread
     every --progress-every seconds (60), recording or not;
   * games: when models/ holds a checkpoint newer than the last one recorded (and its file has
-    settled), `mtgz.az.replays` records `--games` games of it against itself with the run's
+    settled; with `--every N` only iterations divisible by N count), `mtgz.az.replays` records
+    `--games` games of it against itself with the run's
     self-play simulations (evaluation settings: no noise, the most visited option) and uploads
     them. Only the newest checkpoint is recorded; ones skipped while the publisher was down are
     not back-filled. The recorded iterations are kept in <run>/delverai.json.
@@ -173,8 +174,8 @@ def deck_of(cfg):
     return info
 
 
-def progress(run):
-    """The site's progress record of a run."""
+def progress(run, every=1):
+    """The site's progress record of a run (`every`: which iterations get games recorded)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
     st = runctl.run_status(run)
     prog = _json(os.path.join(run, 'progress.json'))
@@ -192,17 +193,18 @@ def progress(run):
         'ratings': {k: {'elo': _r(v.get('elo'), 1), 'se': _r(v.get('se'), 1), 'games': v.get('games')}
                     for k, v in (ratings.get('ratings') or {}).items()},
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')},
-        'replayed': state.get('replayed', []),
+        'replayed': state.get('replayed', []), 'record_every': every,
     }
 
 
-def latest_checkpoint(run, settle_s=30):
-    """(iteration, path) of the newest models/iter_NNNN.pt whose file has settled, else None."""
+def latest_checkpoint(run, every=1, settle_s=30):
+    """(iteration, path) of the newest models/iter_NNNN.pt with an iteration divisible by `every`
+    whose file has settled, else None."""
     best = None
     d = os.path.join(run, 'models')
     for f in os.listdir(d) if os.path.isdir(d) else []:
         m = re.fullmatch(r'iter_(\d+)\.pt', f)
-        if m and (best is None or int(m.group(1)) > best[0]):
+        if m and int(m.group(1)) % every == 0 and (best is None or int(m.group(1)) > best[0]):
             best = (int(m.group(1)), os.path.join(d, f))
     if best and time.time() - os.path.getmtime(best[1]) < settle_s:
         return None
@@ -210,7 +212,7 @@ def latest_checkpoint(run, settle_s=30):
 
 
 def post_progress(run, a, key, log=print):
-    p = progress(run)
+    p = progress(run, a.every)
     if a.dry_run:
         log(json.dumps({k: v for k, v in p.items() if k != 'iters'})[:800])
         log(f'{len(p["iters"])} iteration rows')
@@ -223,7 +225,7 @@ def one_pass(run, a, key, log=print, kick=None):
     (`kick`, its wake-up event) the progress is posted here, before and after."""
     if kick is None:
         post_progress(run, a, key, log)
-    ck = latest_checkpoint(run)
+    ck = latest_checkpoint(run, a.every)
     state_path = os.path.join(run, 'delverai.json')
     state = _json(state_path, {}) or {}
     done = state.get('replayed', [])
@@ -282,6 +284,7 @@ def main(argv=None):
     ap.add_argument('--device', default='cpu', help='inference device (default cpu, see above)')
     ap.add_argument('--threads', type=int, default=4, help='torch threads for CPU inference')
     ap.add_argument('--min-iter', type=int, default=None, help='record no checkpoint older than this')
+    ap.add_argument('--every', type=int, default=1, help='record only iterations divisible by this (2: even ones)')
     ap.add_argument('--url', default=replays.SITE)
     ap.add_argument('--key-file', default=None)
     ap.add_argument('--dry-run', action='store_true', help='record, but upload nothing')
