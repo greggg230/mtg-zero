@@ -39,11 +39,12 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mtgz.az import decklists, replays  # noqa: E402
-from zero import runctl  # noqa: E402
+from zero import elo as zelo, runctl  # noqa: E402
 
 SETTINGS = ('preset', 'iters', 'games', 'sims', 'sims_fast', 'p_full', 'sims_minor', 'temp_moves', 'arch', 'hidden',
             'blocks', 'heads', 'ff', 'policy_target', 'eval_games', 'eval_sims', 'eval_random_games', 'elo_games',
-            'elo_sims', 'eval_every', 'yardstick', 'window', 'lr', 'seed')
+            'elo_sims', 'eval_every', 'yardstick', 'window', 'lr', 'seed', 'eval_select', 'eval_select_min_visits',
+            'elo_offsets')
 
 
 def _json(path, default=None):
@@ -82,6 +83,8 @@ def iteration_rows(run):
         out.append({
             'iter': m.get('iter'), 'time': m.get('time'), 'seconds': _r(m.get('seconds'), 1),
             'elo': _r((elo or {}).get('elo'), 1), 'elo_se': _r((elo or {}).get('se'), 1),
+            # the evaluation move rule that rated it (zero-core docs/az.md 5.4: each rule its own Elo pool)
+            'select': (elo or {}).get('select') or (y or {}).get('select') or 'visits',
             'yard_win': _r((y or {}).get('win')), 'yard_se': _r((y or {}).get('se')), 'yard_games': (y or {}).get('games'),
             'yard_margin': _r((y or {}).get('margin'), 2), 'yard_turns': _r((y or {}).get('rounds'), 2),
             'rand_win': _r((rnd or {}).get('win')), 'rand_se': _r((rnd or {}).get('se')), 'rand_games': (rnd or {}).get('games'),
@@ -184,7 +187,8 @@ def progress(run, every=1):
     st = runctl.run_status(run)
     prog = _json(os.path.join(run, 'progress.json'))
     idx = _json(os.path.join(run, 'models', 'index.json'), {}) or {}
-    ratings = (_json(os.path.join(run, 'elo', 'ratings.json'), {}) or {})
+    tag, pool = zelo.active_pool(run)             # the Elo pool of the run's evaluation move rule now
+    ratings = (_json(os.path.join(pool, 'ratings.json'), {}) or {})
     log = os.path.join(run, 'log.txt')
     rows = iteration_rows(run)
     state = _json(os.path.join(run, 'delverai.json'), {}) or {}
@@ -196,7 +200,7 @@ def progress(run, every=1):
         'iters': rows, 'best': idx.get('best'), 'now': now_record(run, cfg, prog, rows, state),
         'ratings': {k: {'elo': _r(v.get('elo'), 1), 'se': _r(v.get('se'), 1), 'games': v.get('games')}
                     for k, v in (ratings.get('ratings') or {}).items()},
-        'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')},
+        'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
         'replayed': state.get('replayed', []), 'record_every': every,
     }
 
