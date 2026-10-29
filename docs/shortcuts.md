@@ -12,7 +12,7 @@ Classes:
   part 2, branch `m7e-pay`, the payment model, tests in `engine/tests/rules_payment.rs`).
 * **B**: an engineering limit kept on purpose, mostly tied to the frozen action-id layout
   (layout v3: `NUMBER` 0..31, 96 permanent slots, 4 `ACTIVATE` slots, 16 `TRIGGER` slots, 64
-  tokens) or to the search model.
+  tokens; 32 `STACK` and 32 `EXILE` slots, 64 hand, library-list and graveyard slots: ENGINE.md 58) or to the search model.
 * **C**: rules-equivalent (a representation that offers the same choices or results: definitions
   instead of cards in a search, modes as multisets, dominated options left out) or not reachable
   with the cube's cards.
@@ -56,7 +56,7 @@ Classes:
 | 26.11.3 | A double-faced card that is copying something doesn't transform | C | kept: reachable only through Saheeli's -2 on a daybound creature over a day/night change | `faces.rs` |
 | 26.11.4 | "Another target" requirements choose at most one target each | C | kept: the lowering checks | `lower` |
 | 26.11.5 | A copy effect's exceptions hold at most four subtypes | B | kept | `copies.rs` |
-| 26.11.6 | At most 96 permanents per player | B | kept: the `MY_PERM` / `OPP_PERM` slots | `game.rs` |
+| 26.11.6 | At most 96 permanents per player | B | kept: the `MY_PERM` / `OPP_PERM` slots. ENGINE.md 58.2 closed the paths around the token cap: with no room (`Game::perm_room`: 96 less the player's permanents and the cards they own elsewhere), gaining control of another player's permanent does nothing (an exchange of control is unchecked: it keeps both counts), another player's card enters under its owner's control, a token or a copy of a permanent spell (Sage of the Skies) ceases to exist instead of entering | `game.rs` (`token_count`, `perm_room`, `change_control`, `put_onto_battlefield_attached`); `tests/limits.rs` |
 | 26.11.7 | At most 31 copies a turn by "may copy this spell" | B | kept (732.2a loop cap) | `copies.rs` |
 | 26.11.8 | Kicker's additional costs added after reductions | A | fixed in M7b part 3b (27.6) | `cast.rs` |
 | 26.11.9 | Chain of Smog's IR flag `needs_target_with_cards_in_hand` ignored | C | kept: the Oracle text has no such condition | `lower` |
@@ -116,6 +116,9 @@ Classes:
 | 46.4 | (M6) One instruction's loop counts are a frame's `u8`: at most 255 copies of a spell by "copy it n times", 255 cards drawn and discarded by a connive, 60 cards looked at by "look at the top n", 254 mana from Coalition Relic's charge counters | B | kept: none is reachable in a 40-card game but Coalition Relic's counters (one a turn) | `copies.rs`, `faces.rs`, `resolve_ext.rs`, `resolve_tail.rs` (`remove_all_add_mana`) |
 | 46.5 | (M6) Spells cast and cards drawn this turn are counted to 255 a player (`u8`, saturating; storm counts both players', to 510) | B | kept: a 40-card game doesn't reach it | `cast.rs`, `game.rs` |
 | 46.6 | (M6) Turn numbers are at most 65,535 (`max_turns` checked by `Game::with_sideboards`; per-object turn numbers are `u16`); a game has at most 65,534 objects (`CardIdx`; tokens and copies take new slots; `add_card` panics past it) | B | kept: the turn cap is 60 (180 a match); loud past the object cap | `game.rs` |
+| 58.1 | (ENGINE.md 58.1) A spell's or an ability's target on the stack is one of the 31 stack items below it: the deeper (older) items of a stack taller than 32 can't be targeted (CR 115.1 has no such limit) | B | kept: the 32 `STACK` slots (layout v4); was a panic (`stack slot 38 out of range`, a `delver-smoke` worker, ENGINE.md 56.11). The checks before a cast, an activation or a trigger use the same items (`Game::stack_in_reach`, `Game::targeting`), so a spell whose only target is deeper is not offered and a trigger with none in reach is removed (603.3d); a copy keeps a deeper target by `PASS` | `cast.rs` (`stack_in_reach`, `target_candidates`, `has_candidates`), `copies.rs`; `tests/limits.rs` |
+| 58.3 | (ENGINE.md 58.3) A deck has at most 64 cards, 63 with a companion in its sideboard (CR 100.2a has no maximum) | B | kept: a hand, a library list and a graveyard have 64 action slots; every decklist of an `mtg` spec is checked (constructed, limited, drafted), a larger one refused | `az/constructed.rs` (`check_size`), `az/mod.rs`; `tests/limits.rs` |
+| 58.4 | (ENGINE.md 58.4) At priority, and for an effect's choice of exiled cards, the first 32 exiled cards the player may play or choose are offered (exile order) | B | kept: the 32 `EXILE` slots; more than 32 playable exiled cards at once needs a pile of impulse draws | `cast.rs`, `faces.rs`, `resolve_m7d.rs`, `resolve_tail2.rs`, `resolve_tail3.rs`, `resolve_walkers.rs` |
 
 ## Notes on the new mechanisms
 

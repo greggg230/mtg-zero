@@ -1096,8 +1096,7 @@ fn settle(g: &mut engine::Game, prefer: impl Fn(&engine::Game) -> Option<engine:
             g.pass();
             continue;
         }
-        let c = prefer(g).filter(|&c| g.has_option(c)).unwrap_or(d.options[0].choice);
-        let _: Choice = c;
+        let c: Choice = prefer(g).filter(|&c| g.has_option(c)).unwrap_or(d.options[0].choice);
         g.choose(c);
     }
     panic!("settle: no progress\n{}", g.log_lines().join("\n"));
@@ -1117,9 +1116,9 @@ fn features(g: &engine::Game, v: u8) -> Vec<f32> {
 /// types and colours as they are are the gate's perturbations').
 #[test]
 fn the_public_state_fixes_are_encoded() {
-    use encode::{glob, mtch, perm, stack, O_GLOBALS, O_MATCH, O_MY_PERM, O_OPP_PERM, O_STACK, PERM_W, STACK_W};
+    use encode::{glob, mtch, perm, stack, O_GLOBALS, O_MATCH, O_MY_PERM, O_OPP_PERM, O_STACK, PERM_W};
     use engine::testkit::Scenario;
-    use engine::{Choice, DecisionKind, Target, Zone};
+    use engine::{Choice, DecisionKind, Zone};
     let db = CardDb::cube();
     let perm_slot = |g: &engine::Game, v: u8, c: engine::CardIdx| -> usize {
         let ctl = g.obj(c).controller;
@@ -1206,7 +1205,6 @@ fn the_public_state_fixes_are_encoded() {
         _ => None,
     });
     assert_eq!(g.player(0).energy, 3, "{}", g.log_lines().join("\n"));
-    let _ = Target::Player(0);
     for v in 0..2u8 {
         let x = features(&g, v);
         let side = v as usize;

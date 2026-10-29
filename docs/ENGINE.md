@@ -552,7 +552,7 @@ to the decider:
 | `HAND` | 36-99 | decider's hand slot 0..63 (cast, play, choose, discard, bottom, put onto the battlefield) |
 | `MY_PERM` | 100-195 | decider's permanents, slot 0..95 (attack, block with, sacrifice, target) |
 | `OPP_PERM` | 196-291 | opponent's permanents, slot 0..95 (target, block this attacker) |
-| `STACK` | 292-323 | stack slot 0..31, 0 = top (target spell) |
+| `STACK` | 292-323 | stack slot 0..31, 0 = top (target spell; a target is one of the 31 items below the targeting spell or ability, section 58.1) |
 | `TRIGGER` | 324-339 | decider's waiting triggers, slot 0..15 (order triggers) |
 | `LIBRARY` | 340-403 | slot 0..63 of a list sorted by (definition, card index): a searched library (a definition, at its first slot), a looked-at pile, another player's seen hand |
 | `GRAVEYARD` | 404-531 | decider's 0..63, opponent's 64..127 (M4b) |
@@ -1212,7 +1212,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_farm.rs` | M6 (section 51): the fuzz farm's first bugs, each state built on cube cards: the hidden pool's deal holds the clouds while the opponent pays (Elvish Spirit Guide, a best-of-three match from a scenario: every world is the sampled deck), 400.3 (an opponent's Lotus Petal is not in your graveyard: no Psychic Frog exile, no delve for Treasure Cruise), 605.3a (Gaea's Cradle animated by Nissa with 28 creatures and Aang's waterbend: checked and paid within 30 s on a thread), 701.25a (a surveiled Blightsteel Colossus shuffles the library after the pile is placed: the decider's worlds and encoding keep the other card), 709.3 (Life // Death from Shelldock Isle revealed before the half is chosen: fixed by 49.6, fails on 075649c), 601.2g-h (delve's cards exiled after the mana abilities: Fanatic of Rhonas with a delirious Dragon's Rage Channeler pays Dig Through Time); five fail on ab02574, all six on 075649c; `pay.rs` unit tests: `covers` on 255 units and an augmenting path, an exhausted search's panic |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
-| `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games); the opening (section 55: the declared mulligan encoded, seen by the second player, cleared once taken, kept by clones and `determinize`; the opening's other floats bit for bit as before; no hidden information in any opening state) |
+| `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games); the opening (section 55: the declared mulligan encoded, seen by the second player, cleared once taken, kept by clones and `determinize`; the opening's other floats bit for bit as before; no hidden information in any opening state); the public-state gate (section 58.6: every public field of the game state classified and perturbed on 240 positions of four kinds of games, the change public and in both viewers' encodings, but the listed limits) and its fixes read back (58.8) |
 | `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b; decks of 5-7 cards and of exactly 6, `PASS` only at a legal size); a pool's deck is sideboarded to exactly 40 cards (section 42: every 40-card deck of generated, evaluation and M8a pools by its canonical path, the two extremes, no 39- or 41-card deck, `PASS` only at 40, the heuristic's answers legal from any point); a spec decklist of another size keeps its size; sideboarded decks are legal (40 cards) and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
@@ -1225,6 +1225,7 @@ they isolate one keyword or trigger each.
 | `tests/constructed.rs` | section 54: the pinned 75 and its provenance (the JSON is the MTGO export), CR 100.2a / 100.4a, the `constructed` spec, the two card tables (the cube's definitions and identities unchanged, the legacy cards at 546-547), 60-card games (the play-or-draw choice, the London mulligan, the turn cap), `determinize` dealing the opponent's unseen cards from their 60 (open decklists), the heuristic in the mirror |
 | `tests/measure_delver.rs` | section 54.6's measurements (`--release -- --ignored --nocapture --test-threads=1`, `MEASURE_GAMES`) |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
+| `tests/limits.rs` | section 58.1-58.3: the action layout's slot limits: a Counterspell's targets among the 31 spells below it, a spell whose only target is 32 deep not offered (Stern Scolding), a trigger's ability target in reach (Tishana's Tidebinder), a copy's deep target kept and new ones in reach (Lutri), no control of another player's permanent, another player's card under its owner and a copy of a permanent spell gone beyond 96 permanents (Dack Fayden, Reanimate, Sage of the Skies), the deck limit counting a companion |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
 **Fuzzer.** Uniform random actions in complete games between random 40-card decks (17 lands,
@@ -1369,7 +1370,8 @@ play-or-draw decision first, the shuffles after it: every game differs; the dige
 no sideboards), 076e92a6939c6798, and for M8b's layout additions, the encodings only:
 63d5bd84a9f7c19b, and for M8b part b's turning face up (the card shown before its cost is paid,
 CR 701.40b: 50 games differ), 646d779580df7517, and for the declared mulligan in the encoding
-(section 55: 11 games' encodings), 0052143696be4ce3), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
+(section 55: 11 games' encodings), 0052143696be4ce3, and for the public-state gate's fixes (section 58.8: 2,474
+games' encodings, chiefly the spells cast this turn), 317b5ba05dc569fb), and names the games that differ. `DIGEST_ENCODING=0` leaves the encodings out and
 prints the combined digest alone: compare it before and after a layout change (M8b: 3fb15384404c7428
 on both sides, section 36.8; part b: the same without the face-up change, e4783eb5c6705fc3 with it,
 section 36.11). `DIGEST_WRITE=1` records
@@ -11164,3 +11166,328 @@ unchanged since).
 * **Every evaluated pool begins with no history**: the cq-n4 pool's first ratings rest on one
   checkpoint's yardstick games and its four Elo matches; they sharpen as evaluations accumulate.
 * **The publisher** (57.5).
+
+## 58. The action layout's slot limits, and the public-state encoding gate
+
+Branch `public-state` (from main 5c18d35), two parts: an engine fix for a panic remote self-play
+found (58.1-58.5, tier "engine rules/cards", commit 78c9e89), and a standing gate that proves public
+state reaches the network's input, with the gaps it found fixed in layout v4's spare floats
+(58.6-58.12, tier "encoding-only", commit 835f5b3). **Layout v4 is unchanged** (33,652 floats,
+`mtgz/az/layout_v4.json` as it was, the action ids as they were): checkpoints of every v4 run load
+as they are (58.11). (57 is another branch's.)
+
+### 58.1 Stack targets in reach (the panic of 56.11)
+
+dv_local's remote worker died in iteration 4 of a `delver-smoke` run (56.8) on `search worker
+panicked: stack slot 38 out of range`, game 348 of the queued setup "8883:348", driver seed
+7777778, the network of iteration 3 (`E:/mtg-zero-scratch/shared-queue2/mirror/dv_local/w00.log`):
+`Game::stack_action` asserts that a stack item's `STACK` slot is below `STACK_N` (32), and a
+decision offered a target 38 items deep. The Delver mirror builds tall stacks (Cori-Steel Cutter's
+flurry triggers, the Monk tokens' prowess, Baubles' draws, counterspells answering counterspells),
+and a tiny network's play reaches 39+ items; any decision that names a stack item that deep panics
+(a Counterspell, Force of Will, Tishana's Tidebinder's trigger, a copy's new target), and so does
+a cube storm count with a counterspell. The game was not reproduced (56.11: which games the shared
+queue accepts first depends on timing, and the search's choices on the network's batches); the
+same panic is reproduced deterministically by constructed states (58.5): on main 3 of the 7 engine
+tests panic with `stack slot 32 out of range`.
+
+**The rule** (class B, docs/shortcuts.md 58.1): a spell's or an ability's target may be one of
+the **31 stack items below it**; the deeper (older) items of a taller stack can't be targeted.
+Targets are chosen with their spell or ability already on the stack (CR 601.2a-c, 602.2a-b, 603.3d),
+on top, so the 32 `STACK` slots name it and 31 items below it. Keeping the newest items in reach is
+the rules-safest cut: a response is nearly always about what was just put on the stack, and the
+alternative (no spell or trigger once the stack holds 32 items) would change far more games.
+
+`Game::stack_in_reach` is the one list of stack items a target may be (spells and abilities, top
+first, the top 31 not counting the item whose targets are chosen); `target_candidates` and
+`has_candidates` both read it, so every decision that names a stack item (`Target` for a spell, an
+activated or a triggered ability; the modes' availability, `ChooseModes`; an activated ability's X
+for "X targets"; `NewTarget` for a copy) and every check before an item is put on the stack (a
+cast's or an activation's `targets_available`, `distinct_choosable`, a trigger's 603.3d check)
+agree. `Game::targeting` (a transient, 0 between tasks) is the item whose targets, modes or X are
+chosen while it is on the stack: it is not counted; a check before the item is put on the stack
+counts every item, and the item then goes on top: the same items are in reach, so "a cast is
+offered only if it can be completed" holds (section 6; the fuzzer's option completion). A
+copy's current target beyond reach is kept by `PASS`; a target chosen earlier that sinks deeper
+stays legal on resolution (608.2b reads no slot).
+
+### 58.2 96 permanents a player
+
+`Game::perm_action` asserts a permanent's `MY_PERM` / `OPP_PERM` slot below `PERM_N` (96). The
+token cap (`token_count`, 26.11.6, 30) kept that for tokens with room for every card the player
+owns to enter too (`perm_reserve`: their cards elsewhere or controlled by another player). Three
+paths went around it: gaining control of another player's permanent (`change_control`: Dack
+Fayden's -2, Thieving Skydiver, Dack's emblem, giving one away), another player's card entering
+under a player's control (Reanimate, Animate Dead, Necromancy on an opponent's graveyard; a stolen
+spell resolving: `GainControlOfSpell`), and a copy of a permanent spell, which becomes a token
+(CR 707.10, 111.1: Sage of the Skies copies itself). Each needs a player at 96 less their reserve
+permanents (a full token board, then a steal): never seen, but legal.
+
+Now (class B, docs/shortcuts.md 26.11.6 extended): `Game::perm_room(p)` = 96 less `p`'s permanents
+and reserve (the token cap's accounting, which `token_count` now shares). With no room, gaining
+control of a permanent `p` doesn't own does nothing (`change_control`; an exchange of control keeps
+both counts and is unchecked: `set_control`), another player's card enters under its owner's
+control (its owner's reserve holds the room), and a token or a copy ceases to exist instead of
+entering (`put_onto_battlefield_attached`, as a token beyond the cap is never created). Below the
+limit nothing changes. Left as it was: cards in no zone (a revealed companion outside the game, a
+Mox Diamond set aside) are not in the token cap's reserve, so with every other card of a player on
+their battlefield they could still exceed it by one each; the assert stays (loud).
+
+### 58.3 The deck limit counts a companion
+
+The engine plays at most 64 cards a player in the game (`constructed::MAX_DECK`: a hand, a library
+list and a graveyard have 64 action slots, 54.4). `constructed::check` refused a larger
+constructed deck but not a 64-card deck with a companion (103.2b, 116.2g: a 65th card can join the
+game), and limited lists were not checked at all (CR 100.2a has no maximum).
+`constructed::check_size` (deck + 1 with a companion in the sideboard, at most 64) now checks every
+decklist an `mtg` spec gives (constructed, limited lists with or without sideboards, drafted
+seats); the random, evaluation and drafted decks have 40 cards (class B, docs/shortcuts.md 58.3).
+
+### 58.4 The other slot limits
+
+Every `assert!(... < act::*_N)` and every slot-numbered option, checked for legal play:
+
+| Limit | Where | Reachable? | Guard |
+|---|---|---|---|
+| `STACK` 32 | `stack_action` | yes: 33+ items (58.1) | 58.1: targets in reach |
+| `MY_PERM` / `OPP_PERM` 96 | `perm_action` (34 callers: attackers, blockers, targets, sacrifices, choices, payments) | yes, beyond the token cap (58.2) | the token cap; 58.2 for control, entering cards, copies |
+| `ACTIVATE` (permanent slot x 4 + ability) | `pay.rs`, the priority options | as `MY_PERM`; at most four activated abilities a permanent (the lowering, 25.10.5) | as above |
+| `HAND` 64, `HAND_ABILITY` 64 | `hand_slots`, `hand_options` (decision.rs) | a hand holds its owner's cards only (CR 400.3): a 64-card deck with a companion | 58.3 |
+| `GRAVEYARD` 64 + 64 | `graveyard_action` | a graveyard holds its owner's cards (58.3) and tokens put there until the next state-based check (704.5d): more than 64 objects only with at least 64 less its cards tokens put there between two checks and a graveyard choice before the check (a cost sacrificing them, then delve or escape; an effect killing them, then choosing a graveyard card). A payment activates a minimal set of mana sources (13.2), a 40-card graveyard needs 24+ tokens in one such window; no deck in play does it | 58.3; the assert stays (loud) |
+| `LIBRARY` 64 | a looked-at pile (`resolve.rs` 883, `stack_ext.rs` 139), a seen hand (`resolve.rs` 1043, `resolve_ext.rs` 567, `resolve_tail.rs` 597), a searched or named library (`resolve.rs` 1156, `resolve_tail.rs` 256, `resolve_tail3.rs` 157, `resolve_walkers.rs` 409, 438) | a pile is at most a library, a seen hand a hand, a library its owner's cards (58.3); companions and sideboarding's pool list take at most 64 (`companion.rs`, `matches.rs`) | 58.3 |
+| `TRIGGER` 16 | `triggers.rs` | yes | the first 16 distinct waiting triggers offered (31.7.8) |
+| `EXILE` 32 | `cast.rs` 1343, `faces.rs`, `resolve_m7d.rs`, `resolve_tail2.rs`, `resolve_tail3.rs`, `resolve_walkers.rs` | yes | the first 32 offered (`take(EXILE_N)`); docs/shortcuts.md 58.4 |
+| `GY_ABILITY` 12 | `activate.rs` 169 | yes | the first 12 (27.13.5) |
+| `NUMBER` 32 | combat damage, X, counts, modes | yes | 13.9, 23.11.3, the clamps (`NUMBER_N - 1`) |
+
+### 58.5 Tests and checks (the engine part)
+
+`tests/limits.rs` (8 tests): a Counterspell on top of 35 Bolts offers exactly the 31 below it
+(`STACK` + 1 ..= + 31) and counters the deepest; Stern Scolding, whose only target (Llanowar Elves)
+is 31 below it under 30 Bolts, is cast with `STACK` + 31, and under 31 Bolts is not offered;
+Tishana's Tidebinder's trigger offers Mishra's Bauble's ability 31 below it and not 32 below; a
+copy of a Counterspell made by Lutri's trigger offers the 30 Bolts in reach as new targets and keeps
+its target 33 below by `PASS`; Dack Fayden's -2 gains an artifact with room and nothing without,
+Reanimate puts an opponent's creature under its owner's control without room, Sage of the Skies'
+copy ceases to exist without room while the card enters; the deck limit with a companion (a
+constructed and a limited list). The 7 engine tests fail on main (3 with `stack slot 32 out of
+range`, 4 on the old behaviour).
+
+* **Digests** (78c9e89): unchanged, full 0052143696be4ce3 (`tests/data/digests.txt`), `DIGEST_ENCODING=0`
+  5f0579aa50453818: no digest game has a stack of 33 items, a full board or a 64-card deck.
+* **The Mac** (`bash tools/mac.sh`, 78c9e89, one job at a time beside delver1's self-play,
+  `CARGO_BUILD_JOBS=8 RUST_TEST_THREADS=8`): the Rust suite (`cargo test --release -p engine -p
+  card_ir --no-fail-fast`) **1,455 passed, 0 failed, 15 ignored** (111 binaries, 11 min 18 s);
+  `FUZZ_POOL=delver FUZZ_GAMES=20000`: 20,000 mirror games, no failure (187 s; 4,399,041 options
+  completed); the default fuzz `FUZZ_GAMES=20000`: 20,000 games and 1,000 matches, no failure (271
+  s; 5,651,735 options completed).
+
+### 58.6 The public-state encoding gate
+
+The hidden-information checks (section 10, 36.11, 55.4) prove that worlds differing only in
+hidden things encode identically; nothing proved that public things get into the encoding, and
+55.1's declared mulligan passed every gate while missing from it. The dual check:
+
+1. **Classification** (`engine/src/public_state.rs`, `fields`): every field of the structs that
+   hold a game's state (`Game`, `Player`, `Obj`, `Turn`, `StackItem`, `ManaPool`, `Dungeon` and the
+   match's `MatchState`) is listed by a destructuring without `..` (the `classify!` macro, as
+   `lower/` does for the IR): a new field is a compile error there until it is classified
+   **public** (it needs a perturbation), **hidden** (the hidden-information checks cover it) or
+   **derived** (internal, a cache, a transient clear at every decision, the settings, a container
+   whose elements are classified on their own; exempt with a one-line reason).
+2. **Perturbations** (`perturbations`): for each public field one or more small changes of a
+   position's clone, made by hand on the state, never through the rules (whose events and
+   triggers would change other things too: a creature put into a graveyard by hand, not
+   destroyed): life + 1, a counter of each kind, tap or untap, a card from a graveyard to exile,
+   another step, a continuous effect of each kind on a permanent, a stack item's X, a match's
+   game won, ... 140 in all.
+3. **The test** (`tests/az.rs`, `public_state_reaches_the_encoding`): 240 positions (60 each: the
+   cube's random decks, the Delver mirror, best-of-three matches, a drafted 2v2 `team_draft`
+   match), mid-game (turn 2 or later, about one decision in 40, sideboarding left out), mixed
+   heuristic and random play. Every perturbation on a clone of each position must change the view
+   (`Game::view_of` and `public_state::match_view`) for both players (the change is public) and
+   the encoding (`MtgAz::encode`: `encode_features` and the match block) for both viewers (it
+   reaches the network), but for the listed limits; a perturbation that never applies fails unless
+   it is marked rare (positions of random games seldom have what it needs: a prepared permanent,
+   divided damage, a ninjutsu attack, a splice). It prints one line per perturbation (applied,
+   view unchanged, encoding unchanged per viewer, the first example) and runs in 1.1 s (release;
+   `AZ_SCALE=k` for k times the positions). `public_state_classification` prints the table, and the
+   module's unit test checks that every public field has a perturbation, every perturbation names a
+   public field and every limit a perturbation.
+4. **Limits** (`limits`): the perturbations whose change the encoding leaves out, each with its
+   reason: by design (58.9), or a gap with no spare float left in layout v4 (58.10). Anything else
+   that fails is a finding.
+
+### 58.7 The classification
+
+211 fields: **116 public, 7 hidden, 88 derived**; 140 perturbations.
+
+| Struct | Fields | Public | Hidden | Derived | Perturbations |
+|---|---:|---:|---:|---:|---:|
+| `Game` | 95 | 23 | 3 (`rng`, `face_down_ids`, `clouds`) | 69 | 47 |
+| `Player` | 35 | 33 | 0 | 2 (`pool`: a container; `last_turn`: the turn number, who is active and the extra turns give it) | 33 |
+| `Obj` | 28 | 21 | 1 (`known`) | 6 (`zone`: the zone lists' mirror; `inc`; `deathtouched`, a transient; `lki_power`; `pw_extra`; `flips`) | 21 |
+| `Turn` | 10 | 9 | 0 | 1 (`cleanup_again`) | 9 |
+| `StackItem` | 20 | 16 | 0 | 4 (`id`, `delve_floor`, `discarded_land`, `flips`) | 16 |
+| `ManaPool` | 3 | 3 | 0 | 0 | 3 |
+| `Dungeon` | 3 | 3 | 0 | 0 | 3 |
+| `MatchState` | 17 | 8 | 3 (`pools`: what the other player knows of a pool is the `OPP_POOL` bag; `rng`; `priors`) | 6 (`gspec`, `decks`: sizes in the match block, cards in the zones; `turns_before`, `over`, `seen`: `earlier` between games; `sb`: `encode_sideboarding`) | 8 |
+
+`Game`'s 69 derived fields: the containers (`objs`, `players`, `stack`, `turn`, `dungeons`), the
+engine's continuation (`agenda`; `pending`, computed from it: its kind and decider are the context
+block's, its options the decider's), the settings (`db`, `spec`: the one that varies, the turn cap,
+is the turns left `g[19]`; `known_pools`), fast paths and caches (`tokens`, `first_token`,
+`any_loss`, `n_static`, `n_self_types`, `seen`, `copy_objs`), counters (`next_ts`,
+`next_stack_id`, `decisions`), event bookkeeping (`ev_seq`, `batch_fired`, `group_ts`), last known
+information (`leaving`, `lki_counters`, `lki_copy`, `lki_damage`, `spell_lki`), the engine loop
+caps' counters (`may_copies`, `activations`: no rule reads them), the search's (`observer`, `keys`,
+`forced`, `forced_at`, `no_auto`), `rules_srcs`, `log`, and 33 transients set and cleared around
+one move or one decision (`entering_*`, `batching`, `answer`, `combat_dmg`, `route_choice`, ...,
+`choosing_for`, `targeting`).
+
+### 58.8 Findings fixed
+
+The first run (on this branch's 78c9e89, `Game::view_of` and the encoding as main's) reported **65
+findings**: 37 view gaps (public fields `Game::view_of` left out) and 27 encoding gaps the view
+showed, and one perturbation never applied (`ManaPool::haste`, now rare); 3 were the perturbations'
+own (a base 7/7 set on a 7/7 creature, a colour chosen again, an effect whose end changes nothing:
+now skipped).
+
+**The view.** `Game::view_of` (testkit: what the hidden-information checks compare across worlds;
+no behaviour reads it) now has every public field: the turn's normal player, additional combats
+and the extra turns; the marks (by the object's place); a player's pool tags, losses, turns begun,
+revolt, this turn's draws and spells, life gained, energy, Yawgmoth's Will, graveyard exile, the
+city's blessing, protection from everything and the companion's card; a permanent's control since,
+what it blocks, first-strike damage, evoked, flashback; a stack item's costs (additional,
+alternative), where it was cast from, delve, X, the division, splices, a ninjutsu attack, a
+trigger's event and noted permanents (objects by place, stack items by position). The fuzzer's
+`determinize` checks compare these too (58.11).
+
+**The encoding**, in the spare floats of layout v4 (no width, offset, segment or identity changed;
+every other feature's meaning and offset as main's):
+
+| Float | Feature | Why (cube and Delver cards) |
+|---|---|---|
+| `g[127]` (`glob::MONARCH`) | the monarch: 1 the viewer, -1 the opponent, 0 none (CR 724) | Palace Jailer, Aragorn, Okoye, Forth Eorlingas! |
+| match block 27-28 (`mtch::SPELLS`) | spells cast this turn / 4 (squashed), the viewer's, the opponent's | Cori-Steel Cutter's flurry ("your second spell each turn": the Delver mirror's engine), prowess, Sage of the Skies, storm |
+| match block 29-30 (`mtch::ENERGY`) | energy counters / 4 (squashed), per player (CR 122.1) | Galvanic Discharge, Guide of Souls |
+| permanent status 91, 92 (`perm::CANT_BLOCK`, `CANT_BE_BLOCKED`) | it can't block, it can't be blocked (`Game::flags_of`: effects and statics) | Aragorn, Headliner Scarlett, Zirda; Kappa Cannoneer, Manifold Key |
+| permanent status 93 (`perm::OTHER_COUNTERS`) | its counters other than +1/+1, -1/-1, loyalty and lore / 4 (stun, keyword, named: charge, oil, ...; squashed) | Cryogen Relic's and Kaito's stun counters, charge counters |
+| permanent status 94 (`perm::EXILED_WITH`) | the cards exiled with it / 4 (`Game::links`, face up: they return when it leaves, CR 610.3) | Portable Hole, Leyline Binding, Palace Jailer |
+| permanent status 95 (`perm::PROTECTED`) | it has protection from something (printed or from an effect, CR 702.16; a summary) | Giver of Runes, True-Name Nemesis |
+| stack status 31 (`stack::X`) | X / 8 (squashed, CR 107.3a) | 15 cube cards: Walking Ballista, Green Sun's Zenith, ... |
+| a permanent's descriptor, card types and colours (code 32-37, 38-42) | as they are (layers 4 and 5, `types_of`, `colors_of`, a copy's exceptions included), not its card's | an animated land is a creature; Painter's Servant's colour; "becomes an artifact" |
+
+Free in layout v4 now: the context block's 246-255 (the decision's, kept for decisions, 55.2) and
+the match block's 31 (the match's). The match block's 27-30 hold game facts: the token network
+reads the globals and the match block as one input (`TokenNet.g`, 160 inputs), so they are globals
+to the network; `Game::encode_features` writes them, `encode_match` the match's floats, and
+sideboarding's encoding leaves them 0. The fixes were chosen by the cards that use each fact (the
+Delver mirror's first); the rest is 58.10. `the_public_state_fixes_are_encoded` (`tests/az.rs`)
+reads each new float back for both viewers (Palace Jailer's monarch and exiled creature, spells cast,
+Walking Ballista's X on the stack, stun counters, True-Name Nemesis's protection, Galvanic
+Discharge's energy). After the fixes the gate reports **93 perturbations encoded**, 4 deliberate
+limits, 42 gaps for layout v5 (4 of them rare, never applied) and one rare public field never
+applied (`Game::prepared`).
+
+### 58.9 Deliberate limits
+
+The perturbations whose change the encoding leaves out by design (`LimitKind::Design`):
+
+* **Bag order**: two graveyard cards swapping places (graveyards are bags of identities, 22.2; the
+  order matters to a few cards).
+* **What the opponent knows of the viewer's own cards**, outside the hand (where `HAND` status 4
+  shows it): a card of the viewer's exiled face down is in its exile bag by identity like a face-up
+  one, and the viewer's own reveals in earlier games of a match are not encoded for it (the
+  opponent's are `OPP_REVEALED`).
+* **The turn a permanent entered**: `NEW` is "under its controller's control since this turn" (CR
+  302.6); the turn it entered differs from that only after a control change and is read by two
+  cards.
+
+And the limits the perturbations respect by construction (they change objects in the encoded slots
+only): 32 permanent slots a side (a bag and the globals' counts for the rest), 8 stack slots (the
+stack's size `g[20]` for the rest), 16 hand slots (the hand bag), 4 trigger slots, 4
+graveyard-ability slots; numbers exact within +-128 then squashed (46); summaries where a slot has
+one float (protection's qualities, other counters' kinds).
+
+### 58.10 Gaps for layout v5 (not fixed)
+
+42 gaps need room layout v4 doesn't have (`LimitKind::V5`; each with its reason in
+`public_state::limits`). Grouped by where a v5 would put them:
+
+* **Per-player globals** (none left): cards drawn this turn and in the draw step (Orcish
+  Bowmasters), noncreature spells cast this turn, life gained this turn, can't gain life, creatures
+  that attacked this turn (raid), spells cast this game, Yawgmoth's Will this turn, graveyard exile
+  this turn, the city's blessing, protection from everything (The One Ring), the pool's
+  artifact-only and haste mana, delayed triggers waiting (Mana Drain's mana, Sneak Attack's
+  sacrifice, Flickerwisp's return, a Bauble's draw), cards they may play from exile (impulse draw,
+  Urza, Fallen Shinobi, Dauthi Voidwalker; the holder sees them as `EXILE` options when it decides).
+* **Globals**: the extra-turn order (`Turn::normal`), additional combat phases.
+* **Per permanent** (status 91-95 used): must attack (Mod::MustAttack), exiled if it would die,
+  subtypes an effect adds, evoked, escaped, the player chosen as it entered (True-Name Nemesis,
+  Dauthi Voidwalker), monstrous, exhausted, the colour chosen as it entered, exerted, abilities
+  resolved this turn, once-each-turn actions done.
+* **Per stack item** (status 31 holds X): which modes were chosen (their count and the targets are
+  encoded), the alternative cost (evoke: an evoked Solitude, dash, Force of Will's pitch), how and
+  from where it was cast (flashback, a graveyard: exiled as it leaves), cards exiled for delve
+  (Murktide Regent's counters), a triggered ability's event amount, noted permanents, divided
+  damage, a ninjutsu attack, splices.
+* **Graveyards**: cards discarded this turn (mayhem).
+
+**Recommendation.** No v5 now: the Delver mirror's most relevant facts are in v4's spare floats,
+and a v5 means a fresh start for every run (never resume across a layout change). When a v5 comes
+for another reason, add: a second per-player block of 24 globals (the per-player items above), 2
+globals, 16 more permanent status floats (the per-permanent items, the colour chosen as a one-hot),
+8 more stack status floats (the chosen modes as a bitmask, the alternative cost, cast from, delved
+instants and sorceries, the event amount), and an exile segment (the cards a player may play from
+exile, with their permission), then fold this gate's 42 v5 limits into fixes. Until then the
+context block's 246-255 could take up to 10 more game floats at the cost of the decision's room
+(55.2); not done.
+
+### 58.11 Checks (the gate)
+
+* **Digests** (835f5b3): `DIGEST_ENCODING=0` **5f0579aa50453818 before (main) and after**: no game
+  plays differently. The full digest **0052143696be4ce3 before** (main and 78c9e89) and
+  **317b5ba05dc569fb after**, re-recorded once with `DIGEST_WRITE=1`: 2,474 of the 2,500 games
+  differ, the games whose hashed encodings (every 10th decision) include a state after a spell was
+  cast that turn (the match block's 27-28; the other fixes are rare).
+* **`--test az`**: 24 passed (21 and the gate's 3: `public_state_reaches_the_encoding`,
+  `public_state_classification`, `the_public_state_fixes_are_encoded`); `layout_json_is_checked_in`
+  (`layout_v4.json` unchanged), `opening_encodings_but_the_declaration_are_unchanged` (the
+  opening's encodings bit for bit as recorded: no new float is set before turn 1) and the
+  hidden-information tests pass; `--test hidden`, `--test view`, `--lib` too.
+* **Checkpoint**: a copy of `runs/delver1/models/iter_0060.pt` (read-only; `zero.net.load` on this
+  build: 33,652 features, the segments of `layout_v4.json`) evaluates 1,142 encodings of this build
+  (16 random Delver-mirror and 16 cube games, both viewers; the new floats set in 590): every policy
+  and value finite; seat 0's value moves by 0.005 on average (0.070 at most) with the new floats
+  masked; the global map's columns of `g[127]` and match 27-31 have norms 0.494-0.545 (the median
+  column 0.540, the trained chooser's 1.353): untrained, at the initialisation's scale as 55.6 found for
+  125-127 (125 is still 0.547; 126, the opponent's declared mulligan, has trained to 1.619 since).
+* **pytest** (`bash tools/build_py.sh`, `python -m pytest -q tests`): 46 passed.
+* **The Mac** (835f5b3; `Game::view_of` grew, which the fuzzer's `determinize` checks compare): the
+  Rust suite **1,459 passed, 0 failed, 15 ignored** (58.5's 1,455 and the gate's 4; 11 min 2 s); the
+  digests there equal these (317b5ba05dc569fb, `DIGEST_ENCODING=0` 5f0579aa50453818: bit-identical,
+  44); the default fuzz (20,000 games, 1,000 matches) and `FUZZ_POOL=delver` (20,000 games) pass with
+  the grown view, the same games and options as on 78c9e89 (5,651,735 and 4,399,041 options
+  completed). These Mac jobs ran at nice 0 beside the A/B experiment's self-play (nice 5), which
+  slowed it ~12% overnight: run Mac jobs beside a live run under `nice -n 19` (`bash tools/mac.sh
+  'nice -n 19 cargo test ...'`), one at a time.
+* No search smoke (tier "encoding-only": its uniform evaluator never reads the features).
+
+### 58.12 Runs
+
+Both parts keep layout v4, the action ids and the shards' width, so a running v4 run can **re-pin
+onto this branch at an iteration boundary without a fresh start** (44.5, 53.4, as 55.6): its
+checkpoints, optimiser state and window load as they are. The engine part changes behaviour only in
+states with a stack taller than 32 items, a player at the 96-permanent limit or a 64-card deck
+(none in the digests): a re-pin removes the panic of 56.11 from the desktop's driver and the Mac's
+workers. The encoding part makes the network's input more complete: the window's older samples carry
+0 where this build writes the new facts (spells cast this turn, energy, the monarch, X, the flags,
+counters, links, protection) and printed card types and colours for animated or painted permanents;
+those inputs were constant in training (their weights untrained, 58.11), so the old samples teach
+nothing that contradicts the new ones, and the window rotates them out (delver1: 6 iterations). The
+re-pin: this branch merged, a pinned worktree of the merged commit built (`bash tools/build_py.sh`),
+`bash tools/mac.sh --eval-checkout`, the tier "re-pin" checks (digest equal to main's recorded
+317b5ba05dc569fb, one smoke configuration on the run's spec), `touch runs/<run>/STOP` during an
+iteration, then the supervisor's command from the new worktree; `runs/delver1` and the A/B runs are
+the user's call (not done here).

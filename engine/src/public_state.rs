@@ -21,10 +21,12 @@
 //!    match) and asserts that the view (`Game::view_of` and [`match_view`])
 //!    changed for both players (the change is public) and that the encoding
 //!    changed for both viewers.
-//! 3. **Deliberate limits** ([`limits`]): the perturbations whose change the
-//!    encoding leaves out by design, each with its reason (the 32 permanent
-//!    slots, bag order, squashed numbers, ...). Anything else that fails is
-//!    a finding.
+//! 3. **Limits** ([`limits`]): the perturbations whose change the encoding
+//!    leaves out, each with its reason: by design (bag order, what the
+//!    opponent knows of the viewer's cards; the perturbations change objects
+//!    in the encoded slots only: 32 permanents a side, 8 stack items), or a gap
+//!    with no spare float left in layout v4, for a layout v5 (ENGINE.md
+//!    58.10). Anything else that fails is a finding.
 
 use crate::az::matches::{Format, MatchState};
 use crate::az::MtgAz;
@@ -1419,7 +1421,9 @@ pub fn limits() -> Vec<Limit> {
 
 /// What a player can see of the match around the game (`Game::view_of` is
 /// the game's): format, game number, results and who chose and played first,
-/// wins and draws, what the other player revealed in earlier games, sideboarding.
+/// wins and draws, what each player revealed in earlier games, sideboarding.
+/// All public: the same for both players (`viewer` is for the signature's
+/// symmetry with `view_of`).
 pub fn match_view(a: &MtgAz, viewer: PlayerId) -> Vec<u64> {
     let m: &MatchState = &a.m;
     let mut v = vec![m.format as u64, m.game_no as u64, m.draws as u64, m.wins[0] as u64, m.wins[1] as u64];
