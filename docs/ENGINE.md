@@ -13597,3 +13597,281 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates), all 
   where the two meet: one flagged-rows mechanism for both (66.8). This repo: `engine/src/az/mod.rs`'s
   `SearchGame` impl (two items appended), `mtgz/az/__init__.py`'s `GamePackage(...)` call (two keys),
   tests appended at the end of `engine/tests/az.rs`; ENGINE.md 66 between 65 and the root-view agent's 67.
+
+## 67. Root-view leaf values (zero-core `leaf_value_view`, value-only samples)
+
+Branch `root-view-values` (from main 87ea619, rebased onto 0f98448): zero-core pinned at
+**2c04cd9** (feat/root-view-values on zero-core main a560448: the root-view values 450d267, the
+recording driver 1078e02, zero.h2h's per-side view 052ea00, the flagged extra rows e5873bb, docs
+2c04cd9: zero-core docs/search.md 3.6, az.md 16); this repo: the non-deciding viewer's leak
+checks, two `#[doc(hidden)]` engine helpers for them, `tools/root_view.py` (the CPU evidence), this
+section. With the settings off a run is the run of before, byte for byte (67.9).
+
+### 67.1 Why
+
+The search determinizes hidden cards from the root player's view (section 10) and, before this,
+valued every leaf with the network on `encode(decider)` of the leaf: at a leaf where the opponent
+decides, that view **cannot see the root player's hand** and **reads the opponent's sampled hand as
+known**. 64.4 measured it at the mulligan: after a kept landless hand the next decider's view gives
+the keeper 0.51, the keeper's own view 0.36. Every other leaf of the mirror's searches is the
+opponent's. A replay the user flagged (Delver AI 1193650d66c0, delver2 iteration 38, frame 20: seat
+1's own upkeep, Brainstorm x2 and Ponder in hand, priority with an empty stack): Pass got 1 visit at Q
+0.464 against Brainstorm's 0.655 (root v 0.683) - Pass's one leaf is seat 0's priority, valued from
+seat 0's view, blind to seat 1's hand.
+
+### 67.2 The design (zero-core docs/search.md 3.6)
+
+* **Views.** Seat key / run setting `leaf_value_view` (`selfplay_leaf_value_view`,
+  `eval_leaf_value_view`): 'mover' (default) or 'root'. With 'root', a leaf of the opponent sends two
+  rows in the same batch: its own, `encode(opponent)`, for the **priors** (the opponent's model of the
+  game: it cannot see our hand either), and a value-only row `encode(root player)` of the same sampled
+  state for the **value and margin** (relative to the root player; backed up as any). The value-only
+  row has no options and is flagged `ROW_VALUE` in the batch's `extra` (zero-core's generic flagged
+  extra rows: the belief head's stage 2, 66.8, adds its own kind). The evaluator interface is
+  unchanged. A leaf of the root player is one row as before.
+* **The encoding for a non-decider** already writes the pending decision's options, the list block
+  (since 65.10 the graveyard list too) and the decision's option count only for the decider
+  (`mine_to_decide`, `encode_context`): a non-deciding viewer sees the decision's kind, its decider and
+  its public context (the asking task, the card, the cost being paid), nothing derived from the
+  decider's hand. 67.3 checks it.
+* **Value-only samples** (`selfplay_view_samples`, `view_sample_target`): a share of the recorded
+  decisions also records the real state from the other player's view - `encode(other)`, its
+  perspective, no options (no policy loss), z its result. **Target**: q = the other player's **own
+  next search's** root value (`next_q`, the default; z when it never searches again), blended with z
+  by the run's `value_q` as every sample. Why: between the sample and its next search the other
+  player only learns more, so that search's value is an unbiased estimate (up to the search's error)
+  of the outcome given what it knows at the sample - the tower property - with less variance than z.
+  Its *previous* search's q is stale (it predates the decider's move); the decider's q negated
+  (zero-sum) is computed from the decider's information set, the other player's hand sampled and the
+  decider's known, so it would teach the other view to ignore its own hand and to know the decider's:
+  the bias reversed. `z` alone is offered (`view_sample_target z`).
+
+### 67.3 Leaks: the non-deciding viewer's encoding
+
+`determinize(viewer)` keeps the cards a payment in progress pins (section 10: the payer's mana
+sources in hand, the cards a cost may exile from it - Force of Will's blue card), so the existing
+check (`determinize_keeps_features_and_legal_actions_for_both_viewers`) cannot see a leak through
+them. Two engine helpers for tests (`#[doc(hidden)]`): `Game::resample_unpinned(viewer, rng)`
+(determinize's deal of **every** card hidden from the viewer, pins included, nothing else: no reseed,
+no observer, the pending decision as it is) and `Game::pinned_for(viewer)`; `determinize`'s deal is
+factored out (`deal_hidden`) unchanged (the digests, 67.9).
+
+* `tests/hidden.rs`: `a_non_deciding_viewers_features_ignore_the_deciders_hidden_cards` (60 random cube
+  games, 232 worlds, the decider's hand dealt again in 215: the other viewer's features identical);
+  `a_non_deciding_viewers_features_ignore_pinned_cards_of_a_payment` (P1 pays for a spell with Simian
+  Spirit Guide in hand, then casts Force of Will by its alternative cost: at every decision of both,
+  P0's features identical in 24 worlds each with the pinned cards dealt again; 6 decisions with pins).
+* `tests/az.rs`: `a_non_deciding_viewers_encoding_ignores_the_deciders_hidden_cards` (the public-state
+  gate's positions - cube, Delver mirror, best-of-three, a drafted match, 40 each: 480 worlds, all
+  with cards dealt again; with `AZ_SCALE=5` 2,400) and `root_view_leaves_encode_alike_whatever_the_
+  deciders_options` - the search's own case: two worlds sampled for the root player at its decision
+  (cube positions and the Delver mirror), played on with the same actions while the keys agree; at
+  every decision of the other player the root player's encoding is the same in both worlds, **also
+  where the other player's options differ** (they follow its sampled hand: different tree nodes, one
+  information state of the root player). 314 positions compared, 63 with different options (`AZ_SCALE=5`:
+  1,785 and 378). `equal_keys_mean_equal_features` stops where the options differ.
+* **The public-state gate** (58.6) already requires every public perturbation to reach the encoding of
+  **both** viewers, the non-deciding one included: 131 encoded, 3 deliberate limits, 1 gap for the
+  next layout (main's). Found on the way, not caused here: at `AZ_SCALE=5` the gate reports 3 findings
+  (can't block 4 of 1,047, can't be blocked 6 of 1,047, can't be countered 2 of 249 perturbations
+  without an encoding change, both viewers alike) - main 0f98448 reports the same 3 at that scale.
+
+### 67.4 Distribution shift: calibration on CPU self-play
+
+`python tools/root_view.py selfplay --model <copy of delver2 iteration 41> --games 192 --conc 96
+--config <delver2's config>`: the line's self-play seat (64 / 16 simulations, p_full 0.25, minor 4,
+cq 0.3, mover-view leaves as the line plays), every decision's value-only sample recorded (26,884
+samples: 13,442 decisions and 13,442 other views; 1,006 s, 1,476 leaves/s on 4 + 4 threads). `calib`:
+the network's P(win) for each row's player against the outcome.
+
+| rows | n | log loss (constant 0.681) | Brier | ECE (5 bins) | mean prediction / won |
+|---|---|---|---|---|---|
+| decisions (the decider's view: trained) | 13,442 | 0.358 | 0.117 | 0.025 | 0.568 / 0.578 |
+| value-only (the other view: never trained) | 13,442 | 0.367 | 0.120 | 0.014 | 0.431 / 0.422 |
+
+* **The shift is small**: the value head, never shown a non-decider's encoding, is about as calibrated
+  on it as on the decider's.
+* **The views disagree, without a bias**: the decider's own P(win) minus 1 - the other view's at the
+  same state: -0.002 on average (13,442 pairs), 0.077 mean absolute, 0.21 at the 90th percentile.
+  Neither view is systematically optimistic in real positions.
+
+`finetune` (the 192 games split by game, 48 held out; 300 steps of 256, lr 1e-4, value_q 0.6; 90 s on
+CPU), the held-out games' log loss / Brier / ECE:
+
+| | decision rows | value-only rows |
+|---|---|---|
+| iteration 41 | 0.335 / 0.107 / 0.065 | 0.349 / 0.112 / 0.041 |
+| fine-tuned with value-only samples | 0.320 / 0.101 / 0.055 | **0.330** / 0.105 / 0.036 |
+| control: decision rows only | 0.319 / 0.101 / 0.059 | 0.334 / 0.107 / 0.033 |
+
+Training on the other view helps it a little beyond fresh data (0.330 vs 0.334 nats) and costs the
+decision rows nothing: value-only samples are cheap insurance, not a necessity.
+
+### 67.5 Search: leaf values and the mulligan
+
+`python tools/root_view.py mull --model M --reps 2` (64.3's hands: 50 with no land, 100 with one, 50
+with 2-4; 64 simulations, two seeds each, no noise; both views; CPU 4 threads). At the opponent's
+leaves of these searches the root player's value from its own view minus from the opponent's:
+**+0.054** on average (iteration 31; +0.044 iteration 41), 0.11 mean absolute, 0.23 at p90, more than
+0.05 at 73% of 16,216 leaves - far more than at real positions (67.4): in a sampled world the
+opponent's hand is a uniform deal of the unseen cards, which its own view then reads as known.
+
+Per declaration (mover view / root view; Q Mulligan where visited; keep = the line's rule cq4 s0.3):
+
+| network | hands | searches | prior Mulligan | Q Keep | Q Mulligan | Mulligan's visits | keep |
+|---|---|---|---|---|---|---|---|
+| 31 | 0 lands, first | 42 | 0.954 | 0.387 / 0.355 | 0.401 / 0.401 | 60.4 / 61.2 | 0% / 0% |
+| 31 | 0 lands, second | 58 | 0.028 | 0.460 / 0.417 | 0.417 / 0.404 | 1.0 / 1.6 | 100% / 100% |
+| 31 | 1 land, first | 102 | 0.159 | 0.517 / 0.526 | 0.393 / 0.393 | 10.2 / 10.3 | 82% / 82% |
+| 31 | 1 land, second | 98 | 0.001 | 0.470 / 0.557 | - | 0 / 0 | 100% / 100% |
+| 41 | 0 lands, second | 58 | 0.035 | 0.471 / 0.421 | 0.414 / 0.415 | 1.2 / 2.0 | 100% / 98% |
+| 41 | 1 land, second | 98 | 0.001 | 0.482 / 0.565 | 0.349 / - | 0 / 0 | 100% / 100% |
+| 41 fine-tuned (67.4) | 0 lands, second | 58 | 0.049 | 0.485 / **0.378** | 0.368 / 0.371 | 1.4 / 2.7 | 100% / 97% |
+| 41 fine-tuned, floor k 4 (64) | 0 lands, second | 58 | 0.049 | 0.485 / 0.378 | 0.370 / 0.369 | 4.9 / 5.9 | 100% / 97% |
+| 41 fine-tuned | 1 land, second | 98 | 0.003 | 0.499 / 0.524 | 0.405 / 0.415 | 0.1 / 0.2 | 100% / 100% |
+
+* **Root-view values move the keep's Q as predicted** where the hand is bad and the opponent acts
+  next: a landless keep on the draw drops by 0.04-0.05 (0.11 after the fine-tune) to the mulligan's Q.
+* **They do not move the keep rates**: overall 0 lands 58% (mover) / 58-56% (root), 1 land 91% / 91%.
+  The prior (0.95-0.97 on Keep on the draw) gives Mulligan 1-6 visits, and the cq rule at scale 0.3
+  needs a Q gap of ~0.09 to beat that prior; with the floor (64) Mulligan is measured and still level.
+* **One-land and normal hands on the draw look better from the keeper's own view** (Q Keep 0.47 ->
+  0.56): 64.4's own-view optimism of the value head for a keep on the draw, now the search's leaf
+  value. The mulligan's remaining lever is that value head (the outcomes' weight), as 64.4 said.
+
+### 67.6 The replay's upkeep Brainstorm, instants by step, and the cost
+
+`python tools/root_view.py position --model <copy of iteration 38> --replay rep_1193650d66c0_full.json
+--frame 20 --reps 16 --sims 64,256` (the game rebuilt from the replay's seed and actions - the legal
+actions match at every network frame; 16 seeds per run):
+
+| | Pass: visits, Q | Brainstorm: visits, Q | the rule's move |
+|---|---|---|---|
+| replay (mover view, 64) | 1, 0.464 | 62, 0.655 | Brainstorm |
+| mover view, 64 | 2.0, 0.512 | 61.0, 0.643 | Brainstorm 16 / 16 |
+| **root view, 64** | 3.5, **0.638** | 59.5, 0.652 | Brainstorm 16 / 16 |
+| mover view, 256 | 11.7, 0.619 | 243.3, 0.653 | Brainstorm 16 / 16 |
+| root view, 256 | 11.6, 0.634 | 243.4, 0.664 | Brainstorm 16 / 16 |
+
+After Pass the next decider is seat 0, whose view gives seat 1 **0.503**; seat 1's own view of the
+same state **0.610** (after the cast: 0.535 / 0.610). So the suspicion holds - Pass's 22-point deficit
+is the opponent's-view leaf - and root-view values close most of it (Q Pass 0.51 -> 0.64, the gap to
+Brainstorm 0.13 -> 0.014), but **the decision does not change**: the prior (0.934) keeps the visits
+and the network still rates Brainstorm now slightly higher.
+
+**Instants by step** (`play --model <iteration 38> --games 24`: the network against itself, the line's
+rule cq4 s0.3, 64 simulations, minor 4; instants = Brainstorm, Lightning Bolt, Daze, Force of Will,
+Unholy Heat, Prismari Charm), cast by the player whose turn it is, by step, mover view / root view:
+
+| step | mover view | root view | of which Brainstorm |
+|---|---|---|---|
+| own upkeep | 27 | 40 | 6 / 12 |
+| own draw step | 47 | 49 | 19 / 18 |
+| own main phase 1 | 81 | 80 | 22 / 19 |
+| own main 2, combat | 14 | 14 | 3 / 4 |
+| in the opponent's turn (any step; upkeep) | 72 (6) | 74 (17) | 2 / 3 |
+
+Root-view leaves do not make the network wait for its main phase: own-upkeep instants are as common
+or more (24 games each: noisy; seat 0 scored 0.33 / 0.46). The upkeep habit is the policy's, not a
+leaf-view artefact; a network trained with root-view targets would be the test (67.8).
+
+**Cost** (`speed`, iteration 41, 64 self-play games of the line's seat, 4 torch + 4 search threads, 90
+s each): mover view **1,313 leaves/s**, root view **887 leaves/s** with 0.51 value-only rows per leaf -
+1,313 / 1,342 network rows/s: the CPU is inference-bound, so the extra rows cost their full share
+(-32% leaves/s). On the GPU (batches of ~96 rows at the line's conc 192) the extra rows ride in the
+same batch and should cost less; not measured (A/B round 2 holds the GPU). Value-only samples at
+share s add s samples per recorded decision: the window holds (1 + s) x the rows and training runs (1 +
+s) x the steps per iteration (zero-core az.md 16.4).
+
+### 67.7 What it means
+
+Root-view leaf values are correct and leak-free here, cost a third of CPU leaves/s, and the value head
+can serve them today (67.4). On today's networks they change Q where 64.4 said they would but rarely
+the moves: the priors were trained on mover-view searches and dominate the visits at 64 simulations.
+Whether a network trained on root-view searches plays better is the A/B's question.
+
+### 67.8 The A/B (flags; not run)
+
+As 64.6 / 63.6 (`runs/ab-r2/ab_driver.py`): fork the main line at K with root-view self-play and
+value-only samples at 0.5, run fork and control K -> K + 10 on the same build, h2h of the two K + 10
+checkpoints (600 games, both sides the line's rule cq4 s0.3 **and the same leaf view**: `mtgz.az.h2h`
+follows each run's `eval_leaf_value_view`, mover on both arms); the fork wins at >= 0.5 + 2 se. The
+experiment entry for an `ab_config.json`:
+
+```json
+{"name": "rootview", "requires": "--selfplay-leaf-value-view",
+ "flags": ["--selfplay-leaf-value-view", "root", "--selfplay-view-samples", "0.5"],
+ "set": ["selfplay_leaf_value_view=root", "selfplay_view_samples=0.5"]}
+```
+
+A variant isolating the data: `{"name": "viewsamples", "requires": "--selfplay-view-samples", "flags":
+["--selfplay-view-samples", "0.5"], "set": ["selfplay_view_samples=0.5"]}` (the search unchanged). A
+cheaper first look, no training: the same checkpoint with both views head to head, `python -m
+mtgz.az.h2h M M --games 600 --a-leaf-value-view root --b-leaf-value-view mover` (the line's rule from
+its run's config). By hand (`$BASE` = round 2's `base_flags`):
+
+```
+python tools/fork_run.py --source runs/delver2 --dest runs/r3-rootview --iter K --set selfplay_leaf_value_view=root --set selfplay_view_samples=0.5
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py runs/r3-rootview/supervisor_console.txt   python tools/supervise.py runs/r3-rootview $BASE --iters $((K+10)) --eval-every 1000 --selfplay-leaf-value-view root --selfplay-view-samples 0.5
+```
+
+* **The build and the Mac**: a pinned run worktree of the merged main, and `bash tools/mac.sh
+  --eval-checkout` for the Mac's checkout: remote self-play ships the fork's seat with the keys
+  `leaf_value_view`, `view_samples`, `view_sample_target`, which an older checkout **refuses** (an
+  error, never a silent off); remote evaluation only if `eval_leaf_value_view` is set (not in this
+  A/B). With the settings off the build plays as main, byte for byte (67.9), so the control continues
+  delver2 unchanged.
+* **Budget**: the fork's self-play is ~1.5x the network rows per leaf (GPU and Mac), its training 1.5x
+  the steps (share 0.5); equal *iterations* is the comparison, as round 2.
+* **What to read**: the verdict; the mulligan rates (`tools/root_view.py mull` on both K + 10:
+  0-land keeps on the draw); `train.value_view` against `value_decision` (the other view's value loss
+  should fall to the decider's); `train.entropy` and the policy loss; both arms against the
+  heuristic; `selfplay.view.rows_per_leaf` (~0.5).
+
+### 67.9 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (the tiered gates), CPU only
+(`CUDA_VISIBLE_DEVICES=-1`), below normal, <= 6 build jobs, nothing on the Mac, `runs/` only read
+(copies of delver2's iterations 31, 38, 41: sha256 ed539c28..., c055cbd6..., ab0827e4...).
+
+* **zero-core** (feat/root-view-values on main a560448): its docs/az.md 16.5 - cargo, pytest, the
+  golden records and match, toy-smoke runs byte for byte against a560448, `check_checkpoint_compat
+  --package zero` identical, Glass Road Zero, Caverna Zero and Kingdom Builder Zero build against it.
+* **This repo** (on main 0f98448): `bash tools/build_py.sh` (own target dir), `cargo test --release -p
+  engine --test az --test hidden` **34 + 13 passed** (the 4 new: 67.3); behaviour digests **unchanged**:
+  full **65e8a5155bd2000c**, `DIGEST_ENCODING=0` **c62a5ce5f290814e** (main's; `deal_hidden` is
+  determinize's deal as it was); `pytest tests` **55 passed**; `check_checkpoint_compat --package mtgz`
+  with delver2's iteration 41 on main 0f98448's build (zero-core a560448) against this one, the Delver
+  spec, 8 self-play games per target and 8 against random: **identical** (records visits
+  5541d72c327aabd8, cq 2a554f6841ce509b, results ce66efb66a4afe7d, 8 / 8 against random).
+* The CPU evidence (67.4-67.6) ran on this branch before its rebase onto 590e7fe / 0f98448 (engine
+  87ea619 + these commits); rerun after it, `mull` (iteration 41) and `position` (frame 20) give the
+  same numbers to the last digit. 65.10 changes the encoding only at graveyard choices (the delve of
+  Murktide Regent) and 66 adds a training target only, so the self-play and `play` games could differ
+  only in their delves.
+* No engine behaviour change, no digest re-record, no search smoke (the uniform evaluator cannot see a
+  leaf's view).
+
+### 67.10 Risks, limits, conflict points
+
+* **The opponent's search in the tree plays against our hand.** With root-view values the opponent's
+  nodes back up the root player's assessment (as before they backed up the mover's): the opponent is
+  modelled by its priors (its own view) and by values that know our hand. That is the root player's
+  best estimate of each line, and the standard choice for determinized search; an opponent whose real
+  play depends on what it believes we hold is modelled only through its priors.
+* **Priors trained on mover-view searches.** Today's policies were distilled from searches with
+  mover-view leaves; a root-view run's targets drift from them for a while (the A/B reads entropy and
+  policy loss).
+* **Training cost** of value-only samples (1 + s rows and steps) and the window's RAM: lower the share
+  (0.25) if the window must keep its iterations.
+* **The encoding contract** now matters for non-deciders: a new decision kind or encoded field must
+  keep the decider's options, list and anything derived from its hidden cards out of a non-decider's
+  view (67.3's tests catch it on random and Delver positions; rare decisions only if they occur).
+* **Distill** (`zero.distill`) averages its policy losses over every row: a window with value-only rows
+  dilutes them (its agreement metrics already skip empty segments); not on the run path.
+* **Conflict points**: zero-core `Batch` / `LeafBuf` / `Dest` (`extra`), `Pending::Leaf` (`vrow`),
+  `worker::decide` (the value-only records: aux targets per record, after the belief head), `NnSeat`'s
+  three fields and the seat keys, `run.train_model`'s loss block (merged with the belief head's),
+  `play.PyDriver._leaf_batches` (also the recording driver's). The belief head's stage 2 (66.8) adds a
+  row kind to `extra` rather than a second mechanism. This repo: `engine/src/hidden.rs`
+  (`deal_hidden`), tests appended at the ends of `tests/az.rs` and `tests/hidden.rs`.
