@@ -16,3 +16,14 @@ serde_json = "1"
 
 [profile.release]
 debug = 1
+
+# The fuzz farm's build (docs/ENGINE.md 70, tools/fuzz_farm.py): release speed with
+# debug_assertions and overflow checks turned back on, so `debug_assert!`-style invariant checks
+# and arithmetic overflow panic there instead of wrapping silently - the fuzz tests already run a
+# sampled determinize check (engine/tests/fuzz.rs `check_determinize`, module docs); under this
+# profile (`cfg!(debug_assertions)`) it samples far more often, since the profile's whole point is
+# paying for cheap extra checking while fuzzing. `cargo test --profile fuzz -p engine --test fuzz`.
+[profile.fuzz]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true

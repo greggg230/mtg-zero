@@ -55,7 +55,8 @@
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! Unbounded numbers (M6, ENGINE.md 46): at every decision the decider's
-//! encoding (and at the ~1-in-40 checkpoints both players' encodings, in
+//! encoding (and at the ~1-in-40 checkpoints - ~1-in-4 under the `fuzz` Cargo profile,
+//! `checkpoint_every`, ENGINE.md 70 - both players' encodings, in
 //! the game and in every world `determinize` samples) has every value finite
 //! and within `encode::FEATURE_BOUND` (256); matches check `MtgAz`'s
 //! encoding the same way. `FUZZ_POOL=exponential`: exponential boards. Each
@@ -248,6 +249,15 @@ fn exponential_mode() -> bool {
 
 fn delver_mode() -> bool {
     pool_mode() == PoolMode::Delver
+}
+
+/// The clone/determinize checkpoint's sampling denominator (module docs; `check_clone`,
+/// `check_determinize`): 1-in-40 normally, 1-in-4 under the `fuzz` Cargo profile
+/// (`debug-assertions = true`, root Cargo.toml): that profile's whole point is paying for extra
+/// checking while the farm fuzzes, so the sampled determinize check runs far more often there
+/// instead of at the release rate every other build (including plain `cargo test --release`) gets.
+fn checkpoint_every() -> u32 {
+    if cfg!(debug_assertions) { 4 } else { 40 }
 }
 
 /// The card table of the mode's games: the cube's and the custom test cards,
@@ -651,7 +661,7 @@ fn play(seed: u64, checks: bool) -> Played {
             check_list_options(&g, &buf, &|| format!("seed {seed} step {steps}"));
             record_extremes(&g);
         }
-        if checks && rng.below(40) == 0 {
+        if checks && rng.below(checkpoint_every()) == 0 {
             check_clone(&g, a, seed);
             check_determinize(&g, seed, &mut rng);
         }
@@ -1188,7 +1198,7 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
             g.encode(p, &mut x1);
             check_bounded(&x1, &|| format!("match {seed} step {}", actions.len()));
         }
-        if checks && rng.below(40) == 0 {
+        if checks && rng.below(checkpoint_every()) == 0 {
             // A clone continues identically.
             let (mut c1, mut c2) = (g.clone(), g.clone());
             let (mut k1, mut k2) = (Vec::new(), Vec::new());

@@ -22,6 +22,12 @@ yet counts as held (being created).
 
 A stopped job's wall clock keeps running: a job that times itself must count only the time it was
 running (`Governor.paused_s`), or its watchdog would fire after a long evaluation.
+
+A GUARANTEED job (`register`/`spawn(..., guaranteed=True)`, tiered gates docs/ENGINE.md 70;
+`fuzz_farm.py` `guaranteed_jobs` / `guaranteed_window`) backs off only for `pause_file` and a hard
+lock (`hard_locks()`: the exclusive evaluation locks, never a self-play busy marker alone) - it
+keeps running at nice 19 through an ordinary self-play phase, on the premise that niceness alone
+already gives the OS scheduler what it needs to prefer self-play's normal-priority process over it.
 """
 import argparse
 import glob
@@ -81,6 +87,18 @@ def held(locks=None):
     return None
 
 
+def hard_locks():
+    """The EXCLUSIVE locks (every evaluation lock, never the self-play busy markers): the ones a
+    `guaranteed` job backs off for too (tiered gates, docs/ENGINE.md 70, fuzz_farm.py
+    `guaranteed_jobs` / `guaranteed_window`). An evaluation really does need the cores to itself;
+    self-play's busy markers only ask for them, and nice 19 already yields to anything that needs
+    them more."""
+    env = os.environ.get('MTGZ_BACKOFF_LOCKS')
+    if env is not None:
+        return [os.path.expanduser(p) for p in env.split(':') if p]
+    return list(DEFAULT_LOCKS)
+
+
 def niceness():
     """This process at nice 19 (a no-op where it already is)."""
     try:
@@ -100,17 +118,31 @@ def _signal_group(pgid, sig):
 class Governor:
     """A thread that stops every registered process group while a lock is held (or `pause_file`
     exists) and continues them after. `paused_s`: seconds stopped so far (a job's running time is
-    its wall time less what it spent stopped while registered: `active(t0)`)."""
+    its wall time less what it spent stopped while registered: `active(t0)`).
+
+    `register(pgid, guaranteed=True)` (tiered gates, docs/ENGINE.md 70; `fuzz_farm.py`
+    `guaranteed_jobs` / `guaranteed_window`): a GUARANTEED group backs off only for `pause_file` and
+    a `hard_locks()` lock (an evaluation that really needs the cores to itself), never for a plain
+    self-play busy marker - it keeps running at nice 19 through those, trusting the OS scheduler to
+    give priority to whatever actually needs the cores more. Tracked separately (its own
+    stopped/why/paused_s) so a guaranteed job's hang detection sees only the pauses that applied to
+    IT."""
 
     def __init__(self, poll=5.0, locks=None, pause_file=None, log=None):
         self.poll, self.locks, self.pause_file, self.logf = poll, locks, pause_file, log
-        self.groups = {}                           # pgid -> registration time
+        self.groups = {}                           # pgid -> registration time (normal)
+        self.guaranteed_groups = {}                 # pgid -> registration time (guaranteed)
         self.mu = threading.Lock()
         self.stopped = False
+        self.hard_stopped = False
         self.why = None
+        self.hard_why = None
         self.paused_s = 0.0
+        self.hard_paused_s = 0.0
         self._since = None
-        self.events = 0                            # back-off episodes
+        self._hard_since = None
+        self.events = 0                            # back-off episodes (normal)
+        self.hard_events = 0                        # back-off episodes (guaranteed)
         self._quit = threading.Event()
         self.th = threading.Thread(target=self._loop, name='backoff', daemon=True)
         self.th.start()
@@ -120,18 +152,26 @@ class Governor:
             with open(self.logf, 'a') as f:
                 f.write(time.strftime('%Y-%m-%d %H:%M:%S ') + msg + '\n')
 
-    def register(self, pgid):
+    def register(self, pgid, guaranteed=False):
         with self.mu:
-            self.groups[pgid] = time.time()
-            if self.stopped:
-                _signal_group(pgid, signal.SIGSTOP)
+            if guaranteed:
+                self.guaranteed_groups[pgid] = time.time()
+                if self.hard_stopped:
+                    _signal_group(pgid, signal.SIGSTOP)
+            else:
+                self.groups[pgid] = time.time()
+                if self.stopped:
+                    _signal_group(pgid, signal.SIGSTOP)
 
     def unregister(self, pgid):
         with self.mu:
             self.groups.pop(pgid, None)
+            self.guaranteed_groups.pop(pgid, None)
 
-    def paused_total(self):
+    def paused_total(self, guaranteed=False):
         with self.mu:
+            if guaranteed:
+                return self.hard_paused_s + (time.time() - self._hard_since if self._hard_since else 0.0)
             return self.paused_s + (time.time() - self._since if self._since else 0.0)
 
     def reason(self):
@@ -140,9 +180,18 @@ class Governor:
         h = held(self.locks)
         return f'remote evaluation ({h})' if h else None
 
+    def hard_reason(self):
+        """Why a GUARANTEED group would back off: `pause_file`, or a hard (exclusive-evaluation)
+        lock - never a self-play busy marker alone."""
+        if self.pause_file and os.path.exists(self.pause_file):
+            return f'pause file {self.pause_file}'
+        h = held(hard_locks())
+        return f'remote evaluation ({h})' if h else None
+
     def _loop(self):
         while not self._quit.is_set():
             why = self.reason()
+            hard_why = self.hard_reason()
             with self.mu:
                 if why and not self.stopped:
                     for g in list(self.groups):
@@ -157,6 +206,19 @@ class Governor:
                     self.paused_s += took
                     self.stopped, self.why, self._since = False, None, None
                     self.log(f'continuing after {took:.0f} s; continued {sorted(self.groups)}')
+                if hard_why and not self.hard_stopped:
+                    for g in list(self.guaranteed_groups):
+                        _signal_group(g, signal.SIGSTOP)
+                    self.hard_stopped, self.hard_why, self._hard_since = True, hard_why, time.time()
+                    self.hard_events += 1
+                    self.log(f'guaranteed jobs backing off too: {hard_why}; stopped {sorted(self.guaranteed_groups)}')
+                elif not hard_why and self.hard_stopped:
+                    for g in list(self.guaranteed_groups):
+                        _signal_group(g, signal.SIGCONT)
+                    took = time.time() - self._hard_since
+                    self.hard_paused_s += took
+                    self.hard_stopped, self.hard_why, self._hard_since = False, None, None
+                    self.log(f'guaranteed jobs continuing after {took:.0f} s; continued {sorted(self.guaranteed_groups)}')
             self._quit.wait(self.poll)
 
     def wait_clear(self, check=None):
@@ -174,10 +236,17 @@ class Governor:
                     _signal_group(g, signal.SIGCONT)
                 self.paused_s += time.time() - self._since
                 self.stopped, self._since = False, None
+            if self.hard_stopped:
+                for g in list(self.guaranteed_groups):
+                    _signal_group(g, signal.SIGCONT)
+                self.hard_paused_s += time.time() - self._hard_since
+                self.hard_stopped, self._hard_since = False, None
 
 
-def spawn(cmd, gov=None, **kw):
-    """Popen at nice 19 in a session of its own (its pgid = its pid), registered with `gov`."""
+def spawn(cmd, gov=None, guaranteed=False, **kw):
+    """Popen at nice 19 in a session of its own (its pgid = its pid), registered with `gov`
+    (`guaranteed=True`: only backs off for `pause_file` / a hard lock, never a self-play busy
+    marker alone - `Governor`'s docs)."""
     def pre():
         os.setsid()
         try:
@@ -186,7 +255,7 @@ def spawn(cmd, gov=None, **kw):
             pass
     p = subprocess.Popen(cmd, preexec_fn=pre, **kw)
     if gov is not None:
-        gov.register(p.pid)
+        gov.register(p.pid, guaranteed=guaranteed)
     return p
 
 

@@ -9,3 +9,4 @@ __pycache__/
 *.pyd.*.old
 /runs/
 .pytest_cache/
+/gates/

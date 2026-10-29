@@ -13875,3 +13875,166 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates), CPU 
   `play.PyDriver._leaf_batches` (also the recording driver's). The belief head's stage 2 (66.8) adds a
   row kind to `extra` rather than a second mechanism. This repo: `engine/src/hidden.rs`
   (`deal_hidden`), tests appended at the ends of `tests/az.rs` and `tests/hidden.rs`.
+
+## 70. Tiered verification gates (`tools/gate.py`): tooling for the policy, user-approved 2026-10-29
+
+Branch `gate-tooling` (from main 6f871ac): the user adopted a tiered gate policy (memory
+`feedback_tiered_gates`, a Fable review 2026-10-28) after the search smoke as a gate caught 0 bugs
+in 16 runs over ~7.4 h and an agent's re-run of its own suite on the sha it had already tested
+caught 0 real bugs in ~30 merges - the bug finders are fuzz during development, the Mac fuzz
+farm's fresh seeds, behaviour digests and `watch_run`, not a second full suite on an already-tested
+commit. This section is the tooling the policy asked for: one command per tier instead of an
+agent's ad-hoc `gate_<name>.sh`, plus the supporting pieces (`search_smoke --jobs`, a fuzz build
+profile, the Mac farm's guaranteed slice).
+
+### 70.1 `tools/gate.py <tier>`
+
+Replaces the hand-written `gate_repin2.sh` / `gate_delve.sh` / `gate_v5.sh` / `gate_encoding.sh`
+(same recipes, two of their bugs fixed):
+
+* **No shared log file.** Each step gets its own log, written by this process alone - the old
+  scripts' `cmd | tee /dev/stderr | grep ...` could truncate a log with NUL bytes when the child
+  and `tee` raced on the same file.
+* **Positive evidence, not absence of FAILED.** `grep -q FAILED && fail` passes silently when a
+  build fails before any test runs (no "test result:" line at all, so no FAILED line either).
+  Every checker requires a positive marker - a "test result: ok" line (with its failed count at
+  0), a "combined digest" line, "N passed", "0 failed of N configurations" - and fails loudly when
+  it is missing, not just when a bad one is found.
+
+The seven tiers are the policy's table verbatim (`gate.py --help` prints each one's recipe and
+budget): `docs`, `python`, `encoding`, `engine`, `search-core`, `optin-core`, `repin`. Run it from
+WITHIN the checkout to gate - a pinned worktree the caller creates first, exactly as the old
+scripts did (`git worktree add --detach ../mtg-zero-wt/run-<sha> <sha>`) - gate.py never creates or
+manages a worktree itself, the same contract as `tools/build_py.sh` and `tools/search_smoke.py`.
+`--sha` labels the report and fails loudly if it does not match the checkout's HEAD (never silently
+gates the wrong commit).
+
+**Report** (`gates/<sha>.json`, one per sha - the normal workflow gates a given commit with
+exactly one tier, so the file name is keyed by sha alone; re-running a different tier against the
+same sha for a check, as this section's own verification did, overwrites it): sha, the zero-core
+pin, the tier, the digests seen, test counts per binary, each step's command, cwd, seconds, log
+path and its sha256, pass/fail and the reason, and the cargo target dir. Logs: `gates/logs/`.
+
+**Target guard.** A checkout marker (`.gate_checkout.json`) in `CARGO_TARGET_DIR` records which
+checkout last built there; a second checkout pointed at the same target dir is refused instead of
+silently reusing the first one's workspace-relative dep-info paths (memory
+`reference_cargo_shared_target_dir`: this is exactly how a scratch worktree's build quietly became
+the real worktree's build before M8d part 3).
+
+**CPU only, always**: `CUDA_VISIBLE_DEVICES=-1` (an empty string does not hide the GPU on
+Windows), `CARGO_BUILD_JOBS` (default 4), below-normal process priority. A tier whose recipe has a
+Mac part (`engine`'s conditional full-suite recheck, `repin`'s `mac.sh --eval-checkout`) runs it in
+a thread alongside its desktop steps so neither waits on the other needlessly; `--no-mac` skips
+Mac steps (marked skipped, not failed). `--dry-run` prints the plan - command, cwd, env overrides,
+which steps are parallel, which are skipped and why - and runs nothing.
+
+**What `gate.py` deliberately leaves out**: `repin`'s `watch_run` (it watches a *live* run
+directory after the re-pin takes effect; a one-shot gate has no natural pass/fail endpoint for an
+open-ended watch, so this stays an operator step after the gate passes, not a scripted check);
+`search-core`'s "smoke_all for the other games in the background" (that is zero-core-side work
+against a moving core commit - zero-core's own `tools/smoke_all.sh --build-only`, 70.3 - run by
+whoever moves zero-core's main, not this repo's gate); `encoding`'s checkpoint-load and
+`search-core`/`optin-core`'s `check_checkpoint_compat` need a `--checkpoint` / `--baseline-root`
+the caller supplies (a specific run's checkpoint, or another checkout to diff against) - omitted,
+the step is marked skipped with the reason, never silently treated as passing.
+
+### 70.2 `tools/search_smoke.py --jobs N`
+
+Runs `N` (seed, spec) configurations at once (each already its own subprocess with a fixed seed,
+module docs) instead of one at a time; report lines print in the same seed/spec order regardless
+of which configuration finishes first, so `--jobs 4`'s output is identical to `--jobs 1`'s, only
+the wall time differs - verified on one spec/seed set (70.6).
+
+### 70.3 The fuzz build profile, and zero-core's `smoke_all.sh --build-only`
+
+**`[profile.fuzz]`** (root `Cargo.toml`, inherits `release`): `debug-assertions = true`,
+`overflow-checks = true` - an arithmetic overflow panics instead of wrapping, and
+`engine/tests/fuzz.rs`'s existing sampled `check_determinize` checkpoint (`checkpoint_every`, 1-in-40
+normally) runs 1-in-4 under `cfg!(debug_assertions)`, i.e. specifically under this profile: `cargo
+test --profile fuzz -p engine --test fuzz`. Not wired into the farm's own build yet (`fuzz_farm.py`
+still builds `--release`; switching it is a follow-up, see the todo list) - the profile exists and
+the checkpoint rate change is live either way (it also fires under a plain `cargo test` built with
+`-C debug-assertions=on`, e.g. a dev profile).
+
+**zero-core `tools/smoke_all.sh --build-only`**: builds each game's `<pkg>._engine` (and, with
+`--with-this-core`, against THIS core checkout) without their cargo test, pytest or smoke run -
+"does an opt-in core feature's byte-identical-by-default build still compile against Glass Road,
+Caverna and Kingdom Builder" without paying for their full suites. Default game discovery now
+includes `../kingdombuilder-zero` alongside `../glassroad-zero` / `../caverna-zero`. zero-core
+docs/az.md 17 has the details; `gate.py`'s `optin-core` tier's last step is this command.
+
+### 70.4 The Mac fuzz farm's guaranteed slice (`tools/fuzz_farm.py`, `tools/mac_backoff.py`)
+
+By default the farm backs every job off (SIGSTOP) while a run's remote self-play holds a busy
+marker on the Mac (`mac_backoff.SELFPLAY_BUSY`, docs/ENGINE.md 50.2) - zero farm throughput for
+however long that phase runs, deliberately conservative. Two new, OFF-BY-DEFAULT `config.json`
+settings give it a guaranteed slice instead:
+
+* **`guaranteed_jobs`** (int, default 0): this many of the round's jobs keep running at nice 19
+  through a plain self-play busy marker (they still back off for a real evaluation lock, or
+  PAUSE) - on the premise that niceness alone already tells the OS scheduler to prefer self-play's
+  normal-priority process, so a guaranteed job need not fully stop to avoid competing with it.
+* **`guaranteed_window`** (`"HH:MM-HH:MM"`, local time, wraps past midnight): every job is
+  guaranteed during that window instead - a nightly slice when self-play is less likely running.
+
+Either way the guaranteed job(s) still draw from each mode's normal advancing cursor - fresh seeds
+every round, never a separate fixed range (`plan`'s `Job`s are built exactly as before; only
+`guaranteed=` on some of them changes, which `start` passes through to
+`mac_backoff.spawn`/`Governor.register`). `mac_backoff.Governor` now tracks two independent
+stopped states (`stopped` / `hard_stopped`, each its own `why`/`paused_s`): normal groups back off
+for `reason()` (any lock, including a self-play busy marker, as before - unchanged for
+`guaranteed_jobs=0`, `guaranteed_window=None`, i.e. every existing deployment of the farm), and
+GUARANTEED groups for `hard_reason()` (`hard_locks()`: every lock except the self-play busy glob,
+or PAUSE) only.
+
+**Not started on the Mac** (A/B round 3 is live there) - checked with
+`python tools/fuzz_farm.py simulate-guaranteed`, which exercises `Governor.register` / `._loop` /
+`.reason` / `.hard_reason` unmodified but swaps the OS-signal (`_signal_group`) and lock-discovery
+(`held`) layers for controllable fakes, since real `Governor` back-off needs POSIX SIGSTOP/SIGCONT
+(no equivalent on Windows, where this was written and checked): a normal job backs off for a
+self-play busy marker and a guaranteed one does not; both back off for a hard lock and for PAUSE;
+`in_guaranteed_window` reads a plain window and one that wraps past midnight correctly. All 13
+checks passed (70.6). `fuzz_farm.py` still builds and runs its jobs at `--release`, not the new
+`fuzz` profile (70.3) - wiring that in is a follow-up, not done here.
+
+### 70.5 De-flaked: a zero-core cargo test and `test_pause_mid_phase_then_resume`
+
+Two tests that failed under load and passed alone (found while building this tooling, not part of
+the policy itself but blocking a clean verification run of it):
+
+* **`driver::tests::queued_setups_are_shared_between_the_groups`** (zero-core
+  `crates/search/src/driver/tests.rs`): asserted the exact POSITION of each group's dispatch size
+  in the combined `sizes` vector (`sizes[..2]`, `sizes[2..4]`); reproduced reliably under thread
+  contention (10 concurrent copies of the binary, ~1/300 runs) - the two groups' reports interleave
+  by thread-scheduling order (which can give one group several reports before the other's first),
+  not by the (deterministic) `queue_share` fairness logic the test means to guard. Fixed by
+  asserting each GROUP's own distinct-size sequence (`own_sequence`, deduplicated) is `[1, 4]`
+  regardless of interleaving - 480/480 passed under the same contention that reproduced the
+  original failure.
+* **zero-core `tests/test_remoteplay.py::test_pause_mid_phase_then_resume`**: polled
+  `progress.json` for `remote.games > 50` in a flat 180 s window; under load the self-play phase is
+  simply slower, not stuck, so a fixed deadline flakes. `wait_for_remote_progress` now extends the
+  deadline as long as the count keeps climbing (a stall-based timeout, not a flat one), resets its
+  "best seen" on an iteration change (a stale reading from an already-finished phase cannot
+  short-circuit it), tolerates a torn read of `progress.json` (keeps the last good one instead of
+  resetting to `{}`), and fails immediately with the run's own output if the process has already
+  exited - instead of silently spinning out the rest of the window.
+
+`queued_setups_fill_every_free_slot_when_the_queue_is_long` and the rest of
+`crates/search/src/driver/tests.rs` (36 tests) still pass; `test_remoteplay.py`'s other tests were
+not touched.
+
+### 70.6 Checks
+
+`gate.py docs`, `python` and `encoding` run for real on this repo's main 6f871ac, in the worktree
+`mtg-zero-wt/gatetool` (target dir `E:/cargo-target/mtg-zero/gatetool`): all three **GATE PASSED**;
+`encoding`'s digests matched the expected values exactly (full `65e8a5155bd2000c`, encoding-free
+`c62a5ce5f290814e`), `cargo test --test az` 34 passed, `pytest` 55 passed both times. The Mac-part
+tiers (`engine`, `search-core`'s baseline-dependent steps, `repin`) were `--dry-run` only - no Mac
+jobs this session (A/B round 3 live on the desktop GPU and the Mac). `search_smoke --jobs 4`'s
+output matched `--jobs 1`'s on `--specs random,eval --seeds 0-1` (same per-configuration result
+lines, same order, only the wall time differed). The guaranteed slice's decision logic
+(`fuzz_farm.py simulate-guaranteed`) was run locally - Windows cannot run the real `Governor`
+(SIGSTOP/SIGCONT do not exist there), so the OS-signal and lock-discovery layers are swapped for
+controllable fakes while `Governor.register` / `._loop` / `.reason` / `.hard_reason` run
+unmodified; all 13 checks passed. It was not started on the Mac.

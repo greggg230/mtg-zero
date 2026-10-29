@@ -34,6 +34,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPECS = {
@@ -180,6 +181,57 @@ def parse_seeds(s):
     return out
 
 
+def run_configuration(spec, seed, a):
+    """One (seed, spec) configuration, as its own subprocess (module docs: a search worker's panic
+    can hang zero-core's driver, so each gets its own process to kill cleanly); -> (report lines,
+    a `(seed, spec, what)` tuple if it failed else None). Pure function of its arguments (seeds are
+    fixed), so running several at once (--jobs) changes nothing about any one configuration's
+    result - only how many run at the same time."""
+    cmd = [sys.executable, os.path.abspath(__file__), '--one', str(seed), spec, '--games', str(a.games),
+           '--events', str(a.events),
+           '--threads', str(a.threads), '--sims', str(a.sims), '--conc', str(a.conc), '--preset', a.preset,
+           '--stall', str(a.stall)]
+    t = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=a.timeout, cwd=ROOT,
+                           env=dict(os.environ, RUST_BACKTRACE=os.environ.get('RUST_BACKTRACE', '1')))
+        out, err, code = p.stdout, p.stderr, p.returncode
+    except subprocess.TimeoutExpired as e:
+        out = e.stdout.decode(errors='replace') if isinstance(e.stdout, bytes) else (e.stdout or '')
+        err = e.stderr.decode(errors='replace') if isinstance(e.stderr, bytes) else (e.stderr or '')
+        code = 'timeout'
+    lines = []
+    bad = None
+    line = next((x for x in out.splitlines() if x.startswith('RESULT ')), None)
+    if code == 0 and line and spec in DRAFT_SPECS:
+        r = json.loads(line[7:])
+        ok = r['games'] == a.events and not r['unfinished'] and not r['matches_unfinished']
+        lines.append(f'{"ok   " if ok else "BAD  "} seed {seed} {spec}: {r["games"]} events resolved ({r["unfinished"]} '
+                      f'bad or pending; team A won {r["team_a_wins"]}, {r["draws"]} drawn), {r["matches"]} matches '
+                      f'({r["matches_unfinished"]} unfinished), {r["decisions"]} draft decisions, {r["samples"]} samples, '
+                      f'{r["sims"]} sims, {r["parked"]} parked, parked records max {r["parked_mb_max"]} MB, '
+                      f'{r["seconds"]} s')
+        if not ok:
+            bad = (seed, spec, 'events missing, unresolved or insane, or matches unfinished')
+    elif code == 0 and line:
+        r = json.loads(line[7:])
+        lines.append(f'ok    seed {seed} {spec}: {r["games"]} games ({r["unfinished"]} unfinished), '
+                      f'{r["decisions"]} decisions, {r["sims"]} sims, {r["seconds"]} s')
+        if r['games'] != a.games or r['unfinished']:
+            bad = (seed, spec, 'games missing or unfinished')
+    else:
+        what = {'timeout': 'HANG (timeout)', 3: 'HANG (stalled)'}.get(code, f'FAIL (exit {code})')
+        err_lines = err.splitlines()
+        # each panic's location and message (the next line), the driver's error
+        panics = [x for i, x in enumerate(err_lines) if 'panicked at' in x or
+                  (i and 'panicked at' in err_lines[i - 1]) or x.startswith(('RuntimeError', 'HANG'))]
+        lines.append(f'{what} seed {seed} {spec} after {time.time() - t:.0f} s')
+        for x in (panics or err_lines[-20:]):
+            lines.append('    ' + x[:2000])
+        bad = (seed, spec, what)
+    return lines, bad
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--seeds', default='0-3', help='driver seeds: 0-3 or 0,5,9')
@@ -192,6 +244,10 @@ def main():
     ap.add_argument('--preset', default='mtg-3', help='the run preset whose self-play seat is used')
     ap.add_argument('--timeout', type=float, default=1800, help='seconds per configuration before it counts as a hang')
     ap.add_argument('--stall', type=float, default=60, help='seconds without a batch before it counts as a hang')
+    ap.add_argument('--jobs', type=int, default=1, help='run this many (seed, spec) configurations at once '
+                     '(each is its own subprocess with its own fixed seed already, so the per-configuration '
+                     'results are identical to --jobs 1 - only the wall time changes; report lines print in the '
+                     'same seed/spec order regardless of which configuration actually finishes first)')
     ap.add_argument('--one', nargs=2, metavar=('SEED', 'SPEC'), help=argparse.SUPPRESS)
     a = ap.parse_args()
     if a.one:
@@ -202,52 +258,24 @@ def main():
         print('RESULT ' + json.dumps(r), flush=True)
         return 0
     t0 = time.time()
-    bad = []
+    jobs = []
     for spec in a.specs.split(','):
         if spec not in SPECS and spec not in DRAFT_SPECS:
             sys.exit(f'unknown spec {spec!r} (have {sorted(SPECS) + sorted(DRAFT_SPECS)})')
         for seed in parse_seeds(a.seeds):
-            cmd = [sys.executable, os.path.abspath(__file__), '--one', str(seed), spec, '--games', str(a.games),
-                   '--events', str(a.events),
-                   '--threads', str(a.threads), '--sims', str(a.sims), '--conc', str(a.conc), '--preset', a.preset,
-                   '--stall', str(a.stall)]
-            t = time.time()
-            try:
-                p = subprocess.run(cmd, capture_output=True, text=True, timeout=a.timeout, cwd=ROOT,
-                                   env=dict(os.environ, RUST_BACKTRACE=os.environ.get('RUST_BACKTRACE', '1')))
-                out, err, code = p.stdout, p.stderr, p.returncode
-            except subprocess.TimeoutExpired as e:
-                out = e.stdout.decode(errors='replace') if isinstance(e.stdout, bytes) else (e.stdout or '')
-                err = e.stderr.decode(errors='replace') if isinstance(e.stderr, bytes) else (e.stderr or '')
-                code = 'timeout'
-            line = next((x for x in out.splitlines() if x.startswith('RESULT ')), None)
-            if code == 0 and line and spec in DRAFT_SPECS:
-                r = json.loads(line[7:])
-                ok = r['games'] == a.events and not r['unfinished'] and not r['matches_unfinished']
-                print(f'{"ok   " if ok else "BAD  "} seed {seed} {spec}: {r["games"]} events resolved ({r["unfinished"]} '
-                      f'bad or pending; team A won {r["team_a_wins"]}, {r["draws"]} drawn), {r["matches"]} matches '
-                      f'({r["matches_unfinished"]} unfinished), {r["decisions"]} draft decisions, {r["samples"]} samples, '
-                      f'{r["sims"]} sims, {r["parked"]} parked, parked records max {r["parked_mb_max"]} MB, '
-                      f'{r["seconds"]} s', flush=True)
-                if not ok:
-                    bad.append((seed, spec, 'events missing, unresolved or insane, or matches unfinished'))
-            elif code == 0 and line:
-                r = json.loads(line[7:])
-                print(f'ok    seed {seed} {spec}: {r["games"]} games ({r["unfinished"]} unfinished), '
-                      f'{r["decisions"]} decisions, {r["sims"]} sims, {r["seconds"]} s', flush=True)
-                if r['games'] != a.games or r['unfinished']:
-                    bad.append((seed, spec, 'games missing or unfinished'))
-            else:
-                what = {'timeout': 'HANG (timeout)', 3: 'HANG (stalled)'}.get(code, f'FAIL (exit {code})')
-                lines = err.splitlines()
-                # each panic's location and message (the next line), the driver's error
-                panics = [x for i, x in enumerate(lines) if 'panicked at' in x or (i and 'panicked at' in lines[i - 1])
-                          or x.startswith(('RuntimeError', 'HANG'))]
-                print(f'{what} seed {seed} {spec} after {time.time() - t:.0f} s', flush=True)
-                for x in (panics or lines[-20:]):
-                    print('    ' + x[:2000], flush=True)
-                bad.append((seed, spec, what))
-    print(f'search smoke: {len(bad)} failed of {len(parse_seeds(a.seeds)) * len(a.specs.split(","))} '
+            jobs.append((spec, seed))
+    bad = []
+    with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as ex:
+        futures = [ex.submit(run_configuration, spec, seed, a) for spec, seed in jobs]
+        # printed (and collected) in submission order regardless of completion order: --jobs N's
+        # output is identical to --jobs 1's, only the wall time differs.
+        for fut in futures:
+            lines, b = fut.result()
+            for line in lines:
+                print(line, flush=True)
+            if b:
+                bad.append(b)
+    print(f'search smoke: {len(bad)} failed of {len(jobs)} '
           f'configurations, {time.time() - t0:.0f} s', flush=True)
     return 1 if bad else 0
 

@@ -25,13 +25,28 @@ running time and per hour of the farm), the back-offs and the failures; `python 
 prints it (`tools/fuzz_farm_status.sh` from the desktop).
 
 Control (`~/mtgz-fuzzfarm/`): `config.json` (read every round: `ref`, `jobs`, `chunk_s`,
-`smoke_threads`, `modes`, `expected`), `PAUSE` (stop the jobs, like a back-off), `STOP` (end: the
-LaunchAgent does not restart a clean exit). `tools/fuzz_farm.sh` installs and controls the user
-LaunchAgent `com.mtgzero.fuzzfarm` (KeepAlive: restarted after a crash; started at login).
+`smoke_threads`, `modes`, `expected`, `guaranteed_jobs`, `guaranteed_window`), `PAUSE` (stop the
+jobs, like a back-off), `STOP` (end: the LaunchAgent does not restart a clean exit).
+`tools/fuzz_farm.sh` installs and controls the user LaunchAgent `com.mtgzero.fuzzfarm` (KeepAlive:
+restarted after a crash; started at login).
+
+**The guaranteed slice** (tiered gates, docs/ENGINE.md 70): by default the farm backs ALL its jobs
+off (SIGSTOP) while a run's remote self-play holds a busy marker on the Mac
+(`mac_backoff.SELFPLAY_BUSY`) - zero farm throughput for however long that phase runs. Setting
+`guaranteed_jobs` (an int) keeps that many of the round's jobs running at nice 19 through a plain
+self-play busy marker (they still back off for a real evaluation lock, or PAUSE); nice 19 already
+tells the OS scheduler to prefer self-play's normal-priority process. `guaranteed_window`
+("HH:MM-HH:MM", local time, wraps past midnight) makes EVERY job guaranteed during that window
+instead (a nightly slice when self-play is less likely running) - set one or the other, or
+neither (0 / null: today's behaviour, unchanged). Either way the guaranteed job(s) still draw from
+each mode's normal advancing cursor (fresh seeds every round, never a fixed range) - only whether
+they back off differs. Both default to off; this was NOT started on the Mac (A/B round 3 is live
+there) - `python tools/fuzz_farm.py simulate-guaranteed` checks the decision logic locally instead.
 
     python fuzz_farm.py run          # the farm (the LaunchAgent runs this)
     python fuzz_farm.py status [--since UNIX_TIME] [--json]
     python fuzz_farm.py once MODE N  # one chunk of a mode now, at the cursor (a check)
+    python fuzz_farm.py simulate-guaranteed   # the guaranteed slice's decision logic, locally (no Mac, no build)
 """
 import argparse
 import hashlib
@@ -67,6 +82,13 @@ CONFIG = {
     'timeout_factor': 5.0,         # a job running this many times its expected time (at least an hour) is a hang
     # failures whose site or message matches one of these are marked expected (known, being fixed)
     'expected': ['PayMana', 'Griselbrand', "Green Sun's Zenith"],
+    # the guaranteed slice (tiered gates, docs/ENGINE.md 70): this many of `jobs` back off only for
+    # a hard lock or PAUSE, never a plain self-play busy marker (mac_backoff.Governor's docs) - 0
+    # (off, today's behaviour) unless set in config.json. `guaranteed_window`, e.g.
+    # "02:00-06:00" (local time, HH:MM-HH:MM, wraps past midnight): during it every job is
+    # guaranteed, overriding `guaranteed_jobs` for that round; None (off) unless set.
+    'guaranteed_jobs': 0,
+    'guaranteed_window': None,
 }
 
 # mode -> kind, test binary / smoke spec, test name, env, unit, initial rate (units per running second), minimum chunk
@@ -129,6 +151,26 @@ def config():
     return c
 
 
+def in_guaranteed_window(cfg, now=None):
+    """Whether `now` (local time, default this moment) falls in `guaranteed_window`
+    ("HH:MM-HH:MM"; wraps past midnight, e.g. "22:00-06:00"); False if unset or malformed (a bad
+    config value backs off as today, it never silently runs the whole farm unthrottled)."""
+    w = cfg.get('guaranteed_window')
+    if not w:
+        return False
+    try:
+        a, b = w.split('-')
+        start = time.strptime(a.strip(), '%H:%M')
+        end = time.strptime(b.strip(), '%H:%M')
+    except ValueError:
+        log(f'config: bad guaranteed_window {w!r} (want "HH:MM-HH:MM"): ignored')
+        return False
+    t = time.localtime(now) if now is not None else time.localtime()
+    cur = (t.tm_hour, t.tm_min)
+    lo, hi = (start.tm_hour, start.tm_min), (end.tm_hour, end.tm_min)
+    return (lo <= cur < hi) if lo <= hi else (cur >= lo or cur < hi)
+
+
 def base_env(cfg):
     env = dict(os.environ)
     env['PATH'] = ':'.join([os.path.join(VENV, 'bin'), os.path.join(HOME, '.cargo', 'bin'), '/opt/homebrew/bin',
@@ -162,6 +204,7 @@ class State:
         self.d.setdefault('started', time.time())
         self.d.setdefault('wall_s', 0.0)       # the farm's running wall time over its lives
         self.d.setdefault('backoff', {'episodes': 0, 'paused_s': 0.0})
+        self.d.setdefault('guaranteed_backoff', {'episodes': 0, 'paused_s': 0.0})
 
     def save(self):
         write_json(path('state.json'), self.d)
@@ -303,9 +346,10 @@ def failures():
 # ---------------------------------------------------------------------------- source and build
 
 class Job:
-    def __init__(self, mode, first, n, cont=0, bisect=False, hang=False):
+    def __init__(self, mode, first, n, cont=0, bisect=False, hang=False, guaranteed=False):
         self.mode, self.first, self.n, self.cont, self.bisect = mode, first, n, cont, bisect
         self.hang = hang                            # a half of a hung chunk: a tight time limit
+        self.guaranteed = guaranteed                # the guaranteed slice: backs off for less (mac_backoff.Governor)
         self.p = None
         self.t0 = None
         self.paused0 = 0.0
@@ -313,7 +357,8 @@ class Job:
         self.expected_s = None
 
     def describe(self):
-        return f'{self.mode} [{self.first}+{self.n}]' + (' (bisect)' if self.bisect else '')
+        return f'{self.mode} [{self.first}+{self.n}]' + (' (bisect)' if self.bisect else '') \
+            + (' (guaranteed)' if self.guaranteed else '')
 
 
 def run_governed(cmd, cwd, env, gov, logpath, timeout_active=None):
@@ -450,6 +495,8 @@ def kill_orphans():
 def plan(cfg, state):
     built = state.d['built']
     modes = cfg['modes'] or list(MODES)
+    window = in_guaranteed_window(cfg)
+    n_guaranteed = len(modes) if window else max(0, int(cfg.get('guaranteed_jobs', 0) or 0))
     jobs = []
     for mode in modes:
         if mode not in MODES:
@@ -463,7 +510,9 @@ def plan(cfg, state):
         n = max(m['min'], int(state.rate(mode) * cfg['chunk_s']))
         if m['kind'] == 'smoke':
             n = min(n, 16)
-        jobs.append(Job(mode, state.cursor(mode), n))
+        # the guaranteed slice always draws from the SAME advancing cursor as every other job
+        # (fresh seeds, never a separate fixed range) - only whether it backs off differs.
+        jobs.append(Job(mode, state.cursor(mode), n, guaranteed=len(jobs) < n_guaranteed))
     return jobs
 
 
@@ -489,9 +538,9 @@ def start(cfg, state, job, gov):
                   + ' '.join(f'{k}={env[k]}' for k in sorted(set(m.get('env', {})) | {FIRST_VAR.get(m['kind'], ''),
                              COUNT_VAR.get(m.get('test', ''), '')}) if k in env) + '\n')
     job.out.flush()
-    job.p = mb.spawn(cmd, gov, cwd=cwd, env=env, stdout=job.out, stderr=subprocess.STDOUT)
+    job.p = mb.spawn(cmd, gov, guaranteed=job.guaranteed, cwd=cwd, env=env, stdout=job.out, stderr=subprocess.STDOUT)
     jobs_file_add(job.p.pid, cmd)
-    job.t0, job.paused0 = time.time(), gov.paused_total()
+    job.t0, job.paused0 = time.time(), gov.paused_total(guaranteed=job.guaranteed)
     job.expected_s = job.n / max(state.rate(job.mode), 1e-9)
     job.env = {k: env[k] for k in list(m.get('env', {})) + [FIRST_VAR.get(m['kind'], ''), COUNT_VAR.get(m.get('test', ''), '')]
                if k in env}
@@ -508,7 +557,7 @@ def hang_limit(cfg, job):
 
 
 def active_s(job, gov):
-    return time.time() - job.t0 - (gov.paused_total() - job.paused0)
+    return time.time() - job.t0 - (gov.paused_total(guaranteed=job.guaranteed) - job.paused0)
 
 
 def repro_of(job, seed, sha):
@@ -699,6 +748,10 @@ def write_status(state, gov, running, phase=None):
          'started': state.d['started'],
          'backoff': {'episodes': state.d['backoff']['episodes'] + (gov.events if gov else 0),
                      'paused_h': round((state.d['backoff']['paused_s'] + (gov.paused_total() if gov else 0)) / 3600, 2)},
+         'guaranteed_jobs': config().get('guaranteed_jobs', 0), 'guaranteed_window': config().get('guaranteed_window'),
+         'guaranteed_backoff': {'episodes': state.d['guaranteed_backoff']['episodes'] + (gov.hard_events if gov else 0),
+                                'paused_h': round((state.d['guaranteed_backoff']['paused_s'] +
+                                                   (gov.paused_total(guaranteed=True) if gov else 0)) / 3600, 2)},
          'running': [{'mode': j.mode, 'first': j.first, 'n': j.n, 'running_s': round(active_s(j, gov)) if gov else None,
                       'expected_s': round(j.expected_s or 0)} for j in running],
          'modes': modes,
@@ -843,6 +896,8 @@ def run():
     finally:
         gov.close()
         state.d['wall_s'] += time.time() - state.d.pop('life_started', time.time())
+        state.d['guaranteed_backoff']['episodes'] += gov.hard_events
+        state.d['guaranteed_backoff']['paused_s'] += gov.hard_paused_s
         state.d['backoff']['episodes'] += gov.events
         state.d['backoff']['paused_s'] += gov.paused_s
         state.save()
@@ -867,9 +922,93 @@ def once(mode, n):
     gov.close()
 
 
+def simulate_guaranteed():
+    """A LOCAL check of the guaranteed slice's DECISION logic (tiered gates, docs/ENGINE.md 70):
+    no Mac, no build, no real farm, and no OS process signalling either (`Governor` SIGSTOPs real
+    process groups, which does not exist on Windows - `mac_backoff._signal_group` and `.held` are
+    swapped for controllable fakes so this runs anywhere; `Governor._loop`, `.register`,
+    `.reason`, `.hard_reason` - the logic that decides who backs off for what - run unmodified).
+    `python tools/fuzz_farm.py simulate-guaranteed`. Verifies: a normal job backs off for a
+    self-play busy marker and a guaranteed one does not; both back off for a hard (evaluation)
+    lock and for PAUSE (a real file: `os.path.exists` needs no fake); `in_guaranteed_window` reads
+    a plain window and one that wraps past midnight."""
+    import tempfile
+    ok = True
+
+    def check(name, cond):
+        nonlocal ok
+        print(('ok    ' if cond else 'FAIL  ') + name)
+        ok = ok and cond
+
+    state = {'busy': False, 'hard': False}
+    NORMAL, HARD = ['NORMAL-LOCKS'], ['HARD-LOCKS']
+
+    def fake_held(locks=None):
+        if locks == HARD:
+            return 'fake-hard-lock' if state['hard'] else None
+        return 'fake-busy-marker' if (state['busy'] or state['hard']) else None
+    import signal
+    had_sigstop, had_sigcont = hasattr(signal, 'SIGSTOP'), hasattr(signal, 'SIGCONT')
+    if not had_sigstop:
+        signal.SIGSTOP = 23                             # Windows has neither: `_loop` only needs
+    if not had_sigcont:                                 # the names to exist, `_signal_group` is faked below
+        signal.SIGCONT = 25
+    orig_signal_group, orig_held, orig_hard_locks = mb._signal_group, mb.held, mb.hard_locks
+    mb._signal_group = lambda pgid, sig: True           # no real OS signal sent - fake pgids below
+    mb.held = fake_held
+    mb.hard_locks = lambda: HARD
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            pause_path = f.name
+        os.remove(pause_path)                           # exists only once the test creates it
+        gov = mb.Governor(poll=0.05, locks=NORMAL, pause_file=pause_path)
+        try:
+            gov.register(999901, guaranteed=False)
+            gov.register(999902, guaranteed=True)
+            time.sleep(0.2)
+            check('neither backs off with nothing held', not gov.stopped and not gov.hard_stopped)
+            state['busy'] = True
+            time.sleep(0.2)
+            check('a normal job backs off for a self-play busy marker', gov.stopped)
+            check('a guaranteed job does NOT back off for a self-play busy marker alone', not gov.hard_stopped)
+            state['busy'] = False
+            time.sleep(0.2)
+            check('the normal job resumes once the marker is gone', not gov.stopped)
+            state['hard'] = True
+            time.sleep(0.2)
+            check('a normal job backs off for a hard (evaluation) lock', gov.stopped)
+            check('a GUARANTEED job backs off for a hard lock too', gov.hard_stopped)
+            state['hard'] = False
+            time.sleep(0.2)
+            check('both resume once the hard lock is gone', not gov.stopped and not gov.hard_stopped)
+            with open(pause_path, 'w'):
+                pass
+            time.sleep(0.2)
+            check('PAUSE stops the guaranteed job too', gov.hard_stopped and gov.stopped)
+        finally:
+            gov.close()
+            os.remove(pause_path)
+    finally:
+        mb._signal_group, mb.held, mb.hard_locks = orig_signal_group, orig_held, orig_hard_locks
+        if not had_sigstop:
+            del signal.SIGSTOP
+        if not had_sigcont:
+            del signal.SIGCONT
+
+    def ts(h, m):
+        return time.mktime((2026, 1, 1, h, m, 0, 0, 1, -1))
+    check('a plain window: 10:00 is outside 02:00-06:00', not in_guaranteed_window({'guaranteed_window': '02:00-06:00'}, ts(10, 0)))
+    check('a plain window: 03:00 is inside 02:00-06:00', in_guaranteed_window({'guaranteed_window': '02:00-06:00'}, ts(3, 0)))
+    check('a wrapping window: 23:30 is inside 22:00-06:00', in_guaranteed_window({'guaranteed_window': '22:00-06:00'}, ts(23, 30)))
+    check('a wrapping window: 12:00 is outside 22:00-06:00', not in_guaranteed_window({'guaranteed_window': '22:00-06:00'}, ts(12, 0)))
+    check('no window configured: never guaranteed', not in_guaranteed_window({'guaranteed_window': None}, ts(3, 0)))
+    print('GUARANTEED-SLICE SIMULATION: ' + ('PASSED' if ok else 'FAILED'))
+    return 0 if ok else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
-    ap.add_argument('cmd', choices=('run', 'status', 'once', 'build'))
+    ap.add_argument('cmd', choices=('run', 'status', 'once', 'build', 'simulate-guaranteed'))
     ap.add_argument('args', nargs='*')
     ap.add_argument('--since', type=float, default=0.0, help='status: failures first seen after this time are NEW')
     ap.add_argument('--json', action='store_true')
@@ -891,6 +1030,8 @@ def main():
         gov.close()
         print(sha)
         return 0 if sha else 1
+    if a.cmd == 'simulate-guaranteed':
+        return simulate_guaranteed()
     once(a.args[0], int(a.args[1]))
     return 0
 
