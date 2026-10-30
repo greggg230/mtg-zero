@@ -416,7 +416,9 @@ at once (704.5e, section 26.4).
   drawer), looking (the top N of your library; another player's hand, `KEY_LOOK`), revealing
   to everyone (`reveal`: hand reveals, revealed searches, a hand card activated, 602.2a), and
   public -> hidden moves (Memory Lapse, Oust, a bounce, Sensei's Divining Top: everyone saw
-  it go there). Cleared by the rearrangements below.
+  it go there). Cleared by the rearrangements below. *Who* knows is public (every event that
+  sets or clears a bit is seen); the encoding carries it for the hand (st[4]) and the top three
+  cards of each library (`g5::TOP_OWNER` / `TOP_OTHER`, section 72).
 * **Knowledge, partial (`Game.clouds`).** `Cloud { viewer, owner, hand, library, slots, defs }`:
   the viewer knows that the identities `defs` (a multiset) are among those of the owner's
   cards it does not know exactly in the domain: `slots` (library cards), plus the whole hand
@@ -11689,7 +11691,7 @@ Every v4 float keeps its index within its block and its meaning; blocks after a 
 | graveyard abilities | 33,284 | 4 x 56 | 37,188 | 4 x 56 | |
 | companions | 33,508 | 2 x 56 | 37,412 | 2 x 56 | |
 | match | 33,620 | 32 | 37,524 | 32 | |
-| globals v5 | | | 37,556 | 64 | per player 24 (16 used), the game's 16 (2 used) |
+| globals v5 | | | 37,556 | 64 | per player 24 (16 used; 22 since section 72), the game's 16 (2 used) |
 | **total** | | **33,652** | | **37,620** | +3,968 (bags 2,048, permanents 1,536, stack 320, globals 64) |
 
 The same 11 segments in the same order with the same slot counts, present flags, identities (card
@@ -15132,3 +15134,114 @@ commit: the same engine; desktop CPU, below-normal priority, target dir
 weighted deal (`determinize_with` pins the same cards: a face choice now pins for it too, as it
 must); this branch is rebased on 69 (b818054) and 68 (d0b62b1; search-only). `testkit::view_of`
 gained the viewer's own hand's knowledge: any information-set check written against it sees it.
+
+## 72. Who knows a library's top cards, in the encoding
+
+Branch `top-known` (from main e08bade), 2026-10-30, CPU only; the user's decision after a question
+about top-of-library knowledge in the Delver mirror ("a correctness issue": fix the input before any
+belief over the opponent's top cards). Layout v5 is unchanged: six spare per-player floats, as
+section 55 filled v4's. The rules engine is untouched (the encoding-free digest is equal).
+
+### 72.1 The gap
+
+`Obj.known` (section 10) says which players know a hidden card. What the card is stays hidden;
+**who knows it is public**: every event that sets or clears a bit is seen by both players (a look
+at the top N, a surveil kept on top, Brainstorm's put-back, a Mishra's Bauble at one's own library,
+a shuffle, a draw). The encoding showed the viewer's own knowledge (the tops block's "known to the
+viewer" and the card; the `*_KNOWN` bags) and, for the hand, which of the viewer's cards the
+opponent knows (hand st[4]), but not who else knows a library card:
+
+* **The opponent's library known to its owner.** The opponent Ponders and keeps, surveils and keeps
+  (Dragon's Rage Channeler, Thundering Falls), Brainstorms, or looks at its own top with a Bauble:
+  everyone knows the opponent knows its next draws, and the keep or the put-back says something
+  about them. The viewer's input was identical to an untouched library, so neither the trunk nor a
+  belief head could learn anything from it.
+* **The viewer's library known to the opponent.** A Mishra's Bauble at a top card its owner knows
+  is remembered by the looker (23.7); the owner's input did not show that the opponent knows its
+  next draw.
+
+The public-state gate (58.6) could not see it: it classified `Obj.known` as hidden as a whole.
+
+### 72.2 The fix: six spare floats per player
+
+`g5::TOP_OWNER` (per-player floats 16-18) and `g5::TOP_OTHER` (19-21): per position k of the top
+three (`TOPS`, top first) of that player's library (per-player blocks viewer first), 1 if the
+library's owner knows the card there, and 1 if the other player does. Two per-player floats stay
+spare. For a viewer the floats about its own knowledge repeat the tops block's "known to the
+viewer"; the new information is the other player's knowledge of both libraries.
+
+Layout v5 is unchanged (37,620 floats; `layout_v5.json` declares `globals_v5` as a block), so the
+encoding guard (61) accepts every v5 checkpoint and the shards' width is the same. As in 55.2, the
+inputs were always 0 in training: their `TokenNet` weight columns are their initialisation (less
+weight decay) until training gives them a meaning.
+
+### 72.3 Hidden information
+
+Who knows stays with a card's slot: `determinize` deals identities (`set_ident`) and
+`force_library_card` swaps identities between cards nobody knows, so the floats are the same in
+every world either viewer's `determinize` deals, and a viewer's input says nothing about what the
+cards are. `Game::view_of` now lists, per library, the positions the other player knows (whose
+changes the gate needs to see); the fuzz and the hidden-information checks compare it across
+worlds.
+
+### 72.4 The gate
+
+`Obj.known` is classified public ("who knows is public, what it is is not: leak-tested") with four
+perturbations, each through `Game::learn` (which keeps the clouds right): the owner learns its top
+card; the other player learns a library's top card (its owner too: a library card the other player
+knows its owner knows, 23.7); the owner learns a card below the top three (a **deliberate limit**:
+below the top three the encoding has the viewer's own knowledge only, in the bags; that the other
+player knows a deeper card is a mulligan's bottom cards, whose number the mulligans' count gives,
+or a card put under others, never the next draws); the other player learns a hand card (hand st[4]
+and `OPP_HAND_KNOWN`, already encoded).
+
+`public_state_reaches_the_encoding` (240 positions: the cube, the Delver mirror, best-of-three, a
+drafted match; 211 fields, 117 public, 6 hidden, 88 derived; 145 perturbations): the owner learns its
+top card, 223 applied; the other player learns a library's top card, 240; a hand card, 218 - both
+views and both encodings changed every time. Below the top three: 240 applied, both views changed,
+the non-owner's encoding unchanged every time (the limit, as declared). In all: 135 encoded, 4
+deliberate limits, 1 gap for the next layout (the graveyard's order, as before).
+
+### 72.5 Tests
+
+`tests/az.rs` `who_knows_a_librarys_top_cards_is_encoded` (the constructed card pool, both viewers,
+20 worlds each per step): P0 Brainstorms, putting a Mountain and a Bolt back (P0's library
+`[(1,0), (1,0), (0,0)]`, (owner, other), top first); P1's Mishra's Bauble at P0's top card, which P0
+knows (`[(1,1), (1,0), (0,0)]`, P1 remembers it); P0 Ponders and keeps (P1 loses track of its card:
+`[(1,0), (1,0), (0,0)]` after the draw); Polluted Delta's search shuffles (all 0). P1's library stays
+all 0 throughout. The gate's tests (`public_state_reaches_the_encoding`, the classification table)
+and `the_v5_facts_encode_no_hidden_information` run the new perturbations.
+
+### 72.6 Encoding, digests, networks
+
+Encoding-free behaviour digest **a634df1919e3c337, unchanged**; the full digest 11e873a3d2e4530a ->
+**6b4bc88c864c4dd4** (`DIGEST_WRITE=1`: 1,825 of the 2,500 games encode differently at some
+position).
+
+The encoding gate (`tools/gate.py encoding`, `gates/45535f0adf75.json`): the build, both digests as
+above, `--test az` 39 passed, the main line's checkpoint `runs/r3-2b-beliefsearch/models/iter_0196.pt`
+(read only) loads and plays 8 Delver games (h2h, CPU, 16 simulations, none unfinished), pytest 59
+passed. Fuzz: 300 games of the default pool and 1,000 of the Delver pool (`FUZZ_POOL=delver`), clean.
+
+**What a v5 checkpoint sees.** Unlike 55.2's v4 networks, the main line's descend from 60's exact
+widen, which gave every v5 global a zero weight column, and a column whose input is always 0 never
+moves: the columns of these twelve floats are exactly 0 in `runs/r3-2b-beliefsearch` iterations 100
+and 196 and in delver2's iteration 0 (`TokenNet.g`, inputs 160 + 24 side + 16..21). On 4,000 Delver
+positions where they are set (a third of the decisions of mixed heuristic / random games, 1.7 set
+floats a row), iteration 196's and 100's values and policies are those with the floats masked, bit for
+bit (P(win) shift 0, policy KL 0, no argmax changed). So a re-pin changes nothing for the network until
+training grows the columns, as it grew the used v5 globals' from 0 (cards drawn 0.3-0.95, attacked 0.5-0.6,
+delayed triggers - a Bauble's draw - 1.9-2.1; the ones the mirror never sets are still 0). A network
+built fresh has random columns there instead, which distilling from older shards (all 0 there) never
+trains: a distilled student (62.9) moved onto this build should have them zeroed first, or it plays
+with an untrained input (55.6's size of effect).
+
+### 72.7 What this does not change
+
+* A Mishra's Bauble at a card its owner does not know is still not remembered (23.7), and a
+  shuffle followed by a draw still drops the cloud it made (10): the bot's own knowledge.
+* The belief head (66) predicts the opponent's hand only and the weighted deal (69) tilts the hand;
+  the opponent's known top cards are dealt uniformly. A belief over them is a later step, and now
+  has an input to learn from.
+* A run picks this up at a re-pin (an iteration boundary; checkpoints, the optimiser state and the
+  window's shards load as they are); which run and when is the user's call.
