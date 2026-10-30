@@ -202,18 +202,33 @@ def _label(flag, name=None):
     return ' '.join([parts[0].lstrip('-').replace('-', '_')] + parts[1:]) if parts else str(name or flag)
 
 
+def _run_label(run, name=None):
+    """A run's label from its directory ('r3-2b-beliefsearch' -> 'beliefsearch'), else `name`."""
+    m = re.match(r'r\d+-\d+[a-z]?-(.+)$', os.path.basename(os.path.normpath(run)))
+    return m.group(1) if m else str(name or os.path.basename(run))
+
+
 def fork_registry(paths):
     """The A/B experiments' forks (their state files' `done`): fork run directory ->
-    {parent, at, label, won}."""
+    {parent, at, label, won}. A test's arm A (raw.a's run) forked from main_before at k - its
+    first record only: a later test of the same run's checkpoint (an evaluation-only head-to-head)
+    is not where it forked. An adoption whose main_after is a new run (neither main_before nor the
+    arm) started that run from the tested checkpoint: a fork of the arm at that iteration."""
     out = {}
     done = [d for path in paths if path for d in ((_json(path, {}) or {}).get('done') or [])]
     for d in done:
         a = (d.get('raw') or {}).get('a')
         if not a or d.get('k') is None or not d.get('main_before'):
             continue
-        fork = os.path.dirname(os.path.dirname(a.replace('\\', '/')))
-        out[_norm(fork)] = {'parent': d['main_before'], 'at': int(d['k']), 'label': _label(d.get('flag'), d.get('name')),
-                            'won': _norm(d.get('main_after') or '') == _norm(fork)}
+        a = a.replace('\\', '/')
+        fork = os.path.dirname(os.path.dirname(a))
+        if _norm(fork) not in out and _norm(fork) != _norm(d['main_before']):
+            out[_norm(fork)] = {'parent': d['main_before'], 'at': int(d['k']), 'label': _label(d.get('flag'), d.get('name')),
+                                'won': _norm(d.get('main_after') or '') == _norm(fork)}
+        after = d.get('main_after')
+        m = re.search(r'iter_(\d+)\.pt$', a)
+        if after and m and _norm(after) not in (_norm(fork), _norm(d['main_before'])) and _norm(after) not in out:
+            out[_norm(after)] = {'parent': fork, 'at': int(m.group(1)), 'label': _run_label(after, d.get('name')), 'won': True}
     return out
 
 
