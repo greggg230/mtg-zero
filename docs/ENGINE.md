@@ -13882,12 +13882,12 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates), CPU 
 
 ## 69. Belief-weighted determinization (stage 2 of the belief head; zero-core `belief_tilt`)
 
-Branch `belief-search` (on main b78c757): zero-core pinned at **353335c** (feat/belief-search on zero-core
-main 3b5134d: the feature 28be0f9 + 42c455e, docs 353335c - zero-core docs/search.md 3.8, az.md 18); this repo:
-`Game::determinize_weighted` (`hidden.rs`), `az/belief.rs` (`deal_weights`, `MtgAz::determinize_with`), the
-tests (69.4), the fuzz's `FUZZ_BELIEF`, `tools/belief_search.py` (the CPU evidence), this section. With every
-tilt at 0 (the default) a run is the run of before, byte for byte (69.8). The user's go-ahead (2026-10-29):
-"build the head and use it in search"; the design is 66.8's.
+Branch `belief-search` (on main 0d4328f): zero-core pinned at **353335c** (feat/belief-search on zero-core main
+3b5134d: the feature 28be0f9 + 42c455e, docs 353335c - zero-core docs/search.md 3.8, az.md 18); this repo:
+`Game::determinize_weighted` (`hidden.rs`), `az/belief.rs` (`deal_weights`, `MtgAz::determinize_with`), the tests
+(69.4), the fuzz's `FUZZ_BELIEF`, `tools/belief_search.py` (the CPU evidence), this section. With every tilt at 0
+(the default) a run is the run of before, byte for byte (69.8). The user's go-ahead (2026-10-29): "build the head
+and use it in search"; the design is 66.8's.
 
 ### 69.1 What was built, and where it departs from 66.8
 
@@ -14091,14 +14091,15 @@ nothing on the Mac, `runs/` only read (copies of stage 1's checkpoints, 69.5).
   (random, uniform, a toy MLP and a toy token checkpoint): identical; `smoke_all.sh --with-this-core --build-only`:
   Glass Road Zero c1f56dc (47 s), Caverna Zero a6fad73 (54 s), Kingdom Builder Zero 4202a4a (78 s) GREEN;
   `python -m zero.parity belief` (zero-core docs/search.md 6).
-* **This repo** (on main b78c757): `bash tools/build_py.sh` (own target dir); `cargo test --release --no-fail-fast`
-  **1,482 passed, 0 failed, 15 ignored** (111 binaries); `--test az` 38 passed (4 new), `--test hidden` 16 passed
-  (3 new), `--test limits` 9 passed; behaviour digests **unchanged**: full 65e8a5155bd2000c, `DIGEST_ENCODING=0`
-  c62a5ce5f290814e (main's 65e8a5155bd2000c / c62a5ce5f290814e: with every tilt at 0 nothing calls the weighted
-  deal, and `determinize` is factored without a change); `pytest tests` 55 passed;
-  `check_checkpoint_compat --package mtgz`, main b78c757 (zero-core 2c04cd9) against this branch (zero-core
-  42c455e), the belief off: identical for the gate's random network (cube), delver2's iteration 41 and jt (the
-  Delver spec; the head never computed with the belief off).
+* **This repo** (on main b78c757, then rebased onto 0d4328f - two Python commits, replays' root-view seats and
+  `delverai_publish`, none of this branch's files - and `pytest tests` again: 57 passed): `bash tools/build_py.sh`
+  (own target dir); `cargo test --release --no-fail-fast` **1,482 passed, 0 failed, 15 ignored** (111 binaries);
+  `--test az` 38 passed (4 new), `--test hidden` 16 passed (3 new), `--test limits` 9 passed; behaviour digests
+  **unchanged**: full 65e8a5155bd2000c, `DIGEST_ENCODING=0` c62a5ce5f290814e (main's 65e8a5155bd2000c /
+  c62a5ce5f290814e: with every tilt at 0 nothing calls the weighted deal, and `determinize` is factored without a
+  change); `pytest tests` 55 passed; `check_checkpoint_compat --package mtgz`, main b78c757 (zero-core 2c04cd9)
+  against this branch (zero-core 42c455e), the belief off: identical for the gate's random network (cube),
+  delver2's iteration 41 and jt (the Delver spec; the head never computed with the belief off).
 * **The weighted-deal fuzz** (`FUZZ_BELIEF=4`: random weights exp(4 x 1.7 z), clip 1e6, at every checkpoint of the
   `fuzz` profile - debug assertions, the determinize check every ~4 decisions -, both viewers, every check of the
   uniform world's, plus: the cards a payment pins stay, the world's 30 random actions with an engine panic reported
