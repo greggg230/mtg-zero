@@ -380,7 +380,8 @@ impl Game {
     /// tests): public zones and objects, zone sizes, life and mana, the
     /// turn, the viewer's own hand, every card the viewer knows exactly
     /// where it is (library positions; the other hand as a multiset, its
-    /// cards are not told apart), the viewer's clouds, and the pending
+    /// cards are not told apart), the library positions the other player
+    /// knows (ENGINE.md 72), the viewer's clouds, and the pending
     /// decision (its options only if the viewer decides). Two worlds a
     /// `determinize(viewer)` may produce must agree on it.
     pub fn view_of(&self, viewer: PlayerId) -> Vec<u64> {
@@ -652,6 +653,15 @@ impl Game {
                 }
             }
             v.push(u64::MAX);
+            // The positions the other player knows (who knows is public: a
+            // look, a put-back, a shuffle are seen; ENGINE.md 72).
+            let other = crate::ids::opp(viewer);
+            for (i, &c) in pl.library.iter().enumerate() {
+                if self.objs[c.i()].known >> other & 1 != 0 {
+                    v.push(i as u64);
+                }
+            }
+            v.push(u64::MAX - 9);
             // The hand: all of it if it is the viewer's, else the multiset
             // of what the viewer knows exactly.
             let mut h: Vec<u64> = pl

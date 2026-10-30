@@ -23,7 +23,7 @@
 //! | graveyard abilities | 4 x 56 | `GY_ABILITY` slots 0..3 (part 3b): the cards in the viewer's graveyard with an ability that works there, in graveyard order, and whether it may be activated now |
 //! | companions | 2 x 56 | v4 (M8a): the viewer's then the opponent's revealed companion (CR 702.139): card code, revealed, its special action still available (outside the game, not taken), the special action is an option of the viewer's decision now (`act::COMPANION`, the viewer's slot), put into the hand |
 //! | match | 32 | v4 (M8b, ENGINE.md 36.7; globals): the format, the game number, both players' game wins, draws, each game's result and who played first, sideboarding now and its order, deck sizes (`mtch::*`); 58.8: spells cast this turn, energy |
-//! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn (8 spare); the last normal turn's player, additional combat phases (14 spare) |
+//! | globals v5 | 64 | **v5** (`g5::*`; globals): per player (viewer first, 24 each) cards drawn this turn and in the draw step, noncreature spells this turn, gained life this turn, can't gain life, creatures that attacked this turn, spells cast this game, Yawgmoth's Will, graveyard exile this turn, the city's blessing, protection from everything, the pool's artifact-only and haste mana, delayed triggers waiting, exiled cards they may play, cards discarded this turn, ENGINE.md 72: which of their library's top three cards they know and which the other player knows (2 spare); the last normal turn's player, additional combat phases (14 spare) |
 //!
 //! v4's globals (ENGINE.md 35): `g[124]` the viewer chose who takes the first
 //! turn (CR 103.1; `g[18]`: the viewer is the starting player); per player
@@ -546,7 +546,7 @@ const _: () = assert!(CODE + stack::X + 1 == v4::STACK_W && stack::MODES == 32 &
 /// [`O_GLOBALS_V5`], after the match block): per player, viewer first
 /// (`g5[PLAYER * side + ..]`), then the game's (`g5[GAME + ..]`).
 pub mod g5 {
-    /// Floats per player (16 used, 8 spare).
+    /// Floats per player (22 used, 2 spare).
     pub const PLAYER: usize = 24;
     /// Cards drawn this turn / 4, in the draw step / 2 (Orcish Bowmasters,
     /// Sylvan Library); noncreature spells cast this turn / 4 (prowess,
@@ -583,7 +583,14 @@ pub mod g5 {
     /// Their graveyard's cards discarded this turn / 4 (mayhem, CR
     /// 702.187b).
     pub const DISCARDED: usize = 15;
-    pub const PLAYER_END: usize = 16;
+    /// ENGINE.md 72: per position k of the top three of their library
+    /// (`TOPS`, top first), whether they (its owner) know the card there
+    /// and whether the other player does. Who knows is public (a look, a
+    /// put-back, a surveil kept on top, a shuffle are seen), what it is is
+    /// not: the tops block shows the card only to a viewer who knows it.
+    pub const TOP_OWNER: usize = 16;
+    pub const TOP_OTHER: usize = TOP_OWNER + super::TOPS;
+    pub const PLAYER_END: usize = TOP_OTHER + super::TOPS;
     /// The game's: the last normal turn was the viewer's (CR 500.7: the
     /// extra-turn order), additional combat phases to follow / 2 (500.8).
     pub const GAME: usize = 2 * PLAYER;
@@ -1432,6 +1439,13 @@ impl Game {
                     .filter(|&&r| self.live(r) && self.objs[r.idx.i()].zone == Zone::Graveyard && self.objs[r.idx.i()].owner == p)
                     .count();
                 o[g5::DISCARDED] = squash(n as f32 / 4.0);
+            }
+            // Who knows their library's top cards (ENGINE.md 72).
+            let lib = &pl.library;
+            for k in 0..TOPS.min(lib.len()) {
+                let known = self.objs[lib[lib.len() - 1 - k].i()].known;
+                o[g5::TOP_OWNER + k] = (known >> p & 1) as f32;
+                o[g5::TOP_OTHER + k] = (known >> opp(p) & 1) as f32;
             }
         }
         g[g5::NORMAL] = (t.normal == me) as u8 as f32;

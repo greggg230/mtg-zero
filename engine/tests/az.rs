@@ -2317,3 +2317,74 @@ fn the_belief_weights_ignore_the_opponents_hidden_cards() {
     println!("{worlds} worlds, {differ} with another opponent hand");
     assert!(worlds > 200 && differ > worlds / 3, "{worlds} {differ}");
 }
+
+/// Who knows a library's top cards (ENGINE.md 72), read back from
+/// `g5::TOP_OWNER` / `TOP_OTHER` for both viewers: P0 Brainstorms (it knows
+/// the two cards it put back); P1's Mishra's Bauble looks at P0's top card,
+/// which its owner knows (P1 remembers it, ENGINE.md 23.7); P0 Ponders and
+/// keeps (P1 loses track of the card it saw, P0 knows the two left on top
+/// after the draw); a fetch land's shuffle forgets them all. Every world
+/// either viewer's `determinize` deals encodes the same for it.
+#[test]
+fn who_knows_a_librarys_top_cards_is_encoded() {
+    use encode::{g5, O_GLOBALS_V5};
+    use engine::db::AbilitySlot;
+    use engine::testkit::Scenario;
+    use engine::{Choice, Step, Target, Zone};
+    // `owner`'s library as `v` encodes it: (its owner knows, the other
+    // player knows) per position, top first.
+    let tops = |g: &engine::Game, v: u8, owner: u8| -> [(f32, f32); 3] {
+        let x = features(g, v);
+        let at = O_GLOBALS_V5 + g5::PLAYER * (owner != v) as usize;
+        std::array::from_fn(|k| (x[at + g5::TOP_OWNER + k], x[at + g5::TOP_OTHER + k]))
+    };
+    let check = |g: &engine::Game, what: &str, p0: [(f32, f32); 3]| {
+        for v in 0..2u8 {
+            assert_eq!(tops(g, v, 0), p0, "{what}: P0's library as P{v} encodes it\n{}", g.log_lines().join("\n"));
+            assert_eq!(tops(g, v, 1), [(0.0, 0.0); 3], "{what}: P1's library as P{v} encodes it");
+            let x = features(g, v);
+            for s in 0..20 {
+                let mut d = g.clone();
+                d.determinize(v, &mut Rng::new(s));
+                assert_eq!(features(&d, v), x, "{what}: P{v}'s world {s}");
+            }
+        }
+    };
+    let mut g = Scenario::new(CardDb::constructed())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Island", "Island", "Polluted Delta"])
+        .hand(0, &["Brainstorm", "Ponder", "Mountain", "Lightning Bolt"])
+        .library(0, &["Forest", "Plains", "Swamp", "Island", "Counterspell", "Forest", "Plains", "Swamp", "Forest", "Plains"])
+        .battlefield(1, &["Mishra's Bauble"])
+        .library(1, &["Island"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    let (x, y) = ((1.0, 0.0), (1.0, 1.0));
+    let no = (0.0, 0.0);
+    check(&g, "the start", [no; 3]);
+    // Brainstorm, the Mountain and the Bolt put back.
+    let (mountain, bolt) = (g.card(0, "Mountain", Zone::Hand), g.card(0, "Lightning Bolt", Zone::Hand));
+    g.choose(Choice::Cast(g.card(0, "Brainstorm", Zone::Hand)));
+    settle(&mut g, |g| [Choice::Card(mountain), Choice::Card(bolt)].into_iter().find(|&c| g.has_option(c)));
+    check(&g, "Brainstorm", [x, x, no]);
+    // P1's Mishra's Bauble at P0's top card (P0 knows it).
+    assert_eq!(g.turn().priority, 0);
+    g.pass();
+    assert_eq!(g.turn().priority, 1);
+    g.choose(Choice::Ability(g.card(1, "Mishra's Bauble", Zone::Battlefield), AbilitySlot::Activated(0)));
+    settle(&mut g, |_| Some(Choice::Target(Target::Player(0))));
+    let top = *g.player(0).library.last().unwrap();
+    assert!(g.knows(1, top), "P1 saw a card its owner knows: remembered");
+    check(&g, "the Bauble", [y, x, no]);
+    // Ponder, kept: three seen, one drawn; P1's card is somewhere in P0's
+    // hand or the top two now (a cloud), not known there.
+    assert_eq!(g.turn().priority, 0);
+    g.choose(Choice::Cast(g.card(0, "Ponder", Zone::Hand)));
+    settle(&mut g, |g| (g.kind() == Some(engine::DecisionKind::YesNo)).then_some(Choice::Pass));
+    check(&g, "Ponder", [x, x, no]);
+    // Polluted Delta: the search shuffles.
+    g.choose(Choice::Ability(g.card(0, "Polluted Delta", Zone::Battlefield), AbilitySlot::Activated(0)));
+    settle(&mut g, |_| None);
+    g.card(0, "Polluted Delta", Zone::Graveyard);
+    check(&g, "the fetch land's shuffle", [no; 3]);
+}

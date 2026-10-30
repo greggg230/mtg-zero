@@ -225,7 +225,7 @@ pub fn fields() -> Vec<Field> {
         blocked: Public "CR 509.1h",
         blocking: Public "the attacker it blocks",
         struck_first: Public "dealt first-strike combat damage (510.4)",
-        known: Hidden "which players know a hidden card (ENGINE.md 10): leak-tested",
+        known: Public "which players know a hidden card: who knows is public (a look, a reveal, a put-back, a shuffle are seen; ENGINE.md 72), what it is is not (leak-tested, ENGINE.md 10)",
         attached: Public "what it is attached to (CR 301.5, 303.4)",
         evoked: Public "it entered evoked (CR 702.74a)",
         lki_power: Derived "last known information (CR 608.2h)",
@@ -1050,6 +1050,45 @@ pub fn perturbations() -> Vec<Perturbation> {
             flip(&mut a.g.players[p].companion_used).map(|s| format!("P{p}: {s}"))
         }),
         // ---- Obj ----
+        // Who knows a hidden card (ENGINE.md 72; `learn` keeps the clouds
+        // right). A library card the other player knows its owner knows too
+        // (ENGINE.md 23.7): the other player's look learns both.
+        p!("the owner learns the top card of their library", "Obj.known", |a, r| {
+            let p = player(r);
+            let c = *a.g.players[p as usize].library.last()?;
+            if a.g.knows(p, c) {
+                return None;
+            }
+            a.g.learn(p, c);
+            Some(format!("P{p}"))
+        }),
+        p!("the other player learns the top card of a library", "Obj.known", |a, r| {
+            let p = player(r);
+            let c = *a.g.players[p as usize].library.last()?;
+            if a.g.knows(opp(p), c) {
+                return None;
+            }
+            a.g.learn(p, c);
+            a.g.learn(opp(p), c);
+            Some(format!("P{} learns P{p}'s", opp(p)))
+        }),
+        p!("the owner learns a library card below the top three", "Obj.known", |a, r| {
+            let p = player(r);
+            let lib = &a.g.players[p as usize].library;
+            let deep: Vec<(usize, CardIdx)> =
+                lib.iter().rev().copied().enumerate().skip(crate::az::encode::TOPS).filter(|&(_, c)| !a.g.knows(p, c)).collect();
+            let (k, c) = pick(&deep, r)?;
+            a.g.learn(p, c);
+            Some(format!("P{p}: {k} from the top"))
+        }),
+        p!("the other player learns a hand card", "Obj.known", |a, r| {
+            let p = player(r);
+            let q = opp(p);
+            let hs: Vec<CardIdx> = a.g.players[p as usize].hand.iter().copied().filter(|&c| !a.g.knows(q, c)).collect();
+            let c = pick(&hs, r)?;
+            a.g.learn(q, c);
+            Some(format!("P{q} learns P{p}'s {}", a.g.name(c)))
+        }),
         p!("a permanent is another card", "Obj.def", |a, r| {
             let ss = slots(&a.g);
             let c = pick(&ss, r)?;
@@ -1390,6 +1429,7 @@ pub fn limits() -> Vec<Limit> {
         l("two graveyard cards swap places", NextLayout, "graveyards are bags of identities (counts), not ordered slots (ENGINE.md 22.2); a graveyard-card choice or target is a list id whose token is its card, the graveyards in order in the list block while it is pending (ENGINE.md 65.10), but Priority's casts and plays from the graveyard (flashback, escape, retrace, Crucible's lands) keep GRAVEYARD ids, a graveyard position scored from the pooled state with no token: made without seeing which card an id is, and the order is not in the input otherwise (option C of ENGINE.md 65.7, a layout change, closes it)"),
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
+        l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }
