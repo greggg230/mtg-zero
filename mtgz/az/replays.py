@@ -74,11 +74,23 @@ def check_encoding(ckpt):
     check_checkpoint(ckpt)
 
 
+def leaf_view(cfg, selfplay=False):
+    """The leaf values' view the recorded games search with (docs/ENGINE.md 67): root whenever
+    the run trains with root view (`selfplay_leaf_value_view`), whatever its evaluation's setting -
+    a run trained and judged with root-view search plays that way; its mover-view values are the
+    biased ones the change fixed. Otherwise the run's own (eval_ / selfplay_leaf_value_view)."""
+    if cfg.get('selfplay_leaf_value_view') == 'root':
+        return 'root'
+    return cfg.get(('selfplay' if selfplay else 'eval') + '_leaf_value_view', 'mover')
+
+
 def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print):
-    """`games` games of `ckpt` against itself, with the run's settings. -> zero-replay/1 dicts."""
+    """`games` games of `ckpt` against itself, with the run's settings (its leaf values' view:
+    `leaf_view`; each network seat names it as `leaf_value_view`). -> zero-replay/1 dicts."""
     check_encoding(ckpt)
     run, it = core.run_of(ckpt)
     cfg = core.run_config(run)
+    view = leaf_view(cfg, selfplay)
     if not cfg.get('spec'):
         raise SystemExit(f'{ckpt}: no run config with a spec next to it ({run or "no run directory"})')
     if device is None:
@@ -87,12 +99,21 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
     seed = random.randrange(1 << 30) if seed is None else seed
     driver = type('Recorder', (_Recorder,), {'sims_minor': cfg.get('sims_minor')})
     real, core.RecordingDriver = core.RecordingDriver, driver   # core.record builds its driver by this name
+    # core.record's seats read the view from the run's config (zero.replay._nn): give it this one
+    key = ('selfplay' if selfplay else 'eval') + '_leaf_value_view'
+    real_cfg, core.run_config = core.run_config, lambda r: dict(real_cfg(r), **{key: view})
     try:
-        return core.record(ckpt, opp='self', games=games, sims=sims or cfg.get('sims', 64),
+        reps = core.record(ckpt, opp='self', games=games, sims=sims or cfg.get('sims', 64),
                            spec=spec_with_log(cfg['spec']), selfplay=selfplay, hint=None,
                            chance_k=cfg.get('chance_k', 0), device=device, seed=seed, title=title, conc=conc, log=log)
     finally:
         core.RecordingDriver = real
+        core.run_config = real_cfg
+    for rep in reps:
+        for s in rep['seats']:
+            if s.get('kind') == 'nn':
+                s['leaf_value_view'] = view
+    return reps
 
 
 def summary(rep):

@@ -373,3 +373,14 @@ def test_a_bigger_network_distilled_on_delver_shards_reads_layout_v5(tmp_path):
     h = extra['distill']['heldout']
     assert [x['step'] for x in h] == [0, 40] and h[-1]['policy_kl'] < h[0]['policy_kl']
     assert extra['teacher_extra'] == {'iter': 3} and extra['distill']['student_net']['params'] == s.n_params()
+
+
+def test_replays_leaf_view():
+    """Recorded games search with root view whenever the run trains with it (ENGINE.md 67), even
+    when its evaluation setting is still the default mover; otherwise with the run's own."""
+    from mtgz.az import replays
+    assert replays.leaf_view({'selfplay_leaf_value_view': 'root', 'eval_leaf_value_view': 'mover'}) == 'root'
+    assert replays.leaf_view({'selfplay_leaf_value_view': 'root'}, selfplay=True) == 'root'
+    assert replays.leaf_view({'eval_leaf_value_view': 'root'}) == 'root'
+    assert replays.leaf_view({'selfplay_leaf_value_view': 'mover'}) == 'mover'
+    assert replays.leaf_view({}) == 'mover'
