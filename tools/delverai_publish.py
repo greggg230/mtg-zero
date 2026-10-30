@@ -193,10 +193,13 @@ def _norm(path):
     return os.path.normcase(os.path.abspath(path))
 
 
-def _label(flag):
-    """'--value-q 0.6' -> 'value_q 0.6'."""
-    parts = str(flag).split()
-    return ' '.join([parts[0].lstrip('-').replace('-', '_')] + parts[1:]) if parts else str(flag)
+def _label(flag, name=None):
+    """A fork's label on the charts: its one changed setting ('--value-q 0.6' -> 'value_q 0.6'), or
+    the experiment's name when it changes several (theirs would run over the other labels)."""
+    parts = str(flag or '').split()
+    if name and sum(x.startswith('--') for x in parts) > 1:
+        return str(name)
+    return ' '.join([parts[0].lstrip('-').replace('-', '_')] + parts[1:]) if parts else str(name or flag)
 
 
 def fork_registry(paths):
@@ -209,7 +212,7 @@ def fork_registry(paths):
         if not a or d.get('k') is None or not d.get('main_before'):
             continue
         fork = os.path.dirname(os.path.dirname(a.replace('\\', '/')))
-        out[_norm(fork)] = {'parent': d['main_before'], 'at': int(d['k']), 'label': _label(d.get('flag') or d.get('name')),
+        out[_norm(fork)] = {'parent': d['main_before'], 'at': int(d['k']), 'label': _label(d.get('flag'), d.get('name')),
                             'won': _norm(d.get('main_after') or '') == _norm(fork)}
     return out
 
