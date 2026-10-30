@@ -359,9 +359,6 @@ impl Game {
         }
     }
 
-    /// The other face (an Adventure, an MDFC's spell face) graveyard card
-    /// `c` may be cast with now as a spell matching `filter` (CR 715.3a,
-    /// 712.11c: only that face is evaluated), if any.
     /// Is graveyard card `c` a spell card `filter` names by one of its
     /// faces (its front, or its other face as `gy_spell_face_now` evaluates
     /// it): public facts only, whether or not it can be cast now.
@@ -378,6 +375,9 @@ impl Game {
         g.card_matches(filter, c, ctx)
     }
 
+    /// The other face (an Adventure, an MDFC's spell face) graveyard card
+    /// `c` may be cast with now as a spell matching `filter` (CR 715.3a,
+    /// 712.11c: only that face is evaluated), if any.
     fn gy_spell_face_now(&self, p: PlayerId, c: CardIdx, filter: &crate::db::Filter, ctx: &crate::cast::Ctx) -> Option<crate::ids::DefId> {
         let face = self.other_face(c)?;
         if self.db.def(face).is(types::LAND) {

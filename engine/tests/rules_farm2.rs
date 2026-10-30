@@ -338,7 +338,7 @@ fn a_companion_cast_beside_a_twin_looks_the_same_in_every_world() {
         }
     }
     let [Some(mut a), Some(mut b)] = by_slot else { panic!("no worlds with the twin on each side") };
-    let mut go = |a: &mut Game, b: &mut Game, what: &str| {
+    let go = |a: &mut Game, b: &mut Game, what: &str| {
         let act = if what.is_empty() { a.pending_decision().unwrap().options[0].action } else { action_named(a, what) };
         let (ka, kb) = step_both(a, b, act);
         assert_eq!(ka, kb, "the keys tell the worlds apart");

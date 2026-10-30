@@ -466,7 +466,8 @@ at once (704.5e, section 26.4).
   the state's RNG and sets the observer. It never touches public state or the viewer's own
   hand, so the viewer's legal actions are unchanged (tested, and asserted by zero-core
   every simulation). **Pinned cards:** while a payment is in progress (from a cast or
-  activation until its mana is paid, and through an "unless pays" payment), the payer's
+  activation until its mana is paid, and through an "unless pays" payment; from a face
+  choice of a card being cast on, section 71.4), the payer's
   mana sources in hand are not resampled for another viewer: the payment may count on
   them. A source already picked is revealed anyway (602.2a), so public. (zero-core only
   determinizes for the decider, who is the payer then; other viewers are tests and
@@ -481,8 +482,9 @@ at once (704.5e, section 26.4).
   exactly; the decider's hand is never resampled for them). Debug builds re-run the asker
   anyway and assert the options are equal. A second rule: **a decision whose options depend
   on cards hidden from another player is asked even when only "pass" remains** (a pile with
-  no matching card, a hand without the card a "put from hand" names), so a refresh for that
-  player finds the same decision instead of running on.
+  no matching card, a hand without the card a "put from hand" names; "you may cast it" of
+  a public card even when it cannot be cast, its castability counting the caster's hand:
+  section 71.3), so a refresh for that player finds the same decision instead of running on.
   `Game::determinize` assumes both decklists are known (open decklists: best-of-one): it deals
   the owner's hidden cards from the owner's actual deck. **Best-of-three** (M8b part b, section
   36.11) hides each deck within its pool: the match's `determinize` first samples the
@@ -2907,7 +2909,8 @@ delayed return about the exiled card (a new object, 400.7).
 * **Looking at another player's library card that its owner doesn't know** (Mishra's
   Bauble): the look is keyed for the looker but not remembered; the owner's determinize may
   change that card, and the looker's clouds could not stay consistent with it. A random hand
-  card seen (Urza's Bauble) is remembered (its owner knows it). Cards cast from exile or a
+  card seen (Urza's Bauble) is remembered (its owner knows it; so its key is public, section
+  71.1). Cards cast from exile or a
   graveyard are public.
 * A coin flip (Mana Crypt) is a public chance key (`KEY_COIN`) and can be forced.
 * Which of two identical hand cards another player "knows" is canonicalized after every
@@ -14686,3 +14689,289 @@ lines, same order, only the wall time differed). The guaranteed slice's decision
 (SIGSTOP/SIGCONT do not exist there), so the OS-signal and lock-discovery layers are swapped for
 controllable fakes while `Governor.register` / `._loop` / `.reason` / `.hard_reason` run
 unmodified; all 13 checks passed. It was not started on the Mac.
+
+## 71. The fuzz farm's failures of 2026-10-29, and three of the belief fuzz's (fuzz triage)
+
+The Mac's farm, on main b78c757 (2026-10-29 17:16-17:31), reported five failures it had not seen
+on its previous build f10db98, and the belief-weighted deal's fuzz (section 69.8) three more, all
+reproducing on main; this triage's own fuzz (71.10: the `fuzz` profile on the farm's seed range)
+found three more of the same classes, failing on main too. None is the weighting's, layout v5's or
+root view's; two are older than the farm's previous build (the farm names a failure by its message,
+and layout v5 moved the floats the messages name); two are the view's (a test oracle), the rest are
+engine bugs. Each is fixed here, with a test on real cube cards that fails on main d0b62b1
+(`engine/tests/rules_farm2.rs`, 11 tests).
+
+| Failure | Cause | Class | Live main line |
+|---|---|---|---|
+| farm a549df8eb756, 37acdaaec70a, 795476f18604: same keys, different encodings at 31288 | Urza's Bauble's look keyed for the looker only (71.1) | chance-key omission | yes, rarely (1 maindeck Bauble) |
+| farm 32e7e5be2b2d, belief 15683: same keys, different views | marks hashed into the view by slot (71.2) | fuzz-check false positive | no |
+| (found with it) a second Nadu's count | `Mark::Triggered` named its Nadu by incarnation number (71.2) | engine bug | no (not in the deck) |
+| (this fuzz) 10002917 and six more: same keys, different views | the view's companion by its slot (71.2) | fuzz-check false positive | no |
+| farm 7f0953e0e769 (f10db98's 7b7fc0b85e1b): determinize changed the encoding at 16 | "you may cast it" skipped when uncastable (71.3) | determinize bug (section 10's second rule) | no (non-decider deals only) |
+| (this fuzz) 10038672: determinize changed the view | the miracle cast question skipped, and a revealed miracle card's knowledge moved to its twin (71.3) | determinize bugs | no (no miracle card in the deck) |
+| belief 7193: PayMana: no way to pay | a face choice did not pin the hand's mana sources (71.4) | determinize bug (pins) | no (non-decider deals only) |
+| belief 14537: ChoosePermanent with no options | teamwork against a Lumberjack (71.5) | engine bug (cost check vs decision) | no (not in the deck) |
+
+### 71.1 Urza's Bauble: the hand's owner sees which card was seen
+
+**The failures.** `match ... step N: same keys, different encodings of P1 at 31288` (three seeds:
+a Manifold Key's ability, an AssignDamage, an Erode on the stack - the decisions printed are the
+ones the check reached; the Bauble's look came a step or two before, in every seed's dump of both
+worlds). Float 31288 is the hand block (`O_HAND` 31172) slot 1, float 56 = `CODE` + 4: **"known to
+the opponent"** of a card in the viewer's hand. Not new: layout v4's hand block began at 27588, and
+the same failure is in the farm's list since 433ff28 at 27644 / 27704 / 27824 (slots 0, 1, 3:
+ca3f8fd6d46b x9, 910523e34733, 78564f28d3db, efa513e0097d, b0bfc5350c44, dbbd6a49c522 - which names
+the Bauble -, 89490d2619bb); layout v5 (7d1f24b) moved the block, the messages changed, and the
+farm hashed them as new. All three seeds reproduce at f10db98, at 27704.
+
+**Cause.** "Look at a card at random in target player's hand" (`Ext::LookAtRandomHandCard`) picks
+with the state's generator, which `determinize` reseeds per world, and makes the card known to the
+looker - remembered, because its owner knows which card was seen (23.7) - but keyed it
+`KEY_LOOK(looker, def)` privately: in a search of the **hand's owner** the key was masked
+(`HIDDEN`), so the worlds in which different cards were seen shared a node, while the owner's
+encoding (the hand block's float 4) and knowledge differed. A chance-key omission (a fact the
+viewer observes and the encoding shows, missing from its keys), not a leak: the owner does know
+which card.
+
+**Fix.** The look at another player's hand is keyed public (both players know the card: the looker
+saw it, the owner saw which); a look at one's own hand stays private. `force_chance` replays it in
+the owner's worlds now too (the key is no longer `HIDDEN` there). `Game::view_of` (the
+information-set checks' view) gains the viewer's own hand as the multiset of (definition, known to
+the opponent): the games fuzz's `check_information_set` did not see this fact (only the match
+check, which compares encodings, did).
+
+**Who it affects.** Every pool with Urza's Bauble (the cube, interactions, drafted pools) and the
+Delver mirror (one maindeck Bauble): a search of the player whose hand the opponent's Bauble looks
+at merged the worlds past that look and evaluated the merged nodes with whichever world's encoding
+reached them (mover and root-view leaves alike). A search-quality fix; no network input changes.
+
+**Test.** `urzas_bauble_keys_the_card_seen_for_the_hands_owner_too`: 24 worlds of the owner; the
+key names the card now known to the looker, equal keys give equal encodings, and the worlds saw
+different cards.
+
+### 71.2 Marks naming another object; a second Nadu
+
+**The failures.** `seed 10588610 step 8: same keys, different views` (farm, interactions and
+games) and the belief fuzz's seed 15683 (`--profile fuzz`; Grief evoked, then Animate Dead on it):
+the views differed in one value, a mark's hash. `view_of` hashes the marks (since 32a06e4, section
+58.6) with `h64(&mark)`, and two marks carry another object's identity: `Mark::Reanimated(ObjRef)`
+(Animate Dead's creature: card #4 in one world, #34 in the other - Grief came from a hand the
+viewer did not know) and `Mark::Triggered { src_inc }` (Nadu's granted trigger: the granting Nadu's
+incarnation number - found by Green Sun's Zenith, it was a different library slot per world, with
+another history). Neither is observable; the encoding reads neither. **A fuzz-check false
+positive**: the view now names both objects by their public place (as it names links and
+`ExiledToPay`'s card). Bisect: f10db98 passes 10588610, 32a06e4 (the commit that put marks in the
+view) fails it; 15683 is the same root cause under the `fuzz` profile's denser checkpoints (release
+builds pass that seed at every commit).
+
+**The engine bug found with it.** "This ability triggers only twice each turn" (Nadu,
+`TrigPred::TimesPerSubject`) counts per granting object (a Nadu that leaves and returns grants a new
+ability: CR 400.7, ruling 96e9a886), but the mark named the granting Nadu by its incarnation number
+alone, which another Nadu that came the same way shares (hand, stack, battlefield: 2): the second
+Nadu's grant found the first one's two triggers and did not trigger that turn. `Mark::Triggered`
+now carries the granting object (`src: ObjRef`).
+
+**The companion.** The view also showed the revealed companion's slot's zone once it was in the
+game; beside a twin in a hand the viewer does not know (a second Lutri, the Spellchaser), which slot
+leaves when its owner casts "Lutri" is not observable, and the worlds differed (this triage's fuzz:
+default-pool seeds 10002917, 10005671, 10005795, 10006483, 10027195, 10037943, 10038627, the `fuzz`
+profile's checkpoints; main fails every one). The view now shows whether the companion is still
+outside the game; where it is in public is the zones' own entries. Also a fuzz-check false positive.
+
+**Who it affects.** The view: tests only. Nadu: the cube, interactions and drafted pools, not the
+Delver deck.
+
+**Tests.** `an_animated_creature_from_a_searched_library_looks_the_same_in_every_world` (Entomb,
+then Animate Dead: the creature's slot differs between the worlds, the views do not),
+`a_nadus_granted_trigger_looks_the_same_in_every_world` (Nadu cast from a hand the opponent does
+not know: from a slot drawn this turn or one held since),
+`a_second_nadu_grants_a_new_twice_each_turn_count_cr400_7`,
+`a_companion_cast_beside_a_twin_looks_the_same_in_every_world` (the twin on a hand slot before the
+companion's in one world, after it in the other).
+
+### 71.3 "You may cast it" is asked even when it cannot be cast
+
+**The failures.** `match 10278736: determinize changed the encoding of P1 (mover P0) at 16: 1 -> 0`
+(farm, drafted; the same message at f10db98 as 7b7fc0b85e1b, interactions match 10319082, and at
+433ff28 as 46e5799497d7). Global 16 is "the viewer has priority". The real games: P0 to answer
+Bilbo, Thief in the Night's attack trigger ("you may cast an artifact, instant or sorcery spell from
+your graveyard", `ChooseGraveyardCard`) while P1 held priority; 10319082: Chandra, Torch of
+Defiance's +1 ("exile the top card of your library; you may cast that card", `YesNo`).
+
+**Cause.** Both askers skipped their question when no card could be cast, and castability counts
+the caster's hidden hand (a Simian Spirit Guide's mana, a card an alternative cost exiles). A world
+`determinize` deals for the other player re-runs the asker (`refresh_pending`) with P0's hand dealt
+again: without the Guide the question was gone, the ability finished and priority passed - so P1's
+encoding changed, and the world was not in P1's information set. Section 10's second rule (a
+decision whose options depend on hidden cards is asked even when only "pass" remains) was broken:
+**a determinize bug**, in the askers. Only a deal for the non-deciding player shows it (71.8).
+
+**Fix.** Asked whenever the card is a spell card the effect names (public: in the graveyard and
+matching the filter by a spell face, `gy_spell_matches`; exiled with a spell face,
+`Game::has_spell_face`) and the caster may cast spells during a resolution at all
+(`may_cast_during_resolution`: no "can't cast spells", no "only any time they could cast a sorcery"
+- public too, so under Teferi, Time Raveler the effect still goes on without a question), the card
+(or "yes") offered only if it can be cast now. A question left
+with "pass" alone is answered by the engine and keyed `KEY_AUTO` (public), as every single-option
+decision is (section 10), so real play is unchanged but for that key. The same pattern was fixed in
+the free-cast askers - cascade, Etali's exile-until-nonland, "an opponent exiles three, you may cast
+one" (`M7d::OppExilesThreeMayCastOne`), Malcolm's loot - whose castability counts the hand through
+a spree's mode costs (Three Steps Ahead) paid with a Spirit Guide - and miracle's cast question
+(`Ext::MiracleCast`, "you may cast it for its miracle cost", this triage's fuzz seed 10038672);
+Shelldock Isle's question and miracle's reveal question already followed the rule.
+
+**A miracle card beside its twin.** Seed 10038672 had a second cause. P0 held two Metamorphosis
+Fanatics and revealed the one drawn; `canon_hand_knowledge` treats twins as interchangeable and
+moved the "known" bit onto the other copy (the lower card index), so a world for P1 dealt the
+trigger's own card (`ev.obj`) another identity, and the question had no miracle card to ask about.
+But the revealed card is played revealed until its ability resolves (CR 702.94b): it is told apart.
+The canonicalization now leaves alone a hand card a waiting trigger, a stack item or a delayed
+trigger names. This one reaches a live search: P1 deciding while P0's miracle trigger waits (P1's
+priority over it) dealt worlds in which the miracle could not happen - but only with two copies of a
+miracle card in one hand, never in the Delver deck.
+
+**Who it affects.** Worlds dealt for the non-deciding player only: tests and analysis (the fuzz's
+checks, `tools/root_view.py`'s leak check, `tools/belief_search.py`); no live search deals for a
+non-decider (71.8). The cube, interactions and drafted pools; the Delver deck has none of these
+cards.
+
+**Tests.** `bilbos_graveyard_cast_is_asked_whether_or_not_the_hand_can_pay` (the Bolt castable only
+with the Guide: 40 worlds of the opponent, some without the Guide, all asking the same question,
+P1's encoding unchanged; with an Island instead, the question with "pass" alone),
+`chandras_exiled_card_is_asked_whether_or_not_the_hand_can_pay` (the same; "no" deals the 2 damage),
+`a_miracle_cast_is_asked_whether_or_not_the_hand_can_pay`,
+`a_miracle_card_beside_its_twin_stays_the_revealed_one_cr702_94b`.
+
+### 71.4 A face choice pins the caster's hand mana sources
+
+**The failure.** The belief fuzz's seed 7193 under `--profile fuzz` (main's own fuzz, no weighting):
+`in a world determinized for P0 (mover P1), option 4 (ChooseFace P1: 0) of ChooseFace for P1 can't
+be completed: PayMana: no way to pay {1}{R}`. **Cause:** "which face?" (`Task::ChooseFace`, an
+Adventure, an MDFC or a split card with both faces castable) comes before `begin_cast`, so
+`payment_in_progress` saw no payment, and the faces' mask - computed at priority counting a Simian
+Spirit Guide in hand, and kept in the task so that a refresh asks the same question - outlived a
+world for the other player that dealt the Guide away. **A determinize bug** (the pins). **Fix:**
+`payment_in_progress` answers a `ChooseFace` with a cast bit with its caster (the cast has begun:
+CR 601.2a-b, 712.11b, 715.3), so the hand's mana sources are pinned as for a payment, and
+`exile_filters_in_progress` adds the offered faces' alternative costs that exile a hand card.
+**Who:** non-decider deals only (71.8); the Delver maindeck has no card with two castable faces
+(Rough // Tumble is in the sideboard, which the Bo1 mirror does not use). **Test:**
+`a_face_choice_pins_the_casters_hand_mana_source` (Brazen Borrower: 40 worlds of the opponent keep
+the Guide; both faces cast and paid in each).
+
+### 71.5 Teamwork with a Lumberjack
+
+**The failure.** The belief fuzz's seed 14537 (`FUZZ_BELIEF=4 --profile fuzz`; a weighted world's
+own random play after its deal, an ordinary legal position): We Say Thee Nay!'s teamwork ("tap
+creatures with total power 2") offered, then `ChoosePermanent with no options`. **Cause:** the cost
+check (`ChooseCost`, `crew_mana_ok`) taps no creature without a mana ability for its trial, and kept
+Orcish Lumberjack's sacrifice-a-Forest mana (`LJ_FOR`, a shared class); the creature decision taps
+Enduring Innocence or Aragorn for its trial, and `classes_without` dropped **every** Lumberjack
+class whenever **any** creature was tapped - with the Forest already tapped and Mishra's Workshop's
+mana for artifacts only, Gleemox alone could not pay {1}{U}. **An engine bug** (the check and the
+decision disagreed). **Fix:** `Game::classes_without` lowers a shared class's count of Lumberjacks by
+the Lumberjacks among the creatures tapped (the same conditions as `mana_classes`' `sac_by`),
+dropping the class only when none is left. **Who:** real games with the cube's We Say Thee Nay! and
+a Lumberjack; not the Delver deck. **Test:**
+`teamwork_keeps_a_lumberjacks_mana_when_another_creature_is_tapped`.
+
+### 71.6 Not fixed here
+
+**A crew paid after a mana tax** (farm 25c57431faf8). The farm's older `ChoosePermanent with no options` (x5 since 433ff28; games 10256079, 10395688,
+10522721 and match 10211089 reproduce on this branch) is the same family as 71.5 on the other path:
+Smuggler's Copter's crew taxed by Anointed Peacekeeper ("activated abilities of sources with the
+chosen name cost {2} more"). An activation pays its mana first (`ActPay` before `PayCosts`), the
+payment may tap the only creature that could crew (Fanatic of Rhonas; an animated Celestial
+Colonnade: creatures with mana abilities), and the crew check (`crew_power`) does not see the
+competition. The fix is teamwork's - the crew's taps before the mana, `crew_mana_ok` on both sides -
+which needs `PayCosts` split for activations: its own change. Not an accepted shortcut, so not
+marked expected in the farm. Neither card is in the Delver deck.
+
+**Also found by this triage's fuzz**, failing the same way on main, not this section's classes:
+`no source to sacrifice CardIdx(52)` (a debug assertion in `resolve_m7d.rs`'s Lumberjack /
+Squandered Resources sacrifice: interactions match 10003257, `--profile fuzz`), and two in the
+farm's `PayMana` bucket, which its config already marks expected (interactions game 10029278:
+`{5}{U}`, Treasure Cruise escaped with Underworld Breach; interactions match 10003496: `{3}{U}{U}`).
+Repros: `FUZZ_POOL=interactions FUZZ_FIRST=<seed> FUZZ_MATCHES=1` (or `FUZZ_GAMES=1`) `cargo test
+--profile fuzz -p engine --test fuzz fuzz_random_matches` (or `fuzz_random_games`).
+
+### 71.7 Bisect
+
+Each repro at the farm's previous good build f10db98 and at main (and 10588610 at 32a06e4, the
+first engine commit after f10db98; `git bisect` had nothing more to narrow):
+
+| Failure | f10db98 | First bad |
+|---|---|---|
+| 71.1 (three seeds) | fails (at 27704) | older: 433ff28 or before |
+| 71.2 10588610 | passes | 32a06e4 (marks in the view) |
+| 71.2 15683 (`fuzz` profile) | - (no profile before b78c757) | the same root cause |
+| 71.3 10278736, 10319082 | fail | older: 433ff28 or before |
+| 71.4 7193 (`fuzz` profile) | - | older (the pins' gap) |
+| 71.5 14537 (`FUZZ_BELIEF`) | - | older (`classes_without`) |
+| 71.2's companion, 71.3's miracle (this fuzz's seeds) | - (`fuzz` profile) | older (main fails them) |
+
+None came from layout v5's new fields (5fa7ed4), the graveyard-list ids (590e7fe), root view
+(6f871ac) or the belief target (0f98448).
+
+### 71.8 Who a live search deals for
+
+Verified in zero-core 2f0a2e8 (the pin): the only deal is `tree::deal(g, self.viewer, ...)` (uniform
+`determinize`, or `determinize_with` the root's belief), from `set_base` (one world per decision)
+and `simulate_with` (a world per simulation); the driver (`worker.rs`) resets a tree with
+`p = game.to_move()`, `Tree::advance` sets the viewer to the next decider, and the driver keeps a
+tree only while the same player decides next. Root-view leaves (section 67) evaluate the root
+player's encoding **in the root player's world**, dealt once at the root where that player decides;
+deeper opponent nodes reuse that world, nothing is dealt for them. Self-play, the league, h2h, the
+evaluators and chance nodes (`force_chance` queues outcomes, it deals nothing) all run this driver.
+The bindings' `Game.determinize(viewer, ...)` / `determinize_with` are called by tests and tools
+only. So 71.3 and 71.4 affect non-decider deals in tests and analysis, never a live search; 71.1
+affects live searches (the hand owner's tree), 71.3's miracle twin the other player's tree at a miracle trigger, 71.5
+real games.
+
+### 71.9 Encoding, digests, networks
+
+No float, block or width changes: layout v5 as it was, and every network keeps loading. The digests
+move on purpose, by chance keys: full **65e8a5155bd2000c -> 11e873a3d2e4530a**, encoding-free
+(`DIGEST_ENCODING=0`) **c62a5ce5f290814e -> a634df1919e3c337** (`tests/data/digests.txt`
+re-recorded: 56 of 2,500 games changed; the branch's first commit, before the miracle cast, had
+cb79a1ec6ee0dd90 / 81dd6be1a17646ab, 38 games). By fix (each switched off in turn with a temporary
+toggle, or added alone): Bilbo's and Chandra's askers 34 games (their new `KEY_AUTO` when nothing
+can be cast), the free-cast askers 3, the miracle cast 18, 71.1 2 (the Bauble's key in the
+20th-decision determinized clones); 71.2, 71.4, 71.5 and the miracle twin none (with 71.1, 71.3 and
+71.5 off, the full digest was main's 65e8a5155bd2000c exactly; 71.3's public gate - Teferi - took
+one game back).
+
+### 71.10 Checks
+
+At the branch's engine commit daa846f (dea4984 after the rebase onto main 1634e83, a Python-only
+commit: the same engine; desktop CPU, below-normal priority, target dir
+`E:/cargo-target/mtg-zero/fuzzfix`; the Mac at `nice -n 19`, one job):
+
+* **Every repro** passes: the farm's five (10436314, 10427561, drafted 10284954, interactions games
+  10588610, drafted 10278736) and f10db98's interactions match 10319082 (release), the belief fuzz's
+  7193, 15683, 14537 and 2535 (`--profile fuzz`, `FUZZ_BELIEF=4` for the last two), this fuzz's
+  seven companion seeds and 10038672 (`--profile fuzz`). Each fails on main d0b62b1.
+* **`engine/tests/rules_farm2.rs`**: 11 passed; all 11 fail on main d0b62b1's engine.
+* **`python tools/gate.py engine --no-mac --expect-digest 11e873a3d2e4530a --expect-digest0
+  a634df1919e3c337 --jobs 6`: GATE PASSED** (both digests as expected, `az` 38, `limits` 9,
+  `hidden` 16, pytest 58, the 1-config smoke).
+* **The Mac** (`bash tools/mac.sh 'nice -n 19 ...'`): `cargo test --release --no-fail-fast` 1,493
+  passed, 0 failed; `FUZZ_GAMES=20000 cargo test --release -p engine --test fuzz`: 20,000 games and
+  1,000 matches, 4 passed.
+* **The desktop fuzz under `--profile fuzz`** (debug assertions, the checkpoint 1-in-4), 8 processes:
+  seeds from 0 - 8,000 games of the cube pool, 8,000 interactions, 4,000 Delver mirror, 1,000
+  matches each of the default, interactions and drafted pools - **0 failures**; the farm's range
+  from 10,000,000 - 40,000 games, 40,000 interactions, 8,000 Delver mirror, 4,000 matches each of the
+  three pools, and `FUZZ_BELIEF=4` on seeds 0 - 16,000 - **3 failures, all 71.6's** (failing on main
+  the same way). Before the follow-up commit the same rounds had found 71.2's companion and 71.3's
+  miracle (fixed in it).
+* The whole engine suite on the desktop at the first commit: 1,484 passed and one failed - a
+  Chandra test under Teferi, Time Raveler that 71.3's public gate (`may_cast_during_resolution`)
+  answered; the Mac's suite above is the final commit's.
+
+### 71.11 Conflict points
+
+`hidden.rs`'s `payment_in_progress` / `exile_filters_in_progress` are shared with section 69's
+weighted deal (`determinize_with` pins the same cards: a face choice now pins for it too, as it
+must); this branch is rebased on 69 (b818054) and 68 (d0b62b1; search-only). `testkit::view_of`
+gained the viewer's own hand's knowledge: any information-set check written against it sees it.
