@@ -60,6 +60,12 @@ class _Recorder(core.RecordingDriver):
         super()._start(slot, seat, p)
         if self.sims_minor and any(k in slot.game.export_state() for k in _MINOR):
             slot.target = self.sims_minor
+            if getattr(seat, 'gumbel', False):
+                # a Gumbel search's schedule is its simulations' (zero-core docs/search.md 3.7): the
+                # minor budget's, its noise kept
+                t = slot.trees[p].t
+                noise = list(t.gumbel_noise) if hasattr(t, 'gumbel_noise') else list(t.gumbel.g)
+                t.set_gumbel(seat.gumbel_m, slot.target, noise, seat.gumbel_c_visit, seat.gumbel_c_scale)
 
 
 def check_encoding(ckpt):
@@ -84,6 +90,15 @@ def leaf_view(cfg, selfplay=False):
     return cfg.get(('selfplay' if selfplay else 'eval') + '_leaf_value_view', 'mover')
 
 
+def root_search(cfg, selfplay=False):
+    """The root search the recorded games use (docs/ENGINE.md 68), by `leaf_view`'s rule: the Gumbel
+    root whenever the run trains with it (`selfplay_root_search`), whatever its evaluation's setting;
+    otherwise the run's own (eval_ / selfplay_root_search)."""
+    if cfg.get('selfplay_root_search') == 'gumbel':
+        return 'gumbel'
+    return cfg.get(('selfplay' if selfplay else 'eval') + '_root_search', 'puct')
+
+
 def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print):
     """`games` games of `ckpt` against itself, with the run's settings (its leaf values' view:
     `leaf_view`; each network seat names it as `leaf_value_view`). -> zero-replay/1 dicts."""
@@ -91,6 +106,7 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
     run, it = core.run_of(ckpt)
     cfg = core.run_config(run)
     view = leaf_view(cfg, selfplay)
+    rs = root_search(cfg, selfplay)
     if not cfg.get('spec'):
         raise SystemExit(f'{ckpt}: no run config with a spec next to it ({run or "no run directory"})')
     if device is None:
@@ -99,9 +115,11 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
     seed = random.randrange(1 << 30) if seed is None else seed
     driver = type('Recorder', (_Recorder,), {'sims_minor': cfg.get('sims_minor')})
     real, core.RecordingDriver = core.RecordingDriver, driver   # core.record builds its driver by this name
-    # core.record's seats read the view from the run's config (zero.replay._nn): give it this one
-    key = ('selfplay' if selfplay else 'eval') + '_leaf_value_view'
-    real_cfg, core.run_config = core.run_config, lambda r: dict(real_cfg(r), **{key: view})
+    # core.record's seats read the view and the root search from the run's config (zero.replay._nn):
+    # give it these
+    side = 'selfplay' if selfplay else 'eval'
+    real_cfg, core.run_config = core.run_config, lambda r: dict(real_cfg(r), **{side + '_leaf_value_view': view,
+                                                                                side + '_root_search': rs})
     try:
         reps = core.record(ckpt, opp='self', games=games, sims=sims or cfg.get('sims', 64),
                            spec=spec_with_log(cfg['spec']), selfplay=selfplay, hint=None,

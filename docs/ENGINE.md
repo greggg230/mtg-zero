@@ -13880,6 +13880,286 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates), CPU 
   row kind to `extra` rather than a second mechanism. This repo: `engine/src/hidden.rs`
   (`deal_hidden`), tests appended at the ends of `tests/az.rs` and `tests/hidden.rs`.
 
+## 68. The Gumbel root search (zero-core `root_search`)
+
+Branch `gumbel-root` (from main b818054, rebased after 69's belief search): zero-core pinned at **2f0a2e8**
+(feat/gumbel-root on zero-core main 353335c: the feature 7357762, its docs 2f0a2e8: zero-core docs/search.md
+3.7, az.md 1.2 and 19);
+this repo: the pin, `mtgz.az.replays` (recorded games search with the Gumbel root whenever the run trains
+with it - `replays.root_search`, the rule of 67's `leaf_view` - and a Gumbel seat's payments get the
+minor budget's schedule), `tools/gumbel_eval.py` (the CPU evidence), this section. With the settings off a run is
+the run of before, byte for byte (68.8). Approved by the user 2026-10-29.
+
+### 68.1 Why
+
+At 64 simulations PUCT is locked in by the prior. 64.3: Keep's prior >= 0.98 in 89 of 100 one-land
+hands of delver2's iteration 21, Mulligan unvisited in most; 67.6: the replay's upkeep Brainstorm
+(prior 0.934) got 62 of 63 visits, Pass 1, also after root-view leaf values raised Q(Pass) to 0.638
+against Brainstorm's ~0.65 - the moves barely change because the prior holds the visits. Gumbel
+AlphaZero's root (Danihelka et al. 2022) samples m candidates by Gumbel-top-k, spreads the budget by
+sequential halving and plays argmax(g + logits + sigma(completedQ)): a policy improvement whatever the
+budget, and with <= m legal actions every option is considered. The line already had its other two
+pieces: the completed-Q target (`policy_target cq`, `cq_c_scale` 0.3) and the 'cq' move rule.
+
+### 68.2 The design (zero-core docs/search.md 3.7, az.md 19)
+
+* **The root** (`Tree::set_gumbel`; mctx's arithmetic, its schedule checked against mctx's source):
+  noise g per root option; the score g + ln P0 + sigma(completedQ), sigma(q) = (c_visit + max N)
+  c_scale q - the 'cq' target's logits; sequential halving (root walk j takes an option whose walks of
+  this search equal the schedule's entry, the best score among them); the move the best score among the
+  most walked options; PUCT below the root. The schedule is that of the search's simulations (a fresh
+  root's own evaluation takes the first).
+* **Settings and seat keys**: `selfplay_root_search` / `eval_root_search` ('puct' default | 'gumbel'),
+  `gumbel_m` 16, `selfplay_gumbel_scale` 1, `eval_gumbel_scale` 0; seat keys `root_search`, `gumbel_m`,
+  `gumbel_scale`, `gumbel_c_visit`, `gumbel_c_scale`.
+* **Interactions** (each decided and tested in zero-core):
+
+| with | decision |
+|---|---|
+| sigma | one sigma for the search and its target: self-play's is the 'cq' target's (50, 0.3); an evaluation's the rule's transform (`eval_select_c_scale` 0.3) |
+| Dirichlet noise, temperature | replaced by the Gumbel noise: self-play's first `temp_moves` (60) searched decisions are searched with noise 1 (the move a sample of the improved policy), later ones without; evaluation: noise `eval_gumbel_scale` (0: deterministic) |
+| the move rule (`*_select`, guard 4) | not used: the Gumbel move replaces it; `eval_select_c_scale` still gives the evaluation's sigma |
+| fast and minor searches (`sims_fast` 16, `sims_minor` 4, `p_full` 0.25) | Gumbel searches too (every search of the seat): at 16 simulations a root of up to 15 options gets one walk each and the best score plays; a minor payment at 4 the top 3 by g + ln P0 once each |
+| the recorded target | 'cq' (required: a recording Gumbel seat with 'visits' is refused), from every root visit as the paper's |
+| the root value target q | the improved policy's value (`gumbel_q`), not the root's mean backup: the halving walks every considered option, so the mean is biased low (68.3: kept hands 0.435 against Keep's 0.518) |
+| tree reuse | kept: a reused root's visits count in Q and sigma, the schedule only counts this search's walks |
+| root minimum visits (64) | exclusive (an error): sequential halving gives a 2-4 option root 8-31 walks per option at 64 |
+| root-view leaf values (67) | orthogonal (tested together) |
+| chance, determinization | unchanged; the noise is per search |
+| the league seat (63) | the self-play seat: Gumbel with self-play's noise |
+| the root's belief (69) | orthogonal: the belief deals the Gumbel search's worlds; a reused root's belief row (its search waits for it) costs no simulation, so the schedule is the same (zero-core's `gumbel_with_a_root_belief` tests, both drivers) |
+| evaluation's Elo pool | `gumbel-m16-v50-s0.3` (a new pool: a Gumbel-evaluated run's ratings start there; with a belief `-b1` after it) |
+| `mtgz.az.h2h` (zero.h2h) | each side its run's `eval_root_search` whatever `--select` says; `--a-root-search` / `--b-root-search`, `--gumbel-m`, `--a-gumbel-scale` / `--b-gumbel-scale` |
+
+* **Not done**: the paper's deterministic interior selection (PUCT stays below the root: the starvation
+  measured is at the root; it would be a separate flag with its own A/B).
+
+### 68.3 The mulligan: keep rates (CPU)
+
+`python tools/gumbel_eval.py mull --model <copy of iteration 51> --reps 2 --noise-reps 8` (64.3's
+hands: 50 without a land, 100 with one, 50 with 2-4; 64 simulations; no noise but `gumbel-noise`; each
+mode with the line's mover-view leaves and with root-view leaves; CPU 4 threads, ~10 s per mode).
+Modes: `puct` (today's: the rule cq4 s0.3), `gumbel` (sigma 0.3, no noise), `gumbel-s1` (sigma 1.0,
+the paper's scale), `gumbel-noise` (self-play's: noise 1, 8 draws per hand: the rate self-play keeps).
+
+| hands | searches | prior Mulligan | Mulligan's visits PUCT / Gumbel | Q Keep / Q Mulligan, Gumbel (mover; root view) | keep, mover view: PUCT / Gumbel / sigma 1.0 / noise | keep, root view: PUCT / Gumbel / sigma 1.0 / noise |
+|---|---|---|---|---|---|---|
+| 0 lands first | 42 | 0.974 | 60.6 / 32.0 | 0.327 / 0.334; 0.298 / 0.331 | 0% / 0% / 0% / 1% | 0% / 0% / 0% / 1% |
+| 0 lands second | 58 | 0.030 | 0.7 / 31.0 | 0.495 / 0.357; 0.440 / 0.356 | 100% / 100% / 100% / 100% | 100% / 100% / 98% / 100% |
+| 0 lands | 100 | 0.427 | 25.9 / 31.4 | 0.425 / 0.347; 0.380 / 0.346 | 58% / 58% / 58% / 58% | 58% / 58% / 57% / 58% |
+| 1 land first | 102 | 0.163 | 10.2 / 31.2 | 0.501 / 0.335; 0.499 / 0.335 | 82% / 82% / 84% / 84% | 82% / 82% / 86% / 84% |
+| 1 land second | 98 | 0.001 | 0.0 / 31.0 | 0.503 / 0.359; 0.546 / 0.359 | 100% / 100% / 100% / 100% | 100% / 100% / 100% / 100% |
+| 1 land | 200 | 0.084 | 5.2 / 31.1 | 0.502 / 0.347; 0.522 / 0.347 | 91% / 91% / 92% / 92% | 91% / 91% / 93% / 92% |
+| 2-4 lands | 100 | 0.018 | 1.0 / 31.0 | 0.528 / 0.346; 0.569 / 0.347 | 98% / 98% / 100% / 99% | 98% / 98% / 100% / 98% |
+
+* **Gumbel measures the mulligan**: Mulligan gets 31-32 of 63 walks in every search (PUCT: 0 with one
+  land on the draw, 0.7 with none on the draw, 5 with one land overall).
+* **The keep rates do not move**: 0 lands 58% (PUCT) / 58% (Gumbel) / 57-58% (sigma 1.0) / 58% (with
+  noise), 1 land 91% / 91% / 92-93% / 92%. Measured, Mulligan's Q is well below Keep's where the line
+  keeps (1 land on the draw: 0.36 against 0.50, root view 0.55): the keeps are the value head's, not the
+  starvation's - 64.4's conclusion, now with Mulligan measured 31 times per search instead of never.
+* **The root value**: a Gumbel search's plain root mean of a kept hand is 0.435 against Keep's Q 0.518
+  (mover view; root view 0.443 / 0.533) - the halving gives Mulligan half the walks; `gumbel_q` is 0.518,
+  the same as PUCT's root value 0.519 (the reason q is the improved policy's value, 68.2).
+
+### 68.4 The replay's upkeep Brainstorm (CPU)
+
+`python tools/gumbel_eval.py position --model <copy of iteration 51> --replay rep_1193650d66c0_full.json
+--frame 20 --reps 16 --sims 64,256` (the game rebuilt from the replay's seed and actions as in 67.6, the
+legal actions checked at every network frame; 16 seeds per run). Iteration 51 (67.6 used 38):
+
+| search, leaves, simulations | Pass: visits, Q | Brainstorm: visits, Q | cq target on Pass | the move |
+|---|---|---|---|---|
+| 67.6, iteration 38: replay (PUCT, mover, 64) | 1, 0.464 | 62, 0.655 | | Brainstorm |
+| PUCT (cq4 s0.3), mover, 64 | 1, 0.530 | 62, 0.683 | 0.001 | Brainstorm 16 / 16 |
+| PUCT (cq4 s0.3), root, 64 | 1, 0.647 | 62, 0.690 | 0.006 | Brainstorm 16 / 16 |
+| Gumbel (sigma 0.3), mover, 64 | 31, 0.653 | 32, 0.681 | 0.014 | Brainstorm 16 / 16 |
+| Gumbel (sigma 0.3), root, 64 | 31, 0.657 | 32, 0.688 | 0.012 | Brainstorm 16 / 16 |
+| Gumbel, noise 1, mover, 64 | 31, 0.653 | 32, 0.681 | 0.014 | Brainstorm 16 / 16 |
+| Gumbel, noise 1, root, 64 | 31, 0.657 | 32, 0.688 | 0.012 | Brainstorm 16 / 16 |
+| PUCT (cq4 s0.3), mover, 256 | 1.9, 0.547 | 253.1, 0.693 | 0.001 | Brainstorm 16 / 16 |
+| PUCT (cq4 s0.3), root, 256 | 3.6, 0.667 | 251.4, 0.701 | 0.002 | Brainstorm 16 / 16 |
+| Gumbel (sigma 0.3), mover, 256 | 127, 0.667 | 128, 0.689 | 0.008 | Brainstorm 16 / 16 |
+| Gumbel (sigma 0.3), root, 256 | 127, 0.669 | 128, 0.698 | 0.006 | Brainstorm 16 / 16 |
+| Gumbel, noise 1, mover, 256 | 127, 0.667 | 128, 0.689 | 0.008 | Brainstorm 16 / 16 |
+| Gumbel, noise 1, root, 256 | 127, 0.669 | 128, 0.698 | 0.006 | Brainstorm 16 / 16 |
+
+Gumbel takes Pass from 1-4 visits to 31 of 63 (127 of 255) and measures it - Q(Pass) 0.653 against
+Brainstorm's 0.681 (root view 0.657 / 0.688; at 256: 0.667 / 0.689) - and the move stays Brainstorm 16 of
+16 in every mode, with noise too (the improved policy gives Pass 0.01; on a two-option root the noise
+cannot change the walks - both options are walked alike - only the move). The network's own search,
+Pass fully measured, rates the upkeep Brainstorm better by 0.02-0.03: on today's network the upkeep cast
+is the value head's verdict, not a starved Pass.
+
+### 68.5 Self-play and throughput (CPU)
+
+`python tools/gumbel_eval.py selfplay --model <copy of iteration 51> --games 48 --seed 3`: 48 recorded
+self-play games per mode of the line's seat (64 / 16 simulations, p_full 0.25, minor 4, cq target 0.3,
+temp_moves 60; Gumbel: noise 1 within temp_moves), the records' targets against the network's prior on
+the same rows, the root value q against the outcome z (CPU, shared with three matches):
+
+| | PUCT | Gumbel |
+|---|---|---|
+| records per game (turns) | 73.4 (18.5) | 63.1 (16.8) |
+| the prior's top probability at the recorded roots | 0.87 | 0.861 |
+| 'cq' target entropy (nats) | 0.29 | 0.3236 |
+| target mass off the prior's favourite | 0.1324 | 0.14 |
+| targets whose argmax is not the prior's | 0.0445 | 0.0363 |
+| q: Brier against z, correlation with z | 0.1547, 0.6061 | 0.1169, 0.7154 |
+
+Every record is valid (a 'cq' target summing to 1, q a win vector); the Gumbel games are shorter
+(16.8 against 18.5 turns; 48 games each, so a hint at most) and their targets a little less sharp (entropy
++0.03, mass off the favourite +0.008) - the targets now see Q for options PUCT never visited, and where
+that Q is close the improved policy spreads. q predicts z better (Brier 0.117 against 0.155), as the
+improved policy's value should, though the two sets of games differ.
+
+**Throughput** (`speed`, 64 self-play games of the line's seat, 4 torch + 4 search threads, 120 s each,
+nothing else of this task running): PUCT **2,042** and 2,065 leaves/s (two runs), Gumbel **2,098**; on
+the final build two hours later (another background load from A/B round 3) PUCT **1,747**, Gumbel
+**1,794**: no cost (+3%). The search's own time per leaf 48 against 52 us (63 against 68 on the final
+build): the root's completed-Q logits per walk cost nothing visible, and fewer Gumbel walks end in a
+terminal (223 against 683 in the first 2 minutes).
+
+### 68.6 Head to head: Gumbel vs PUCT on the same checkpoint (CPU)
+
+`python tools/gumbel_eval.py h2h --model <copy of iteration 51> --a gumbel --b puct --games 300 --sims S
+[--view root] --seed 7` (zero.h2h's match: seats alternating, the Delver spec, chance_k 2 as the A/B
+driver's h2h; side A the Gumbel root - m 16, no noise, sigma 0.3 -, side B PUCT with the line's rule
+cq4 s0.3; both sides' leaves in the view given; 4 torch + 4 search threads each, three matches at once):
+
+| simulations, leaves | seed | games | Gumbel's score +- se | margin | Elo | minutes |
+|---|---|---|---|---|---|---|
+| 32, mover | 7 | 300 | **0.460 +- 0.029** | -1.21 | -28 | 37 |
+| 32, mover | 8 | 300 | **0.477 +- 0.029** | -1.01 | -16 | 39 |
+| 64, mover | 7 | 300 | **0.540 +- 0.029** | +1.63 | +28 | 72 |
+| 64, mover | 8 | 300 | **0.463 +- 0.029** | -1.93 | -26 | 53 |
+| 32, root view | 7 | 300 | **0.520 +- 0.029** | +0.32 | +14 | 58 |
+| 32, mover: both seeds | | 600 | **0.468 +- 0.020** | | | |
+| 64, mover: both seeds | | 600 | **0.502 +- 0.020** | | | |
+
+* **No search-only gain on today's network, either way.** At 32 simulations the Gumbel root scores
+  **0.468 +- 0.020** over 600 games (two seeds: 0.460 and 0.477; 1.6 se below even); at 64, **0.502 +- 0.020** over
+  600 games (0.540, 0.463); with root-view leaves on both sides at 32, **0.520 +- 0.029** (300 games). None is
+  2 se from 0.5, and the pattern (a little below at 32, a little above at 64) is within the noise of
+  two seeds each.
+* **Why not more**: iteration 51 was trained on PUCT's searches - its priors are sharp (the recorded
+  roots' top prior averages 0.87, 68.5) and its value head agrees with them where Gumbel measures the
+  alternatives (the mulligan 68.3, the Brainstorm 68.4). Sequential halving then spends part of a small
+  budget confirming low-prior options are worse (at 32 simulations over 16 options: eight get one walk),
+  which PUCT spent deepening its favourite; at 64 there is budget for both. The search's guarantee is a
+  policy improvement over the *prior*: with a prior this good and sigma at 0.3, the improvement on
+  today's network is small.
+* **What the A/B is for**: the question is the training signal, not the search alone - targets and
+  self-play moves from a search that measures every considered option (68.5: the targets move off the
+  prior's favourite where the measured Q says so). That needs a network trained on them (68.7).
+
+### 68.7 The A/B (flags; not run)
+
+As 64.6 / 67.8 (`runs/ab-r3/ab_driver.py`): fork the main line at K with the Gumbel root in self-play
+**and** in evaluation, run fork and control K -> K + 20 on the same build, h2h of the two K + 20
+checkpoints. The experiment entry for an `ab_config.json`:
+
+```json
+{"name": "gumbel", "iters": 20, "requires": "--selfplay-root-search",
+ "flags": ["--selfplay-root-search", "gumbel", "--eval-root-search", "gumbel", "--selfplay-root-min-visits", "0"],
+ "set": ["selfplay_root_search=gumbel", "eval_root_search=gumbel", "selfplay_root_min_visits=0"]}
+```
+
+* **Why `eval_root_search` too**: so that each side of the readout searches the way it trained with no
+  driver change. The round-3 driver passes `--select cq --select-min-visits 4 --a-cq-c-scale 0.3
+  --b-cq-c-scale 0.3` to `mtgz.az.h2h`; zero.h2h gives each side its run's `eval_root_search` whatever
+  `--select` says, so the fork's side plays the Gumbel root (no noise, sigma 0.3 from its cq flags) and
+  the control's PUCT with cq4 s0.3. The fork's own evaluations are off during the arms (`--eval-every
+  1000`); if it wins and becomes the main line, its Elo pool is `gumbel-m16-v50-s0.3` (a new pool).
+  (A fork that leaves `eval_root_search` at 'puct' would need `--a-root-search gumbel` in the driver's
+  h2h - a driver change.)
+* **`selfplay_root_min_visits=0`**: the root minimum visits are exclusive with it; round 3's `rootmin4`
+  may become the main line before this experiment (an error at the fork's start otherwise).
+* **The rest of the line stays**: `policy_target` cq (required) at `cq_c_scale` 0.3 (the search's sigma
+  too), `temp_moves` 60 (now: the decisions searched with noise), `sims` 64 / 16 / minor 4, a root-view
+  main line's leaf view (orthogonal; the driver passes each side's view).
+* **The build and the Mac**: a pinned run worktree of the merged main and `bash tools/mac.sh
+  --eval-checkout` for the Mac's checkout - remote self-play ships the fork's seat with the keys
+  `root_search`, `gumbel_m`, `gumbel_scale`, `gumbel_c_visit`, `gumbel_c_scale`, which an older checkout
+  **refuses** (an error, never a silent off), and the Mac's remote evaluation (Elo of a Gumbel main line)
+  needs them too. The `requires` check only reads the desktop worktree's `--help`.
+* **Budget**: the same as the control (no extra rows, the same simulations; throughput 68.5).
+* **What to read**: the verdict; `train.entropy` and the policy loss (the targets move off the prior
+  where the search measured a gap: 68.5); the value loss (q is the improved policy's value);
+  `selfplay.unfinished` and game length; the mulligan rates (`tools/gumbel_eval.py mull` on both K + 20);
+  both arms against the heuristic; the replay position.
+* A cheaper first look, no training: 68.6's matches on the main line's newest checkpoint.
+
+### 68.8 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (the tiered gates), CPU only
+(`CUDA_VISIBLE_DEVICES=-1`), below normal, <= 6 build jobs, nothing on the Mac, `runs/` only read (a
+copy of delver2's iteration 51, sha256 0eba258c...).
+
+* **zero-core** (feat/gumbel-root on main 353335c, after the rebase; before it the same on 3b5134d /
+  2c04cd9): its docs/az.md 19.5 - cargo 88 passed, pytest 283 passed, 3 skipped (CUDA) and
+  `test_a_dying_worker_gives_its_accepted_games_back` failed under the CPU's load (a remote-play queue's
+  timing; alone it passes on the branch and on 353335c), the golden records and match, toy-smoke runs byte
+  for byte against 353335c (four configs), `check_checkpoint_compat --package zero` identical (random,
+  uniform, a toy checkpoint), Rust vs Python parity at Gumbel roots (exact formulas on 256 checks; searches
+  at the Python-Python floor), the Gumbel root with the root's belief (Rust and both Python drivers).
+* **This repo** (on main b818054): `python tools/gate.py optin-core --no-mac` on bb56855 (the pin's code;
+  only the docs commit moved since): **GATE PASSED** - core tests 91 passed, `check_checkpoint_compat`
+  byte identity (random net, smoke spec) identical against b818054, `--test az` 38 passed, `--test hidden`
+  16 passed, Glass Road Zero, Caverna Zero and Kingdom Builder Zero build against the core (GREEN; their
+  paths given with `--other-games`: from the submodule smoke_all.sh finds no sibling repos); before the
+  rebase the same on b212420 (79 / 34 / 13). Behaviour digests **unchanged**: full **65e8a5155bd2000c**,
+  `DIGEST_ENCODING=0` **c62a5ce5f290814e**; `pytest tests` **58 passed** (main's 57 and
+  `test_replays_root_search`); `check_checkpoint_compat --package mtgz` with the copy of iteration 51, the
+  Delver spec, 8 self-play games per target and 8 against random, against b818054: **identical** (records
+  visits f3ecee2301f9a8ec, cq cb746887057c61b1, results d06971b32b85285f, 8 / 8 against random). After the
+  rebase the replay position (68.4) gives the same numbers to the last digit, and `mtgz.az.h2h` with the A/B
+  driver's flags on two copies of iteration 51 under run configs with and without `eval_root_search
+  gumbel` plays `gumbel-m16-v50-s0.3` against `cq-n4-v50-s0.3` (68.7).
+* The CPU evidence (68.3-68.6) ran on zero-core 9348baf (the feature's code before the rebase and the
+  replay fix; the search unchanged since); the belief search changes nothing with its tilt at 0.
+* No engine change, no digest re-record, no search smoke (default-off feature, tier table).
+
+### 68.9 Risks, limits, conflict points
+
+* **Sigma's scale against the prior.** Gumbel measures every considered option, but the move (and the
+  target) still weigh Q against the log-prior: at 64 simulations sigma is (50 + 32) x 0.3 = 24.6 logits
+  per unit of Q, so a 0.98 prior needs a Q gap of ~0.16 to be overruled (the paper's scale 1.0: ~0.05).
+  The line's 0.3 won round 1 as a target scale; the Gumbel search inherits it. `gumbel-s1` (68.3) shows
+  what 1.0 would do to the mulligan (a few more keeps).
+* **Shallower search of the favourite.** Sequential halving spends its first round on every considered
+  option (16 options at 64: eight get one walk), so the best line is searched less deeply than PUCT
+  would; at small budgets with many options a single-walk Q decides the first cut. The matches (68.6)
+  are the measure on today's network; a network trained on Gumbel targets may differ (the A/B).
+* **Fast searches** (16 simulations) now walk up to 15 options once each and play the best noisy
+  one-walk score; PUCT spent them on 1-3 options. Not measured separately (they record nothing; the
+  self-play games of 68.5 contain them).
+* **Exploration.** The noise is on for the first `temp_moves` (60) searched decisions - minor payments
+  count -, then self-play is deterministic, with no Dirichlet noise either (PUCT: Dirichlet noise on
+  every full search). If the A/B shows the policy collapsing (`train.entropy`), raise `temp_moves`.
+* **The root value target.** q is the improved policy's value over the walked options (68.3), a change
+  of definition for the Gumbel arm only; with the noise off (after `temp_moves`) the move is the argmax,
+  whose value is slightly above it.
+* **Reuse.** A reused root's first round ranks the options this search has not walked by their score,
+  Q included (the paper's search has no reuse): an option measured before competes with its Q.
+* **The pin is local.** zero-core `feat/gumbel-root` is not pushed (this task did not push); the pin
+  2f0a2e8 must reach GitHub (and the Mac) before a worktree elsewhere can check it out.
+* **The Elo pool.** A Gumbel-evaluated main line rates in `gumbel-m16-v50-s0.3`, a new pool: its ratings
+  are not comparable with `cq-n4-v50-s0.3`'s history.
+* **The dashboard's pool name** (zerodash `runfiles.elo_pool`) knows the Gumbel pools but not the
+  belief's `-b` suffix (69's gap, not this branch's): a run evaluated with a belief shows the pool without it.
+* **Conflict points** (69's belief search landed first; this branch is rebased on it - 15 files merged by
+  hand in zero-core, both features kept and tested together): zero-core `tree.rs` (`Tree`'s
+  fields, `Default`, `reset`, `compact`, `simulate_with`'s root selection, `backup`), `driver.rs`
+  (`NnSeat`'s field and `NnSeat::eval`, `Driver::new`'s seat checks, `Slot`'s `gnoise`),
+  `driver/worker.rs` (`start`, `apply_eval`'s noise condition, `decide`'s move and q, `restart_search`),
+  `dynapi.rs` (`DynTree`), the bindings (`SEAT_KEYS`, `parse_seat`, `SearchTree`'s methods), Python
+  `mcts.Tree` (slots, `simulate`, `backup`), `play.NNSeat` / `PyDriver._start` / `_decide` / `submit`,
+  `games.nn_seat`, `run.py` (DEFAULTS, `Run.nn_seat`, `check_eval_settings`), `h2h.py`, `replay.py`,
+  `parity.py`; docs search.md 3.7 (belief: its own subsection), az.md 1.2 rows and 19 (belief: 18).
+  This repo: `tools/gumbel_eval.py` (new), `mtgz/az/replays.py` (`root_search`, the recorder's minor
+  schedule), a test at the end of `tests/test_mtg_az.py`, this section.
+
 ## 69. Belief-weighted determinization (stage 2 of the belief head; zero-core `belief_tilt`)
 
 Branch `belief-search` (on main 0d4328f): zero-core pinned at **353335c** (feat/belief-search on zero-core main

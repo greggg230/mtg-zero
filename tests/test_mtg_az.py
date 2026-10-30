@@ -384,3 +384,14 @@ def test_replays_leaf_view():
     assert replays.leaf_view({'eval_leaf_value_view': 'root'}) == 'root'
     assert replays.leaf_view({'selfplay_leaf_value_view': 'mover'}) == 'mover'
     assert replays.leaf_view({}) == 'mover'
+
+def test_replays_root_search():
+    """Recorded games search with the Gumbel root whenever the run trains with it (ENGINE.md 68), as
+    with the leaf view; otherwise with the run's own; a Gumbel seat's minor decisions get the minor
+    budget's schedule (zero-core docs/search.md 3.7)."""
+    from mtgz.az import replays
+    assert replays.root_search({'selfplay_root_search': 'gumbel', 'eval_root_search': 'puct'}) == 'gumbel'
+    assert replays.root_search({'selfplay_root_search': 'gumbel'}, selfplay=True) == 'gumbel'
+    assert replays.root_search({'eval_root_search': 'gumbel'}) == 'gumbel'
+    assert replays.root_search({'eval_root_search': 'gumbel'}, selfplay=True) == 'puct'
+    assert replays.root_search({}) == 'puct'
