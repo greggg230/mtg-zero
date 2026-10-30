@@ -15245,3 +15245,344 @@ with an untrained input (55.6's size of effect).
   has an input to learn from.
 * A run picks this up at a re-pin (an iteration boundary; checkpoints, the optimiser state and the
   window's shards load as they are); which run and when is the user's call.
+
+## 73. Strength measurement for the Delver line (zero-core `feat/measure`: fixed Elo anchors, held-out losses, paired + sequential h2h; behaviour fingerprints)
+
+User-approved 2026-10-30 after a Fable review found that the main line's yardsticks could not see its
+progress (zero-core docs/az.md 20 has the framework's side: settings, formulas, tests). This branch
+pins zero-core `feat/measure` and adds `tools/delver_fingerprints.py`, `mtgz.az.heldout` (the shim)
+and `tests/test_measure.py`. Every new setting is off by default: the engine, the encoding, the
+digests and every run of before are unchanged (73.9).
+
+### 73.1 Why
+
+The review's evidence on `runs/r3-2b-beliefsearch` (paused at iteration 196):
+
+* **The Elo pool** (`elo/cq-n4-v50-s0.3-rv-b1m0.25/`): every 8 iterations each checkpoint plays k-1,
+  k-2, k-4, k-8 for 25 games each at 32 simulations: +-50-115 Elo per rating, no fixed reference.
+  The ratings of the evaluated checkpoints 128-192 wander 1448-1613 with se 47-70; the pooled pairs
+  give 0.481 +- 0.015 = -1.9 +- 2.3 Elo per iteration - a plateau and +1 Elo a generation look alike.
+* **The yardstick** is saturated: 92-98% against the heuristic since iteration ~100 (the user: stop
+  testing against it).
+* **h2h verdicts** (600 games, se 0.020) are too noisy for the effects the A/B program adopts: two
+  features went in at 0.538 and 0.534 (the bar 0.541). The games alternate seats but are not paired:
+  each game's deal is its own, so a mirror's opening-hand variance stays in the score.
+* **A cheap learning signal** was missing: the held-out value loss against the true outcome z on a
+  fixed set of fresh rows moved 0.4066 (iteration 111) -> 0.4012 (188) in the review's check.
+
+### 73.2 What the pin adds (zero-core docs/az.md 20)
+
+* **Fixed anchors** (`--elo-anchors label=path,...`, `--elo-anchor-games`, `--elo-anchor-elo`,
+  `--elo-anchor-calib-games`, `--elo-anchor-from`): frozen checkpoints every evaluated checkpoint plays;
+  the first anchor's rating set, later ones calibrated once against it and frozen (sha256 kept); the
+  fit of the pool's whole results with them fixed -> `elo_anchored` (metrics, evals.jsonl, log),
+  `anchored.json`. Shipped to the Mac's mirror for `--eval-remote mac`. `--eval-games 0` drops the
+  heuristic's games; every Elo match is still played (tested).
+* **`--elo-paired 1`**: the run's Elo matches as paired games (even game counts).
+* **Held-out losses** (`--heldout-shards`, `python -m mtgz.az.heldout make | eval`): value CE /
+  accuracy / Brier against z and policy CE / top-1 against the recorded targets on a frozen row set,
+  decision and value-only rows apart, every evaluated iteration (`heldout` in the metrics, a log line).
+* **zero.h2h** (`python -m mtgz.az.h2h`, the same module): `--paired`, `--sprt E0,E1` (+ `--alpha`,
+  `--beta`, `--batch-games`, `--max-games`), `--target-se`, `--a-sims` / `--b-sims`.
+
+### 73.3 Paired h2h on the Delver mirror: the variance it removes
+
+**Method.** Checkpoint 196 (A) against 188 (B) of the line, 32 simulations, each side its run's
+evaluation search (config.json next to models/: the 'cq' rule n4 at 0.3, root-view leaves, the belief
+tilt 1 mix 0.25 on every search), `chance_k` 0 (the run's evaluation; h2h's default 2 hit the engine
+panics of 73.8), the Delver spec; batches of 200 games on the Mac (`nice -n 19`, beside the fuzz
+farm: 6.5 min each) and one on the desktop CPU (22 min), each batch its own seed (11-14, 21); paired,
+and one unpaired batch for the check.
+(`E:/mtg-zero-scratch/measure/pool_batches.py` pools them: the pentanomial counts add up.)
+
+| batch | games | A's score | se (paired) | se_games (unpaired formula) | variance_ratio |
+|---|---|---|---|---|---|
+| paired seed 11 | 200 | 0.490 | 0.0246 | 0.0353 | 0.48 |
+| paired seed 12 | 200 | 0.500 | 0.0293 | 0.0354 | 0.68 |
+| paired seed 13 | 200 | 0.470 | 0.0264 | 0.0353 | 0.56 |
+| paired seed 14 | 200 | 0.460 | 0.0232 | 0.0352 | 0.43 |
+| paired seed 21 (desktop) | 200 | 0.545 | 0.0247 | 0.0352 | 0.49 |
+| **paired, pooled** | **1,000** | **0.493** | **0.0115** | 0.0158 | **0.53** (95% bootstrap 0.46-0.61) |
+| unpaired seed 11 | 200 | 0.470 | - | 0.0353 | - |
+
+The 500 pairs: 63 both won, **367 split (73%)**, 70 both lost, no draw (pentanomial [70, 0, 367, 0,
+63]); the unpaired batch agrees (0.470 +- 0.035). In three pairs of four each side won with the same seat's deal - the deal (who is on the play,
+the two hands, the library) decides most mirror games, and pairing takes that variance out:
+**var(pair score) = 0.53 x var(game) / 2**, so a paired h2h of N games is as precise as an unpaired
+one of 1.9 N. At 600 games the se falls from 0.020 to 0.015 and the 2-se bar from 0.541 to 0.530. (By
+the way: 196 scored 0.493 +- 0.012 against 188 - -5 +- 8 Elo: eight iterations without a measurable
+gain.)
+
+**What it does to the A/B verdicts** (`E:/mtg-zero-scratch/measure/sprt_sim.py`: 8,000 simulated tests
+per row; pair scores from the 3-point law with the ratio 0.54 of the first four batches, games from a
+Bernoulli; zero.h2h's LLR
+and bounds): the share of forks adopted and the mean games played, for a fork that is truly E Elo
+better -
+
+| true E | score | 600-game 2-se bar, unpaired (today) | ... paired | SPRT(0, 20), <= 2,400 games, unpaired: H1 / undecided / games | ... paired |
+|---|---|---|---|---|---|
+| -10 | 0.486 | 0% | 0% | 0% / 3% / 1,282 | 0% / 0% / 836 |
+| 0 | 0.500 | 2% | 2% | 2% / 29% / 1,804 | 2% / 9% / 1,354 |
+| +10 | 0.514 | 10% | 15% | 20% / 60% / 2,107 | 30% / 39% / 1,831 |
+| +20 | 0.529 | 28% | 46% | 69% / 30% / 1,791 | **90% / 8% / 1,343** |
+| +30 | 0.543 | 54% | 80% | 96% / 3% / 1,266 | 100% / 0% / 841 |
+| +40 | 0.557 | 79% | 97% | 100% / 0% / 926 | 100% / 0% / 655 |
+
+Today's readout adopts a real +20 Elo fork 28% of the time; paired + SPRT(0, 20) adopts it 90% of the
+time in 1,343 games on average (2.2 batches of 600), with the same 2% false adoptions of a null; a
++30 fork is decided in 841 games. SPRT(0, 15) with up to 3,000 games: +20 adopted 97% (1,448
+games), +10 43%, a null 2% (1,935 games, 18% undecided). The choice (73.6) is SPRT(0, 20), alpha =
+beta = 0.05, batches of 600, at most 2,400: the effects the program has adopted (0.534-0.538, +24-26
+Elo) are inside its power, its false positives are the old bar's, a lopsided result still costs one
+batch of 600 and a close one up to four (~76 min on the GPU).
+
+### 73.4 Held-out losses of the main line
+
+The set: `python -m mtgz.az.heldout make --from runs/r3-2b-beliefsearch/data/iter_0191 --rows 8192
+--seed 0` -> `E:/mtg-zero-scratch/measure/heldout/r3-2b_iter0191_8192.npz` (8.8 MB; set
+`463ad8eefa5c`: 5,407 decision rows, 2,785 value-only rows of iteration 191's 800 games, generated by
+checkpoint 190). Iteration 191's rows trained checkpoints 191-196 only (window 6): held out for every
+checkpoint up to 190 and for all the line's next ones (197 on). All 110 checkpoints of the line's
+models/ (83-196), CPU, 2.4 s each:
+
+| checkpoint | decision value_ce | acc | policy_ce | top-1 | view value_ce | acc |
+|---|---|---|---|---|---|---|
+| 83 | 0.3933 | 0.796 | 0.522 | 0.843 | 0.4103 | 0.785 |
+| 96 | 0.3876 | 0.801 | 0.490 | 0.859 | 0.3995 | 0.792 |
+| 112 | 0.3872 | 0.800 | 0.467 | 0.872 | 0.3908 | 0.805 |
+| 128 | 0.3865 | 0.800 | 0.444 | 0.882 | 0.3938 | 0.794 |
+| 144 | 0.3839 | 0.804 | 0.425 | 0.890 | 0.3916 | 0.797 |
+| 160 | 0.3852 | 0.801 | 0.402 | 0.906 | 0.3950 | 0.797 |
+| 176 | 0.3842 | 0.798 | 0.383 | 0.926 | 0.3974 | 0.788 |
+| 188 | 0.3839 | 0.808 | 0.363 | 0.947 | 0.4053 | 0.787 |
+| 190 | 0.3878 | 0.801 | 0.360 | 0.951 | 0.4099 | 0.782 |
+| 191 (trained on it) | 0.3593 | 0.823 | 0.361 | 0.948 | 0.3746 | 0.805 |
+| 196 (trained on it 6 x) | 0.3192 | 0.857 | 0.357 | 0.948 | 0.3309 | 0.841 |
+
+* **The value head learns slowly**: decision rows' value CE 0.393 (83) -> 0.384 (188), a linear fit
+  over the clean checkpoints (83-190) -0.009 per 100 iterations, with a checkpoint-to-checkpoint
+  scatter of ~0.003 (120: 0.394). The view rows' value CE does not improve at all (-0.0015 per 100
+  iterations).
+* **Contamination is large**: the checkpoints that trained on the set's rows fall to 0.319 (196, six
+  windows) - the value head memorizes the outcomes of games it trained on, 0.065 nats in six
+  iterations against 0.009 of real progress in a hundred. A set must be fresh for the checkpoints it
+  measures: iteration 191's is for 197 on.
+* **The encoding moved under it**: the set's rows were encoded before section 72's top-card floats (six
+  per-player globals, set at about a third of Delver decisions; 0 in the set). The line's checkpoints
+  have zero weights on those columns (72: their outputs bit for bit unchanged), so they read the set
+  as before; once training moves those weights, a set built from a relaunched iteration (held out from
+  six iterations after it) measures the new inputs too - keep iteration 191's for the history.
+* **policy_ce is agreement, not strength**: it falls steadily (0.522 -> 0.360) towards checkpoint 190,
+  the search that recorded the targets, and stays there after; the line's next checkpoints will move
+  away from 190's search whether they improve or not. Read it as drift (a collapse or a jump shows),
+  `value_ce` as the learning signal.
+
+### 73.5 Behaviour fingerprints (`tools/delver_fingerprints.py`)
+
+`python tools/delver_fingerprints.py r3-2b-beliefsearch` (bands of 20 generations; `--band`,
+`--min-gen`, `--max-gen`, several runs, `--json`). The replays are the Delver AI publisher's
+(runs/<run>/replays: 6 games of every even generation against itself, 64 simulations), both seats
+counted; a cell is rate (n). The metrics' exact definitions are in the tool's docstring; in short:
+
+* **fetch cracked now**: of the fetches played and cracked, the share cracked with nothing between.
+* **brainstorm w/ shuffle**: of the Brainstorms cast, the share with a shuffle to follow (its own
+  fetch ability on the stack - `bs in resp. to fetch` -, an uncracked fetch of its own, or a fetch
+  in hand with the land drop unused in its own turn before the end step).
+* **murktide delve best**: of the Murktides cast, the share that exiled as many instants and
+  sorceries as it could (min(5, those in its graveyard)).
+* **fow pitched fow**: of the Force of Will pitch payments that offered a second Force of Will AND
+  another blue card, the share that pitched the Force of Will.
+* **tap-out into Daze**: of the spells cast in the caster's own main phase (empty stack, turn >= 3,
+  free spells excluded) while the opponent - at its first decision after the cast - held Daze and an
+  Island, the share with no untapped land left (Wasteland and uncracked fetches count as mana);
+  `tapped out: dazed` = of those, the share actually Dazed.
+* **T1-2 Volcanic, U only**: of the fetch searches in the fetcher's own turns 1-2 with the basic Island
+  still in its library, whose turn then cast only non-red spells, the share that took Volcanic Island
+  (`... nothing cast`: the turn cast nothing more).
+* **mulligans**: opening sevens, keep rate by lands and play / draw, the network's mean prior on
+  Mulligan and how often the search visited it.
+
+Fixed against the review's scripts: their turn 1-2 was global turns 1-2 and read the Island's zone
+after the fetch had found it (a found Island never counted as "in the library": the Volcanic share was
+100% by construction); the tap-out count ignored Wasteland and uncracked fetches and read the state
+one step after the cast (mana payment not always finished); Murktide's delve skipped countered casts;
+the Brainstorm shuffle needed the main phase (most Brainstorms are cast in the upkeep or draw step).
+
+r3-2b-beliefsearch (2026-10-30, generations 90-196, 324 games):
+
+```
+run r3-2b-beliefsearch
+generations                         90-98     100-118     120-138     140-158     160-178     180-196
+games                                  30          60          60          60          60          54
+fetch cracked now               93% (150)   91% (286)   88% (292)   94% (291)   86% (294)   89% (265)
+brainstorm w/ shuffle            12% (85)   13% (141)   11% (147)   14% (162)   16% (138)   11% (142)
+bs in resp. to fetch              0% (85)    0% (141)    0% (147)    0% (162)    1% (138)    0% (142)
+murktide delve best              52% (40)    63% (78)    67% (87)    59% (83)    72% (75)    64% (70)
+fow pitched fow                  75% (16)    91% (11)    57% (21)    56% (25)    64% (11)    79% (14)
+tap-out into Daze               57% (107)   51% (216)   51% (251)   58% (185)   45% (192)   49% (186)
+tapped out: dazed                62% (61)   44% (110)   41% (127)   39% (108)    47% (87)    49% (91)
+T1-2 Volcanic, U only            80% (30)    74% (53)    60% (48)    83% (48)    61% (41)    62% (42)
+T1-2 Volcanic, nothing cast      100% (2)     89% (9)    80% (10)     57% (7)    25% (12)     20% (5)
+starting player won              73% (30)    52% (60)    53% (60)    52% (60)    52% (60)    59% (54)
+
+mulligans (opening 7): keep rate (n) | mean Mulligan prior | searched
+  0 lands, draw                    0% (2)      0% (4)      0% (2)      0% (6)      0% (2)     50% (4)
+  0 lands, play                    0% (1)      0% (3)      0% (3)      0% (3)      0% (4)      0% (2)
+  1 lands, draw                   80% (5)    82% (17)     67% (6)    54% (13)     67% (6)    91% (11)
+  1 lands, play                  70% (10)    92% (12)    79% (19)    86% (14)    91% (11)     83% (6)
+  2 lands, draw                  100% (8)   100% (25)    96% (25)   100% (21)   100% (17)   100% (23)
+  2 lands, play                 100% (10)    85% (13)   100% (15)   100% (18)    96% (25)    93% (27)
+  3 lands, draw                 100% (10)   100% (12)   100% (20)   100% (14)   100% (24)   100% (12)
+  3 lands, play                  100% (7)   100% (21)   100% (15)   100% (17)   100% (10)    100% (8)
+  4+ lands, draw                 100% (5)    100% (2)    100% (7)     83% (6)   100% (11)    100% (4)
+  4+ lands, play                 100% (2)   100% (11)    100% (8)     75% (8)    90% (10)   100% (11)
+  prior / searched:            0.111 / 10  0.119 / 24  0.096 / 22  0.165 / 34  0.104 / 24  0.070 / 17
+```
+
+What it says: the line cracks fetches at once ~90% of the time and so almost never has a shuffle for its
+Brainstorm (11-16%, never in response to a fetch); it pitches a second Force of Will over another blue
+card 56-91% of the time; it taps out into a live Daze about half the time and is Dazed about half of
+those; it takes Volcanic Island over the basic on its first two turns when only blue was needed 60-83%;
+it keeps nearly every seven with 2+ lands (85-100%) and 54-92% of one-landers; Murktide's delve leaves
+an instant or sorcery behind in about a third of the casts. None of these moves across the 106
+generations beyond the noise of a few dozen games a band (n in each cell): the review's reading of a
+behavioural plateau holds. The fingerprints are descriptive (a Volcanic Island fetch can be right);
+their use is to see a change after a fix or a new training setting.
+
+### 73.6 The A/B driver (`runs/ab-r3/ab_driver.py`, not edited here)
+
+The driver (read-only here) builds `python -m mtgz.az.h2h FORK CONTROL --games 600 --sims 32 --spec S
+--device cuda --threads 8 --seed 7 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale
+0.3` (+ the leaf views) and adopts the fork at `a_score >= 0.5 + 2 se`. To use paired + sequential
+games, change two places:
+
+1. `h2h()`, the command (lines 157-158):
+
+   ```python
+   cmd = [sys.executable, '-m', 'mtgz.az.h2h', a, b, '--games', str(games), '--sims', '32',
+          '--spec', spec, '--device', 'cuda', '--threads', '8', '--seed', '7',
+          '--chance-k', '0', '--paired', '--sprt', '0,20', '--max-games', str(4 * games)] + H2H_SELECT
+   ```
+
+   (`games` = ab_config's `h2h_games` 600: batches of 600, at most 2,400; `--chance-k 0` is the run's
+   own evaluation setting - h2h's default 2 is what hit both engine panics, 73.8; drop it to keep
+   round 3's searches.)
+2. `main()`, the verdict (lines 264-268):
+
+   ```python
+   score = r.get('score', r.get('a_score'))
+   se = r.get('se', r.get('a_se', 0.0))
+   sprt = r.get('sprt') or {}
+   win = sprt.get('decision') == 'H1' if sprt else (score is not None and score >= 0.5 + 2 * se)
+   new_main = fork if win else main_run
+   verdict = ('FORK WINS' if win else 'control kept' + (' (undecided)' if sprt.get('decision') == 'undecided' else '')) \
+       + (f' (score {score:.3f} ± {se:.3f}, {r.get("games")} games, llr {sprt.get("llr")})' if score is not None else '')
+   ```
+
+   and `write_results`' method line (line 179, 'The fork wins at score >= 0.5 + 2 se.') to 'Paired
+   games (each deal from both seats); the fork wins when the SPRT of +20 Elo against 0 (alpha = beta =
+   0.05) accepts +20 within 2,400 games; undecided = control kept.'
+
+The minimal change is `'--paired'` alone in the command: the old rule then reads the paired se (`se`)
+unchanged - the same bar with the variance of 73.3. The subprocess timeout (4 h) covers 2,400 games on
+the GPU (600 games took 19 min in round 3). An undecided SPRT means |effect| below ~15 Elo after
+2,400 games: the user's "principled fix" adoptions remain a judgement call on `a_score` +- `se`.
+
+### 73.7 Relaunching the main line with anchors, held-out losses and no heuristic
+
+The frozen files (this branch never writes runs/: copy them somewhere durable first, e.g.
+`runs/anchors/` and `runs/heldout/`, and use those paths below; the run refuses to start without them,
+exit 78):
+
+| file | what | sha256 |
+|---|---|---|
+| `E:/mtg-zero-scratch/measure/anchors/r3-2b_iter_0192.pt` | anchor a192 = models/iter_0192.pt | 81edd6201af8... |
+| `E:/mtg-zero-scratch/measure/anchors/r3-2b_iter_0160.pt` | anchor a160 = models/iter_0160.pt | 9fab6e1d9bf4... |
+| `E:/mtg-zero-scratch/measure/heldout/r3-2b_iter0191_8192.npz` | the held-out set (463ad8eefa5c) | 9a0a23ce24fa... |
+
+Steps: remove the run's STOP file; the pinned worktree of the merged main (`git worktree add --detach
+../mtg-zero-wt/run-<sha7> <sha>`, `bash tools/build_py.sh`, the `repin` gate) and **`bash tools/mac.sh
+--eval-checkout` in it** (the Mac evaluates with the run's exact commit: `RunCommitRemote` refuses
+another checkout, and an older one could not play the anchors); then, from that worktree (the old
+launch's flags plus the new ones; `--elo-games 24`: paired games need an even count):
+
+```
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch/supervisor_console.txt" python tools/supervise.py "C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --iters 400 --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 128 --heldout-shards "C:/Users/Gregg Keithley/mtg-zero/runs/heldout/r3-2b_iter0191_8192.npz"
+```
+
+* `--eval-games 0`: no heuristic games (the pool keeps its old ones: the ordinary `elo` stays linked);
+  `--eval-random-games 0` as before.
+* `a192` is the scale's anchor, fixed at 1613 = iteration 192's rating in the pool now (the anchored
+  ratings start on the pool's scale; any constant would do); `a160` is calibrated once against it
+  (200 paired games) on the first evaluation. Each evaluated checkpoint then plays 100 paired games
+  against each; with the offsets (4 x 24) that is ~300 network-against-network games per evaluation
+  (today 100 of them + 100 against the cheaper heuristic) - about twice today's ~5 min on the Mac
+  (measured: 200 such games in 6.5 min at nice 19 beside the fuzz farm).
+* `--elo-anchor-from 128`: the first evaluation (iteration 200) also plays the anchors with the
+  evaluated checkpoints 128-192 (9 x 200 games; with the calibration and its own, ~2,200 games) - an
+  anchored history of 72 iterations at once, about 70 minutes of the Mac's evaluation time, once
+  (the run keeps training meanwhile; later evaluations queue). `--elo-anchor-from 200` skips it.
+* `--elo-paired 1`: the offsets' and anchors' games paired (0.53 of the variance left, 73.3); the
+  offsets' games change from 25 to 24.
+* `--heldout-shards`: `heldout` in every evaluated iteration's metrics (~3 s on the GPU after training).
+* Watch: `iter N elo anchored E +-X` and `iter N heldout (set 463ad8eefa5c): ...` in log.txt;
+  `elo/cq-n4-v50-s0.3-rv-b1m0.25/anchored.json`; `tools/watch_run.sh` as after every launch.
+
+### 73.8 Two engine panics found by the measurement (not fixed here)
+
+The variance measurement's first runs used h2h's default `chance_k` 2 (the A/B driver's too) and
+all three died on an engine panic inside a search (`search worker panicked`; the driver then fails
+the whole match):
+
+| run (Mac, checkpoints 196 vs 188, 32 sims, the line's evaluation seats) | game | panic |
+|---|---|---|
+| `--paired --seed 7`, 600 games | 37 | `ChooseGraveyardCard: duplicate action ids [Opt { action: 0, choice: Pass }, Opt { action: 347, choice: Card(CardIdx(8)) }, Opt { action: 350, choice: Card(CardIdx(14)) }, Opt { action: 350, choice: Card(CardIdx(14)) }, Opt { action: 352, choice: Card(CardIdx(24)) }]` (engine/src/flow.rs:215) |
+| `--seed 7` (unpaired), 600 games | 510 | `a card with another face` (an `other_face(..).expect`: engine/src/faces.rs:388 / 510, flow.rs:689) |
+| `--paired --seed 8`, 600 games | 138 | `a card with another face` |
+
+The first reproduces on the desktop CPU, the same game and message (`python -m mtgz.az.h2h
+E:/mtg-zero-scratch/measure/r3/models/iter_0196.pt E:/mtg-zero-scratch/measure/r3/models/iter_0188.pt
+--games 38 --sims 32 --paired --seed 7`, the line's config.json next to models/: ~10 min on 6
+threads), so it is deterministic and not the Mac's. Neither is this branch's (no engine change; the
+unpaired run's driver is byte for byte the old one). Both happen in a search's simulation, i.e.
+in a sampled world, and look like section 49.6's class (a world inconsistent with a choice in
+progress: a graveyard card listed twice by a delve; a card dealt without the face a decision names -
+Tamiyo // Seasoned Scholar is the deck's double-faced card). The suspect is `chance_k` 2's forced
+chance outcomes (with the belief-weighted deal on every search): the run's own evaluation plays
+`chance_k` 0 (config.json) and its Elo matches never hit them, and the measurement's six batches at
+`chance_k` 0 (1,200 games, 73.3) had none - a correlation, not yet a diagnosis. Not fixed here (an engine
+triage's job, with the reproduction above); until then an h2h of these checkpoints should pass
+`--chance-k 0` (73.6), and a long sequential test multiplies the exposure.
+
+### 73.9 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (feedback_tiered_gates; desktop 2026-10-30,
+CPU only `CUDA_VISIBLE_DEVICES=-1`, below normal priority, own targets `E:/cargo-target/{zero-core,
+mtg-zero}/measure`; the GPU was the orchestrator's; the Mac at nice 19, one job at a time):
+
+* **zero-core** (`feat/measure` ec57c15, documented in c15e3d0, its own worktree): `cargo test --release` 89 passed
+  (zero_search; + webnet 3); `pytest tests` 302 passed, 3 skipped (CUDA); toy-smoke runs byte for byte
+  against 85459f5 (its own worktree and target, `ZERO_INFLIGHT=1`, seed 3; 4 configurations - classic
+  with the external yardstick, tokens + `elo_together`, rolling with 'cq' targets and the cq2 rule, the
+  Delver line's shape - each without the new settings and with them given at their defaults): every
+  shard, checkpoint (zip members), optimizer state, Elo file, models/index.json and the metrics
+  without timings identical, config.json only gains the eight keys; `check_checkpoint_compat --package
+  zero` (random, uniform, a toy checkpoint) identical.
+* **This branch**: `python tools/gate.py optin-core --baseline-root <main's own build> --no-mac`
+  (SMOKE_TARGET=measure-smoke) **PASSED twice**: on 6f089df against e08bade, and after the rebase onto
+  main eedbf14 on 34f4733 against eedbf14 - core tests 92, checkpoint_compat byte identity (the random
+  network), `--test az` 38 / 39, `--test hidden` 16, Glass Road c1f56dc / Caverna a6fad73 / Kingdom
+  Builder 4202a4a build against the core (`smoke_all.sh --with-this-core --build-only`: GREEN) - and
+  `check_checkpoint_compat` with checkpoint 196 and the Delver spec identical against both;
+  `pytest tests` 62 passed both times (`test_measure.py` 3). No engine/ or card_ir/ change: the
+  behaviour digests are main's (6b4bc88c864c4dd4 / encoding-free a634df1919e3c337), not re-recorded.
+  The commits after 34f4733 are documentation and the pin's documentation commit (docs tier).
+* **End to end on the Mac**: `bash tools/mac.sh --eval-checkout` at 34f4733, then a delver-smoke
+  run on the desktop (2 iterations, `--eval-every 1`) with `--eval-remote mac` (a separate eval
+  workdir, `ZERO_EVAL_WORKDIR`), `--eval-games 0 --eval-random-games 0`, two anchors (`a1`, `a2`: a
+  smoke run's checkpoints 1 and 2), `--elo-anchor-games 4 --elo-anchor-calib-games 6 --elo-paired 1`
+  and a 256-row held-out set: the anchors reached the mirror as `anchors/a1.pt`, `a2.pt` (sha256 equal
+  to the desktop's), the mirror's config named them there, the Mac fixed `a1` at 1000 and calibrated
+  `a2` (1119, 6 games), played them with checkpoints 1 and 2, and the run logged `iter 1 elo anchored
+  1058 +-242 (remote mac)` / `iter 2 ... 1059 +-204`, got `anchored.json` back and `elo_anchored` in
+  `evals.jsonl`; `heldout` in every iteration's metrics (computed on the desktop).
