@@ -395,3 +395,51 @@ def test_replays_root_search():
     assert replays.root_search({'eval_root_search': 'gumbel'}) == 'gumbel'
     assert replays.root_search({'eval_root_search': 'gumbel'}, selfplay=True) == 'puct'
     assert replays.root_search({}) == 'puct'
+
+
+def test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_rows(tmp_path):
+    """ENGINE.md 62.9: the main line's shape on Delver shards of this build - the belief target recorded
+    (aux) and value-only rows (view samples 0.5) - and a teacher with the belief head (a random last
+    layer: a head that predicts something); zero-core's distillation gives the student the head (the
+    game's targets: the belief search's check passes), distils it and reports both kinds of row; the
+    student's record and log carry the head and the value-only rows."""
+    import os
+    import sys
+    import torch
+    from mtgz.az import decklists
+    from zero.data import ShardWriter
+    from zero.net import check_belief_head, load, make_net, save
+    info = G.info('mtg')
+    spec = decklists.mirror_spec(decklists.IZZET_DELVER, max_turns=60)
+    meta = {'game': 'mtg', 'features': info['num_features'], 'actions': info['num_actions']}
+    for name, seed in (('iter_0001', 3), ('iter_0002', 4)):
+        seat = G.nn_seat('m', 4, selfplay=True, sims_fast=2, p_full=0.5, temp_moves=10, view_samples=0.5)
+        drv = G.Driver('mtg', [[seat, seat]] * 2, spec=spec, concurrency=2, threads=1, seed=seed, record=True,
+                       max_steps=20000, aux=True)
+        w = ShardWriter(str(tmp_path / 'data' / name), 'c00', rows=4096, meta=meta)
+        drive(drv, {'m': UniformEvaluator()}, on_batch=lambda lb: w.add(drv.take_samples()))
+        w.add(drv.take_samples())
+        assert w.close()['samples'] > 50
+    torch.manual_seed(0)
+    belief = [['belief', 1024, 'multinomial']]
+    t = make_net(info, 'mtg', 'tokens', 32, 1, heads=2, aux=belief)
+    with torch.no_grad():
+        for lin in (t.gen, t.ptr, t.aux_head[2]):
+            lin.weight.normal_(0, 0.3)
+            lin.bias.normal_(0, 0.3)
+    tp, out = str(tmp_path / 'teacher.pt'), str(tmp_path / 'student.pt')
+    save(t, tp, {'iter': 3})
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    import distill
+    assert distill.main([tp, out, '--data', str(tmp_path / 'data' / 'iter_0001'), '--heldout',
+                         str(tmp_path / 'data' / 'iter_0002'), '--hidden', '48', '--blocks', '2', '--heads', '2',
+                         '--steps', '40', '--batch', '64', '--lr', '2e-3', '--warmup', '5', '--eval-every', '0',
+                         '--torch-threads', '1', '--normal-priority']) == 0
+    s, extra = load(out, game='mtg')
+    check_belief_head(s, 'mtg')                        # what selfplay_ / eval_belief_tilt ask of a checkpoint
+    assert s.config['aux'] == belief and s.config['layout']['version'] == 5
+    h = extra['distill']['heldout']
+    assert h[-1]['aux']['belief']['kl'] < h[0]['aux']['belief']['kl'] and h[-1]['policy_kl'] < h[0]['policy_kl']
+    assert h[-1]['view']['rows'] > 0 and h[-1]['decision']['rows'] > 0
+    start = json.loads(open(out + '.log.jsonl').readline())
+    assert start['aux'] == belief and start['train_view_rows'] > 0 and start['train_aux_rows'] == start['train_rows']
