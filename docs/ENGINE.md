@@ -12221,8 +12221,8 @@ ceiling.
 The student is a fresh 192 x 6 network of layout v5 (version 5 recorded in its config; the encoding
 guard of this build and of the A/B's pinned build run-e5483aa accept it, and every load path - the
 run, the Mac's evaluation and self-play, h2h - builds it from its config: no code on the run path
-changed), trained on the teacher's answers (its policy over the legal actions, its value, its margin)
-on the run's own shards, then forked into a continuation of the run at K with `fork_run --source
+changed), trained on the teacher's answers (its policy over the legal actions, its value, its margin;
+since 62.9 a teacher's belief head too, which the student gets) on the run's own shards, then forked into a continuation of the run at K with `fork_run --source
 <run> --dest <fork> --iter K --net <student.pt>`: the fork has the run's window, iteration numbers,
 settings and Elo history, the student as checkpoint K, no optimizer state (a fresh AdamW with its
 warm-up at the run's lr) and K's Elo results dropped (zero-core az.md 13.3).
@@ -12231,7 +12231,7 @@ warm-up at the run's lr) and K's Elo results dropped (zero-core az.md 13.3).
 blocks), width does not - the LayerNorms average over the width, so only exact duplicates (x 2, never
 192) keep the function, and duplicates train in lockstep until noise breaks the exactness; the
 student of a distillation is a fresh network that uses all of its capacity, of any size, and the tool
-serves every game. The price is a GPU phase (62.6: an estimated 35-50 minutes) and a fidelity short
+serves every game. The price is a GPU phase (62.6: an estimated 40-55 minutes) and a fidelity short
 of exact, which the held-out agreement and the head-to-head gate measure.
 
 ### 62.5 Evidence on CPU
@@ -12268,91 +12268,147 @@ of exact, which the held-out agreement and the head-to-head gate measure.
   fresh 192 x 6 network (the student before its distillation) lost all 24 of its games (margin -20.7).
   A sanity check, not the gate: 48 games cannot tell 50% from 60% (62.6 b's 400 on the GPU can).
 
-### 62.6 The GPU plan (not run)
+### 62.6 The GPU plan (not run; for the main line `r3-2b-beliefsearch`, rewritten 2026-10-29: 62.9)
 
-When round 2 (`runs/ab-r2`) is done and the GPU and the Mac are free; Git Bash on the desktop. `MAIN` is
-the main line then (`runs/ab-r2/state.json` "main"), stopped at an iteration boundary (STOP, its
-supervisor gone), `K` its newest checkpoint; the commands below are written for delver2 at 21.
+When round 3 (`runs/ab-r3`) is done and the GPU and the Mac are free; Git Bash on the desktop. `MAIN` is
+the main line then (`runs/ab-r3/state.json` "main"), stopped at an iteration boundary (STOP, its
+supervisor gone), `K` its newest checkpoint: the commands read both (written when they were
+`r3-2b-beliefsearch` at 91: 128 x 4 tokens with the belief head, root-view leaves with value-only samples
+0.5, belief-weighted determinization in self-play and evaluation; 62.9 says what changed and why). The
+distillation, the fork and the head-to-heads run from a pinned worktree of a main that has zero-core's
+distillation of auxiliary heads (zero-core `feat/distill-aux`, az.md 13.6) and its build; the A/B's two
+arms run on the main line's own pinned build (round 3's `worktree`), which loads the 192 x 6 student like
+any checkpoint (nothing on the run path changed).
 
 ```
-MAIN="C:/Users/Gregg Keithley/mtg-zero/runs/delver2"; K=21; KK=$(printf %04d $K); K10=$(printf %04d $((K + 10)))
-OUT=E:/mtg-zero-scratch/bignet/gpu-k$K; mkdir -p $OUT
+AB="C:/Users/Gregg Keithley/mtg-zero/runs/ab-r3"
+MAIN="$(python -c "import json; print(json.load(open(r'$AB/state.json'))['main'].replace(chr(92), '/'))")"
+K=$(python -c "import glob, os; print(max(int(os.path.basename(p)[5:9]) for p in glob.glob(r'$MAIN/models/iter_*.pt')))")
+KK=$(printf %04d $K); K10=$(printf %04d $((K + 10)))
+OUT=E:/mtg-zero-scratch/distill-gpu/k$K; mkdir -p $OUT
+FORK="C:/Users/Gregg Keithley/mtg-zero/runs/r3-big192x6"
 SPEC="$(python -c "import json; print(json.load(open(r'$MAIN/config.json'))['spec'])")"
-H2H=(--sims 32 --spec "$SPEC" --device cuda --threads 8 --seed 7 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 0.3)
-cd "C:/Users/Gregg Keithley/mtg-zero-wt/bignet"      # (or a worktree of main once merged: any layout v5 build)
+VIEW="$(python -c "import json; print(json.load(open(r'$MAIN/config.json')).get('selfplay_leaf_value_view') or 'mover')")"
+H2H=(--sims 32 --spec "$SPEC" --device cuda --threads 8 --seed 7 --select cq --select-min-visits 4 --a-cq-c-scale 0.3
+     --b-cq-c-scale 0.3 --a-leaf-value-view $VIEW --b-leaf-value-view $VIEW)
+cd "C:/Users/Gregg Keithley/mtg-zero-wt/run-<sha of that main>"     # bash tools/build_py.sh done there
 ```
 
-**0. The Mac's real cost** (optional, ~3 minutes, the Mac idle; this branch committed): the Mac's
-inference shape (8 workers x 3 threads at batches of 192) on real Delver rows, the three sizes:
+**0. The Mac's real cost** (optional, ~3 minutes, the Mac idle; this checkout pushed): the Mac's
+inference shape (8 workers x 3 threads at batches of 192) on real rows of the main line, the three sizes:
 
 ```
-scp E:/mtg-zero-scratch/bignet/delver2_data/iter_0021/m00-5892_000.npz greggkeithley@100.95.248.116:/tmp/delver_rows.npz
+scp "$(ls "$MAIN/data/iter_$KK"/m00-*_000.npz | head -1)" greggkeithley@100.95.248.116:/tmp/delver_rows.npz
 bash tools/mac.sh 'bash tools/build_py.sh && for n in "128 4 4 256" "192 6 6 384" "256 6 8 512"; do set -- $n; python -m mtgz.az.bench infer --game mtg --arch tokens --hidden $1 --blocks $2 --heads $3 --ff $4 --shard /tmp/delver_rows.npz --batches 192 --workers 8 --torch-threads 3 --seconds 10; done'
 ```
 
-**(a) Distil the student on the desktop GPU** (the main line's window: its 6 iterations, ~330k rows, of
-which a 24 GB budget keeps ~318k; the newest iteration's desktop shard, ~8.4k rows, held out). 12,000
-steps of 512 rows (~19 epochs) at lr 1e-3 (the CPU run's, stable), the student at its best held-out
-KL kept as well:
+**(a) Distil the student on the desktop GPU.** The window: the main line's 6 iterations, ~460k rows (77k
+an iteration, a third of them value-only), of which a 30 GB budget keeps ~367k (80%); held out: the
+newest iteration's desktop shard (~13k rows). 16,000 steps of 512 rows (~22 epochs) at lr 1e-3, the
+student at its best held-out KL kept as well. The teacher's belief head comes with it - copied into the
+student and distilled at the defaults (`--aux-w 1`, `--aux-teacher-w 1`: zero-core az.md 13.6, 62.9) -
+and the value-only rows train the value, not the policy (the run's own mask):
 
 ```
 python tools/distill.py "$MAIN/models/iter_$KK.pt" $OUT/student_192x6.pt --data "$MAIN/data" \
     --heldout "$MAIN/data/iter_$KK/r00_000.npz" --hidden 192 --blocks 6 --heads 6 --ff 384 \
-    --steps 12000 --batch 512 --lr 1e-3 --lr-min 1e-5 --warmup 500 --ram-budget-gb 24 --heldout-rows 16384 \
+    --steps 16000 --batch 512 --lr 1e-3 --lr-min 1e-5 --warmup 500 --ram-budget-gb 30 --heldout-rows 16384 \
     --eval-every 1000 --save-every 2000 --keep-best --device cuda --torch-threads 4 --seed 1 \
     > $OUT/distill_console.txt 2>&1
 ```
 
-Estimated **35-50 minutes**: the window's load (~2-3 min for 24 GB), the teacher's answers once (~1-2
-min), ~0.12-0.15 s a step (the run's own GPU training step is 0.092 s at batch 512 for 128 x 4, a
-192 x 6 step has 1.28x its kernels and its arithmetic is milliseconds) = 25-30 min, 12 held-out
-evaluations. The first `train` line's `s_per_step` gives the real figure; `--resume` continues after a
-crash from `student_192x6.pt.partial` (every 2,000 steps). Peak RAM ~27 GB: nothing else large may run.
-More distinct games help (the CPU run's train / held-out KL: 0.026 / 0.067): other v5 Delver runs'
-data directories can be added with more `--data` (the budget then subsamples all of them at one rate).
+The first line (`start`) must show `"aux": [["belief", 1024, "multinomial"]]`, `train_view_rows` (~a
+third of `train_rows`) and `train_aux_rows` = `train_rows`; every `train` line `aux_belief_kl`, every
+`heldout` line `decision`, `view` and `aux`.
 
-**(b) Verify it** (~25 minutes): the agreement on the held-out shard, then 400 games against its teacher
-on the GPU, both sides the main line's rule (as round 2's head-to-heads):
+* **Time, estimated 40-55 minutes**: the window's load ~1-2 min (54 shards read whole and subsampled;
+  the CPU run read 18 in 11 s), the teacher's answers once with its belief (~367k rows, ~1-3 min),
+  ~0.12-0.15 s a step = 32-40 min (the run's own GPU training step on this line: 0.097 s at 512 rows for
+  128 x 4 with the head - r3-2-belief025's iterations 89-91, ~46 s for ~300 steps of which 17-20 s the
+  load -; a 192 x 6 step has 1.28x its kernels, its arithmetic is milliseconds; the head and the
+  teacher's predictions add 2 MB a batch), 16 held-out evaluations (~1 min). The first `train` line's
+  `s_per_step` gives the real figure; `--resume` continues after a crash from `student_192x6.pt.partial`
+  (every 2,000 steps).
+* **Why 16,000 steps** (the old plan 12,000): a third of each batch is value-only rows, which teach the
+  value and the head but not the policy; 16,000 x 512 x 2/3 = 5.5M decision rows seen, ~0.9x the old
+  plan's 6.1M (12,000 x 512, all of them decisions).
+* **RAM**: 81.7 KB a row (75.5 KB of features and targets, 6.1 KB for the head: the shards' belief
+  targets and the teacher's predictions, zero-core az.md 13.6), so 30 GB = 367,264 rows (24 GB: 293,811,
+  of which ~98k value-only, against the old plan's 318k decisions). Peak ~40 GB: the window 30 + the
+  held-out rows ~1.3 + the shards being loaded (8 at a time, up to ~6) + CUDA and torch ~3. The main line
+  is stopped (its 20 GB window cache freed) and nothing else large may run; on a busier machine
+  `--ram-budget-gb 24` (peak ~34 GB). More distinct games help (the CPU run of 62.5 overfit 79k rows):
+  other v5 Delver data directories of the same line can be added with more `--data`.
+
+**(b) Fork, then verify** (~35-45 minutes). The student goes into the fork first, so that its side of
+the head-to-head searches as the run does: `mtgz.az.h2h` reads each side's search from its checkpoint's
+run (`config.json` next to `models/`: eval_belief_tilt 1 and belief_mix 0.25 whatever `--select` says,
+and eval_root_search when the line has the Gumbel root - then both sides search with it, whatever
+`--select` says), while a student file outside a run would search with the defaults (uniform worlds,
+PUCT); `$VIEW` gives both sides the leaf view the line trains with (round 3's driver does the same).
+`fork_run --net` checks the encoding and the belief head before it copies anything (net.HeadMissing for
+a student without the head, the refusal the run would give at its start):
 
 ```
 python tools/distill.py --compare $OUT/student_192x6.pt "$MAIN/models/iter_$KK.pt" --data "$MAIN/data/iter_$KK/r00_000.npz" --device cuda
-python -m mtgz.az.h2h $OUT/student_192x6.pt "$MAIN/models/iter_$KK.pt" --games 400 "${H2H[@]}" | tee $OUT/h2h_student_vs_teacher.json
-```
-
-**Gate: `a_score` >= 0.45** (2 se below parity at 400 games); expected near 0.5 with held-out top-1
->= 0.95. Below it: distil further from the student (`--init $OUT/student_192x6.pt --steps 8000 --lr
-3e-4 --warmup 200`, or `student_192x6.best.pt` if the held-out KL rose late) and verify again.
-
-**(c) The A/B** (round 2's method: a fork arm K -> K + 10 with the student, then the control K -> K + 10,
-the same build and flags - round 2's `base_flags` - then a 600-game head-to-head of the two K + 10
-checkpoints; the fork wins at a score >= 0.5 + 2 se). Both arms run on the main line's pinned build
-(`run-e5483aa`, zero-core edf4b89: it loads the student like any checkpoint, and the Mac's checkout of
-it exists); only the fork is made with this branch's `fork_run --net`:
-
-```
-FORK="C:/Users/Gregg Keithley/mtg-zero/runs/r3-1-big192x6"
 python tools/fork_run.py --source "$MAIN" --dest "$FORK" --iter $K --net $OUT/student_192x6.pt
-WT="C:/Users/Gregg Keithley/mtg-zero-wt/run-e5483aa"; cd "$WT"
+python -m mtgz.az.h2h "$FORK/models/iter_$KK.pt" "$MAIN/models/iter_$KK.pt" --games 400 "${H2H[@]}" | tee $OUT/h2h_student_vs_teacher.json
+```
+
+**Gate: `a_score` >= 0.45** (2 se below parity at 400 games) **with `select_a` = `select_b`** (both sides
+the same search: `cq-n4-v50-s0.3-rv-b1m0.25` on this line, `gumbel-m16-...-rv-b1m0.25` on a Gumbel one);
+expected near 0.5 with held-out top-1 >= 0.95 and a belief KL well under the 64 x 2 CPU student's 0.026
+(62.9). Below it: `rm -rf "$FORK"`,
+distil further from the student (`--init $OUT/student_192x6.pt --steps 8000 --lr 3e-4 --warmup 200`, or
+`student_192x6.best.pt` if the held-out KL rose late), fork and verify again. Time: `--compare` and the
+fork ~1 min each (the fork hard-links the window); 400 games ~30-40 min (round 3's 600-game
+head-to-heads of two 128 x 4 networks took 30-48 min with the belief or root-view leaves on one side,
+`runs/ab-r3/state.json`; here both on both sides, one side 2.3x the arithmetic).
+
+**(c) The A/B** (round 3's method: the fork arm K -> K + 10 with the student - the fork of (b) -, then
+the control K -> K + 10, on the same build with round 3's `base_flags`, then a 600-game head-to-head of
+the two K + 10 checkpoints, each side with its run's search; the fork wins at a score >= 0.5 + 2 se):
+
+```
+WT="$(python -c "import json; print(json.load(open(r'$AB/ab_config.json'))['worktree'])")"; cd "$WT"
 BASE=(--preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1
       --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8
       --elo-games 25 --window-cache 1 --train-prefetch 2 --iters $((K + 10)) --eval-every 1000)
 MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "$FORK/supervisor_console.txt" python tools/supervise.py "$FORK" "${BASE[@]}"
 # ... checkpoint K + 10 in $FORK and its supervisor gone (watch_run / the dashboard), then the control:
 MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "$MAIN/supervisor_console.txt" python tools/supervise.py "$MAIN" "${BASE[@]}"
-# ... checkpoint K + 10 in $MAIN, then (from the bignet worktree or the pinned one):
+# ... checkpoint K + 10 in $MAIN, then (from the distillation's worktree or the pinned one):
 python -m mtgz.az.h2h "$FORK/models/iter_$K10.pt" "$MAIN/models/iter_$K10.pt" --games 600 "${H2H[@]}" | tee $OUT/h2h_ab.json
 ```
 
-Estimated: the fork arm **~70-75 minutes** (10 iterations at ~7.1 min, 62.2; its first one ~1 min
-more: a fresh AdamW warms up, the window cache fills), the control **~35 minutes** (3.5 min an
-iteration), the head-to-head **~30-35 minutes** (round 2's 400 games of two 128 x 4 networks took 19
-minutes; one side 2.3x the arithmetic, mostly hidden on the GPU) - with (a) and (b) **about 3.5
-hours**. The first fork iterations measure what 62.2 estimated: `selfplay.remote.leaves_per_s` (the
-Mac), `selfplay.leaves_per_s` (the desktop), `train.seconds`. If the fork wins per iteration, the
-per-hour question is the fork's K + 10 against the control's K + 20 (the same wall-clock: run the
-control 10 more iterations, ~35 minutes, then the same head-to-head). If round 2's driver should run it
-instead, its fork step needs `--net` (an experiment key passing `['--net', path]` to `fork_run.py`)
-and a build with this branch (a re-pin, both arms on it).
+The fork's config.json is the main line's (its leaf view, value-only samples, belief weight, tilt and
+mix, the Gumbel root if the line has it) with the student's size (arch, hidden, blocks, heads, ff);
+`BASE` repeats round 3's flags only. The Mac self-plays a share of every iteration with the 192 x 6
+network from the pinned build's checkout (it exists for the main line).
+
+* **The A/B entry** for round 3's driver (an `ab_config.json` experiment), once its fork step passes an
+  experiment's network to `fork_run.py` - not made here (`runs/` is the user's): a few lines in
+  `runs/ab-r3/ab_driver.py`, `+ (['--net', exp['net']] if exp.get('net') else [])` on its `fork_run.py`
+  command, and a blocker when the K it stopped the main line at is not the experiment's `net_iter` (a
+  student distilled from another checkpoint):
+
+  ```json
+  {"name": "big192x6", "iters": 10, "needs_belief_head": true, "net_iter": 91,
+   "net": "E:/mtg-zero-scratch/distill-gpu/k91/student_192x6.pt", "flags": [], "set": []}
+  ```
+
+  (`net` and `net_iter` for K = 91: the student must be the K at which the driver forks; its h2h then
+  follows each arm's leaf view as round 3's do. The driver makes its own fork, `r3-<n>-big192x6`: delete
+  the gate's `$FORK` after (b) when the driver runs the A/B.)
+* **Time, estimated**: the fork arm **~70-80 minutes** (10 iterations at ~6.8-7.5 min: 62.2's model with
+  this line's measured rates - the Mac 3.39 games/s and the desktop 0.66 at 128 x 4, r3-2-belief025's
+  iterations 89-91 at 250 s an iteration - divided by 2.32 and 0.9 for 192 x 6, the training 1.3x; the
+  first iteration ~1 min more: a fresh AdamW warms up, the window cache fills), the control **~42
+  minutes** (4.2 min an iteration), the head-to-head **~45-60 minutes** (600 games) - with (a) and (b)
+  **about 4-4.5 hours**. The first fork iterations measure what 62.2 estimated: `selfplay.remote.leaves_per_s`
+  (the Mac), `selfplay.leaves_per_s` (the desktop), `train.seconds`. If the fork wins per iteration, the
+  per-hour question is the fork's K + 10 against the control's K + 20 (the same wall-clock: run the
+  control 10 more iterations, ~42 minutes, then the same head-to-head).
 
 ### 62.7 Checks
 
@@ -12383,6 +12439,107 @@ Tier "opt-in core feature with byte-identical defaults" (the tiered gates): the 
   bigger network's iterations take ~2x as long, so a per-hour comparison is the fork's K + N against
   the control's K + 2N.
 * `fork_run --net` drops K's Elo results; the fork's Elo pool rates the student from its own games on.
+
+### 62.9 The plan for the current main line: what changed and why (2026-10-29)
+
+Branch `distill-aux` (main 014b85a), zero-core `feat/distill-aux` (on main 2f0a2e8; its az.md 13.6),
+user-approved 2026-10-29 as a plan held in reserve for a plateau of the main line, **CPU only**: round 3's
+Gumbel test held the desktop GPU and the Mac; `runs/` only read (copies in `E:/mtg-zero-scratch/distill2`).
+
+**Why.** 62.4-62.6 were written for delver2 at 21. The main line is now `r3-2b-beliefsearch` (round 3:
+root-view leaves adopted at 71, the belief head trained from 72, belief-weighted determinization
+adopted at 91), and the distillation tool predated three of its features:
+
+* **The belief head** (66, `aux_belief_w` 0.25) and **the belief search** (69, `selfplay_belief_tilt` /
+  `eval_belief_tilt` 1, `belief_mix` 0.25), which refuses a checkpoint without the head (exit 78): a
+  student distilled before had no head, so the main line could not continue from it.
+* **Value-only rows** (67, `selfplay_view_samples` 0.5: a third of the window's rows, no policy target):
+  the tool averaged its policy terms over every row, the value-only rows' zeros included, so the policy
+  weighed two thirds of what the value did.
+* **The head-to-head reads each side's search from its run** (eval_belief_tilt, belief_mix,
+  eval_root_search): the old plan's `h2h $OUT/student.pt $MAIN/...` would have played the student with
+  uniform worlds against a teacher with the belief (checked on CPU: `select_a` `cq-n4-v50-s0.3-rv`
+  against `cq-n4-v50-s0.3-rv-b1m0.25`).
+
+**What changed.** zero-core (az.md 13.6): the student gets the teacher's head and distils it (KL to the
+teacher's prediction; `--aux-w 1`, `--aux-teacher-w` = `--teacher-w`, measured below), the policy terms
+average over the decision rows only (the run's mask), the held-out agreement reports decision and
+value-only rows apart and the head's KL, the window's budget counts the head's 6.1 KB a row, and
+`fork_run --net` refuses a network without the head for a run with the belief before it copies
+anything. The plan (62.6): `MAIN` and `K` read from round 3's state and the models; 16,000 steps
+(the decision rows seen ~0.9x the old plan's); a 30 GB budget (the window has ~1.4x the rows, a third
+value-only; peak ~40 GB); the student forked before the gate so that both sides search with the run's
+settings, and the leaf view passed as round 3's driver does; the gate also checks that `select_a` =
+`select_b`; times from this line's measured iterations (4.2 min at 128 x 4, against 3.5 for delver2);
+the A/B entry for round 3's driver. A teacher without a head on shards without value-only rows distils
+exactly as before (the golden below).
+
+**CPU evidence** (desktop, 4 torch threads, below normal; `tools/distill.py` from this branch):
+
+* **The main line's checkpoint 91 into 64 x 2** (a tiny student, only to exercise the paths; 638,557
+  parameters with the head): trained on 73,454 rows of iterations 89-90 (a 6 GB budget of 148,602; 24,411
+  value-only, every row with a belief target), held out 4,096 rows of iteration 91's desktop shard (1,312
+  value-only, 3,916 with a non-empty hand), 2,000 steps of 256 rows (~7 epochs, 0.107 s a step, 4.3 min),
+  lr 1e-3 (warm-up 100, cosine to 1e-5), the defaults otherwise
+  (`E:/mtg-zero-scratch/distill2/cpu/long_64x2_aux1.0.pt.log.jsonl`):
+
+  | step | policy KL, decisions (p90) | top-1 | P(win) sq. error: decision / value-only rows | value CE vs z: decision / value-only | belief KL to the teacher | belief CE vs the true hands / hit |
+  |---:|---|---:|---|---|---:|---|
+  | 0 (fresh) | 0.571 (1.092) | 0.632 | 0.1238 / 0.1345 | 0.704 / 0.718 | 4.29 | 6.931 / 0.000 |
+  | 500 | 0.161 (0.441) | 0.837 | 0.0227 / 0.0234 | 0.464 / 0.460 | 0.047 | 2.691 / 0.416 |
+  | 1,000 | 0.122 (0.340) | 0.869 | 0.0115 / 0.0106 | 0.430 / 0.425 | 0.031 | 2.671 / 0.422 |
+  | 1,500 | 0.104 (0.289) | 0.878 | 0.0106 / 0.0097 | 0.429 / 0.426 | 0.027 | 2.664 / 0.421 |
+  | 2,000 | **0.099** (0.275) | **0.878** | **0.0106 / 0.0097** | 0.428 / 0.426 | **0.026** | 2.663 / 0.418 |
+  | the teacher | 0 | 1 | 0 | 0.390 / 0.399 | 0 | 2.649 / 0.440 |
+
+  The belief's KL is the same on both kinds of row (0.0258 / 0.0256) and its 1,024 outputs cost the
+  student nothing visible in the policy: the defaults against the run's weight 0.25 and against blends
+  with the true hands (zero-core az.md 13.6's table) - weight 1 / 0.25: policy KL 0.099 / 0.098, P(win)
+  squared error on decision rows 0.0106 / 0.0117, belief KL 0.026 / 0.036; the 0.5 blend 0.104 and 0.054
+  (its head reads the true hands at 2.631, the teacher's 2.649), the true hands alone 0.116 and 0.252
+  (they overfit: their CE rose after step 1,000). The training KL ended at 0.078 against the held-out
+  0.099: a 64 x 2 student on 73k rows, as 62.5's 192 x 6 on 79k.
+* **`fork_run --net` and two iterations** (`E:/mtg-zero-scratch/distill2/fork`, a fork of a copy of the
+  main line - its config, checkpoint 91, iterations 89-91 - with the student as checkpoint 91): accepted
+  (the encoding guard, the belief head); then `python -m mtgz.az.run --run <fork> --iters 93
+  --infer-device cpu --train-device cpu --selfplay-remote "" --eval-remote "" --games 16 --conc 16
+  --threads 4 --groups 1 --torch-threads 2 --ram-budget-gb 3 --eval-every 1000`, i.e. the run's own
+  settings - 64 / 16 / 4 simulations, cq targets, root-view leaves, value-only samples 0.5, belief tilt 1
+  and mix 0.25 in self-play, the belief weight 0.25 - with fewer games and no remotes: not refused;
+  iteration 92 self-played 16 games with the belief (1,856 belief rows, 0.45 a decision; 0.50 value rows
+  a leaf; 1,573 samples of which 905 value-only, 1,675 leaves/s) and trained 50 steps (policy 0.484, value
+  0.392 - value-only rows 0.397, decisions 0.389 -, belief 2.655 with hit 0.470, a 3 GB window of 38,700
+  rows, 12,860 value-only; the head kept, not re-added); iteration 93 the same (1,109 belief rows; policy
+  0.488, value 0.389, belief 2.652 / 0.486). Checkpoints 92 and 93 pass the guard and the belief's check
+  (64 x 2, layout v5, the head). A student without the head (delver2's golden student below) is refused
+  for this run by `fork_run --net` before anything is copied (`HeadMissing: selfplay_belief_tilt /
+  eval_belief_tilt of the fork ... has no auxiliary head`).
+* **The 192 x 6 student** (not trained): `new_student(teacher, 'tokens', 192, 6, heads=6, ff=384)` from
+  checkpoint 91 builds with the belief head (3,766,493 parameters: 3,585,117 + the head's 181,376), layout
+  version 5, no encoding mismatch, passes `check_belief_head` and `fork_run`'s `check_heads` for the main
+  line's settings, saves and loads through the guard; one forward pass with the head on 64 real rows.
+* **The plan's gate command** (62.6 b, on CPU: 4 games at 8 simulations, the fork's student against the
+  teacher): `select_a` = `select_b` = `cq-n4-v50-s0.3-rv-b1m0.25`.
+* **Golden: no head, no value-only rows** - delver2's iteration 71 into a 32 x 1 token student
+  (`--keep-best`) and a 32 x 1 MLP (`--teacher-w 0.5 --value-q 0.6`), a 0.3 GB budget (3,971 of 8,202
+  rows), held out 1,024 rows, and `--compare`, on this checkout with zero-core 2f0a2e8 (main's) and with
+  `feat/distill-aux`: the students (configs, tensors), the best student, every log line and the
+  comparison identical (the record's settings gain `aux_w` / `aux_teacher_w`); base against base
+  identical too (deterministic). zero-core's own toy golden (az.md 13.6): identical.
+
+**Checks** (tier "opt-in core feature with byte-identical defaults"; no run-path code, no engine change,
+no digest re-record, no search smoke): `bash tools/build_py.sh` (own target dir
+`E:/cargo-target/mtg-zero/distill2`); `python tools/gate.py python --no-mac` on 2200482 (this branch's code and test, zero-core pinned at
+1e7eaf8) **passed** in 99 s: `pytest tests` **59 passed**
+(`test_a_belief_teacher_distils_into_a_student_with_its_head_on_delver_view_rows` is new), the mtg-smoke
+run-loop 16 games, 0 unfinished (`gates/220048263b89.json`); the commits after it are docs only (this
+section, 62.4, 62.6; the pin moved to zero-core's docs commit 85459f5). zero-core (its az.md 13.6):
+`cargo build --release --workspace`, `pytest tests` **291 passed**, 3 skipped (CUDA), the goldens.
+
+**Limits.** The CPU student is 64 x 2: what a 192 x 6 student reaches on the GPU (and its head-to-head
+against the teacher with both sides' belief search) is the plan's measurement, not this one's. The RAM
+and time figures are estimates from this line's measured iterations and the CPU runs. The A/B entry needs
+the driver's `--net` lines (62.6 c).
 
 ## 63. The self-play league: past checkpoints in the Delver mirror
 
