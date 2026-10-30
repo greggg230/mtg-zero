@@ -1366,7 +1366,18 @@ impl Game {
                 // Its owner knows their hand: the looker may remember it.
                 self.learn(p, c);
                 let d = self.objs[c.i()].def;
-                self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+                if q == p {
+                    self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
+                } else {
+                    // The owner sees which of their cards was seen (it is
+                    // remembered: ENGINE.md 23.7; their encoding shows it,
+                    // the hand's "known to the opponent"), so the key is
+                    // theirs too: with both players knowing it, public. A
+                    // key private to the looker merged, in the owner's
+                    // search, the worlds of different cards seen (the state's
+                    // generator is the world's: ENGINE.md 71.1).
+                    self.emit_public(crate::hidden::KEY_LOOK, p, d as u64);
+                }
                 self.note(|_| format!("P{p} looks at a card at random in P{q}'s hand"));
                 Flow::Next
             }

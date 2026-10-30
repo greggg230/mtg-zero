@@ -286,6 +286,16 @@ impl Game {
                 }
             }
         }
+        // Asked whenever a card exiled this way is still there with a spell
+        // face (public), even if none can be cast now: castability counts
+        // the caster's hidden hand (a spree's mode costs paid with a Spirit
+        // Guide), so whether the question comes must not tell, and a world
+        // `determinize` deals for the other player must find the same
+        // decision (ENGINE.md 10's second rule; 71.3).
+        if !self.may_cast_during_resolution(p) || !self.exile.iter().any(|c| f.picked.contains(c) && self.has_spell_face(*c)) {
+            f.picked.clear();
+            return Flow::Next;
+        }
         // (In exile order: `EXILE` + k = the k-th card offered.)
         let cands: Vec<CardIdx> = self
             .exile
@@ -294,10 +304,6 @@ impl Game {
             .filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c))
             .take(act::EXILE_N as usize)
             .collect();
-        if cands.is_empty() {
-            f.picked.clear();
-            return Flow::Next;
-        }
         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
         opts.extend(cands.into_iter().enumerate().map(|(k, c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }));
         self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
@@ -317,7 +323,7 @@ impl Game {
     /// spell face (a split card's right half, an Adventure: CR 709.3,
     /// 715.3; ruling 6187a75b). Only the face cast is evaluated.
     pub(crate) fn faces_castable_now(&self, p: PlayerId, card: CardIdx, free: bool) -> u8 {
-        if !self.may_cast_spells(p) || self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
+        if !self.may_cast_during_resolution(p) {
             return 0;
         }
         let classes = self.mana_classes(p, None);
@@ -340,6 +346,29 @@ impl Game {
             None => false,
         };
         (if front { FACE_CAST } else { 0 }) | (if other { OTHER_CAST } else { 0 })
+    }
+
+    /// May `p` cast a spell during a resolution at all (CR 608.2g): no
+    /// "can't cast spells" and no "only any time they could cast a sorcery"
+    /// (the stack isn't empty) applies. Public, unlike castability, which
+    /// counts the caster's hand; `faces_castable_now`'s and `can_cast_now`'s
+    /// first check, and with `has_spell_face` when "you may cast it" is
+    /// asked (ENGINE.md 10's second rule, 71.3).
+    pub(crate) fn may_cast_during_resolution(&self, p: PlayerId) -> bool {
+        self.may_cast_spells(p) && !self.permanents_of(crate::ids::opp(p)).any(|c| self.abilities(c).opp_sorcery_speed)
+    }
+
+    /// Has `card` a face `faces_castable_now` may find castable (a spell
+    /// face: not a land)? Public (its faces), unlike whether it can be cast
+    /// now: the question "you may cast it" is asked on this (ENGINE.md 10's
+    /// second rule, 71.3).
+    pub(crate) fn has_spell_face(&self, card: CardIdx) -> bool {
+        let def = self.def_of(card);
+        let front = match def.halves {
+            Some((left, _)) => !self.db.def(left).is(types::LAND),
+            None => !def.is(types::LAND),
+        };
+        front || def.other_face().is_some_and(|face| !self.db.def(face).is(types::LAND))
     }
 
     /// Begin casting `card` with the permission just given (during a

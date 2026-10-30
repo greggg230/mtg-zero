@@ -542,8 +542,15 @@ impl Game {
         // Rare per-object facts (public; ENGINE.md 58.6): exhausted, a colour or
         // name chosen, exerted, can't be countered, ... (objects by place).
         for &(r, m) in &self.marks {
+            // (A mark naming another object names it by its place too: its
+            // slot and incarnation are not observable, and differ between
+            // worlds when it came from a hidden zone - Animate Dead's
+            // creature from a resampled hand, a Nadu from a searched
+            // library; ENGINE.md 71.2.)
             let what = match m {
                 crate::game::Mark::ExiledToPay(x) => 1_000_000 + live_place(x),
+                crate::game::Mark::Reanimated(x) => 2_000_000 + live_place(x),
+                crate::game::Mark::Triggered { def, slot, turn, n, src } => h64(&(def, slot, turn, n, live_place(src))),
                 m => h64(&m),
             };
             v.extend([live_place(r), what]);
@@ -652,6 +659,18 @@ impl Game {
             h.sort_unstable();
             v.extend(h);
             v.push(u64::MAX);
+            // Its own hand: which of its cards the other player knows (the
+            // encoding's "known to the opponent"; twins are canonical,
+            // `canon_hand_knowledge`), as the multiset of (definition,
+            // known) - an Urza's Bauble's look is the owner's to see
+            // (ENGINE.md 23.7, 71.1).
+            if p == viewer {
+                let o = crate::ids::opp(viewer);
+                let mut k: Vec<u64> = pl.hand.iter().map(|&c| (self.objs[c.i()].def as u64) << 1 | (self.objs[c.i()].known >> o & 1) as u64).collect();
+                k.sort_unstable();
+                v.extend(k);
+                v.push(u64::MAX - 8);
+            }
         }
         for k in self.clouds.iter().filter(|k| k.viewer == viewer) {
             v.extend([k.owner as u64, k.hand as u64, k.library as u64]);

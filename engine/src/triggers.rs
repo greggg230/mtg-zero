@@ -305,7 +305,7 @@ impl Game {
                     // "... only twice each turn", per granted object (Nadu).
                     if let Some(s) = times_slot(&t.pred) {
                         if let Subj::Obj(r) = ev.subject(s) {
-                            self.note_granted_trigger(r, o.def, i as u8, o.r.inc);
+                            self.note_granted_trigger(r, o.def, i as u8, o.r);
                         }
                     }
                 }
@@ -390,7 +390,7 @@ impl Game {
             TrigPred::Chapter(n) => ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
             TrigPred::Level(n) => ev.kind == EventKind::ClassLevel && ev.a == Subj::Obj(src.r) && ev.amount == *n as u32,
             TrigPred::TimesPerSubject(s, n) => match ev.subject(*s) {
-                Subj::Obj(r) => self.granted_triggered(r, src.def, src.r.inc) < *n,
+                Subj::Obj(r) => self.granted_triggered(r, src.def, src.r) < *n,
                 _ => false,
             },
             TrigPred::Batch => true,

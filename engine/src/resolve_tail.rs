@@ -570,10 +570,18 @@ impl Game {
             }
             Some(_) => Flow::Next,
             None => {
-                if self.objs[card.i()].zone != Zone::Graveyard || !self.can_cast_free_now(p, card) {
+                // Asked whenever the card is there with a spell face
+                // (public), "yes" only if it can be cast now: castability
+                // counts the caster's hidden hand (a spree's mode costs paid
+                // with a Spirit Guide; ENGINE.md 10's second rule, 71.3).
+                if self.objs[card.i()].zone != Zone::Graveyard || !self.may_cast_during_resolution(p) || !self.has_spell_face(card) {
                     return Flow::Next;
                 }
-                self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, yes_no());
+                let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                if self.can_cast_free_now(p, card) {
+                    opts.push(Opt { action: act::YES, choice: Choice::Yes });
+                }
+                self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
                 Flow::Suspend
             }
         }

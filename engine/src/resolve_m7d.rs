@@ -460,11 +460,16 @@ impl Game {
                     }
                     f.picked = exiled.into_iter().filter(|&c| self.objs[c.i()].zone == Zone::Exile).collect();
                 }
-                let cands: Vec<CardIdx> = self.exile.iter().copied().filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c)).collect();
-                if cands.is_empty() {
+                // Asked whenever a card exiled this way is still there with
+                // a spell face (public), even if none can be cast now:
+                // castability counts the caster's hidden hand (a spree's
+                // mode costs paid with a Spirit Guide; ENGINE.md 10's second
+                // rule, 71.3).
+                if !self.may_cast_during_resolution(p) || !self.exile.iter().any(|c| f.picked.contains(c) && self.has_spell_face(*c)) {
                     f.picked.clear();
                     return Flow::Next;
                 }
+                let cands: Vec<CardIdx> = self.exile.iter().copied().filter(|c| f.picked.contains(c) && self.can_cast_free_now(p, *c)).collect();
                 let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
                 opts.extend(cands.iter().take(act::EXILE_N as usize).enumerate().map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) }));
                 self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseExiled, opts);
@@ -530,34 +535,34 @@ impl Game {
 impl Game {
     /// How many times this turn the triggered ability granted by a static
     /// ability of definition `def` triggered for object `r`.
-    pub(crate) fn granted_triggered(&self, r: crate::ids::ObjRef, def: crate::ids::DefId, src_inc: u16) -> u8 {
+    pub(crate) fn granted_triggered(&self, r: crate::ids::ObjRef, def: crate::ids::DefId, src: crate::ids::ObjRef) -> u8 {
         let turn = self.turn.number as u16;
         self.marks
             .iter()
             .find_map(|&(o, m)| match m {
-                crate::game::Mark::Triggered { def: d, turn: t, n, src_inc: i, .. } if o == r && d == def && t == turn && i == src_inc => Some(n),
+                crate::game::Mark::Triggered { def: d, turn: t, n, src: i, .. } if o == r && d == def && t == turn && i == src => Some(n),
                 _ => None,
             })
             .unwrap_or(0)
     }
 
-    pub(crate) fn note_granted_trigger(&mut self, r: crate::ids::ObjRef, def: crate::ids::DefId, slot: u8, src_inc: u16) {
+    pub(crate) fn note_granted_trigger(&mut self, r: crate::ids::ObjRef, def: crate::ids::DefId, slot: u8, src: crate::ids::ObjRef) {
         let turn = self.turn.number as u16;
         for (o, m) in self.marks.iter_mut() {
-            if let crate::game::Mark::Triggered { def: d, slot: s, turn: t, n, src_inc: i } = m {
+            if let crate::game::Mark::Triggered { def: d, slot: s, turn: t, n, src: i } = m {
                 if *o == r && *d == def && *s == slot {
-                    if *t == turn && *i == src_inc {
+                    if *t == turn && *i == src {
                         *n += 1;
                     } else {
                         *t = turn;
-                        *i = src_inc;
+                        *i = src;
                         *n = 1;
                     }
                     return;
                 }
             }
         }
-        self.marks.push((r, crate::game::Mark::Triggered { def, slot, turn, n: 1, src_inc }));
+        self.marks.push((r, crate::game::Mark::Triggered { def, slot, turn, n: 1, src }));
     }
 }
 

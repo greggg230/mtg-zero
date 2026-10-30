@@ -70,26 +70,6 @@ impl Default for Src {
 /// The members of a class, inline up to eight (ENGINE.md 17).
 pub(crate) type Members = SVec<Src, 8>;
 
-/// `classes` without the sources of the cards in `cards` (permanents a cost
-/// taps before the mana is paid: teamwork).
-pub(crate) fn classes_without(classes: &[Class], cards: &[CardIdx]) -> Vec<Class> {
-    classes
-        .iter()
-        // (A Lumberjack may be among the tapped creatures: none of its
-        // sacrifices then.)
-        .filter(|cl| cl.share == 0 || cards.is_empty())
-        .filter_map(|cl| {
-            let mut m = Members::new();
-            for s in cl.members.iter() {
-                if !cards.contains(&s.card) {
-                    m.push(*s);
-                }
-            }
-            (!m.is_empty()).then(|| Class { members: m, ..cl.clone() })
-        })
-        .collect()
-}
-
 /// Converge (exact, any number of units): the most colours (with `fixed`,
 /// already spent) an exact payment of `cost` and of the `marked` needs (the
 /// mana costs of mana abilities activated in the payment: not spent on the
@@ -465,6 +445,61 @@ fn units_of(v: &[u8; 6]) -> impl Iterator<Item = Unit> + '_ {
 }
 
 impl Game {
+    /// `classes` without the sources of the cards in `cards` (permanents a
+    /// cost taps before the mana is paid: teamwork's creatures). A
+    /// Lumberjack's sacrifices (`LJ_FOR`, `Class::share` Lumberjacks to tap)
+    /// lose the Lumberjacks among `cards` and go when none is left; the other
+    /// creatures tapped leave them (ENGINE.md 71.5: every shared class went
+    /// whenever any creature was tapped, so a teamwork pick of a creature
+    /// without a mana ability found the Lumberjack's mana gone that the
+    /// cost's check, tapping no source, had counted).
+    pub(crate) fn classes_without(&self, classes: &[Class], cards: &[CardIdx]) -> Vec<Class> {
+        classes
+            .iter()
+            .filter_map(|cl| {
+                let mut m = Members::new();
+                for s in cl.members.iter() {
+                    if !cards.contains(&s.card) {
+                        m.push(*s);
+                    }
+                }
+                if m.is_empty() {
+                    return None;
+                }
+                let mut share = cl.share;
+                if share > 0 {
+                    let land = cl.members[0].card;
+                    let tapped = cards.iter().filter(|&&c| self.lumberjack_for(c, land)).count();
+                    share = share.saturating_sub(tapped.min(u8::MAX as usize) as u8);
+                    if share == 0 {
+                        return None;
+                    }
+                }
+                Some(Class { members: m, share, ..cl.clone() })
+            })
+            .collect()
+    }
+
+    /// Is `c` one of the Lumberjacks a `LJ_FOR` class of `land` counts
+    /// (`mana_classes`' `sac_by`, `sac_classes`): a mana ability of it, ready
+    /// to activate, sacrifices a permanent `land` matches and makes mana of
+    /// its own (not Squandered Resources' "any type that land could
+    /// produce")?
+    fn lumberjack_for(&self, c: CardIdx, land: CardIdx) -> bool {
+        let p = self.objs[c.i()].controller;
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(c)) };
+        let locks = self.activation_locks();
+        let d = self.abilities(c);
+        d.activated.iter().enumerate().any(|(i, ad)| {
+            ad.mana().is_some_and(|m| !matches!(m.prod, ManaProd::SacrificedLand))
+                && !ad.instant_only
+                && self.activation_ready(p, c, ad, locks)
+                && !(d.latent > 0 && !self.has_activated(c, i))
+                && !(ad.exhaust && self.exhausted(c, i as u8))
+                && ad.cost.sacrifice.as_ref().is_some_and(|sc| self.card_matches(&sc.filter, land, &ctx))
+        })
+    }
+
     /// The mana `p`'s permanents add whenever `p` taps a creature for mana
     /// (Badgermole Cub).
     pub(crate) fn creature_mana_bonus(&self, p: PlayerId) -> [u8; 6] {

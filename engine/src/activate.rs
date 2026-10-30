@@ -664,7 +664,7 @@ impl Game {
             }
             let tapped: Vec<CardIdx> =
                 tapped_in.iter().copied().chain((0..k).filter(|i| mask >> i & 1 != 0).map(|i| with_mana[i])).collect();
-            let left = crate::pay::classes_without(classes, &tapped);
+            let left = self.classes_without(classes, &tapped);
             if self.can_pay_with(p, mana, &left, keep) {
                 return true;
             }

@@ -905,6 +905,11 @@ impl Game {
             Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } => {
                 self.item_index(*id).map(|i| self.stack[i].controller)
             }
+            // "Which face?" of a card being cast (CR 601.2a-b, 712.11b,
+            // 715.3): the cast has begun, and the faces offered were found
+            // castable counting the caster's hand (a Spirit Guide's mana), so
+            // it pins as a payment does (ENGINE.md 71.4).
+            Task::ChooseFace { p, mask, .. } if mask & (crate::decision::FACE_CAST | crate::decision::OTHER_CAST) != 0 => Some(*p),
             _ => None,
         })
     }
@@ -916,6 +921,26 @@ impl Game {
         use crate::flow::Task;
         let mut out = Vec::new();
         for t in &self.agenda {
+            // A face choice (`payment_in_progress`): the alternative costs of
+            // the faces it offers to cast may count on a hand card too.
+            if let Task::ChooseFace { p, card, mask } = *t {
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+                let def = self.def_of(card);
+                let front = match def.halves {
+                    Some((left, _)) => left,
+                    None => self.objs[card.i()].def,
+                };
+                let faces = [(crate::decision::FACE_CAST, Some(front)), (crate::decision::OTHER_CAST, def.other_face())];
+                for (bit, face) in faces {
+                    let Some(face) = face.filter(|_| mask & bit != 0) else { continue };
+                    for a in &self.db.def(face).alt_costs {
+                        if let Some(f) = &a.cost.exile_from_hand {
+                            out.push((f.clone(), ctx));
+                        }
+                    }
+                }
+                continue;
+            }
             let Task::CastDone { id } = t else { continue };
             let Some(i) = self.item_index(*id) else { continue };
             let item = &self.stack[i];

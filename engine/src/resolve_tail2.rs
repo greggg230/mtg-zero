@@ -322,13 +322,21 @@ impl Game {
                     }
                     Some(_) => Flow::Next,
                     None => {
+                        // Asked whenever the graveyard holds a spell card the
+                        // filter names (public), even if none can be cast now:
+                        // castability counts the caster's hidden hand (a
+                        // Spirit Guide's mana, a card an alternative cost
+                        // exiles), so whether the question comes must not
+                        // tell, and a world `determinize` deals for the other
+                        // player must find the same decision (ENGINE.md 10's
+                        // second rule; 71.3).
+                        if !self.may_cast_during_resolution(p) || !self.graveyard_cards(p).any(|c| self.gy_spell_matches(c, filter, &ctx)) {
+                            return Flow::Next;
+                        }
                         let cands: Vec<CardIdx> = self
                             .graveyard_cards(p)
                             .filter(|&c| (self.card_matches(filter, c, &ctx) && self.can_cast_now(p, c)) || self.gy_spell_face_now(p, c, filter, &ctx).is_some())
                             .collect();
-                        if cands.is_empty() {
-                            return Flow::Next;
-                        }
                         let mut opts: Vec<Opt> = cands.iter().map(|&c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) }).collect();
                         opts.push(Opt { action: act::PASS, choice: Choice::Pass });
                         self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
@@ -343,6 +351,22 @@ impl Game {
     /// The other face (an Adventure, an MDFC's spell face) graveyard card
     /// `c` may be cast with now as a spell matching `filter` (CR 715.3a,
     /// 712.11c: only that face is evaluated), if any.
+    /// Is graveyard card `c` a spell card `filter` names by one of its
+    /// faces (its front, or its other face as `gy_spell_face_now` evaluates
+    /// it): public facts only, whether or not it can be cast now.
+    fn gy_spell_matches(&self, c: CardIdx, filter: &crate::db::Filter, ctx: &crate::cast::Ctx) -> bool {
+        if !self.def_of(c).is(types::LAND) && self.card_matches(filter, c, ctx) {
+            return true;
+        }
+        let Some(face) = self.other_face(c) else { return false };
+        if self.db.def(face).is(types::LAND) {
+            return false;
+        }
+        let mut g = self.clone();
+        g.objs[c.i()].def = face;
+        g.card_matches(filter, c, ctx)
+    }
+
     fn gy_spell_face_now(&self, p: PlayerId, c: CardIdx, filter: &crate::db::Filter, ctx: &crate::cast::Ctx) -> Option<crate::ids::DefId> {
         let face = self.other_face(c)?;
         if self.db.def(face).is(types::LAND) {
@@ -377,9 +401,14 @@ impl Game {
             }
             f.i = 1;
             match hit {
-                Some(c) if self.can_cast_free_now(p, c) => {
+                // Asked whenever there is a hit (a nonland card), "yes" only
+                // if it can be cast now: castability counts the caster's
+                // hidden hand (a spree's mode costs paid with a Spirit Guide;
+                // ENGINE.md 10's second rule, 71.3).
+                Some(c) if self.may_cast_during_resolution(p) => {
                     self.note(|g| format!("P{p} cascades into {}", g.name(c)));
-                    self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, yes_no());
+                    let opts = self.cascade_options(p, c);
+                    self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
                     return Flow::Suspend;
                 }
                 _ => {
@@ -409,8 +438,9 @@ impl Game {
                 }
                 // (Asked again: a refresh of the pending decision.)
                 None => {
-                    if self.objs[hit.i()].zone == Zone::Exile && self.can_cast_free_now(p, hit) {
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, yes_no());
+                    if self.objs[hit.i()].zone == Zone::Exile && self.may_cast_during_resolution(p) {
+                        let opts = self.cascade_options(p, hit);
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
                         return Flow::Suspend;
                     }
                     let rest = std::mem::take(&mut f.picked);
@@ -422,6 +452,16 @@ impl Game {
         let rest: Vec<CardIdx> = std::mem::take(&mut f.picked).into_iter().filter(|c| self.objs[c.i()].zone == Zone::Exile).collect();
         self.put_on_bottom_randomly(p, rest);
         Flow::Next
+    }
+
+    /// Cascade's question (CR 702.85a): "yes" only if the hit can be cast
+    /// now without paying its mana cost.
+    fn cascade_options(&self, p: PlayerId, hit: CardIdx) -> Vec<Opt> {
+        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+        if self.can_cast_free_now(p, hit) {
+            opts.push(Opt { action: act::YES, choice: Choice::Yes });
+        }
+        opts
     }
 
     /// Could `p` cast `card` (in hand) for its miracle cost now (CR 702.94a,

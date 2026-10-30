@@ -176,11 +176,21 @@ impl Game {
                     f.picked = vec![top];
                 }
                 let card = f.picked[0];
-                if self.objs[card.i()].zone != Zone::Exile || self.faces_castable_now(p, card, false) == 0 {
+                // Asked whenever the exiled card has a spell face (public),
+                // "yes" only if it can be cast now: castability counts the
+                // caster's hidden hand (a Spirit Guide's mana, a card an
+                // alternative cost exiles), so whether the question comes
+                // must not tell, and a world `determinize` deals for the other
+                // player must find the same decision (ENGINE.md 10's second
+                // rule; 71.3).
+                if self.objs[card.i()].zone != Zone::Exile || !self.may_cast_during_resolution(p) || !self.has_spell_face(card) {
                     f.picked.clear();
                     return Flow::Next;
                 }
-                let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
+                let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                if self.faces_castable_now(p, card, false) != 0 {
+                    opts.push(Opt { action: act::YES, choice: Choice::Yes });
+                }
                 self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
                 Flow::Suspend
             }
@@ -512,13 +522,7 @@ impl Game {
     /// are ignored; "can cast spells only any time they could cast a
     /// sorcery" is not: the stack isn't empty)?
     pub(crate) fn can_cast_now(&self, p: PlayerId, card: CardIdx) -> bool {
-        if self.def_of(card).is(types::LAND) {
-            return false;
-        }
-        if self.permanents_of(opp(p)).any(|c| self.abilities(c).opp_sorcery_speed) {
-            return false;
-        }
-        if !self.may_cast_spells(p) {
+        if self.def_of(card).is(types::LAND) || !self.may_cast_during_resolution(p) {
             return false;
         }
         let classes = self.mana_classes(p, None);
