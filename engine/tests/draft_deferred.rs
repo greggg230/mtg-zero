@@ -29,6 +29,7 @@ fn cfg(players: usize, events: usize, spec: &str, sims: u32) -> DriverCfg {
         queue_only: false,
         move_log: 0,
         aux: false,
+        paired: false,
     }
 }
 
