@@ -210,3 +210,64 @@ fn a_replayed_mill_offers_each_milled_card_once() {
         }
     }
 }
+
+/// Found by this branch's fuzz (the Delver pool, seed 16246 under the `fuzz`
+/// profile: "same keys, different views"): Urza's Bauble's "look at a card
+/// at random in target player's hand" marked the card seen as known to the
+/// looker even when the looker already knew another card of the hand with
+/// that identity. A hand's cards are not told apart, so seeing a Lightning
+/// Bolt beside the Bolt already known is not knowing two: in the looker's
+/// worlds of one node (the same keys: "a Bolt was seen") the one known Bolt
+/// was seen in some and the other Bolt in others, and the looker knew one
+/// Bolt or two. Not a chance-node bug (no forced outcome): an older one in
+/// the look's knowledge (ENGINE.md 71.1's code).
+#[test]
+fn a_random_look_at_a_twin_of_a_known_card_knows_no_more_than_one() {
+    let mut g = Scenario::new(db())
+        .spec(|s| s.auto_single = false)
+        .battlefield(0, &["Urza's Bauble"])
+        .hand_known(1, &["Lightning Bolt"])
+        .hand(1, &["Lightning Bolt", "Counterspell"])
+        .library(0, &["Island"; 10])
+        .library(1, &["Lightning Bolt"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    let ub = g.card(0, "Urza's Bauble", Zone::Battlefield);
+    g.choose(Choice::Ability(ub, engine::db::AbilitySlot::Activated(0)));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(Choice::Target(Target::Player(1)));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Priority));
+    let bolt = db().id("Lightning Bolt").unwrap();
+    let mut seen: Vec<(Vec<u64>, Vec<u64>)> = Vec::new();
+    let mut bolts_seen = 0;
+    for s in 0..48u64 {
+        // A world of the looker (its own generator), the look resolved.
+        let mut r = g.clone();
+        r.determinize(0, &mut engine::rng::Rng::new(500 + s));
+        let mut keys = Vec::new();
+        for _ in 0..20 {
+            if r.stack().is_empty() && r.kind() == Some(DecisionKind::Priority) {
+                break;
+            }
+            let a = if r.kind() == Some(DecisionKind::Priority) { engine::act::PASS } else { r.pending_decision().unwrap().options[0].action };
+            r.apply(a, &mut keys).unwrap();
+        }
+        let known_bolts = r.player(1).hand.iter().filter(|&&c| r.knows(0, c) && r.obj(c).def == bolt).count();
+        let saw_bolt = keys.iter().any(|&k| engine::hidden::key_kind(k) == engine::hidden::KEY_LOOK && engine::hidden::key_payload(k) == bolt as u64);
+        if saw_bolt {
+            bolts_seen += 1;
+            assert_eq!(known_bolts, 1, "world {s}: a Bolt seen beside the known Bolt");
+        }
+        r.check_invariants().unwrap();
+        r.check_knowledge().unwrap();
+        seen.push((keys, r.view_of(0)));
+    }
+    assert!(bolts_seen > 4, "the worlds saw a Bolt: {bolts_seen}");
+    for i in 0..seen.len() {
+        for j in i + 1..seen.len() {
+            if seen[i].0 == seen[j].0 {
+                assert_eq!(seen[i].1, seen[j].1, "worlds {i} / {j}: same keys, different views of the looker");
+            }
+        }
+    }
+}

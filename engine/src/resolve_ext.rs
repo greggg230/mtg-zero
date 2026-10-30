@@ -1350,9 +1350,18 @@ impl Game {
                     .forced_def(crate::hidden::KEY_LOOK, p)
                     .and_then(|d| sorted.iter().copied().find(|&c| self.objs[c.i()].def == d));
                 let c = forced.unwrap_or_else(|| sorted[self.rng.below(sorted.len() as u32) as usize]);
-                // Its owner knows their hand: the looker may remember it.
-                self.learn(p, c);
                 let d = self.objs[c.i()].def;
+                // Its owner knows their hand: the looker may remember it -
+                // unless the looker already knows another card of the hand
+                // with that identity: a hand's cards are not told apart
+                // (ENGINE.md 10), so seeing "a Lightning Bolt" beside the Bolt
+                // already known is not knowing two. (Marked, the twin made
+                // the looker's knowledge differ between the worlds of one
+                // node, the one known twin seen or the other: ENGINE.md 74.)
+                let twin_known = sorted.iter().any(|&x| x != c && self.objs[x.i()].def == d && self.objs[x.i()].known & (1 << p) != 0);
+                if !twin_known {
+                    self.learn(p, c);
+                }
                 if q == p {
                     self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
                 } else {
