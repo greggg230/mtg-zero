@@ -200,10 +200,21 @@ impl Game {
                     }
                     Some(_) => Flow::Next,
                     None => {
-                        if !self.can_cast_miracle(p, card) {
+                        // Asked whenever the revealed card can be a miracle
+                        // spell at all (public), "yes" only if it can be cast
+                        // for its miracle cost now: castability counts the
+                        // caster's hidden hand (a Spirit Guide's mana), so a
+                        // world `determinize` deals for the other player must
+                        // find the same decision (ENGINE.md 10's second rule,
+                        // 71.3).
+                        if self.def_of(card).miracle.is_none() || self.def_of(card).is(types::LAND) || !self.may_cast_during_resolution(p) {
                             return Flow::Next;
                         }
-                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, yes_no());
+                        let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
+                        if self.can_cast_miracle(p, card) {
+                            opts.push(Opt { action: act::YES, choice: Choice::Yes });
+                        }
+                        self.ask(Task::Run(f.clone()), p, DecisionKind::YesNo, opts);
                         Flow::Suspend
                     }
                 }

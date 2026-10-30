@@ -301,6 +301,65 @@ fn a_nadus_granted_trigger_looks_the_same_in_every_world() {
     assert!(compared > 0 && differed, "worlds compared ({compared}) with Nadus of different incarnation numbers ({differed})");
 }
 
+/// A revealed companion put into its owner's hand, with a twin in that hand
+/// the opponent does not know: when its owner casts "Lutri", which of the two
+/// slots leaves is not observable (the hand's cards are not told apart), and
+/// the view showed the companion slot's zone (the desktop fuzz's seeds
+/// 10002917, 10005671, 10005795, 10006483 under the `fuzz` profile; main fails
+/// them too). The worlds, one with the twin on a slot before the companion's
+/// and one after, look the same to the opponent.
+#[test]
+fn a_companion_cast_beside_a_twin_looks_the_same_in_every_world() {
+    const LUTRI: &str = "Lutri, the Spellchaser";
+    let g = scen()
+        .battlefield(0, &["Volcanic Island"; 6])
+        .hand(0, &["Island"])
+        .companion(0, LUTRI)
+        .hand(0, &["Island"])
+        .library(0, &[LUTRI, "Island", "Island", "Island", "Island", "Island"])
+        .library(1, &["Island"; 10])
+        .at(Step::Main1, 0)
+        .start();
+    let comp = g.player(0).companion.unwrap();
+    let mut slots: Vec<CardIdx> = g.player(0).hand.clone();
+    slots.sort();
+    let (lo, hi) = (slots[0], slots[1]);
+    assert!(lo < comp && comp < hi, "a hand slot on either side of the companion's");
+    // Worlds of P1 with the twin on the lower slot, and on the upper one.
+    let mut by_slot: [Option<Game>; 2] = [None, None];
+    for s in 0..400u64 {
+        let mut w = g.clone();
+        w.determinize(1, &mut Rng::new(900 + s));
+        let lutri = w.objs().iter().position(|o| o.zone == Zone::Hand && o.owner == 0 && w.db().def(o.def).name == LUTRI);
+        match lutri.map(|i| CardIdx(i as u16)) {
+            Some(c) if c == lo && by_slot[0].is_none() => by_slot[0] = Some(w),
+            Some(c) if c == hi && by_slot[1].is_none() => by_slot[1] = Some(w),
+            _ => {}
+        }
+    }
+    let [Some(mut a), Some(mut b)] = by_slot else { panic!("no worlds with the twin on each side") };
+    let mut go = |a: &mut Game, b: &mut Game, what: &str| {
+        let act = if what.is_empty() { a.pending_decision().unwrap().options[0].action } else { action_named(a, what) };
+        let (ka, kb) = step_both(a, b, act);
+        assert_eq!(ka, kb, "the keys tell the worlds apart");
+    };
+    go(&mut a, &mut b, "put the companion into hand");
+    while !at_priority(&a) {
+        go(&mut a, &mut b, "");
+    }
+    go(&mut a, &mut b, "cast Lutri");
+    while !(a.stack().is_empty() && at_priority(&a)) {
+        if at_priority(&a) {
+            go(&mut a, &mut b, "pass");
+        } else {
+            go(&mut a, &mut b, "");
+        }
+    }
+    assert_eq!(a.count_in(0, LUTRI, Zone::Battlefield), 1, "{}", log(&a));
+    assert_ne!(a.obj(comp).zone, b.obj(comp).zone, "the case: a different slot left in each world");
+    assert_eq!(a.view_of(1), b.view_of(1), "same keys, different views of the other player");
+}
+
 /// Nadu's "this ability triggers only twice each turn" counts per granting
 /// object (a Nadu that leaves and comes back grants a new ability: CR 400.7,
 /// ruling 96e9a886). The count named the granting Nadu by its incarnation
@@ -461,6 +520,62 @@ fn chandras_exiled_card_is_asked_whether_or_not_the_hand_can_pay() {
     w.choose(Choice::Pass);
     resolve_with(&mut w, |_| None);
     assert_eq!(w.life(1), 18);
+}
+
+/// Miracle's cast question (CR 702.94a: "you may cast this card for its
+/// miracle cost when you draw it"): Metamorphosis Fanatic revealed, its
+/// {1}{B} payable only with the Simian Spirit Guide beside one Swamp. The
+/// same (the desktop fuzz's seed 10038672 under the `fuzz` profile; main
+/// fails it too).
+#[test]
+fn a_miracle_cast_is_asked_whether_or_not_the_hand_can_pay() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp"])
+        .hand(0, &["Simian Spirit Guide"])
+        .library(0, &["Metamorphosis Fanatic", "Island", "Island", "Island", "Island", "Island", "Island", "Island"])
+        .library(1, &["Island"; 10])
+        .turn_number(3)
+        .at(Step::Upkeep, 0)
+        .start();
+    until_kind(&mut g, DecisionKind::YesNo);
+    g.choose(Choice::Yes); // reveal it
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    assert!(g.has_option(Choice::Yes), "the Guide pays the miracle cost\n{}", log(&g));
+    let without = refresh_keeps_the_question(&g, 1, "Simian Spirit Guide");
+    assert!(without > 0, "some world dealt the Guide away");
+}
+
+/// A miracle card drawn beside its twin (the farm-range seed 10038672: two
+/// Metamorphosis Fanatics in hand). The revealed one is played revealed
+/// until its ability resolves (CR 702.94b), but the twins' knowledge was
+/// normalised onto the other copy (the lower card index), so a world for the
+/// opponent dealt the trigger's own card another identity and the question
+/// vanished. It stays the revealed one.
+#[test]
+fn a_miracle_card_beside_its_twin_stays_the_revealed_one_cr702_94b() {
+    const FANATIC: &str = "Metamorphosis Fanatic";
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp"])
+        .hand(0, &[FANATIC])
+        .library(0, &[FANATIC, "Island", "Island", "Island", "Island", "Island", "Island", "Island"])
+        .library(1, &["Island"; 10])
+        .turn_number(3)
+        .at(Step::Upkeep, 0)
+        .start();
+    until_kind(&mut g, DecisionKind::YesNo);
+    g.choose(Choice::Yes); // reveal the drawn one
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    assert!(g.has_option(Choice::Yes), "{}", log(&g));
+    let r = g.stack().iter().find_map(|s| s.ev.obj).expect("the miracle trigger names its card");
+    let held = g.player(0).hand.iter().copied().filter(|&c| c != r.idx).find(|&c| g.name(c) == FANATIC).unwrap();
+    assert!(held < r.idx, "the twin comes first in canonical order (the case)");
+    assert!(g.knows(1, r.idx), "the revealed card is the one the opponent knows");
+    refresh_keeps_the_question(&g, 1, "Swamp");
+    for s in 0..40u64 {
+        let mut w = g.clone();
+        w.determinize(1, &mut Rng::new(61 + s));
+        assert_eq!(w.name(r.idx), FANATIC, "the trigger's card is still the revealed Fanatic");
+    }
 }
 
 // ---- 71.4 a face choice pins the caster's hand mana sources ----------------------

@@ -638,7 +638,11 @@ impl Game {
             v.extend([pl.left_battlefield as u64, pl.drawn as u64, pl.spells_cast as u64, pl.noncreature_cast as u64]);
             v.extend([pl.gained_life as u64, pl.draw_step_draws as u64, pl.spells_game as u64, pl.energy as u64]);
             v.extend([pl.gy_play_turn as u64, pl.gy_exile_turn as u64, pl.city_blessing as u64, pl.prot_until as u64]);
-            v.push(pl.companion.map_or(u64::MAX, |c| self.objs[c.i()].zone as u64));
+            // The revealed companion: still outside the game or not (its
+            // slot's zone once in the game is not observable: a twin in a
+            // hand the viewer does not know may be the one that leaves it,
+            // ENGINE.md 71.2; where it is in public is the zones' own).
+            v.push(pl.companion.map_or(u64::MAX, |c| (self.objs[c.i()].zone == Zone::Nowhere) as u64));
             v.extend(pl.graveyard.iter().map(|&c| self.objs[c.i()].def as u64));
             v.push(u64::MAX);
             // Library cards the viewer knows exactly, by position.

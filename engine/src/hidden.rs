@@ -223,7 +223,12 @@ impl Game {
     /// knowledge bits are normalised so the better-known come first in
     /// canonical order (by definition, then card), making the state, and
     /// what an encoding reads per hand slot, independent of which physical
-    /// card a sampled world dealt where.
+    /// card a sampled world dealt where. But a hand card a trigger, a stack
+    /// item or a delayed trigger names (its event's object: a card revealed
+    /// for miracle is played revealed until its ability resolves, CR
+    /// 702.94b) is told apart from its twins: it keeps its bits, or a world
+    /// `determinize` deals for another player could give that slot another
+    /// identity while the ability still acts on it (ENGINE.md 71.3).
     pub(crate) fn canon_hand_knowledge(&mut self) {
         for p in 0..2u8 {
             if self.players[p as usize].hand.len() < 2 {
@@ -238,15 +243,23 @@ impl Game {
                     j += 1;
                 }
                 if j - i > 1 {
-                    let mut bits: SVec<u8, 16> = h[i..j].iter().map(|c| self.objs[c.i()].known).collect();
+                    let twins: SVec<CardIdx, 16> = h[i..j].iter().copied().filter(|&c| !self.named_by_an_ability(c)).collect();
+                    let mut bits: SVec<u8, 16> = twins.iter().map(|c| self.objs[c.i()].known).collect();
                     bits.sort_unstable_by(|a, b| b.cmp(a));
-                    for (k, &c) in h[i..j].iter().enumerate() {
+                    for (k, &c) in twins.iter().enumerate() {
                         self.objs[c.i()].known = bits[k];
                     }
                 }
                 i = j;
             }
         }
+    }
+
+    /// Does a waiting trigger, a stack item or a delayed trigger name card
+    /// `c` as its event's object (`canon_hand_knowledge`)?
+    fn named_by_an_ability(&self, c: CardIdx) -> bool {
+        let names = |ev: &crate::triggers::EvCtx| [ev.obj, ev.obj2].into_iter().flatten().any(|r| r.idx == c && self.live(r));
+        self.waiting.iter().any(|w| names(&w.ev)) || self.stack.iter().any(|s| names(&s.ev)) || self.delayed.iter().any(|d| names(&d.ev))
     }
 
     /// The queued outcome of a coin flip by `p` (`force_chance`), if the
