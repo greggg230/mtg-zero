@@ -5,7 +5,7 @@ does to decisions, and what the extra row costs. CPU only; every model is only r
   python tools/belief_search.py positions --model M --games 60 --out P.json.gz [--sims 32 --seed 1]
   python tools/belief_search.py deals --model M --positions P.json.gz [--tilts 0,0.5,1,2 --deals 200 --every 3]
   python tools/belief_search.py decisions --model M --positions P.json.gz [--tilts 0,1 --sims 64 --reps 8]
-  python tools/belief_search.py speed --model M [--games 64 --seconds 90]
+  python tools/belief_search.py speed --model M [--games 64 --seconds 90 --rounds 1]
 
 * `positions`: games of the network against itself (zero.h2h's match: the line's evaluation rule, uniform
   deals), each game's moves logged; `deals` and `decisions` rebuild every decision from them (the Rust
@@ -146,7 +146,7 @@ def card_columns(cards=WATCH):
 def state_facts(g, v):
     """(the decider's turn, the opponent's untapped lands) from the spectator view."""
     s = json.loads(g.export_state())
-    lands = sum(1 for c in s['players'][1 - v]['battlefield'] if 'Land' in str(c.get('types')) and not c.get('tapped'))
+    lands = sum(1 for c in s['players'][1 - v]['battlefield'] if 'land' in c.get('types', []) and not c.get('tapped'))
     return s.get('active') == v, lands
 
 
@@ -356,7 +356,8 @@ def cmd_speed(a):
     low_priority(a.torch_threads)
     ev = evaluator(a.model)
     out = {}
-    for mode, tilt in (('eval', 0.0), ('eval', 1.0), ('selfplay', 0.0), ('selfplay', 1.0)):
+    arms = [('eval', 0.0), ('eval', 1.0), ('selfplay', 0.0), ('selfplay', 1.0)]
+    for r, (mode, tilt) in [(r, arm) for r in range(a.rounds) for arm in arms]:
         kw = dict(belief_tilt=tilt) if tilt else {}
         if mode == 'eval':
             seat = dict(G.nn_seat('m', 32, chance_k=0, **kw), **SEAT)
@@ -379,12 +380,21 @@ def cmd_speed(a):
             pass
         secs = time.time() - t0
         st = drv.stats()
-        out[f'{mode} tilt {tilt:g}'] = {'seconds': round(secs, 1), 'leaves': st['leaves'], 'belief_rows': st['belief_rows'],
-                          'leaves_per_s': round(st['leaves'] / secs, 1),
-                          'rows_per_s': round((st['leaves'] + st['belief_rows']) / secs, 1),
-                          'belief_rows_per_leaf': round(st['belief_rows'] / max(1, st['leaves']), 4),
-                          'infer_s': round(ev.seconds, 1), 'avg_batch_rows': round(ev.leaves / max(1, ev.calls), 1)}
-        print(mode, tilt, json.dumps(out[f'{mode} tilt {tilt:g}']), flush=True)
+        row = {'seconds': round(secs, 1), 'leaves': st['leaves'], 'belief_rows': st['belief_rows'],
+               'leaves_per_s': round(st['leaves'] / secs, 1),
+               'rows_per_s': round((st['leaves'] + st['belief_rows']) / secs, 1),
+               'belief_rows_per_leaf': round(st['belief_rows'] / max(1, st['leaves']), 4),
+               'infer_s': round(ev.seconds, 1), 'avg_batch_rows': round(ev.leaves / max(1, ev.calls), 1)}
+        out.setdefault(f'{mode} tilt {tilt:g}', []).append(row)
+        print(r, mode, tilt, json.dumps(row), flush=True)
+    # the arms interleaved round by round (the shared machine's drift cancels in the paired ratios)
+    for mode in ('eval', 'selfplay'):
+        u, b = out[f'{mode} tilt 0'], out[f'{mode} tilt 1']
+        ratios = [y['leaves_per_s'] / x['leaves_per_s'] for x, y in zip(u, b)]
+        m = sum(ratios) / len(ratios)
+        se = (sum((x - m) ** 2 for x in ratios) / max(1, len(ratios) - 1) / len(ratios)) ** 0.5
+        out[f'{mode} belief / uniform leaves per s'] = {'mean': round(m, 4), 'se': round(se, 4), 'rounds': len(ratios)}
+        print(mode, out[f'{mode} belief / uniform leaves per s'], flush=True)
     if a.out:
         json.dump(out, open(a.out, 'w'), indent=1)
 
@@ -419,6 +429,7 @@ def main(argv=None):
         if name == 'speed':
             s.add_argument('--games', type=int, default=64)
             s.add_argument('--seconds', type=float, default=90.0)
+            s.add_argument('--rounds', type=int, default=1)
     a = ap.parse_args(argv)
     {'positions': cmd_positions, 'deals': cmd_deals, 'decisions': cmd_decisions, 'speed': cmd_speed}[a.cmd](a)
 

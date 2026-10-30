@@ -308,6 +308,10 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
         let mut d = g.clone();
         d.determinize_weighted(viewer, &mut rng, &|x| w[ids[x as usize] as usize]);
         let what = format!("seed {seed} step {step}: a world dealt by weights for P{viewer} (mover P{mover})");
+        // the cards a payment in progress pins stay where they are, as determinize keeps them
+        for c in g.pinned_for(viewer) {
+            assert_eq!(g.ident(c), d.ident(c), "{what}: a pinned card was dealt again");
+        }
         if viewer == mover {
             let (mut l1, mut l2) = (Vec::new(), Vec::new());
             g.legal_actions(&mut l1);
@@ -353,7 +357,15 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
                 break;
             }
             d.legal_actions(&mut legal);
-            d.apply(legal[rng.below(legal.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("{what}: {e}"));
+            let act = legal[rng.below(legal.len() as u32) as usize];
+            let at = d.describe_action(act).unwrap_or_else(|| format!("action {act}"));
+            // (an engine panic in the world's own play: said with the world and the action)
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| d.apply(act, &mut keys))) {
+                Ok(r) => r.unwrap_or_else(|e| panic!("{what}: {e}")),
+                Err(_) => panic!("{what}: its play panicked at {at}; its log:
+{}", d.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("
+")),
+            }
             d.check_invariants().unwrap_or_else(|e| panic!("{what}: {e}"));
         }
     }
