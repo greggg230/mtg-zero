@@ -750,8 +750,10 @@ impl Game {
 impl Game {
     /// "You may look at the top card of your library any time": each player
     /// controlling such a permanent knows their top card (a private look,
-    /// keyed and forced like any look at a library's top).
-    pub(crate) fn look_tops(&mut self) {
+    /// keyed and forced like any look at a library's top). True when a
+    /// queued outcome (`force_chance`) gave a top card another identity.
+    pub(crate) fn look_tops(&mut self) -> bool {
+        let mut forced = false;
         for p in 0..2u8 {
             let Some(&top) = self.players[p as usize].library.last() else { continue };
             if self.objs[top.i()].known & (1 << p) != 0 || !self.permanents_of(p).any(|c| self.abilities(c).look_top) {
@@ -766,11 +768,14 @@ impl Game {
             if casting {
                 continue;
             }
+            let was = self.objs[top.i()].def;
             self.force_library_card(top, crate::hidden::KEY_LOOK, p);
             self.learn(p, top);
             let d = self.objs[top.i()].def;
+            forced |= d != was;
             self.emit_private(crate::hidden::KEY_LOOK, p, d as u64);
         }
+        forced
     }
 
     /// May `p` play `card`, the top card of their library, with a permanent

@@ -2208,6 +2208,36 @@ impl Game {
         }
     }
 
+    /// `p` mills `n` (CR 701.13a): the top `n` cards of their library are
+    /// put into their graveyard together, one action. A card a replacement
+    /// shuffles into its library instead (Blightsteel Colossus, CR 614.1a)
+    /// stays where it is until all of them have moved, and the library is
+    /// shuffled after the action, not between its cards - shuffled at once,
+    /// the next cards milled came from the shuffled library, not the top
+    /// `n`, and a card already milled and shuffled back could be milled
+    /// again (a mill's pile then held one card twice: ENGINE.md 74). With
+    /// `forced`, each card takes its queued outcome first (zero-core
+    /// `force_chance`, ENGINE.md 10) and is revealed (the effects that read
+    /// the milled cards). Returns the cards milled, top first, wherever they
+    /// went (`Zone::Graveyard`: put there).
+    pub(crate) fn mill(&mut self, p: PlayerId, n: usize, forced: bool) -> Vec<CardIdx> {
+        let cards: Vec<CardIdx> = self.players[p as usize].library.iter().rev().take(n).copied().collect();
+        let outer = std::mem::replace(&mut self.pile_moving, true);
+        for &c in &cards {
+            if forced {
+                self.force_library_card(c, KEY_REVEAL, p);
+                self.reveal(c);
+            }
+            self.move_card(c, Zone::Graveyard, Pos::Top);
+        }
+        self.pile_moving = outer;
+        // (Inside a looked-at pile's placement, its own flush comes later.)
+        if !outer {
+            self.flush_pile_shuffles();
+        }
+        cards
+    }
+
     /// CR 610.3a: the cards exiled "until" `source` leaves the battlefield
     /// return to their previous zones at once; links whose card left exile
     /// are dropped.

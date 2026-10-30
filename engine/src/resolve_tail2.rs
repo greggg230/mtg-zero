@@ -270,11 +270,9 @@ impl Game {
                 if f.i == 0 {
                     f.i = 1;
                     f.picked.clear();
-                    for _ in 0..*n {
-                        let Some(&top) = self.players[p as usize].library.last() else { break };
-                        self.move_card(top, Zone::Graveyard, Pos::Top);
-                        if self.objs[top.i()].zone == Zone::Graveyard {
-                            f.picked.push(top);
+                    for c in self.mill(p, *n as usize, false) {
+                        if self.objs[c.i()].zone == Zone::Graveyard {
+                            f.picked.push(c);
                         }
                     }
                 }

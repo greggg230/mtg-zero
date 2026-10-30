@@ -201,10 +201,8 @@ impl Game {
             }
             Ext::Mill { who, n } => {
                 if let Some(p) = self.who(f, *who) {
-                    for _ in 0..self.amount(f, *n).max(0) {
-                        let Some(&top) = self.players[p as usize].library.last() else { break };
-                        self.move_card(top, Zone::Graveyard, Pos::Top);
-                    }
+                    let n = self.amount(f, *n).max(0) as usize;
+                    self.mill(p, n, false);
                 }
                 Flow::Next
             }
@@ -1099,14 +1097,7 @@ impl Game {
             Ext::MillTwoWhileShareColor { who } => {
                 let Some(p) = self.who(f, *who) else { return Flow::Next };
                 loop {
-                    let mut milled = Vec::new();
-                    for _ in 0..2 {
-                        let Some(&top) = self.players[p as usize].library.last() else { break };
-                        self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
-                        self.reveal(top);
-                        self.move_card(top, Zone::Graveyard, Pos::Top);
-                        milled.push(top);
-                    }
+                    let milled = self.mill(p, 2, true);
                     let share = milled.len() == 2 && self.def_of(milled[0]).colors & self.def_of(milled[1]).colors != 0;
                     if !share {
                         break;
@@ -1277,16 +1268,12 @@ impl Game {
                 let p = f.controller;
                 match self.answer.take() {
                     Some(Choice::Yes) => {
-                        // Mill that many (the milled cards are the pile).
+                        // Mill that many (the milled cards put into the
+                        // graveyard are the pile: not one a replacement
+                        // shuffled into the library instead).
                         let n = f.ev.amount as usize;
-                        let mut milled = Vec::new();
-                        for _ in 0..n {
-                            let Some(&top) = self.players[p as usize].library.last() else { break };
-                            self.force_library_card(top, crate::hidden::KEY_REVEAL, p);
-                            self.reveal(top);
-                            self.move_card(top, Zone::Graveyard, Pos::Top);
-                            milled.push(top);
-                        }
+                        let mut milled = self.mill(p, n, true);
+                        milled.retain(|&c| self.objs[c.i()].zone == Zone::Graveyard);
                         f.pile = milled;
                         f.i = 1;
                     }

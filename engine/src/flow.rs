@@ -195,9 +195,16 @@ impl Game {
             self.agenda.clear();
         }
         // "You may look at the top card of your library any time" (Bolas's
-        // Citadel): before any decision, its controller knows it.
-        if self.seen & crate::game::SEEN_TOP != 0 && self.outcome.is_none() {
-            self.look_tops();
+        // Citadel): before any decision, its controller knows it. (Priority,
+        // whose options name the top card, looks before computing them:
+        // `priority_ask`. No other decision's options read a top card its
+        // controller has not seen, so a queued outcome of this look changes
+        // none; debug builds check it, ENGINE.md 74.)
+        if self.seen & crate::game::SEEN_TOP != 0 && self.outcome.is_none() && self.look_tops() && cfg!(debug_assertions) {
+            let mut c = self.clone();
+            c.keys.clear();
+            c.refresh_pending();
+            assert_eq!(c.pending, self.pending, "a forced look at a top card changed the pending decision");
         }
         self.canon_hand_knowledge();
     }
@@ -651,6 +658,15 @@ impl Game {
         let p = self.turn.priority;
         match self.answer.take() {
             None => {
+                // Bolas's Citadel: the options name the top card of the
+                // library by what it is (cast it, play it, its faces), so its
+                // controller looks at a new top card before they are
+                // computed, not after (`advance`'s look): a look's queued
+                // outcome (`force_chance`) may give the card another identity,
+                // and the options must be that card's (ENGINE.md 74).
+                if self.seen & crate::game::SEEN_TOP != 0 {
+                    let _ = self.look_tops();
+                }
                 let opts = self.priority_options(p);
                 self.ask(Task::PriorityAsk, p, DecisionKind::Priority, opts);
             }

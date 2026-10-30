@@ -43,10 +43,7 @@ impl Game {
             Ext::Balance => self.balance(f),
             Ext::MillAttackPump { n, kws } => {
                 let p = f.controller;
-                for _ in 0..*n {
-                    let Some(&top) = self.players[p as usize].library.last() else { break };
-                    self.move_card(top, Zone::Graveyard, Pos::Top);
-                }
+                self.mill(p, *n as usize, false);
                 // CR 205.2a: card types among the cards (counted now, locked
                 // in, 608.2h).
                 let t = self.graveyard_cards(p).fold(0u16, |m, c| m | self.types_of(c));
@@ -219,10 +216,8 @@ impl Game {
                 // battlefield if it left (CR 608.2h).
                 let x = self.amount(f, crate::program::Amount::SourceCounters(counter)).max(0);
                 let mut mv = 0i32;
-                for _ in 0..x {
-                    let Some(&top) = self.players[p as usize].library.last() else { break };
-                    mv += self.def_of(top).mana_value() as i32;
-                    self.move_card(top, Zone::Graveyard, Pos::Top);
+                for c in self.mill(p, x as usize, false) {
+                    mv += self.def_of(c).mana_value() as i32;
                 }
                 self.note(|_| format!("P{p} mills {x}; P{q} loses {mv}"));
                 if mv > 0 {

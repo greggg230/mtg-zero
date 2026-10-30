@@ -62,6 +62,18 @@
 //! opponent's hidden pool is dealt into the hand more than uniformly. Its own generator: the games are
 //! the same with or without it.
 //!
+//! `FUZZ_CHANCE=n` (ENGINE.md 74): one decision in `n` (its own generator) runs a chance walk,
+//! what zero-core's search does at `chance_k` > 0: two worlds of the decider (each dealt as a
+//! simulation's, uniform or by random weights) walk one random path while they are at one node of
+//! the tree, one taking each step freely and the other replaying its keys (`force_chance`, a
+//! search transition: single-option decisions answered), the roles swapping at random; a replaying
+//! world that leaves the node plays on alone for 20 steps. Every world's invariants and knowledge
+//! hold after every step, the legal actions stay sorted and unique, every option of a replaying
+//! world's decision completes (always when the force changed its outcome), and a panic is reported
+//! with the walk's path and forced keys. It prints the walks, their steps, the replays whose
+//! outcome the force changed and the walks split by the keys; with 100 games or more some replay
+//! must have taken a forced outcome. Unset: none (the games are the same either way).
+//!
 //! Unbounded numbers (M6, ENGINE.md 46): at every decision the decider's
 //! encoding (and at the ~1-in-40 checkpoints - ~1-in-4 under the `fuzz` Cargo profile,
 //! `checkpoint_every`, ENGINE.md 70 - both players' encodings, in
@@ -368,6 +380,161 @@ fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
             }
             d.check_invariants().unwrap_or_else(|e| panic!("{what}: {e}"));
         }
+    }
+}
+
+/// `FUZZ_CHANCE=n` (ENGINE.md 74): one decision in `n` (its own generator) runs a chance walk;
+/// unset: none.
+fn chance_every() -> Option<u32> {
+    std::env::var("FUZZ_CHANCE").ok().map(|s| {
+        let n: u32 = s.parse().unwrap_or_else(|_| panic!("FUZZ_CHANCE={s}: one decision in n (a number >= 1)"));
+        assert!(n >= 1, "FUZZ_CHANCE={n}: n >= 1");
+        n
+    })
+}
+
+/// Steps of one chance walk at most (`check_forced_chance`).
+const CHANCE_DEPTH: usize = 40;
+
+/// Chance walks run, their steps with both worlds at one node, the forced replays whose
+/// outcome the force changed (the replaying world, unforced, would have had other keys) and the
+/// walks that ended because the replay's keys differed (a different child).
+static CHANCE_WALKS: AtomicU64 = AtomicU64::new(0);
+static CHANCE_STEPS: AtomicU64 = AtomicU64::new(0);
+static CHANCE_FORCED: AtomicU64 = AtomicU64::new(0);
+static CHANCE_SPLIT: AtomicU64 = AtomicU64::new(0);
+
+/// zero-core's search transition (`tree::transition`): `act`, then every single-option decision
+/// answered, the whole transition's chance keys returned; `forced`: the outcomes it replays
+/// (`force_chance` once before, cleared after, as the search does).
+fn chance_transition(g: &mut Game, act: u16, forced: Option<&[u64]>) -> Result<Vec<u64>, String> {
+    let mut keys = Vec::new();
+    let mut legal = Vec::new();
+    if let Some(f) = forced {
+        g.force_chance(f);
+    }
+    let r = (|| {
+        g.apply(act, &mut keys)?;
+        while !g.is_over() {
+            g.legal_actions(&mut legal);
+            if legal.len() != 1 {
+                break;
+            }
+            g.apply(legal[0], &mut keys)?;
+        }
+        Ok(())
+    })();
+    if forced.is_some() {
+        g.force_chance(&[]);
+    }
+    r.map(|()| keys)
+}
+
+/// Steps a chance walk's world plays on alone once it leaves the other's node.
+const CHANCE_SOLO: usize = 20;
+
+/// The message of a caught panic.
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+}
+
+/// One search transition of a chance walk's world, its invariants and knowledge checked after
+/// it; a failure or an engine panic is reported with the walk (`at`, the path, the forced keys).
+fn chance_step(w: &mut Game, act: u16, forced: Option<&[u64]>, at: &str, path: &[String]) -> Vec<u64> {
+    let k = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| chance_transition(w, act, forced))) {
+        Ok(Ok(k)) => k,
+        Ok(Err(e)) => panic!("{at}: {e}\npath: {path:?}\nforced: {forced:?}"),
+        Err(p) => panic!(
+            "{at}: panicked: {}\npath: {path:?}\nforced: {forced:?}\n{}",
+            panic_text(&*p),
+            w.log_lines().iter().rev().take(40).rev().cloned().collect::<Vec<_>>().join("\n")
+        ),
+    };
+    w.check_invariants().unwrap_or_else(|e| panic!("{at}: {e}\npath: {path:?}\nforced: {forced:?}"));
+    w.check_knowledge().unwrap_or_else(|e| panic!("{at}: {e}\npath: {path:?}\nforced: {forced:?}"));
+    k
+}
+
+/// What zero-core's search does at `chance_k` > 0 (ENGINE.md 74): every simulation deals its own
+/// world for the decider (uniform or, one time in two, by random weights: the belief-weighted
+/// search), and an edge that has recorded `chance_k` outcomes replays one of them
+/// (`force_chance`) in the world walking it. Two worlds of the decider walk the same random
+/// path while they are at one node of the tree (the same next decider and legal actions, equal
+/// keys so far); at each step one of them takes the action freely and the other replays its
+/// keys (a search transition: single-option decisions answered, `chance_transition`), then
+/// they may swap. When the replay's keys or the next legal actions differ, the replaying world
+/// is in another node, and it plays on alone (`CHANCE_SOLO` random steps), as the search goes
+/// on below its own child. Each world's invariants, knowledge and legal actions hold after
+/// every step, every option of a replaying world's decision completes (whenever the force
+/// changed its outcome, else one time in four), and an engine panic is reported with the walk.
+/// Its own generator: the game is the same with or without it.
+fn check_forced_chance(g: &Game, seed: u64, step: usize) {
+    let mut rng = Rng::new(seed ^ (step as u64).wrapping_mul(0xC4A1_1CE5_0000_0001) ^ 0xC4A7);
+    let mover = g.to_move().unwrap();
+    let ids = engine::az::identity::identities(g.db());
+    let deal = |rng: &mut Rng| -> Game {
+        let mut d = g.clone();
+        if rng.below(2) == 0 {
+            d.determinize(mover, rng);
+        } else {
+            let w = random_weights(rng, 1.0);
+            d.determinize_weighted(mover, rng, &|x| w[ids[x as usize] as usize]);
+        }
+        d
+    };
+    let mut free = deal(&mut rng);
+    let mut replay = deal(&mut rng);
+    CHANCE_WALKS.fetch_add(1, Ordering::Relaxed);
+    let (mut lf, mut lr) = (Vec::new(), Vec::new());
+    let mut path: Vec<String> = Vec::new();
+    let mut split = false;
+    for depth in 0..CHANCE_DEPTH {
+        if free.is_over() || replay.is_over() {
+            return;
+        }
+        free.legal_actions(&mut lf);
+        replay.legal_actions(&mut lr);
+        assert!(lr.windows(2).all(|w| w[0] < w[1]) && !lr.is_empty(), "seed {seed} step {step}: chance walk {depth}: actions {lr:?}\npath: {path:?}");
+        if free.to_move() != replay.to_move() || lf != lr {
+            split = true; // different nodes of the tree (`replay`: the world forced last)
+            break;
+        }
+        if depth > 0 && rng.below(2) == 0 {
+            std::mem::swap(&mut free, &mut replay);
+        }
+        let act = lf[rng.below(lf.len() as u32) as usize];
+        let at = |how: &str| format!("seed {seed} step {step}: chance walk (mover P{mover}) at {depth}, {how}, action {act}");
+        path.push(format!("{act} = {}", free.describe_action(act).unwrap_or_default()));
+        let kf = chance_step(&mut free, act, None, &at("the free world"), &path);
+        let unforced = chance_step(&mut replay.clone(), act, None, &at("the replaying world unforced"), &path);
+        let kr = chance_step(&mut replay, act, Some(&kf), &at("the replaying world"), &path);
+        CHANCE_STEPS.fetch_add(1, Ordering::Relaxed);
+        let changed = unforced != kf && kr == kf;
+        if changed {
+            CHANCE_FORCED.fetch_add(1, Ordering::Relaxed);
+        }
+        if !replay.is_over() && (changed || rng.below(4) == 0) {
+            check_options_complete(&replay, seed, &format!("a chance walk's replaying world (seed {seed} step {step}, depth {depth}, path {path:?})"));
+        }
+        if kr != kf {
+            CHANCE_SPLIT.fetch_add(1, Ordering::Relaxed);
+            split = true; // a different child
+            break;
+        }
+    }
+    if !split {
+        return;
+    }
+    // The replaying world below its own node.
+    for solo in 0..CHANCE_SOLO {
+        if replay.is_over() {
+            return;
+        }
+        replay.legal_actions(&mut lr);
+        let act = lr[rng.below(lr.len() as u32) as usize];
+        path.push(format!("(alone) {act} = {}", replay.describe_action(act).unwrap_or_default()));
+        let at = format!("seed {seed} step {step}: chance walk (mover P{mover}), the replaying world alone at {solo}, action {act}");
+        chance_step(&mut replay, act, None, &at, &path);
     }
 }
 
@@ -743,6 +910,9 @@ fn play(seed: u64, checks: bool) -> Played {
     // (The completion check's sampling: its own generator, so the game's
     // actions are the same with or without it.)
     let mut crng = Rng::new(seed ^ 0xC0_4D_1E7E);
+    // (`FUZZ_CHANCE`'s sampling: its own generator too.)
+    let mut chrng = Rng::new(seed ^ 0xC4A_5CE5);
+    let chance = chance_every();
     let mut legal = Vec::new();
     let mut actions = Vec::new();
     let mut keys = Vec::new();
@@ -781,6 +951,11 @@ fn play(seed: u64, checks: bool) -> Played {
         }
         if checks && complete_now(&g, &mut crng) {
             check_options_complete(&g, seed, "the game");
+        }
+        if let Some(n) = chance.filter(|_| checks) {
+            if chrng.below(n) == 0 {
+                check_forced_chance(&g, seed, steps);
+            }
         }
         g.apply(a, &mut keys).unwrap_or_else(|e| panic!("seed {seed}: {e}"));
         g.check_invariants().unwrap_or_else(|e| panic!("seed {seed} step {steps}: {e}
@@ -1072,6 +1247,18 @@ fn fuzz_random_games() {
     );
     if n >= 200 {
         assert!(GY_LISTS.load(Ordering::Relaxed) > 0, "no graveyard-list decision in {n} games");
+    }
+    if let Some(c) = chance_every() {
+        let (w, s, f, x) = (
+            CHANCE_WALKS.load(Ordering::Relaxed),
+            CHANCE_STEPS.load(Ordering::Relaxed),
+            CHANCE_FORCED.load(Ordering::Relaxed),
+            CHANCE_SPLIT.load(Ordering::Relaxed),
+        );
+        println!("FUZZ_CHANCE={c}: {w} chance walks, {s} steps at one node, {f} replays whose outcome the force changed, {x} walks split by the keys");
+        if n >= 100 {
+            assert!(f > 0, "FUZZ_CHANCE: no replay took a forced outcome ({w} walks, {s} steps)");
+        }
     }
     if delver_mode() {
         let (m, t, c) =
