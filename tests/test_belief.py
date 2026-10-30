@@ -124,3 +124,39 @@ def test_a_replay_of_a_checkpoint_with_the_head_shows_belief(tmp_path):
     assert [s['aux'] for s in reps[0]['seats'] if s['kind'] == 'nn'] == [['belief']]
     from mtgz.az.replays import summary
     assert summary(reps[0])['belief'] is True
+
+
+# ---- stage 2: the belief-weighted deal through the bindings (docs/ENGINE.md 69) ----------------
+
+def test_belief_search_rebuilds_the_drivers_games_and_deals_by_the_belief(tmp_path):
+    """tools/belief_search.py rebuilds the Rust driver's games from their move logs (its port of the
+    driver's game seeds), and `Game.determinize_with` keeps the decider's view while dealing by the belief."""
+    import gzip
+    import importlib.util
+    import os
+    spec = importlib.util.spec_from_file_location('belief_search', os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), 'tools', 'belief_search.py'))
+    bs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bs)
+    seats = [[{'bot': 'random'}, {'bot': 'random'}]] * 3
+    drv = G.Driver('mtg', seats, spec=SPEC, concurrency=3, seed=17, threads=1, move_log=100_000)
+    drive(drv, {})
+    rows = drv.take_results()
+    p = tmp_path / 'pos.json.gz'
+    json.dump({'spec': SPEC, 'seed': 17, 'rows': [{'gid': r['gid'], 'moves': r['moves'], 'result': r['result']} for r in rows]},
+              gzip.open(p, 'wt'))
+    seen = dealt = 0
+    for gid, k, g in bs.rebuilt(str(p)):          # (raises when a rebuilt game leaves its log)
+        seen += 1
+        v = g.to_move
+        t = np.asarray(g.aux_target(v))
+        if not t.sum() or seen % 25:
+            continue
+        x = np.asarray(g.encode(v))
+        pred = np.full(B.D, 1e-4, np.float32)
+        pred[np.flatnonzero(t)[0]] = 1.0
+        w = g.clone()
+        w.determinize_with(v, 5, pred / pred.sum(), 2.0, 1000.0)
+        assert np.array_equal(np.asarray(w.encode(v)), x) and w.legal() == g.legal()
+        dealt += 1
+    assert seen > 100 and dealt > 3, (seen, dealt)

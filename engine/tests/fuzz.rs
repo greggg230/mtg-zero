@@ -54,6 +54,14 @@
 //! leave-the-graveyard trigger resolved. Games only (best-of-one).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
+//! `FUZZ_BELIEF=t` (ENGINE.md 69): at every checkpoint also the belief-weighted deal
+//! (`Game::determinize_weighted`, `MtgAz::determinize_belief`) for both viewers, with random weights
+//! sharpened by the tilt t (clip 1e6): every check of `determinize`'s world (the decider's actions and
+//! view, known cards, invariants, clouds, every owner's cards, both encodings bounded, every option
+//! completes, 30 moves on), and at the end the deal's concentration: the most favoured identity of the
+//! opponent's hidden pool is dealt into the hand more than uniformly. Its own generator: the games are
+//! the same with or without it.
+//!
 //! Unbounded numbers (M6, ENGINE.md 46): at every decision the decider's
 //! encoding (and at the ~1-in-40 checkpoints - ~1-in-4 under the `fuzz` Cargo profile,
 //! `checkpoint_every`, ENGINE.md 70 - both players' encodings, in
@@ -258,6 +266,97 @@ fn delver_mode() -> bool {
 /// instead of at the release rate every other build (including plain `cargo test --release`) gets.
 fn checkpoint_every() -> u32 {
     if cfg!(debug_assertions) { 4 } else { 40 }
+}
+
+/// `FUZZ_BELIEF=t`: the tilt of the belief-weighted deal's checks (ENGINE.md 69); unset: none.
+fn belief_tilt() -> Option<f64> {
+    std::env::var("FUZZ_BELIEF").ok().map(|s| s.parse::<f64>().unwrap_or_else(|_| panic!("FUZZ_BELIEF={s}: a tilt (a number > 0)"))).inspect(|&t| {
+        assert!(t > 0.0 && t.is_finite(), "FUZZ_BELIEF={t}: a tilt > 0");
+    })
+}
+
+/// The weighted deals checked, and the most favoured identity's dealt copies in the opponent's
+/// unknown hand slots against the uniform deal's expected copies (x 1000, summed).
+static BELIEF_WORLDS: AtomicU64 = AtomicU64::new(0);
+static BELIEF_DEALT: AtomicU64 = AtomicU64::new(0);
+static BELIEF_UNIFORM: AtomicU64 = AtomicU64::new(0);
+
+/// Random per-identity weights for a weighted deal: exp(tilt x a standard normal-ish), clipped to
+/// [1e-6, 1e6] (the extreme of `belief_weight`'s clip).
+fn random_weights(rng: &mut Rng, tilt: f64) -> Vec<f64> {
+    (0..engine::az::identity::D)
+        .map(|_| {
+            let z: f64 = (0..4).map(|_| rng.below(1 << 20) as f64 / (1u64 << 20) as f64).sum::<f64>() - 2.0;
+            (tilt * 1.7 * z).exp().clamp(1e-6, 1e6)
+        })
+        .collect()
+}
+
+/// The checks of `check_determinize` on worlds dealt by random weights (`FUZZ_BELIEF`), for both
+/// viewers; its own generator (the game's actions are unchanged).
+fn check_determinize_weighted(g: &Game, seed: u64, step: usize, tilt: f64) {
+    let mut rng = Rng::new(seed ^ (step as u64).wrapping_mul(0xBE11_EF5E_ED00_0001) ^ 0x7177);
+    let mover = g.to_move().unwrap();
+    let ids = engine::az::identity::identities(g.db());
+    let cards = |g: &Game, p: u8| -> Vec<u16> {
+        let mut v: Vec<u16> = g.objs().iter().enumerate().filter(|(_, o)| o.owner == p).map(|(i, _)| g.ident(engine::CardIdx(i as u16))).collect();
+        v.sort();
+        v
+    };
+    for viewer in [mover, 1 - mover] {
+        let w = random_weights(&mut rng, tilt);
+        let mut d = g.clone();
+        d.determinize_weighted(viewer, &mut rng, &|x| w[ids[x as usize] as usize]);
+        let what = format!("seed {seed} step {step}: a world dealt by weights for P{viewer} (mover P{mover})");
+        if viewer == mover {
+            let (mut l1, mut l2) = (Vec::new(), Vec::new());
+            g.legal_actions(&mut l1);
+            d.legal_actions(&mut l2);
+            assert_eq!(l1, l2, "{what}: the decider's actions changed");
+        } else {
+            assert_eq!(d.to_move(), Some(mover), "{what}: a refresh ran past the decision");
+        }
+        assert_eq!(g.view_of(viewer), d.view_of(viewer), "{what}: the view changed");
+        for (i, o) in g.objs().iter().enumerate() {
+            let c = engine::CardIdx(i as u16);
+            if g.knows(viewer, c) {
+                assert_eq!((o.def, g.ident(c)), (d.obj(c).def, d.ident(c)), "{what}: a known card was dealt again");
+            }
+        }
+        for p in 0..2u8 {
+            assert_eq!(cards(g, p), cards(&d, p), "{what}: P{p}'s cards");
+            assert_eq!(g.player(p).hand.len(), d.player(p).hand.len(), "{what}: P{p}'s hand size");
+        }
+        d.check_invariants().unwrap_or_else(|e| panic!("{what}: {e}"));
+        d.check_knowledge().unwrap_or_else(|e| panic!("{what}: {e}"));
+        let mut buf = Vec::new();
+        for v in [0u8, 1] {
+            check_encoding(&d, v, &mut buf, &|| what.clone());
+        }
+        check_options_complete(&d, seed, &what);
+        // the concentration: the most favoured identity of the opponent's hidden pool, dealt copies
+        // into its unknown hand slots against the uniform deal's m h / H
+        let o = 1 - viewer;
+        let pool = g.unknown_to(viewer, o);
+        let unknown_hand: Vec<engine::CardIdx> = g.player(o).hand.iter().copied().filter(|&c| !g.knows(viewer, c)).collect();
+        if !pool.is_empty() && !unknown_hand.is_empty() {
+            let best = pool.iter().map(|&c| g.ident(c)).max_by(|&a, &b| w[ids[a as usize] as usize].total_cmp(&w[ids[b as usize] as usize]).then(b.cmp(&a))).unwrap();
+            let h = pool.iter().filter(|&&c| g.ident(c) == best).count() as f64;
+            let dealt = unknown_hand.iter().filter(|&&c| d.ident(c) == best).count() as f64;
+            BELIEF_WORLDS.fetch_add(1, Ordering::Relaxed);
+            BELIEF_DEALT.fetch_add((dealt * 1000.0) as u64, Ordering::Relaxed);
+            BELIEF_UNIFORM.fetch_add((unknown_hand.len() as f64 * h / pool.len() as f64 * 1000.0) as u64, Ordering::Relaxed);
+        }
+        let (mut legal, mut keys) = (Vec::new(), Vec::new());
+        for _ in 0..30 {
+            if d.is_over() {
+                break;
+            }
+            d.legal_actions(&mut legal);
+            d.apply(legal[rng.below(legal.len() as u32) as usize], &mut keys).unwrap_or_else(|e| panic!("{what}: {e}"));
+            d.check_invariants().unwrap_or_else(|e| panic!("{what}: {e}"));
+        }
+    }
 }
 
 /// The card table of the mode's games: the cube's and the custom test cards,
@@ -664,6 +763,9 @@ fn play(seed: u64, checks: bool) -> Played {
         if checks && rng.below(checkpoint_every()) == 0 {
             check_clone(&g, a, seed);
             check_determinize(&g, seed, &mut rng);
+            if let Some(t) = belief_tilt() {
+                check_determinize_weighted(&g, seed, steps, t);
+            }
         }
         if checks && complete_now(&g, &mut crng) {
             check_options_complete(&g, seed, "the game");
@@ -939,6 +1041,17 @@ fn fuzz_random_games() {
         assert!(MAX_POWER.load(Ordering::Relaxed) > 65_535, "no board past 65,535 power: {}", extremes_report());
     }
     println!("longest game: {} actions (cap 100,000)", MAX_GAME_STEPS.load(Ordering::Relaxed));
+    if let Some(t) = belief_tilt() {
+        let (w, d, u) = (BELIEF_WORLDS.load(Ordering::Relaxed), BELIEF_DEALT.load(Ordering::Relaxed), BELIEF_UNIFORM.load(Ordering::Relaxed));
+        println!(
+            "FUZZ_BELIEF={t}: {w} weighted worlds with unknown hand cards; the favoured identity dealt {:.3} copies per world, the uniform deal's {:.3}",
+            d as f64 / 1000.0 / w.max(1) as f64,
+            u as f64 / 1000.0 / w.max(1) as f64
+        );
+        if w >= 100 {
+            assert!(d > 2 * u, "FUZZ_BELIEF: the weighted deal does not concentrate ({d} vs uniform {u})");
+        }
+    }
     println!(
         "graveyard lists (ENGINE.md 65.10): {} decisions checked, longest {} (cards offered from both graveyards: at most {}; the limit 64)",
         GY_LISTS.load(Ordering::Relaxed),
@@ -1228,6 +1341,26 @@ fn play_match_stats(seed: u64, checks: bool, stats: &mut HiddenStats) -> PlayedM
                 check_hidden_pool(&g, &d, viewer as u8, seed, stats);
                 if viewer == p && rng.below(4) == 0 {
                     check_match_information_set(&g, viewer, seed, &mut rng);
+                }
+                if let Some(t) = belief_tilt() {
+                    // the belief-weighted deal (ENGINE.md 69): the hidden pool sampled first, then the
+                    // hand by the weights; every check of the uniform world's (its own generator)
+                    let mut brng = Rng::new(seed ^ (actions.len() as u64).wrapping_mul(0x9E37) ^ viewer as u64);
+                    let pred = random_weights(&mut brng, 1.0).iter().map(|&x| x as f32).collect::<Vec<f32>>();
+                    let s: f32 = pred.iter().sum();
+                    let b = zero_search::game::Belief { pred: pred.iter().map(|x| x / s).collect(), tilt: t, clip: 1e6 };
+                    let mut dw = g.clone();
+                    dw.determinize_belief(viewer, &mut zero_search::rng::Rng::new(brng.next_u64()), &b);
+                    dw.legal_actions(&mut legal2);
+                    if viewer == p {
+                        assert_eq!(legal, legal2, "match {seed}: a weighted deal changed the decider's actions");
+                    }
+                    x2.fill(0.0);
+                    dw.encode(viewer, &mut x2);
+                    if let Some(i) = (0..x1.len()).find(|&i| x1[i] != x2[i]) {
+                        panic!("match {seed}: a weighted deal changed the encoding of P{viewer} at {i}");
+                    }
+                    check_hidden_pool(&g, &dw, viewer as u8, seed, &mut HiddenStats::default());
                 }
                 // The world plays on.
                 let mut kd = Vec::new();

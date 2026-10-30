@@ -296,7 +296,13 @@ def cmd_decisions(a):
         acts = list(g.legal())
         cast_a = casts[0]['a']
         pass_a = next((o['a'] for o in dec['options'] if o.get('t', '').startswith('Pass')), None)
-        row = {'game': gid, 'move': k, 'cast': casts[0]['t'], 'by_tilt': {}}
+        from mtgz.az import belief as B
+        t_hand = np.asarray(g.aux_target(v), np.float64)
+        nh = t_hand.sum()
+        st = json.loads(g.export_state())
+        row = {'game': gid, 'move': k, 'cast': casts[0]['t'], 'turn': st.get('turn'), 'step': st.get('step'),
+               'their_untapped_lands': state_facts(g, v)[1], 'their_hand': int(nh),
+               'belief': B.counts_by_name(p * nh, top=5), 'true': B.counts_by_name(t_hand), 'by_tilt': {}}
         for tt in tilts:
             trees = []
             for r in range(a.reps):
