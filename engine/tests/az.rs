@@ -2388,3 +2388,144 @@ fn who_knows_a_librarys_top_cards_is_encoded() {
     g.card(0, "Polluted Delta", Zone::Graveyard);
     check(&g, "the fetch land's shuffle", [no; 3]);
 }
+
+/// `tools/top_probe.py`'s dump (ENGINE.md 72.8; ignored: it reads `TOPPROBE_DIR`): replays recorded
+/// games (`games.txt`: game seed, result, iteration, actions; `spec.json`) exactly and writes, for
+/// every decision where the decider's opponent knows top cards of its library that the decider does
+/// not, the decider's features (`x.bin`, f32) and a row (`rows.tsv`: game, iteration, step, decider,
+/// the cards' positions, identities, what taught the opponent each, the decider's unknown pool of the
+/// opponent's cards, whether each card was drawn before a shuffle); `episodes.tsv` per known card.
+#[test]
+#[ignore]
+fn top_known_probe_dump() {
+    use engine::game::StackKind;
+    use engine::ids::{CardIdx, Zone};
+    use std::collections::HashMap;
+    use std::io::Write;
+    struct Ep {
+        id: usize,
+        name: &'static str,
+        src: String,
+        rows: u32,
+        outcome: i8,
+    }
+    let dir = std::env::var("TOPPROBE_DIR").expect("TOPPROBE_DIR");
+    let spec = MtgSpec::parse(&std::fs::read_to_string(format!("{dir}/spec.json")).unwrap()).unwrap();
+    let games = std::fs::read_to_string(format!("{dir}/games.txt")).unwrap();
+    let file = |n: &str| std::io::BufWriter::new(std::fs::File::create(format!("{dir}/{n}")).unwrap());
+    let (mut fx, mut fr, mut fe) = (file("x.bin"), file("rows.tsv"), file("episodes.tsv"));
+    let (mut good, mut bad, mut decisions, mut nrows, mut neps) = (0, 0, 0u64, 0u64, 0usize);
+    let mut x = vec![0.0f32; NUM_FEATURES];
+    for (gi, line) in games.lines().enumerate() {
+        let v: Vec<&str> = line.split_whitespace().collect();
+        let seed: u64 = v[0].parse().unwrap();
+        let iter: u32 = v[3].parse().unwrap();
+        let acts: Vec<u16> = v[4..].iter().map(|s| s.parse().unwrap()).collect();
+        let mut a = MtgAz::new_game(&spec, 2, seed).unwrap();
+        let ids = identity::identities(a.g.db());
+        let mut eps: Vec<Ep> = Vec::new();
+        let mut open: HashMap<(u8, CardIdx), usize> = HashMap::new();
+        let mut known_lib: [Vec<CardIdx>; 2] = [Vec::new(), Vec::new()];
+        let mut src: HashMap<(u8, CardIdx), String> = HashMap::new();
+        let mut rows: Vec<(Vec<f32>, String, Vec<usize>)> = Vec::new();
+        let mut keys = Vec::new();
+        let (mut ok, mut n) = (true, 0u64);
+        for (si, &act) in acts.iter().enumerate() {
+            let Some(viewer) = a.to_move() else {
+                ok = false;
+                break;
+            };
+            n += 1;
+            let (vw, o) = (viewer as u8, 1 - viewer as u8);
+            let lib = &a.g.player(o).library;
+            let mut lab: Vec<(usize, usize)> = Vec::new();
+            for k in 0..3.min(lib.len()) {
+                let c = lib[lib.len() - 1 - k];
+                if a.g.knows(o, c) && !a.g.knows(vw, c) {
+                    let e = *open.entry((o, c)).or_insert_with(|| {
+                        let s = src.get(&(o, c)).cloned().unwrap_or_else(|| "?".into());
+                        eps.push(Ep { id: ids[a.g.obj(c).def as usize] as usize, name: a.g.name(c), src: s, rows: 0, outcome: -1 });
+                        eps.len() - 1
+                    });
+                    eps[e].rows += 1;
+                    lab.push((k, e));
+                }
+            }
+            if !lab.is_empty() {
+                a.encode(viewer, &mut x);
+                let mut pool: HashMap<usize, u32> = HashMap::new();
+                for c in a.g.unknown_to(vw, o) {
+                    *pool.entry(ids[a.g.obj(c).def as usize] as usize).or_default() += 1;
+                }
+                let mut pv: Vec<String> = pool.iter().map(|(i, n)| format!("{i}:{n}")).collect();
+                pv.sort();
+                let join = |f: &dyn Fn(&(usize, usize)) -> String, sep: &str| lab.iter().map(f).collect::<Vec<_>>().join(sep);
+                let meta = format!(
+                    "{gi}\t{iter}\t{si}\t{vw}\t{}\t{}\t{}\t{}",
+                    join(&|&(k, _)| k.to_string(), ","),
+                    join(&|&(_, e)| eps[e].id.to_string(), ","),
+                    join(&|&(_, e)| eps[e].src.clone(), "|"),
+                    pv.join(",")
+                );
+                rows.push((x.clone(), meta, lab.iter().map(|&(_, e)| e).collect()));
+            }
+            // What is resolving (or the decision) teaches whoever learns a library card now.
+            let what = a
+                .g
+                .stack()
+                .last()
+                .map(|s| match s.kind {
+                    StackKind::Spell { card } => a.g.name(card).to_string(),
+                    StackKind::Ability { source, .. } => a.g.name(source.idx).to_string(),
+                })
+                .unwrap_or_else(|| format!("{:?}", a.g.kind()));
+            if a.step(act, &mut keys).is_err() {
+                ok = false;
+                break;
+            }
+            for p in 0..2u8 {
+                let now: Vec<CardIdx> = a.g.player(p).library.iter().copied().filter(|&c| a.g.knows(p, c)).collect();
+                for &c in &now {
+                    if !known_lib[p as usize].contains(&c) {
+                        src.insert((p, c), what.clone());
+                    }
+                }
+                known_lib[p as usize] = now;
+            }
+            // 0 drawn, 1 shuffled away (its owner no longer knows it), 2 left the library otherwise.
+            open.retain(|&(o, c), e| {
+                eps[*e].outcome = match a.g.obj(c).zone {
+                    Zone::Hand => 0,
+                    Zone::Library if a.g.knows(o, c) => return true,
+                    Zone::Library => 1,
+                    _ => 2,
+                };
+                false
+            });
+        }
+        if !ok || a.to_move().is_some() {
+            bad += 1;
+            continue;
+        }
+        good += 1;
+        decisions += n;
+        for e in &mut eps {
+            if e.outcome < 0 {
+                e.outcome = 3; // the game ended
+            }
+        }
+        for (xr, meta, es) in &rows {
+            for f in xr {
+                fx.write_all(&f.to_le_bytes()).unwrap();
+            }
+            writeln!(fr, "{meta}\t{}", es.iter().map(|&e| eps[e].outcome.to_string()).collect::<Vec<_>>().join(",")).unwrap();
+            nrows += 1;
+        }
+        for e in &eps {
+            writeln!(fe, "{gi}\t{iter}\t{}\t{}\t{}\t{}\t{}", e.id, e.name, e.src, e.rows, e.outcome).unwrap();
+        }
+        neps += eps.len();
+    }
+    println!("games replayed {good}, diverged {bad}; decisions {decisions}; rows {nrows}; known cards {neps}");
+    assert_eq!(bad, 0, "{bad} games diverged from their replays");
+}

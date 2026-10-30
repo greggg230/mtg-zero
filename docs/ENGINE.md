@@ -15249,8 +15249,9 @@ with an untrained input (55.6's size of effect).
 ### 72.8 A belief over the opponent's known top cards? (a stage-1 test: not worth building)
 
 The user's follow-up question: extend the belief head (66) and the weighted deal (69) to the opponent's
-top cards that it knows and the decider doesn't. Measured as 66.6 measured the hand, on CPU (scratch
-scripts, nothing committed but this note):
+top cards that it knows and the decider doesn't. Measured as 66.6 measured the hand, on CPU, by
+`tools/top_probe.py` (its dump: `tests/az.rs` `top_known_probe_dump`, ignored; the commands in the
+tool's docstring):
 
 * **Data.** The 324 games of `runs/r3-2b-beliefsearch/replays` (iterations 90-196, the network against
   itself at 64 simulations), replayed exactly on this build from each game's seed (zero-core's driver:
@@ -15262,8 +15263,8 @@ scripts, nothing committed but this note):
 * **Models** (10 folds by game; cross-entropy per known card in nats, standard errors by a bootstrap over
   games): uniform, today's deal, **2.923** +- 0.014; count-matching (66.6) 2.876; count-matching per
   source - Brainstorm, Ponder, Channeler, other: public, everyone saw it - **2.841** +- 0.017 (-0.082); a
-  residual head (66.6's shape) on iteration 196's frozen trunk z plus the twelve floats of 72.2 2.880,
-  with the source as an input too 2.844. By source: Brainstorm -0.19 (put back more often than
+  residual head (66.6's shape) on iteration 196's frozen trunk z plus the twelve floats of 72.2 2.88,
+  with the source as an input too 2.84 (two runs of the tool: 2.880 / 2.882, 2.844 / 2.845). By source: Brainstorm -0.19 (put back more often than
   uniform: Volcanic Island 8% vs 4%, Prismari Charm 6% vs 2%, Force of Will 11% vs 8%, fetch lands),
   the Channeler -0.09 (kept: Lightning Bolt, Brainstorm, Ponder 10-12% vs 7%), Ponder nothing.
 * **Against the hand.** 66.6's frozen-trunk residual gained 0.37 nats a card (13%) and 0.61 fine-tuned,
@@ -15271,6 +15272,6 @@ scripts, nothing committed but this note):
   per-source bias, nothing from reading the position, on one or two cards the search deals. The expected
   effect is far below what an A/B can detect, so the head is **not built**. Two caveats: the trunk
   never trained with 72.2's floats (its columns are 0; the head saw them as inputs), and the hand's
-  head gained a further 0.24 from fine-tuning. The scripts read replays, so the test is cheap to
-  repeat on a trunk trained on this build. The input itself stays: the value and policy can use who
+  head gained a further 0.24 from fine-tuning. `tools/top_probe.py` reads a run's replays, so the test
+  is cheap to repeat on a trunk trained on this build (a few minutes on CPU). The input itself stays: the value and policy can use who
   knows the next draws directly, which this test does not measure.
