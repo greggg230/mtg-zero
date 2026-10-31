@@ -16197,3 +16197,85 @@ and zero-core c15e3d0 (E:/zero-scratch/light/base-c15e3d0), each built in its ow
   the fingerprint names them).
 * **Not done here**: the A/B itself (77.6), the Mac checkout of the fork's commit (`mac.sh
   --eval-checkout`: the coordinator), the evidence on the Mac.
+
+## 78. CUDA graphs of the token network's inference (zero-core `feat/token-graphs`, opt-in)
+
+Branch `token-graphs` (from main 1605436), zero-core `feat/token-graphs` 2b79780 (code 3d5875e, docs
+2b79780; from c15e3d0; its docs/az.md 10.6 has the design, the numerics and every measurement),
+2026-10-31. Nothing live changed:
+the runs, their pinned worktrees and the Mac untouched; checkpoints copied read-only to
+`E:/mtg-zero-scratch/token-graphs/`.
+
+### 78.1 Why, and what
+
+The desktop GPU's eager inference of the Delver line's token network (128 x 4, the belief head) is
+bound by its ~445-585 kernels and 13-15 host syncs a forward, not by its arithmetic (62.2, zero-core
+az.md 10.5); it is the desktop's self-play share and every head-to-head and Elo match run on the RTX
+5090 (a 2,400-game paired h2h at 32 simulations: ~80 minutes on 2026-10-31). zero-core's
+`TokenGraphRunner` captures the network's inference in CUDA graphs: the host packs each batch
+(present slots, token counts and positions), one graph per padded (rows: multiple of 64, tokens:
+multiple of 16) shape runs a static-shape forward (156 kernels, no sync) with the belief head's
+predictions and value-only rows; float32; the answers are eager's to float32 rounding.
+
+### 78.2 How to turn it on (off by default)
+
+* **h2h**: `python -m mtgz.az.h2h A B ... --device cuda --graphs 1` (both sides; `--a-graphs` /
+  `--b-graphs` for one side). The output then has `graphs_a` / `graphs_b` (each side's share of batches
+  through the graphs: 1.0). Note for the line's matches: `--select` replaces a side's run rule, so pass
+  the leaf view as the A/B driver does (`--a-leaf-value-view root --b-leaf-value-view root`).
+* **A run** (its desktop self-play and evaluations): the env `ZERO_TOKEN_GRAPHS=1` on the command that
+  starts it - `ZERO_TOKEN_GRAPHS=1 MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py
+  "$RUN/supervisor_console.txt" python tools/supervise.py "$RUN" ...`: the supervisor passes its
+  environment to the run, whose `stdout.txt` then says `zero.infer: token network CUDA graphs on ...`
+  for each evaluator. No run setting (zero-core's run.py is being changed on another branch); the
+  Mac's workers are not affected (they infer on their CPU). It needs the run's pinned build to have
+  zero-core 3d5875e or later - a re-pin, the orchestrator's call.
+* **bench**: `python -m mtgz.az.bench infer | selfplay ... --device cuda --graphs 1`.
+* Off: `ZERO_CUDA_GRAPHS=0` turns the env off (said on stderr); on a CPU evaluator the env is said
+  and ignored; `--graphs 1` with `--device cpu` is an error.
+
+### 78.3 Measured (the desktop GPU shared with r3-2b-beliefsearch's training and self-play and another session's h2h; eager and graphs interleaved)
+
+| what | eager | graphs | |
+|---|---:|---:|---:|
+| inference, leaves/s at batches of 64 / 144 / 192 / 512 | 3,034 / 4,291 / 5,305 / 6,871 | 21,790 / 27,054 / 25,680 / 26,690 | 7.2x / 6.3x / 4.8x / 3.9x |
+| h2h, 200 games, 32 simulations, 200 in flight (batches of 36) | 1,753.7 s | 261.3 s | 6.7x |
+| self-play at the line's settings (192 in flight, batches of ~145), leaves/s | 2,195, 2,004 | 6,457, 8,028 | 3.4x |
+| h2h, 2,400 paired games (the A/B driver's shape, 1,024 in flight) | ~80 min (that morning's; not interleaved) | 27.8 min | ~2.9x |
+
+* **Numerics** (iteration 328 on the 8,192 held-out rows, batches of 1-1,024): max abs. differences
+  priors 2.9e-6, value 9.5e-7, margin 2.4e-6, belief 5.1e-7 (means 1e-7 or less), the same at every size;
+  replays deterministic.
+* **Equivalence**: iteration 328 against itself, A graphs, B eager, 400 paired games: **A 0.4975 +-
+  0.0043** (pairs' se), 197 of 200 deals split, the 3 others 1 for A and 2 for B.
+* bfloat16 (measured, not offered): no faster, and 10^4 x the differences.
+* From ~192 rows a batch the host's copy of the 37,620-float rows bounds the graphs (~27k leaves/s); a
+  sparse feed from the driver is the next step (zero-core az.md 10.6).
+
+### 78.4 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (memory `feedback_tiered_gates`). zero-core's
+Rust is unchanged (c15e3d0's crates): `mtgz/_engine.pyd` copied from `mtg-zero-wt/run-4589760` (the same
+pin; 4589760 -> 1605436 changed tools only), not rebuilt; the gate's cargo tests build their own binaries
+in `E:/cargo-target/mtg-zero/token-graphs`.
+
+* `python tools/gate.py optin-core --baseline-root <a checkout of main 1605436> --no-mac --other-games
+  "<glassroad-zero> <caverna-zero> <kingdombuilder-zero>"` (8.3 paths: the option is split on spaces;
+  `SMOKE_TARGET=token-graphs` for the games' own target dirs), twice on 23d4fd3 (zero-core 3d5875e, the
+  code; this commit moves the pin to its docs commit 2b79780 only): core tests 92 passed,
+  checkpoint_compat byte identity identical, `--test az` 39 passed, `--test hidden` 16 passed, Glass Road
+  c1f56dc / Caverna a6fad73 / Kingdom Builder 4202a4a build against the core - **GATE FAILED both times**
+  on the last step's smoke_all core pytest: zero-core `test_remoteplay.py`'s
+  `test_cotrain_the_local_driver_is_never_starved` (306 passed; the first run also
+  `test_a_dying_worker_gives_its_accepted_games_back`, 305), a share of games between a local driver
+  and a worker. Run side by side on zero-core c15e3d0 and on this branch under the same load (the live
+  run, another session's h2h), the first fails in both the same way (the local share 23 / 158 and 21 /
+  158 against the 15% bar) and the second passes in both: the desktop's load, not this change (a
+  follow-up: make it load-robust, as 70.5 did for two others).
+* `check_checkpoint_compat --package mtgz` with a copy of the main line's iteration 328 (the Delver
+  spec, 8 games a target, 8 against random) against main 1605436: **identical** (records visits
+  73693aedf6cb0b7f, cq 6dd36ebeb19d9fbf, results 38b68141fc4cff90, 8 / 8 against random).
+* zero-core's own (its az.md 10.6): `TokenNet.forward` bit for bit c15e3d0's on Delver rows (outputs and
+  gradients, CPU and CUDA), its new tests with CUDA, toy runs byte for byte, the numerics and the
+  measurements above.
+* No engine change, no digest re-record, no search smoke: with the env unset nothing plays differently.
