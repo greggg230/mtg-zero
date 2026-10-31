@@ -73,7 +73,7 @@ Game (all mutable state, Clone)  <-- reads ------+
 | `rng.rs` | xoshiro256++ / splitmix64 (the same generators as zero-core) |
 | `svec.rs` | `SVec`, a small vector of plain values with inline storage (the short lists built for every decision; section 17) |
 | `testkit.rs` | scenario builder and helpers for tests (public; not used by the engine) |
-| `az/` | the zero-core game `mtg` (section 21): `mod.rs` (`MtgAz`, the spec, the `SearchGame` impl), `encode.rs`, `decks.rs`, `bots.rs` |
+| `az/` | the zero-core game `mtg` (section 21): `mod.rs` (`MtgAz`, the spec, the `SearchGame` impl), `encode.rs`, `decks.rs`, `bots.rs`, `explore.rs` (the habit tags of self-play exploration, section 75) |
 
 No dependency beyond `card_ir`, `serde`, `serde_json`, and zero-core's `zero_search` (the
 `SearchGame` trait, for `az/` only; the pinned submodule `third_party/zero-core`). No `HashMap` inside `Game` (iteration
@@ -1224,6 +1224,7 @@ they isolate one keyword or trigger each.
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games); the opening (section 55: the declared mulligan encoded, seen by the second player, cleared once taken, kept by clones and `determinize`; the opening's other floats bit for bit as before; no hidden information in any opening state); the public-state gate (section 58.6: every public field of the game state classified and perturbed on 240 positions of four kinds of games, the change public and in both viewers' encodings, but the listed limits) and its fixes read back (58.8); a Murktide Regent delve's ids, picks, context and bags (section 65) |
+| `tests/explore.rs` | section 75: the habit tags of self-play exploration - each tag on a constructed position of the Delver mirror's cards and not on its neighbours (another step, turn, hand or board), the opening sevens' keeps, a whole game read at every decision unchanged |
 | `tests/rules_m8b.rs` | M8b part a (section 36): best-of-one is the game of before action for action; the spec's `format` and `pools`; CR 103.1 in later games (the loser chooses; after a drawn game the previous chooser); drawn games count and a match can be drawn; the match ends at two wins or after three games, its result and margin; sideboarding reaches every legal deck exactly once (an exhaustive search of a small list, 100.2b; decks of 5-7 cards and of exactly 6, `PASS` only at a legal size); a pool's deck is sideboarded to exactly 40 cards (section 42: every 40-card deck of generated, evaluation and M8a pools by its canonical path, the two extremes, no 39- or 41-card deck, `PASS` only at 40, the heuristic's answers legal from any point); a spec decklist of another size keeps its size; sideboarded decks are legal (40 cards) and are the next game's cards and sideboard; the heuristic keeps its deck; sideboarding hidden from the other player; `determinize` keeps the decider's actions and encoding in matches; the match block and bags; pools and the deckbuilder |
 | `tests/rules_m8b_hidden.rs` | M8b part b (section 36.11): the hidden pool: the opponent's first picks drawn from the prior (never known cards, never the viewer's) and seen ones kept; sampled decks with the public sizes (40 cards, the sampled pool's bounds 40..=40: section 42) holding every card the viewer knows (in games and between games); a deck of 40 basic lands with 31 of a type sampled; the second sideboarder's worlds independent of the first's choice; the companion question asked of every player in best-of-three; the bags (`OPP_POOL`, `OPP_HIDDEN`) and every feature the same in the viewer's worlds; the heuristic's choices the same in its worlds; `force_chance` in matches |
 | `tests/rulings_*.rs` | M8d (section 37): one test per official ruling of a cube card, the ruling named in the test (`// ruling: <hash8>`; `docs/rulings.md` tracks every ruling, built by `tools/rulings_doc.py`), the CR in its name. `rulings_copies.rs` (Phyrexian Metamorph, Superior Spider-Man, Saheeli, Shifting Woodland: 707.2, 707.9b, 107.3m, 707.4, 613.1, 302.6, 704.5n), `rulings_replacement.rs` (Blightsteel, Dauthi Voidwalker, Yawgmoth's Will, Hullbreacher, Quantum Riddler, Containment Priest, Suplex: 614, 616.1, 702.90, 700.4), `rulings_protection.rs` (Emrakul, True-Name Nemesis, Mother and Giver of Runes: 702.16, 113.6, 101.2, 702.86, 608.2b), `rulings_stack.rs` (Tidebinder, a countered delayed trigger, spells that can't be countered against Remand, Mana Drain, Subtlety, storm, Lutri's and Chain Lightning's copies, checks on resolution, Teferi, ninjutsu), `rulings_facedown.rs` (manifest dread, Headliner Scarlett: 701.40, 701.62, 708.8), `rulings_faces.rs` (Sink into Stupor and Aang against "can't be countered", a modal double-faced card from the graveyard, daybound, Reflection of Kiki-Jiki's copies, Adventures), `rulings_triggers.rs` (sources gone before their enter abilities resolve, 610.3c, 603.6; Sensei's Top; Goryo's Vengeance; Chandra's emblem; Mana Drain's next main phase; Dack's control), `rulings_walkers.rs` (606.3, 602.2b, Kaito 205.1a), `rulings_mana.rs` (601.2f with alternative costs, 601.2g-h, 119.4, 107.3b, delve, Goblin Engineer); shared helpers in `tests/rulings_util/`. Part 2 (section 38): `rulings_stack2.rs` (divided damage with a target gone: Fury, Pyrokinesis, Fire Covenant, Shatterskull Smashing; Invert Polarity; Lutri's copies of modal, spree, X and divided spells: 601.2d, 608.2b, 115.7, 707.10), `rulings_casts.rs` (Etali's free casts, Bolas's Citadel, Dauthi and a discard, converge on copies and free casts: 608.2g, 107.3b, 118.9a, 601.2f, 614.1a), `rulings_copies2.rs` (Reflection's copies of copies and tokens, the prepare card: 707.9b, 722.3), `rulings_triggers2.rs` (sources gone, Green Sun's Zenith stolen, exile-until one card at a time, magecraft on copies, Leovold, Screaming Nemesis, Coveted Jewel, City of Traitors, flashback exile, library positions: 610.3c, 603.2c, 603.2e, 702.85a, 401.4). Part 3 (section 39): `rulings_replacement2.rs` (ravenous, reconfigure, Archon of Emeria, Elspeth's doubling, an Aura entering without being cast, Narset and Leovold with Hullbreacher, finality counters, bestow: 614, 616.1, 303.4f), `rulings_copies3.rs` (CDAs in every zone, copies of kicked, saddled and dashed objects, token copies' copiable values, Vehicles made creatures, backup, earthbend: 707.2, 707.9, 604.3, 613.4b), `rulings_stack3.rs` (targets gone, priority around resolutions and casts, uncounterable spells, casts during a resolution, storm and replicate, special actions, splice, Bolas's Citadel's top card: 608.2b, 117.3b, 601.2), `rulings_triggers3.rs` (reflexive triggers per token, last known information, delayed returns, cast triggers, draws over a turn, trigger order, intervening ifs, Nadu's new object: 603.12, 608.2h, 603.3b, 603.4, 400.7), `rulings_protection2.rs` (effects that don't target, a reanimated True-Name Nemesis and its Aura, protection from everything, modes needing a target, two wards: 702.16b, 303.4d, 700.2a, 702.21a), `rulings_faces2.rs` (DFC and MDFC characteristics in and out of play, Adventures' characteristics, copies and permissions with Bilbo and Robber of the Rich, preparation cards: 712.8, 712.11, 712.14, 715.3-715.4, 722), `rulings_walkers2.rs` (loyalty abilities after entering mid-combat, Comet's dice: 606.3). Part 4 (section 40): `rulings_zones2.rs` (exile and return as a new object, cards played from exile or a graveyard with their timing, "cast" and lands, escape and retrace again, empty libraries, dual lands' types: 400.7, 601.3, 305.1, 702.138, 702.81, 205.3i), `rulings_combat.rs` (creatures put onto the battlefield attacking, ninjutsu, summoning sickness of lands and Vehicles made creatures, blocks that stand, exert: 508.4, 702.49, 302.6, 509.1h, 701.39b), `rulings_mana2.rs` (mana value under every cost, X outside the stack and in free casts, alternative costs with permissions, flashback, escape, devotion, domain, converge, mana abilities, emerge (also with retrace, 40.9), waterbend, cascade into a split card: 202.3, 107.3b, 118.9, 702.34a, 702.138, 700.5, 106.6, 709.3, 702.119a), `rulings_other.rs` (Ajani's -4, reconfigure, Equipment, control changes, Balance, extra turns, connive and explore, colorless emblems, durations: 701.21a, 702.151b, 301.5, 500.7, 701.50) |
@@ -15834,3 +15835,371 @@ distillation's, then a run's; the Mac at `nice -n 19`, one job at a time, beside
 * **h2h at `chance_k` 2** is safe again on cube specs as far as these two causes go; the chance fuzz
   (`FUZZ_CHANCE`) is the gate for that path, and a candidate for the Mac farm's modes.
 * **Not fixed**: 74.3's `PayMana` (seed 523, the farm's expected bucket).
+
+## 75. Self-play exploration: habit-targeted forced deviations (zero-core `explore`)
+
+Branch `explore` (from main 4589760): zero-core pinned at **917cb1f** (feat/explore on zero-core main
+c15e3d0: the feature d745576, one tag drawn per game 715bbb1, its docs 917cb1f: zero-core docs/search.md
+3.9, az.md 21); this repo: the
+six habit tags (`engine/src/az/explore.rs`, the `SearchGame` impl's `EXPLORE_TAGS` / `explore_tags`),
+`testkit::Scenario::tapped`, the `DriverCfg` literals of tests/az.rs and draft_deferred.rs,
+`tools/explore_eval.py` (the CPU evidence, 75.6), `engine/tests/explore.rs`, `tests/test_explore.py`, this
+section. Approved by the user 2026-10-30; built, tested and measured on the CPU, **not merged, not run**.
+With the settings off a run is the run of before, byte for byte (75.8: the digests, checkpoint_compat).
+
+### 75.1 Why
+
+The main line plateaued well below good human play, and 73.5's fingerprints show why it may stay there:
+habits frozen across 100+ generations - fetchlands cracked at once ~90% of the time (so Brainstorm has
+a shuffle 11-16% of the time, never in response to a fetch), tapping out into a live Daze about half the
+time, Force of Will pitched to Force of Will 56-91% of the time when another blue card was there,
+Murktide's delve leaving an instant or sorcery behind in a third of the casts, Volcanic Island fetched
+on turns 1-2 when only blue was needed 60-83%, 54-92% of one-landers kept. Each alternative pays off
+turns later, beyond a 16-64 simulation search: only the value network can learn it, and only from games
+that play it. The 'cq' targets put ~86% on one move (the run's `max_share` 0.85), so the alternatives
+almost never appear in self-play and the habits reinforce themselves. The bigger network (r3-big192x6,
+stopped at ~243, in reserve) did not move them: it learns from the same games. The main line is
+r3-2b-beliefsearch again, resuming from 196 at lr 3e-5 (the Fable review's constant lr 1e-4, a separate
+fix): the A/B (75.7) forks from it.
+
+### 75.2 The design (zero-core docs/search.md 3.9, az.md 21)
+
+**Habit-targeted forced deviations in self-play.** The game tags, per option of the pending decision,
+the habits it knows; in a share of the self-play games (`selfplay_explore_games`, 0.25) the recording
+seat's chosen move that carries an explored tag is, with the tag's chance per opportunity, replaced by
+the best untagged option - when the search found that option close (the gate) - and so are that seat's
+moves with the tag through the tag's window; one episode a game. The search, its tree and the recorded
+policy target are the unconstrained search's: only the move played changes. With `mask_z` the records of
+both seats made at or before the first deviation get z := q (the search's own estimate) and no margin
+target; the records after it keep their real outcome - the states after a held fetch, a Brainstorm and
+its shuffle are exactly the data the value net lacks.
+
+The details decided while building it (each tested in zero-core, 75.5):
+
+| question | decision |
+|---|---|
+| where the setting lives | the driver (`DriverCfg::explore`), not a seat key: one episode a game whichever seat, the masking of every seat's records; the seats that explore are those with `selfplay` and `record` (never an evaluation seat, h2h, Elo, a replay, the remote evaluation; a league opponent's `record` false never explores), refused by `Driver::new` on a driver that records nothing or has no such seat |
+| when, in `decide()` | after the move is chosen (temperature sampling - the run's first 60 searched decisions -, the move rule, or the Gumbel winner) and after the decision's records are made; every searched decision of the seat: full (64), fast (16) or minor (4; the MTG tags never fall on a payment) |
+| the gate's Q | the completed Q of the 'cq' target (`tree::completed_q`: W/N over every visit; an unvisited option's is the target's v_mix, the network's root value only when nothing was visited - the "unvisited -> value0" of the plan is v_mix with visits): the deviation passes when Q(deviation) >= Q(chosen) - `q_margin` (0.10, P(win): the run's `margin_w` is 0) |
+| the deviation | the best option without the tag by the visit counts the move rule reads, then P0 (`argmax_visits`' order) |
+| a blocked gate at a trigger | no episode now (`blocked`); the game stays eligible and a later opportunity may trigger (one draw per opportunity either way) |
+| windows | in turns, `rounds()` = MTG's global turn number (both players' turns count): open while `rounds() < turn + window`, checked at every exploring decision; 0 = the decision only. Inside, only the episode seat's moves with its tag deviate, each through the gate; a blocked one ends the episode (the habit is played) |
+| one episode a game | the first trigger in either seat; after it ends, no other in that game. Which tag: `selfplay_explore_pick` 'first' (the plan: any explored tag's first trigger - the default) or 'game' (added after 75.6: each eligible game draws one explored tag at its start, only it can trigger; with 'first' the mulligan and the first turns' tags took every episode) |
+| the streams | the exploration stream from (driver seed, the game's stream id), its own: eligibility, then one draw per opportunity; `init_slot` draws nothing more from `base`. A game without an episode is the game without exploration; a game with one is that game up to its deviation (tested; measured on the CPU, 75.6: every pair of twins identical up to the deviation) |
+| masking | all records with an index below the first deviation's (its own decision's record included: its target and q are its search's); a record without a root value then - a value-only sample (`selfplay_view_samples` 0.5, `next_q`) waiting for its observer's next search, which now comes after the deviation - is dropped |
+| the margin target | a new optional shard column `masked` (uint8): the margin loss skips those rows (mean over the others); sc is 0 there too. The value target needs nothing (z = q). A held-out set refuses masked rows; distillation masks them as training does. The least invasive schema change: old shards load as before, the losses of a window without `masked` are those of before |
+| metrics | from the finished games' rows (each row's `explore`: eligible, opportunities and blocks per tag, the episode, masked, dropped) - local and remote alike: `selfplay.explore` in metrics.jsonl and the log's selfplay line |
+| remote self-play | the Mac's workers explore from the mirror's config (the run's settings), tally the games the run accepts, and report their exploration in their hello: a checkout that explores otherwise (an older one does not explore) is refused, never a remote self-playing without it in silence |
+| names | the run settings name tags; a name the game does not declare is refused at the start (exit with the game's list), never ignored |
+
+**Settings** (zero-core az.md 21.3): `selfplay_explore` ('' = off; comma-separated tag names or 'all'),
+`selfplay_explore_games` (0.25), `selfplay_explore_q_margin` (0.1), `selfplay_explore_mask_z` (1),
+`selfplay_explore_p` and `selfplay_explore_window` ('' = the game's defaults below; a number for every
+tag; `tag=v,...`), `selfplay_explore_pick` ('first' | 'game'). Saved in the run's config.json, shipped to the Mac's mirror with it; `python -m
+mtgz.az.run --help` lists them. Single-game runs only.
+
+### 75.3 The tags (`engine/src/az/explore.rs`)
+
+| tag (id) | on which option | default window | default p |
+|---|---|---|---|
+| `fetch_crack` (1) | Priority: activating a fetchland (Flooded Strand, Polluted Delta, Misty Rainforest, Scalding Tarn and their siblings, Prismatic Vista) - at any time, any turn | 2: the rest of this turn and the next (crack at the opponent's end step / hold for Brainstorm) | 0.25 |
+| `daze_tapout` (2) | Priority, in its own main phase with an empty stack from turn 3 on: casting a spell whose cost (its static increases, the most delve) is at least its untapped lands + its pool (an uncracked fetch counts: it finds an untapped land), cost >= 1, while the opponent controls an Island-typed land (Daze's alternative cost) and holds a card | 1: the rest of the turn | 0.5 |
+| `fow_pitch_fow` (3) | ExileCost of its own Force of Will's alternative cost (the spell whose `PayCosts` asked): exiling a Force of Will while another card could be exiled | 0 | 1.0 |
+| `delve_skip_spell` (4) | a delve pick (`Task::Delve`'s ChooseGraveyardCard) of a card that is not an instant or sorcery while one is still offered | 1: the rest of the turn (the cast's picks) | 0.5 |
+| `volcanic_fetch` (5) | SearchLibrary of its own fetch's ability (on the stack) in its own turns with global turn <= 4 (its first two): finding Volcanic Island while the basic Island is offered | 0 | 0.5 |
+| `keep_one_lander` (6) | Mulligan of the opening seven (no mulligan yet, seven cards): keeping (`PASS`) with at most one land | 0 | 1.0 |
+
+**Against the fingerprints** (73.5): the same decisions where the decision can see them. Where the
+fingerprint looks ahead or behind the decider's eyes, the tag stays with what is visible: `daze_tapout`
+does not know the opponent's Daze (an Island and a card in hand: what the decider sees) and counts the
+mana from the cost (the fingerprint reads the untapped lands at the opponent's next decision);
+`volcanic_fetch` cannot know the rest of the turn's spells ("only blue was needed"): it tags every
+first-two-turns Volcanic fetch with the basic offered; `delve_skip_spell` tags a pick, while the
+fingerprint judges the cast's total (a pick of a land with spells offered leaves one behind only when
+the picks run out first; the gate judges which); a PASS that stops delving early is not tagged (it pays
+mana instead: a different trade). `fow_pitch_fow` and `keep_one_lander` are the fingerprint's exactly
+(the latter its opening-seven table's <= 1 land rows).
+
+**Defaults.** The chances spread the episodes over a game's opportunities rather than its first one (75.6
+measures where they start): fetch cracks come ~5 a game (both seats; 73.5: 265 cracks in 54 games), so
+0.25 a crack; tap-outs and delve skips ~1-2, 0.5; first-two-turns fetches ~1, 0.5; a Force of Will
+pitch with the choice and a one-lander's keep are rare (~0.3 a game), 1.0. One episode a game: an
+eligible game takes the first trigger, so a rare tag with p 1 at the mulligan (turn 0) takes its games
+before any other.
+
+### 75.4 Hidden information
+
+A tag reads the decider's own hand (Force of Will, the opening seven), the public zones (both
+battlefields, the graveyards, the stack, the opponent's hand count), the turn and the decision's own
+options (a library search's offered definitions are what the search shows the searcher). Never the
+opponent's hand, the library order or anything a world deals: the driver calls it on the live game of
+the exploring seat's decision only (never inside a search), and it changes nothing - no rule, option,
+key or feature depends on it (`a_game_reads_tags_without_changing`; the digests, 75.8).
+
+### 75.5 Tests
+
+`engine/tests/explore.rs` (8): the tags' names, ids and windows (the game's `EXPLORE_TAGS`); each tag
+on a constructed position and not on its neighbours - `fetch_crack` (a fetch's activation, not
+Wasteland's or the other options; also in response on the opponent's turn), `daze_tapout` (Dragon's Rage
+Channeler and Ponder off one land into Island + a card; not with a land left up - an uncracked fetch
+counts -, not without an Island on the other side, with an empty opposing hand or on turn 2; tapped
+lands; Thundering Falls as the Island; Mishra's Bauble never; Murktide at its most-delve cost; not in
+response), `fow_pitch_fow` (the second Force of Will over Brainstorm; nothing with only Forces or only
+another blue card), `delve_skip_spell` (each pick of a Murktide's delve: the lands and the Bauble tagged
+while Brainstorm or Ponder is offered, none after; a graveyard of lands: none), `volcanic_fetch` (turns 1,
+3, 4 with the basic offered; not on turn 5, on the opponent's turn or without the basic), `keep_one_lander`
+(Delver mirror deals until both kinds of opening sevens are seen: the keep tagged exactly with <= 1 land;
+the seven after a mulligan never); a whole random Delver game read at every decision plays the same moves
+to the same state, every tag on its decision kind. `tests/test_explore.py` (2): the game's six tags in
+its info; a Delver self-play driver exploring all six (episodes, masked rows = the rows' counts, every
+episode's game identical to the driver without exploration up to its deviation, the evidence tool's
+games rebuilt from their move logs); `python -m mtgz.az.run --preset delver-smoke` refusing an undeclared
+name and, with `--selfplay-explore all`, the selfplay metrics' `explore` and the saved settings.
+zero-core's own (96 Rust, 308 Python): its docs/az.md 21.7.
+
+### 75.6 CPU evidence (`tools/explore_eval.py`)
+
+**What was run** (desktop 2026-10-30, CPU only - `CUDA_VISIBLE_DEVICES=-1` -, below normal priority, 3
+search + 3 torch threads a process, four processes at a time; the GPU and the Mac busy with the live
+runs; no training): a read-only copy of `runs/r3-2b-beliefsearch/models/iter_0196.pt` (the main line's
+128 x 4 network; the line resumes from it) and of its config.json, at the line's own self-play search -
+64 simulations full / 16 fast / 4 minor, `p_full` 0.25, 'cq' targets (cq_c_scale 0.3), temperature for
+the first 60 searched decisions, Dirichlet 0.3 / 0.25, root-view leaf values, value-only samples 0.5, the
+root belief (tilt 1, mix 0.25) - on the Delver spec: `python tools/explore_eval.py play --model ... --config
+... --games 96 --conc 48 --seed S --explore all` with every game eligible (`--explore-games 1`, to get
+many episodes from few games; a run's default is 0.25) and the tags' defaults, and the same 96 games
+(the same seed) without exploration as their control; four seeds (384 games a side, ~850-930 leaves/s a
+process, 11-14 min a run). Then `report` (the games rebuilt from their move logs - the engine's spectator
+view with the log on, what the replays store - and fingerprinted with `tools/delver_fingerprints.py`).
+The files: `E:/mtg-zero-scratch/explore/evidence/{a,b,c,d}_{on,off}.json` and `first_report.json`, `g{a,b}_on.json`
+and `game_report.json` (pick 'game'); the scripts `run_one.sh`, `run_game.sh` there.
+
+**The twins.** All 458 episodes' games (382 + 76) are their control game move for move up to the first
+deviation (`prefix_identical` 458/458): the exploration stream moves nothing else, and the deviation is the only
+change.
+
+**Pick 'first' (the design as planned: any tag's first trigger takes the game)**:
+
+| tag | opportunities | episodes | gate blocks | overridden (per episode) | to an unvisited option | mean Q gap: visited (max) / unvisited | ends | first-deviation turns | episode seat's score vs its twin's |
+|---|---|---|---|---|---|---|---|---|---|
+| fetch_crack | 476 | 121 | 0 | 1,385 (11.4) | 75 (62%) | 0.012 (0.095) / 0.000 | window 84, gate 37 | 1: 44, 2: 20, 3: 19, 4: 13, 5-12: 25 | 0.463 vs 0.562 (-0.099 +- 0.059) |
+| daze_tapout | 156 | 71 | 3 | 116 (1.6) | 28 (39%) | 0.017 (0.087) / 0.002 | window 68, gate 3 | 3: 21, 4: 14, 5: 11, 6: 14, 7-13: 11 | 0.521 vs 0.549 (-0.028 +- 0.060) |
+| fow_pitch_fow | 5 | 4 | 1 | 4 | 4 | - / 0.002 | decision 4 | 1, 6, 6, 7 | 0.50 vs 0.75 (n 4) |
+| delve_skip_spell | 3 | 0 | 0 | - | - | - | - | - | - |
+| volcanic_fetch | 177 | 77 | 6 | 77 | 39 (51%) | 0.023 (0.095) / 0.000 | decision 77 | 1: 30, 2: 18, 3: 18, 4: 11 | 0.442 vs 0.481 (-0.039 +- 0.070) |
+| keep_one_lander | 114 | 109 | 5 | 109 | 88 (81%) | 0.001 (0.087) / 0.000 | decision 109 | 0: 109 | 0.404 vs 0.422 (-0.018 +- 0.066) |
+
+(Opportunities and blocks count only before a game's episode; a gate block = triggered, refused.)
+382 episodes in 384 eligible games; 1,691 decisions played otherwise; **masked 7.96%** of the records
+(2,972 of 37,325), **dropped 0.32%** (118 value-only samples) - at the default share of 0.25 about a
+quarter of that (~2% masked, ~0.1% dropped).
+
+* **The gate**: visited deviations were within 0.10 nearly always (blocks 0-7% of the triggers; the
+  visited gaps' mean 0.01-0.02, their maximum 0.095): at q_margin 0.10 it blocks only clear losses -
+  fetch holds ended by the gate (37 of 121) are those where cracking became clearly better inside the
+  window. **Most deviations went to an option the search never visited** (62% of the fetch holds, 81% of
+  the forced mulligans, 39-51% of the others): those pass on the target's v_mix, ~the chosen move's Q
+  (their gap 0.000-0.002) - the gate does not judge them (75.9).
+* **What followed a fetch hold**: the held fetch was cracked later in 120 of 121 (2 turns later in 78:
+  the window's end, at the seat's next turn; 1 turn in 28); the seat held a Brainstorm at the hold in 43%
+  and cast it before the crack - the Brainstorm-then-shuffle line - in 5 of 121 (4.1%; its twin never: the
+  fetch was gone). A daze tap-out avoided: the opponent's Daze that turn 0 of 71 (twins: 3 of 71 Dazed);
+  the seat cast something else later that turn in 46% (twins 96%).
+* **Fingerprints** (both seats of the 384 games each; rate, its se):
+
+| metric | explore | control |
+|---|---|---|
+| fetch cracked now | 83.2% (1,912) +- 0.9 | 88.0% (1,836) +- 0.8 |
+| brainstorm w/ shuffle | 18.2% (977) +- 1.2 | 15.9% (925) +- 1.2 |
+| murktide delve best | 70.6% (540) +- 2.0 | 74.7% (530) +- 1.9 |
+| fow pitched fow | 61.3% (137) +- 4.2 | 67.5% (120) +- 4.3 |
+| tap-out into Daze | 48.6% (1,532) +- 1.3 | 55.1% (1,344) +- 1.4 |
+| tapped out: dazed | 40.7% (744) +- 1.8 | 39.5% (741) +- 1.8 |
+| T1-2 Volcanic, U only | 33.3% (276) +- 2.8 | 49.8% (291) +- 2.9 |
+| one-landers kept (opening seven) | 9.0% (211) +- 2.0 | 61.1% (211) +- 3.4 |
+| starting player won | 53.6% (384) | 51.0% (384) |
+
+  The control is iteration 196's self-play (temperature and noise on): it differs from 73.5's evaluation
+  replays (Brainstorm with a shuffle 16% against 11%, one-landers kept 61%). Exploration puts the
+  alternatives into the data where the tags fire: fetches held (cracks at once 88% -> 83%), live-Daze
+  tap-outs avoided (55% -> 49%), the basic fetched on turns 1-2 (Volcanic 50% -> 33%), one-landers
+  mulliganed (kept 61% -> 9%) - with every game eligible: a run's share of 0.25 dilutes it fourfold.
+* **The deviations' value, paired** (the episode seat's result against its twin's, the same deal and the
+  same play up to the deviation): every tag's leans negative, none beyond 1.7 se (fetch holds -0.099 +-
+  0.059; the forced mulligans -0.018 +- 0.066 over four seeds, -0.16 +- 0.10 over the first two). Noisy
+  (a game's later chance dominates), and expected to lean negative if the network plays its own habits'
+  continuations best - but no evidence yet that any alternative wins at iteration 196's strength: the
+  A/B (75.7) is the test, the value net learning from these games is the mechanism.
+* **One episode a game, first trigger wins - the late tags starve.** Murktide's delve had 3 opportunities
+  and no episode in 384 eligible games, Force of Will's pitch 4 episodes, although the control games hold
+  145 delve picks of a non-spell while a spell was offered (in seeds 1-2's 192 games) and 120 Force of Will
+  payments with a second Force and another blue card (in 384): the mulligan (turn 0), the first turns'
+  fetches and Volcanic searches trigger first. Hence pick 'game'
+  (zero-core 715bbb1): each eligible game draws one tag.
+
+**Pick 'game'** (`--explore-pick game`, seeds 1 and 2: their controls are the runs above):
+
+| tag | games that drew it | opportunities | episodes | gate blocks | overridden | to an unvisited option | mean Q gap visited (max) | first-deviation turns | seat vs twin |
+|---|---|---|---|---|---|---|---|---|---|
+| fetch_crack | 37 | 120 | 26 | 0 | 300 (11.5) | 7 | 0.016 (0.089) | 1: 3, 2: 1, 3: 5, 4: 5, 5-13: 12 | 0.50 vs 0.46 (+0.04 +- 0.13) |
+| daze_tapout | 21 | 50 | 17 | 2 | 23 | 9 | 0.015 (0.072) | 3-12 | 0.41 vs 0.59 (-0.18 +- 0.15) |
+| fow_pitch_fow | 27 | 4 | 4 | 0 | 4 | 4 | - | 2, 3, 4, 7 | 0.00 vs 0.75 (n 4) |
+| delve_skip_spell | 33 | 15 | 4 | 0 | 4 | 0 | -0.013 (0.002) | 7, 8, 12, 13 | 1.00 vs 1.00 (n 4) |
+| volcanic_fetch | 36 | 34 | 16 | 1 | 16 | 9 | 0.037 (0.098) | 1: 7, 2: 5, 3: 1, 4: 3 | 0.44 vs 0.69 (-0.25 +- 0.17) |
+| keep_one_lander | 38 | 9 | 9 | 0 | 9 | 5 | 0.045 (0.087) | 0: 9 | 0.33 vs 0.67 (n 9) |
+
+76 episodes in 192 eligible games (40%: a game whose drawn tag never comes up has none - a Force of Will
+pitch with the choice comes up in 4 of 27 games, a delve skip in 15 opportunities of 33); 356 decisions
+played otherwise; masked 6.96%, dropped 0.18%. Every tag gets episodes, the fetch holds' first
+deviations spread over the game (turns 1-3 in 9 of 26, against 83 of 121 with 'first'), and after a hold
+the seat cast its Brainstorm before cracking in 5 of 26 (19%; twins 0). The delve deviations had been
+searched (their gap -0.013: the spell pick looked better than the habit's land). Whole-game fingerprints
+move less (a game's one episode is rarer): fetch cracked now 88.6% -> 85.3%, tap-outs into Daze 54.9% ->
+52.4%, one-landers kept 60% -> 51%.
+
+**All episodes, paired**: the episode seat scores -0.052 +- 0.032 below its twin with 'first' (382),
+-0.16 +- 0.08 with 'game' (76): at iteration 196's strength the forced alternatives lose a little on
+average, within ~2 se - the cost of the experiment's games, not yet its value (the value net has not
+learned from them). **Throughput**: the 'first' exploring runs 823-858 leaves/s against their controls'
+854-936 run beside them, the 'game' ones 1,081-1,100 (run later, with less load beside them): within the
+machine's load noise; the tags cost a call per decision of an eligible game.
+
+### 75.7 The A/B (flags; not run)
+
+**Against r3-2b-beliefsearch** (the main line again: the 128 x 4 network, resuming from iteration 196 at
+lr 3e-5 on main 4589760; r3-big192x6 stopped at ~243, in reserve). Round 3's method (62.6, 73.6): the
+fork arm K -> K + 24 with the line's flags plus exploration, then the control - the line itself - K -> K +
+24 with its flags unchanged, one after the other on the whole desktop GPU and the Mac, so each arm plays
+its 800 games an iteration at the line's speed (~4-5 min an iteration at 128 x 4: ~2 h an arm).
+
+* **The fork point K**: a checkpoint of the resumed line at an evaluation boundary (a multiple of
+  `--eval-every 8`), after its first few iterations at lr 3e-5 so that both arms start from the new
+  schedule (K = 200 or 208). The line stops at K (STOP, a natural pause; the user's call).
+* **The build**: zero-core feat/explore and this branch merged (or this branch's worktree pinned at its
+  commit: `git worktree add --detach ../mtg-zero-wt/run-<sha7> <sha>`, `bash tools/build_py.sh`, `python
+  tools/gate.py repin --expect-digest 132437374243f7b2` - exploration off changes no digest), and
+  `bash tools/mac.sh --eval-checkout` from that worktree: the Mac's workers must explore (their hello
+  says so; an older checkout is refused - this machine would then play every game, a slower arm). The
+  control can stay on the line's own pin 4589760 (off = its run byte for byte, 75.8) with its own Mac
+  checkout restored before it runs.
+* **The fork**: `python tools/fork_run.py --source runs/r3-2b-beliefsearch --dest runs/r3-2b-explore --iter K` (the
+  line's config, its window hard-linked), then from the build's worktree:
+
+```
+BASE=(<exactly the resumed line's own supervise.py flags - its relaunch at lr 3e-5 -, e.g. 73.7's --preset delver-mirror
+      --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq
+      --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1
+      --train-prefetch 2 --eval-every 8 --eval-leaf-value-view root and its lr settings> --iters $((K + 24)))
+XP=(--selfplay-explore all --selfplay-explore-pick game --selfplay-explore-games 0.5 --selfplay-explore-q-margin 0.1
+    --selfplay-explore-mask-z 1)
+MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "$FORK/supervisor_console.txt" python tools/supervise.py "$FORK" "${BASE[@]}" "${XP[@]}"
+# ... checkpoint K + 24 in the fork and its supervisor gone; then the control, the line itself, K -> K + 24 with BASE alone
+```
+
+  **Why these flags** (75.6): pick 'game' so that every habit gets episodes (with 'first' the mulligan and
+  the first turns take them all: no delve, four Force of Will pitches in 384 games) and the fetch holds
+  start over the whole game; a share of 0.5 because a drawn tag comes up in ~40% of the games: ~160
+  episodes an iteration (800 games x 0.5 x 0.4; fetch holds ~55, tap-outs ~35, Volcanic fetches ~33,
+  forced mulligans ~19, Force of Will and delve ~8 each), ~3.5% of the records masked, ~0.1% dropped.
+  The design's literal defaults (`--selfplay-explore all`: 'first', 0.25 - ~200 episodes, two thirds of
+  them fetch holds and forced mulligans) are the alternative arm if only one habit set is wanted fast.
+  Watch each fork iteration's `selfplay:` line: `explore.episodes`, `masked_share`, `dropped_share`, the
+  per-tag `drawn` / `episodes` / `alt_unvisited` / `ends`.
+* **Length**: 24 iterations (three evaluations at `eval_every` 8; the window is 6 iterations, so the last
+  two windows are made of exploring games only). A habit the value net unlearns shows in the search
+  first (the 'cq' target follows Q), then in the policy.
+* **Judged by**, on checkpoints K + 8, K + 16, K + 24 of both arms:
+  1. **paired h2h** (73.3, 73.6), the fork against the control at the same iteration, the line's
+     evaluation search on both sides and the run's own spec:
+     `python -m mtgz.az.h2h FORK/models/iter_N.pt MAIN/models/iter_N.pt --spec "$(python -c "import json; print(json.load(open('runs/r3-2b-beliefsearch/config.json'))['spec'])")" --chance-k 0 --paired --sprt 0,20 --games 600 --max-games 2400 --sims 32 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 0.3 --device cuda --threads 8 --seed 7`
+     (+ the leaf view and belief settings the A/B driver passes, 73.6). Adopt at the SPRT's H1 at K + 24;
+     H0 or undecided = the control kept (a call for the user when the fingerprints move but Elo does not).
+  2. **fingerprints**: neither arm's checkpoints are the publisher's, so their games are this tool's -
+     `python tools/explore_eval.py play --model ARM/models/iter_N.pt --config ARM/config.json --games 192
+     --seed 1 --out arm_N.json` (exploration off: the network's own play at the run's self-play
+     settings), then `python tools/explore_eval.py fingerprint arm_N.json` for each arm (CPU, ~25 min
+     each at 128 x 4 with four processes). The point of the experiment: fetch cracked now below ~89%, a
+     Brainstorm with a shuffle above ~18%, tap-outs into a live Daze below ~55%, the turn 1-2 Volcanic
+     below ~56%, the one-landers' keep rate moving either way (75.6's control values at iteration 196;
+     each cell's binomial noise is in the output).
+  3. **anchored Elo** (73.7: `--elo-anchors a192=...,a160=... --elo-anchor-games 100 --elo-paired 1` in
+     both arms' BASE when the resumed line has them) and the **held-out value CE** on the frozen fresh set
+     (`--heldout-shards runs/heldout/r3-2b_iter0197fresh_8192.npz`: games of 196 without exploration, so
+     neither arm trained on it; a set from the fork's own games is refused, 75.2).
+* **Not in this A/B**: the per-tag subsets (one tag a run), other windows / chances, a gate that requires
+  visited alternatives (75.9) - follow-ups if the whole set wins or is close.
+
+### 75.8 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (70; desktop 2026-10-30, CPU only, below normal
+priority, 4 cargo jobs; the GPU and the Mac busy with the live runs), on **574409e** (zero-core pinned at
+715bbb1; the commit after it moves the pin to 917cb1f, documentation only, and adds this section):
+
+* `python tools/gate.py optin-core --baseline-root E:/mtg-zero-scratch/explore/base-4589760 --feature-tests
+  az,explore --other-games "C:/Users/GREGGK~1/glassroad-zero C:/Users/GREGGK~1/caverna-zero
+  C:/Users/GREGGK~1/kingdombuilder-zero"` (the 8.3 paths: the tier splits the list on spaces) - **PASSED**
+  in 1,059 s, `gates/574409ead6f0.json`: core tests 99 (zero_search 96, webnet 3); checkpoint_compat byte
+  identity against main 4589760 (its own detached worktree and target, `--net random`, the cube spec);
+  `--test az` 39; `--test explore` 8; build-only of Glass Road c1f56dc, Caverna a6fad73, Kingdom Builder
+  4202a4a against zero-core 715bbb1 GREEN (and smoke_all's own core run: cargo test 96, pytest 308 passed /
+  3 skipped).
+  The first run, on db3bb5a (pin d745576), passed every step but the last: no `--other-games` (smoke_all's
+  sibling discovery finds no game beside `third_party/zero-core`), and its core pytest lost
+  `test_remoteplay.py::test_a_dying_worker_gives_its_accepted_games_back` (a remote self-play quota, 162 of
+  192 games, under the machine's load: passes alone and in the full suite) - re-run on the new pin.
+* **Digests** (the engine tier's steps, on 574409e): encoding-free `a0d54562c8330271`, full
+  `132437374243f7b2` - unchanged.
+* `check_checkpoint_compat` with the line's checkpoint 196 on the Delver spec against 4589760 (self-play
+  'visits' and 'cq' records and results, 1,360 samples each, the match against random): identical.
+* `cargo test --test explore` 8 and `pytest tests/test_explore.py` 2 passed on 715bbb1 (and on d745576).
+* zero-core's checks: its docs/az.md 21.7.
+
+### 75.9 Risks, limits, open questions
+
+* **The gate rarely gates.** Most first deviations go to an option the search never visited
+  (75.6, pick 'first': 62% of the fetch holds, 81% of the forced mulligans, 39-51% of the tap-outs and
+  Volcanic fetches): its completed Q is the 'cq' target's v_mix, the visited options' prior-weighted mean - close
+  to the chosen move's own Q by construction - so the gap is ~0 and it passes. The plan's
+  "unvisited -> value0" would do the same (the root's network value is as close). The gate does block
+  clear blunders among visited alternatives (the blocks, and the 'gate' ends of fetch holds when cracking
+  became much better), but "a plausible near-tie" is not established for an unvisited option. If the A/B
+  shows damage (the paired diffs of 75.6 lean negative: -0.05 +- 0.03 over every episode with 'first'),
+  the follow-up is a visits requirement on the deviation (`explore_min_visits`, zero-core: the
+  gate refuses an option with fewer visits) or root minimum visits on tagged decisions only, so that the
+  gate reads a searched Q. Not built: the plan accepted unvisited alternatives.
+* **Fetch holds are long.** The window of 2 turns overrides every crack the seat wants for the rest of
+  its turn and the next - ~12 decisions an episode (75.6) - so the "crack at the opponent's end step"
+  line is played only when the gate ends the episode there; the hold mostly ends with the window, at the
+  seat's next turn (78 of 121 cracks two turns later). A window of 1 (`--selfplay-explore-window fetch_crack=1`) would hold for the turn
+  only and leave the opponent's turn to the network.
+* **Trigger turns are early with pick 'first'.** The first opportunities trigger first: fetch holds
+  start on turns 1-3 in 83 of 121, Volcanic fetches on turn 1 in 30 of 77 (75.6). Pick 'game' spreads the
+  holds (turns 1-3 in 9 of 26); lower chances (`--selfplay-explore-p fetch_crack=0.1`) would too, at the
+  cost of fewer episodes of that tag.
+* **Late and rare tags.** With pick 'first' the late habits starve (Murktide's delve 0 episodes, Force of
+  Will's pitch 4, in 384 eligible games); with 'game' they get a few (4 and 4 in 192), because their
+  opportunities are rare in a game whatever the setting: a drawn Force of Will tag came up in 4 of 27
+  games, a drawn delve tag 15 times in 33 games.
+* **The policy target is the habit's.** The recorded policy target of a deviating decision (and of those
+  in the window) is the unconstrained search's - the habit -; only the value target learns from the
+  deviation's outcome. The policy moves only when the value net's Q of the alternative rises enough for
+  the search (and its 'cq' target) to prefer it: slower than a policy change, and nothing at all if the
+  habit is in fact right.
+* **Masking is narrow but costs signal.** 7-8% of the records with every game eligible (75.6) - ~2% at
+  'first' 0.25, ~3.5% at the A/B's 'game' 0.5 - train their value on q instead of z, and none of them
+  their margin; the value-only samples waiting for their observer's next search at a deviation are
+  dropped (0.2-0.3% of the records with every game eligible, ~0.05-0.1% in a run).
+* **Games after a deviation are worse games, on purpose.** One game in four or five carries an episode
+  ('first' at 0.25; 'game' at 0.5); if the habits are right, those games' later records teach the cost of
+  the deviation (the intended signal) and the self-play games are a little weaker meanwhile (75.6: -0.05
+  +- 0.03 for the episode seat).
+* **One episode a game.** With 'first' the per-tag mix follows the order of the opportunities in a game
+  as much as the chances; with 'game' a game whose drawn tag never comes up has no episode (60% of the
+  eligible games in 75.6) - hence the A/B's share of 0.5.
+* **Remote self-play needs the exploring checkout on the Mac.** An older checkout is refused (the run
+  plays every game on the desktop: slower, never silently unexplored).
+* **Shards with `masked` read by an older checkout**: the column is ignored, so the margin of masked rows
+  would train towards 0 (sc 0). Fork exploring runs only with checkouts that have this core.
+* **Held-out sets** cannot be made from an exploring run's shards (refused): make them from the control.
+* **Not covered**: co-training runs (refused), a run with `margin_w` > 0 (the gate's units are then the
+  search's utility, not P(win)), the toy tags' semantics (tests only).
