@@ -37,6 +37,12 @@ hand or on the battlefield) (a) the actual play, (b) the Bauble at its own libra
 on, (c) the same with the follow rule (crack iff the seen card is a land and the decider has
 --land-min lands in play + hand).
 
+API (the CLI's own functions, importable: `import position_lab as L`): `build_position` (a replay + frame, a
+site id, a record, a scenario or an opening seed), `save_scenario` / `load_scenario` (position-lab/1 JSON),
+`search_params` + `evaluate_position` (prior, value, searches with explicit settings: sims, chance_k, c_puct,
+the root belief, the leaf view, a root floor, the rule, seeds), `sweep` (a grid of them), `play_out`
+(candidates from a position in one deal mode, progress and cancel callbacks), `run_lab` (the whole lab).
+
 Report per spot, mode and candidate: score (win 1, draw 0.5) +- its se, the difference to the best
 candidate +- the paired se (the same deals), games, mean final turn and turns played from the spot; the
 network's view of the spot (prior per option, value, the belief's expected opponent hand, a
@@ -558,11 +564,17 @@ def deal_seed(si, i):
     return 1_000_003 * si + i
 
 
-def play_one(spot, modes, cand, ci, si, ev, keys, c_puct, sims, games, seed=1, conc=512, threads=4, move_log=0):
+class Cancelled(Exception):
+    """A play-out stopped by its `cancel` callback."""
+
+
+def play_one(spot, modes, cand, ci, si, ev, keys, c_puct, sims, games, seed=1, conc=512, threads=4, move_log=0,
+             progress=None, cancel=None):
     """One candidate at one spot: every mode x `games` deals in one zero-core driver, queued setups in the
     order (mode, deal i) - every candidate's driver has the same seed and the same order, so game gid of
     one candidate and of another are the same deal AND the same search streams (they part where the
-    games do: zero-core docs/search.md 2.3). -> ({tag: row}, perf, {tag: spec})."""
+    games do: zero-core docs/search.md 2.3). `progress(done, total)` is called after every network batch,
+    `cancel()` -> True stops the driver (Cancelled). -> ({tag: row}, perf, {tag: spec})."""
     from zero import games as G
     from zero.infer import drive
     seat = G.nn_seat('m', int(sims), c_puct, chance_k=0)
@@ -588,6 +600,10 @@ def play_one(spot, modes, cand, ci, si, ev, keys, c_puct, sims, games, seed=1, c
             if r.get('tag') is None:
                 raise SystemExit(f"game {r['gid']} played the driver's spec, not a queued setup")
             rows[r['tag']] = r
+        if progress is not None:
+            progress(len(rows), len(setups))
+        if cancel is not None and cancel():
+            raise Cancelled(f'{len(rows)} of {len(setups)} games played')
     drive(drv, {'m': ev}, on_batch=take)
     take()
     if len(rows) != len(setups):
@@ -1241,10 +1257,12 @@ def t1_canary(sources, log=print):
     ('any', 'clean') and side (play / draw): hands, how often the player Baubled its own library before its
     land drop, and with a look the land choice by the seen card's class (land / spell)."""
     recs = []
-    for spec, seed, moves, tag in sources:
+    for src in sources:
+        spec, seed, moves, tag = src[:4]
+        gen = src[4] if len(src) > 4 else None
         for r in t1_canary_game(spec, seed, moves):
             if r['composition']:
-                recs.append(dict(r, tag=tag))
+                recs.append(dict(r, tag=tag, gen=gen))
     out = {'records': len(recs), 'table': {}}
     for comp in ('any', 'clean'):
         for side in ('play', 'draw'):
@@ -1259,6 +1277,16 @@ def t1_canary(sources, log=print):
                                               'after_a_look': dict(by), 'without_a_look': dict(nolook)}
     out['examples'] = [{k: r[k] for k in ('tag', 'player', 'on_play', 'hand', 'looked', 'seen', 'land', 'cracked', 'actions')}
                        for r in recs if r['composition'] == 'clean'][:20]
+    out['records_list'] = [{k: r[k] for k in ('tag', 'gen', 'player', 'on_play', 'composition', 'looked', 'seen', 'land',
+                                              'cracked')} for r in recs]
+    # the fingerprint per generation (any composition, both sides): hands, Bauble looks before the land drop
+    by = collections.defaultdict(lambda: [0, 0, 0])
+    for r in recs:
+        b = by[r['gen']]
+        b[0] += 1
+        b[1] += r['looked']
+        b[2] += r['composition'] == 'clean'
+    out['by_gen'] = {str(k): {'hands': v[0], 'looked': v[1], 'clean': v[2]} for k, v in sorted(by.items(), key=lambda kv: (kv[0] is None, kv[0] or 0))}
     return out
 
 
@@ -1272,14 +1300,121 @@ def canary_sources(replays=REPLAYS, selfplay=(), gen_min=None):
         m = re.search(r'Generation (\d+)', rep.get('title') or '')
         if gen_min is not None and (not m or int(m.group(1)) < gen_min):
             continue
-        out.append((rep['spec'], replay_seed(rep), [(fm['p'], fm['a']) for fm in rep['frames']], os.path.basename(f)))
+        out.append((rep['spec'], replay_seed(rep), [(fm['p'], fm['a']) for fm in rep['frames']], os.path.basename(f),
+                    int(m.group(1)) if m else None))
     for path in selfplay:
         with open(path, encoding='utf-8') as fh:
             d = json.load(fh)
         for r in d['rows']:
             out.append((d['spec'], game_seed(int(d['seed']), int(r['gid'])), [tuple(m) for m in r['moves']],
-                        f'{os.path.basename(path)}:{r["gid"]}'))
+                        f'{os.path.basename(path)}:{r["gid"]}', d.get('iter') or d.get('gen')))
     return out
+
+
+# ------------------------------------------------------------------ the API (the CLI's own functions; for a UI)
+
+def build_position(replay=None, frame=None, site_id=None, record=None, scenario=None, opening_seed=None,
+                   spec=None, check=True):
+    """A position (a spot dict, JSON-serializable: `save_scenario`) from a replay + frame, a site replay id
+    + frame, a position record, a saved scenario, or an opening seed (`opening_spot`, `spec` default the
+    Delver mirror); checked against the replay's stored state when it has one."""
+    if scenario:
+        s = load_scenario(scenario) if isinstance(scenario, str) else dict(scenario)
+    elif opening_seed is not None:
+        s = opening_spot(spec or json.loads(A.SPEC_DELVER), int(opening_seed))
+        if s is None:
+            raise ValueError(f'seed {opening_seed}: the starting player has no turn-1 decision')
+    elif record:
+        s = spot_from_record(record)
+    elif site_id:
+        path = replay_for_site_id(site_id)
+        s = spot_from_replay(load_replay(path), int(frame), path)
+        s['site_id'] = site_id
+    elif replay:
+        s = spot_from_replay(load_replay(replay), int(frame), replay)
+    else:
+        raise ValueError('a replay + frame, a site id + frame, a record, a scenario or an opening seed')
+    if check:
+        check_spot(s)
+    return s
+
+
+def search_params(model_path, **over):
+    """The search settings of a position evaluation: the checkpoint's run's evaluation seat (`seat_keys`) with
+    `over` applied - sims, chance_k, c_puct, belief_tilt / belief_clip / belief_mix (tilt 0: no root belief),
+    leaf_value_view ('mover' | 'root'), root_min_visits (a floor per option), select / select_min_visits /
+    cq_c_visit / cq_c_scale, seeds (a list) -> a dict `evaluate_position` takes."""
+    _, keys, c_puct = seat_keys(model_path)
+    p = {'keys': dict(keys), 'c_puct': c_puct, 'sims': 64, 'chance_k': 0, 'seeds': [1000, 1001, 1002, 1003], 'floor': 0}
+    for k, v in over.items():
+        if k in ('sims', 'chance_k', 'c_puct', 'seeds', 'floor'):
+            p[k] = v
+        elif k == 'root_min_visits':
+            p['floor'] = int(v)
+        else:
+            p['keys'][k] = v
+    if not p['keys'].get('belief_tilt'):
+        for k in ('belief_tilt', 'belief_clip', 'belief_mix', 'belief_fast'):
+            p['keys'].pop(k, None)
+    return p
+
+
+def evaluate_position(spot, ev, params, pred=None):
+    """The network at a position: prior and value per option, and one search per seed with `params`
+    (`search_params`): per run the visits, Q and the rule's choice. -> dict."""
+    g = spot_game(spot)
+    d = spot['decider']
+    opts = options(g)
+    pri, val, _ = evaluate(ev, [g.encode(d)], [[a for a, _ in opts]])[:3]
+    if pred is None and params['keys'].get('belief_tilt'):
+        pred = belief_pred(ev, g, d)
+    n = len(params['seeds'])
+    res = search([g] * n, ev, int(params['sims']), params['seeds'], params['keys'], params['c_puct'],
+                 [pred] * n if pred is not None else None, chance_k=int(params['chance_k']), floor=[int(params['floor'])] * n)
+    names = dict(opts)
+    return {'decider': d, 'value': float(val[0][0]), 'prior': {names[a]: float(p) for (a, _), p in zip(opts, pri)},
+            'runs': [{'seed': sd, 'visits': {names.get(a, a): n_ for a, n_ in zip(r['acts'], r['n'])},
+                      'q': {names.get(a, a): q for a, q in zip(r['acts'], r['q'])},
+                      'choice': names.get(r['acts'][r['rule']], r['acts'][r['rule']])} for sd, r in zip(params['seeds'], res)]}
+
+
+def sweep(spot, ev, model_path, grid, pred=None):
+    """`evaluate_position` over every combination of `grid` ({param: [values]}, e.g. {'sims': [64, 800],
+    'chance_k': [0, 8]}). -> [(the combination, its evaluation)]."""
+    import itertools
+    keys = list(grid)
+    out = []
+    for combo in itertools.product(*(grid[k] for k in keys)):
+        over = dict(zip(keys, combo))
+        out.append((over, evaluate_position(spot, ev, search_params(model_path, **over), pred)))
+    return out
+
+
+def play_out(spot, candidates, model_path, mode='belief', games=100, sims=32, hold=(), exclude=(), seed=1, ev=None,
+             progress=None, cancel=None, si=0):
+    """Candidates (dicts {'name', 'forced', 'follow'}: option ids or labels, short forced sequences, a follow
+    rule) played out from a position in one deal mode, `games` paired deals each, in this process (one
+    driver per candidate; `progress(done, total)` / `cancel()` as `play_one`). -> the per-candidate summary
+    (`summarize`) and the raw rows."""
+    ev = ev or load_net(model_path)[0]
+    cfg, keys, c_puct = seat_keys(model_path)
+    from zero.mcts import belief_settings
+    tilt, clip, mix, _ = belief_settings(cfg, 'eval')
+    kw = {}
+    if mode in ('belief', 'pinned'):
+        kw = {'pred': [float(x) for x in belief_pred(ev, spot_game(spot), spot['decider'])], 'belief': (tilt or 1.0, clip, mix)}
+    if mode == 'pinned':
+        kw.update(hold=hold, exclude=exclude)
+    rows = {}
+    total = len(candidates) * games
+    for ci, cand in enumerate(candidates):
+        def prog(done, _n, ci=ci):
+            if progress is not None:
+                progress(ci * games + done, total)
+        r, _, _ = play_one(spot, [(mode, kw)], cand, ci, si, ev, keys, c_puct, sims, games, seed, progress=prog, cancel=cancel)
+        rows.update(r)
+    res, diffs = summarize(spot, mode, candidates, rows, games, si)
+    return {'candidates': res, 'diffs_vs_first': diffs, 'rows': rows}
 
 
 # ------------------------------------------------------------------ text
@@ -1528,7 +1663,7 @@ def cmd_canary(a):
     t0 = time.time()
     out = t1_canary(src)
     out.update(sources=len(src), seconds=round(time.time() - t0, 1), replays=a.replays, selfplay=a.selfplay, gen_min=gen_min)
-    print(json.dumps({k: v for k, v in out.items() if k != 'examples'}, indent=1))
+    print(json.dumps({k: v for k, v in out.items() if k not in ('examples', 'records_list')}, indent=1))
     if a.out:
         with open(a.out, 'w', encoding='utf-8') as f:
             json.dump(out, f, indent=1)

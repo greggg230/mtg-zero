@@ -260,3 +260,57 @@ def test_pooling_is_stratified_by_spot():
     assert out[1]['vs_first']['diff'] == round((m1 + m2) / 2, 4) == 0.0
     assert out[1]['vs_first']['se_paired'] == round((s1 ** 2 + s2 ** 2) ** 0.5 / 2, 4)
     assert out[1]['vs_first']['pairs'] == 8 and out[0]['vs_first']['diff'] == 0.0
+
+
+def test_t1_compositions_and_the_opening_spot():
+    tam, isl = L.TAMIYO, 'Volcanic Island'
+    clean = [isl, 'Polluted Delta', L.BAUBLE, tam, 'Daze', 'Force of Will', 'Murktide Regent']
+    assert L.t1_composition(clean) == 'clean'
+    assert L.t1_composition(clean[:-1] + ['Brainstorm']) == 'any'
+    assert L.t1_composition(clean[:-1] + ['Island']) == 'any', 'a second land is not clean'
+    assert L.t1_composition(clean[1:] + ['Daze']) is None
+    s = L.opening_spot(json.loads(A.SPEC_DELVER), 1754)
+    assert s['hand'] == sorted(s['hand']) and L.t1_composition(s['hand']) == 'clean'
+    g = L.check_spot(s)
+    crack, keep, look = L.t1_lines(g, s['decider'])
+    labels = {t for _, t in L.options(g)}
+    assert crack[0] in labels and keep[0] in labels and look[0] in labels
+    # a scenario round trip is the same spot
+    import tempfile
+    path = os.path.join(tempfile.mkdtemp(), 's.json')
+    L.save_scenario(s, path)
+    assert L.load_scenario(path)['actions'] == s['actions']
+    L.check_spot(L.load_scenario(path))
+
+
+def test_the_canary_sees_a_bauble_look_before_the_land():
+    """A turn-1 game scripted from an opening spot: the Bauble at the own library, then the Island-type land;
+    the canary reads the look (and the seen card: the library's top) and the land choice from the moves."""
+    s = L.opening_spot(json.loads(A.SPEC_DELVER), 1754)
+    d = s['decider']
+    g = E.Game('mtg', json.dumps(s['spec']), 2, s['seed'])
+    from zero import mcts
+    moves = []
+    plan = ['Play first', 'Keep', 'Keep', "Cast Mishra's Bauble", 'Pass priority', "Activate Mishra's Bauble", f'Target P{d + 1}',
+            'Pass priority', 'Play Volcanic Island']
+    for _ in range(60):
+        if g.over or not plan:
+            break
+        if len(g.legal()) == 1:
+            mcts.transition(g, g.legal()[0])
+            continue
+        opts = L.options(g)
+        want = plan[0] if g.to_move == d or plan[0] in ('Play first', 'Keep') else 'Pass priority'
+        a = next((x for x, t in opts if t == want), None)
+        if a is None:
+            a = next(x for x, t in opts if t == 'Pass priority')
+        elif g.to_move == d or want in ('Play first', 'Keep'):
+            plan.pop(0)
+        moves.append((g.to_move, a))
+        mcts.transition(g, a)
+    recs = {r['player']: r for r in L.t1_canary_game(json.dumps(s['spec']), s['seed'], moves)}
+    r = recs[d]
+    assert r['on_play'] and r['composition'] == 'clean' and r['looked'] and r['land'] == 'island' and not r['cracked']
+    assert r['seen'] is not None
+    out = L.t1_canary([(json.dumps(s['spec']), s['seed'], moves, 'x', 1)])
+    assert out['table']['clean play']['bauble_look_before_land'] == 1 and out['by_gen']['1']['looked'] == 1
