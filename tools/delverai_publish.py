@@ -23,6 +23,14 @@ yet. `--follow STATE`: publish the run a JSON file names as its "main" (the A/B 
 runs/ab/state.json: the main line moves to a fork's directory when the fork wins), read at every
 pass; the run argument is the fallback.
 
+Head-to-heads (`h2h` in each iteration row): the evaluated generation's own games in its Elo pool
+(`<run>/elo/<select tag>/results.json`, zero-core docs/az.md 5.4 and 20.1): against the generations
+1, 2, 4, 8 back (elo_offsets) and the pool's fixed anchors, each {back, iter} or {anchor, iter: the
+generation it is a copy of (the run's checkpoint with its sha256), elo}, with the generation's
+points, the games and its win rate. The pool's other games (the bots', the anchors' calibration,
+the matches where it is the earlier generation) are not its own. A bot or random evaluation of 0
+games (--eval-games 0) measured nothing: its yard_win / rand_win are None.
+
 Lineage (`lineage` in the progress record): the run's history since its first ancestor, for the
 site's charts from the beginning. A fork (the A/B experiments' `done` entries of --follow's file:
 the fork's directory, the run it forked from and at which iteration, its changed setting) keeps
@@ -52,7 +60,7 @@ from zero import elo as zelo, runctl  # noqa: E402
 SETTINGS = ('preset', 'iters', 'games', 'sims', 'sims_fast', 'p_full', 'sims_minor', 'temp_moves', 'arch', 'hidden',
             'blocks', 'heads', 'ff', 'policy_target', 'eval_games', 'eval_sims', 'eval_random_games', 'elo_games',
             'elo_sims', 'eval_every', 'yardstick', 'window', 'lr', 'seed', 'eval_select', 'eval_select_min_visits',
-            'elo_offsets')
+            'elo_offsets', 'elo_opponents', 'elo_anchor_games', 'elo_anchor_from')
 
 
 def _json(path, default=None):
@@ -82,20 +90,27 @@ def _r(x, n=4):
 def iteration_rows(run):
     """metrics.jsonl (remote evaluations merged) -> one compact row per iteration."""
     evals = {e['iter']: e for e in _jsonl(os.path.join(run, 'evals.jsonl')) if 'iter' in e}
+    pools = {}                                    # select tag -> {iteration: its head-to-heads}
     out = []
     for m in _jsonl(os.path.join(run, 'metrics.jsonl')):
         e = evals.get(m.get('iter'), {})
         y, rnd, elo = m.get('eval_yard') or e.get('eval_yard'), m.get('eval_random') or e.get('eval_random'), \
             m.get('elo') or e.get('elo')
+        # the evaluation move rule that rated it (zero-core docs/az.md 5.4: each rule its own Elo pool)
+        tag = (elo or {}).get('select') or (y or {}).get('select') or 'visits'
+        if tag not in pools:
+            pools[tag] = head_to_heads(run, tag)
+        # 0 games against the bot or random (--eval-games 0: no yardstick) measured nothing
+        ym, rm = (y if (y or {}).get('games') else None), (rnd if (rnd or {}).get('games') else None)
         sp, tr = m.get('selfplay') or {}, m.get('train') or {}
         out.append({
             'iter': m.get('iter'), 'time': m.get('time'), 'seconds': _r(m.get('seconds'), 1),
             'elo': _r((elo or {}).get('elo'), 1), 'elo_se': _r((elo or {}).get('se'), 1),
-            # the evaluation move rule that rated it (zero-core docs/az.md 5.4: each rule its own Elo pool)
-            'select': (elo or {}).get('select') or (y or {}).get('select') or 'visits',
-            'yard_win': _r((y or {}).get('win')), 'yard_se': _r((y or {}).get('se')), 'yard_games': (y or {}).get('games'),
-            'yard_margin': _r((y or {}).get('margin'), 2), 'yard_turns': _r((y or {}).get('rounds'), 2),
-            'rand_win': _r((rnd or {}).get('win')), 'rand_se': _r((rnd or {}).get('se')), 'rand_games': (rnd or {}).get('games'),
+            'select': tag,
+            'yard_win': _r((ym or {}).get('win')), 'yard_se': _r((ym or {}).get('se')), 'yard_games': (y or {}).get('games'),
+            'yard_margin': _r((ym or {}).get('margin'), 2), 'yard_turns': _r((ym or {}).get('rounds'), 2),
+            'rand_win': _r((rm or {}).get('win')), 'rand_se': _r((rm or {}).get('se')), 'rand_games': (rnd or {}).get('games'),
+            'h2h': pools[tag].get(m.get('iter'), []),
             'sp_games': sp.get('games'), 'sp_samples': sp.get('samples'), 'sp_turns': _r(sp.get('rounds'), 2),
             'sp_decisions': _r(sp.get('decisions_per_game'), 1), 'sp_games_per_h': _r(sp.get('games_per_h'), 0),
             'sp_unfinished': sp.get('unfinished'),
@@ -103,6 +118,96 @@ def iteration_rows(run):
             'value_acc': _r(tr.get('value_acc')), 'phases': {k: _r(v, 1) for k, v in (m.get('phases') or {}).items()},
             'eval_s': _eval_seconds(m, e),
         })
+    return out
+
+
+def _iter_of(name):
+    m = re.fullmatch(r'iter_(\d+)', name)
+    return int(m.group(1)) if m else None
+
+
+_SHA = {}
+
+
+def _sha256(path):
+    """A file's sha256, cached by its size and mtime (each checkpoint hashed once per process)."""
+    import hashlib
+    st = os.stat(path)
+    key = (st.st_size, st.st_mtime_ns)
+    got = _SHA.get(path)
+    if got and got[0] == key:
+        return got[1]
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    _SHA[path] = (key, h.hexdigest())
+    return h.hexdigest()
+
+
+def anchor_copies(run, anchors):
+    """{anchor player: the run's iteration whose checkpoint has the anchor's sha256, else None}.
+    The candidates: the numbers in the anchor's label and file name, and the iteration in its path
+    in the run's elo_anchors ('a192=.../r3-2b_iter_0192.pt' -> 192)."""
+    cfg = _json(os.path.join(run, 'config.json'), {}) or {}
+    try:
+        paths = {zelo.anchor_name(lb): p for lb, p in zelo.parse_anchors(cfg.get('elo_anchors', ''))}
+    except ValueError:
+        paths = {}
+    out = {}
+    for name, a in anchors.items():
+        cands = [int(x) for s in (a.get('label'), a.get('file')) for x in re.findall(r'\d+', str(s or ''))]
+        cands += [int(x) for x in re.findall(r'iter_(\d+)', str(paths.get(name, '')))]
+        out[name] = None
+        for k in dict.fromkeys(cands):
+            f = os.path.join(run, 'models', f'iter_{k:04d}.pt')
+            try:
+                if a.get('sha256') and os.path.exists(f) and _sha256(f) == a['sha256']:
+                    out[name] = k
+                    break
+            except OSError:
+                pass
+    return out
+
+
+def head_to_heads(run, tag='visits'):
+    """{iteration: its own games in the Elo pool `tag`}: against an earlier generation
+    {back, iter} (by back) and against each fixed anchor {anchor (its label), iter (the generation
+    it is a copy of, or None), elo (its fixed rating), sha} (in the pool's order), each with the
+    generation's points, the games and its win rate. Not its own: the bots' games, the anchors'
+    calibration, the matches in which it is the earlier generation (a later one's)."""
+    res = _json(os.path.join(zelo.pool_dir(run, tag), 'results.json'), {}) or {}
+    anchors = res.get('anchors') or {}
+    order = {n: i for i, n in enumerate(anchors)}
+    copies = anchor_copies(run, anchors) if anchors else {}
+    out = {}
+    for key, v in (res.get('pairs') or {}).items():
+        a, _, b = key.partition('|')
+        try:
+            pa, n = float(v[0]), int(v[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if n <= 0:
+            continue
+        ia, ib = _iter_of(a), _iter_of(b)
+        if ia is not None and ib is not None and ia != ib:
+            k, j = max(ia, ib), min(ia, ib)
+            pts = pa if k == ia else n - pa       # the pair is [points of a, games]
+            m = {'back': k - j, 'iter': j}
+        elif (ia is None) != (ib is None) and (a if ia is None else b) in anchors:
+            k, opp = (ib, a) if ia is None else (ia, b)
+            pts = n - pa if ia is None else pa
+            an = anchors[opp]
+            m = {'anchor': an.get('label') or opp, 'iter': copies.get(opp), 'elo': _r(an.get('elo'), 1),
+                 'sha': (an.get('sha256') or '')[:12] or None, '_order': order[opp]}
+        else:
+            continue
+        m.update(points=_r(pts, 2), games=n, win=_r(pts / n))
+        out.setdefault(k, []).append(m)
+    for ms in out.values():
+        ms.sort(key=lambda m: (1, m['_order']) if 'anchor' in m else (0, m['back']))
+        for m in ms:
+            m.pop('_order', None)
     return out
 
 
@@ -153,7 +258,7 @@ def now_record(run, cfg, prog, rows, state):
     # The latest checkpoint's evaluation while it runs (a remote one runs beside the next
     # self-play; a local one is the run's 'eval' phase).
     every = int(cfg.get('eval_every') or 1)
-    if last and last.get('elo') is None and last.get('yard_win') is None and last['iter'] % every == 0:
+    if last and last.get('elo') is None and last.get('yard_games') is None and last['iter'] % every == 0:
         if cfg.get('eval_remote'):
             out['evaluating'] = {'iter': last['iter'], 'since': last.get('time'), 'host': cfg['eval_remote']}
         elif prog.get('phase') == 'eval':
@@ -278,7 +383,9 @@ def lineage_record(run, forks):
             it = r.get('iter')
             if not isinstance(it, int) or it < sg['first'] or (sg['last'] is not None and it > sg['last']):
                 continue
-            rows.append(dict(r, g=sg['offset'] + it, gen=it, run=sg['run'], seg=k))
+            # the opponents' global generations too (in the run's own numbering: offset + its iteration)
+            h2h = [dict(m, g=None if m.get('iter') is None else sg['offset'] + m['iter']) for m in r.get('h2h') or []]
+            rows.append(dict(r, g=sg['offset'] + it, gen=it, run=sg['run'], seg=k, h2h=h2h))
     return {'segments': [{x: sg[x] for x in ('run', 'label', 'kind', 'first', 'last', 'offset')}
                          | {'from_g': sg['offset'] + sg['first']} for sg in segs], 'rows': rows}
 
