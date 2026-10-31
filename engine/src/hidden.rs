@@ -216,6 +216,43 @@ impl Game {
         self.objs[x.i()].def = a;
     }
 
+    /// Stratified chance outcomes (ENGINE.md 79.4; zero-core's `chance_mode_heavy` 'stratified'): the
+    /// cards of `viewer`'s own library interchangeable with its top card for every player - unknown to
+    /// everyone, in the same cloud domains: what `force_library_card` may swap -, the top included, in
+    /// library order. Empty when the library is empty or anyone knows its top card (its identity is
+    /// then no chance outcome for the viewer, or another player's knowledge pins it).
+    pub fn top_strata(&self, viewer: PlayerId) -> Vec<CardIdx> {
+        let lib = &self.players[viewer as usize].library;
+        let Some(&top) = lib.last() else { return Vec::new() };
+        if self.objs[top.i()].known != 0 {
+            return Vec::new();
+        }
+        let homes = |x: CardIdx| -> Vec<bool> { self.clouds.iter().map(|k| Self::in_domain_at(k, viewer, x, Zone::Library)).collect() };
+        let mine = homes(top);
+        lib.iter().copied().filter(|&x| self.objs[x.i()].known == 0 && homes(x) == mine).collect()
+    }
+
+    /// Put unit `unit` of `top_strata(viewer)` - the identity at that position of their sorted
+    /// identities (modulo their number) - on top of `viewer`'s library, swapped with a card holding it:
+    /// two interchangeable cards trade identities, so only information hidden from everyone changes.
+    pub fn set_top_stratum(&mut self, viewer: PlayerId, unit: u32) {
+        let s = self.top_strata(viewer);
+        if s.is_empty() {
+            return;
+        }
+        let mut defs: Vec<DefId> = s.iter().map(|&c| self.objs[c.i()].def).collect();
+        defs.sort_unstable();
+        let d = defs[unit as usize % defs.len()];
+        let top = *s.last().unwrap();
+        if self.objs[top.i()].def == d {
+            return;
+        }
+        let x = *s.iter().find(|&&c| self.objs[c.i()].def == d).unwrap();
+        let (a, b) = (self.objs[top.i()].def, self.objs[x.i()].def);
+        self.objs[top.i()].def = b;
+        self.objs[x.i()].def = a;
+    }
+
     /// A random discard from `p`'s hand (`hand` in canonical order): the
     /// card the next queued reveal names, if the hand holds one.
     /// Hand cards of one definition are interchangeable (ENGINE.md 10):

@@ -581,6 +581,49 @@ impl SearchGame for MtgAz {
         light::window(&self.g)
     }
 
+    /// Heavy decisions' passive option (ENGINE.md 79, zero-core docs/search.md 3.11): `act::PASS` when
+    /// legal - pass priority, keep, no (more) attackers, no block, find nothing, decline, done, no more
+    /// targets -, else none (a forced choice: a required target, a mode). Read only by zero-core's
+    /// reveal probe of a self-play seat with `sims_heavy`.
+    fn passive_action(&self, legal: &[u16]) -> Option<u16> {
+        legal.contains(&crate::decision::act::PASS).then_some(crate::decision::act::PASS)
+    }
+
+    /// Heavy decisions' revelations (ENGINE.md 79): which keys `step` pushed in a world determinized
+    /// for `viewer` tell it something - its own draws and looks (`KEY_DRAW` / `KEY_LOOK` to it; another
+    /// player's are masked `HIDDEN` and never count), another player's card made public (`KEY_REVEAL` of
+    /// a card it owns: a cast from its hand, a discard), coins and dice. Not: the viewer's own cards made
+    /// public (it knew its hand; a reveal from its own library would be news, none in the Delver
+    /// deck: a limitation), `KEY_AUTO` (a single-option decision answered, bookkeeping), `KEY_GAME`
+    /// (between the games of a match). Read only by zero-core's reveal probe.
+    /// Heavy decisions' stratified chance outcomes (ENGINE.md 79.4): the viewer's next own revelation is
+    /// its library's top card (a Bauble look at its own library, its next draw, a cantrip's first card);
+    /// its units are the cards interchangeable with the top (`Game::top_strata`; none while sideboarding,
+    /// or when anyone knows the top). Read only by a heavy search with `chance_mode_heavy` 'stratified'.
+    fn strata(&self, viewer: usize) -> u32 {
+        if self.m.sb.is_some() {
+            return 0;
+        }
+        self.g.top_strata(viewer as u8).len() as u32
+    }
+
+    fn set_stratum(&mut self, viewer: usize, unit: u32) {
+        if self.m.sb.is_none() {
+            self.g.set_top_stratum(viewer as u8, unit);
+        }
+    }
+
+    fn reveals(&self, key: u64, viewer: usize) -> bool {
+        use crate::hidden::{key_kind, key_payload, key_player, HIDDEN, KEY_COIN, KEY_DIE, KEY_DRAW, KEY_LOOK, KEY_REVEAL};
+        let who = key_player(key) as usize;
+        match key_kind(key) {
+            KEY_DRAW | KEY_LOOK => who == viewer && key_payload(key) != HIDDEN,
+            KEY_REVEAL => who != viewer,
+            KEY_COIN | KEY_DIE => true,
+            _ => false,
+        }
+    }
+
     /// The spectator view (`view.rs`): what the replay recorder stores at every step.
     fn export_state(&self) -> String {
         self.spectator_json()
