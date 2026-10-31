@@ -6,7 +6,8 @@ under runs/.
 
   python tools/explore_eval.py play --model CKPT --config RUN/config.json --games 96 --out on.json \\
       --explore all [--explore-games 1] [--explore-q-margin 0.1] [--explore-p ...] [--explore-window ...] \\
-      [--explore-pick first|game] [--sims 64 --sims-fast 16] [--conc 48] [--threads 4] [--torch-threads 4] [--seed 1]
+      [--explore-pick first|game] [--explore-min-visits 4] [--explore-max-actions 8]
+      [--sims 64 --sims-fast 16] [--conc 48] [--threads 4] [--torch-threads 4] [--seed 1]
   python tools/explore_eval.py play ... --out off.json                     # no --explore: the control
   python tools/explore_eval.py report on.json off.json [on2.json off2.json ...] [--json report.json]
   python tools/explore_eval.py fingerprint x.json [...]       # the games' fingerprints alone (an A/B arm)
@@ -89,6 +90,8 @@ def play(a):
     cfg['selfplay_explore_p'] = a.explore_p
     cfg['selfplay_explore_window'] = a.explore_window
     cfg['selfplay_explore_pick'] = a.explore_pick
+    cfg['selfplay_explore_min_visits'] = a.explore_min_visits
+    cfg['selfplay_explore_max_actions'] = a.explore_max_actions
     cfg['threads'] = a.threads
     scratch = os.path.join(os.path.dirname(os.path.abspath(a.out)), 'run_stub')
     R = Run(scratch, cfg)                          # (attributes only: nothing written)
@@ -268,6 +271,8 @@ def report(a):
            'sims_fast': on0['sims_fast'], 'explore': on0['explore'],
            'seconds': {'on': sum(on['seconds'] for on, _ in pairs), 'off': sum(off['seconds'] for _, off in pairs)},
            'leaves_per_s': {'on': [on['leaves_per_s'] for on, _ in pairs], 'off': [off['leaves_per_s'] for _, off in pairs]},
+           'leaves_per_game': {'on': round(sum(on['leaves'] for on, _ in pairs) / max(1, sum(len(on['rows']) for on, _ in pairs)), 1),
+                               'off': round(sum(off['leaves'] for _, off in pairs) / max(1, sum(len(off['rows']) for _, off in pairs)), 1)},
            'samples': {'on': sum(on['samples'] for on, _ in pairs), 'off': sum(off['samples'] for _, off in pairs)},
            'tally': t, 'masked_share': t['masked_share'], 'dropped_share': t['dropped_share']}
     per = collections.defaultdict(lambda: {'episodes': 0, 'prefix_ok': 0, 'seat_result': [], 'twin_result': [],
@@ -291,7 +296,10 @@ def report(a):
         e = per[tag]
         e['episodes'] += 1
         k = int(ep['step'])
-        e['prefix_ok'] += r['moves'][:k] == tw['moves'][:k] and r['moves'][k][0] == tw['moves'][k][0]
+        # (the twins are one game until the first exploring search with min_visits, the deviation without)
+        k0 = r['explore'].get('first_search')
+        k0 = k if k0 is None else min(k, int(k0))
+        e['prefix_ok'] += r['moves'][:k0] == tw['moves'][:k0] and r['moves'][k0][0] == tw['moves'][k0][0]
         p = int(ep['seat'])
         e['seat_result'].append(r['result'][p])
         e['twin_result'].append(tw['result'][p])
@@ -312,7 +320,9 @@ def report(a):
         if tt is None:
             continue
         d = {'drawn': tt.get('drawn', 0), 'opportunities': tt['opportunities'], 'blocked': tt['blocked'], 'episodes': tt['episodes'],
-             'gate_block_rate': round(tt['blocked'] / max(1, tt['blocked'] + tt['episodes']), 4),
+             'unsearched': tt.get('unsearched', 0), 'alt_under_min_visits': tt.get('alt_under', 0),
+             'gate_block_rate': round(tt['blocked'] / max(1, tt['blocked'] + tt.get('unsearched', 0) + tt['episodes']), 4),
+             'unsearched_rate': round(tt.get('unsearched', 0) / max(1, tt['blocked'] + tt.get('unsearched', 0) + tt['episodes']), 4),
              'overridden': tt['overridden'], 'q_gap_mean': tt['q_gap'], 'alt_unvisited': tt['alt_unvisited'],
              'ends': tt['ends'], 'turns': tt['turns']}
         if e:
@@ -377,6 +387,8 @@ def main(argv=None):
     p.add_argument('--explore-p', default='')
     p.add_argument('--explore-window', default='')
     p.add_argument('--explore-pick', default='first', help="'first' (any tag's first trigger) | 'game' (a tag drawn per game)")
+    p.add_argument('--explore-min-visits', type=int, default=4, help='searched alternatives (0 = off: unvisited ones gated on v_mix)')
+    p.add_argument('--explore-max-actions', type=int, default=8)
     p.add_argument('--out', required=True)
     r = sub.add_parser('report', help='ON OFF [ON OFF ...]: twin play files, exploration on then off')
     r.add_argument('files', nargs='+')

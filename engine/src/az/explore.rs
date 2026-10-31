@@ -9,7 +9,7 @@
 //!
 //! | tag | the habit | window |
 //! |---|---|---|
-//! | `fetch_crack` | activating a fetchland | the rest of the turn and the next |
+//! | `fetch_crack` | activating a fetchland | the rest of the turn (the seat may crack on the next turn: at its end step, in response) |
 //! | `daze_tapout` | casting a spell in its own main phase (turn >= 3, empty stack) that leaves it no untapped land while the opponent controls an Island and holds a card | the rest of the turn |
 //! | `fow_pitch_fow` | exiling Force of Will to pay its own Force of Will while another blue card could be exiled | the decision |
 //! | `delve_skip_spell` | a delve pick of a card that is not an instant or sorcery while one is still offered | the rest of the turn (the cast's picks) |
@@ -30,12 +30,13 @@ use crate::ids::{CardIdx, PlayerId};
 use zero_search::game::ExploreTag;
 
 /// The tags in id order (id k + 1 = entry k) and their defaults: the window
-/// in turns (zero-core `ExploreTag::window`: 0 = the decision only, 1 = the
-/// rest of the turn, 2 = ... and the next turn) and the chance per
-/// opportunity (ENGINE.md 75.2: fetch cracks come ~5 a game, a one-lander's
+/// in turns (zero-core `ExploreTag::window`, counted by `rounds()` = the
+/// global turn number, both players' turns: 0 = the decision only, 1 = the
+/// rest of the current turn, 2 = ... and the next turn) and the chance per
+/// opportunity (ENGINE.md 75.3: fetch cracks come ~5 a game, a one-lander's
 /// keep once in four).
 pub const TAGS: &[ExploreTag] = &[
-    ExploreTag { name: "fetch_crack", window: 2, p: 0.25 },
+    ExploreTag { name: "fetch_crack", window: 1, p: 0.25 },
     ExploreTag { name: "daze_tapout", window: 1, p: 0.5 },
     ExploreTag { name: "fow_pitch_fow", window: 0, p: 1.0 },
     ExploreTag { name: "delve_skip_spell", window: 1, p: 0.5 },

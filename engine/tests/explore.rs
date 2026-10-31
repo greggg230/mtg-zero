@@ -48,7 +48,7 @@ fn the_tags_and_their_ids() {
     assert_eq!(names, ["fetch_crack", "daze_tapout", "fow_pitch_fow", "delve_skip_spell", "volcanic_fetch", "keep_one_lander"]);
     assert_eq!((FETCH_CRACK, DAZE_TAPOUT, FOW_PITCH_FOW, DELVE_SKIP_SPELL, VOLCANIC_FETCH, KEEP_ONE_LANDER), (1, 2, 3, 4, 5, 6));
     assert_eq!(<MtgAz as SearchGame>::EXPLORE_TAGS, explore::TAGS);
-    assert_eq!(explore::TAGS.iter().map(|t| t.window).collect::<Vec<_>>(), [2, 1, 0, 1, 0, 0]);
+    assert_eq!(explore::TAGS.iter().map(|t| t.window).collect::<Vec<_>>(), [1, 1, 0, 1, 0, 0]);
     for f in explore::FETCHES {
         if let Ok(d) = CardDb::constructed().expect_id(f) {
             assert!(CardDb::constructed().def(d).types & engine::db::types::LAND != 0, "{f}");
@@ -363,4 +363,45 @@ fn a_game_reads_tags_without_changing() {
         };
         assert!(kinds.keys().all(|(t, k)| allowed(*t, k)), "{kinds:?}");
     }
+}
+
+#[test]
+fn a_window_of_one_turn_is_the_rest_of_the_current_turn() {
+    // zero-core's windows count `rounds()`: in a Delver game it is the global turn number (both
+    // players' turns), the same at every decision of a turn - its end step and cleanup included - and
+    // one more from the next turn's first decision on, whoever is active. So a window of 1 opened on
+    // the seat's own turn closes at the opponent's turn's first decision (it can crack there: upkeep,
+    // in response, at the end step), and one opened on the opponent's turn closes at the seat's.
+    let spec = delver_mirror();
+    let (mut ends, mut changes) = (0, 0);
+    for seed in 0..12u64 {
+        let mut g = MtgAz::new(&spec, seed).unwrap();
+        let mut rng = engine::rng::Rng::new(seed + 99);
+        let (mut key, mut legal) = (Vec::new(), Vec::new());
+        let mut last: Option<(u32, PlayerId)> = None;
+        for _ in 0..3000 {
+            if g.to_move().is_none() {
+                break;
+            }
+            let t = *g.g.turn();
+            assert_eq!(g.rounds(), t.number, "seed {seed}: rounds() is the turn number");
+            ends += matches!(t.step, Step::End | Step::Cleanup) as usize;
+            if let Some((r, active)) = last {
+                // (a turn without a decision - every option single, answered by the engine - is skipped)
+                assert!(g.rounds() >= r, "seed {seed}: {r} -> {}", g.rounds());
+                if g.rounds() == r && r > 0 {
+                    assert_eq!(t.active, active, "seed {seed}: the same turn, the same player's");
+                } else if g.rounds() > r && r > 0 {
+                    changes += 1;
+                    assert_eq!(t.active != active, (g.rounds() - r) % 2 == 1, "seed {seed}: turns {r} -> {}", g.rounds());
+                }
+            }
+            last = Some((g.rounds(), t.active));
+            legal.clear();
+            g.legal_actions(&mut legal);
+            let a = legal[rng.below(legal.len() as u32) as usize];
+            g.step(a, &mut key).unwrap();
+        }
+    }
+    assert!(ends > 50 && changes > 50, "end-step decisions {ends}, turn changes {changes}");
 }

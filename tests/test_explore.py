@@ -38,9 +38,9 @@ def uniform(lb):
     return pri, v, np.zeros((b, 8), np.float32)
 
 
-def play(explore, games=8, seed=3):
-    seat = G.nn_seat('m', 8, selfplay=True, sims_fast=4, p_full=0.25, temp_moves=60, sims_minor=2, policy_target='cq',
-                     cq_c_scale=0.3, view_samples=0.5)
+def play(explore, games=8, seed=3, sims=8):
+    seat = G.nn_seat('m', sims, selfplay=True, sims_fast=sims // 2, p_full=0.25, temp_moves=60, sims_minor=2,
+                     policy_target='cq', cq_c_scale=0.3, view_samples=0.5)
     d = G.Driver('mtg', [[seat, seat]] * games, spec=P.SPEC_DELVER, concurrency=games, seed=seed, record=True, threads=2,
                  move_log=100_000, **({'explore': explore} if explore else {}))
     rows, masked = [], 0
@@ -54,12 +54,16 @@ def play(explore, games=8, seed=3):
         if s is not None and 'masked' in s:
             masked += int(s['masked'].sum())
     rows += d.take_results()
+    s = d.take_samples()
+    if s is not None and 'masked' in s:
+        masked += int(s['masked'].sum())
     return sorted(rows, key=lambda r: r['gid']), masked
 
 
 def test_the_tags_and_a_delver_driver_exploring_them():
     assert [t[0] for t in G.info('mtg')['explore_tags']] == TAGS
-    x = {'games': 1.0, 'q_margin': 1.0, 'mask_z': True, 'tags': [{'tag': t} for t in TAGS]}
+    # min_visits 0 (no floor): every episode's game is the game without exploration until its deviation
+    x = {'games': 1.0, 'q_margin': 1.0, 'mask_z': True, 'min_visits': 0, 'tags': [{'tag': t} for t in TAGS]}
     on, masked = play(x)
     off, _ = play(None)
     eps = [(r, r['explore']['episode']) for r in on if r['explore'].get('episode')]
@@ -68,6 +72,17 @@ def test_the_tags_and_a_delver_driver_exploring_them():
         tw = off[r['gid']]
         k = ep['step']
         assert r['moves'][:k] == tw['moves'][:k] and r['moves'][k][1] != tw['moves'][k][1], r['gid']
+    # min_visits 4 (the default) at 32 simulations: until the first exploring search; every deviation to
+    # an option of >= 4 root visits; the floored searches' accounting
+    on4, _ = play(dict(x, min_visits=4), sims=32)
+    off4, _ = play(None, sims=32)
+    eps4 = [r['explore']['episode'] for r in on4 if r['explore'].get('episode')]
+    assert eps4 and all(e['alt_visits'] >= 4 for e in eps4)
+    assert sum(r['explore']['floored'] for r in on4) > 0 and sum(r['explore']['raised'] for r in on4) > 0
+    for r in on4:
+        k = r['explore']['first_search']
+        if k is not None:
+            assert r['moves'][:k] == off4[r['gid']]['moves'][:k], r['gid']
     # the evidence tool rebuilds each game from its move log (the engine's view at every step)
     T = tool()
     for r in on[:3]:
