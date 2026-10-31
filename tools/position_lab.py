@@ -268,15 +268,22 @@ def belief_pred(ev, g, p):
     return np.asarray(out[3][0], np.float32)
 
 
-def search(games, ev, sims, seeds, keys, c_puct, preds=None):
+def search(games, ev, sims, seeds, keys, c_puct, preds=None, chance_k=0, floor=None):
     """One Rust tree per game with the evaluation seat's settings (root-view leaves, the root belief,
-    the move rule), `sims` simulations each in lockstep (root_view.py's search_all)."""
+    the move rule), `sims` simulations each in lockstep (root_view.py's search_all); `chance_k` (an int,
+    or one per tree): the tree's chance-node replays (zero-core docs/search.md 3: an edge holding >= k
+    sampled outcome keys replays one of them instead of sampling afresh - the search keeps building on
+    hypothetical states after a hidden outcome; the run's searches use 0); `floor` (one per tree): a root
+    minimum of visits per option instead of the seat's (zero-core docs/search.md 3.5's forced walks)."""
     import numpy as np
+    ks = list(chance_k) if isinstance(chance_k, (list, tuple)) else [int(chance_k)] * len(games)
     rv = keys.get('leaf_value_view', 'mover') == 'root'
     trees = []
     for i, (g, s) in enumerate(zip(games, seeds)):
         t = g.search_tree(True, int(s))
-        if keys.get('root_min_visits'):
+        if floor is not None and floor[i]:
+            t.set_root_min(int(floor[i]))
+        elif keys.get('root_min_visits'):
             t.set_root_min(int(keys['root_min_visits']) if len(g.legal()) <= keys.get('root_min_visits_max_actions', 4) else 0)
         if keys.get('belief_tilt'):
             t.set_belief(np.asarray(preds[i], np.float32), g, float(keys['belief_tilt']), float(keys['belief_clip']),
@@ -285,7 +292,7 @@ def search(games, ev, sims, seeds, keys, c_puct, preds=None):
     for _ in range(sims):
         rows, acts, owners = [], [], []
         for j, (g, t) in enumerate(zip(games, trees)):
-            r = t.simulate(g, c_puct, root_view=True) if rv else t.simulate(g, c_puct)
+            r = t.simulate(g, c_puct, chance_k=ks[j], root_view=rv)
             if r is None:
                 continue
             x, a = r[1], r[2]
@@ -348,6 +355,90 @@ def net_view(g, spot, ev, keys, c_puct, sims=64, reps=4):
 
 # ------------------------------------------------------------------ candidates
 
+def is_crack(label):
+    return label.startswith('Activate ') and label[9:].split(' [')[0] in FETCHES
+
+
+def is_bauble(label):
+    return label in ('Cast ' + BAUBLE, 'Activate ' + BAUBLE)
+
+
+def deep_settings(ks, floor):
+    """The deep searches: the evaluation seat's search at each chance_k of `ks` (largest first), then with a
+    root floor of `floor` visits per option (0: none) at each - the floor is the only way an option of prior
+    ~0 is searched at all (a PUCT root never visits it at any budget), so it is how 'what is Bauble-first
+    worth after the look' gets measured."""
+    out = [{'name': f'k={k}', 'chance_k': k, 'floor': 0} for k in ks]
+    if floor:
+        out += [{'name': f'k={k} floor {floor}', 'chance_k': k, 'floor': floor} for k in ks]
+    return out
+
+
+def deep_view(g, spot, ev, keys, c_puct, pred, sims=800, settings=None, reps=8):
+    """The network's search at the spot at a large budget, per setting (`deep_settings`), `reps` seeds each
+    (the evaluation seat's settings otherwise: rule, root-view leaves, the root belief): per option the mean
+    visit share and the mean Q (over the seeds that visited it), per seed the rule's move; the shares and
+    Q of 'crack a fetch now' and 'Mishra's Bauble first'; the modal move of the rule (`pick`). Every
+    setting's trees run in one lockstep batch."""
+    import numpy as np
+    names = dict(options(g))
+    settings = settings or deep_settings((8, 0), 0)
+    m = len(g.legal())
+    games, seeds, kk, ff, which = [], [], [], [], []
+    for si, st in enumerate(settings):
+        fl = min(int(st['floor']), sims // (2 * m)) if st['floor'] else 0      # at most half the budget
+        for r in range(reps):
+            games.append(g)
+            seeds.append(7001 + 977 * r)       # the same seeds for every setting: paired searches
+            kk.append(int(st['chance_k']))
+            ff.append(fl)
+            which.append(si)
+    t0 = time.time()
+    res = search(games, ev, sims, seeds, keys, c_puct, [pred] * len(games), chance_k=kk, floor=ff)
+    out = {'sims': sims, 'reps': reps, 'seconds': round(time.time() - t0, 1), 'by_setting': {}}
+    for si, st in enumerate(settings):
+        rr = [r for r, x in zip(res, which) if x == si]
+        acts = rr[0]['acts']
+        lab = [names.get(a, str(a)) for a in acts]
+        share = [float(np.mean([r['n'][i] / max(1, sum(r['n'])) for r in rr])) for i in range(len(acts))]
+        q = [(float(np.mean([r['q'][i] for r in rr if r['q'][i] is not None])) if any(r['q'][i] is not None for r in rr)
+              else None) for i in range(len(acts))]
+        moves = collections.Counter(lab[r['rule']] for r in rr)
+        sel = lambda f: [i for i, x in enumerate(lab) if f(x)]  # noqa: E731
+        crack, baub = sel(is_crack), sel(is_bauble)
+        best = lambda ix: max((q[i] for i in ix if q[i] is not None), default=None)  # noqa: E731
+        out['by_setting'][st['name']] = {
+            'chance_k': st['chance_k'], 'floor': ff[which.index(si)],
+            'visit_share': {x: round(v, 4) for x, v in zip(lab, share)},
+            'q': {x: (round(v, 4) if v is not None else None) for x, v in zip(lab, q)},
+            'crack_share': round(sum(share[i] for i in crack), 4), 'bauble_share': round(sum(share[i] for i in baub), 4),
+            'crack_q': r4(best(crack)), 'bauble_q': r4(best(baub)),
+            'rule_moves': dict(moves), 'pick': moves.most_common(1)[0][0]}
+    return out
+
+
+def cached_deep_view(cache, si, g, spot, ev, keys, c_puct, pred, deep, model_path):
+    """`deep_view`, kept in the cache directory (keyed by everything it depends on): a resumed lab adds the
+    same deep-pick candidates as the first run."""
+    import hashlib
+    key = hashlib.sha256(json.dumps({'spot': [spot['source'], spot['frame'], spot['seed'], spot['actions']], 'deep': deep,
+                                     'keys': keys, 'c_puct': c_puct, 'model': model_id(model_path),
+                                     'pred': [float(x) for x in pred]}, sort_keys=True).encode('utf-8')).hexdigest()
+    path = os.path.join(cache, f'deep_{si:02d}.json') if cache else None
+    if path and os.path.exists(path):
+        with open(path, encoding='utf-8') as f:
+            d = json.load(f)
+        if d.get('key') == key:
+            return d['view']
+    v = deep_view(g, spot, ev, keys, c_puct, pred, deep['sims'], deep['settings'], deep['reps'])
+    if path:
+        os.makedirs(cache, exist_ok=True)
+        with open(path + '.tmp', 'w', encoding='utf-8') as f:
+            json.dump({'key': key, 'view': v}, f)
+        os.replace(path + '.tmp', path)
+    return v
+
+
 def parse_cand(text):
     """A --cand: a JSON object {"name", "forced", "follow"}, or a ';'-separated label sequence."""
     text = text.strip()
@@ -386,16 +477,36 @@ def bauble_line(g, d):
     return line + ['Activate ' + BAUBLE, f'Target P{d + 1}', 'resolve']
 
 
-def bauble_candidates(spot, g, land_min):
+def bauble_candidates(spot, g, land_min, view=None, deep_modes=None):
     """(a) the actual play (the frame's move), (b) the Bauble line then the network, (c) the line with the
-    follow rule (crack iff the seen card is a land and the decider has >= land_min lands)."""
+    follow rule (crack iff the seen card is a land and the decider has >= land_min lands); with a deep view
+    (`deep_view`), the move each deep setting picks, forced alone and the network on - (d), (e), ... in the
+    settings' order - unless it is another candidate already (then the report says which), played in
+    `deep_modes` only."""
     names = dict(options(g))
     actual = names[spot['recorded']['a']]
     line = bauble_line(g, spot['decider'])
-    return [{'name': f'(a) {actual} (the actual play)', 'forced': [label_item(actual)], 'follow': None},
-            {'name': '(b) Bauble at own library first, network on', 'forced': line, 'follow': None},
-            {'name': f'(c) Bauble first + rule (crack iff land & >= {land_min} lands)', 'forced': line,
-             'follow': {'rule': 'bauble_fetch', 'land_min': land_min, 'fetches': list(FETCHES)}}]
+    cands = [{'name': f'(a) {actual} (the actual play)', 'forced': [label_item(actual)], 'follow': None},
+             {'name': '(b) Bauble at own library first, network on', 'forced': line, 'follow': None},
+             {'name': f'(c) Bauble first + rule (crack iff land & >= {land_min} lands)', 'forced': line,
+              'follow': {'rule': 'bauble_fetch', 'land_min': land_min, 'fetches': list(FETCHES)}}]
+    deep = (view or {}).get('deep')
+    if deep:
+        tags = iter('defghij')
+        for name, dv in deep['by_setting'].items():
+            pick = dv['pick']
+            same = next((c['name'] for c in cands if c['forced'] == [label_item(pick)] and not c.get('follow')), None)
+            if same:
+                dv['candidate'] = same
+                continue
+            tag = next(tags)
+            dv['candidate'] = f'({tag})'
+            c = {'name': f'({tag}) {pick} (the deep {name} search\'s pick), network on', 'forced': [label_item(pick)],
+                 'follow': None}
+            if deep_modes:
+                c['modes'] = list(deep_modes)
+            cands.append(c)
+    return cands
 
 
 def start_block(mode, cand, deal_seed, pred=None, belief=None, hold=(), exclude=()):
@@ -517,7 +628,7 @@ def model_id(path):
 
 
 def play(jobs, model_path, keys, c_puct, sims, games, seed, conc, threads, search_threads, procs, diag, cache=None,
-         log=print, cached_only=False):
+         log=print, cached_only=False, play_cands=None):
     """Every (spot, candidate, mode) of `jobs` ([(spot, [(mode, start kwargs)], candidates)]) in `procs`
     worker processes (each: `threads` torch threads, `search_threads` search threads, below-normal
     priority), jobs found in `cache` (same key) reused. -> (rows by tag, line infos by tag, perfs)."""
@@ -529,7 +640,8 @@ def play(jobs, model_path, keys, c_puct, sims, games, seed, conc, threads, searc
         for m, _ in md:
             order.setdefault(m, len(order))
     work = sorted([(spot, m, cand, ci, si, keys, c_puct, sims, games, seed, conc, search_threads, diag, cache)
-                   for si, (spot, md, cands) in enumerate(jobs) for ci, cand in enumerate(cands) for m in md],
+                   for si, (spot, md, cands) in enumerate(jobs) for ci, cand in enumerate(cands) for m in md
+                   if m[0] in cand.get('modes', [m[0]])],
                   key=lambda w: (order[w[1][0]], w[4], w[3]))
     rows, infos, perfs = {}, {}, []
     todo = []
@@ -551,6 +663,11 @@ def play(jobs, model_path, keys, c_puct, sims, games, seed, conc, threads, searc
     if cached_only:
         log(f'  --cached-only: {len(todo)} jobs not played')
         todo = []
+    if play_cands is not None:
+        skip = [w for w in todo if w[3] not in play_cands]
+        if skip:
+            log(f'  --play-cands {sorted(play_cands)}: {len(skip)} jobs of other candidates not played')
+        todo = [w for w in todo if w[3] in play_cands]
     t0 = time.time()
     if todo:
         with ProcessPoolExecutor(max_workers=max(1, min(procs, len(todo))), initializer=_worker_init,
@@ -617,17 +734,21 @@ def r4(x):
     return None if x is None else round(x, 4)
 
 
-def summarize(spot, mode, cands, rows, games, si):
-    """Per candidate: score +- se, the paired differences to the best and to the first (the actual play),
-    the per-deal differences to the first (for pooling)."""
+def summarize(spot, mode, cands, rows, games, si, here=None):
+    """Per candidate (of `here`, default all; None for the others): score +- se, the paired differences to
+    the best and to the first (the actual play), the per-deal differences to the first (for pooling)."""
     d = spot['decider']
     turn0 = spot['state'].get('turn') or 0
-    by = [[rows[f'{si}|{mode}|{ci}|{i}'] for i in range(games)] for ci in range(len(cands))]
-    scores = [[float(r['result'][d]) for r in rs] for rs in by]
-    means = [stats(s)[0] for s in scores]
-    best = max(range(len(cands)), key=lambda c: means[c])
+    here = list(range(len(cands))) if here is None else list(here)
+    by = [[rows[f'{si}|{mode}|{ci}|{i}'] for i in range(games)] if ci in here else None for ci in range(len(cands))]
+    scores = [[float(r['result'][d]) for r in rs] if rs else None for rs in by]
+    means = [stats(s)[0] if s else None for s in scores]
+    best = max(here, key=lambda c: means[c])
     out = []
     for ci, cand in enumerate(cands):
+        if ci not in here:
+            out.append(None)
+            continue
         m, se = stats(scores[ci])
         rs = by[ci]
         rec = {'candidate': cand['name'], 'games': len(rs), 'score': r4(m), 'se': r4(se),
@@ -639,31 +760,46 @@ def summarize(spot, mode, cands, rows, games, si):
             dm, dse = stats([a - b for a, b in zip(scores[ci], scores[ref])])
             rec[key] = {'diff': r4(dm), 'se_paired': r4(dse), 'pairs': games}
         out.append(rec)
-    diffs = [[a - b for a, b in zip(scores[ci], scores[0])] for ci in range(len(cands))]
+    diffs = [[a - b for a, b in zip(scores[ci], scores[0])] if scores[ci] else None for ci in range(len(cands))]
     return out, diffs
 
 
-def pooled(spots_out, mode, n_cands):
+def pooled(spots_out, mode, n_cands, pick=None):
     """Over the spots that played `mode` (equal weight): the mean score per candidate, and the paired
     difference to the first candidate - the mean of the spots' mean differences, its se stratified by
-    spot (sqrt(sum of the spots' squared paired se) / spots: deals independent across spots)."""
+    spot (sqrt(sum of the spots' squared paired se) / spots: deals independent across spots). `pick`:
+    instead of candidate index ci, `pick(spot report, ci)` names each spot's candidate (None: skip)."""
     out = []
     for ci in range(n_cands):
         sc, means, ses, pairs = [], [], [], 0
         for so in spots_out:
             res = so['modes'].get(mode)
-            if not res:
+            cj = pick(so, ci) if pick else ci
+            if not res or cj is None or cj >= len(res['candidates']) or res['candidates'][cj] is None:
                 continue
-            sc.append(res['candidates'][ci]['score'])
-            m, se = stats(res['_diffs'][ci])
+            sc.append(res['candidates'][cj]['score'])
+            m, se = stats(res['_diffs'][cj])
             means.append(m)
             ses.append(se)
-            pairs += len(res['_diffs'][ci])
+            pairs += len(res['_diffs'][cj])
         k = len(means)
         out.append({'candidate': ci, 'spots': len(sc), 'score': r4(sum(sc) / len(sc)) if sc else None,
                     'vs_first': {'diff': r4(sum(means) / k) if k else None,
                                  'se_paired': r4(math.sqrt(sum(x * x for x in ses)) / k) if k else None, 'pairs': pairs}})
     return out
+
+
+def deep_pick_index(so, setting):
+    """The index of the candidate that is a deep setting's pick at a spot (its own (d), (e), ..., or the
+    candidate it already is), or None."""
+    dv = ((so['view'].get('deep') or {}).get('by_setting') or {}).get(setting)
+    if not dv or not dv.get('candidate'):
+        return None
+    name = dv['candidate']
+    for ci, c in enumerate(so['candidates']):
+        if c == name or c.startswith(name + ' '):
+            return ci
+    return None
 
 
 def deal_summary(spot, si, md, cand, games, top=10):
@@ -702,7 +838,7 @@ def line_summary(infos, scores):
 
 
 def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_sims, view_reps, threads, search_threads,
-            procs, conc, seed, log=print, diagnose_lines=True, cache=None, cached_only=False):
+            procs, conc, seed, log=print, diagnose_lines=True, cache=None, cached_only=False, deep=None, play_cands=None):
     """The lab for every spot: its checks and the network's view, then every play-out."""
     ev, model, check_head = load_net(model_path)
     cfg, keys, c_puct = seat_keys(model_path)
@@ -719,6 +855,11 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
     for spot in spots:
         g = check_spot(spot)
         view, pred = net_view(g, spot, ev, keys, c_puct, view_sims, view_reps)
+        if deep and deep.get('sims'):
+            view['deep'] = cached_deep_view(cache, len(jobs), g, spot, ev, keys, c_puct, pred, deep, model_path)
+            log(f'  deep search {deep["sims"]} x {deep["reps"]}: ' + '; '.join(
+                f'{k}: pick {v["pick"]} (crack {v["crack_share"]:.3f} q {v["crack_q"]}, Bauble {v["bauble_share"]:.3f} q {v["bauble_q"]})'
+                for k, v in view['deep']['by_setting'].items()) + f' ({view["deep"]["seconds"]} s)')
         cands = cand_fn(spot, g, view)
         md, skipped = [], {}
         for mode in modes:
@@ -743,26 +884,27 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
     log(f'play-outs: {n} games at {sims} simulations per move, {procs} processes')
     t1 = time.time()
     rows, infos, perfs = play(jobs, model_path, keys, c_puct, sims, games, seed, conc, threads, search_threads, procs,
-                              diagnose_lines, cache=cache, log=log, cached_only=cached_only)
+                              diagnose_lines, cache=cache, log=log, cached_only=cached_only, play_cands=play_cands)
     out['perf'] = {'games': len(rows), 'seconds': round(time.time() - t1, 1), 'jobs': perfs,
                    'cut': sum(p['cut'] for p in perfs)}
     for si, (spot, md, cands) in enumerate(jobs):
         so = out['spots'][si]
         d = spot['decider']
         for mode, _ in md:
-            if not all(f'{si}|{mode}|{ci}|{i}' in rows for ci in range(len(cands)) for i in range(games)):
+            here = [ci for ci, c in enumerate(cands) if mode in c.get('modes', [mode])]
+            if not all(f'{si}|{mode}|{ci}|{i}' in rows for ci in here for i in range(games)):
                 so.setdefault('incomplete_modes', []).append(mode)    # (--cached-only: not every job played yet)
                 continue
-            res, diffs = summarize(spot, mode, cands, rows, games, si)
+            res, diffs = summarize(spot, mode, cands, rows, games, si, here)
             # the decider's per-deal results of each candidate (deal i: the same world for all)
             entry = {'candidates': res, '_diffs': diffs,
                      'results': [[float(rows[f'{si}|{mode}|{ci}|{i}']['result'][d]) for i in range(games)]
-                                 for ci in range(len(cands))]}
+                                 if ci in here else None for ci in range(len(cands))]}
             if diagnose_lines:
                 entry['lines'] = []
                 for ci, cand in enumerate(cands):
                     tags = [f'{si}|{mode}|{ci}|{i}' for i in range(games)]
-                    if not all(t in infos for t in tags):
+                    if ci not in here or not all(t in infos for t in tags):
                         entry['lines'].append(None)
                         continue
                     entry['lines'].append(line_summary([infos[t] for t in tags], [float(rows[t]['result'][d]) for t in tags]))
@@ -786,6 +928,10 @@ def table(rep):
             lines.append(f'   search {s["reps"]}x{s["sims"]}: ' + ', '.join(
                 f'{k} n={n} q={s["q"][k]}' for k, n in sorted(s['visits'].items(), key=lambda kv: -kv[1])[:4])
                 + f'; moves {s["rule_moves"]}')
+        for k, dv in ((v.get('deep') or {}).get('by_setting') or {}).items():
+            lines.append(f'   deep {k} ({v["deep"]["reps"]}x{v["deep"]["sims"]}): crack share {dv["crack_share"]:.3f}'
+                         f' q {dv["crack_q"]}, Bauble share {dv["bauble_share"]:.3f} q {dv["bauble_q"]}; rule moves'
+                         f' {dv["rule_moves"]} -> {dv.get("candidate")}')
         lines.append('   opponent hand: ' + ', '.join(f'{k} x{c}' for k, c in v['opponent_hand'].items())
                      + ' | belief: ' + ', '.join(f'{k} {e:.2f}' for k, e in list(v['belief_hand'].items())[:6]))
         for m, d in (so.get('deals') or {}).items():
@@ -796,12 +942,15 @@ def table(rep):
             row = f'   {name[:50]:<50}'
             for m in modes:
                 c = so['modes'][m]['candidates'][ci]
+                if c is None:
+                    row += '-'.rjust(32)
+                    continue
                 vb = c['vs_best']
                 row += f'{c["score"]:.3f}+-{c["se"]:.3f} ({vb["diff"]:+.3f}+-{vb["se_paired"]:.3f})'.rjust(32)
             lines.append(row)
         lines.append('   games {} per cell; mean turns from the spot: {}'.format(
             so['modes'][modes[0]]['candidates'][0]['games'] if modes else 0,
-            ', '.join(f'{m} ' + '/'.join(f'{c["turns_from_spot"]:.1f}' for c in so['modes'][m]['candidates']) for m in modes)))
+            ', '.join(f'{m} ' + '/'.join(f'{c["turns_from_spot"]:.1f}' for c in so['modes'][m]['candidates'] if c) for m in modes)))
         for m in modes:
             for ci, li in enumerate(so['modes'][m].get('lines') or []):
                 if li:
@@ -929,13 +1078,22 @@ def cmd_spot(a):
 def cmd_bauble(a):
     modes = check_modes(a)
     low_priority(a.threads)
-    rep = run_lab(spots_of(a), lambda s, g, v: bauble_candidates(s, g, a.land_min), a.model, modes, a.hold, a.exclude,
-                  a.games, a.sims, a.view_sims, a.view_reps, a.threads, a.search_threads, a.procs, a.conc, a.seed,
-                  diagnose_lines=not a.no_diagnose, cache=a.cache,
-                  cached_only=a.cached_only)
-    rep['candidate_names'] = ['(a) the actual play (crack now)', '(b) Bauble first, network on',
-                              f'(c) Bauble first + rule (land_min {a.land_min})']
-    rep['pooled'] = {m: pooled(rep['spots'], m, 3) for m in modes}
+    ks = sorted({int(x) for x in a.deep_k.split(',') if x.strip()}, reverse=True)
+    deep_modes = [m for m in a.deep_modes.split(',') if m]
+    settings = deep_settings(ks, a.deep_floor)
+    deep = {'sims': a.deep_sims, 'settings': settings, 'reps': a.deep_reps} if a.deep_sims else None
+    rep = run_lab(spots_of(a), lambda s, g, v: bauble_candidates(s, g, a.land_min, v, deep_modes), a.model, modes, a.hold,
+                  a.exclude, a.games, a.sims, a.view_sims, a.view_reps, a.threads, a.search_threads, a.procs, a.conc, a.seed,
+                  diagnose_lines=not a.no_diagnose, cache=a.cache, cached_only=a.cached_only, deep=deep,
+                  play_cands=None if a.play_cands is None else {int(x) for x in a.play_cands.split(',') if x.strip()})
+    names = ['(a) the actual play (crack now)', '(b) Bauble first, network on', f'(c) Bauble first + rule (land_min {a.land_min})']
+    picks = [None, None, None]
+    for st in (settings if deep else []):
+        names.append(f'the deep {st["name"]} search\'s pick')
+        picks.append(st['name'])
+    rep['candidate_names'] = names
+    rep['pooled'] = {m: pooled(rep['spots'], m, len(names),
+                               pick=lambda so, ci: ci if picks[ci] is None else deep_pick_index(so, picks[ci])) for m in modes}
     finish(rep, a)
 
 
@@ -955,6 +1113,14 @@ def main(argv=None):
     b = sub.add_parser('bauble', help="the Bauble-before-crack demo: (a) crack now, (b) Bauble first, (c) + the rule")
     common(b)
     b.add_argument('--land-min', type=int, default=4)
+    b.add_argument('--deep-sims', type=int, default=0, help='a deep search at each spot (e.g. 800) whose picks join the candidates')
+    b.add_argument('--deep-k', default='0,8', help='its chance_k values (the largest first picks (d), the next (e))')
+    b.add_argument('--deep-reps', type=int, default=8)
+    b.add_argument('--deep-floor', type=int, default=100, help='also each chance_k with this root floor of visits per '
+                   'option (0: none; at most half the budget)')
+    b.add_argument('--deep-modes', default='belief', help='the modes the deep picks are played in')
+    b.add_argument('--play-cands', help='play only these candidate indices (e.g. 3,4,5: the deep picks; the others '
+                   'from the cache, else listed as not played yet)')
     b.set_defaults(fn=cmd_bauble)
     w = sub.add_parser('show', help='the text table of a report')
     w.add_argument('--report', required=True)
