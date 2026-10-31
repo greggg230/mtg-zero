@@ -238,3 +238,12 @@ def test_candidates_parse():
         ["Cast Mishra's Bauble", 'Pass priority', 12]
     c = L.parse_cand('{"name": "x", "forced": ["*"], "follow": {"rule": "bauble_fetch"}}')
     assert c['follow'] == {'rule': 'bauble_fetch'} and c['name'] == 'x'
+
+
+def test_deal_summaries_report_the_played_deals(spot):
+    o = 1 - spot['decider']
+    real = set(hand(L.spot_game(spot), o))
+    d = L.deal_summary(spot, 0, [('actual', {})], {'forced': []}, 20)
+    assert set(d) == {'actual', 'uniform'}, 'the uniform deal beside the modes, for reference'
+    assert all(v == 1.0 for v in d['actual'].values()) and set(d['actual']) == real
+    assert any(v < 1.0 for v in d['uniform'].values())

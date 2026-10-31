@@ -8,7 +8,7 @@
 //! "start": {"seed": 889364660, "actions": [384, 0, ...], "deal": "belief", "deal_seed": 7,
 //!           "pred": [...], "tilt": 1, "clip": 20, "mix": 0.25,
 //!           "hold": ["Force of Will"], "exclude": ["Daze"],
-//!           "forced": ["Cast Mishra's Bauble", "Pass priority", 97, "*"],
+//!           "forced": ["Cast Mishra's Bauble", "resolve", 97, "*"],
 //!           "follow": {"rule": "bauble_fetch", "land_min": 4, "fetches": ["Flooded Strand"]}}
 //! ```
 //!
@@ -36,10 +36,13 @@
 //!   silent world), and the dealt world is a real game from then on (no determinization observer).
 //! * **The forced line** (`forced`): the decider's next non-minor decisions (not mana payments)
 //!   take these options in order - an option label (`view.rs`'s words: the first option, by
-//!   action id, with exactly that text), an action id, or `"*"` (the network's own choice there):
-//!   `legal_actions` offers only that option, so the driver steps it without a search. When the
-//!   next item is not among the options (the opponent's answer changed the decision) the line is
-//!   broken: the network plays on from there, and the follow rule never starts.
+//!   action id, with exactly that text), an action id, `"*"` (the network's own choice there), or
+//!   `"resolve"` (pass while the decider has priority with something on the stack, the network
+//!   answering any other question on the way - a trigger's surveil, a tax -, done at its first
+//!   priority with an empty stack, where the next item applies): `legal_actions` offers only that
+//!   option, so the driver steps it without a search. When the next item is not among the options
+//!   (the opponent's answer changed the decision) the line is broken: the network plays on from
+//!   there, and the follow rule never starts.
 //! * **The follow rule** (`follow`, after the line; one rule today, `"bauble_fetch"`): at the
 //!   decider's first decision after the line, if it knows the top card of its library (a Mishra's
 //!   Bauble look resolved) the rule holds while that card stays its known top card: the card is
@@ -76,6 +79,10 @@ pub enum Forced {
     Label(String),
     Action(u16),
     Any,
+    /// `"resolve"`: let the stack resolve - pass whenever the decider has priority with something on
+    /// the stack, the network answering any other question on the way (a trigger's surveil, a tax);
+    /// done at the decider's first priority with an empty stack, where the next item applies.
+    Resolve,
 }
 
 /// The follow rule `"bauble_fetch"` (module docs).
@@ -219,6 +226,7 @@ impl Start {
                 .iter()
                 .map(|f| match f {
                     Value::String(s) if s == "*" => Ok(Forced::Any),
+                    Value::String(s) if s == "resolve" => Ok(Forced::Resolve),
                     Value::String(s) => Ok(Forced::Label(s.clone())),
                     Value::Number(n) => n
                         .as_u64()
@@ -301,6 +309,8 @@ enum Want {
     Free,
     /// Not among the options: the line breaks.
     Missing,
+    /// A `resolve` item meets another question than priority: the network answers, the item stays.
+    Wait,
 }
 
 fn is_minor(g: &Game) -> bool {
@@ -343,6 +353,10 @@ impl Lab {
         let d = g.pending_decision().expect("the decider decides");
         match &self.forced[self.pos] {
             Forced::Any => Want::Free,
+            Forced::Resolve if d.kind == DecisionKind::Priority => {
+                d.options.iter().find(|o| o.choice == Choice::Pass).map_or(Want::Missing, |o| Want::Act(o.action))
+            }
+            Forced::Resolve => Want::Wait,
             Forced::Action(a) => d.options.iter().find(|o| o.action == *a).map_or(Want::Missing, |o| Want::Act(o.action)),
             Forced::Label(l) => d.options.iter().find(|o| g.option_text(d.kind, o.choice) == *l).map_or(Want::Missing, |o| Want::Act(o.action)),
         }
@@ -405,7 +419,10 @@ impl Lab {
             return;
         }
         if self.pos < self.forced.len() {
+            let resolve = self.forced[self.pos] == Forced::Resolve;
             match self.want(g) {
+                Want::Wait => {}
+                Want::Act(x) if x == a && resolve => {}
                 Want::Free => self.pos += 1,
                 Want::Act(x) if x == a => self.pos += 1,
                 _ => {
@@ -427,6 +444,15 @@ impl Lab {
     /// After a step (and at the start): the rule starts at the decider's first decision after the
     /// line, and ends when its card is no longer the decider's known top card.
     pub(crate) fn after_step(&mut self, g: &Game) {
+        // a `resolve` item is done at the decider's priority with an empty stack (the next applies)
+        while self.pos < self.forced.len()
+            && self.forced[self.pos] == Forced::Resolve
+            && self.deciding(g)
+            && g.pending_decision().is_some_and(|d| d.kind == DecisionKind::Priority)
+            && g.stack().is_empty()
+        {
+            self.pos += 1;
+        }
         match self.rule {
             Rule::Armed if self.pos >= self.forced.len() && self.deciding(g) => match known_top(g, self.player) {
                 Some(card) => {

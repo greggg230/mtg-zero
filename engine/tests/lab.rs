@@ -325,7 +325,8 @@ fn until_rule_starts(g: &mut MtgAz) {
         }
         let l = legal(g);
         let a = if g.to_move() == Some(lab.player as usize) {
-            assert_eq!(l.len(), 1, "the forced line offers one option: {:?}", option_texts(g));
+            // the forced line offers one option (a `resolve` item lets other questions through)
+            assert!(l.len() == 1 || g.g.pending_decision().unwrap().kind != DecisionKind::Priority, "{:?}", option_texts(g));
             l[0]
         } else {
             option_texts(g).iter().find(|x| x.1 == "Pass priority").map_or(l[0], |x| x.0)
@@ -339,7 +340,7 @@ fn until_rule_starts(g: &mut MtgAz) {
 fn the_forced_line_and_the_bauble_fetch_rule() {
     let (seed, acts, spot) = bauble_spot();
     let d = spot.g.to_move().unwrap();
-    let line = json!(["Activate Mishra's Bauble", format!("Target P{}", d + 1), "Pass priority"]);
+    let line = json!(["Activate Mishra's Bauble", format!("Target P{}", d + 1), "resolve"]);
     let mut outcomes = [0usize; 2];
     for ds in 0..40u64 {
         let spec = with_start(json!({"seed": seed, "actions": acts, "deal": "uniform", "deal_seed": ds, "forced": line,
@@ -395,6 +396,45 @@ fn the_forced_line_and_the_bauble_fetch_rule() {
     step(&mut g, a);
     assert_eq!(g.lab.as_ref().unwrap().broken, Some(0));
     assert_eq!(g.lab.as_ref().unwrap().rule, Rule::Off);
+}
+
+#[test]
+fn a_resolve_item_passes_until_the_stack_is_empty() {
+    let (seed, acts, spot) = bauble_spot();
+    let d = spot.g.to_move().unwrap();
+    // at an empty stack a leading `resolve` is done at once: the next item applies to this decision
+    let g = MtgAz::new_game(&with_start(json!({"seed": seed, "actions": acts, "deal": "none", "forced": ["resolve", "Pass priority"]})), 2, 0).unwrap();
+    assert_eq!(g.lab.as_ref().unwrap().pos, 1);
+    assert_eq!(legal(&g).len(), 1);
+    assert_eq!(option_texts(&g).iter().find(|x| x.0 == legal(&g)[0]).unwrap().1, "Pass priority");
+    // with the Bauble's ability on the stack: the decider passes (one option), the opponent answers,
+    // and the item is done at the decider's next priority with an empty stack
+    let line = json!(["Activate Mishra's Bauble", format!("Target P{}", d + 1), "resolve", "*"]);
+    let mut g = MtgAz::new_game(&with_start(json!({"seed": seed, "actions": acts, "deal": "none", "forced": line})), 2, 0).unwrap();
+    let mut passes = 0;
+    for _ in 0..50 {
+        let lab = g.lab.as_ref().unwrap().clone();
+        if lab.pos >= 3 {
+            break;
+        }
+        let l = legal(&g);
+        let a = if g.g.to_move() == Some(d) {
+            if lab.pos == 2 && !g.g.stack().is_empty() {
+                assert_eq!(l.len(), 1);
+                assert_eq!(option_texts(&g).iter().find(|x| x.0 == l[0]).unwrap().1, "Pass priority");
+                passes += 1;
+            }
+            l[0]
+        } else {
+            option_texts(&g).iter().find(|x| x.1 == "Pass priority").map_or(l[0], |x| x.0)
+        };
+        step(&mut g, a);
+    }
+    let lab = g.lab.as_ref().unwrap();
+    assert!(passes >= 1);
+    assert_eq!((lab.pos, lab.broken), (3, None));
+    assert!(g.g.stack().is_empty() && g.g.to_move() == Some(d));
+    assert!(legal(&g).len() > 1, "'*': the network's own choice");
 }
 
 fn is_fetch(t: &str) -> bool {

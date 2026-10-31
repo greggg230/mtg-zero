@@ -373,14 +373,16 @@ def top_k(view, k):
 
 def bauble_line(g, d):
     """The forced line 'Mishra's Bauble at the decider's own library, the look resolved' at the spot:
-    cast it first if it is in hand (and pass so it resolves), activate it, target the decider, pass."""
+    cast it first if it is in hand (and let it resolve), activate it, target the decider, let the look
+    resolve ("resolve": pass while anything is on the stack - a Dragon's Rage Channeler's or a Cori-Steel
+    Cutter's trigger above the Bauble -, the network answering their questions)."""
     labels = [t for _, t in options(g)]
     line = []
     if 'Activate ' + BAUBLE not in labels:
         if 'Cast ' + BAUBLE not in labels:
             raise SystemExit("the spot has no Mishra's Bauble to cast or activate")
-        line += ['Cast ' + BAUBLE, PASS]
-    return line + ['Activate ' + BAUBLE, f'Target P{d + 1}', PASS]
+        line += ['Cast ' + BAUBLE, 'resolve']
+    return line + ['Activate ' + BAUBLE, f'Target P{d + 1}', 'resolve']
 
 
 def bauble_candidates(spot, g, land_min):
@@ -650,6 +652,21 @@ def pooled(spots_out, mode, n_cands):
     return out
 
 
+def deal_summary(spot, si, md, cand, games, top=10):
+    """The deals the play-outs use, per mode (and the uniform deal for reference): the share of deals in
+    which the decider's opponent holds each card (the `top` most frequent), and the real hand."""
+    E = engine()
+    o = 1 - spot['decider']
+    out = {}
+    for mode, kw in list(md) + ([('uniform', {})] if all(m != 'uniform' for m, _ in md) else []):
+        c = collections.Counter()
+        for i in range(games):
+            g = E.Game('mtg', start_spec(spot, start_block(mode, cand, deal_seed(si, i), **kw)), 2, 0)
+            c.update(set(x['name'] for x in json.loads(g.export_state())['players'][o]['hand']))
+        out[mode] = {k: round(v / games, 3) for k, v in c.most_common(top)}
+    return out
+
+
 def line_summary(infos, scores):
     """A forced line's games: how often it held, what the Bauble showed, the rule's verdicts (and their
     scores), how often the network itself cracked a fetch over the seen card."""
@@ -701,10 +718,11 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
                     continue
             md.append((mode, kw))
         jobs.append((spot, md, cands))
+        deals = deal_summary(spot, len(jobs) - 1, md, cands[0], games)
         out['spots'].append({'id': spot['id'], 'source': spot['source'], 'frame': spot['frame'], 'gen': spot.get('gen'),
                              'record': spot.get('record'), 'site_id': spot.get('site_id'), 'view': view,
                              'candidates': [c['name'] for c in cands], 'lines': cands, 'skipped_modes': skipped,
-                             'modes': {}})
+                             'deals': deals, 'modes': {}})
         log(f'spot {spot["id"]}: checked; network view at {time.time() - t0:.0f} s; candidates {[c["name"] for c in cands]}'
             + (f'; skipped {skipped}' if skipped else ''))
     n = sum(len(m) * len(c) for _, m, c in jobs) * games
@@ -753,6 +771,8 @@ def table(rep):
                 + f'; moves {s["rule_moves"]}')
         lines.append('   opponent hand: ' + ', '.join(f'{k} x{c}' for k, c in v['opponent_hand'].items())
                      + ' | belief: ' + ', '.join(f'{k} {e:.2f}' for k, e in list(v['belief_hand'].items())[:6]))
+        for m, d in (so.get('deals') or {}).items():
+            lines.append(f'   opponent holds ({m} deals): ' + ', '.join(f'{k} {x:.2f}' for k, x in list(d.items())[:7]))
         modes = list(so['modes'])
         lines.append('   {:<50}'.format('candidate (score +- se; vs best +- paired se)') + ''.join(f'{m:>32}' for m in modes))
         for ci, name in enumerate(so['candidates']):
