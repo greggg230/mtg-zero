@@ -1,7 +1,8 @@
 """tools/delverai_publish.py's head-to-heads (the site's "win rate against earlier generations"): a
 generation's own games in its Elo pool, from its side ("a|b": [points of a, games], names sorted),
 the anchors as copies of the run's checkpoints (same sha256), the global generations of the
-lineage, and a bot evaluation of 0 games as no measurement."""
+lineage, and a bot evaluation of 0 games as no measurement. The anchored Elo: each row's from its
+evaluation, the anchors' definitions."""
 import hashlib
 import json
 import os
@@ -34,8 +35,10 @@ def _run(tmp_path, name='r3-2b-beliefsearch'):
                                               'elo_anchors': 'a192=/x/anchors/r3-2b_iter_0192.pt,a160=/x/a160.pt'})
     _write(os.path.join(run, 'elo', TAG, 'results.json'), {
         'select': TAG, 'since': 96, 'anchor': 'heuristic',
-        'anchors': {'anchor:a192': {'label': 'a192', 'file': 'a192.pt', 'sha256': sha(b'net 192'), 'elo': 1613.0},
-                    'anchor:a160': {'label': 'a160', 'file': 'a160.pt', 'sha256': sha(b'net 160'), 'elo': 1578.2},
+        'anchors': {'anchor:a192': {'label': 'a192', 'file': 'a192.pt', 'sha256': sha(b'net 192'), 'elo': 1613.0,
+                                    'how': 'set (elo_anchor_elo)', 'since': 200},
+                    'anchor:a160': {'label': 'a160', 'file': 'a160.pt', 'sha256': sha(b'net 160'), 'elo': 1578.2, 'se': 24.7,
+                                    'how': "calibrated: 200 games against each of ['anchor:a192']"},
                     'anchor:x': {'label': 'x', 'file': 'x.pt', 'sha256': sha(b'another'), 'elo': 1500.0}},
         'pairs': {
             'heuristic|random': [95.0, 100],
@@ -56,7 +59,7 @@ def _run(tmp_path, name='r3-2b-beliefsearch'):
         {'iter': 192, 'eval_yard': {'win': 0.98, 'se': 0.014, 'games': 100, 'select': TAG},
          'eval_random': {'win': 1.0, 'se': 0.0, 'games': 0}, 'elo': {'elo': 1613.1, 'se': 70.0, 'select': TAG}},
         {'iter': 200, 'eval_yard': {'win': 0.0, 'se': 0.0, 'margin': 0.0, 'games': 0, 'select': TAG},
-         'elo': {'elo': 1651.8, 'se': 97.9, 'select': TAG}},
+         'elo': {'elo': 1651.8, 'se': 97.9, 'select': TAG}, 'elo_anchored': {'elo': 1587.54, 'se': 24.43, 'select': TAG}},
     ], lines=True)
     return run
 
@@ -90,3 +93,15 @@ def test_the_lineage_numbers_the_opponents_too(tmp_path):
     r = next(x for x in L['rows'] if x['run'] == 'r3-2b-beliefsearch' and x['gen'] == 200)
     assert r['g'] == 337 and [m['g'] for m in r['h2h']] == [336, 333, 329, 329, 297, None]
     assert [m['iter'] for m in r['h2h']] == [199, 196, 192, 192, 160, None]   # the run's own numbering kept
+
+
+def test_the_anchored_elo_and_the_anchors(tmp_path):
+    run = _run(tmp_path)
+    rows = {r['iter']: r for r in P.iteration_rows(run)}
+    assert (rows[200]['elo_anchored'], rows[200]['elo_anchored_se'], rows[200]['elo']) == (1587.5, 24.4, 1651.8)
+    assert (rows[192]['elo_anchored'], rows[192]['elo_anchored_se']) == (None, None)     # before the anchors: the pool's only
+    assert P.anchor_defs(run, TAG, offset=137) == [
+        {'label': 'a192', 'iter': 192, 'g': 329, 'elo': 1613.0, 'se': None, 'how': 'set', 'since': 200},
+        {'label': 'a160', 'iter': 160, 'g': 297, 'elo': 1578.2, 'se': 24.7, 'how': 'calibrated', 'since': None},
+        {'label': 'x', 'iter': None, 'g': None, 'elo': 1500.0, 'se': None, 'how': None, 'since': None}]
+    assert P.anchor_defs(run, 'visits') == []

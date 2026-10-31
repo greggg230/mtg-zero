@@ -31,6 +31,15 @@ points, the games and its win rate. The pool's other games (the bots', the ancho
 the matches where it is the earlier generation) are not its own. A bot or random evaluation of 0
 games (--eval-games 0) measured nothing: its yard_win / rand_win are None.
 
+Anchored Elo (`elo_anchored` / `elo_anchored_se` in each row, `anchors` in the record): a pool with
+fixed anchors (zero-core docs/az.md 20.1: frozen checkpoints at fixed ratings, elo_anchor_games
+against each evaluated generation) rates every generation that played them on the anchors' scale:
+the iteration's `elo_anchored` of its evaluation (metrics.jsonl / evals.jsonl, the log's `iter N
+elo anchored E +-1.96se`), which neither drifts with the pool's chain of short matches nor leans on
+the yardstick. `anchors`: the active pool's, in its order - {label, iter (the run's generation it is
+a copy of), g (in the lineage's numbering), elo, se, how (set / calibrated), since}. A row without
+it (before the anchors, older runs) has None: its `elo` is the pool's.
+
 Lineage (`lineage` in the progress record): the run's history since its first ancestor, for the
 site's charts from the beginning. A fork (the A/B experiments' `done` entries of --follow's file:
 the fork's directory, the run it forked from and at which iteration, its changed setting) keeps
@@ -96,6 +105,7 @@ def iteration_rows(run):
         e = evals.get(m.get('iter'), {})
         y, rnd, elo = m.get('eval_yard') or e.get('eval_yard'), m.get('eval_random') or e.get('eval_random'), \
             m.get('elo') or e.get('elo')
+        ea = m.get('elo_anchored') or e.get('elo_anchored') or {}     # the fixed anchors' scale (docs/az.md 20.1)
         # the evaluation move rule that rated it (zero-core docs/az.md 5.4: each rule its own Elo pool)
         tag = (elo or {}).get('select') or (y or {}).get('select') or 'visits'
         if tag not in pools:
@@ -106,6 +116,7 @@ def iteration_rows(run):
         out.append({
             'iter': m.get('iter'), 'time': m.get('time'), 'seconds': _r(m.get('seconds'), 1),
             'elo': _r((elo or {}).get('elo'), 1), 'elo_se': _r((elo or {}).get('se'), 1),
+            'elo_anchored': _r(ea.get('elo'), 1), 'elo_anchored_se': _r(ea.get('se'), 1),
             'select': tag,
             'yard_win': _r((ym or {}).get('win')), 'yard_se': _r((ym or {}).get('se')), 'yard_games': (y or {}).get('games'),
             'yard_margin': _r((ym or {}).get('margin'), 2), 'yard_turns': _r((ym or {}).get('rounds'), 2),
@@ -167,6 +178,22 @@ def anchor_copies(run, anchors):
                     break
             except OSError:
                 pass
+    return out
+
+
+def anchor_defs(run, tag='visits', offset=0):
+    """The fixed anchors of the run's pool `tag`, in the pool's order: [{label, iter (the run's
+    generation it is a copy of, or None), g (offset + iter: the lineage's numbering), elo, se,
+    how ('set' / 'calibrated'), since}], [] without anchors."""
+    res = _json(os.path.join(zelo.pool_dir(run, tag), 'results.json'), {}) or {}
+    anchors = res.get('anchors') or {}
+    copies = anchor_copies(run, anchors) if anchors else {}
+    out = []
+    for name, a in anchors.items():
+        it = copies.get(name)
+        out.append({'label': a.get('label') or name, 'iter': it, 'g': None if it is None else offset + it,
+                    'elo': _r(a.get('elo'), 1), 'se': _r(a.get('se'), 1),
+                    'how': (re.match(r'[a-z]+', str(a.get('how') or '')) or [None])[0], 'since': a.get('since')})
     return out
 
 
@@ -414,6 +441,8 @@ def progress(run, every=1, forks=None):
     log = os.path.join(run, 'log.txt')
     rows = iteration_rows(run)
     state = _json(os.path.join(run, 'delverai.json'), {}) or {}
+    lin = lineage_record(run, forks or {})
+    offset = lin['segments'][-1]['offset'] if lin else 0
     return {
         'run': os.path.basename(os.path.abspath(run)), 'updated': time.time(),
         'state': st.get('state'), 'detail': st.get('detail'), 'paused_since': st.get('paused_since'),
@@ -423,8 +452,9 @@ def progress(run, every=1, forks=None):
         'ratings': {k: {'elo': _r(v.get('elo'), 1), 'se': _r(v.get('se'), 1), 'games': v.get('games')}
                     for k, v in (ratings.get('ratings') or {}).items()},
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
+        'anchors': anchor_defs(run, tag, offset),
         'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
-        'lineage': lineage_record(run, forks or {}),
+        'lineage': lin,
     }
 
 
