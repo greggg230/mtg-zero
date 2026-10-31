@@ -15835,7 +15835,7 @@ distillation's, then a run's; the Mac at `nice -n 19`, one job at a time, beside
   (`FUZZ_CHANCE`) is the gate for that path, and a candidate for the Mac farm's modes.
 * **Not fixed**: 74.3's `PayMana` (seed 523, the farm's expected bucket).
 
-## 75. CUDA graphs of the token network's inference (zero-core `feat/token-graphs`, opt-in)
+## 78. CUDA graphs of the token network's inference (zero-core `feat/token-graphs`, opt-in)
 
 Branch `token-graphs` (from main 1605436), zero-core `feat/token-graphs` 2b79780 (code 3d5875e, docs
 2b79780; from c15e3d0; its docs/az.md 10.6 has the design, the numerics and every measurement),
@@ -15843,7 +15843,7 @@ Branch `token-graphs` (from main 1605436), zero-core `feat/token-graphs` 2b79780
 the runs, their pinned worktrees and the Mac untouched; checkpoints copied read-only to
 `E:/mtg-zero-scratch/token-graphs/`.
 
-### 75.1 Why, and what
+### 78.1 Why, and what
 
 The desktop GPU's eager inference of the Delver line's token network (128 x 4, the belief head) is
 bound by its ~445-585 kernels and 13-15 host syncs a forward, not by its arithmetic (62.2, zero-core
@@ -15854,7 +15854,7 @@ az.md 10.5); it is the desktop's self-play share and every head-to-head and Elo 
 multiple of 16) shape runs a static-shape forward (156 kernels, no sync) with the belief head's
 predictions and value-only rows; float32; the answers are eager's to float32 rounding.
 
-### 75.2 How to turn it on (off by default)
+### 78.2 How to turn it on (off by default)
 
 * **h2h**: `python -m mtgz.az.h2h A B ... --device cuda --graphs 1` (both sides; `--a-graphs` /
   `--b-graphs` for one side). The output then has `graphs_a` / `graphs_b` (each side's share of batches
@@ -15871,7 +15871,7 @@ predictions and value-only rows; float32; the answers are eager's to float32 rou
 * Off: `ZERO_CUDA_GRAPHS=0` turns the env off (said on stderr); on a CPU evaluator the env is said
   and ignored; `--graphs 1` with `--device cpu` is an error.
 
-### 75.3 Measured (the desktop GPU shared with r3-2b-beliefsearch's training and self-play and another session's h2h; eager and graphs interleaved)
+### 78.3 Measured (the desktop GPU shared with r3-2b-beliefsearch's training and self-play and another session's h2h; eager and graphs interleaved)
 
 | what | eager | graphs | |
 |---|---:|---:|---:|
@@ -15889,7 +15889,7 @@ predictions and value-only rows; float32; the answers are eager's to float32 rou
 * From ~192 rows a batch the host's copy of the 37,620-float rows bounds the graphs (~27k leaves/s); a
   sparse feed from the driver is the next step (zero-core az.md 10.6).
 
-### 75.4 Checks
+### 78.4 Checks
 
 Tier "opt-in core feature with byte-identical defaults" (memory `feedback_tiered_gates`). zero-core's
 Rust is unchanged (c15e3d0's crates): `mtgz/_engine.pyd` copied from `mtg-zero-wt/run-4589760` (the same
