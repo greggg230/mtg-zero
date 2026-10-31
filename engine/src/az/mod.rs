@@ -512,8 +512,12 @@ impl SearchGame for MtgAz {
         if self.lab.is_none() {
             return self.match_step(a, chance);
         }
-        // a position-lab game (ENGINE.md 76): its line and rule follow the step
+        // a position-lab game (ENGINE.md 76): its line and rule follow the step (an ambiguous label is
+        // an error, never a guess)
         if let Some(l) = self.lab.as_mut() {
+            if let Some(e) = l.ambiguity(&self.g) {
+                return Err(e);
+            }
             l.before_step(&self.g, a);
         }
         self.match_step(a, chance)?;

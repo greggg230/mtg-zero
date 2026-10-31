@@ -539,9 +539,13 @@ def bauble_candidates(spot, g, land_min, view=None, deep_modes=None):
     return cands
 
 
-def start_block(mode, cand, deal_seed, pred=None, belief=None, hold=(), exclude=()):
-    """The start block of one game: deal mode, deal seed, the candidate's line and rule."""
+def start_block(mode, cand, deal_seed, pred=None, belief=None, hold=(), exclude=(), top=None, top_known=False):
+    """The start block of one game: deal mode, deal seed, the candidate's line and rule; `top` ([[P1's], [P2's]]
+    card names, top first: the deal puts them on top of the libraries, `top_known`: their owners know them)."""
     st = {'deal_seed': int(deal_seed), 'forced': cand['forced']}
+    if top and any(top):
+        st['top'] = [list(top[0]), list(top[1])]
+        st['top_known'] = bool(top_known)
     if cand.get('follow'):
         st['follow'] = cand['follow']
     if mode in ('belief', 'pinned'):
@@ -901,6 +905,11 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
                 f'{k}: pick {v["pick"]} (crack {v["crack_share"]:.3f} q {v["crack_q"]}, Bauble {v["bauble_share"]:.3f} q {v["bauble_q"]})'
                 for k, v in view['deep']['by_setting'].items()) + f' ({view["deep"]["seconds"]} s)')
         cands = cand_fn(spot, g, view)
+        for c in cands:           # the engine refuses an ambiguous or unknown first label: say so before any play-out
+            try:
+                engine().Game('mtg', start_spec(spot, start_block('none', c, 0)), 2, 0)
+            except Exception as e:                              # noqa: BLE001
+                raise SystemExit(f'{spot["id"]}: candidate {c["name"]!r}: {e}')
         md, skipped = [], {}
         for mode in modes:
             kw = {'pred': [float(x) for x in pred], 'belief': belief} if mode in ('belief', 'pinned') else {}
@@ -999,6 +1008,42 @@ def opening_spot(spec, seed):
         a = next((x for x, t in options(g) if t == want), None)
         if a is None:
             return None
+        acts.append(int(a))
+        mcts.transition(g, a)
+    return None
+
+
+def opening_spot_draw(spec, seed, ev, keys, c_puct, sims=32):
+    """The second player's first main-phase priority (turn 2, its hand with the draw) of game `seed`: the
+    chooser plays first, both keep, the starting player's turn 1 played by the network (the evaluation
+    seat's search, `sims` simulations, a fixed seed per decision), priority otherwise passing. None when the
+    game does not get there."""
+    from zero import mcts
+    E = engine()
+    sp = dict(spec, log=True)
+    g = E.Game('mtg', json.dumps(sp), 2, int(seed))
+    acts = []
+    for k in range(200):
+        if g.over:
+            return None
+        st = json.loads(g.export_state())
+        d = st['decision']
+        if st['turn'] > 2:
+            return None
+        if st['turn'] == 2 and d['kind'] == 'Priority' and st['step'] == 'main1' and st['active'] == g.to_move:
+            return {'id': f'seed{seed}d', 'source': f'seed:{seed}:draw', 'frame': len(acts), 'spec': dict(spec), 'seed': int(seed),
+                    'actions': acts, 'decider': int(g.to_move), 'recorded': {'acts': list(g.legal()), 'a': None},
+                    'state': st, 'gen': None, 'title': f'opening of seed {seed}, on the draw',
+                    'hand': sorted(c['name'] for c in st['players'][g.to_move]['hand'])}
+        if st['turn'] == 1 and g.to_move == st['active'] and d['kind'] not in ('PlayDraw', 'Mulligan'):
+            pred = belief_pred(ev, g, g.to_move) if keys.get('belief_tilt') else None
+            r = search([g], ev, sims, [9000 + k], keys, c_puct, [pred] if pred is not None else None)[0]
+            a = r['acts'][r['rule']]
+        else:
+            want = {'PlayDraw': 'Play first', 'Mulligan': 'Keep', 'Priority': PASS}.get(d['kind'])
+            a = next((x for x, t in options(g) if t == want), None)
+            if a is None:
+                a = options(g)[0][0]
         acts.append(int(a))
         mcts.transition(g, a)
     return None
@@ -1360,22 +1405,24 @@ def search_params(model_path, **over):
 
 
 def evaluate_position(spot, ev, params, pred=None):
-    """The network at a position: prior and value per option, and one search per seed with `params`
-    (`search_params`): per run the visits, Q and the rule's choice. -> dict."""
+    """The network at a position: per option (keyed by action id - two options may share a label, e.g. two
+    "Target Volcanic Island"; the label is a display field) the prior, and one search per seed with `params`
+    (`search_params`): per run the visits and Q per action and the rule's choice (an action id). -> dict."""
     g = spot_game(spot)
     d = spot['decider']
-    opts = options(g)
-    pri, val, _ = evaluate(ev, [g.encode(d)], [[a for a, _ in opts]])[:3]
+    st = json.loads(g.export_state())
+    raw = [(int(o['a']), o['t']) for o in (st.get('decision') or {}).get('options', [])]
+    pri, val, _ = evaluate(ev, [g.encode(d)], [[a for a, _ in raw]])[:3]
     if pred is None and params['keys'].get('belief_tilt'):
         pred = belief_pred(ev, g, d)
     n = len(params['seeds'])
     res = search([g] * n, ev, int(params['sims']), params['seeds'], params['keys'], params['c_puct'],
                  [pred] * n if pred is not None else None, chance_k=int(params['chance_k']), floor=[int(params['floor'])] * n)
-    names = dict(opts)
-    return {'decider': d, 'value': float(val[0][0]), 'prior': {names[a]: float(p) for (a, _), p in zip(opts, pri)},
-            'runs': [{'seed': sd, 'visits': {names.get(a, a): n_ for a, n_ in zip(r['acts'], r['n'])},
-                      'q': {names.get(a, a): q for a, q in zip(r['acts'], r['q'])},
-                      'choice': names.get(r['acts'][r['rule']], r['acts'][r['rule']])} for sd, r in zip(params['seeds'], res)]}
+    return {'decider': d, 'value': float(val[0][0]),
+            'options': [{'action': a, 'label': t, 'prior': float(p)} for (a, t), p in zip(raw, pri)],
+            'runs': [{'seed': sd, 'visits': {str(a): int(n_) for a, n_ in zip(r['acts'], r['n'])},
+                      'q': {str(a): q for a, q in zip(r['acts'], r['q'])}, 'choice': int(r['acts'][r['rule']])}
+                     for sd, r in zip(params['seeds'], res)]}
 
 
 def sweep(spot, ev, model_path, grid, pred=None):
@@ -1619,7 +1666,27 @@ def cmd_t1(a):
         spots = [load_scenario(x) for x in a.scenario]
     else:
         lo, hi = (int(x) for x in a.seeds.split('-'))
-        spots = find_t1_spots(json.loads(A.SPEC_DELVER), range(lo, hi), a.spots, a.composition)
+        if a.draw:
+            ev0 = load_net(a.model)[0]
+            _, keys0, cp0 = seat_keys(a.model)
+            spots = []
+            for sd in range(lo, hi):
+                # (cheap first: the second player's seven and its draw - its library's top - before its turn)
+                o = opening_spot(json.loads(A.SPEC_DELVER), sd)
+                if o is None:
+                    continue
+                lab = json.loads(engine().Game('mtg', start_spec(o, {'deal': 'none'}), 2, 0).export_state())['lab']
+                q = 1 - o['decider']
+                eight = sorted(c['name'] for c in o['state']['players'][q]['hand']) + lab['libraries'][q][:1]
+                if t1_composition(eight) not in ((a.composition,) if a.composition == 'clean' else ('clean', 'any')):
+                    continue
+                sp = opening_spot_draw(json.loads(A.SPEC_DELVER), sd, ev0, keys0, cp0)
+                if sp and t1_composition(sp['hand']) in ((a.composition,) if a.composition == 'clean' else ('clean', 'any')):
+                    spots.append(sp)
+                    if len(spots) >= a.spots:
+                        break
+        else:
+            spots = find_t1_spots(json.loads(A.SPEC_DELVER), range(lo, hi), a.spots, a.composition)
         print(f'{len(spots)} opening spots ({a.composition}) in seeds {a.seeds}: ' + '; '.join(
             f'{s["id"]} P{s["decider"] + 1}: {", ".join(s["hand"])}' for s in spots), flush=True)
         if a.save_spots:
@@ -1699,6 +1766,7 @@ def main(argv=None):
     t.add_argument('--seeds', default='1-60000', help='the game seeds searched for the opening hand (lo-hi)')
     t.add_argument('--spots', type=int, default=4, help='opening spots to take')
     t.add_argument('--composition', default='clean', choices=('clean', 'any'))
+    t.add_argument('--draw', action='store_true', help='opening spots on the draw (the starting player\'s turn 1 by the network)')
     t.add_argument('--scenario', action='append', help='a saved opening spot (position-lab/1 JSON) instead of the search')
     t.add_argument('--save-spots', help='a directory to save the found spots as scenarios')
     t.add_argument('--one-ply', type=int, default=200, help='belief deals for the one-ply value check (0: none)')

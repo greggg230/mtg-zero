@@ -30,7 +30,9 @@
 //!   * `"none"`: the source game itself (its random stream continuing; tests).
 //!
 //!   `hold` (a multiset of card names) and `exclude` (names): the opponent's hand must hold at
-//!   least these and none of those - the belief (or uniform) deal conditioned on it by rejection
+//!   least these and none of those; `top` ([[P1's], [P2's]] card names, top first): each library
+//!   starts so, and with `top_known` its owner knows those cards - the belief (or uniform) deal
+//!   conditioned on it by rejection
 //!   (at most `tries` deals, default 100,000; an impossible pin is an error at once). Every deal
 //!   keeps what each player knows (`Game::check_knowledge` must hold after it: an error, never a
 //!   silent world), and the dealt world is a real game from then on (no determinization observer).
@@ -137,6 +139,10 @@ pub struct Start {
     pub tries: u32,
     pub forced: Vec<Forced>,
     pub follow: Option<Follow>,
+    /// Per player, the library's top cards (top first) the deal must put there; `top_known`: their owner
+    /// knows them (as after a Brainstorm's put-back).
+    pub top: [Vec<DefId>; 2],
+    pub top_known: bool,
 }
 
 // (floats compared by their bits: a spec is equal to itself, and MtgSpec is Eq)
@@ -147,12 +153,15 @@ impl PartialEq for Start {
             && bits(&self.pred) == bits(&o.pred)
             && (self.tilt.to_bits(), self.clip.to_bits(), self.mix.to_bits()) == (o.tilt.to_bits(), o.clip.to_bits(), o.mix.to_bits())
             && (&self.hold, &self.exclude, self.tries, &self.forced, &self.follow) == (&o.hold, &o.exclude, o.tries, &o.forced, &o.follow)
+            && (&self.top, self.top_known) == (&o.top, o.top_known)
     }
 }
 impl Eq for Start {}
 
-const KEYS: [&str; 14] =
-    ["seed", "actions", "viewer", "deal", "deal_seed", "pred", "tilt", "clip", "mix", "hold", "exclude", "tries", "forced", "follow"];
+const KEYS: [&str; 16] = [
+    "seed", "actions", "viewer", "deal", "deal_seed", "pred", "tilt", "clip", "mix", "hold", "exclude", "tries", "forced", "follow", "top",
+    "top_known",
+];
 
 /// The deal's own stream: split from the deal seed with this salt.
 const SALT: u64 = 0x1AB0_5EED_D3A1_0001;
@@ -278,7 +287,24 @@ impl Start {
                 Some(Follow { land_min: land_min as u32, fetches, bad: line("bad")?, good: line("good")? })
             }
         };
-        Ok(Start { seed, actions, viewer, deal, deal_seed: uint("deal_seed")?, pred, tilt, clip, mix, hold, exclude, tries, forced, follow })
+        let mut top: [Vec<DefId>; 2] = [Vec::new(), Vec::new()];
+        if let Some(x) = o.get("top") {
+            let a = x.as_array().filter(|a| a.len() == 2).ok_or("mtg spec: start.top must be [[P1's top cards], [P2's]]")?;
+            for (p, l) in a.iter().enumerate() {
+                top[p] = l
+                    .as_array()
+                    .ok_or("mtg spec: start.top: lists of card names")?
+                    .iter()
+                    .map(|n| db.expect_id(n.as_str().ok_or("mtg spec: start.top: card names are strings")?))
+                    .collect::<Result<Vec<_>, _>>()?;
+            }
+            if top.iter().any(|t| !t.is_empty()) && !matches!(deal, Deal::Belief | Deal::Uniform) {
+                return Err("mtg spec: start.top needs a dealt world (deal \"belief\" or \"uniform\")".into());
+            }
+        }
+        let top_known = o.get("top_known").map_or(Ok(false), |x| x.as_bool().ok_or("mtg spec: start.top_known must be a boolean"))?;
+        Ok(Start { seed, actions, viewer, deal, deal_seed: uint("deal_seed")?, pred, tilt, clip, mix, hold, exclude, tries, forced, follow, top,
+                   top_known })
     }
 }
 
@@ -323,6 +349,8 @@ enum Want {
     Missing,
     /// A `resolve` item meets another question than priority: the network answers, the item stays.
     Wait,
+    /// A label that names more than one option: an error (`Lab::ambiguity`).
+    Ambiguous,
 }
 
 fn is_minor(g: &Game) -> bool {
@@ -370,8 +398,27 @@ impl Lab {
             }
             Forced::Resolve => Want::Wait,
             Forced::Action(a) => d.options.iter().find(|o| o.action == *a).map_or(Want::Missing, |o| Want::Act(o.action)),
-            Forced::Label(l) => d.options.iter().find(|o| g.option_text(d.kind, o.choice) == *l).map_or(Want::Missing, |o| Want::Act(o.action)),
+            Forced::Label(l) => {
+                let mut m = d.options.iter().filter(|o| g.option_text(d.kind, o.choice) == *l);
+                match (m.next(), m.next()) {
+                    (Some(o), None) => Want::Act(o.action),
+                    (Some(_), Some(_)) => Want::Ambiguous,
+                    _ => Want::Missing,
+                }
+            }
         }
+    }
+
+    /// The error of a forced label that names two options of the decider's decision (a label is one
+    /// option; give the action id): None when the line's next item is not one.
+    pub(crate) fn ambiguity(&self, g: &Game) -> Option<String> {
+        if !self.deciding(g) || self.pos >= self.forced.len() || !matches!(self.want(g), Want::Ambiguous) {
+            return None;
+        }
+        let d = g.pending_decision().expect("the decider decides");
+        let Forced::Label(l) = &self.forced[self.pos] else { return None };
+        let ids: Vec<u16> = d.options.iter().filter(|o| g.option_text(d.kind, o.choice) == *l).map(|o| o.action).collect();
+        Some(format!("start.forced item {}: the label {l:?} names {} options of P{}'s {:?} decision (actions {ids:?}): give an action id", self.pos, ids.len(), self.player, d.kind))
     }
 
     /// The rule's fetch activations among the pending options (Priority only): (action, fetch).
@@ -579,7 +626,7 @@ impl MtgAz {
             }
             Deal::Uniform | Deal::Belief => {
                 let o = 1 - viewer;
-                if !st.hold.is_empty() || !st.exclude.is_empty() {
+                if !st.hold.is_empty() || !st.exclude.is_empty() || st.top.iter().any(|t| !t.is_empty()) {
                     // a pin no world can hold is an error at once (not `tries` rejections)
                     let mut could: Vec<DefId> = az.g.unknown_to(viewer, o).iter().map(|&c| az.g.ident(c)).collect();
                     could.extend(az.g.player(o).hand.iter().filter(|&&c| az.g.knows(viewer, c)).map(|&c| az.g.ident(c)));
@@ -600,7 +647,7 @@ impl MtgAz {
                     } else {
                         w.determinize_belief(viewer as usize, &mut rng, &belief);
                     }
-                    if hand_fits(&w.g, o, &st.hold, &st.exclude) {
+                    if hand_fits(&w.g, o, &st.hold, &st.exclude) && tops_fit(&w.g, &st.top) {
                         dealt = Some(w);
                         break;
                     }
@@ -616,6 +663,14 @@ impl MtgAz {
                 })?;
                 // the dealt world is the real game from here
                 az.g.observer = None;
+                if st.top_known {
+                    for p in 0..2u8 {
+                        let lib = az.g.player(p).library.clone();
+                        for &c in lib.iter().rev().take(st.top[p as usize].len()) {
+                            az.g.learn(p, c);
+                        }
+                    }
+                }
             }
         }
         az.g.check_knowledge().map_err(|e| format!("start: the dealt world breaks a player's knowledge: {e}"))?;
@@ -625,9 +680,20 @@ impl MtgAz {
         let mut lab = Lab::new(decider, st);
         lab.rejected = rejected;
         lab.after_step(&az.g);
+        if let Some(e) = lab.ambiguity(&az.g) {
+            return Err(e);
+        }
         az.lab = Some(Box::new(lab));
         Ok(az)
     }
+}
+
+/// Each player's library starts with its `top` cards (top first)?
+fn tops_fit(g: &Game, top: &[Vec<DefId>; 2]) -> bool {
+    (0..2u8).all(|p| {
+        let lib = &g.player(p).library;
+        top[p as usize].iter().enumerate().all(|(i, &d)| lib.len() > i && g.ident(lib[lib.len() - 1 - i]) == d)
+    })
 }
 
 fn hand_fits_pool(pool: &[DefId], hold: &[DefId]) -> bool {

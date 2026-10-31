@@ -495,3 +495,59 @@ fn lab_games_play_to_the_end() {
     assert!(ended >= 10);
     let _ = (Choice::Pass, DecisionKind::Priority);
 }
+
+#[test]
+fn an_ambiguous_label_is_an_error() {
+    // a random mirror game's decision with two options of one label (two of a permanent, ...)
+    for seed in 0..300u64 {
+        let spec = MtgSpec::parse(&mirror().to_string()).unwrap();
+        let mut g = MtgAz::new_game(&spec, 2, seed).unwrap();
+        let mut r = Rng::new(seed ^ 0x55);
+        let mut acts = Vec::new();
+        for _ in 0..400 {
+            auto(&mut g);
+            if g.to_move().is_none() {
+                break;
+            }
+            let o = option_texts(&g);
+            let dup = o.iter().find(|x| o.iter().filter(|y| y.1 == x.1).count() > 1).map(|x| x.1.clone());
+            if let Some(label) = dup {
+                let e = MtgAz::new_game(&with_start(json!({"seed": seed, "actions": acts, "deal": "none", "forced": [label]})), 2, 0).err();
+                assert!(e.as_deref().is_some_and(|e| e.contains("names 2 options") || e.contains("names 3 options")), "{e:?}");
+                // by action id it is fine
+                let a = o.iter().find(|x| x.1 == label).unwrap().0;
+                let g2 = MtgAz::new_game(&with_start(json!({"seed": seed, "actions": acts, "deal": "none", "forced": [a]})), 2, 0).unwrap();
+                assert_eq!(legal(&g2), vec![a]);
+                return;
+            }
+            let l = legal(&g);
+            let a = l[r.below(l.len() as u32) as usize];
+            acts.push(a);
+            step(&mut g, a);
+        }
+    }
+    panic!("no decision with a duplicate label in 300 random games");
+}
+
+#[test]
+fn top_pins_put_the_cards_on_top_and_their_owner_may_know_them() {
+    let (src, acts) = walk(8, 50).expect("a live game");
+    let d = src.g.to_move().unwrap();
+    for ds in 0..10u64 {
+        let mut top = [json!([]), json!([])];
+        top[d as usize] = json!(["Brainstorm", "Daze"]);
+        let g = MtgAz::new_game(&with_start(json!({"seed": 8, "actions": acts, "deal": "uniform", "deal_seed": ds,
+                                                    "top": top, "top_known": true})), 2, 0).unwrap();
+        let lib = names_in(&g, d, Zone::Library);
+        assert_eq!(&lib[lib.len() - 2..], ["Daze", "Brainstorm"], "top first: the last two");
+        let l = &g.g.player(d).library;
+        assert!(g.g.knows(d, l[l.len() - 1]) && g.g.knows(d, l[l.len() - 2]));
+        g.g.check_knowledge().unwrap();
+    }
+    let bad = MtgSpec::parse(&{
+        let mut v = mirror();
+        v["start"] = json!({"seed": 8, "deal": "actual", "top": [["Daze"], []]});
+        v.to_string()
+    });
+    assert!(bad.unwrap_err().contains("dealt world"));
+}
