@@ -539,11 +539,11 @@ def tier_optin_core(ctx, args):
     for t in feature_tests:
         steps.append(Step(f'feature tests: cargo test --test {t}', ['cargo', 'test', '--release', '-p', 'engine',
                                                                      '--test', t]))
-    other = args.other_games or ''
+    # (each --other-games value is one checkout path, never split: 'C:/Users/Gregg Keithley/...' has a space)
+    other = [p for p in (args.other_games or []) if p]
     smoke_all = os.path.join(CORE, 'tools', 'smoke_all.sh')
     steps.append(Step('build-only: the other games (Glass Road, Caverna, Kingdom Builder)',
-                       ['bash', smoke_all, '--with-this-core', '--build-only', *other.split()] if other
-                       else ['bash', smoke_all, '--with-this-core', '--build-only'],
+                       ['bash', smoke_all, '--with-this-core', '--build-only', *other],
                        cwd=CORE, checker=lambda out, rc: (rc == 0, (out.strip().splitlines() or ['?'])[-1][:300], {})))
     return steps
 
@@ -646,9 +646,10 @@ def build_parser():
                      '4-config smoke (default random,eval,match,nomull)')
     ap.add_argument('--feature-tests', default=None, help='optin-core tier: comma-separated cargo test --test '
                      'targets for the new feature (default az,hidden)')
-    ap.add_argument('--other-games', default=None, help='optin-core tier: extra game checkout paths for the '
-                     'build-only step, space-separated (default: smoke_all.sh\'s own glassroad-zero/caverna-zero '
-                     'discovery)')
+    ap.add_argument('--other-games', nargs='+', action='extend', default=None, help='optin-core tier: the game '
+                     'checkouts for the build-only step, one path per argument (quote a path with a space; the '
+                     'option may repeat; default: smoke_all.sh\'s own discovery of its siblings, which finds none '
+                     'from a pinning checkout\'s third_party/zero-core)')
     ap.add_argument('--files', nargs='*', default=None, help='docs tier: the touched tool files to py_compile '
                      '(default: every tools/*.py)')
     ap.add_argument('--smoke-preset', default=None, help='python tier: the run-loop smoke preset (default '
