@@ -15993,14 +15993,14 @@ What this cannot show: the evidence is one fixed network. What a policy learns w
 samples (unrecorded) or from 16-simulation targets there (recorded) over many generations is the A/B's
 (77.6).
 
-### 77.6 The A/B (prepared, not launched)
+### 77.6 The A/B (prepared, not launched; approved by the user 2026-10-31)
 
 **Design** (75.7's protocol): fork the main line `runs/r3-2b-beliefsearch` (128 x 4, lr 3e-5, live on
-`mtg-zero-wt/run-4589760`, supervisor pid 123396 on 2026-10-31) at its newest checkpoint K at launch;
+`mtg-zero-wt/run-e057c87` since 14:43 2026-10-31, supervisor pid 170172) at its newest checkpoint K;
 **treatment** = the line's own flags (its supervisor's command line, `supervisor_state.json` `args`) +
 the light setting, K -> K + 24; **control** = the line itself continuing K -> K + 24 afterwards.
-Sequential: the fork alone on the desktop GPU and the Mac (the line paused), then the line resumed as
-the control. The treatment: **recorded 16 / 4** (`--selfplay-sims-light 16 --selfplay-sims-light-fast 4
+Sequential: the fork alone on the desktop GPU and the Mac (the line stopped), then the line relaunched
+as the control. The treatment: **recorded 16 / 4** (`--selfplay-sims-light 16 --selfplay-sims-light-fast 4
 --selfplay-light-record 1`, every class) - 77.5's numbers: nearly the unrecorded variant's saving, the
 same recorded samples (so the same training steps per generation: an equal-generation comparison that
 measures the search, not a smaller training budget). The unrecorded `--selfplay-sims-light 4` is the
@@ -16024,7 +16024,82 @@ compare the fork's K + 24 at equal generations as above (the cap does not change
 generations). Wall-clock is noisy (the Mac's share of the games, other jobs, the evaluation every
 8 generations): compare the self-play phases' seconds and leaves too, and the same generation span.
 
-**Prepared**: `mtg-zero-wt/run-757dfa1`, detached at **757dfa1** (this branch's code - 7e26452's - with
+**Prepared (2026-10-31, after the token-graphs re-pin)**: the user approved the recorded 16 / 4 arm. The
+line moved at 14:43 to `mtg-zero-wt/run-e057c87` (main e057c87: zero-core c6b959b, the token network's
+CUDA graphs, section 78), launched with env `ZERO_TOKEN_GRAPHS=1` and `--selfplay-remote-procs 3`
+(supervisor 170172). This branch merged both mains (zero-core `feat/light-decisions` a262f03 = a797384 +
+c6b959b; mtg-zero 1929742 = 757dfa1's line + e057c87), and the fork's worktree is
+`mtg-zero-wt/run-1929742` (detached at **1929742**; its submodule fetched from the local zero-core repo:
+a262f03 is not on GitHub), target `E:/cargo-target/mtg-zero/run-1929742`, its pyd built: `gate.py repin
+--expect-digest 132437374243f7b2 --spec delver --preset delver-mirror` PASSED there (build, digest = main's,
+the Delver smoke, and `mac.sh --eval-checkout`: `~/mtg-zero-wt/run-19297425356c` on the Mac, built - the
+line's checkout untouched). The first prepared worktree `run-757dfa1` (before the graphs) is superseded.
+
+**Changes to the protocol for the new situation**:
+
+* **Both arms** run with env `ZERO_TOKEN_GRAPHS=1` (and `MTGZ_SUPERVISE_STALL=7200`) and the line's
+  flags of its 14:43 launch, `--selfplay-remote-procs 3` included; the fork adds `--iters K+24` and the
+  light flags.
+* **STOP + a fresh relaunch, not PAUSE / resume**: the line is STOPPED at K (a STOP file: the run ends
+  after its current iteration, its remote evaluations drain, the supervisor exits cleanly - no PAUSE,
+  so the supervisor's kill_orphans self-kill after a PAUSE cannot happen), the fork runs K -> K + 24,
+  then the line is relaunched fresh (a new supervisor; it moves the STOP file to STOP.old and resumes
+  after K) from `run-e057c87` with its exact flags and env. Both arms then start cold (a fresh process:
+  the window cache loaded, the CUDA graphs captured), so their first generation's wall-clock is
+  comparable.
+* **h2h with `--graphs 1`** (both sides' evaluators on the token network's CUDA graphs; the h2h runs from
+  the fork's worktree, which has them).
+* The equal-wall-clock reading stays: n_eq from the arms' metrics (`seconds` of each generation K+1 ..
+  K+24), then the fork's K + 24 against the control's K + n_eq.
+
+**The steps**: `E:/mtg-zero-scratch/light-windows/ab/ab_light.sh <step>` - one step a call, each checks
+what it needs and prints what it did:
+
+| Step | What |
+|---|---|
+| `check` | read-only: the line's supervisor and run alive, newest checkpoint, no STOP / PAUSE; the line's code e057c87; the fork's worktree 1929742 clean, its gate report, its build's 22 classes |
+| `stop` | write `STOP` in the line; wait for the supervisor's clean exit ("clean exit" / "STOP file present" in supervisor.log, state done); list processes still naming the run (expect none); K = the newest checkpoint -> `ab/K` |
+| `fork` | `tools/fork_run.py --source runs/r3-2b-beliefsearch --dest runs/r3-2b-light16 --iter K` from the fork's worktree |
+| `launch-fork` | refuses while the line's supervisor lives; `env ZERO_TOKEN_GRAPHS=1 MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py ... tools/supervise.py runs/r3-2b-light16 <the line's flags> --iters K+24 --selfplay-sims-light 16 --selfplay-sims-light-fast 4 --selfplay-light-record 1 --selfplay-light-classes all`; prints the watch_run command |
+| `check-fork` | after its first iteration: the "light decisions:" start-up line, "token network CUDA graphs on", the selfplay line's games (local + Mac), samples and `light`, REFUSED lines (want 0) |
+| `wait-fork` | blocks until the fork's supervisor is gone; checks iteration K + 24 is in its metrics |
+| `relaunch-main` | refuses while either supervisor lives, with a PAUSE file, or if run-e057c87 is not at e057c87; `env ZERO_TOKEN_GRAPHS=1 MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py ... tools/supervise.py runs/r3-2b-beliefsearch <the line's flags> --iters 400` from `run-e057c87`; prints the watch_run command |
+| `h2h 8`, `h2h 16`, `h2h 24` | paired h2h fork vs control at K + n once both checkpoints exist: `--spec` the run's, `--chance-k 0`, `--paired --sprt 0,20 --games 600 --max-games 2400 --sims 32`, the cq 0.3 / min-visits 4 rule, root-view leaves, `--graphs 1 --device cuda`; `ab/h2h_<N>.json`, the score, Elo +- se, the SPRT's stop |
+| `walltime` | per arm over K+1 .. K+24: hours, seconds a generation, self-play seconds a generation, leaves a game (local + Mac), the fork's `saved_share`; the ratios; n_eq -> `ab/n_eq` |
+| `h2h-eq` | the fork's K + 24 against the control's K + n_eq (the same h2h); `ab/h2h_eq_<F>_vs_<C>.json` |
+| `fingerprints` | both arms' K + 24 at the run's self-play search with light off (`light_eval.py play --sims-light 0`, 192 games, CPU) and the report: window act rates by class, fingerprints, each arm against the other |
+| `summary` | anchored Elo and held-out CE lines of both logs, every h2h's score |
+
+Also in that directory: `graphs_light_smoke.py`, the smoke of the token graphs and light decisions together
+(77.7).
+
+**Watch the fork's first iteration** (`check-fork`): the start-up line "light decisions: 16 simulations
+(full draws) / 4 (fast draws), recorded (full draws); classes own_upkeep,..."; "zero.infer: token network
+CUDA graphs on" in its stdout; the `selfplay:` line's `light` - `share` ~0.29, `recorded_per_game` ~0.25 x
+`per_game`, `saved_share` ~0.2 (77.5) - its games = the local ones + the Mac's (`remote.games` > 0) and
+no "REFUSED: its checkout searches light decisions as" line; samples per game as the line's (~90 with the
+value-only samples).
+
+**Verdict** (the user's): the fork adopted if (1) it is not weaker per generation (the K + 24 h2h's
+estimate within ~1 se of 0 and clear of -20 Elo, the fingerprints and window act rates of `fingerprints`
+not drifting) and (2) its generations are faster (seconds and self-play seconds a generation, leaves a
+game ~20% fewer: `walltime`); the equal-wall-clock h2h (`h2h-eq`) is the summary number. Anchored Elo and
+held-out CE are the side evidence.
+
+**Checklist**
+
+1. `check` (all green; the line running on e057c87).
+2. `stop` -> K (the supervisor gone cleanly, no process left naming the run).
+3. `fork`.
+4. `launch-fork`; arm `watch_run.sh` on the fork (the command it prints).
+5. After the fork's first iteration: `check-fork` (light metrics, graphs on, the Mac plays, no REFUSED).
+6. `wait-fork` (K + 24, the fork's supervisor gone).
+7. `relaunch-main` (the control, fresh); arm `watch_run.sh` on the line; check a new iteration in its log.
+8. `h2h 8`, `h2h 16`, `h2h 24` as the control reaches K + 8 / + 16 / + 24.
+9. `walltime`, then `h2h-eq` (if n_eq < 24).
+10. `fingerprints` (CPU), `summary`; the verdict to the user.
+
+**The first preparation (superseded 2026-10-31 by the re-pin above; kept for the record)**: `mtg-zero-wt/run-757dfa1`, detached at **757dfa1** (this branch's code - 7e26452's - with
 zero-core a797384, whose runtime is cc83628's; its submodule fetched from the local zero-core repo: the
 core commit is not on GitHub), its own target `E:/cargo-target/mtg-zero/run-757dfa1`, its pyd built and
 checked by `gate.py repin --expect-digest 132437374243f7b2 --no-mac` (PASSED: build, digest, a Delver
@@ -16035,7 +16110,7 @@ there (a new checkout: the line's `run-45897601285d` is not touched). Without it
 and evaluations are refused (no checkout of its commit there; an older one's hello would also report no
 light settings) and the desktop plays every game.
 
-**Commands** (Git Bash on the desktop):
+*Its commands (PAUSE / resume, without the graphs - do not use):*
 
 ```
 MAIN="C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch"
@@ -16114,34 +16189,6 @@ grep -E "elo anchored|heldout" "$FORK/log.txt" "$MAIN/log.txt" | tail -12
 (`light_eval.py play --config` of the fork's config.json carries its light settings: step 7 passes
 `--sims-light 0` so both arms are fingerprinted at the same search, light off.)
 
-**Watch the fork's first iteration**: the start-up line "light decisions: 16 simulations (full draws) / 4
-(fast draws), recorded (full draws); classes own_upkeep,..."; the `selfplay:` line's `light` - `share`
-~0.29, `recorded_per_game` ~0.25 x `per_game`, `saved_share` ~0.2 (77.5) - its `games` = the local games
-+ the Mac's (`remote.games` > 0) and no "REFUSED: its checkout searches light decisions as" line (step 1
-done); `samples` per game as the line's (~90 + the value-only samples).
-
-**Verdict** (the user's): the fork adopted if (1) it is not weaker per generation (the K + 24 h2h not
-H1 for the control, the estimate within ~1 se of 0, the fingerprints and window act rates of step 7 not
-drifting) and (2) its generations are faster (wall-clock and self-play seconds per generation, leaves
-per game ~20% fewer); the equal-wall-clock h2h (6b) is the summary number. Anchored Elo and held-out CE
-are the side evidence.
-
-**Checklist**
-
-1. `mac.sh --eval-checkout` from the fork's worktree -> "eval checkout ready" (the coordinator).
-2. Pause the line (`pause_run.py --wait`), note K.
-3. **Check the line's supervisor is alive** (2b). If it is gone (kill_orphans), the line must be
-   relaunched at step 5 with a fresh supervisor (5b: PAUSE removed, its own command line), not resumed.
-4. `fork_run.py --source ... --dest runs/r3-2b-light16 --iter K`.
-5. Launch the fork (hidden, `MTGZ_SUPERVISE_STALL=7200`), arm `watch_run.sh`; after its first iteration
-   check the `light` metrics and that the Mac plays (no REFUSED).
-6. Fork at K + 24, its supervisor gone -> resume the line (`pause_run.py --resume --wait`), or 5b if its
-   supervisor died; arm `watch_run.sh`; check the line runs again (a new iteration in its log).
-7. h2h at K + 8 / + 16 / + 24 as the control reaches them (`--spec` the run's, `--chance-k 0`, paired
-   SPRT(0, 20)); then 6b (equal wall-clock).
-8. Fingerprints and window act rates of both arms at K + 24 (CPU, step 7).
-9. Anchored Elo and held-out CE from both logs; the verdict to the user.
-
 ### 77.7 Checks
 
 Desktop 2026-10-31, CPU only (`CUDA_VISIBLE_DEVICES=-1`), below normal priority, beside the live main
@@ -16166,6 +16213,21 @@ and zero-core c15e3d0 (E:/zero-scratch/light/base-c15e3d0), each built in its ow
 * **The fork's worktree** `mtg-zero-wt/run-757dfa1` (77.6): `gate.py repin --expect-digest
   132437374243f7b2 --no-mac` PASSED on 757dfa1 (build in its own target 186 s, digest = main's, the
   1-config Delver smoke 0 / 1 failed; the Mac step skipped: the coordinator's).
+* **After merging the mains** (zero-core a262f03 = a797384 + c6b959b, mtg-zero 1929742 = 757dfa1's line +
+  e057c87; no code conflicts, ENGINE.md 77 and 78 both kept): zero-core cargo 95 + 3 and `pytest
+  tests/test_light.py tests/test_token_graphs.py` 32 passed / 5 skipped (CUDA; on the CPU); this repo's
+  `--test light` 3, `pytest tests` 69 passed. `queued_setups_fill_every_free_slot_when_the_queue_is_long`
+  (zero-core, eval seats) fails now and then under load in the full suite: 1 of 12 runs at c15e3d0 too,
+  never alone (0 of 40 on either) - an existing timing assumption, not this change.
+* **The fork's worktree** `mtg-zero-wt/run-1929742`: `gate.py repin --expect-digest 132437374243f7b2 --spec
+  delver --preset delver-mirror` PASSED (build 240 s in its own target, digest = main's, the Delver smoke 0 /
+  1 failed, `mac.sh --eval-checkout` -> `~/mtg-zero-wt/run-19297425356c` ready; `gates/19297425356c.json`).
+* **Token graphs + light decisions together** (`ab/graphs_light_smoke.py`, on the GPU beside the live
+  line, in the fork's worktree with `ZERO_TOKEN_GRAPHS=1`: the run loop's own seat and evaluator, the
+  line's config with light 16 / 4 recorded, checkpoint 320, 8 games): "token network CUDA graphs on",
+  15,071 batches all through the graphs (`graph_calls == calls`), 88.5 light decisions a game (30.4% of
+  the searched), 23.5 recorded, `saved_share` 24.2%, 845 samples, all finite.
+
 
 ### 77.8 Risks and open points
 
