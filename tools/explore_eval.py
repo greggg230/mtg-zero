@@ -6,7 +6,7 @@ under runs/.
 
   python tools/explore_eval.py play --model CKPT --config RUN/config.json --games 96 --out on.json \\
       --explore all [--explore-games 1] [--explore-q-margin 0.1] [--explore-p ...] [--explore-window ...] \\
-      [--sims 64 --sims-fast 16] [--conc 48] [--threads 4] [--torch-threads 4] [--seed 1]
+      [--explore-pick first|game] [--sims 64 --sims-fast 16] [--conc 48] [--threads 4] [--torch-threads 4] [--seed 1]
   python tools/explore_eval.py play ... --out off.json                     # no --explore: the control
   python tools/explore_eval.py report on.json off.json [on2.json off2.json ...] [--json report.json]
   python tools/explore_eval.py fingerprint x.json [...]       # the games' fingerprints alone (an A/B arm)
@@ -88,6 +88,7 @@ def play(a):
     cfg['selfplay_explore_mask_z'] = a.explore_mask_z
     cfg['selfplay_explore_p'] = a.explore_p
     cfg['selfplay_explore_window'] = a.explore_window
+    cfg['selfplay_explore_pick'] = a.explore_pick
     cfg['threads'] = a.threads
     scratch = os.path.join(os.path.dirname(os.path.abspath(a.out)), 'run_stub')
     R = Run(scratch, cfg)                          # (attributes only: nothing written)
@@ -197,9 +198,11 @@ def follow_up(tag, rep, ep):
         turns = None
         if crack is not None:
             turns = st[crack]['turn'] - st[i0]['turn'] if st[crack].get('turn') is not None else None
-        return {'cracked_later': crack is not None, 'crack_turns_later': turns,
+        had = any(c.get('name') == 'Brainstorm' for c in st[i0]['players'][p]['hand'])
+        return {'cracked_later': crack is not None, 'crack_turns_later': turns, 'had_brainstorm': had,
                 'brainstorm_then_crack': bs is not None and crack is not None and bs <= crack,
-                'brainstorm_while_holding': bs is not None and (crack is None or bs <= crack)}
+                'brainstorm_while_holding': bs is not None and (crack is None or bs <= crack),
+                'had_bs_and_cast_it_holding': had and bs is not None and (crack is None or bs <= crack)}
     if tag == 'daze_tapout':
         t = st[i0].get('turn')
         dazed = any(re.search(rf'P{1 - p} casts Daze', ln) for i, ln in lines if st[i].get('turn') == t)
@@ -308,7 +311,7 @@ def report(a):
         tt = t['tags'].get(tag)
         if tt is None:
             continue
-        d = {'opportunities': tt['opportunities'], 'blocked': tt['blocked'], 'episodes': tt['episodes'],
+        d = {'drawn': tt.get('drawn', 0), 'opportunities': tt['opportunities'], 'blocked': tt['blocked'], 'episodes': tt['episodes'],
              'gate_block_rate': round(tt['blocked'] / max(1, tt['blocked'] + tt['episodes']), 4),
              'overridden': tt['overridden'], 'q_gap_mean': tt['q_gap'], 'alt_unvisited': tt['alt_unvisited'],
              'ends': tt['ends'], 'turns': tt['turns']}
@@ -317,6 +320,11 @@ def report(a):
             diff = [x - y for x, y in zip(e['seat_result'], e['twin_result'])]
             mu = sum(diff) / n
             sd = math.sqrt(sum((x - mu) ** 2 for x in diff) / max(1, n - 1)) if n > 1 else 0.0
+            vis = [g for g, v in zip(e['q_gap'], e['alt_visits']) if v > 0]
+            unv = [g for g, v in zip(e['q_gap'], e['alt_visits']) if v == 0]
+            d.update(q_gap_visited=round(sum(vis) / len(vis), 4) if vis else None, q_gap_visited_max=round(max(vis), 4) if vis else None,
+                     q_gap_unvisited=round(sum(unv) / len(unv), 4) if unv else None,
+                     overridden_per_episode=round(sum(e['overridden']) / n, 2))
             d.update(prefix_identical=f'{e["prefix_ok"]}/{e["episodes"]}', seat_score=round(sum(e['seat_result']) / n, 4),
                      twin_score=round(sum(e['twin_result']) / n, 4), paired_diff=round(mu, 4),
                      paired_se=round(sd / math.sqrt(n), 4) if n > 1 else None,
@@ -368,6 +376,7 @@ def main(argv=None):
     p.add_argument('--explore-mask-z', type=int, default=1)
     p.add_argument('--explore-p', default='')
     p.add_argument('--explore-window', default='')
+    p.add_argument('--explore-pick', default='first', help="'first' (any tag's first trigger) | 'game' (a tag drawn per game)")
     p.add_argument('--out', required=True)
     r = sub.add_parser('report', help='ON OFF [ON OFF ...]: twin play files, exploration on then off')
     r.add_argument('files', nargs='+')
