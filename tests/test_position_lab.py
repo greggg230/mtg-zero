@@ -250,3 +250,13 @@ def test_deal_summaries_report_the_played_deals(spot):
     assert set(d) == {'actual', 'uniform'}, 'the uniform deal beside the modes, for reference'
     assert all(v == 1.0 for v in d['actual'].values()) and set(d['actual']) == real
     assert any(v < 1.0 for v in d['uniform'].values())
+
+
+def test_pooling_is_stratified_by_spot():
+    so = lambda d1: {'modes': {'m': {'candidates': [{'score': 0.5}, {'score': 0.5 + sum(d1) / len(d1)}],  # noqa: E731
+                                     '_diffs': [[0.0] * len(d1), d1]}}}
+    out = L.pooled([so([1.0, 0.0, 1.0, 0.0]), so([-1.0, -1.0, 0.0, 0.0])], 'm', 2)
+    (m1, s1), (m2, s2) = L.stats([1.0, 0.0, 1.0, 0.0]), L.stats([-1.0, -1.0, 0.0, 0.0])
+    assert out[1]['vs_first']['diff'] == round((m1 + m2) / 2, 4) == 0.0
+    assert out[1]['vs_first']['se_paired'] == round((s1 ** 2 + s2 ** 2) ** 0.5 / 2, 4)
+    assert out[1]['vs_first']['pairs'] == 8 and out[0]['vs_first']['diff'] == 0.0

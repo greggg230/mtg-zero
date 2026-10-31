@@ -635,21 +635,25 @@ def summarize(spot, mode, cands, rows, games, si):
 
 
 def pooled(spots_out, mode, n_cands):
-    """Over the spots that played `mode` (equal weight: the same games per spot): the mean score per
-    candidate, and the paired difference to the first candidate over every deal of every spot, with
-    its se (deals independent across spots)."""
+    """Over the spots that played `mode` (equal weight): the mean score per candidate, and the paired
+    difference to the first candidate - the mean of the spots' mean differences, its se stratified by
+    spot (sqrt(sum of the spots' squared paired se) / spots: deals independent across spots)."""
     out = []
     for ci in range(n_cands):
-        sc, dif = [], []
+        sc, means, ses, pairs = [], [], [], 0
         for so in spots_out:
             res = so['modes'].get(mode)
             if not res:
                 continue
             sc.append(res['candidates'][ci]['score'])
-            dif.extend(res['_diffs'][ci])
-        m, se = stats(dif)
+            m, se = stats(res['_diffs'][ci])
+            means.append(m)
+            ses.append(se)
+            pairs += len(res['_diffs'][ci])
+        k = len(means)
         out.append({'candidate': ci, 'spots': len(sc), 'score': r4(sum(sc) / len(sc)) if sc else None,
-                    'vs_first': {'diff': r4(m), 'se_paired': r4(se), 'pairs': len(dif)}})
+                    'vs_first': {'diff': r4(sum(means) / k) if k else None,
+                                 'se_paired': r4(math.sqrt(sum(x * x for x in ses)) / k) if k else None, 'pairs': pairs}})
     return out
 
 
