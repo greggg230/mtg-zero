@@ -178,7 +178,7 @@ fn hidden_pool_world_while_paying(card: &str, spell: &str, lands: &[&str]) {
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{}", log(&g));
     assert!(g.player(0).hand.iter().all(|&c| !g.knows(1, c)) && !g.player(0).hand.is_empty());
     let def = g.obj(pinned).def;
-    let az = MtgAz { g, m };
+    let az = MtgAz { g, m, lab: None };
     for s in 0..64 {
         let mut d = az.clone();
         d.determinize(1, &mut zero_search::rng::Rng::new(s));

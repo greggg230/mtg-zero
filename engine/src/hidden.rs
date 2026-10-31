@@ -732,6 +732,40 @@ impl Game {
         }
     }
 
+    /// The position lab's `"actual"` deal (ENGINE.md 76): every card stays where it is - both
+    /// hands, every card some player knows exactly - but the library cards nobody knows, whose
+    /// identities are shuffled among themselves within each group of library cards that every
+    /// cloud treats alike (the same membership in every cloud's domain, as `force_library_card`
+    /// swaps), so each cloud's identities stay inside its domain and every player's knowledge
+    /// holds; then the state's random stream is reseeded. What is still random from the spot on
+    /// (the library orders nobody has seen) is dealt again; nothing else changes. Not used by any
+    /// search (`determinize` deals the decider's worlds).
+    #[doc(hidden)]
+    pub fn redeal_unknown_library_orders(&mut self, rng: &mut Rng) {
+        for owner in 0..2u8 {
+            let lib: Vec<CardIdx> =
+                self.players[owner as usize].library.iter().copied().filter(|&c| self.objs[c.i()].known == 0).collect();
+            let sig: Vec<Vec<bool>> = lib
+                .iter()
+                .map(|&c| self.clouds.iter().map(|k| Self::in_domain_at(k, owner, c, Zone::Library)).collect())
+                .collect();
+            let mut done = vec![false; lib.len()];
+            for i in 0..lib.len() {
+                if done[i] {
+                    continue;
+                }
+                let group: Vec<usize> = (i..lib.len()).filter(|&j| !done[j] && sig[j] == sig[i]).collect();
+                let mut defs: Vec<DefId> = group.iter().map(|&j| self.ident(lib[j])).collect();
+                rng.shuffle(&mut defs);
+                for (&j, &d) in group.iter().zip(&defs) {
+                    done[j] = true;
+                    self.set_ident(lib[j], d);
+                }
+            }
+        }
+        self.rng = Rng::new(rng.next_u64());
+    }
+
     /// Tests and analysis (ENGINE.md 67): `determinize`'s deal of every card
     /// hidden from `viewer` **including** the ones a payment in progress pins
     /// (the payer's mana sources in hand, the cards a cost may exile from

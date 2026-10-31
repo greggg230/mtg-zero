@@ -266,8 +266,9 @@ impl Game {
         }
     }
 
-    /// An option in words, for the decision `kind` (the pending one).
-    fn option_text(&self, kind: DecisionKind, c: Choice) -> String {
+    /// An option in words, for the decision `kind` (the pending one; the position lab's forced
+    /// labels, `lab.rs`).
+    pub(crate) fn option_text(&self, kind: DecisionKind, c: Choice) -> String {
         use DecisionKind as K;
         let nm = |i: CardIdx| self.name(i).to_string();
         let tgt = |t: Target| match t {
@@ -463,6 +464,10 @@ impl MtgAz {
     /// match's score, and while sideboarding the decision as action ids only.
     pub fn spectator_json(&self) -> String {
         let mut v = self.g.spectator_view();
+        // a position-lab game's line, rule and libraries (ENGINE.md 76; no other game has it)
+        if let Some(l) = &self.lab {
+            v["lab"] = l.view(&self.g);
+        }
         v["match"] = json!({
             "format": format!("{:?}", self.m.format).to_lowercase(),
             "game": self.m.game_no,
