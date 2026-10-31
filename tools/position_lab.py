@@ -517,14 +517,20 @@ def model_id(path):
 
 
 def play(jobs, model_path, keys, c_puct, sims, games, seed, conc, threads, search_threads, procs, diag, cache=None,
-         log=print):
+         log=print, cached_only=False):
     """Every (spot, candidate, mode) of `jobs` ([(spot, [(mode, start kwargs)], candidates)]) in `procs`
     worker processes (each: `threads` torch threads, `search_threads` search threads, below-normal
     priority), jobs found in `cache` (same key) reused. -> (rows by tag, line infos by tag, perfs)."""
     from concurrent.futures import ProcessPoolExecutor, as_completed
     _WORKER['model_id'] = model_id(model_path)
-    work = [(spot, m, cand, ci, si, keys, c_puct, sims, games, seed, conc, search_threads, diag, cache)
-            for si, (spot, md, cands) in enumerate(jobs) for ci, cand in enumerate(cands) for m in md]
+    # mode-major (the first mode - belief by default - complete for every spot first), then spot, candidate
+    order = {}
+    for _, md, _ in jobs:
+        for m, _ in md:
+            order.setdefault(m, len(order))
+    work = sorted([(spot, m, cand, ci, si, keys, c_puct, sims, games, seed, conc, search_threads, diag, cache)
+                   for si, (spot, md, cands) in enumerate(jobs) for ci, cand in enumerate(cands) for m in md],
+                  key=lambda w: (order[w[1][0]], w[4], w[3]))
     rows, infos, perfs = {}, {}, []
     todo = []
     if cache:
@@ -542,6 +548,9 @@ def play(jobs, model_path, keys, c_puct, sims, games, seed, conc, threads, searc
         todo.append(w)
     if len(todo) < len(work):
         log(f'  {len(work) - len(todo)} of {len(work)} jobs from the cache {cache}')
+    if cached_only:
+        log(f'  --cached-only: {len(todo)} jobs not played')
+        todo = []
     t0 = time.time()
     if todo:
         with ProcessPoolExecutor(max_workers=max(1, min(procs, len(todo))), initializer=_worker_init,
@@ -693,7 +702,7 @@ def line_summary(infos, scores):
 
 
 def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_sims, view_reps, threads, search_threads,
-            procs, conc, seed, log=print, diagnose_lines=True, cache=None):
+            procs, conc, seed, log=print, diagnose_lines=True, cache=None, cached_only=False):
     """The lab for every spot: its checks and the network's view, then every play-out."""
     ev, model, check_head = load_net(model_path)
     cfg, keys, c_puct = seat_keys(model_path)
@@ -734,13 +743,16 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
     log(f'play-outs: {n} games at {sims} simulations per move, {procs} processes')
     t1 = time.time()
     rows, infos, perfs = play(jobs, model_path, keys, c_puct, sims, games, seed, conc, threads, search_threads, procs,
-                              diagnose_lines, cache=cache, log=log)
+                              diagnose_lines, cache=cache, log=log, cached_only=cached_only)
     out['perf'] = {'games': len(rows), 'seconds': round(time.time() - t1, 1), 'jobs': perfs,
                    'cut': sum(p['cut'] for p in perfs)}
     for si, (spot, md, cands) in enumerate(jobs):
         so = out['spots'][si]
         d = spot['decider']
         for mode, _ in md:
+            if not all(f'{si}|{mode}|{ci}|{i}' in rows for ci in range(len(cands)) for i in range(games)):
+                so.setdefault('incomplete_modes', []).append(mode)    # (--cached-only: not every job played yet)
+                continue
             res, diffs = summarize(spot, mode, cands, rows, games, si)
             # the decider's per-deal results of each candidate (deal i: the same world for all)
             entry = {'candidates': res, '_diffs': diffs,
@@ -799,10 +811,14 @@ def table(rep):
                                     f' of {li["cracked_over_seen_n"]}' if 'network_cracked_over_seen_card' in li else ''))
         if so.get('skipped_modes'):
             lines.append(f'   skipped: {so["skipped_modes"]}')
+        if so.get('incomplete_modes'):
+            lines.append(f'   not played yet (--cached-only): {so["incomplete_modes"]}')
     if rep.get('pooled'):
         lines.append('== pooled over spots (equal weight): score; paired difference to (a) over all deals')
         for m, pc in rep['pooled'].items():
             for x in pc:
+                if not x['spots']:
+                    continue
                 vf = x['vs_first']
                 lines.append(f'   [{m}] {rep["candidate_names"][x["candidate"]][:50]:<50} {x["score"]:.3f} over {x["spots"]} spots;'
                              f' vs (a) {vf["diff"]:+.4f} +- {vf["se_paired"]:.4f} ({vf["pairs"]} pairs)')
@@ -868,6 +884,7 @@ def common(ap):
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--no-diagnose', action='store_true')
     ap.add_argument('--cache', help='a directory for each finished job\'s games (a stopped lab resumes from it)')
+    ap.add_argument('--cached-only', action='store_true', help='report the cached jobs only, play nothing')
     ap.add_argument('--out')
 
 
@@ -904,7 +921,8 @@ def cmd_spot(a):
             raise SystemExit('no candidates (--top-k / --cand)')
         return cs
     rep = run_lab(spots_of(a), cands, a.model, modes, a.hold, a.exclude, a.games, a.sims, a.view_sims, a.view_reps,
-                  a.threads, a.search_threads, a.procs, a.conc, a.seed, diagnose_lines=not a.no_diagnose, cache=a.cache)
+                  a.threads, a.search_threads, a.procs, a.conc, a.seed, diagnose_lines=not a.no_diagnose, cache=a.cache,
+                  cached_only=a.cached_only)
     finish(rep, a)
 
 
@@ -913,7 +931,8 @@ def cmd_bauble(a):
     low_priority(a.threads)
     rep = run_lab(spots_of(a), lambda s, g, v: bauble_candidates(s, g, a.land_min), a.model, modes, a.hold, a.exclude,
                   a.games, a.sims, a.view_sims, a.view_reps, a.threads, a.search_threads, a.procs, a.conc, a.seed,
-                  diagnose_lines=not a.no_diagnose, cache=a.cache)
+                  diagnose_lines=not a.no_diagnose, cache=a.cache,
+                  cached_only=a.cached_only)
     rep['candidate_names'] = ['(a) the actual play (crack now)', '(b) Bauble first, network on',
                               f'(c) Bauble first + rule (land_min {a.land_min})']
     rep['pooled'] = {m: pooled(rep['spots'], m, 3) for m in modes}
