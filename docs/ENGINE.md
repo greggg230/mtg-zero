@@ -16024,23 +16024,32 @@ compare the fork's K + 24 at equal generations as above (its first 24 generation
 whatever the cap). Wall-clock is noisy (the Mac's share of the games, other jobs, the evaluation every
 8 generations): compare the self-play phases' seconds and leaves too, and the same generation span.
 
-**Commands** (Git Bash on the desktop; `<SHA>` = this branch's code commit the fork pins, 77.7):
+**Prepared**: `mtg-zero-wt/run-757dfa1`, detached at **757dfa1** (this branch's code - 7e26452's - with
+zero-core a797384, whose runtime is cc83628's; its submodule fetched from the local zero-core repo: the
+core commit is not on GitHub), its own target `E:/cargo-target/mtg-zero/run-757dfa1`, its pyd built and
+checked by `gate.py repin --expect-digest 132437374243f7b2 --no-mac` (PASSED: build, digest, a Delver
+smoke; `gates/757dfa1b414d.json` there). **Not done** (the hard rules: the Mac and the live run stay
+untouched by the preparation): `mac.sh --eval-checkout` from that worktree - it pushes the commit to the
+Mac's bare repo, the core's pin to `~/mtg-zero-core.git`, and builds `~/mtg-zero-wt/run-757dfa1b414d`
+there (a new checkout: the line's `run-45897601285d` is not touched). Without it the fork's Mac workers
+are refused (their hello's light settings) and the desktop plays every game.
+
+**Commands** (Git Bash on the desktop):
 
 ```
 MAIN="C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch"
 FORK="C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-light16"
 MAINWT="C:/Users/Gregg Keithley/mtg-zero-wt/run-4589760"        # the line's code
-WT="C:/Users/Gregg Keithley/mtg-zero-wt/run-<SHA7>"               # the fork's code (pinned)
+WT="C:/Users/Gregg Keithley/mtg-zero-wt/run-757dfa1"             # the fork's code (pinned, prepared)
 OUT="E:/mtg-zero-scratch/light-windows/ab"; mkdir -p "$OUT"
 
-# 0. the fork's pinned worktree (done in the preparation, 77.7; to redo it): its own target dir; the core
-#    commit is local only (not on GitHub): fetch it from the zero-core repo into the submodule
-git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add --detach "$WT" <SHA>
-git -C "$WT" submodule update --init third_party/zero-core || true
+# 0. the fork's pinned worktree (done in the preparation; to redo it): its own target dir; the core commit
+#    is local only (not on GitHub): fetch it from the zero-core repo into the submodule
+git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add --detach "$WT" 757dfa1
+git -C "$WT" submodule update --init third_party/zero-core || true      # (clones; the pin is not on GitHub)
 git -C "$WT/third_party/zero-core" fetch "C:/Users/Gregg Keithley/zero-core" feat/light-decisions
-git -C "$WT/third_party/zero-core" checkout "$(git -C "$WT" rev-parse <SHA>:third_party/zero-core)"
-cd "$WT" && CARGO_TARGET_DIR="E:/cargo-target/mtg-zero/run-<SHA7>" bash tools/build_py.sh
-cd "$WT" && python tools/gate.py repin --expect-digest 132437374243f7b2 --no-mac
+git -C "$WT/third_party/zero-core" checkout "$(git -C "$WT" rev-parse 757dfa1:third_party/zero-core)"
+cd "$WT" && python tools/gate.py repin --expect-digest 132437374243f7b2 --no-mac   # builds into E:/cargo-target/mtg-zero/run-757dfa1
 
 # 1. the Mac checkout of the fork's commit (the coordinator; prints "eval checkout ready")
 cd "$WT" && bash tools/mac.sh --eval-checkout
@@ -16151,7 +16160,11 @@ and zero-core c15e3d0 (E:/zero-scratch/light/base-c15e3d0), each built in its ow
 * zero-core (docs/az.md 22.8): cargo 98, pytest 328 passed / 3 skipped (+ 1 co-training timing test that
   failed under load and passed alone), toy-smoke runs byte for byte against c15e3d0 (classic and rolling
   'cq', the settings absent and given at their defaults), `check_checkpoint_compat --package zero`.
-* This repo: `cargo test --release -p engine --test light` 3, `pytest tests/test_light.py` 3.
+* This repo: `cargo test --release -p engine --test light` 3; `pytest tests` 69 passed (3 new in
+  `tests/test_light.py`).
+* **The fork's worktree** `mtg-zero-wt/run-757dfa1` (77.6): `gate.py repin --expect-digest
+  132437374243f7b2 --no-mac` PASSED on 757dfa1 (build in its own target 186 s, digest = main's, the
+  1-config Delver smoke 0 / 1 failed; the Mac step skipped: the coordinator's).
 
 ### 77.8 Risks and open points
 
