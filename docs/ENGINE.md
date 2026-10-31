@@ -15880,7 +15880,7 @@ The details decided while building it (each tested in zero-core, 75.5):
 |---|---|
 | where the setting lives | the driver (`DriverCfg::explore`), not a seat key: one episode a game whichever seat, the masking of every seat's records; the seats that explore are those with `selfplay` and `record` (never an evaluation seat, h2h, Elo, a replay, the remote evaluation; a league opponent's `record` false never explores), refused by `Driver::new` on a driver that records nothing or has no such seat |
 | when, in `decide()` | after the move is chosen (temperature sampling - the run's first 60 searched decisions -, the move rule, or the Gumbel winner) and after the decision's records are made; every searched decision of the seat: full (64), fast (16) or minor (4; the MTG tags never fall on a payment) |
-| the gate's Q | the completed Q of the 'cq' target (`tree::completed_q`: W/N over every visit; an unvisited option's is the target's v_mix, the network's root value only when nothing was visited - the "unvisited -> value0" of the plan is v_mix with visits): the deviation passes when Q(deviation) >= Q(chosen) - `q_margin` (0.10, P(win): the run's `margin_w` is 0) |
+| the gate's Q | the completed Q of the 'cq' target (`tree::completed_q`: W/N over every visit; an unvisited option's is the target's v_mix, the network's root value only when nothing was visited - the "unvisited -> value0" of the plan is v_mix with visits): the deviation passes when Q(deviation) >= Q(chosen) - `q_margin` (0.10, P(win): the run's `margin_w` is 0). Since 75.10 only an option with >= 4 root visits is a candidate, and the decision's search takes the root floor and the full budget |
 | the deviation | the best option without the tag by the visit counts the move rule reads, then P0 (`argmax_visits`' order) |
 | a blocked gate at a trigger | no episode now (`blocked`); the game stays eligible and a later opportunity may trigger (one draw per opportunity either way) |
 | windows | in turns, `rounds()` = MTG's global turn number (both players' turns count): open while `rounds() < turn + window`, checked at every exploring decision; 0 = the decision only. Inside, only the episode seat's moves with its tag deviate, each through the gate; a blocked one ends the episode (the habit is played) |
@@ -15902,7 +15902,7 @@ mtgz.az.run --help` lists them. Single-game runs only.
 
 | tag (id) | on which option | default window | default p |
 |---|---|---|---|
-| `fetch_crack` (1) | Priority: activating a fetchland (Flooded Strand, Polluted Delta, Misty Rainforest, Scalding Tarn and their siblings, Prismatic Vista) - at any time, any turn | 2: the rest of this turn and the next (crack at the opponent's end step / hold for Brainstorm) | 0.25 |
+| `fetch_crack` (1) | Priority: activating a fetchland (Flooded Strand, Polluted Delta, Misty Rainforest, Scalding Tarn and their siblings, Prismatic Vista) - at any time, any turn | 1: the rest of the current turn - the seat may crack on the next (in response, at its end step); 2 until 75.10 | 0.25 |
 | `daze_tapout` (2) | Priority, in its own main phase with an empty stack from turn 3 on: casting a spell whose cost (its static increases, the most delve) is at least its untapped lands + its pool (an uncracked fetch counts: it finds an untapped land), cost >= 1, while the opponent controls an Island-typed land (Daze's alternative cost) and holds a card | 1: the rest of the turn | 0.5 |
 | `fow_pitch_fow` (3) | ExileCost of its own Force of Will's alternative cost (the spell whose `PayCosts` asked): exiling a Force of Will while another card could be exiled | 0 | 1.0 |
 | `delve_skip_spell` (4) | a delve pick (`Task::Delve`'s ChooseGraveyardCard) of a card that is not an instant or sorcery while one is still offered | 1: the rest of the turn (the cast's picks) | 0.5 |
@@ -16064,70 +16064,92 @@ learned from them). **Throughput**: the 'first' exploring runs 823-858 leaves/s 
 854-936 run beside them, the 'game' ones 1,081-1,100 (run later, with less load beside them): within the
 machine's load noise; the tags cost a call per decision of an eligible game.
 
-### 75.7 The A/B (flags; not run)
+### 75.7 The A/B (prepared, not launched)
 
-**Against r3-2b-beliefsearch** (the main line again: the 128 x 4 network, resuming from iteration 196 at
-lr 3e-5 on main 4589760; r3-big192x6 stopped at ~243, in reserve). Round 3's method (62.6, 73.6): the
-fork arm K -> K + 24 with the line's flags plus exploration, then the control - the line itself - K -> K +
-24 with its flags unchanged, one after the other on the whole desktop GPU and the Mac, so each arm plays
-its 800 games an iteration at the line's speed (~4-5 min an iteration at 128 x 4: ~2 h an arm).
+**Design** (the user's, 2026-10-30): the main line `runs/r3-2b-beliefsearch` (128 x 4, live at lr 3e-5 on
+`mtg-zero-wt/run-4589760`) is forked at its newest checkpoint K at launch; **treatment** = the line's
+own flags + exploration (pick 'game', share 0.5, the 75.10 defaults) for 24 generations; **control** =
+the line itself continuing the same 24 generations. Sequential, as round 3's driver: the fork alone on
+the whole desktop GPU and the Mac (the line paused), then the line resumed as the control - each arm at
+the line's speed (~4.5 min an iteration on 2026-10-30: ~2 h an arm), no arm starved by the other.
 
-* **The fork point K**: a checkpoint of the resumed line at an evaluation boundary (a multiple of
-  `--eval-every 8`), after its first few iterations at lr 3e-5 so that both arms start from the new
-  schedule (K = 200 or 208). The line stops at K (STOP, a natural pause; the user's call).
-* **The build**: zero-core feat/explore and this branch merged (or this branch's worktree pinned at its
-  commit: `git worktree add --detach ../mtg-zero-wt/run-<sha7> <sha>`, `bash tools/build_py.sh`, `python
-  tools/gate.py repin --expect-digest 132437374243f7b2` - exploration off changes no digest), and
-  `bash tools/mac.sh --eval-checkout` from that worktree: the Mac's workers must explore (their hello
-  says so; an older checkout is refused - this machine would then play every game, a slower arm). The
-  control can stay on the line's own pin 4589760 (off = its run byte for byte, 75.8) with its own Mac
-  checkout restored before it runs.
-* **The fork**: `python tools/fork_run.py --source runs/r3-2b-beliefsearch --dest runs/r3-2b-explore --iter K` (the
-  line's config, its window hard-linked), then from the build's worktree:
+**Prepared**: `mtg-zero-wt/run-9a57a55` (detached at **9a57a55** = 5dd9199's code with zero-core 7985add,
+whose runtime is cd3bd6d's; the optin-core gate passed on it, 75.8), its own target
+`E:/cargo-target/mtg-zero/run-9a57a55`, its pyd built and checked by `gate.py repin --expect-digest
+132437374243f7b2 --no-mac` (build, digest, a Delver smoke). **Not done** (the hard rules: the Mac and the
+live run stay untouched by the preparation): `mac.sh --eval-checkout` from that worktree - it pushes
+`refs/heads/run-9a57a5549753` to the Mac's bare repo, the core's pin to `~/mtg-zero-core.git`, and builds
+`~/mtg-zero-wt/run-9a57a5549753` there (a new checkout: the line's `run-45897601285d` is not touched).
+The fork's Mac workers and evaluations run from it (`MTGZ_REMOTE_COMMIT`); without it they are refused
+and the desktop plays every game.
+
+**Commands** (Git Bash on the desktop):
 
 ```
-BASE=(<exactly the resumed line's own supervise.py flags - its relaunch at lr 3e-5 -, e.g. 73.7's --preset delver-mirror
-      --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq
-      --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1
-      --train-prefetch 2 --eval-every 8 --eval-leaf-value-view root and its lr settings> --iters $((K + 24)))
-XP=(--selfplay-explore all --selfplay-explore-pick game --selfplay-explore-games 0.5 --selfplay-explore-q-margin 0.1
-    --selfplay-explore-mask-z 1)
-MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "$FORK/supervisor_console.txt" python tools/supervise.py "$FORK" "${BASE[@]}" "${XP[@]}"
-# ... checkpoint K + 24 in the fork and its supervisor gone; then the control, the line itself, K -> K + 24 with BASE alone
+MAIN="C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch"
+FORK="C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-explore"
+WT="C:/Users/Gregg Keithley/mtg-zero-wt/run-9a57a55"           # the fork's code
+MAINWT="C:/Users/Gregg Keithley/mtg-zero-wt/run-4589760"       # the line's code
+OUT="E:/mtg-zero-scratch/explore/ab"; mkdir -p "$OUT"
+
+# 1. the Mac checkout of the fork's commit (~5-10 min on the Mac; prints "eval checkout ready")
+cd "$WT" && bash tools/mac.sh --eval-checkout
+
+# 2. pause the line at its newest checkpoint (seconds: the iteration in flight is dropped and replayed
+#    on resume; its supervisor, pid 143452, stays up waiting), then K
+cd "$MAINWT" && python tools/pause_run.py "$MAIN" --wait
+K=$(ls "$MAIN/models" | sed -n 's/^iter_0*\([0-9][0-9]*\)\.pt$/\1/p' | sort -n | tail -1); echo "K=$K"
+
+# 3. the fork (the line is only read; its window hard-linked)
+cd "$WT" && python tools/fork_run.py --source "$MAIN" --dest "$FORK" --iter $K
+
+# 4. the fork's run: the line's own flags (its supervisor's command line) + exploration, K -> K + 24
+cd "$WT" && MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "$FORK/supervisor_console.txt" python tools/supervise.py "$FORK" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --ram-budget-gb 34 --iters $((K + 24)) --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 200 --heldout-shards "C:/Users/Gregg Keithley/mtg-zero/runs/heldout/r3-2b_iter0197fresh_8192.npz" --lr 3e-5 --lr-min 3e-5 --selfplay-explore all --selfplay-explore-pick game --selfplay-explore-games 0.5 --selfplay-explore-q-margin 0.1 --selfplay-explore-mask-z 1 --selfplay-explore-min-visits 4 --selfplay-explore-max-actions 8
+cd "$WT" && bash tools/watch_run.sh "$FORK" 24 &        # the crash / stall watch, as after every launch
+grep "selfplay:" "$FORK/log.txt" | tail -1 | grep -o '"explore": {"games[^}]*'; grep -c "REFUSED" "$FORK/log.txt"
+
+# 5. the fork at K + 24 and its supervisor gone: the control is the line, resumed from K
+cd "$MAINWT" && python tools/pause_run.py "$MAIN" --resume --wait
+
+# 6. paired h2h with the run's spec and chance_k 0 (each once the control has the checkpoint; the GPU is
+#    shared with the training line): +8, +16, +24
+cd "$WT" && SPEC="$(python -c "import json; print(json.load(open(r'$MAIN/config.json'))['spec'])")"
+for N in $((K + 8)) $((K + 16)) $((K + 24)); do I=$(printf %04d $N)
+  python -m mtgz.az.h2h "$FORK/models/iter_$I.pt" "$MAIN/models/iter_$I.pt" --spec "$SPEC" --chance-k 0 --paired --sprt 0,20 --games 600 --max-games 2400 --sims 32 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 0.3 --a-leaf-value-view root --b-leaf-value-view root --device cuda --threads 8 --seed 7 > "$OUT/h2h_$N.json"
+done
+
+# 7. fingerprints of each arm's own play (exploration off, the run's self-play search; CPU, ~25 min an arm)
+cd "$WT" && for ARM in "$FORK" "$MAIN"; do A=$(basename "$ARM"); I=$(printf %04d $((K + 24)))
+  CUDA_VISIBLE_DEVICES=-1 python tools/explore_eval.py play --model "$ARM/models/iter_$I.pt" --config "$ARM/config.json" --games 192 --conc 48 --threads 4 --torch-threads 4 --seed 1 --out "$OUT/fp_${A}_$((K + 24)).json"
+  python tools/explore_eval.py fingerprint "$OUT/fp_${A}_$((K + 24)).json" > "$OUT/fp_${A}_$((K + 24)).txt"
+done
+
+# 8. anchored Elo and held-out value CE of both arms
+grep -E "elo anchored|heldout" "$FORK/log.txt" "$MAIN/log.txt" | tail -12
 ```
 
-  **Why these flags** (75.6): pick 'game' so that every habit gets episodes (with 'first' the mulligan and
-  the first turns take them all: no delve, four Force of Will pitches in 384 games) and the fetch holds
-  start over the whole game; a share of 0.5 because a drawn tag comes up in ~40% of the games: ~160
-  episodes an iteration (800 games x 0.5 x 0.4; fetch holds ~55, tap-outs ~35, Volcanic fetches ~33,
-  forced mulligans ~19, Force of Will and delve ~8 each), ~3.5% of the records masked, ~0.1% dropped.
-  The design's literal defaults (`--selfplay-explore all`: 'first', 0.25 - ~200 episodes, two thirds of
-  them fetch holds and forced mulligans) are the alternative arm if only one habit set is wanted fast.
-  Watch each fork iteration's `selfplay:` line: `explore.episodes`, `masked_share`, `dropped_share`, the
-  per-tag `drawn` / `episodes` / `alt_unvisited` / `ends`.
-* **Length**: 24 iterations (three evaluations at `eval_every` 8; the window is 6 iterations, so the last
-  two windows are made of exploring games only). A habit the value net unlearns shows in the search
-  first (the 'cq' target follows Q), then in the policy.
-* **Judged by**, on checkpoints K + 8, K + 16, K + 24 of both arms:
-  1. **paired h2h** (73.3, 73.6), the fork against the control at the same iteration, the line's
-     evaluation search on both sides and the run's own spec:
-     `python -m mtgz.az.h2h FORK/models/iter_N.pt MAIN/models/iter_N.pt --spec "$(python -c "import json; print(json.load(open('runs/r3-2b-beliefsearch/config.json'))['spec'])")" --chance-k 0 --paired --sprt 0,20 --games 600 --max-games 2400 --sims 32 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 0.3 --device cuda --threads 8 --seed 7`
-     (+ the leaf view and belief settings the A/B driver passes, 73.6). Adopt at the SPRT's H1 at K + 24;
-     H0 or undecided = the control kept (a call for the user when the fingerprints move but Elo does not).
-  2. **fingerprints**: neither arm's checkpoints are the publisher's, so their games are this tool's -
-     `python tools/explore_eval.py play --model ARM/models/iter_N.pt --config ARM/config.json --games 192
-     --seed 1 --out arm_N.json` (exploration off: the network's own play at the run's self-play
-     settings), then `python tools/explore_eval.py fingerprint arm_N.json` for each arm (CPU, ~25 min
-     each at 128 x 4 with four processes). The point of the experiment: fetch cracked now below ~89%, a
-     Brainstorm with a shuffle above ~18%, tap-outs into a live Daze below ~55%, the turn 1-2 Volcanic
-     below ~56%, the one-landers' keep rate moving either way (75.6's control values at iteration 196;
-     each cell's binomial noise is in the output).
-  3. **anchored Elo** (73.7: `--elo-anchors a192=...,a160=... --elo-anchor-games 100 --elo-paired 1` in
-     both arms' BASE when the resumed line has them) and the **held-out value CE** on the frozen fresh set
-     (`--heldout-shards runs/heldout/r3-2b_iter0197fresh_8192.npz`: games of 196 without exploration, so
-     neither arm trained on it; a set from the fork's own games is refused, 75.2).
-* **Not in this A/B**: the per-tag subsets (one tag a run), other windows / chances, a gate that requires
-  visited alternatives (75.9) - follow-ups if the whole set wins or is close.
+**Watch the fork's first iteration**: its `selfplay:` line's `explore` - `games` 800, `eligible` ~400,
+`episodes` ~140 (75.10: 0.35 an eligible game), `masked_share` ~4-5%, `dropped_share` < 0.1%,
+`raised_sims_per_game` ~65, per tag
+`alt_under` 0 - and `remote.games` > 0 (no "REFUSED: its checkout explores as" line: step 1 done).
+
+**Verdict**: the SPRT of h2h_{K+24} - H1 (+20 Elo) = the fork wins; H0 or undecided = the control kept
+(the fingerprints and the anchored Elo / held-out CE are the evidence for the user either way; K+8 and
+K+16 are the trend). The fingerprints' targets: 75.6's control values at 196 (fetch cracked now 88%, a
+Brainstorm with a shuffle 16%, tap-outs into Daze 55%, the T1-2 Volcanic 50-52%, one-landers kept
+61-64%, Force of Will pitched Force of Will 66%).
+
+**Checklist**
+
+1. `mac.sh --eval-checkout` from `run-9a57a55` -> "eval checkout ready".
+2. Pause the line (`pause_run.py --wait`), note K.
+3. `fork_run.py --source ... --dest runs/r3-2b-explore --iter K`.
+4. Launch the fork (hidden, `MTGZ_SUPERVISE_STALL=7200`), arm `watch_run.sh`; after its first iteration
+   check `explore` in the selfplay line and that the Mac plays (no REFUSED).
+5. Fork at K + 24, supervisor gone -> resume the line (`pause_run.py --resume --wait`): the control.
+6. h2h at K + 8 / + 16 / + 24 as the control reaches them (`--spec` the run's, `--chance-k 0`, paired SPRT).
+7. Fingerprints of both arms at K + 24 (CPU).
+8. Anchored Elo and held-out CE from both logs; the verdict to the user.
 
 ### 75.8 Checks
 
@@ -16154,9 +16176,25 @@ priority, 4 cargo jobs; the GPU and the Mac busy with the live runs), on **57440
 * `cargo test --test explore` 8 and `pytest tests/test_explore.py` 2 passed on 715bbb1 (and on d745576).
 * zero-core's checks: its docs/az.md 21.7.
 
+**After 75.10**, on **9a57a55** (the fork's commit: 5dd9199's code, zero-core 7985add whose runtime is
+cd3bd6d's; its docs commit after it changes nothing else):
+
+* `gate.py optin-core` (the same arguments, the three games as one path each now) **PASSED** in 940 s,
+  `gates/9a57a5549753.json`: core tests 100 (zero_search 97, webnet 3), checkpoint_compat byte identity
+  against 4589760, `--test az` 39, `--test explore` 9, build-only of Glass Road c1f56dc, Caverna a6fad73,
+  Kingdom Builder 4202a4a GREEN, smoke_all's core pytest 308 passed / 3 skipped. The run before it, on
+  a291de7 (pin cd3bd6d), failed only that pytest: `test_cotrain.py::test_cotrain_pause_mid_iteration_replays_it`
+  hung - the test read its child's output through a pipe only at its end, and the nine explore keys in
+  the printed resolver config took the start-up output (4,036 bytes; 3,756 on c15e3d0) past a Windows
+  pipe's 4 KB buffer, so the run blocked on a print; fixed in the test (and the same pattern in
+  `test_loop.py`'s PAUSE test), 7985add - the run itself was fine.
+* `gate.py repin --expect-digest 132437374243f7b2 --no-mac` in `mtg-zero-wt/run-9a57a55` **PASSED**
+  (its `gates/9a57a5549753.json`): its own-target build, the digest, the Delver 1-config smoke; the
+  encoding-free digest `a0d54562c8330271` on the same build. Digests unchanged.
+
 ### 75.9 Risks, limits, open questions
 
-* **The gate rarely gates.** Most first deviations go to an option the search never visited
+* **(Fixed in 75.10: the gate now compares searched options.)** **The gate rarely gates.** Most first deviations go to an option the search never visited
   (75.6, pick 'first': 62% of the fetch holds, 81% of the forced mulligans, 39-51% of the tap-outs and
   Volcanic fetches): its completed Q is the 'cq' target's v_mix, the visited options' prior-weighted mean - close
   to the chosen move's own Q by construction - so the gap is ~0 and it passes. The plan's
@@ -16167,7 +16205,7 @@ priority, 4 cargo jobs; the GPU and the Mac busy with the live runs), on **57440
   the follow-up is a visits requirement on the deviation (`explore_min_visits`, zero-core: the
   gate refuses an option with fewer visits) or root minimum visits on tagged decisions only, so that the
   gate reads a searched Q. Not built: the plan accepted unvisited alternatives.
-* **Fetch holds are long.** The window of 2 turns overrides every crack the seat wants for the rest of
+* **(Fixed in 75.10: the window is the rest of the current turn.)** **Fetch holds are long.** The window of 2 turns overrides every crack the seat wants for the rest of
   its turn and the next - ~12 decisions an episode (75.6) - so the "crack at the opponent's end step"
   line is played only when the gate ends the episode there; the hold mostly ends with the window, at the
   seat's next turn (78 of 121 cracks two turns later). A window of 1 (`--selfplay-explore-window fetch_crack=1`) would hold for the turn
@@ -16203,3 +16241,81 @@ priority, 4 cargo jobs; the GPU and the Mac busy with the live runs), on **57440
 * **Held-out sets** cannot be made from an exploring run's shards (refused): make them from the control.
 * **Not covered**: co-training runs (refused), a run with `margin_w` > 0 (the gate's units are then the
   search's utility, not P(win)), the toy tags' semantics (tests only).
+
+### 75.10 After 75.6: the gate on searched alternatives, a one-turn fetch hold
+
+Approved by the user after 75.6, with the A/B once they pass. Zero-core cd3bd6d (the code; its docs
+cc8dd0e, search.md 3.9 and az.md 21.9; the tests' pipe fix 7985add) and this branch's 5dd9199 (and
+tools/gate.py a291de7).
+
+**1. The gate judges real estimates** (`selfplay_explore_min_visits` 4, `selfplay_explore_max_actions`
+8). 75.6: most deviations went to options the search never visited, whose completed Q (v_mix) is ~the
+chosen move's by construction - the gate passed them with a gap of ~0. Now:
+
+* an **exploring search** - an eligible game's recording seat at a decision where a deviation can
+  happen (an option of a tag it may still deviate from, beside one without it: before the game's
+  episode the drawn tag's, during the episode its tag's, its seat's) - takes the **root minimum visits**
+  of zero-core's docs/search.md 3.5 (64's machinery: `Tree::set_root_min`, `root_floor`) at 4 visits an
+  option, on roots of up to 8 options (the budget rule 2 x 8 x 4 = 64; 99-100% of the tagged decisions
+  but delve's 76% have <= 8 options, measured on 48 games), the forced walks kept out of the visit
+  counts, temperature sampling, the 'visits' rule and q exactly as root_min_visits' (the 'cq' target
+  reads Q from every visit, as with 64's floor);
+* **its budget is at least the full 64**: a fast draw (16, three searches in four) is raised to 64 and
+  stays unrecorded and noise-free (the playout-cap draw is kept). Without it a fast search could not
+  pay a floor (2 x options x 4 <= 16: two options at most) and the gate would refuse most decisions
+  inside a window (a fetch hold's cracks come at fast searches too) - the "fall back to >= N visits"
+  alone would have ended most episodes at their second decision;
+* a deviation goes only to an option with **>= 4 root visits** (forced walks included); a trigger
+  without one is refused (`unsearched`; inside a window: the episode ends, 'unsearched');
+* off, an ineligible game, a decision without such a tag, the other seat, after the episode: the
+  search of before. An eligible game is its twin until its first exploring search (not its first
+  deviation any more): the raised budget and the floor draw other simulations from there.
+
+**2. The fetch hold lasts the rest of the current turn** (`fetch_crack` window 2 -> 1). `rounds()` is
+the global turn number (both players' turns: `a_window_of_one_turn_is_the_rest_of_the_current_turn` -
+equal to `turn().number` at every decision, constant within a turn, end step and cleanup included, its
+parity the active player's; a turn without any decision is skipped), so a window of 1 opened on the
+seat's turn closes at the opponent's turn's first decision: the seat may crack there - in response, at
+its end step.
+
+**3. tools/gate.py** `--other-games` takes one path per argument (a291de7): the space in "Gregg
+Keithley" had split the first gate's paths (75.8).
+
+**The trial** (CPU as 75.6: iteration 196, its self-play search, pick 'game', every game eligible, the
+new defaults; seeds 1-3, 288 games against their exploration-off twins - 75.6's controls: off is the
+same byte for byte on these builds; `fa,fb,fc_on.json`, `floor_report.json`, `run_floor.sh`):
+
+| tag | drew it | opportunities | gate blocks (rate) | unsearched | episodes | overridden (per episode) | alternative's visits, median (fewest) | visited Q gap, mean (max) | seat vs twin |
+|---|---|---|---|---|---|---|---|---|---|
+| fetch_crack | 49 | 149 | 2 (6%) | 0 | 34 | 182 (5.4) | 4 (4) | 0.014 (0.068) | 0.47 vs 0.47 (0.00 +- 0.11) |
+| daze_tapout | 36 | 78 | 6 (17%) | 0 | 29 | 37 | 5 | 0.025 (0.076) | 0.55 vs 0.45 (+0.10 +- 0.09) |
+| fow_pitch_fow | 42 | 9 | 5 (56%) | 0 | 4 | 4 | 17 | 0.034 (0.073) | 0.25 vs 0.75 (n 4) |
+| delve_skip_spell | 52 | 22 | 0 | 0 | 10 | 13 | 21 | 0.008 (0.052) | 0.70 vs 0.60 (n 10) |
+| volcanic_fetch | 54 | 54 | 7 (28%) | 0 | 18 | 18 | 4 | 0.033 (0.097) | 0.33 vs 0.67 (-0.33 +- 0.14) |
+| keep_one_lander | 55 | 18 | 11 (61%) | 0 | 7 | 7 | 5 | 0.018 (0.064) | 0.29 vs 0.43 (n 7) |
+
+* **Deviations under the minimum: 0** of the 261 played (every episode's fewest is >= 4); **no trigger
+  unsearched** - 1,008 of the 1,056 exploring searches took the floor, the rest had their visits anyway.
+* **The gate now gates**: it refuses 61% of the forced mulligans, 56% of the Force of Will deviations,
+  28% of the turn 1-2 basic fetches, 17% of the avoided tap-outs (the searched Q of the alternative was
+  more than 0.10 below the habit's), 6% of the fetch holds and no delve pick - 75.6's 0-7% came from
+  gaps of ~0 on unvisited options.
+* **Episodes**: 102 in 288 eligible games (35%; 75.6's 'game' 40%), every tag; first-deviation turns
+  spread (fetch holds turns 1-16, tap-outs 3-19, delve 7-32).
+* **The fetch hold**: 5.4 decisions an episode (75.6: 11.4); the held fetch cracked one turn later in 27
+  of 34 (the opponent's turn: in response or at its end), later the same turn in 6 (the gate ended the
+  hold), two turns later 1; the seat cast its Brainstorm before cracking in 3 of 34 (8.8%; its twins 0
+  of 26).
+* **Paired, all episodes**: -0.049 +- 0.060 (75.6: -0.052 +- 0.032 'first', -0.16 +- 0.08 'game'); by tag
+  within noise but the Volcanic fetches' -0.33 +- 0.14 (n 18). The twins now part at the first
+  exploring search (identical up to it 102 of 102), so the difference holds the floor's effect too.
+* **Fingerprints** (both seats, rate (n)): fetch cracked now 86.8% (1,382) against 88.3% (1,372); a
+  Brainstorm with a shuffle 16.0% / 16.0%; Murktide's delve best 77.2% / 76.3%; Force of Will pitched
+  Force of Will 54.7% (95) / 66.3% (83); tap-out into Daze 55.8% / 54.8%; T1-2 Volcanic 49.1% / 52.0%;
+  one-landers kept 59.6% / 64.4% - with one episode in a third of the games and the gate refusing the
+  deviations the search finds clearly worse, the whole-game rates move little (75.6's larger moves were
+  'first' with every game eligible and unjudged deviations).
+* **Cost**: 3.7 exploring searches a game, 131 simulations a game from the raised budgets (2.1% of a
+  game's 6,300 leaves at every game eligible: ~1% at the A/B's share 0.5), 22 forced walks a game
+  (inside the budget); the exploring runs' leaves per game 6,570 against 6,301 (+4.3%, the games
+  differing as well).
