@@ -38,8 +38,9 @@
 //!   take these options in order - an option label (`view.rs`'s words: the first option, by
 //!   action id, with exactly that text), an action id, `"*"` (the network's own choice there), or
 //!   `"resolve"` (pass while the decider has priority with something on the stack, the network
-//!   answering any other question on the way - a trigger's surveil, a tax -, done at its first
-//!   priority with an empty stack, where the next item applies): `legal_actions` offers only that
+//!   answering any other question on the way - a trigger's surveil, a tax -, done at the first
+//!   decision with an empty stack, whoever's; the engine asks no decision whose only option is a pass,
+//!   so the decider's own empty-stack priority may never come): `legal_actions` offers only that
 //!   option, so the driver steps it without a search. When the next item is not among the options
 //!   (the opponent's answer changed the decision) the line is broken: the network plays on from
 //!   there, and the follow rule never starts.
@@ -51,7 +52,9 @@
 //!   id), and the rule ends -, else "good" - then the decider activates no fetch of its own accord
 //!   (an empty stack or its own item on top; in answer to the opponent's spell or ability the
 //!   network decides, and a crack there ends the rule too) until the card is drawn or moved.
-//!   Without a known top card at that decision the rule ends.
+//!   Without a known top card at that decision the rule ends. With `bad` / `good` (forced lines) the
+//!   verdict's line continues the forced line from that decision first (a branch: "a land seen: play
+//!   the fetch, crack it, cast Tamiyo; else play the Island, cast Tamiyo"), the rule as above after it.
 //!
 //! The forced line and the rule are part of the game state: the searches' worlds (cloned and
 //! determinized) keep them, so a seat's search knows the decider's scripted moves (the opponent's
@@ -81,7 +84,8 @@ pub enum Forced {
     Any,
     /// `"resolve"`: let the stack resolve - pass whenever the decider has priority with something on
     /// the stack, the network answering any other question on the way (a trigger's surveil, a tax);
-    /// done at the decider's first priority with an empty stack, where the next item applies.
+    /// done at the first decision with an empty stack, whoever's; the next item applies at the
+    /// decider's next decision.
     Resolve,
 }
 
@@ -90,6 +94,28 @@ pub enum Forced {
 pub struct Follow {
     pub land_min: u32,
     pub fetches: Vec<DefId>,
+    /// Forced lines that continue the line by the verdict when the rule starts (empty: none).
+    pub bad: Vec<Forced>,
+    pub good: Vec<Forced>,
+}
+
+/// A list of forced items (labels, action ids, `"*"`, `"resolve"`).
+fn parse_forced(x: &Value, what: &str) -> Result<Vec<Forced>, String> {
+    x.as_array()
+        .ok_or_else(|| format!("mtg spec: {what} must be a list"))?
+        .iter()
+        .map(|f| match f {
+            Value::String(s) if s == "*" => Ok(Forced::Any),
+            Value::String(s) if s == "resolve" => Ok(Forced::Resolve),
+            Value::String(s) => Ok(Forced::Label(s.clone())),
+            Value::Number(n) => n
+                .as_u64()
+                .filter(|&a| a < crate::decision::NUM_ACTIONS as u64)
+                .map(|a| Forced::Action(a as u16))
+                .ok_or_else(|| format!("mtg spec: {what}: {n} is not an action id")),
+            _ => Err(format!("mtg spec: {what}: {f} is neither an option label, an action id, \"*\" nor \"resolve\"")),
+        })
+        .collect()
 }
 
 /// A spec's `start` block (module docs).
@@ -220,29 +246,14 @@ impl Start {
         let tries = uint("tries")?.unwrap_or(100_000).clamp(1, u32::MAX as u64) as u32;
         let forced = match o.get("forced") {
             None => Vec::new(),
-            Some(x) => x
-                .as_array()
-                .ok_or("mtg spec: start.forced must be a list")?
-                .iter()
-                .map(|f| match f {
-                    Value::String(s) if s == "*" => Ok(Forced::Any),
-                    Value::String(s) if s == "resolve" => Ok(Forced::Resolve),
-                    Value::String(s) => Ok(Forced::Label(s.clone())),
-                    Value::Number(n) => n
-                        .as_u64()
-                        .filter(|&a| a < crate::decision::NUM_ACTIONS as u64)
-                        .map(|a| Forced::Action(a as u16))
-                        .ok_or_else(|| format!("mtg spec: start.forced: {n} is not an action id")),
-                    _ => Err(format!("mtg spec: start.forced: {f} is neither an option label, an action id nor \"*\"")),
-                })
-                .collect::<Result<Vec<_>, String>>()?,
+            Some(x) => parse_forced(x, "start.forced")?,
         };
         let follow = match o.get("follow") {
             None | Some(Value::Null) => None,
             Some(f) => {
                 let f = f.as_object().ok_or("mtg spec: start.follow must be an object")?;
                 for k in f.keys() {
-                    if !["rule", "land_min", "fetches"].contains(&k.as_str()) {
+                    if !["rule", "land_min", "fetches", "bad", "good"].contains(&k.as_str()) {
                         return Err(format!("mtg spec: unknown start.follow key {k:?}"));
                     }
                 }
@@ -263,7 +274,8 @@ impl Start {
                         .map(|n| db.expect_id(n.as_str().ok_or("mtg spec: start.follow.fetches: card names are strings")?))
                         .collect::<Result<Vec<_>, _>>()?,
                 };
-                Some(Follow { land_min: land_min as u32, fetches })
+                let line = |k: &str| f.get(k).map_or(Ok(Vec::new()), |x| parse_forced(x, &format!("start.follow.{k}")));
+                Some(Follow { land_min: land_min as u32, fetches, bad: line("bad")?, good: line("good")? })
             }
         };
         Ok(Start { seed, actions, viewer, deal, deal_seed: uint("deal_seed")?, pred, tilt, clip, mix, hold, exclude, tries, forced, follow })
@@ -444,20 +456,23 @@ impl Lab {
     /// After a step (and at the start): the rule starts at the decider's first decision after the
     /// line, and ends when its card is no longer the decider's known top card.
     pub(crate) fn after_step(&mut self, g: &Game) {
-        // a `resolve` item is done at the decider's priority with an empty stack (the next applies)
-        while self.pos < self.forced.len()
-            && self.forced[self.pos] == Forced::Resolve
-            && self.deciding(g)
-            && g.pending_decision().is_some_and(|d| d.kind == DecisionKind::Priority)
-            && g.stack().is_empty()
+        // a `resolve` item is done once the stack is empty at a decision, whoever's (the engine asks no
+        // decision with "pass" its only option: the decider's empty-stack priority after its item resolved
+        // may never come; ENGINE.md 76.1); the next item applies at the decider's next decision
+        while self.pos < self.forced.len() && self.forced[self.pos] == Forced::Resolve && g.to_move().is_some() && g.stack().is_empty()
         {
             self.pos += 1;
         }
         match self.rule {
             Rule::Armed if self.pos >= self.forced.len() && self.deciding(g) => match known_top(g, self.player) {
                 Some(card) => {
-                    self.seen = Some((g.ident(card), self.bad(g, card)));
+                    let bad = self.bad(g, card);
+                    self.seen = Some((g.ident(card), bad));
                     self.rule = Rule::Active { card };
+                    // a branch: the verdict's line continues the forced line from this decision
+                    let f = self.follow.as_ref().expect("a rule");
+                    let line = if bad { f.bad.clone() } else { f.good.clone() };
+                    self.forced.extend(line);
                 }
                 None => self.rule = Rule::Off,
             },

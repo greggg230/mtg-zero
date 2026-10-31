@@ -183,6 +183,23 @@ def read_records(arg):
     return recs if line is None else [recs[line]]
 
 
+def save_scenario(spot, path):
+    """A spot as a scenario file (JSON): the source spec, seed and action prefix, the decider, its options
+    and stored state; `load_scenario` reads it back (the lab's input format for built positions)."""
+    keep = ('id', 'source', 'frame', 'spec', 'seed', 'actions', 'decider', 'recorded', 'state', 'gen', 'title', 'hand')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'format': 'position-lab/1', **{k: spot.get(k) for k in keep}}, f)
+
+
+def load_scenario(path):
+    with open(path, encoding='utf-8') as f:
+        d = json.load(f)
+    if d.get('format') != 'position-lab/1':
+        raise SystemExit(f'{path}: not a position-lab/1 scenario')
+    d.pop('format')
+    return d
+
+
 def spot_from_record(rec, replays=REPLAYS):
     path = rec.get('replay') or os.path.join(replays, rec['file'])
     frame = rec.get('frame', rec.get('k'))
@@ -407,13 +424,20 @@ def deep_view(g, spot, ev, keys, c_puct, pred, sims=800, settings=None, reps=8):
         sel = lambda f: [i for i, x in enumerate(lab) if f(x)]  # noqa: E731
         crack, baub = sel(is_crack), sel(is_bauble)
         best = lambda ix: max((q[i] for i in ix if q[i] is not None), default=None)  # noqa: E731
+        groups = {}
+        for gname, f in (('bauble', is_bauble), ('crack', is_crack), ('play fetch', lambda x: x.startswith('Play ') and x[5:] in FETCHES),
+                         ('play Island-type', lambda x: x.startswith('Play ') and x[5:] in ('Island', 'Volcanic Island')),
+                         ('pass', lambda x: x == PASS)):
+            ix = sel(f)
+            if ix:
+                groups[gname] = {'share': round(sum(share[i] for i in ix), 4), 'q': r4(best(ix))}
         out['by_setting'][st['name']] = {
             'chance_k': st['chance_k'], 'floor': ff[which.index(si)],
             'visit_share': {x: round(v, 4) for x, v in zip(lab, share)},
             'q': {x: (round(v, 4) if v is not None else None) for x, v in zip(lab, q)},
             'crack_share': round(sum(share[i] for i in crack), 4), 'bauble_share': round(sum(share[i] for i in baub), 4),
             'crack_q': r4(best(crack)), 'bauble_q': r4(best(baub)),
-            'rule_moves': dict(moves), 'pick': moves.most_common(1)[0][0]}
+            'rule_moves': dict(moves), 'pick': moves.most_common(1)[0][0], 'groups': groups}
     return out
 
 
@@ -876,6 +900,7 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
         deals = deal_summary(spot, len(jobs) - 1, md, cands[0], games)
         out['spots'].append({'id': spot['id'], 'source': spot['source'], 'frame': spot['frame'], 'gen': spot.get('gen'),
                              'record': spot.get('record'), 'site_id': spot.get('site_id'), 'view': view,
+                             'hand': spot.get('hand'),
                              'candidates': [c['name'] for c in cands], 'lines': cands, 'skipped_modes': skipped,
                              'deals': deals, 'modes': {}})
         log(f'spot {spot["id"]}: checked; network view at {time.time() - t0:.0f} s; candidates {[c["name"] for c in cands]}'
@@ -913,6 +938,350 @@ def run_lab(spots, cand_fn, model_path, modes, hold, exclude, games, sims, view_
     return out
 
 
+# ------------------------------------------------------------------ the turn-1 Bauble position (built from seeds)
+
+ISLANDS = ('Island', 'Volcanic Island')
+TAMIYO = 'Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar'
+T1_ALLOWED = ('Force of Will', 'Daze', 'Cori-Steel Cutter', 'Murktide Regent', 'Prismari Charm')
+
+
+def t1_composition(hand):
+    """'clean': exactly one Island-type land, one fetchland, one Mishra's Bauble, one Tamiyo and every other card
+    from T1_ALLOWED (none castable on our turn 1; Force of Will and Daze reactive only); 'any': at least one
+    of each of the four; else None."""
+    c = collections.Counter(hand)
+    isl, fe = sum(c[x] for x in ISLANDS), sum(c[x] for x in FETCHES)
+    if not (isl and fe and c[BAUBLE] and c[TAMIYO]):
+        return None
+    rest = sum(v for k, v in c.items() if k not in ISLANDS + FETCHES + (BAUBLE, TAMIYO))
+    ok_rest = sum(v for k, v in c.items() if k in T1_ALLOWED)
+    return 'clean' if (isl, fe, c[BAUBLE], c[TAMIYO]) == (1, 1, 1, 1) and rest == ok_rest else 'any'
+
+
+def opening_spot(spec, seed):
+    """The starting player's first main-phase priority on turn 1 of game `seed` of `spec` (a dict): the
+    chooser plays first, both keep their seven, priority passes until then (no other decision on the way);
+    None when the starting player gets no turn-1 decision. -> a spot (as `spot_from_replay`)."""
+    from zero import mcts
+    E = engine()
+    sp = dict(spec, log=True)
+    g = E.Game('mtg', json.dumps(sp), 2, int(seed))
+    acts = []
+    for _ in range(40):
+        if g.over:
+            return None
+        st = json.loads(g.export_state())
+        d = st['decision']
+        if st['turn'] > 1:
+            return None
+        if d['kind'] == 'Priority' and st['step'] == 'main1' and st['active'] == g.to_move:
+            return {'id': f'seed{seed}', 'source': f'seed:{seed}', 'frame': len(acts), 'spec': dict(spec), 'seed': int(seed),
+                    'actions': acts, 'decider': int(g.to_move), 'recorded': {'acts': list(g.legal()), 'a': None},
+                    'state': st, 'gen': None, 'title': f'opening of seed {seed}',
+                    'hand': sorted(c['name'] for c in st['players'][g.to_move]['hand'])}
+        want = {'PlayDraw': 'Play first', 'Mulligan': 'Keep', 'Priority': PASS}.get(d['kind'])
+        a = next((x for x, t in options(g) if t == want), None)
+        if a is None:
+            return None
+        acts.append(int(a))
+        mcts.transition(g, a)
+    return None
+
+
+def find_t1_spots(spec, seeds, want=8, composition='clean'):
+    """Opening spots on the play whose starting hand is `composition` ('clean' or 'any'), the first `want`."""
+    out = []
+    for s in seeds:
+        sp = opening_spot(spec, s)
+        if sp and t1_composition(sp['hand']) in ((composition,) if composition == 'clean' else ('clean', 'any')):
+            out.append(sp)
+            if len(out) >= want:
+                break
+    return out
+
+
+def t1_lines(g, d):
+    """The turn-1 lines' labels at an opening spot: the Island-type land, the fetchland, Tamiyo's cast."""
+    labels = [t for _, t in options(g)]
+    isl = next(t for t in labels if t.startswith('Play ') and t[5:] in ISLANDS)
+    fe = next(t for t in labels if t.startswith('Play ') and t[5:] in FETCHES)
+    crack = [fe, 'Activate ' + fe[5:], 'resolve', 'Cast ' + TAMIYO, 'resolve']
+    keep = [isl, 'Cast ' + TAMIYO, 'resolve']
+    look = ['Cast ' + BAUBLE, 'resolve', 'Activate ' + BAUBLE, f'Target P{d + 1}', 'resolve']
+    return crack, keep, look
+
+
+def t1_candidates(spot, g, view=None, deep_modes=None):
+    """(a) the network's own play; (b) no Bauble: crack the fetch, Tamiyo; (c) no Bauble: the Island-type land
+    + Tamiyo, the fetch kept; (d) Mishra's Bauble at the own library first, then the network; (e) the same
+    + the branch rule (a land seen: the fetch, cracked, Tamiyo; a spell seen: the land, Tamiyo, the fetch
+    kept); with a deep view, each deep setting's pick (forced alone, the network on) unless it is already a
+    candidate's line."""
+    crack, keep, look = t1_lines(g, spot['decider'])
+    cands = [{'name': "(a) the network's own play", 'forced': ['*'], 'follow': None},
+             {'name': '(b) no Bauble: crack the fetch, Tamiyo', 'forced': crack, 'follow': None},
+             {'name': '(c) no Bauble: Island-type land + Tamiyo, fetch kept', 'forced': keep, 'follow': None},
+             {'name': '(d) Bauble own library first, network on', 'forced': look, 'follow': None},
+             {'name': '(e) Bauble first + branch (land seen: crack; else land + Tamiyo)', 'forced': look,
+              'follow': {'rule': 'bauble_fetch', 'land_min': 0, 'fetches': list(FETCHES), 'bad': crack, 'good': keep}}]
+    deep = (view or {}).get('deep')
+    if deep:
+        tags = iter('fghijk')
+        for name, dv in deep['by_setting'].items():
+            pick = dv['pick']
+            same = next((c['name'] for c in cands[1:] if c['forced'][:1] == [label_item(pick)] and len(c['forced']) == 1), None)
+            if same:
+                dv['candidate'] = same
+                continue
+            tag = next(tags)
+            dv['candidate'] = f'({tag})'
+            c = {'name': f'({tag}) {pick} (the deep {name} search\'s pick), network on', 'forced': [label_item(pick)],
+                 'follow': None}
+            if deep_modes:
+                c['modes'] = list(deep_modes)
+            cands.append(c)
+    return cands
+
+
+def t1_groups(label):
+    """The turn-1 option classes of the deep view."""
+    if label == 'Cast ' + BAUBLE:
+        return 'bauble'
+    if label.startswith('Play ') and label[5:] in FETCHES:
+        return 'fetch'
+    if label.startswith('Play ') and label[5:] in ISLANDS:
+        return 'island'
+    return None
+
+
+def scripted(g, d, items, finds=('Find Volcanic Island', 'Find Island')):
+    """Play forced `items` (labels; 'resolve': pass while anything is on the stack) for the decider `d`, the
+    opponent passing (or its lowest option), the decider's other questions its first option (mana
+    payments) - but a library search, which takes the first of `finds` offered (None: each option in turn,
+    a list of games). -> [(game, the find taken)] once the items are done (at the next decision, whoever's,
+    with an empty stack; one decision at a time, single-option ones too), or [] when an item is missing."""
+    def step1(x, a):
+        x.step(int(a))      # one decision at a time (a single-option one too: the line's "resolve" sees it)
+    out = []
+    work = [(g, list(items), None)]
+    while work:
+        h, rest, found = work.pop()
+        for _ in range(200):
+            if h.over:
+                break
+            st = json.loads(h.export_state())
+            dec = st['decision']
+            opts = options(h)
+            if rest and rest[0] == 'resolve' and not st.get('stack'):
+                rest.pop(0)                    # (the stack is empty, whoever decides: the item is done)
+                continue
+            if h.to_move != d:
+                if not rest:
+                    out.append((h, found))     # the line is done; the next decision is the opponent's
+                    break
+                step1(h, next((a for a, t in opts if t == PASS), opts[0][0]))
+                continue
+            if dec['kind'] == 'SearchLibrary':
+                fl = [(a, t) for a, t in opts if t.startswith('Find ') and t != 'Find nothing']
+                for a, t in fl[1:] if finds is None else []:
+                    h2 = h.clone()
+                    step1(h2, a)
+                    work.append((h2, list(rest), t))
+                want = next((x for x in (finds or ()) if any(t == x for _, t in fl)), None)
+                pick = next(a for a, t in fl if t == want) if want else (fl[0][0] if fl else opts[0][0])
+                found = want or (fl[0][1] if fl else None)
+                step1(h, pick)
+                continue
+            if not rest:
+                if dec['kind'] == 'Priority' and not st.get('stack'):
+                    out.append((h, found))
+                    break
+                step1(h, opts[0][0])
+                continue
+            item = rest[0]
+            if item == 'resolve':
+                if not st.get('stack'):
+                    rest.pop(0)
+                    continue
+                step1(h, next((a for a, t in opts if t == PASS), opts[0][0]) if dec['kind'] == 'Priority' else opts[0][0])
+                continue
+            if dec['kind'] in ('PayMana', 'PayPool'):
+                step1(h, opts[0][0])
+                continue
+            a = next((x for x, t in opts if t == item), None)
+            if a is None:
+                break
+            rest.pop(0)
+            step1(h, a)
+    return out
+
+
+def one_ply_t1(spot, ev, pred, belief, deals=200, log=print):
+    """The value network alone after a forced Bauble look (the user's one-ply check): for `deals` belief deals
+    of the spot, the look line with the opponent passing, then each branch scripted - 'keep it': the Island-type
+    land + Tamiyo, the fetch held; 'crack': the fetch, cracked (the better of its finds), Tamiyo - and the
+    network's value (its own view) at the decider's next priority after Tamiyo resolved. Per seen card and per
+    class (land / spell): the mean value of each branch and the share of deals where the value prefers keep.
+    The crack fetches a Volcanic Island (an Island without one), as the expert line does."""
+    import numpy as np
+    E = engine()
+    d = spot['decider']
+    g0 = spot_game(spot)
+    crack, keep, look = t1_lines(g0, d)
+    rows = []
+    for i in range(deals):
+        st = start_block('belief', {'forced': []}, deal_seed(0, i), pred=pred, belief=belief)
+        g = E.Game('mtg', start_spec(spot, st), 2, 0)
+        after = scripted(g, d, look)
+        if not after:
+            continue
+        h = after[0][0]
+        lib = json.loads(h.export_state())['lab']['libraries'][d]
+        seen = lib[0] if lib else None
+        vals = {}
+        for name, line in (('keep', keep), ('crack', crack)):
+            best = None
+            for x, _ in scripted(h.clone(), d, line):
+                v = float(evaluate(ev, [x.encode(d)], [list(x.legal())])[1][0][0])
+                best = v if best is None else max(best, v)
+            vals[name] = best
+        if vals['keep'] is None or vals['crack'] is None:
+            continue
+        rows.append({'seen': seen, 'land': seen in ISLANDS + FETCHES + ('Wasteland', 'Thundering Falls'), **vals})
+    # (the spot's own value, before the look: the scale the branches move from)
+    out = {'deals': deals, 'measured': len(rows), 'by_class': {}, 'by_card': {}}
+    for key, f in (('land', lambda r: r['land']), ('spell', lambda r: not r['land'])):
+        rs = [r for r in rows if f(r)]
+        if rs:
+            out['by_class'][key] = {'n': len(rs), 'keep': r4(float(np.mean([r['keep'] for r in rs]))),
+                                    'crack': r4(float(np.mean([r['crack'] for r in rs]))),
+                                    'prefers_keep': r4(float(np.mean([r['keep'] > r['crack'] for r in rs])))}
+    for card, n in collections.Counter(r['seen'] for r in rows).most_common(6):
+        rs = [r for r in rows if r['seen'] == card]
+        out['by_card'][card] = {'n': n, 'keep': r4(float(np.mean([r['keep'] for r in rs]))),
+                                'crack': r4(float(np.mean([r['crack'] for r in rs]))),
+                                'prefers_keep': r4(float(np.mean([r['keep'] > r['crack'] for r in rs])))}
+    return out
+
+
+# ------------------------------------------------------------------ the turn-1 Bauble canary (a fingerprint)
+
+def game_seed(driver_seed, gid):
+    """zero-core's driver game seed of game `gid` (worker::init_slot's base stream's first draw)."""
+    m64 = (1 << 64) - 1
+
+    def split64(x):
+        z = (x + 0x9E3779B97F4A7C15) & m64
+        z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & m64
+        z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & m64
+        return z ^ (z >> 31)
+    s, x = [], split64(driver_seed ^ split64(gid + 1))
+    for _ in range(4):
+        x = (x + 0x9E3779B97F4A7C15) & m64
+        s.append(split64(x))
+    if not any(s):
+        s[0] = 1
+    rotl = lambda v, k: ((v << k) | (v >> (64 - k))) & m64  # noqa: E731
+    return (rotl((s[0] + s[3]) & m64, 23) + s[0]) & m64
+
+
+def t1_canary_game(spec, seed, moves):
+    """One game's turn-1 Bauble fingerprint: for each player, at its first main-phase priority (its first
+    turn), the hand's composition (`t1_composition`, with the draw on the draw); and when it has one, what it
+    did that turn: whether it activated Mishra's Bauble at its own library before its land drop, the card the
+    look showed (the library's top when the ability was targeted), and the land it played (Island-type /
+    fetch, cracked that turn or not). `moves`: the game's multi-option decisions (seat, action), in order.
+    -> [per player record]."""
+    from zero import mcts
+    E = engine()
+    sp = json.loads(spec) if isinstance(spec, str) else dict(spec)
+    sp.pop('log', None)
+    g = E.Game('mtg', json.dumps(sp), 2, int(seed))
+    out, cur, acts = {}, {}, []
+    for mv in moves:
+        p, a = mv[0], mv[1]
+        if len(mv) > 2 and mv[2] is not None and len(mv[2]) == 1:
+            continue            # (a logged single-option move: auto-stepped below, as the driver did)
+        while not g.over and len(g.legal()) == 1:
+            mcts.transition(g, g.legal()[0])
+        if g.over:
+            break
+        st = json.loads(g.export_state())
+        if st['turn'] > 2:
+            break
+        q = g.to_move
+        lab = dict(options(g))
+        t = lab.get(int(a), '')
+        act = st['active']
+        if q == act and st['step'] in ('main1', 'main2') and act not in out:
+            hand = sorted(c['name'] for c in st['players'][act]['hand'])
+            out[act] = {'player': act, 'turn': st['turn'], 'on_play': st['turn'] == 1, 'hand': hand,
+                        'composition': t1_composition(hand), 'looked': False, 'seen': None, 'land': None, 'cracked': False,
+                        'actions': []}
+            cur = out[act]
+        r = out.get(act)
+        if r is not None and q == act and st['turn'] == r['turn']:
+            r['actions'].append(t)
+            if t == f'Target P{act + 1}' and st.get('stack') and st['stack'][-1].get('name') == BAUBLE and r['land'] is None:
+                lab_g = E.Game('mtg', json.dumps(dict(sp, start={'seed': int(seed), 'actions': acts, 'deal': 'none'})), 2, 0)
+                libs = json.loads(lab_g.export_state())['lab']['libraries'][act]
+                r['looked'], r['seen'] = True, (libs[0] if libs else None)
+            if t.startswith('Play ') and r['land'] is None:
+                r['land'] = 'island' if t[5:] in ISLANDS else ('fetch' if t[5:] in FETCHES else 'other')
+            if t.startswith('Activate ') and t[9:] in FETCHES:
+                r['cracked'] = True
+        acts.append(int(a))
+        mcts.transition(g, int(a))
+    del cur
+    return list(out.values())
+
+
+def t1_canary(sources, log=print):
+    """The turn-1 Bauble canary over game records: `sources` [(spec, seed, moves, tag)]. Per composition
+    ('any', 'clean') and side (play / draw): hands, how often the player Baubled its own library before its
+    land drop, and with a look the land choice by the seen card's class (land / spell)."""
+    recs = []
+    for spec, seed, moves, tag in sources:
+        for r in t1_canary_game(spec, seed, moves):
+            if r['composition']:
+                recs.append(dict(r, tag=tag))
+    out = {'records': len(recs), 'table': {}}
+    for comp in ('any', 'clean'):
+        for side in ('play', 'draw'):
+            rs = [r for r in recs if (comp == 'any' or r['composition'] == 'clean') and r['on_play'] == (side == 'play')]
+            looked = [r for r in rs if r['looked']]
+            by = collections.Counter()
+            for r in looked:
+                cls = 'land' if r['seen'] in ISLANDS + FETCHES + ('Wasteland', 'Thundering Falls') else 'spell'
+                by[f'{cls} seen -> {r["land"]}{" cracked" if r["cracked"] else ""}'] += 1
+            nolook = collections.Counter(f'{r["land"]}{" cracked" if r["cracked"] else ""}' for r in rs if not r['looked'])
+            out['table'][f'{comp} {side}'] = {'hands': len(rs), 'bauble_look_before_land': len(looked),
+                                              'after_a_look': dict(by), 'without_a_look': dict(nolook)}
+    out['examples'] = [{k: r[k] for k in ('tag', 'player', 'on_play', 'hand', 'looked', 'seen', 'land', 'cracked', 'actions')}
+                       for r in recs if r['composition'] == 'clean'][:20]
+    return out
+
+
+def canary_sources(replays=REPLAYS, selfplay=(), gen_min=None):
+    """The records the canary reads: zero-replay/1 files (`replays`: a directory) and self-play move logs
+    (`selfplay`: JSON files of zero.h2h-style rows {gid, moves} with the file's spec and driver seed:
+    E:/mtg-zero-scratch/explore/ab/fp_*_241.json)."""
+    out = []
+    for f in sorted(glob.glob(os.path.join(replays, '*.json.gz'))):
+        rep = load_replay(f)
+        m = re.search(r'Generation (\d+)', rep.get('title') or '')
+        if gen_min is not None and (not m or int(m.group(1)) < gen_min):
+            continue
+        out.append((rep['spec'], replay_seed(rep), [(fm['p'], fm['a']) for fm in rep['frames']], os.path.basename(f)))
+    for path in selfplay:
+        with open(path, encoding='utf-8') as fh:
+            d = json.load(fh)
+        for r in d['rows']:
+            out.append((d['spec'], game_seed(int(d['seed']), int(r['gid'])), [tuple(m) for m in r['moves']],
+                        f'{os.path.basename(path)}:{r["gid"]}'))
+    return out
+
+
 # ------------------------------------------------------------------ text
 
 def table(rep):
@@ -929,8 +1298,8 @@ def table(rep):
                 f'{k} n={n} q={s["q"][k]}' for k, n in sorted(s['visits'].items(), key=lambda kv: -kv[1])[:4])
                 + f'; moves {s["rule_moves"]}')
         for k, dv in ((v.get('deep') or {}).get('by_setting') or {}).items():
-            lines.append(f'   deep {k} ({v["deep"]["reps"]}x{v["deep"]["sims"]}): crack share {dv["crack_share"]:.3f}'
-                         f' q {dv["crack_q"]}, Bauble share {dv["bauble_share"]:.3f} q {dv["bauble_q"]}; rule moves'
+            gs = ', '.join(f'{gn} {x["share"]:.3f} q {x["q"]}' for gn, x in (dv.get('groups') or {}).items())
+            lines.append(f'   deep {k} ({v["deep"]["reps"]}x{v["deep"]["sims"]}): {gs}; rule moves'
                          f' {dv["rule_moves"]} -> {dv.get("candidate")}')
         lines.append('   opponent hand: ' + ', '.join(f'{k} x{c}' for k, c in v['opponent_hand'].items())
                      + ' | belief: ' + ', '.join(f'{k} {e:.2f}' for k, e in list(v['belief_hand'].items())[:6]))
@@ -958,6 +1327,15 @@ def table(rep):
                                  + (f', rule {li["rule"]}' if li.get('rule') else '')
                                  + (f', the network cracked over the seen card {li["network_cracked_over_seen_card"]:.2f}'
                                     f' of {li["cracked_over_seen_n"]}' if 'network_cracked_over_seen_card' in li else ''))
+        if so.get('one_ply'):
+            op = so['one_ply']
+            lines.append(f'   one-ply value after a forced look ({op["measured"]} of {op["deals"]} belief deals): ' + '; '.join(
+                f'{k} seen (n {x["n"]}): keep {x["keep"]} vs crack {x["crack"]}, keep preferred {x["prefers_keep"]:.2f}'
+                for k, x in op['by_class'].items()))
+            lines.append('      by card: ' + '; '.join(f'{k} (n {x["n"]}): keep {x["keep"]} / crack {x["crack"]}'
+                                                   f' -> keep {x["prefers_keep"]:.2f}' for k, x in op['by_card'].items()))
+        if so.get('hand'):
+            lines.append(f'   hand: {", ".join(so["hand"])}')
         if so.get('skipped_modes'):
             lines.append(f'   skipped: {so["skipped_modes"]}')
         if so.get('incomplete_modes'):
@@ -1097,6 +1475,65 @@ def cmd_bauble(a):
     finish(rep, a)
 
 
+def cmd_t1(a):
+    """The turn-1 Bauble position (seeds searched for the opening hand), candidates (a)-(e) (+ the deep picks),
+    the play-outs and the one-ply value check."""
+    modes = check_modes(a)
+    low_priority(a.threads)
+    if a.scenario:
+        spots = [load_scenario(x) for x in a.scenario]
+    else:
+        lo, hi = (int(x) for x in a.seeds.split('-'))
+        spots = find_t1_spots(json.loads(A.SPEC_DELVER), range(lo, hi), a.spots, a.composition)
+        print(f'{len(spots)} opening spots ({a.composition}) in seeds {a.seeds}: ' + '; '.join(
+            f'{s["id"]} P{s["decider"] + 1}: {", ".join(s["hand"])}' for s in spots), flush=True)
+        if a.save_spots:
+            os.makedirs(a.save_spots, exist_ok=True)
+            for s in spots:
+                save_scenario(s, os.path.join(a.save_spots, f'{s["id"]}.json'))
+    if not spots:
+        raise SystemExit('no opening spot found')
+    ks = sorted({int(x) for x in a.deep_k.split(',') if x.strip()}, reverse=True)
+    deep_modes = [m for m in a.deep_modes.split(',') if m]
+    settings = deep_settings(ks, a.deep_floor)
+    deep = {'sims': a.deep_sims, 'settings': settings, 'reps': a.deep_reps} if a.deep_sims else None
+    rep = run_lab(spots, lambda s, g, v: t1_candidates(s, g, v, deep_modes), a.model, modes, a.hold, a.exclude, a.games,
+                  a.sims, a.view_sims, a.view_reps, a.threads, a.search_threads, a.procs, a.conc, a.seed,
+                  diagnose_lines=not a.no_diagnose, cache=a.cache, cached_only=a.cached_only, deep=deep,
+                  play_cands=None if a.play_cands is None else {int(x) for x in a.play_cands.split(',') if x.strip()})
+    if a.one_ply:
+        ev = load_net(a.model)[0]
+        cfg, _, _ = seat_keys(a.model)
+        from zero.mcts import belief_settings
+        tilt, clip, mix, _ = belief_settings(cfg, 'eval')
+        for s, so in zip(spots, rep['spots']):
+            pred = belief_pred(ev, spot_game(s), s['decider'])
+            so['one_ply'] = one_ply_t1(s, ev, [float(x) for x in pred], (tilt or 1.0, clip, mix), a.one_ply)
+    names = ["(a) the network's own play", '(b) no Bauble: crack, Tamiyo', '(c) no Bauble: Island + Tamiyo, fetch kept',
+             '(d) Bauble first, network on', '(e) Bauble first + branch rule']
+    picks = [None] * 5
+    for st in (settings if deep else []):
+        names.append(f'the deep {st["name"]} search\'s pick')
+        picks.append(st['name'])
+    rep['candidate_names'] = names
+    rep['pooled'] = {m: pooled(rep['spots'], m, len(names),
+                               pick=lambda so, ci: ci if picks[ci] is None else deep_pick_index(so, picks[ci])) for m in modes}
+    finish(rep, a)
+
+
+def cmd_canary(a):
+    """The turn-1 Bauble canary over game records (a fingerprint: run per generation)."""
+    gen_min = a.gen_min
+    src = canary_sources(a.replays, a.selfplay or (), gen_min)
+    t0 = time.time()
+    out = t1_canary(src)
+    out.update(sources=len(src), seconds=round(time.time() - t0, 1), replays=a.replays, selfplay=a.selfplay, gen_min=gen_min)
+    print(json.dumps({k: v for k, v in out.items() if k != 'examples'}, indent=1))
+    if a.out:
+        with open(a.out, 'w', encoding='utf-8') as f:
+            json.dump(out, f, indent=1)
+
+
 def cmd_show(a):
     with open(a.report, encoding='utf-8') as f:
         print(table(json.load(f)))
@@ -1122,6 +1559,27 @@ def main(argv=None):
     b.add_argument('--play-cands', help='play only these candidate indices (e.g. 3,4,5: the deep picks; the others '
                    'from the cache, else listed as not played yet)')
     b.set_defaults(fn=cmd_bauble)
+    t = sub.add_parser('t1', help='the turn-1 Bauble position: opening hands searched over seeds, candidates (a)-(e)')
+    common(t)
+    t.add_argument('--seeds', default='1-60000', help='the game seeds searched for the opening hand (lo-hi)')
+    t.add_argument('--spots', type=int, default=4, help='opening spots to take')
+    t.add_argument('--composition', default='clean', choices=('clean', 'any'))
+    t.add_argument('--scenario', action='append', help='a saved opening spot (position-lab/1 JSON) instead of the search')
+    t.add_argument('--save-spots', help='a directory to save the found spots as scenarios')
+    t.add_argument('--one-ply', type=int, default=200, help='belief deals for the one-ply value check (0: none)')
+    t.add_argument('--deep-sims', type=int, default=0)
+    t.add_argument('--deep-k', default='0,8')
+    t.add_argument('--deep-reps', type=int, default=8)
+    t.add_argument('--deep-floor', type=int, default=100)
+    t.add_argument('--deep-modes', default='belief')
+    t.add_argument('--play-cands')
+    t.set_defaults(fn=cmd_t1)
+    c = sub.add_parser('canary', help='the turn-1 Bauble canary over game records (a per-generation fingerprint)')
+    c.add_argument('--replays', default=REPLAYS)
+    c.add_argument('--selfplay', action='append', help='a self-play move-log file (E:/mtg-zero-scratch/explore/ab/fp_*.json)')
+    c.add_argument('--gen-min', type=int)
+    c.add_argument('--out')
+    c.set_defaults(fn=cmd_canary)
     w = sub.add_parser('show', help='the text table of a report')
     w.add_argument('--report', required=True)
     w.set_defaults(fn=cmd_show)

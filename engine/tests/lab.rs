@@ -399,6 +399,35 @@ fn the_forced_line_and_the_bauble_fetch_rule() {
 }
 
 #[test]
+fn the_rule_branches_into_its_verdicts_line() {
+    let (seed, acts, spot) = bauble_spot();
+    let d = spot.g.to_move().unwrap();
+    let line = json!(["Activate Mishra's Bauble", format!("Target P{}", d + 1), "resolve"]);
+    let mut seen = [0usize; 2];
+    for ds in 0..30u64 {
+        let follow = json!({"rule": "bauble_fetch", "land_min": 0, "bad": ["Pass priority"], "good": ["*", "Pass priority"]});
+        let mut g = MtgAz::new_game(&with_start(json!({"seed": seed, "actions": acts, "deal": "uniform", "deal_seed": ds,
+                                                         "forced": line, "follow": follow})), 2, 0).unwrap();
+        until_rule_starts(&mut g);
+        let lab = g.lab.as_ref().unwrap().clone();
+        let (_, bad) = lab.seen.expect("the rule started");
+        let texts = option_texts(&g);
+        if bad {
+            // the bad line: "Pass priority" alone (not the crack the rule alone would force)
+            assert_eq!(lab.forced.len(), 4);
+            assert_eq!(legal(&g).len(), 1);
+            assert_eq!(texts.iter().find(|x| x.0 == legal(&g)[0]).unwrap().1, "Pass priority");
+        } else {
+            // the good line: "*" (the network's own choice: every option), then a pass
+            assert_eq!(lab.forced.len(), 5);
+            assert_eq!(legal(&g).len(), texts.len());
+        }
+        seen[bad as usize] += 1;
+    }
+    assert!(seen[0] > 0 && seen[1] > 0, "{seen:?}");
+}
+
+#[test]
 fn a_resolve_item_passes_until_the_stack_is_empty() {
     let (seed, acts, spot) = bauble_spot();
     let d = spot.g.to_move().unwrap();
