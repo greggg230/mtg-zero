@@ -29,6 +29,7 @@ pub mod draft_bots;
 pub mod draft_encode;
 pub mod encode;
 pub mod identity;
+pub mod light;
 pub mod matches;
 pub mod pools;
 pub mod sample;
@@ -565,6 +566,19 @@ impl SearchGame for MtgAz {
         self.g
             .pending_decision()
             .is_some_and(|d| matches!(d.kind, crate::decision::DecisionKind::PayMana | crate::decision::DecisionKind::PayPool))
+    }
+
+    /// Light decisions (ENGINE.md 77, zero-core docs/search.md 3.10; `light.rs`): the timing
+    /// windows - a priority decision with an empty stack outside the decider's own main phases - by
+    /// step and whose turn (`own_upkeep` ... `opp_cleanup`). Read only by a self-play seat with
+    /// zero-core's `sims_light`; never while sideboarding.
+    const LIGHT_CLASSES: &'static [&'static str] = light::CLASSES;
+
+    fn light_class(&self) -> Option<usize> {
+        if self.m.sb.is_some() {
+            return None;
+        }
+        light::window(&self.g)
     }
 
     /// The spectator view (`view.rs`): what the replay recorder stores at every step.
