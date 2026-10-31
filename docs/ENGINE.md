@@ -16020,8 +16020,8 @@ fork's wall-clock is K + n_eq, n_eq = round(T_f / t_c) (~19-20 if the fork is ~2
 of the fork's K + 24 against the control's K + n_eq (the same SPRT(0, 20)) answers "more strength per
 hour". The reverse reading (the control's K + 24 against the fork's generation at the control's
 wall-clock, ~K + 29) needs the fork run ~5 generations longer: launch it with `--iters $((K + 30))` and
-compare the fork's K + 24 at equal generations as above (its first 24 generations are the same games
-whatever the cap). Wall-clock is noisy (the Mac's share of the games, other jobs, the evaluation every
+compare the fork's K + 24 at equal generations as above (the cap does not change its first 24
+generations). Wall-clock is noisy (the Mac's share of the games, other jobs, the evaluation every
 8 generations): compare the self-play phases' seconds and leaves too, and the same generation span.
 
 **Prepared**: `mtg-zero-wt/run-757dfa1`, detached at **757dfa1** (this branch's code - 7e26452's - with
@@ -16032,7 +16032,8 @@ smoke; `gates/757dfa1b414d.json` there). **Not done** (the hard rules: the Mac a
 untouched by the preparation): `mac.sh --eval-checkout` from that worktree - it pushes the commit to the
 Mac's bare repo, the core's pin to `~/mtg-zero-core.git`, and builds `~/mtg-zero-wt/run-757dfa1b414d`
 there (a new checkout: the line's `run-45897601285d` is not touched). Without it the fork's Mac workers
-are refused (their hello's light settings) and the desktop plays every game.
+and evaluations are refused (no checkout of its commit there; an older one's hello would also report no
+light settings) and the desktop plays every game.
 
 **Commands** (Git Bash on the desktop):
 
