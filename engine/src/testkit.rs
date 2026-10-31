@@ -114,6 +114,19 @@ impl Scenario {
         self
     }
 
+    /// `p`'s first untapped permanent named `name` is tapped.
+    pub fn tapped(mut self, p: PlayerId, name: &str) -> Self {
+        let c = self
+            .g
+            .battlefield
+            .iter()
+            .copied()
+            .find(|&c| self.g.objs[c.i()].controller == p && self.g.def_of(c).name == name && !self.g.objs[c.i()].tapped)
+            .unwrap_or_else(|| panic!("no untapped {name} of P{p}"));
+        self.g.objs[c.i()].tapped = true;
+        self
+    }
+
     /// `p` has played `n` lands this turn.
     pub fn lands_played(mut self, p: PlayerId, n: u8) -> Self {
         self.g.players[p as usize].lands_played = n;

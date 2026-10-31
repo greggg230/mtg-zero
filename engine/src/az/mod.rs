@@ -28,6 +28,7 @@ pub mod draft;
 pub mod draft_bots;
 pub mod draft_encode;
 pub mod encode;
+pub mod explore;
 pub mod identity;
 pub mod matches;
 pub mod pools;
@@ -608,5 +609,16 @@ impl SearchGame for MtgAz {
     /// (no hand to deal): `determinize`.
     fn determinize_with(&mut self, viewer: usize, rng: &mut zero_search::rng::Rng, belief: &zero_search::game::Belief) {
         self.determinize_belief(viewer, rng, belief);
+    }
+
+    /// The Delver line's habit tags for self-play exploration (ENGINE.md 75, zero-core
+    /// docs/search.md 3.9; `explore.rs`): fetch cracks, tapping out into a live Daze, Force of Will
+    /// pitching Force of Will, delve leaving a spell behind, the turn 1-2 Volcanic Island fetch, a
+    /// one-lander kept. Read only on an exploring self-play seat's live decision: no rule, option or
+    /// feature depends on them.
+    const EXPLORE_TAGS: &'static [zero_search::game::ExploreTag] = explore::TAGS;
+
+    fn explore_tags(&self, legal: &[u16], out: &mut [u8]) {
+        explore::tags_az(self, legal, out);
     }
 }
