@@ -73,7 +73,7 @@ Game (all mutable state, Clone)  <-- reads ------+
 | `rng.rs` | xoshiro256++ / splitmix64 (the same generators as zero-core) |
 | `svec.rs` | `SVec`, a small vector of plain values with inline storage (the short lists built for every decision; section 17) |
 | `testkit.rs` | scenario builder and helpers for tests (public; not used by the engine) |
-| `az/` | the zero-core game `mtg` (section 21): `mod.rs` (`MtgAz`, the spec, the `SearchGame` impl), `encode.rs`, `decks.rs`, `bots.rs` |
+| `az/` | the zero-core game `mtg` (section 21): `mod.rs` (`MtgAz`, the spec, the `SearchGame` impl), `encode.rs`, `decks.rs`, `bots.rs`, `light.rs` (the timing windows: section 77) |
 
 No dependency beyond `card_ir`, `serde`, `serde_json`, and zero-core's `zero_search` (the
 `SearchGame` trait, for `az/` only; the pinned submodule `third_party/zero-core`). No `HashMap` inside `Game` (iteration
@@ -1237,6 +1237,7 @@ they isolate one keyword or trigger each.
 | `tests/measure_delver.rs` | section 54.6's measurements (`--release -- --ignored --nocapture --test-threads=1`, `MEASURE_GAMES`) |
 | `tests/perf.rs` | the numbers in section 17 (`--release -- --ignored --nocapture`) |
 | `tests/limits.rs` | section 58.1-58.3: the action layout's slot limits: a Counterspell's targets among the 31 spells below it, a spell whose only target is 32 deep not offered (Stern Scolding), a trigger's ability target in reach (Tishana's Tidebinder), a copy's deep target kept and new ones in reach (Lutri), no control of another player's permanent, another player's card under its owner and a copy of a permanent spell gone beyond 96 permanents (Dack Fayden, Reanimate, Sage of the Skies), the deck limit counting a companion |
+| `tests/light.rs` | section 77: the timing windows' classes and step mapping; constructed windows and non-windows (steps, whose turn, a spell on the stack, other decision kinds); whole random Delver games against the measurement's classifier, no trigger waiting at a priority decision, no priority in untap / setup, the game unchanged by reading the hook |
 | `tests/digest.rs` | behaviour digests of a fixed set of games, compared with `tests/data/digests.txt` (below; `--release -- --ignored --nocapture`) |
 
 **Fuzzer.** Uniform random actions in complete games between random 40-card decks (17 lands,
@@ -15834,3 +15835,351 @@ distillation's, then a run's; the Mac at `nice -n 19`, one job at a time, beside
 * **h2h at `chance_k` 2** is safe again on cube specs as far as these two causes go; the chance fuzz
   (`FUZZ_CHANCE`) is the gate for that path, and a candidate for the Mac farm's modes.
 * **Not fixed**: 74.3's `PayMana` (seed 523, the farm's expected bucket).
+
+## 77. Light decisions: the timing windows searched with a small budget (zero-core `sims_light`)
+
+(Sections 75 and 76 are on other branches: 75 self-play exploration on `explore`, 76 the position lab
+on `position-lab`.) Branch `light-decisions` from main 1605436; zero-core `feat/light-decisions` from
+its main c15e3d0 (not from `feat/explore`): zero-core docs/search.md 3.10, docs/az.md 22. Not merged,
+not pushed; the A/B (77.6) prepared, not launched.
+
+### 77.1 Why
+
+A measurement on 2026-10-31 (E:/mtg-zero-scratch/measure-play: `measure.py`, `report.py`,
+`report.json`) found that **timing windows** - a priority decision with an empty stack outside the
+decider's own main phases - are 28.7% of the searched decisions of the line's own self-play search (384
+games of generation 241 at 64 full / 16 fast, p_full 0.25, minor 4) and 29.1% of its simulations and of
+its recorded decisions (30.6% / 31.1% in the evaluation replays of generations >= 240, 64 simulations).
+The network acts in 9.3% of them (+-0.2; 14.3% in a game's first 60 searched decisions, where self-play
+samples its moves, 8.4% after): Brainstorm, Lightning Bolt, Mishra's Bauble, Unholy Heat, a Clue,
+Urza's Bauble, Wasteland, Prismari Charm, a fetch. In the replays its prior puts 0.85 on passing on
+average (>= 0.9 in 64% of the windows), the search's move is the prior's argmax 97.9% of the time, the
+median |Q(pass) - best Q(alternative)| is 0.0055 (72% of the gaps under 0.02), and 92-94% of the windows
+come in runs of 2+ consecutive windows with the same options. The act rate is highest in the own draw
+step (26.5%) and the opponent's end step (26.8%), lowest in the combat steps (1-7%). Searching every
+window at the minor budget (4 simulations, unrecorded) would free 24.9% of the self-play budget and lose
+29.1% of the recorded decisions; in the replays' accounting all windows 29.2%, all but the opponent's end
+step 27.9%, the own turn 16.6%, the opponent's turn 12.5%.
+
+### 77.2 The windows and their classes (`engine/src/az/light.rs`)
+
+`light::window(&Game)`: the pending decision is `DecisionKind::Priority`, the stack is empty, and it is
+not the decider's own main phase 1 or 2 - the measurement's `category` exactly (tests/light.rs compares
+the two on every decision of 16 random games). Its class (`light::CLASSES`, 22 names, zero-core's
+`SearchGame::LIGHT_CLASSES`): the step and whose turn from the decider's side - `own_upkeep`,
+`own_draw`, `own_begin_combat`, `own_declare_attackers`, `own_declare_blockers`,
+`own_first_strike_damage`, `own_combat_damage`, `own_end_combat`, `own_end`, `own_cleanup`, then
+`opp_upkeep`, `opp_draw`, `opp_main1`, `opp_begin_combat`, `opp_declare_attackers`,
+`opp_declare_blockers`, `opp_first_strike_damage`, `opp_combat_damage`, `opp_end_combat`, `opp_main2`,
+`opp_end`, `opp_cleanup`. `MtgAz::light_class` returns it (never while sideboarding).
+
+Edge cases, decided:
+
+* **The opponent's end step** (the measurement's 26.8% act rate: Brainstorm, Bolt and Bauble at the end
+  of the opponent's turn are the deck's instant-speed plan) is a class of its own, `opp_end`: a run
+  chooses with zero-core's `selfplay_light_classes` - `all` (the default: the measurement's definition),
+  `all,-opp_end`, `opp_*` (the opponent's turn only), `own_*`, or any list of names / globs. The step set
+  is configurable as a whole, not just that step.
+* **Triggers waiting**: never at a priority decision. The `Priority` task puts every waiting trigger on
+  the stack before it asks (section 5, CR 117.5), so a decision with a trigger waiting is a response;
+  a trigger removed for want of a target leaves an empty stack and a window. Checked at every
+  priority decision of the 16 games (`waiting_triggers()` empty).
+* **Cleanup and extra priority**: a priority decision in the cleanup step (CR 514.3a: an SBA happened
+  there; another cleanup step follows) is a window (`own_cleanup` / `opp_cleanup`) like the end step's.
+  None in the measurement's 54k decisions. The first-strike damage step is a window like the others.
+* **Untap and setup** never ask for priority (CR 502.4; mulligans): no class (checked).
+* **The opponent's main phases** are windows (`opp_main1`, `opp_main2`: 4.5% and 1.0% act rates); the
+  decider's own are never (lands, sorcery-speed spells; the measurement's `own_main`).
+* **Every other decision kind** - paying (minor), targets, modes, attackers, blockers, a resolving
+  spell's choices (Brainstorm's put-back), mulligans, sideboarding - is never light.
+
+It reads only public facts of the live game (the decision's kind and decider, the turn, the stack):
+the same in every determinized world. Nothing in the rules, options, keys or encoding depends on it.
+
+### 77.3 The settings
+
+zero-core run settings (docs/az.md 22), flags of `python -m mtgz.az.run` / `tools/supervise.py`:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--selfplay-sims-light N` | 0 | a window (of the selected classes) whose playout-cap draw was full is searched with N simulations instead of `sims`; 0 = off |
+| `--selfplay-sims-light-fast M` | 0 | a fast draw's window: M instead of `sims_fast` (0 = N) |
+| `--selfplay-light-record 0/1` | 0 | 0: windows are never recorded (a minor decision's treatment: no root noise, floor or belief); 1: a full draw's window is recorded, its targets from the N-simulation search |
+| `--selfplay-light-classes` | all | the classes (77.2) |
+
+Saved in config.json (a run resumed without them: off). Self-play seats only: evaluation, Elo, the
+anchors, h2h, replays and the Mac's evaluations are the searches of before. Remote self-play workers
+search from the mirror's config; a worker whose hello reports other light settings (an older checkout:
+none) is refused, retried in 10 minutes ("REFUSED: its checkout searches light decisions as ..."). The
+self-play line gains `light`: per game the light decisions, their share of the searched decisions,
+recorded / unrecorded, their simulations, the simulations saved, and the saved share of the self-play
+budget - this machine's games and the Mac's accepted ones.
+
+**Recorded or not** (zero-core az.md 22.3). At 64 / 16 / p_full 0.25 a window costs 28 simulations on
+average. Unrecorded at 4: 4 a window (-24: ~25% of the budget, 77.1) and no window samples (31% of the
+decision samples, and the value-only samples drawn with them: the training steps per generation fall
+with them, `reuse` 2). Recorded 16 / 4: 7 a window (-21: ~22%), the same samples as before with targets
+from a 16-simulation search (the 'cq' target at c_scale 0.3 with ~16 visits: closer to the prior and the
+network's own values) and their root value q from it.
+
+### 77.4 Tests
+
+* `engine/tests/light.rs` (3): the classes and the step mapping; constructed positions (the own
+  upkeep, the opponent's priority in it, the own draw step, a Brainstorm on the stack for either player,
+  Brainstorm's put-back choices, the own main phase and the opponent's priority in it, the own beginning
+  of combat, Lightning Bolt's target and payment, Bolt on the stack, the own and the opponent's end
+  step, the end of combat, the opponent's main 2); 16 random Delver games - at every decision the
+  engine's class equals the measurement's classifier on the spectator view the replays store, no
+  trigger waiting at a priority decision, no priority in untap or setup, reading the hook never changes
+  a game (moves and final state fingerprint).
+* `tests/test_light.py` (3): the game info's classes and their selection; a Delver driver searching its
+  windows light (uniform evaluator): every light decision a window and every window light by the
+  engine's reading of each game rebuilt from its move log, none recorded, fewer leaves per searched
+  decision; recorded full draws with 16 / 4; the opponent's turn only; the run settings through
+  `mtgz.az.run` (refused for an unknown class and for a setting without `--selfplay-sims-light`; the
+  selfplay metrics' `light`, config.json).
+* zero-core: 6 driver tests and `tests/test_light.py` (27; docs/search.md 3.10, az.md 22.6).
+
+### 77.5 CPU evidence (checkpoint 320 at the line's self-play search)
+
+`tools/light_eval.py` on a read-only copy of `runs/r3-2b-beliefsearch/models/iter_0320.pt` and the
+line's config.json (E:/mtg-zero-scratch/light-windows/: the copies, `play.sh`, `evidence/*.json`,
+`evidence/report.json`, `evidence/summary.txt`), at the line's own self-play search - 64 full / 16 fast,
+p_full 0.25, minor 4, temperature for the first 60 searched decisions, 'cq' targets 0.3, root-view leaves,
+the belief search (tilt 1, mix 0.25), value-only samples 0.5 - on the CPU (`CUDA_VISIBLE_DEVICES=-1`,
+2 search + 2 torch threads a process, below normal priority, beside the live line and other agents'
+jobs). 192 games a variant: driver seeds 1 and 2, the same deals in every variant (the mulligans are the
+same games: the games diverge at their first window). Every game rebuilt from its move log and each
+searched decision classified by the engine (`Game.light_class`), for the control too.
+
+| | off (the line today) | `--selfplay-sims-light 4` (unrecorded) | `16 / 4 --selfplay-light-record 1` |
+|---|---|---|---|
+| searched decisions per game | 239.9 | 242.3 | 245.7 |
+| windows per game (share) | 70.3 (29.3%) | 71.0 (29.3%) | 72.0 (29.3%) |
+| light decisions per game (the rows) | - | 71.0, none recorded | 72.0, 17.6 recorded (24.5%: the full draws) |
+| leaves per game | 6,480 | 4,883 (**-24.6%**) | 5,159 (**-20.4%**) |
+| simulations per game | 6,619 | 4,982 | 5,264 |
+| `saved_share` (the self-play line's) | - | 25.4% | 22.2% |
+| seconds per game (CPU) | 12.56 | 10.21 (-18.7%) | 10.51 (-16.3%) |
+| recorded samples per game | 88.3 (58.9 decisions + 29.4 value-only) | 62.4 (41.8 + 20.6; -29.4%) | 90.1 (60.1 + 30.0; +2.0%) |
+| turns per game | 17.0 | 16.8 | 17.2 |
+| **act rate in the windows** | **8.5% +- 0.2** (n 13,496) | **8.2% +- 0.2** (-0.3 +- 0.3) | **8.6% +- 0.2** (+0.1 +- 0.3) |
+| ... on the own turn / the opponent's | 10.4% / 5.9% | 10.4% / 5.3% | 10.7% / 5.7% |
+
+* **The light-decision share is the measurement's**: 29.3% of the searched decisions (77.1: 28.7%
+  of 241's self-play), the same in every variant; the rows' light decisions equal the engine's windows
+  game by game (the driver searches exactly the windows). No cleanup or first-strike window came up in
+  these 576 games.
+* **Leaves -25% / -20%** as predicted (24.9% / ~22%); the CPU's wall time falls less (-19% / -16%):
+  the engine's work per decision stays. On the line (the GPU and the Mac, network-bound) the self-play
+  phase should fall nearer the leaves; it is ~75% of an iteration (224 of 299 s at 328), so ~15% a
+  generation for the recorded variant (more for the unrecorded one: its training steps fall with its
+  samples).
+* **The network still acts when it should**, at this generation: the act rate holds overall and in each
+  class (by class within ~1.5 se: own draw 28.1 / 30.3 / 28.9%, own upkeep 11.6 / 11.1 / 12.2%, own
+  declare attackers 8.0 / 7.3 / 9.9%, opp upkeep 8.6 / 7.3 / 7.9%, opp end 30.0 / 30.0 / 27.7% (n ~560);
+  the largest moves the rare ones: opp draw 0.8 -> 0.1% unrecorded, -0.6 +- 0.3), and so do the actions
+  (Brainstorm 234 / 240 / 244, Bolt 225 / 229 / 236, Mishra's Bauble 240 / 217 / 219, Unholy Heat, a Clue,
+  Wasteland, Urza's Bauble, Prismari Charm). The window act is the prior's (77.1: the search changes the
+  move ~2% of the time), and a light search follows the prior.
+* **Fingerprints** (73.5) unchanged within ~1 se: fetch cracked at once 89.1 / 87.7 / 87.7%, Brainstorm
+  with a shuffle 16.3 / 18.1 / 16.5%, Murktide's best delve 76.8 / 77.9 / 76.2%, Force of Will pitched
+  Force of Will 72.3 / 73.0 / 68.8% (n ~70), tap-outs into Daze 55.4 / 53.1 / 53.4% (-2.3 / -1.9 +-
+  2.6), the T1-2 Volcanic 68.8 / 69.3 / 69.0%, the starting player's wins 52.1 / 54.2 / 53.1%.
+* **Samples**: unrecorded -29% (the windows' and the value-only samples drawn with them); recorded the
+  same as before (+2%: the games' lengths).
+
+What this cannot show: the evidence is one fixed network. What a policy learns without the windows'
+samples (unrecorded) or from 16-simulation targets there (recorded) over many generations is the A/B's
+(77.6).
+
+### 77.6 The A/B (prepared, not launched)
+
+**Design** (75.7's protocol): fork the main line `runs/r3-2b-beliefsearch` (128 x 4, lr 3e-5, live on
+`mtg-zero-wt/run-4589760`, supervisor pid 123396 on 2026-10-31) at its newest checkpoint K at launch;
+**treatment** = the line's own flags (its supervisor's command line, `supervisor_state.json` `args`) +
+the light setting, K -> K + 24; **control** = the line itself continuing K -> K + 24 afterwards.
+Sequential: the fork alone on the desktop GPU and the Mac (the line paused), then the line resumed as
+the control. The treatment: **recorded 16 / 4** (`--selfplay-sims-light 16 --selfplay-sims-light-fast 4
+--selfplay-light-record 1`, every class) - 77.5's numbers: nearly the unrecorded variant's saving, the
+same recorded samples (so the same training steps per generation: an equal-generation comparison that
+measures the search, not a smaller training budget). The unrecorded `--selfplay-sims-light 4` is the
+alternative arm (77.5: its training steps per generation fall with its samples).
+
+**The question is twofold.** (1) Equal strength per generation: paired h2h, fork vs control at the same
+generation, K + 8 / + 16 / + 24, SPRT(0, 20) (H1 = the fork +20 Elo). For a speed feature the reading
+that matters is non-inferiority: report each h2h's paired score with its standard error (the JSON's
+`a_score` +- `se`, `elo_se`; Elo = 400 log10(s / (1 - s))); "equal" = the K + 24 estimate within about one se of 0 and above -20 by more than
+two (SPRT(0, 20) accepting H0 alone does not tell "equal" from "-20"). (2) Faster
+generations: wall-clock per generation and its self-play phase alone (metrics.jsonl `phases`
+`selfplay_s`, the log's per-iteration timestamps), self-play leaves per game (`selfplay.leaves` /
+`games`, local and remote) and the self-play line's `light.saved_share` (target ~0.2). **At equal
+wall-clock** (no extra compute: every generation's checkpoint is kept): with T_f the fork's wall-clock
+for its 24 generations and t_c the control's mean seconds per generation, the control's generation at the
+fork's wall-clock is K + n_eq, n_eq = round(T_f / t_c) (~19-20 if the fork is ~20% faster); a paired h2h
+of the fork's K + 24 against the control's K + n_eq (the same SPRT(0, 20)) answers "more strength per
+hour". The reverse reading (the control's K + 24 against the fork's generation at the control's
+wall-clock, ~K + 29) needs the fork run ~5 generations longer: launch it with `--iters $((K + 30))` and
+compare the fork's K + 24 at equal generations as above (its first 24 generations are the same games
+whatever the cap). Wall-clock is noisy (the Mac's share of the games, other jobs, the evaluation every
+8 generations): compare the self-play phases' seconds and leaves too, and the same generation span.
+
+**Commands** (Git Bash on the desktop; `<SHA>` = this branch's code commit the fork pins, 77.7):
+
+```
+MAIN="C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-beliefsearch"
+FORK="C:/Users/Gregg Keithley/mtg-zero/runs/r3-2b-light16"
+MAINWT="C:/Users/Gregg Keithley/mtg-zero-wt/run-4589760"        # the line's code
+WT="C:/Users/Gregg Keithley/mtg-zero-wt/run-<SHA7>"               # the fork's code (pinned)
+OUT="E:/mtg-zero-scratch/light-windows/ab"; mkdir -p "$OUT"
+
+# 0. the fork's pinned worktree (done in the preparation, 77.7; to redo it): its own target dir; the core
+#    commit is local only (not on GitHub): fetch it from the zero-core repo into the submodule
+git -C "C:/Users/Gregg Keithley/mtg-zero" worktree add --detach "$WT" <SHA>
+git -C "$WT" submodule update --init third_party/zero-core || true
+git -C "$WT/third_party/zero-core" fetch "C:/Users/Gregg Keithley/zero-core" feat/light-decisions
+git -C "$WT/third_party/zero-core" checkout "$(git -C "$WT" rev-parse <SHA>:third_party/zero-core)"
+cd "$WT" && CARGO_TARGET_DIR="E:/cargo-target/mtg-zero/run-<SHA7>" bash tools/build_py.sh
+cd "$WT" && python tools/gate.py repin --expect-digest 132437374243f7b2 --no-mac
+
+# 1. the Mac checkout of the fork's commit (the coordinator; prints "eval checkout ready")
+cd "$WT" && bash tools/mac.sh --eval-checkout
+
+# 2. pause the line at its newest checkpoint, then K
+cd "$MAINWT" && python tools/pause_run.py "$MAIN" --wait
+K=$(ls "$MAIN/models" | sed -n 's/^iter_0*\([0-9][0-9]*\)\.pt$/\1/p' | sort -n | tail -1); echo "K=$K"
+
+# 2b. KNOWN BUG (hub todo: kill_orphans can kill the supervisor itself after a PAUSE - a stale Windows
+#     ppid + pid reuse): is the line's supervisor still alive?
+python -c "import json, psutil; s = json.load(open(r'$MAIN/supervisor_state.json')); print(s['pid'], s['state'], psutil.pid_exists(s['pid']) and 'supervise' in ' '.join(psutil.Process(s['pid']).cmdline()))"
+#     False -> the line has NO supervisor: at step 5 it must be RELAUNCHED (5b), not resumed.
+
+# 3. the fork (the line is only read; its window hard-linked)
+cd "$WT" && python tools/fork_run.py --source "$MAIN" --dest "$FORK" --iter $K
+
+# 4. the fork's run: the line's own flags + the light setting, K -> K + 24
+cd "$WT" && MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "$FORK/supervisor_console.txt" python tools/supervise.py "$FORK" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --ram-budget-gb 34 --iters $((K + 24)) --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 200 --heldout-shards "C:/Users/Gregg Keithley/mtg-zero/runs/heldout/r3-2b_iter0197fresh_8192.npz" --lr 3e-5 --lr-min 3e-5 --selfplay-sims-light 16 --selfplay-sims-light-fast 4 --selfplay-light-record 1 --selfplay-light-classes all
+cd "$WT" && bash tools/watch_run.sh "$FORK" 24 &        # the crash / stall watch, as after every launch
+grep "light decisions:" "$FORK/log.txt"; grep "selfplay:" "$FORK/log.txt" | tail -1 | grep -o '"light": {[^}]*}'; grep -c "REFUSED" "$FORK/log.txt"
+
+# 5. the fork at K + 24 and its supervisor gone: the control is the line, resumed from K
+cd "$MAINWT" && python tools/pause_run.py "$MAIN" --resume --wait
+# 5b. ONLY if 2b printed False (no supervisor): remove the PAUSE file and start a fresh supervisor with the
+#     line's own command line (supervisor_state.json args; the line's code), then watch it
+cd "$MAINWT" && python tools/pause_run.py "$MAIN" --resume
+#     (the args of supervisor_state.json on 2026-10-31 - check them against the file first)
+cd "$MAINWT" && MTGZ_SUPERVISE_STALL=7200 python tools/launch_hidden.py "$MAIN/supervisor_console.txt" python tools/supervise.py "$MAIN" --preset delver-mirror --seed 1 --eval-remote mac --selfplay-remote mac --games 800 --conc 192 --selfplay-remote-linger 1 --eval-select cq --eval-select-min-visits 4 --eval-select-c-scale 0.3 --eval-random-games 0 --elo-offsets 1,2,4,8 --window-cache 1 --train-prefetch 2 --ram-budget-gb 34 --iters 400 --eval-every 8 --eval-leaf-value-view root --eval-games 0 --elo-games 24 --elo-paired 1 --elo-anchors "a192=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0192.pt,a160=C:/Users/Gregg Keithley/mtg-zero/runs/anchors/r3-2b_iter_0160.pt" --elo-anchor-games 100 --elo-anchor-elo 1613 --elo-anchor-calib-games 200 --elo-anchor-from 200 --heldout-shards "C:/Users/Gregg Keithley/mtg-zero/runs/heldout/r3-2b_iter0197fresh_8192.npz" --lr 3e-5 --lr-min 3e-5
+cd "$MAINWT" && bash tools/watch_run.sh "$MAIN" 24 &
+
+# 6. paired h2h with the run's spec and chance_k 0 (each once the control has the checkpoint): +8, +16, +24
+cd "$WT" && SPEC="$(python -c "import json; print(json.load(open(r'$MAIN/config.json'))['spec'])")"
+for N in $((K + 8)) $((K + 16)) $((K + 24)); do I=$(printf %04d $N)
+  python -m mtgz.az.h2h "$FORK/models/iter_$I.pt" "$MAIN/models/iter_$I.pt" --spec "$SPEC" --chance-k 0 --paired --sprt 0,20 --games 600 --max-games 2400 --sims 32 --select cq --select-min-visits 4 --a-cq-c-scale 0.3 --b-cq-c-scale 0.3 --a-leaf-value-view root --b-leaf-value-view root --device cuda --threads 8 --seed 7 > "$OUT/h2h_$N.json"
+done
+# 6b. equal wall-clock: n_eq from both arms' logs (77.6 above), then the fork's K + 24 against the control's K + n_eq
+python - "$FORK" "$MAIN" $K <<'PY'
+import json, sys
+fork, main, k = sys.argv[1], sys.argv[2], int(sys.argv[3])
+def per_gen(run):
+    m = {r['iter']: r for r in map(json.loads, open(run + '/metrics.jsonl')) if k < r['iter'] <= k + 24}
+    tot = [r.get('seconds', 0) for r in m.values()]               # the whole iteration (finish_iter)
+    sp = [r.get('phases', {}).get('selfplay_s', 0) for r in m.values()]
+    return len(m), sum(tot), sum(sp)
+nf, tf, sf = per_gen(fork); nc, tc, sc = per_gen(main)
+print(f'fork {nf} gens {tf / 3600:.2f} h (self-play {sf / 3600:.2f} h); control {nc} gens {tc / 3600:.2f} h (self-play {sc / 3600:.2f} h)')
+print('n_eq =', round(tf / (tc / max(1, nc))))
+PY
+
+# 7. fingerprints and window behaviour of each arm's own network at K + 24 (light off, the run's self-play
+#    search; CPU, below normal)
+cd "$WT" && I=$(printf %04d $((K + 24))); for ARM in "$FORK" "$MAIN"; do A=$(basename "$ARM")
+  CUDA_VISIBLE_DEVICES=-1 python tools/light_eval.py play --model "$ARM/models/iter_$I.pt" --config "$ARM/config.json" --sims-light 0 --games 192 --conc 48 --threads 4 --torch-threads 4 --seed 1 --out "$OUT/fp_${A}_$((K + 24)).json"
+done
+python tools/light_eval.py report "$OUT/fp_r3-2b-beliefsearch_$((K + 24)).json" "$OUT/fp_r3-2b-light16_$((K + 24)).json" --json "$OUT/fp_report.json"
+
+# 8. anchored Elo and held-out value CE of both arms
+grep -E "elo anchored|heldout" "$FORK/log.txt" "$MAIN/log.txt" | tail -12
+```
+
+(`light_eval.py play --config` of the fork's config.json carries its light settings: step 7 passes
+`--sims-light 0` so both arms are fingerprinted at the same search, light off.)
+
+**Watch the fork's first iteration**: the start-up line "light decisions: 16 simulations (full draws) / 4
+(fast draws), recorded (full draws); classes own_upkeep,..."; the `selfplay:` line's `light` - `share`
+~0.29, `recorded_per_game` ~0.25 x `per_game`, `saved_share` ~0.2 (77.5) - its `games` = the local games
++ the Mac's (`remote.games` > 0) and no "REFUSED: its checkout searches light decisions as" line (step 1
+done); `samples` per game as the line's (~90 + the value-only samples).
+
+**Verdict** (the user's): the fork adopted if (1) it is not weaker per generation (the K + 24 h2h not
+H1 for the control, the estimate within ~1 se of 0, the fingerprints and window act rates of step 7 not
+drifting) and (2) its generations are faster (wall-clock and self-play seconds per generation, leaves
+per game ~20% fewer); the equal-wall-clock h2h (6b) is the summary number. Anchored Elo and held-out CE
+are the side evidence.
+
+**Checklist**
+
+1. `mac.sh --eval-checkout` from the fork's worktree -> "eval checkout ready" (the coordinator).
+2. Pause the line (`pause_run.py --wait`), note K.
+3. **Check the line's supervisor is alive** (2b). If it is gone (kill_orphans), the line must be
+   relaunched at step 5 with a fresh supervisor (5b: PAUSE removed, its own command line), not resumed.
+4. `fork_run.py --source ... --dest runs/r3-2b-light16 --iter K`.
+5. Launch the fork (hidden, `MTGZ_SUPERVISE_STALL=7200`), arm `watch_run.sh`; after its first iteration
+   check the `light` metrics and that the Mac plays (no REFUSED).
+6. Fork at K + 24, its supervisor gone -> resume the line (`pause_run.py --resume --wait`), or 5b if its
+   supervisor died; arm `watch_run.sh`; check the line runs again (a new iteration in its log).
+7. h2h at K + 8 / + 16 / + 24 as the control reaches them (`--spec` the run's, `--chance-k 0`, paired
+   SPRT(0, 20)); then 6b (equal wall-clock).
+8. Fingerprints and window act rates of both arms at K + 24 (CPU, step 7).
+9. Anchored Elo and held-out CE from both logs; the verdict to the user.
+
+### 77.7 Checks
+
+Desktop 2026-10-31, CPU only (`CUDA_VISIBLE_DEVICES=-1`), below normal priority, beside the live main
+line; own cargo targets (`E:/cargo-target/mtg-zero/light-decisions`, `.../light-base-1605436`, zero-core
+`E:/cargo-target/zero-core/light-decisions`, `.../light-base-c15e3d0`); the pyd built with
+`tools/build_py.sh`. Baselines: worktrees of main 1605436 (E:/mtg-zero-scratch/light-windows/base-1605436)
+and zero-core c15e3d0 (E:/zero-scratch/light/base-c15e3d0), each built in its own target.
+
+* **`tools/gate.py optin-core` PASSED** on 7e26452 (zero-core pin cc83628; `gates/7e26452ab056.json`):
+  core tests 98, checkpoint_compat byte identity against 1605436, `--test az` 39, `--test hidden` 16,
+  `--test light` 3, Glass Road c1f56dc / Caverna a6fad73 / Kingdom Builder 4202a4a build against this
+  core GREEN (`--other-games` one path per argument: a291de7's fix, cherry-picked from `explore` as
+  0f0b7c3; `SKIP_CORE=1`: the core's pytest ran on its own, below; `SMOKE_TARGET=light-decisions`).
+* **Digests unchanged**: full 132437374243f7b2, encoding-free (`DIGEST_ENCODING=0`) a0d54562c8330271.
+* **`check_checkpoint_compat`** with the line's checkpoint 320 on its Delver spec, 1605436 against this
+  branch: identical (1,664 samples a target; records 216341a590fcbe44 visits / 63f1d43eacb9ba37 cq).
+* zero-core (docs/az.md 22.8): cargo 98, pytest 328 passed / 3 skipped (+ 1 co-training timing test that
+  failed under load and passed alone), toy-smoke runs byte for byte against c15e3d0 (classic and rolling
+  'cq', the settings absent and given at their defaults), `check_checkpoint_compat --package zero`.
+* This repo: `cargo test --release -p engine --test light` 3, `pytest tests/test_light.py` 3.
+
+### 77.8 Risks and open points
+
+* **Long-run learning at the windows** - the evidence is one network. Unrecorded: no window samples at
+  all, so the policy there changes only through generalisation from the other decisions (the habit "pass
+  unless the prior already acts" is frozen, the 2% of windows where the search overrode the prior teach
+  nothing); recorded 16 / 4: the 'cq' target from ~16 visits leans on the network's own Q and prior
+  (softer, less search-improved), and the root noise (eps 0.25) weighs more at 16 simulations. The A/B
+  measures it per generation; the fingerprints and window act rates of its step 7 are the early warning.
+* **Training budget**: unrecorded removes ~29% of the decision samples and of the value-only samples
+  (fewer training steps per generation at `reuse` 2, the window's 6 iterations holding fewer rows,
+  `min_window_samples` 30,000 still met) - per-generation strength then mixes the search and the
+  training budget; the recorded variant keeps them (why 77.6 picks it).
+* **Value-only samples' next q** (unrecorded): a value-only record waiting for its observer's next
+  search skips that seat's light searches and takes a later full or fast one's root value (a later, deeper
+  estimate instead of a 4-simulation one).
+* **Temperature moves**: a game's first 60 searched decisions sample by visit counts; at 4 simulations
+  (1 + 3 walks) the counts are coarse ([3, 0] or [2, 1]) - the measured act rate held (14% in
+  temperature moves in 77.1), but the sampled distribution there is the prior's coarsened, not a
+  64-simulation search's.
+* **Wall-clock vs leaves**: the CPU saved 16-19% of the time for 20-25% of the leaves; the line's
+  generations gain only on its self-play phase (~75% of an iteration), so expect ~12-18%, and measure it
+  (77.6 (2)).
+* **Older checkouts**: a run directory with the light settings in its config.json resumed on a build
+  without them would ignore them in silence (resolve_config keeps unknown saved keys): relaunch a fork
+  only from its pinned worktree. The Mac's workers are covered by the hello's fingerprint (refused).
+* **Classes are the engine's**: `light::CLASSES` names are the settings' vocabulary; renaming or
+  reordering them changes what a saved `selfplay_light_classes` selects (names are saved, not indices;
+  the fingerprint names them).
+* **Not done here**: the A/B itself (77.6), the Mac checkout of the fork's commit (`mac.sh
+  --eval-checkout`: the coordinator), the evidence on the Mac.
