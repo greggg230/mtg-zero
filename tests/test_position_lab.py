@@ -238,6 +238,9 @@ def test_candidates_parse():
         ["Cast Mishra's Bauble", 'Pass priority', 12]
     c = L.parse_cand('{"name": "x", "forced": ["*"], "follow": {"rule": "bauble_fetch"}}')
     assert c['follow'] == {'rule': 'bauble_fetch'} and c['name'] == 'x'
+    assert L.parse_cand('{"follow": {"rule": "bauble_fetch"}}')['forced'] == []
+    with pytest.raises(SystemExit):
+        L.parse_cand('{"name": "nothing"}')
 
 
 def test_deal_summaries_report_the_played_deals(spot):

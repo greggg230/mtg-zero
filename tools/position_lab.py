@@ -353,9 +353,10 @@ def parse_cand(text):
     text = text.strip()
     if text.startswith('{'):
         c = json.loads(text)
-        if not c.get('forced'):
-            raise SystemExit(f'--cand {text}: no "forced" line')
-        return {'name': c.get('name') or ' ; '.join(map(str, c['forced'])), 'forced': c['forced'], 'follow': c.get('follow')}
+        if not c.get('forced') and not c.get('follow'):
+            raise SystemExit(f'--cand {text}: neither a "forced" line nor a "follow" rule')
+        forced = c.get('forced') or []
+        return {'name': c.get('name') or ' ; '.join(map(str, forced)) or 'the rule', 'forced': forced, 'follow': c.get('follow')}
     items = [x.strip() for x in text.split(';') if x.strip()]
     return {'name': ' ; '.join(items), 'forced': [label_item(x) for x in items], 'follow': None}
 
