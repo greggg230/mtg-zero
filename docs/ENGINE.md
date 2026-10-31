@@ -16319,3 +16319,38 @@ same byte for byte on these builds; `fa,fb,fc_on.json`, `floor_report.json`, `ru
   game's 6,300 leaves at every game eligible: ~1% at the A/B's share 0.5), 22 forced walks a game
   (inside the budget); the exploring runs' leaves per game 6,570 against 6,301 (+4.3%, the games
   differing as well).
+
+### 75.11 The A/B result (2026-10-30/31): no gain, the control kept
+
+Run as 75.7 (user-approved): the main line `runs/r3-2b-beliefsearch` (lr 3e-5 since 196) paused at
+**K = 217**; the fork `runs/r3-2b-explore` (pick 'game', share 0.5, the 75.10 defaults; build
+`run-9a57a55`, Mac `run-9a57a5549753`) ran 217 -> 241 alone on the desktop and the Mac (21:28-23:23,
+~148 episodes and 4.5% masked rows an iteration, every deviation to an option of >= 4 visits); then the
+line resumed from 217 as the control (23:24 -> 241 at ~01:15).
+
+**Paired h2h** (fork vs control at the same iteration, the Delver spec, `--chance-k 0`, 32 simulations,
+the line's evaluation search, SPRT(0, +20 Elo), alpha = beta = 0.05):
+
+| iteration | games | fork score | Elo | SPRT |
+|---|---|---|---|---|
+| 225 (K + 8) | 600 | 0.457 +- 0.016 | -30 +- 11 | H0 |
+| 233 (K + 16) | 1,200 | 0.495 +- 0.010 | -3 +- 7 | H0 |
+| 241 (K + 24) | 1,200 | 0.496 +- 0.011 | -3 +- 8 | H0 |
+
+**Anchored Elo / held-out value CE** (each +-46 Elo): fork 1560 / 0.3771 (224), 1593 / 0.3786 (232), 1564 /
+0.3762 (240); control 1597 / 0.3778, 1606 / 0.3780, 1581 / 0.3787. No difference beyond the noise.
+
+**Fingerprints at 241** (exploration off, the run's self-play search, 192 CPU games each, fork vs
+control, +- 1 se of the difference): tap-out into a live Daze 50.5% vs 56.1% (-5.6 +- 2.6); fetch cracked
+at once 88.8% vs 91.5% (-2.6 +- 1.4; held to later in the turn 79 vs 56 times); Brainstorm with a
+shuffle 19.2% vs 17.3% (+1.8 +- 2.5); Murktide's best delve 78% vs 79%; Force of Will pitched Force of
+Will 79% vs 78%; T1-2 Volcanic for blue only 54% vs 57%; one-landers kept 60% vs 57%. Two habits moved
+a little (the Daze tap-out and the immediate fetch), none of them into a strength gain.
+
+**Reading.** The forced deviations cost the fork early (-30 Elo at K + 8, the window filling with
+exploration games) and were neutral by K + 16. With the gate on searched alternatives, exploration only
+tests what the search already rates within 0.1 of its choice, and 24 generations of it moved habits by a
+few points without changing the result. The volcanic deviations' cost in 75.10 (-0.33 a game) and the
+unmoved fingerprints suggest that several "habits" may not be mistakes at this level - only an outside
+reference can tell (hub todos: the human yardstick). The feature stays on its branches, off by default
+(byte-identical), unmerged; the generic trigger (hub todo) waits on a reason to retry.
