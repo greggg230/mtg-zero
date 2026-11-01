@@ -15916,3 +15916,229 @@ in `E:/cargo-target/mtg-zero/token-graphs`.
   gradients, CPU and CUDA), its new tests with CUDA, toy runs byte for byte, the numerics and the
   measurements above.
 * No engine change, no digest re-record, no search smoke: with the env unset nothing plays differently.
+
+## 80. The exhaustive lookahead per information set in Rust, a lookahead player (zero-core `feat/lookahead`, opt-in)
+
+Branch `lookahead` (from main e057c87), zero-core `feat/lookahead` (from main c6b959b; its docs/search.md
+3.9 has the design and the API), 2026-11-01, approved by the user that day. Nothing live changed: the
+main line r3-2b-beliefsearch is stopped (the user's call), its pinned worktrees, the Delver Lab (:5360),
+the Delver AI publisher, the other experiment (`E:/mtg-zero-scratch/lookahead-teacher/`) and the Mac
+untouched; the network is a read-only copy of iteration 475 with its run's config in
+`E:/mtg-zero-scratch/lookahead/models/r3-2b-beliefsearch/`. Off by default; no merge, no push.
+
+### 80.1 Why
+
+The Delver Lab's x-ply lookahead (delver-lab `delverlab/xply.py`, `xply_is.py`, Python over the bindings)
+found lines the network's MCTS misses - Mishra's Bauble first at a turn-1 spot, with a card-dependent
+follow-up -: it ignores the prior (every option expanded), decides our moves per information set (the
+value of information) and searches every reply. It walks every node in Python and values the leaves on
+the CPU (~1,500 positions/s): ~5-30 s a 6-ply decision. The goal: fast enough to play whole evaluation
+games with it (a lookahead player), later to produce self-play targets, and to speed up the lab.
+
+### 80.2 What (zero-core docs/search.md 3.9)
+
+`crates/search/src/lookahead.rs` ports the lab's lookahead exactly: plies = decisions with >= 2 options of
+either seat (single-option ones stepped by the transition, mana payments - `minor_decision` - the network's
+top prior, no ply); horizons `plies`, 'turn', 'next_turn' (`max_plies` 40, `cut` counted); every option or
+top-k by prior (`topk_root`, `topk_from_turn`); our decisions per information set (members grouped by an
+exact hash of `encode(R)` and the legal options, one choice per group, the max of the group's average) or
+per world; the opponent per world by 'min' (best reply), 'expect' (policy-weighted) or 'top'; worlds dealt
+from the root decider's view by the seat's root belief (tilt 1 / clip 20 / mix 0.25 for the Delver line's
+evaluation seat), explicit seeds in the position API; leaves the value head on `encode(R)`
+(root-view), terminals `result()`; a node budget with stages (top-k 4 below the root, then shallower,
+then the seat's MCTS) and counters. It is a seat type of zero-core's driver (seat key `lookahead`): its
+leaf and prior rows go through the same batches as MCTS leaves, so every game in flight shares one GPU
+batch. Leaf values are shared by observation (`dedup`: worlds R cannot tell apart after the same moves
+share one row; exact up to float rounding).
+
+What MTG needs: `SearchGame::active_seat` (the active player, for 'next_turn'; engine/src/az/mod.rs, test
+`active_seat_is_the_active_player` in tests/az.rs), the existing `minor_decision` (PayMana / PayPool) and
+`determinize_with` (the belief head's deal); observation hashing is zero-core's generic hash of the
+encoding (the lab's key), no MTG hook. `mtgz/az/lookahead.py`: zero.lookahead with MTG's `reveal` (the
+draws / looks a line's move showed, from its chance keys) for the position API's lines. h2h: zero.h2h's
+flags pass through `python -m mtgz.az.h2h`.
+
+### 80.3 How to use it
+
+* **A match**: `ZERO_TOKEN_GRAPHS=1 python -m mtgz.az.h2h A B --a-lookahead plies=4,worlds=8,opp=min,budget=100000
+  --sims 32 --chance-k 0 --device cuda --graphs 1 --paired --spec "$SPEC" --threads 12 [--conc N --groups G
+  --max-rows 1024]`: side A decides by the lookahead (its MCTS settings - the run's evaluation seat, read from
+  the checkpoint's run config - deal its worlds by the belief and play its final fallback), B by MCTS. The
+  output adds `lookahead_a`, `lookahead_tag_a`, `look` (decisions, nodes, rows, fallbacks per stage, peak live
+  games, the search threads' lookahead time).
+* **A position** (the lab's call): `from mtgz.az import lookahead as LA; LA.evaluate_position(game, ev,
+  {'plies': 6, 'worlds': 8, 'opp': 'min'}, seeds=range(8), belief_tilt=1, belief_clip=20, belief_mix=0.25)`
+  -> per root option the value per world, mean +- sd, the modal principal line with labels and reveals, the
+  counters; `worlds=[...]` instead of `seeds` takes worlds dealt elsewhere (the parity runs feed the lab's
+  code and this one the same worlds).
+* Settings: `plies`, `horizon`, `max_plies`, `worlds`, `topk`, `topk_root`, `topk_from_turn`, `opp`
+  (min | best | expect | policy | top), `mode` (infoset | world), `budget`, `fallback_topk`, `fallback_plies`,
+  `fallback` (mcts | prior), `rows`, `dedup` - an unknown or bad one is an error.
+
+### 80.4 Parity with the lab's Python lookahead
+
+`E:/mtg-zero-scratch/lookahead/scripts/parity.py`: for each position the worlds are dealt once (8, by the
+Rust deal with the run's evaluation belief - tilt 1, clip 20, mix 0.25 -, deal seeds 0-7) and fed to both:
+the lab's `xply_is.run` (information sets) / `xply.run` (per world) with its own `EngineOps` / `NetOps`
+(imported read-only from delver-lab; `NetOps`'s `L.evaluate` is position_lab's, copied verbatim) and
+`zero.lookahead.evaluate_position(..., worlds=...)`; the same network (iteration 475's copy), CPU eager.
+Positions: the turn-1 canary openings of game seeds 1754, 2100, 5103, 6347 (the lab's `opening_spot` rule:
+Volcanic Island or a fetch, Mishra's Bauble, Tamiyo and fillers, on the play) and the user's spot - replay
+`20261031-204931_001.json.gz` frame 3 = gen 418 game 2 decision 4, P2's turn-1 main phase (Pass, Cast
+Mishra's Bauble, Play Polluted Delta / Thundering Falls / Volcanic Island). Settings: both modes, the three
+opponent models, 4 and 6 plies, every option (the top-k option is the same code; the lab's information-set
+solver caps the root, its per-world tree does not: the harness sets `topk_root` per mode).
+
+| | configurations | identical (values to 1e-5, the choice, every counter) |
+|---|---:|---:|
+| infoset, min / expect / top, 4 and 6 plies | 30 | 30 |
+| world, min / expect / top, 4 and 6 plies | 30 | 29 |
+
+* **Values**: per root option and world, max |difference| 3.6e-7 (means 2.6e-7, sds 1.3e-7) - the network's
+  float rounding at other batch shapes (the lab evaluates in chunks of 512 rows, the Rust in rounds of up
+  to 512).
+* **Counters**: nodes (836-1,929 at 4 plies, 3,949-17,598 at 6), leaves, prior rows, value rows, minor
+  steps, groups: identical in all 60.
+* **The one difference** (seed 6347, per world, min, 6 plies): options 39 and 0 within 6e-8 of each other
+  (0.56776302 / 0.56776296 in Python, equal in Rust): the choice flipped by float rounding, not a difference
+  of semantics.
+* **Lines**: the modal principal line the same for 244 of 252 options (the rest: near-ties deeper in the
+  tree; the lab's modal key also includes its reveal annotations).
+* **Dedup on** (the default; the table ran with it off): the 6-ply information-set runs at all five
+  positions again identical (values to 1.8e-7), the lab's value rows = the rows sent + the shared ones, 57-71%
+  of the leaves shared.
+* Time (CPU, the same network, 8 torch threads, the desktop shared): the 60 runs took 161 s in the lab's
+  Python and 99 s in Rust - on the CPU both are bound by the network (the GPU numbers are 80.5).
+
+### 80.5 Throughput
+
+**One position at a time** (the position API, the lab's call: one game in flight; the GPU's token graphs,
+`scripts/bench_look.py`; 13 positions - the 5 parity spots on turn 1 and 8 of gen 418 #2 from turn 3 on, >= 4
+options; 8 worlds, best reply; the desktop shared with this branch's own h2h):
+
+| plies | branching | s / decision (turn 1 / mid-game) | nodes / decision | nodes / s | value rows shared |
+|---:|---|---:|---:|---:|---:|
+| 4 | every option | 0.19 (0.13 / 0.22) | 2,113 | 11,271 | 75% |
+| 4 | top-k 4 | 0.10 (0.08 / 0.11) | 1,352 | 13,709 | 70% |
+| 5 | every option | 0.37 (0.25 / 0.45) | 6,252 | 16,723 | 74% |
+| 5 | top-k 4 | 0.24 (0.18 / 0.28) | 3,562 | 14,728 | 68% |
+| 6 | every option | 0.80 (0.46 / 1.02) | 18,142 | 22,650 | 72% |
+| 6 | top-k 4 | 0.53 (0.40 / 0.61) | 9,357 | 17,824 | 67% |
+
+The lab's Python took 7-10 s for the user's spot at 6 plies (17,598 nodes, CPU); the same lookahead here
+0.64-1.2 s on the GPU. One position is bound by the lookahead's own CPU work on one thread (clones,
+transitions, encodings and their hashes: ~40-60 us a node), not by the network.
+
+**Many games in flight** (the driver, `scripts/bench_driver.py`: the h2h's shape - the lookahead seat against
+the run's MCTS evaluation seat, paired games, sparse batches, 4 groups, 12 search threads; best reply):
+
+| plies | branching | 1 game in flight: decisions / s (s a decision) | 64 in flight: decisions / s | nodes / s | rows / s | evaluators' share |
+|---:|---|---:|---:|---:|---:|---:|
+| 4 | every option | 17.3 (0.058) | 104 | 83k | 29k | 0.50 |
+| 4 | top-k 4 | 18.1 (0.055) | 126 | 76k | 29k | 0.67 |
+| 5 | every option | 12.5 (0.080) | 65 | 143k | 48k | 0.45 |
+| 5 | top-k 4 | 13.6 (0.074) | 87 | 139k | 48k | 0.56 |
+| 6 | every option | 5.6 (0.177) | 40 | 242k | 79k | 0.55 |
+| 6 | top-k 4 | 8.6 (0.117) | 55 | 225k | 79k | 0.64 |
+
+(60 s from the games' start each - mostly the first turns, ~580-6,000 nodes a decision; the desktop otherwise
+idle.) Many games in flight multiply the decisions per second by 6-7: the GPU batches every game's rows
+together (79k rows/s at 6 plies, against ~27k leaves/s for MCTS's batches of a few hundred rows in 78.3).
+The speed-ups that got there (zero-core, opt-in): **sparse batches** (each row's ~150 non-zeros instead of
+37,620 floats: the batches' assembly into fresh memory had been 59% of a 4-ply match's wall time; a 32-game
+match 165 s -> 89 s, the same games), **4 driver groups** (89 s -> 65 s), the evaluator's `max_rows` pieces
+two in flight, the graphs' host copy over 4 threads for big dense batches, leaf values shared by observation
+(57-81% of the leaves), encoding in place in the batch buffer.
+
+**CPU only** (eager CPU network, 8 torch threads, 8 positions - the 5 of turn 1 and 3 mid-game -, the desktop
+idle): 4 plies 0.15 s a decision (GPU 0.12), 6 plies 1.04 s (GPU 0.58; 28,872 nodes a decision at these
+positions): one position is mostly the lookahead's own CPU work, the GPU's edge is in batching many games.
+
+
+### 80.6 First lookahead player against the MCTS player
+
+The same network for both sides (iteration 475's copy), the run's spec, `--chance-k 0`, paired games. B = the
+run's evaluation seat: 32 simulations, the 'cq' rule with select_min_visits 4 and select scale 0.3, root-view
+leaves, the root belief (tilt 1, mix 0.25). A = the same seat with `--a-lookahead`: per information set, 8
+worlds dealt by its belief, every option, the stated opponent model and budget (fallback: top-k 4 below the
+root, then 2 plies fewer, then the seat's MCTS). Scores are A's (+- 1 se of the pair scores).
+
+| A (the lookahead side) | pairs | A's score | Elo | wall / 100 games (in flight) | A's decisions; nodes / rows a decision | fallbacks (top-k / MCTS) |
+|---|---:|---:|---:|---:|---|---:|
+| 4 plies, best reply, budget 100k | 100 | **0.315 +- 0.030** | -135 | 693 s (200; dense) | 23,875; 852 / 262 | 6 / 0 |
+| 4 plies, policy-weighted, budget 100k | 100 | **0.390 +- 0.034** | -78 | 540 s (200; dense) | 22,598; 821 / 348 | 7 / 0 |
+| 6 plies, best reply, budget 150k | 50 | **0.470 +- 0.046** | -21 | 877 s (64) | 13,193; 6,638 / 2,118 | 80 / 0 |
+| 6 plies, policy-weighted, budget 150k | 50 | **0.370 +- 0.045** | -93 | 910 s (64) | 10,979; 6,974 / 3,249 | 77 / 0 |
+| guarded, 4 plies, 16 worlds, policy-weighted, 5 pp | 300 | **0.515 +- 0.015** | +10 | 365 s (100) | 71,427; 1,880 / 640; **1.9% overridden** | 15+ / 0 |
+| guarded, 6 plies, 16 worlds, policy-weighted, 5 pp, budget 300k | 50 | **0.460 +- 0.035** | -28 | 2,583 s (64) | 12,387; 13,445 / 5,506; **2.3% overridden** | 112 / 0 |
+
+(The first two ran on dense batches before 80.5's speed-ups, the rest on sparse batches with 4 driver groups;
+"wall / 100 games" is the match's wall time per 100 games with that many in flight on the shared desktop.)
+
+* **The pure lookahead player loses to MCTS at 32 simulations** at 4 plies by 80-135 Elo and at 6 plies by
+  20-90: it picks the best of every option's lookahead value, and those values carry the value head's noise -
+  the max over many of them is biased upward (the optimizer's curse). The teacher experiment
+  (`E:/mtg-zero-scratch/lookahead-teacher/results/summary.json`, another session's) measured the same from the
+  other side: on 203 non-trivial decisions of generations 380-454 the 6-ply lookahead disagrees with the
+  network's 8 x 64 MCTS at 37-42% and its moves played out worse there (-1.0 +- 0.6 pp best reply, -1.1 +- 0.7
+  policy-weighted), predicting +2.4 pp; large predicted differences were well calibrated.
+* **The guarded player** (the coordinator's ask after that finding; `guard`, docs/search.md 3.9 in zero-core)
+  keeps the MCTS move unless the lookahead's best option beats the MCTS move's lookahead value by more than 5
+  pp: at 4 plies it changes 1.9% of its decisions and scores 0.515 +- 0.015 over 300 pairs (0.555, 0.500, 0.490
+  in three batches of 100 - the first one's +38 Elo was luck): even with MCTS-32, +10 Elo within 1 se; at 6
+  plies (2.3% changed) 0.460 +- 0.035 over 50 pairs - no better. The few moves the lookahead is very sure of
+  do not add measurable strength at these sample sizes.
+* Best reply beats policy-weighted at 6 plies (0.47 against 0.37) and loses at 4 (0.315 against 0.39): at 6
+  plies the lookahead sees the opponent's reply and our answer to it; at 4 the pessimistic reply ends many
+  lines one ply after it.
+
+### 80.7 What a 1,300-game evaluation would take
+
+From the matches above and 80.5 (the desktop as it was: sometimes two matches sharing it; a game is ~115-125
+lookahead decisions plus as many MCTS ones; 1,300 games = 650 pairs):
+
+| the lookahead side | per 100 games (in flight) | 1,300 games |
+|---|---:|---:|
+| 4 plies, 8 worlds | ~150-200 s (64-100; sparse, 4 groups) | ~35-45 min |
+| 5 plies, 8 worlds | ~1.6x 4 plies (80.5's decisions / s) | ~1-1.2 h |
+| 6 plies, 8 worlds | 877-910 s (64) | ~3.2 h |
+| guarded, 4 plies, 16 worlds | 365 s (100) | ~1.3 h |
+| guarded, 6 plies, 16 worlds | 2,583 s (64) | ~9.3 h |
+
+More games in flight (128-256) should shorten the 6-ply runs further (the batches grow; memory: ~11 KB a live
+member game, the largest 6-ply decision held 230k at once - 2.5 GB). Top-k 4 below the root cuts 6 plies by
+~30% (80.5).
+
+### 80.8 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (memory `feedback_tiered_gates`), zero-core pin
+9354074 (the code; the docs commits after it, to cb14d00, change docs only), this branch at ff33648:
+
+* `python tools/gate.py optin-core --baseline-root <run-e057c87, main e057c87's built worktree, read only> --no-mac
+  --other-games "<glassroad-zero> <caverna-zero> <kingdombuilder-zero>"` (8.3 paths; `SMOKE_TARGET=lookahead`):
+  **GATE PASSED** - core tests 105, checkpoint_compat byte identity identical, `--test az` 40 (39 + the new
+  `active_seat_is_the_active_player`), `--test hidden` 16, Glass Road c1f56dc / Caverna a6fad73 / Kingdom Builder
+  4202a4a build against the core (GREEN; the step's core pytest passed this time, the known load-flaky
+  `test_cotrain_the_local_driver_is_never_starved` included).
+* Digests unchanged: full **132437374243f7b2**, encoding-free **a0d54562c8330271**.
+* `check_checkpoint_compat --package mtgz` with iteration 475's copy and the run's spec against run-e057c87:
+  **identical** (visits 0b2a3c60d9238fd3, cq b48e2b7f4242e2fa, results eaf06ff0d68b94ff, 8 / 8 against random).
+* pytest 69 passed (the new tests/test_lookahead.py's 3 included).
+* zero-core's own (its search.md 3.9, az.md 21): cargo test 102 + webnet 3 (13 lookahead tests), pytest 316
+  passed / 9 skipped on the CPU (the CUDA ones - the sparse batches through the graphs bit for bit, the token
+  graphs - run with CUDA separately: passed; `test_graphs_match_eager_and_follow_new_weights`, which this
+  branch's code paths do not reach, missed its 2e-5 tolerance by up to 1.7e-5 in 2 of 5 runs while this
+  branch's matches shared the GPU, and passed in the others), check_checkpoint_compat
+  `--package zero` identical, toy-smoke runs byte for byte against c6b959b in two configurations (the classic
+  preset; rolling with 'cq' targets at 0.3 and the cq2 rule: every shard, checkpoint member, Elo file identical,
+  timings aside).
+* Off by default: no seat key `lookahead`, no `sparse`, no `max_rows` - nothing plays or evaluates differently.
+
+### 80.9 What next (proposals, not done)
+
+* The lookahead as a **training target**: not as the policy (its pure moves lose), maybe as a guarded
+  correction or a value target at the root; needs its own A/B.
+* **Fewer noisy maxima**: a lower-variance leaf (a few MCTS simulations per leaf instead of the raw value),
+  the prior as a tie-breaker / regulariser at our decisions, or more worlds where the root options are close.
+* **Speed**: within-decision parallelism (one position is single-threaded: the lab's latency), sparse batches
+  for MCTS self-play and evaluation (their batches are bound by the same host copies, 78.3).
