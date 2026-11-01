@@ -16256,3 +16256,31 @@ lookahead played 21-50% of its decisions differently from the MCTS search of the
 | `lookahead-6ply-vs-mcts32_4_lookahead-on-draw_P1.json` | P1, on the draw | won (1 life) | 20 |
 | `lookahead-6ply-vs-mcts32_5_lookahead-on-draw_P2.json` | P2, on the draw | lost (-9 - 17) | 19 |
 | `lookahead-6ply-vs-mcts32_6_lookahead-on-draw_P1.json` | P1, on the draw | lost (0 - 15) | 13 |
+
+## 82. Sparse network batches in self-play (zero-core `feat/sparse-selfplay`, run setting `sparse`, opt-in)
+
+Branch `sparse-selfplay` (from main 3d3b99a), zero-core `feat/sparse-selfplay` 6e93cd8 (code 141c2ba; its
+docs/az.md 10.7 has the design, the equivalence and every measurement), 2026-11-01. Nothing live changed.
+
+* **Why**: the desktop's share of the Delver line's self-play was one process moving zeros - each leaf a
+  37,620-float row (~0.7% non-zero) assembled by the driver, copied into the CUDA graphs' pinned buffer
+  and uploaded (zero-core az.md 10.6) - at under half a CPU core, the RTX 5090 at ~185 W of 575.
+* **What**: zero-core run setting `sparse` (default 0) gives every driver the run builds the lookahead's
+  sparse batches (ENGINE.md 80, zero-core docs/search.md 2.2): the same rows, games and samples. The
+  Mac's remote spec sets `sparse: 0` in both its overrides (evaluations and self-play): its CPU
+  evaluators would only densify a sparse batch, and it is not measured there.
+* **Equivalence**: the Delver line's self-play from iteration 489 with the graphs, the first 24 finished
+  games' samples and results hashed: dense d31a5acb09179104 twice, sparse the same.
+* **Measured** (the line's own local self-play from iteration 489, the GPU shared with
+  r3-2b-exploit475): dense 192 in flight 13.4k leaves/s; sparse 192: 25.0k (1.87x); sparse 384: 35.6k
+  (2.66x); **sparse 768: 44.3k (3.31x)**; sparse 1,536: 41.7k; 4 groups instead of 2 lose at every size.
+  Harness: `E:/mtg-zero-scratch/sparse-bench/bench_sp.py` + `run_bench.sh`, results there.
+* **Turning it on** for a run: `--sparse 1 --conc 768` at a restart (a re-pin onto a build with zero-core
+  141c2ba or later; ZERO_TOKEN_GRAPHS=1 as before). The desktop's self-play share then grows (the shared
+  queue gives a batch-bound consumer its slots), so its dense local shards grow too (~4.2 GB per ~620
+  games, kept `keep_data` iterations). Training (~100 s a generation, 40-50 s of it loading the 34 GB
+  window) becomes the larger part of a generation.
+* **Checks** (tier "opt-in core feature with byte-identical defaults"): zero-core pytest 329 passed - two
+  CUDA tests of test_token_graphs.py (`test_graphs_match_eager_and_follow_new_weights` 3.7e-5 against
+  its 2e-5, `test_absent_slots_are_never_read` one ulp) fail about 2 runs in 3 on the shared GPU, on main
+  c6b959b too (hub todo); the new loop test; the Delver equivalence above; mtg-zero pytest.
