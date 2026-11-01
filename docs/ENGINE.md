@@ -15916,3 +15916,175 @@ in `E:/cargo-target/mtg-zero/token-graphs`.
   gradients, CPU and CUDA), its new tests with CUDA, toy runs byte for byte, the numerics and the
   measurements above.
 * No engine change, no digest re-record, no search smoke: with the env unset nothing plays differently.
+
+## 81. The exploitability test: a best-response fork against the frozen gen 475 (zero-core `selfplay_league_fixed`)
+
+Branch `league-fixed` (from main e057c87), zero-core `feat/league-fixed` f87a9d0 (code 970f6ca,
+docs f87a9d0; from c6b959b; its docs/az.md 14.7 has the design), 2026-11-01, user-approved from
+the review `hub/data/mtg_bot/delver_review_4_2026-11-01.md` (its step 1). Built, tested and left ready
+to launch, not launched: the main line `runs/r3-2b-beliefsearch`, its pinned worktree, `runs/` and the
+Mac untouched; gen 475 copied read-only to `E:/mtg-zero-scratch/exploit/frozen/r3-2b_iter_0475.pt`
+(sha256 a12f8c44272d20bb...). (75-80 are taken by other branches.)
+
+### 81.1 Why
+
+The review finds the main line at a self-consistent fixed point (anchored +4 +- 9 Elo per 100
+generations since gen 280; the policy agrees with its own 64-simulation search on 97.4% of fresh
+decisions) and stable, predictable habits (its 2.6: tap-out into a live Daze, Force pitched to Force,
+T1-2 Volcanic for blue-only turns). Self-play Elo against ancestors cannot see whether those habits
+are *exploitable*. The test: a learner trained only against a frozen copy of gen 475 for 24-32
+generations. If it beats the frozen 475 by >= 100 Elo (the review's prior ~55%) the main line is
+exploitable and training against exploiters is the next lever (phase 2: a league share of ~0.3-0.5
+over exploiters and past selves); below ~20 Elo the bot is near a self-play equilibrium and the gains
+left need a better evaluator. The league already trains only the current network's decisions against
+a past checkpoint (63); it lacked a FIXED opponent.
+
+### 81.2 What zero-core built (its az.md 14.7)
+
+* `--selfplay-league-fixed g475=<path>` (comma-separated `path` / `label=path`; '' = off, the default):
+  the league's candidates are those frozen checkpoints instead of the pool's offsets; with
+  `--selfplay-league 1.0` every self-play game is the learner against g475, seats alternating, the
+  frozen seat searching with the run's self-play settings (noise, temperature, the playout cap, the
+  root belief) and recording nothing.
+* The file is copied once into the run as `league/g475.pt`, its sha256 / size / source / first
+  iteration in `league/fixed.json`; a restart checks the copy and the source (another file under the
+  label, a changed copy: refused, exit 78), the encoding guard and the belief head (61, 69). Refused at
+  the start: the setting with share 0, a non-default pool with it, slots > the fixed opponents, bad
+  labels.
+* Metrics: `selfplay.league` names it `fixed:g475` (`pool`, `slots`, `win` +- `se` = the learner's
+  score against it), plus `fixed` {name: sha256[:16]}.
+* Remote self-play (52, 56): the mirror gets the run's copy with its config; a worker's hello announces
+  its copy's sha256 and a worker without it (an older checkout) or with another file is refused
+  (killed, retried every 10 minutes; the desktop plays every game). The `mac` remote runs the run's
+  commit anyway (44).
+* `tools/fork_run.py --no-data` (no window shards: the fork's trainings see only its own games
+  against g475), Elo pools of a continuation without the games of checkpoints after K (a fork behind a
+  live source), the source's `league/` copied.
+* Off: no change (az.md 14.7: toy runs byte for byte against c6b959b, setting off and the pool league
+  on).
+
+### 81.3 This repo
+
+Only the pin moves (zero-core f87a9d0): no engine, encoding, card or package change; layout v5,
+digests 132437374243f7b2 / a0d54562c8330271 unchanged (the engine is not touched; the gate's az /
+hidden suites pass, 81.7).
+
+### 81.4 The fork, as prepared (`E:/mtg-zero-scratch/exploit/run.sh`)
+
+* **The build**: a pinned worktree of this commit, `mtg-zero-wt/run-<sha7>` (zero-core f87a9d0, its own
+  target `E:/cargo-target/mtg-zero/run-<sha7>`, `mtgz/_engine.pyd` built; run.sh names it and `check`
+  verifies HEAD, a clean tree, the core pin, the module and the setting). For
+  the Mac (when it is up, with the line's Mac flags): `bash run.sh mac-prep` = `tools/mac.sh
+  --eval-checkout` in that worktree, before the launch.
+* **The run directory is on E:** (`E:/mtg-zero/runs/r3-2b-exploit475`, `EXPLOIT_NAME` for another, a
+  junction at `runs/r3-2b-exploit475` for the dashboards): C: had ~19 GB free on 2026-11-01 06:50, and the fork
+  writes ~3 GB of shards a generation (~20 GB at keep_data 6).
+* **`fork`**: `tools/fork_run.py --source runs/r3-2b-beliefsearch --dest <E: run> --iter 475 --no-data`.
+  Checkpoint 475 is the frozen one (its sha256 checked: the fork starts from exactly the network it
+  plays). No window shards: the main line's data of iterations <= 475 is deleted by its keep_data
+  anyway, and it would be mirror games. No optimizer state: the line's `opt_latest.pt` belongs to its
+  newest checkpoint, so the fork's first training starts a fresh AdamW with the 100-step warm-up. The
+  line's Elo pool is copied without its games of checkpoints after 475 (81.2). The frozen file is also
+  copied to `runs/anchors/r3-2b_iter_0475.pt` (where a192 / a160 live): the fixed opponent's source and
+  the anchor a475 are that file.
+* **`launch`**: the line's flags exactly as its supervisor recorded them (`supervisor_state.json`'s
+  args, checked against `supervisor.log`'s last start line) with `--iters 507` (475 + 32), `--elo-anchors
+  a192=...,a160=...,a475=runs/anchors/r3-2b_iter_0475.pt` and `--selfplay-league 1.0
+  --selfplay-league-fixed g475=runs/anchors/r3-2b_iter_0475.pt`; env `ZERO_TOKEN_GRAPHS=1
+  MTGZ_SUPERVISE_STALL=7200`; `tools/launch_hidden.py` + `tools/supervise.py` from the pinned
+  worktree; extra flags after `launch` are appended (e.g. `--lr 1e-4 --lr-min 1e-4`, 81.6). The
+  evaluation is the line's (every 8 generations: Elo offsets 1/2/4/8, 100 paired anchor games each
+  against a192 / a160 / a475, the held-out set) - a475 is new in the pool, so the first evaluation
+  calibrates it with 200 paired games against each of a192 and a160 (az.md 20.1). `EXPLOIT_MAC=0`
+  replaces the Mac flags by `--eval-remote '' --selfplay-remote ''` (local evaluation, ~10-20 min
+  every 8 generations in the loop); `EXPLOIT_CONC` / `EXPLOIT_GAMES` override `--conc` / `--games`.
+* **Readouts**: `bash run.sh summary` - the learner's league score against g475 per generation and
+  pooled over +1-8 / +9-16 / +17-24 / +25-32 (with self-play's noise and temperature on both sides:
+  1,600 games a generation give +- 0.0125, ~+-9 Elo), the anchored Elo of the fork's evaluations and
+  a475's fixed rating, the h2h results. `bash run.sh h2h N [plain|sprt100|sprt50]`: fork iteration N
+  against the run's copy `league/g475.pt` (its config.json is the fork's, so both sides play the line's
+  evaluation rule `cq-n4-v50-s0.3-rv-b1m0.25`, checked in the output), paired, the run's spec,
+  `--chance-k 0 --graphs 1 --sims 32` on CUDA; plain = 1,200 games (+- ~0.010 paired, ~+-7 Elo),
+  `sprt100` = SPRT(0, 100) in batches of 200 up to 1,200, `sprt50` = SPRT(0, 50) up to 2,400; the JSON in
+  `E:/mtg-zero-scratch/exploit/h2h/`.
+
+### 81.5 What the learner trains on
+
+Only its own decisions against g475 (z its result, q its own root value): **about a third of the main
+line's samples per generation** - one seat of each game instead of two, and no value-only view samples
+(the line's `selfplay_view_samples 0.5` records them only for another *recording* seat, docs/search.md
+3.6, and the frozen seat records nothing). The CPU smoke (81.7) measured 26-31 samples a game (845 and 998 in two iterations of 32
+games) against the line's 89 (gen 480: 71,344 for 800 games): at `--games 1600` ~46k samples and ~180
+training steps a generation (reuse 2, batch 512) instead of ~480-520. Over 32 generations that is ~5,800
+steps at lr 3e-5 - about 11 of the main line's generations of gradient. A flat score is therefore weaker
+evidence than it looks; 81.6.
+
+### 81.6 Expected time, and the recommendation
+
+From the line's own generations on the desktop with the Mac offline (476-480: 800 games in 292-421 s
+of self-play, of which 79% inference (gen 480: infer_s 298 of 376 s), training 29-44 s, ~6-7.5 min a
+generation; 481 at 1,600 games: 13.7 min with 220 of them on the Mac). A league game sends each
+dispatch's leaves to two networks (the learner and g475): two CUDA-graph replays of about half the
+rows instead of one, not measured on the GPU (the GPU is the live line's; 63.4 measured -13% leaves/s
+on a CPU at share 0.25), so the estimates allow +10-40% on self-play; training is cheaper than the
+line's (~180 steps, ~20 s):
+
+| fork setting | alone on the desktop (main line stopped), Mac offline | alongside the live main line, Mac offline |
+|---|---|---|
+| `--games 1600` (the line's flag) | ~14-19 min a generation, ~8-10 h for 32 | ~25-35 min a generation (both runs ~2x slower), ~14-18 h |
+| `EXPLOIT_GAMES=800` | ~7-10 min, ~4-5 h for 32 | ~13-18 min, ~7-9 h |
+
+With the Mac up and prepared (`mac-prep`) its three workers take over half of a run's games, but they
+are one machine: two runs on it split it. Evaluations add nothing to these with the Mac flags (they
+queue for the Mac); with `EXPLOIT_MAC=0` each of the four (480, 488, 496, 504) blocks the loop ~10-20
+min, the first with a475's 400-game calibration.
+
+Recommendation: **run the fork while the main line is stopped** - the review's own advice is to stop the
+main line at its fixed point and use the GPU for forks (its 4.1), and the fork alone at the line's 1,600
+games takes ~8-10 h for 32 generations against ~14-18 h shared - or, if the main line keeps training,
+alongside it with `EXPLOIT_CONC=96` and `EXPLOIT_GAMES=800` (~7-9 h). Read the league score at +8 / +16
+(`summary`); if it is still flat (< +20 Elo) at +16, a learner at lr 3e-5 with a third of the line's
+steps may simply not have moved: extend it (`--iters`) to +48, or make a second fork from 475 at the
+line's rate before gen 196 (`EXPLOIT_NAME=r3-2b-exploit475-lr1e4 bash run.sh fork`, then `... launch
+--lr 1e-4 --lr-min 1e-4`) before calling the line unexploitable. Confirm at the end with `h2h 507` (or
+`sprt100`).
+
+### 81.7 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (memory `feedback_tiered_gates`). The engine is
+not touched (no Rust change in this repo or in zero-core): `mtgz/_engine.pyd` built in this worktree's
+own target `E:/cargo-target/mtg-zero/league-fixed`.
+
+* `python tools/gate.py optin-core --baseline-root <mtg-zero-wt/token-graphs: main e057c87> --no-mac
+  --other-games "<8.3 paths of glassroad-zero caverna-zero kingdombuilder-zero>"` (`SMOKE_TARGET=league-fixed`)
+  on 5d71a91 (zero-core 970f6ca, the code; this commit moves the pin to its docs commit f87a9d0 only):
+  **GATE PASSED** in 27 min - core tests 92 passed, checkpoint_compat byte identity identical, `--test
+  az` 39 passed, `--test hidden` 16 passed, Glass Road c1f56dc / Caverna a6fad73 / Kingdom Builder
+  4202a4a build against the core, zero-core's `pytest tests` 316 passed, 8 skipped (17 min 42 s; the
+  load-sensitive co-training timing test passed this time). Report `gates/5d71a9156917.json`.
+* Digests (`cargo test --release -p engine --test digest -- --ignored`): **132437374243f7b2** full,
+  **a0d54562c8330271** with `DIGEST_ENCODING=0` - unchanged.
+* `pytest tests/test_loop.py` 10 passed (its `test_fork_run` forks behind its source: the new Elo-pool
+  filter's case).
+* zero-core (its az.md 14.7): `tests/test_league.py` 22 passed (9 new), `tests/test_loop.py` with it 37;
+  byte identity against c6b959b with the setting off and the pool league on (classic toy-smoke runs,
+  every file); `check_checkpoint_compat --package zero` identical.
+* **The real game, CPU** (`E:/mtg-zero-scratch/exploit/smoke/xs`, a scratch run: `tools/fork_run.py
+  <frozen 475> <run>` as iteration 0, the main line's config.json with the Mac, anchors and held-out set
+  off, `--games 32 --conc 32 --iters 2 --selfplay-league 1.0 --selfplay-league-fixed g475=<frozen 475>`):
+  the copy `league/g475.pt` and its record (sha256 a12f8c44272d, since 1); iterations 1 and 2 each 32 of
+  32 games against `fixed:g475`, the learner (iteration 0 = the same network, then iteration 1) scoring
+  0.531 +- 0.088 and 0.562 +- 0.088; 845 / 998 samples (26-31 a game), `view.samples` 0 with the
+  root-view rows still sent (`view.rows_per_leaf` 0.51), the belief rows on (0.37 per decision); training
+  50 steps each (min_steps; lr 3e-05 in the metrics, the log line rounds it). A paired CPU h2h of its
+  iteration 1 against `league/g475.pt` named both sides `cq-n4-v50-s0.3-rv-b1m0.25` (the line's rule
+  from the run's config.json): the h2h step's setup.
+* **The script, end to end on scratch copies** (`K=1`, everything under `E:/mtg-zero-scratch/exploit/test_fork`):
+  `check` (also its refusal of a bad `EXPLOIT_MAC`), `fork` (no data, the league's copy and record
+  copied, the junction made and read back with `os.readlink`), `launch` with `EXPLOIT_MAC=0` and tiny
+  CPU overrides through `tools/launch_hidden.py` + `tools/supervise.py` - first with another file under
+  the label g475: `run REFUSED (exit status 78 ...)`, the supervisor not restarting it, the script
+  failing loudly; then the right file: iteration 2 played 8 of 8 games against `fixed:g475` and trained
+  on its own 208 samples only -, `summary` and `stop`. `h2h` was not run on the GPU (the live line's).
+* No search smoke (no engine change), no digest re-record, nothing launched, no run directory, Mac or
+  pinned run worktree of another run touched.
