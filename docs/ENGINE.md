@@ -16143,3 +16143,111 @@ Tier "opt-in core feature with byte-identical defaults" (memory `feedback_tiered
   the prior as a tie-breaker / regulariser at our decisions, or more worlds where the root options are close.
 * **Speed**: within-decision parallelism (one position is single-threaded: the lab's latency), sparse batches
   for MCTS self-play and evaluation (their batches are bound by the same host copies, 78.3).
+
+### 80.10 How the 6-ply lookahead player plays differently (behaviour analysis, 2026-11-01)
+
+The overnight matches (another session, this build, generation 424 both sides, paired): guarded 4 plies
+0.5125 +- 0.0102 over 1,200 games (+9 Elo, undecided), pure 6 plies best reply 0.448 +- 0.019 over 600 (-36,
+SPRT H0). To see how the 6-ply player plays: 200 paired games (`scripts/behave_play.py`: zero.h2h's match with
+the move log and its rows; driver seed 11) of the pure 6-ply best-reply lookahead (per information set, 8
+worlds, budget 150k) against MCTS-32 (the run's evaluation seat), generation 424 both (`iter_0424.pt`'s copy),
+and a control of MCTS-32 against itself on the same deals (the same seed). The lookahead side scored 0.485 +-
+0.033 here (0.59 on the play, 0.38 on the draw). The games were rebuilt from their move logs
+(`scripts/rebuild.py`: the paired game seeds, the spectator view with `log` on) and fingerprinted with
+`tools/delver_fingerprints.py` (this branch adds `scan_game(..., players=)`: one player's decisions and log
+lines) plus Bauble use and an action profile (`scripts/behave_analyze.py`). L = the lookahead seat, M = its
+MCTS opponent in the same games, C = both seats of the control; rate (n).
+
+| fingerprint | L | M | C |
+|---|---:|---:|---:|
+| fetch cracked at once | **0.645** (538) | 0.876 (507) | 0.874 (982) |
+| ... held to the next turn | **57** | 1 | 12 |
+| Brainstorm with a shuffle | 0.151 (271) | 0.226 (266) | 0.188 (520) |
+| Murktide delve best | **0.716** (134) | 0.822 (118) | 0.805 (246) |
+| Force of Will pitched a FoW | 0.654 (26) | 0.724 (29) | 0.513 (78) |
+| tap-out into Daze | 0.492 (301) | 0.556 (315) | 0.547 (812) |
+| ... then Dazed | 0.338 (148) | 0.469 (175) | 0.405 (444) |
+| T1-2 Volcanic (blue only) | 0.579 (76) | 0.730 (74) | 0.720 (164) |
+| Bauble looks at its own library | **0.693** (277) | 0.560 (268) | 0.458 (520) |
+| Bauble casts / 1,000 decisions | 11.2 | 11.7 | 11.7 |
+| keep rate, opening seven | 0.845 (200) | 0.845 (200) | 0.850 (400) |
+| chose to play first | 0.98 (100) | 1.00 (100) | 1.00 (200) |
+| game length (turns, mean) | 16.65 (these games) | | 17.02 (the control) |
+
+| action profile (share of the choices) | L | M | C |
+|---|---|---|---|
+| own main phase, no land drop open | **pass 0.50**, cast 0.34, activate 0.17 | pass 0.33, cast 0.40, activate 0.27 | pass 0.31, cast 0.42, activate 0.27 |
+| own main phase, land drop open | land **0.68**, pass 0.18, cast 0.10 | land 0.79, pass 0.13, cast 0.06 | land 0.78, pass 0.11, cast 0.08 |
+| priority in other steps | pass 0.87, activate 0.07, cast 0.06 | pass 0.92, cast 0.04, activate 0.04 | pass 0.92, cast 0.05, activate 0.04 |
+| responses (stack not empty) | pass 0.85, cast 0.10, activate 0.05 | pass 0.90, cast 0.08, activate 0.02 | pass 0.90, cast 0.08, activate 0.02 |
+| blocks | **block 0.52** | block 0.68 | block 0.64 |
+| attacks | attack 0.68, none 0.20, at Tamiyo 0.05 | attack 0.73, none 0.15, at Tamiyo 0.09 | attack 0.69, none 0.17, at Tamiyo 0.11 |
+
+**Decision-level disagreement.** 500 of L's decisions (mana payments apart: there it takes the top prior),
+each searched again by MCTS-32 twice (seeds apart: the noise floor) and by the lookahead once more with new
+worlds (its self-consistency):
+
+| kind of decision | n | L vs MCTS | MCTS vs MCTS | lookahead again vs its move | most common (L, MCTS) at disagreements |
+|---|---:|---:|---:|---:|---|
+| priority, other steps | 154 | 0.273 | 0.013 | 0.117 | pass / cast 19, pass / activate 15, cast / pass 4 |
+| response | 107 | 0.196 | 0.019 | 0.084 | pass / cast 8, pass / activate 5, activate / pass 3 |
+| own main, no land drop | 74 | 0.365 | 0.000 | 0.284 | pass / cast 10, pass / activate 8 |
+| own main, land drop open | 35 | 0.486 | 0.000 | 0.343 | another land 7, pass / land 3 |
+| library selection | 33 | 0.242 | 0.061 | 0.152 | |
+| other (yes-no, modes, triggers) | 25 | 0.400 | 0.040 | 0.200 | |
+| targets | 23 | 0.413 | 0.130 | 0.174 | the other player / land |
+| attacks | 18 | 0.389 | 0.000 | 0.111 | no attack / attack 5 |
+| mulligan, play-draw, bottom | 12 | 0.000 | 0.000 | 0.000 | |
+| delve choices | 10 | 0.200 | 0.000 | 0.200 | |
+| alternative costs | 6 | 0.000 | 0.000 | 0.000 | |
+| blocks | 3 | 0.5 | 0.33 | 0 | |
+| **all** | **500** | **0.290** | **0.022** | **0.156** | |
+
+Of the 136 decisions where L differs from both MCTS searches, it **passes where MCTS acts 68 times** (a cast 37 -
+Lightning Bolt 9, Brainstorm 7, Unholy Heat 6 -, an activation 28 - fetches 17, Clues 6 -, a land 3) and acts
+where MCTS passes 12 times. Its margin over the MCTS move, in its own re-run, is 1-3 pp in most kinds - inside
+the value head's noise - and it does not reproduce 16% of its own moves with new worlds (MCTS-32: 2%).
+
+**The most notable systematic differences** (the counts above):
+
+1. **It defers: passes where MCTS acts** - own main phase with no land drop open 50% passes against 31-33%;
+   at disagreements 68 passes against 12 actions. The horizon effect plausibly drives it: a held option
+   (a card in hand, an uncracked fetch, open mana) keeps its value at a 6-ply leaf, while what acting buys
+   (a threat that attacks next turn, a card drawn, a land thinned) is mostly past the horizon.
+2. **It holds fetches**: cracked at once 64.5% against 87.5%, 57 held into the next turn against 1 (M) and
+   12 (C, two seats).
+3. **It blocks less** (52% against 64-68%) and attacks a planeswalker less (5% against 9-11%).
+4. **It delves worse** with Murktide (best delve 72% against 81%) and plays a land when one is open less
+   (68% against 78%), choosing another land 7 times in 35 sampled land-drop decisions.
+5. **It looks at its own library with Mishra's Bauble more** (69% against 46-56%) and taps out into Daze less
+   (49% against 55%; when it does, it is Dazed less, 34% against 47%) - the information it values.
+
+**What plausibly explains the -36 Elo**: (1) and (2) - lost tempo and card flow in a tempo mirror, a
+systematic bias of a fixed horizon - and the noise: half its disagreements with MCTS are not reproduced by a
+re-run of the lookahead itself (16% of all its moves), small margins chosen by a max over noisy leaves (the
+teacher experiment's optimizer's curse). (3) and (4) cost life and Murktide's size. (5) is not obviously a
+cost (Bauble looks and Daze care are the kind of information play the lab found); the game lengths are the
+same (16.65 against 17.02 turns). Mulligans and the play / draw choice are the network's (keep rates equal; it
+chose to draw twice in 100).
+
+### 80.11 Six recorded games of the 6-ply lookahead player (replays to watch)
+
+`python -m mtgz.az.replays CKPT --lookahead plies=6,worlds=8,opp=min,mode=infoset,budget=150000 --json --out DIR`
+(zero-core 88f0d69's zero.replay lookahead seat: the checkpoint's lookahead seat against its own MCTS
+evaluation seat - the run's eval_sims 32, the cq rule, root-view leaves, the belief, chance_k 0, no
+sims_minor -; `--upload` refused). Each lookahead decision's frame holds the MCTS search's statistics (what
+MCTS would have played: `look.mcts_a`; `n`, `q`, `p0`, `w`), the belief head's read of the opponent's hand
+(`belief`) and `look` {a, options [action, mean, sd], stats}. Ten games recorded with generation 424
+(seed 424), the first three with the lookahead on the play and on the draw kept, tagged (`group` and
+`meta.run_label` 'lookahead-6ply-vs-mcts32', `meta.lookahead_seat`, `lookahead_on`, the settings) in
+`E:/mtg-zero-scratch/lookahead/replays/` (plain JSON, zero-replay/1; not uploaded). In the six kept games the
+lookahead played 21-50% of its decisions differently from the MCTS search of the same decision.
+
+| file | lookahead | result | turns |
+|---|---|---|---:|
+| `lookahead-6ply-vs-mcts32_1_lookahead-on-play_P1.json` | P1, on the play | lost (0 - 14 life) | 14 |
+| `lookahead-6ply-vs-mcts32_2_lookahead-on-play_P2.json` | P2, on the play | won (19 life) | 13 |
+| `lookahead-6ply-vs-mcts32_3_lookahead-on-play_P2.json` | P2, on the play | won (8 life) | 27 |
+| `lookahead-6ply-vs-mcts32_4_lookahead-on-draw_P1.json` | P1, on the draw | won (1 life) | 20 |
+| `lookahead-6ply-vs-mcts32_5_lookahead-on-draw_P2.json` | P2, on the draw | lost (-9 - 17) | 19 |
+| `lookahead-6ply-vs-mcts32_6_lookahead-on-draw_P1.json` | P1, on the draw | lost (0 - 15) | 13 |

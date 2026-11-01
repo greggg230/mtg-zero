@@ -125,7 +125,10 @@ class Band:
         return (self.c[num] / n if n else None), n
 
 
-def scan_game(d, B):
+def scan_game(d, B, players=None):
+    """Count game `d`'s metrics into `B`; `players` (a set of 0 / 1): only those players' decisions and
+    log lines (a game of two different players, e.g. a lookahead seat against an MCTS one, ENGINE.md
+    80.10); None: both (the mirror). The game-level counts (decided, starter won) are the game's."""
     st, fr = d['states'], d['frames']
     res = d['result']
     B.games += 1
@@ -140,7 +143,7 @@ def scan_game(d, B):
         if not dec:
             continue
         p = dec.get('player')
-        if p is None:
+        if p is None or (players is not None and p not in players):
             continue
         op = 1 - p
         me, them = s['players'][p], s['players'][op]
@@ -223,6 +226,9 @@ def scan_game(d, B):
     for k, (i, ln) in enumerate(log):
         turn, step, b = body(ln)
         if turn is None:
+            continue
+        m = re.match(r'P([01]) (?:plays|activates|casts) ', b)
+        if players is not None and m and int(m.group(1)) not in players:
             continue
         m = re.match(r'P([01]) plays (.*)$', b)
         if m and m.group(2) in FETCH:
