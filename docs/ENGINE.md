@@ -16230,6 +16230,11 @@ cost (Bauble looks and Daze care are the kind of information play the lab found)
 same (16.65 against 17.02 turns). Mulligans and the play / draw choice are the network's (keep rates equal; it
 chose to draw twice in 100).
 
+**The guarded 4-ply player** (16 worlds, policy-weighted, 5 pp; 200 paired games the same way, 0.470 +- 0.023
+here): it overrode 1.8% of its decisions (422 of 23,151), and its fingerprints are MCTS's within noise - fetch
+cracked at once 0.868 against M 0.895 / C 0.874, Murktide delve best 0.783 / 0.821, Bauble looks at its own
+library 0.473 / 0.474, tap-out into Daze 0.550 / 0.557 -: the guard removes the deferring along with the rest.
+
 ### 80.11 Six recorded games of the 6-ply lookahead player (replays to watch)
 
 `python -m mtgz.az.replays CKPT --lookahead plies=6,worlds=8,opp=min,mode=infoset,budget=150000 --json --out DIR`
