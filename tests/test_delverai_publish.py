@@ -131,10 +131,11 @@ def test_an_exploiter_fork_finds_its_anchors_in_its_parent_and_labels_its_games(
     rows = P.iteration_rows(fork, also=(parent,))
     assert [(m['anchor'], m['iter'], m['points'], m['win']) for m in rows[0]['h2h']] == [('a192', 192, 60.0, 0.6), ('a475', 475, 38.0, 0.38)]
     # the recorded games against the frozen 475: each seat's label, the record's fields
-    a = argparse.Namespace(record_vs='/x/anchors/r3-2b_iter_0475.pt', record_vs_label='Gen 475 (frozen)',
+    vs = os.path.join(fork, 'models', 'iter_0475.pt')     # the frozen 475 (the anchor a475's file)
+    a = argparse.Namespace(record_vs=vs, record_vs_label='Gen 475 (frozen)',
                            record_label='Exploiter gen {iter}', title='Exploiter: trained only against gen 475',
                            note='Every self-play game against a frozen 475.', side=True)
     rep = {'seats': [{'checkpoint': 'r3-2b_iter_0475.pt'}, {'checkpoint': 'C:\\runs\\x\\models\\iter_0480.pt'.replace('\\', os.sep)}]}
     assert P.seat_labels(rep, os.path.join('runs', 'x', 'models', 'iter_0480.pt'), a, 480) == ['Gen 475 (frozen)', 'Exploiter gen 480']
     assert P.record_extra(a) == {'title': 'Exploiter: trained only against gen 475', 'note': 'Every self-play game against a frozen 475.',
-                                 'side': True, 'record_vs': {'label': 'Gen 475 (frozen)'}}
+                                 'side': True, 'record_vs': {'label': 'Gen 475 (frozen)', 'sha': hashlib.sha256(b'net 475').hexdigest()[:12]}}
