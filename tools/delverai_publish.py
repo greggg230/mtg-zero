@@ -3,6 +3,7 @@ generation (once per new checkpoint).
 
   python tools/delverai_publish.py runs/delver1 [--loop 300] [--games 6] [--device cuda]
       [--url https://delverai.greggg230.com] [--key-file F] [--dry-run]
+      [--title T --note N --side] [--record-vs CKPT --record-vs-label L --record-label 'gen {iter}']
 
 Each pass:
   * progress: the run's metrics (metrics.jsonl with evals.jsonl merged, as zerodash), Elo
@@ -17,6 +18,13 @@ Each pass:
     self-play simulations (evaluation settings: no noise, the most visited option) and uploads
     them. Only the newest checkpoint is recorded; ones skipped while the publisher was down are
     not back-filled. The recorded iterations are kept in <run>/delverai.json.
+
+A side run (`--side`: e.g. an exploiter trained against a frozen generation beside the main line) is
+never the site's default run, whichever publisher posted last; `--title` / `--note` name and explain
+it on the site (the record's `title`, `note`, `side`). `--record-vs CKPT`: the recorded games are the
+checkpoint against CKPT instead of itself (half of them on each seat), each game's `seat_labels`
+from `--record-label` (the generation's, '{iter}' its number) and `--record-vs-label` (the record's
+`record_vs`).
 
 `--loop N`: repeat every N seconds (default: one pass), waiting for a run that has not started
 yet. `--follow STATE`: publish the run a JSON file names as its "main" (the A/B experiments'
@@ -96,8 +104,9 @@ def _r(x, n=4):
     return round(x, n) if isinstance(x, (int, float)) else None
 
 
-def iteration_rows(run):
-    """metrics.jsonl (remote evaluations merged) -> one compact row per iteration."""
+def iteration_rows(run, also=()):
+    """metrics.jsonl (remote evaluations merged) -> one compact row per iteration. `also`: the run's
+    ancestors in its own numbering (anchor_copies)."""
     evals = {e['iter']: e for e in _jsonl(os.path.join(run, 'evals.jsonl')) if 'iter' in e}
     pools = {}                                    # select tag -> {iteration: its head-to-heads}
     out = []
@@ -109,7 +118,7 @@ def iteration_rows(run):
         # the evaluation move rule that rated it (zero-core docs/az.md 5.4: each rule its own Elo pool)
         tag = (elo or {}).get('select') or (y or {}).get('select') or 'visits'
         if tag not in pools:
-            pools[tag] = head_to_heads(run, tag)
+            pools[tag] = head_to_heads(run, tag, also)
         # 0 games against the bot or random (--eval-games 0: no yardstick) measured nothing
         ym, rm = (y if (y or {}).get('games') else None), (rnd if (rnd or {}).get('games') else None)
         sp, tr = m.get('selfplay') or {}, m.get('train') or {}
@@ -156,10 +165,12 @@ def _sha256(path):
     return h.hexdigest()
 
 
-def anchor_copies(run, anchors):
+def anchor_copies(run, anchors, also=()):
     """{anchor player: the run's iteration whose checkpoint has the anchor's sha256, else None}.
     The candidates: the numbers in the anchor's label and file name, and the iteration in its path
-    in the run's elo_anchors ('a192=.../r3-2b_iter_0192.pt' -> 192)."""
+    in the run's elo_anchors ('a192=.../r3-2b_iter_0192.pt' -> 192); their checkpoints in the run's
+    models/, else in `also`'s (ancestors in the same numbering: a fork keeps its parent's, whose
+    older checkpoints it does not copy)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
     try:
         paths = {zelo.anchor_name(lb): p for lb, p in zelo.parse_anchors(cfg.get('elo_anchors', ''))}
@@ -171,23 +182,26 @@ def anchor_copies(run, anchors):
         cands += [int(x) for x in re.findall(r'iter_(\d+)', str(paths.get(name, '')))]
         out[name] = None
         for k in dict.fromkeys(cands):
-            f = os.path.join(run, 'models', f'iter_{k:04d}.pt')
-            try:
-                if a.get('sha256') and os.path.exists(f) and _sha256(f) == a['sha256']:
-                    out[name] = k
-                    break
-            except OSError:
-                pass
+            for d in (run, *also):
+                f = os.path.join(d, 'models', f'iter_{k:04d}.pt')
+                try:
+                    if a.get('sha256') and os.path.exists(f) and _sha256(f) == a['sha256']:
+                        out[name] = k
+                        break
+                except OSError:
+                    pass
+            if out[name] is not None:
+                break
     return out
 
 
-def anchor_defs(run, tag='visits', offset=0):
+def anchor_defs(run, tag='visits', offset=0, also=()):
     """The fixed anchors of the run's pool `tag`, in the pool's order: [{label, iter (the run's
     generation it is a copy of, or None), g (offset + iter: the lineage's numbering), elo, se,
     how ('set' / 'calibrated'), since}], [] without anchors."""
     res = _json(os.path.join(zelo.pool_dir(run, tag), 'results.json'), {}) or {}
     anchors = res.get('anchors') or {}
-    copies = anchor_copies(run, anchors) if anchors else {}
+    copies = anchor_copies(run, anchors, also) if anchors else {}
     out = []
     for name, a in anchors.items():
         it = copies.get(name)
@@ -197,7 +211,7 @@ def anchor_defs(run, tag='visits', offset=0):
     return out
 
 
-def head_to_heads(run, tag='visits'):
+def head_to_heads(run, tag='visits', also=()):
     """{iteration: its own games in the Elo pool `tag`}: against an earlier generation
     {back, iter} (by back) and against each fixed anchor {anchor (its label), iter (the generation
     it is a copy of, or None), elo (its fixed rating), sha} (in the pool's order), each with the
@@ -206,7 +220,7 @@ def head_to_heads(run, tag='visits'):
     res = _json(os.path.join(zelo.pool_dir(run, tag), 'results.json'), {}) or {}
     anchors = res.get('anchors') or {}
     order = {n: i for i, n in enumerate(anchors)}
-    copies = anchor_copies(run, anchors) if anchors else {}
+    copies = anchor_copies(run, anchors, also) if anchors else {}
     out = {}
     for key, v in (res.get('pairs') or {}).items():
         a, _, b = key.partition('|')
@@ -398,6 +412,12 @@ def _cut(segs, k):
     return segs
 
 
+def same_numbering(segs, k):
+    """The directories of segment k's ancestors that number their iterations as it does (the forks
+    before it back to the last migration: same offset)."""
+    return tuple(sg['dir'] for sg in segs[:k] if sg['offset'] == segs[k]['offset'])[::-1]
+
+
 def lineage_record(run, forks):
     """The progress record's `lineage`: the segments and every row of them, each with its global
     generation `g`, its run and its own iteration `gen`. None for a run without ancestors."""
@@ -406,7 +426,7 @@ def lineage_record(run, forks):
         return None
     rows = []
     for k, sg in enumerate(segs):
-        for r in iteration_rows(sg['dir']):
+        for r in iteration_rows(sg['dir'], same_numbering(segs, k)):
             it = r.get('iter')
             if not isinstance(it, int) or it < sg['first'] or (sg['last'] is not None and it > sg['last']):
                 continue
@@ -429,9 +449,9 @@ def migrated_from(run):
             'layout': m.get('layout'), 'time': m.get('time')}
 
 
-def progress(run, every=1, forks=None):
+def progress(run, every=1, forks=None, extra=None):
     """The site's progress record of a run (`every`: which iterations get games recorded;
-    `forks`: fork_registry, for the lineage)."""
+    `forks`: fork_registry, for the lineage; `extra`: more fields - title, note, side, record_vs)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
     st = runctl.run_status(run)
     prog = _json(os.path.join(run, 'progress.json'))
@@ -439,11 +459,13 @@ def progress(run, every=1, forks=None):
     tag, pool = zelo.active_pool(run)             # the Elo pool of the run's evaluation move rule now
     ratings = (_json(os.path.join(pool, 'ratings.json'), {}) or {})
     log = os.path.join(run, 'log.txt')
-    rows = iteration_rows(run)
+    segs = lineage(run, forks or {})
+    also = same_numbering(segs, len(segs) - 1)
+    rows = iteration_rows(run, also)
     state = _json(os.path.join(run, 'delverai.json'), {}) or {}
     lin = lineage_record(run, forks or {})
     offset = lin['segments'][-1]['offset'] if lin else 0
-    return {
+    return dict({
         'run': os.path.basename(os.path.abspath(run)), 'updated': time.time(),
         'state': st.get('state'), 'detail': st.get('detail'), 'paused_since': st.get('paused_since'),
         'progress': prog, 'log_age_s': _r(time.time() - os.path.getmtime(log), 0) if os.path.exists(log) else None,
@@ -452,10 +474,10 @@ def progress(run, every=1, forks=None):
         'ratings': {k: {'elo': _r(v.get('elo'), 1), 'se': _r(v.get('se'), 1), 'games': v.get('games')}
                     for k, v in (ratings.get('ratings') or {}).items()},
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
-        'anchors': anchor_defs(run, tag, offset),
+        'anchors': anchor_defs(run, tag, offset, also),
         'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
         'lineage': lin,
-    }
+    }, **(extra or {}))
 
 
 def latest_checkpoint(run, every=1, settle_s=30):
@@ -472,8 +494,30 @@ def latest_checkpoint(run, every=1, settle_s=30):
     return best
 
 
+def record_extra(a):
+    """The record's fields from the command line: title, note, side, record_vs."""
+    out = {}
+    if a.title:
+        out['title'] = a.title
+    if a.note:
+        out['note'] = a.note
+    if a.side:
+        out['side'] = True
+    if a.record_vs:
+        out['record_vs'] = {'label': a.record_vs_label or os.path.splitext(os.path.basename(a.record_vs))[0]}
+    return out
+
+
+def seat_labels(rep, ckpt, a, it):
+    """A game against --record-vs: each seat's label (the generation's on the seat playing `ckpt`)."""
+    mine = os.path.basename(ckpt)
+    vs = a.record_vs_label or os.path.splitext(os.path.basename(a.record_vs))[0]
+    me = (a.record_label or 'gen {iter}').replace('{iter}', str(it))
+    return [me if os.path.basename(str(s.get('checkpoint') or '')) == mine else vs for s in rep['seats']]
+
+
 def post_progress(run, a, key, log=print):
-    p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])))
+    p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])), record_extra(a))
     if a.dry_run:
         log(json.dumps({k: v for k, v in p.items() if k != 'iters'})[:800])
         log(f'{len(p["iters"])} iteration rows')
@@ -493,23 +537,24 @@ def one_pass(run, a, key, log=print, kick=None):
     if ck is None or ck[0] in done or (a.min_iter is not None and ck[0] < a.min_iter):
         return False
     it, path = ck
-    log(f'recording {a.games} games of iteration {it} ({path})')
+    log(f'recording {a.games} games of iteration {it} ({path}){f" against {a.record_vs}" if a.record_vs else ""}')
     t0 = time.time()
     RECORDING.update(iter=it, since=t0, games=a.games)
     if kick:
         kick.set()
     try:
         reps = replays.record(path, games=a.games, sims=a.sims, device=a.device,
-                              title=f'Generation {it}', log=log)
+                              title=f'Generation {it}', log=log, opp=a.record_vs)
     finally:
         RECORDING.clear()
     out = os.path.join(run, 'replays')
     for r in reps:
+        meta = {'seat_labels': seat_labels(r, path, a, it)} if a.record_vs else None
         replays.core.save(r, out)
         if a.dry_run:
-            log(f'  (dry run) {replays.summary(r)}')
+            log(f'  (dry run) {dict(replays.summary(r), **(meta or {}))}')
         else:
-            log(f'  uploaded {replays.upload(r, a.url, key)}')
+            log(f'  uploaded {replays.upload(r, a.url, key, meta=meta)}')
     state['replayed'] = sorted(set(done) | {it})
     state['record_s'] = (state.get('record_s') or [])[-9:] + [round(time.time() - t0, 1)]
     with open(state_path + '.tmp', 'w', encoding='utf-8') as f:
@@ -563,7 +608,15 @@ def main(argv=None):
     ap.add_argument('--url', default=replays.SITE)
     ap.add_argument('--key-file', default=None)
     ap.add_argument('--dry-run', action='store_true', help='record, but upload nothing')
+    ap.add_argument('--title', default=None, help="the run's name on the site (e.g. 'Exploiter: trained only against gen 475')")
+    ap.add_argument('--note', default=None, help='a sentence or two about the run, shown with its title')
+    ap.add_argument('--side', action='store_true', help="a side run: never the site's default run")
+    ap.add_argument('--record-vs', default=None, help='record the games against this checkpoint instead of itself')
+    ap.add_argument('--record-vs-label', default=None, help="--record-vs's seat label (default: its file name)")
+    ap.add_argument('--record-label', default=None, help="the recorded generation's seat label with --record-vs ('{iter}': its number; default 'gen {iter}')")
     a = ap.parse_args(argv)
+    if a.record_vs and not os.path.isfile(a.record_vs):
+        raise SystemExit(f'--record-vs {a.record_vs}: no such checkpoint')
     current_run(a)
     if not os.path.isdir(a.run) and a.loop is None:
         raise SystemExit(f'{a.run}: no such run directory')
