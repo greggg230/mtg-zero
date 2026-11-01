@@ -504,7 +504,9 @@ def record_extra(a):
     if a.side:
         out['side'] = True
     if a.record_vs:
-        out['record_vs'] = {'label': a.record_vs_label or os.path.splitext(os.path.basename(a.record_vs))[0]}
+        # its sha256's first 12 (as the h2h rows' anchors): the site finds its games against that anchor
+        out['record_vs'] = {'label': a.record_vs_label or os.path.splitext(os.path.basename(a.record_vs))[0],
+                            'sha': _sha256(a.record_vs)[:12]}
     return out
 
 
