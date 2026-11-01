@@ -216,17 +216,18 @@ PACKAGE = register(GamePackage(
     # threads (50.3's best), CPU inference, shards of 8192 samples compressed; at nice 5 (above the fuzz
     # farm's and the studies' 19, below anything at normal priority); mirrors in ~/mtgz-selfplay; they
     # back off while an evaluation holds ~/mtgz-remote/.eval.lock (always) or the other games' remotes'
-    # locks on the Mac (their evaluations share the cores)
+    # locks on the Mac (their evaluations share the cores). Dense network batches on the Mac (sparse 0 whatever the
+    # run's setting: its CPU evaluators would densify a sparse batch; not measured there, zero-core run setting sparse)
     remotes={'mac': RunCommitRemote(ROOT, host='greggkeithley@100.95.248.116', home='/Users/greggkeithley',
                                     python='/Users/greggkeithley/.venvs/dominion-zero/bin/python',
                                     workdir='/Users/greggkeithley/mtgz-remote', env={'OMP_NUM_THREADS': '4'},
                                     overrides={'infer_device': 'cpu', 'train_device': 'cpu', 'threads': 12,
-                                               'groups': 2, 'infer_workers': 3},
+                                               'groups': 2, 'infer_workers': 3, 'sparse': 0},
                                     selfplay={'workdir': '/Users/greggkeithley/mtgz-selfplay', 'procs': 2, 'nice': 5,
                                               'locks': ['/Users/greggkeithley/kbz-remote/.eval.lock',
                                                         '/Users/greggkeithley/domz-remote/.eval.lock'],
                                               'env': {'OMP_NUM_THREADS': '3'},
                                               'overrides': {'infer_device': 'cpu', 'train_device': 'cpu', 'conc': 768,
                                                             'threads': 12, 'groups': 4, 'infer_workers': 4,
-                                                            'torch_threads': 3, 'shard_rows': 8192}})},
+                                                            'torch_threads': 3, 'shard_rows': 8192, 'sparse': 0}})},
 ))
