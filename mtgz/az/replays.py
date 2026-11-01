@@ -99,9 +99,13 @@ def root_search(cfg, selfplay=False):
     return cfg.get(('selfplay' if selfplay else 'eval') + '_root_search', 'puct')
 
 
-def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print):
+def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print,
+           lookahead=None):
     """`games` games of `ckpt` against itself, with the run's settings (its leaf values' view:
-    `leaf_view`; each network seat names it as `leaf_value_view`). -> zero-replay/1 dicts."""
+    `leaf_view`; each network seat names it as `leaf_value_view`). `lookahead` (settings): the
+    checkpoint's lookahead seat against its MCTS evaluation seat (zero.replay's lookahead seat,
+    docs/ENGINE.md 80.11): the run's evaluation simulations by default and the evaluation seat's
+    minor decisions (no `sims_minor`: as zero.h2h's seats). -> zero-replay/1 dicts."""
     check_encoding(ckpt)
     run, it = core.run_of(ckpt)
     cfg = core.run_config(run)
@@ -113,7 +117,7 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
         import torch
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     seed = random.randrange(1 << 30) if seed is None else seed
-    driver = type('Recorder', (_Recorder,), {'sims_minor': cfg.get('sims_minor')})
+    driver = type('Recorder', (_Recorder,), {'sims_minor': None if lookahead else cfg.get('sims_minor')})
     real, core.RecordingDriver = core.RecordingDriver, driver   # core.record builds its driver by this name
     # core.record's seats read the view and the root search from the run's config (zero.replay._nn):
     # give it these
@@ -121,9 +125,11 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
     real_cfg, core.run_config = core.run_config, lambda r: dict(real_cfg(r), **{side + '_leaf_value_view': view,
                                                                                 side + '_root_search': rs})
     try:
-        reps = core.record(ckpt, opp='self', games=games, sims=sims or cfg.get('sims', 64),
+        dsims = cfg.get('eval_sims', 32) if lookahead else cfg.get('sims', 64)
+        reps = core.record(ckpt, opp='self', games=games, sims=sims or dsims,
                            spec=spec_with_log(cfg['spec']), selfplay=selfplay, hint=None,
-                           chance_k=cfg.get('chance_k', 0), device=device, seed=seed, title=title, conc=conc, log=log)
+                           chance_k=cfg.get('chance_k', 0), device=device, seed=seed, title=title, conc=conc, log=log,
+                           lookahead=lookahead)
     finally:
         core.RecordingDriver = real
         core.run_config = real_cfg
@@ -132,6 +138,17 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
             if s.get('kind') == 'nn':
                 s['leaf_value_view'] = view
     return reps
+
+
+def save_json(rep, out_dir, name=None):
+    """One replay as a plain JSON file `<out_dir>/<stamp>_<k>.json` (or `name`) -> its path."""
+    import datetime
+    os.makedirs(out_dir, exist_ok=True)
+    stamp = datetime.datetime.fromtimestamp(rep['created']).strftime('%Y%m%d-%H%M%S')
+    path = os.path.join(out_dir, name or f'{stamp}_{rep["game_index"]:03d}.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(rep, f, separators=(',', ':'))
+    return path
 
 
 def summary(rep):
@@ -206,15 +223,29 @@ def main(argv=None):
     ap.add_argument('--out', default=None, help='default: <run>/replays')
     ap.add_argument('--upload', nargs='?', const=SITE, default=None, help=f'upload to the site (default {SITE})')
     ap.add_argument('--key-file', default=None)
+    ap.add_argument('--lookahead', default=None, metavar='SETTINGS',
+                    help="the checkpoint's lookahead seat against its MCTS evaluation seat (zero.lookahead.parse, e.g. "
+                         "plies=6,worlds=8,opp=min,budget=150000; ENGINE.md 80.11)")
+    ap.add_argument('--json', action='store_true', help='write plain .json files (default .json.gz)')
     a = ap.parse_args(argv)
     key = upload_key(a.key_file) if a.upload else None
+    if a.lookahead and a.upload:
+        ap.error('--lookahead games are not for the site (--upload refused)')
+    look = None
+    if a.lookahead:
+        from zero import lookahead as LA
+        try:
+            look = LA.parse(a.lookahead)
+        except ValueError as e:
+            ap.error(str(e))
     reps = record(a.ckpt, games=a.games, sims=a.sims, selfplay=a.selfplay, device=a.device, seed=a.seed, conc=a.conc,
-                  title=a.title)
+                  title=a.title, lookahead=look)
     run, _ = core.run_of(a.ckpt)
     out = a.out or os.path.join(run or '.', 'replays')
     for r in reps:
         s = summary(r)
-        print(f'{core.save(r, out)}: winner {s["winner"]} turn {s["turns"]} life {s["life"]} ({s["frames"]} steps)')
+        print(f'{save_json(r, out) if a.json else core.save(r, out)}: winner {s["winner"]} turn {s["turns"]} life {s["life"]} '
+              f'({s["frames"]} steps)')
         if key:
             print(f'  uploaded: {upload(r, a.upload, key)}')
 
