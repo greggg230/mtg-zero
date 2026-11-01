@@ -105,3 +105,36 @@ def test_the_anchored_elo_and_the_anchors(tmp_path):
         {'label': 'a160', 'iter': 160, 'g': 297, 'elo': 1578.2, 'se': 24.7, 'how': 'calibrated', 'since': None},
         {'label': 'x', 'iter': None, 'g': None, 'elo': 1500.0, 'se': None, 'how': None, 'since': None}]
     assert P.anchor_defs(run, 'visits') == []
+
+
+def test_an_exploiter_fork_finds_its_anchors_in_its_parent_and_labels_its_games(tmp_path):
+    import argparse
+    parent = _run(tmp_path)                                  # r3-2b-beliefsearch: models 160, 191, 192
+    fork = str(tmp_path / 'r3-2b-exploit475')
+    os.makedirs(os.path.join(fork, 'models'))
+    with open(os.path.join(fork, 'models', 'iter_0475.pt'), 'wb') as f:
+        f.write(b'net 475')                                  # the fork point: its own copy; 192 / 160 only in the parent
+    res = json.load(open(os.path.join(parent, 'elo', TAG, 'results.json')))
+    res['anchors']['anchor:a475'] = {'label': 'a475', 'file': 'a475.pt', 'sha256': hashlib.sha256(b'net 475').hexdigest(),
+                                     'elo': 1650.0, 'how': 'calibrated: 200 games', 'since': 480}
+    res['pairs'] = {'anchor:a475|iter_0480': [62.0, 100], 'anchor:a192|iter_0480': [40.0, 100]}
+    _write(os.path.join(fork, 'elo', TAG, 'results.json'), res)
+    _write(os.path.join(fork, 'config.json'), {'elo_anchors': 'a475=/x/anchors/r3-2b_iter_0475.pt'})
+    _write(os.path.join(fork, 'metrics.jsonl'), [{'iter': 480, 'elo': {'elo': 1700.0, 'se': 90.0, 'select': TAG}}], lines=True)
+    forks = {P._norm(fork): {'parent': parent, 'at': 475, 'label': 'exploiter vs 475', 'won': False}}
+    segs = P.lineage(fork, forks)
+    assert [s['run'] for s in segs] == ['r3-2b-beliefsearch', 'r3-2b-exploit475'] and P.same_numbering(segs, 1) == (parent,)
+    alone = {a['label']: a['iter'] for a in P.anchor_defs(fork, TAG)}
+    assert alone == {'a192': None, 'a160': None, 'x': None, 'a475': 475}  # without its parent: only its own 475
+    defs = {a['label']: a['iter'] for a in P.anchor_defs(fork, TAG, also=(parent,))}
+    assert defs == {'a192': 192, 'a160': 160, 'x': None, 'a475': 475}
+    rows = P.iteration_rows(fork, also=(parent,))
+    assert [(m['anchor'], m['iter'], m['points'], m['win']) for m in rows[0]['h2h']] == [('a192', 192, 60.0, 0.6), ('a475', 475, 38.0, 0.38)]
+    # the recorded games against the frozen 475: each seat's label, the record's fields
+    a = argparse.Namespace(record_vs='/x/anchors/r3-2b_iter_0475.pt', record_vs_label='Gen 475 (frozen)',
+                           record_label='Exploiter gen {iter}', title='Exploiter: trained only against gen 475',
+                           note='Every self-play game against a frozen 475.', side=True)
+    rep = {'seats': [{'checkpoint': 'r3-2b_iter_0475.pt'}, {'checkpoint': 'C:\\runs\\x\\models\\iter_0480.pt'.replace('\\', os.sep)}]}
+    assert P.seat_labels(rep, os.path.join('runs', 'x', 'models', 'iter_0480.pt'), a, 480) == ['Gen 475 (frozen)', 'Exploiter gen 480']
+    assert P.record_extra(a) == {'title': 'Exploiter: trained only against gen 475', 'note': 'Every self-play game against a frozen 475.',
+                                 'side': True, 'record_vs': {'label': 'Gen 475 (frozen)'}}

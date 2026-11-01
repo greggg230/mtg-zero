@@ -6,7 +6,8 @@ pending decision's options in words, the game log's tail).
   python -m mtgz.az.replays runs/delver1/models/iter_0012.pt [--games 6] [--selfplay]
       [--sims N] [--device cuda] [--upload [URL]] [--key-file F]
 
-The checkpoint plays itself, seats alternating between games. Defaults come from the
+The checkpoint plays itself (or `opp`, another checkpoint: `record(..., opp=path)`, game k with the
+checkpoint on seat k % 2), seats alternating between games. Defaults come from the
 checkpoint's run (`runs/<run>/config.json`): its spec with `"log": true` (the engine's
 play-by-play), its self-play simulations (`sims`) and `chance_k`. Evaluation settings by
 default (no noise, the most visited option: how the network plays); `--selfplay` = the run's
@@ -100,12 +101,15 @@ def root_search(cfg, selfplay=False):
 
 
 def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, conc=8, title=None, log=print,
-           lookahead=None):
-    """`games` games of `ckpt` against itself, with the run's settings (its leaf values' view:
-    `leaf_view`; each network seat names it as `leaf_value_view`). `lookahead` (settings): the
-    checkpoint's lookahead seat against its MCTS evaluation seat (zero.replay's lookahead seat,
-    docs/ENGINE.md 80.11): the run's evaluation simulations by default and the evaluation seat's
-    minor decisions (no `sims_minor`: as zero.h2h's seats). -> zero-replay/1 dicts."""
+           lookahead=None, opp=None):
+    """`games` games of `ckpt` against itself - or against `opp`, another checkpoint (zero.replay.record:
+    seats alternating, game k with `ckpt` on seat k % 2; the same simulations) - with the run's settings
+    (its leaf values' view: `leaf_view`; each network seat names it as `leaf_value_view`). `lookahead`
+    (settings): the checkpoint's lookahead seat against its MCTS evaluation seat (zero.replay's lookahead
+    seat, docs/ENGINE.md 80.11; not with `opp`): the run's evaluation simulations by default and the
+    evaluation seat's minor decisions (no `sims_minor`: as zero.h2h's seats). -> zero-replay/1 dicts."""
+    if lookahead and opp:
+        raise ValueError("a lookahead seat plays against its checkpoint's own MCTS seat: no `opp`")
     check_encoding(ckpt)
     run, it = core.run_of(ckpt)
     cfg = core.run_config(run)
@@ -126,7 +130,7 @@ def record(ckpt, games=6, sims=None, selfplay=False, device=None, seed=None, con
                                                                                 side + '_root_search': rs})
     try:
         dsims = cfg.get('eval_sims', 32) if lookahead else cfg.get('sims', 64)
-        reps = core.record(ckpt, opp='self', games=games, sims=sims or dsims,
+        reps = core.record(ckpt, opp=opp or 'self', games=games, sims=sims or dsims,
                            spec=spec_with_log(cfg['spec']), selfplay=selfplay, hint=None,
                            chance_k=cfg.get('chance_k', 0), device=device, seed=seed, title=title, conc=conc, log=log,
                            lookahead=lookahead)
@@ -181,11 +185,12 @@ def public(rep):
     return rep
 
 
-def upload(rep, url, key, timeout=60):
-    """POST one replay to the site (`<url>/api/replays/upload`). -> the site's answer (dict)."""
+def upload(rep, url, key, timeout=60, meta=None):
+    """POST one replay to the site (`<url>/api/replays/upload`), `meta` added to its listing record
+    (e.g. `seat_labels`: who plays each seat, shown by the site's viewer). -> the site's answer (dict)."""
     rep = public(rep)
     gz = gzip.compress(json.dumps(rep, separators=(',', ':')).encode('utf-8'))
-    body = json.dumps({'meta': summary(rep), 'gz': base64.b64encode(gz).decode('ascii')}).encode('utf-8')
+    body = json.dumps({'meta': dict(summary(rep), **(meta or {})), 'gz': base64.b64encode(gz).decode('ascii')}).encode('utf-8')
     return post(url.rstrip('/') + '/api/replays/upload', body, key, timeout)
 
 
