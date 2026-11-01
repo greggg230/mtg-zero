@@ -16006,7 +16006,8 @@ solver caps the root, its per-world tree does not: the harness sets `topk_root` 
   tree; the lab's modal key also includes its reveal annotations).
 * **Dedup on** (the default; the table ran with it off): the 6-ply information-set runs at all five
   positions again identical (values to 1.8e-7), the lab's value rows = the rows sent + the shared ones, 57-71%
-  of the leaves shared.
+  of the leaves shared. The whole table again on the final build (ff33648, dedup on, the sparse sink and hash):
+  the same 59 of 60, the same near-tie.
 * Time (CPU, the same network, 8 torch threads, the desktop shared): the 60 runs took 161 s in the lab's
   Python and 99 s in Rust - on the CPU both are bound by the network (the GPU numbers are 80.5).
 
