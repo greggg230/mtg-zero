@@ -17,8 +17,9 @@ KEY_DRAW, KEY_REVEAL, KEY_LOOK = 1, 2, 3
 
 
 def reveal(keys, player=None):
-    """What a move showed, from its chance keys: ['P1 drew', 'P2 looked', 'P1 revealed'] (who saw it;
-    the card stays in the replayed world: a line is one world's)."""
+    """What a move showed, from its chance keys - the draws and looks, as the lab's lines annotate them
+    (delver-lab `xply.EngineOps.step`): ['P1 drew', 'P2 looked'] (who saw it; the card stays in the
+    replayed world: a line is one world's). Public reveals (a card played from a hand) are left out."""
     out = []
     for k in keys:
         kind, p = int(k) >> 56, (int(k) >> 48) & 0xFF
@@ -26,8 +27,6 @@ def reveal(keys, player=None):
             out.append(f'P{p + 1} drew')
         elif kind == KEY_LOOK:
             out.append(f'P{p + 1} looked')
-        elif kind == KEY_REVEAL:
-            out.append(f'P{p + 1} revealed')
     return out
 
 
