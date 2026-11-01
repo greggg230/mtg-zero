@@ -602,6 +602,21 @@ fn minor_decisions_are_mana_payments() {
     assert!(pay > 0, "no mana payment met");
 }
 
+/// zero-core's lookahead horizon 'next_turn' (ENGINE.md 80): `active_seat` is the exported state's
+/// active player, every state.
+#[test]
+fn active_seat_is_the_active_player() {
+    let mut seen = [0u32; 2];
+    for g in states(scale(4), 3, 13) {
+        let st: serde_json::Value = serde_json::from_str(&g.export_state()).unwrap();
+        let a = st["active"].as_u64().unwrap() as usize;
+        assert_eq!(g.active_seat(), Some(a));
+        assert_eq!(g.active_seat(), Some(g.g.turn().active as usize));
+        seen[a] += 1;
+    }
+    assert!(seen[0] > 0 && seen[1] > 0, "{seen:?}");
+}
+
 #[test]
 fn decks_are_legal_seeded_and_varied() {
     let db = CardDb::cube();
@@ -2001,7 +2016,7 @@ fn selfplay_records_the_belief_target_with_the_samples() {
         s.p_full = 0.5;
         let cfg = DriverCfg { spec: spec.clone(), seats: vec![SeatCfg::Nn(s)], games: vec![vec![0, 0]; 2], keys: vec![("m".into(), KeyKind::Nn)],
                               concurrency: 2, seed: 5, record: true, threads: 2, groups: 1, max_steps: 100_000, rolling: false, net: 0,
-                              queue_only: false, move_log: 0, aux, paired: false };
+                              queue_only: false, move_log: 0, aux, paired: false, sparse: false };
         let mut d = Driver::<MtgAz>::new(cfg).unwrap();
         let mut recs = Vec::new();
         while let Some(b) = d.next_batch(true).unwrap() {

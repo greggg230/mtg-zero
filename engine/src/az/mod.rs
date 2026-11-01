@@ -572,6 +572,15 @@ impl SearchGame for MtgAz {
         self.spectator_json()
     }
 
+    /// The active player (zero-core's lookahead horizon 'next_turn', docs/ENGINE.md 80; the
+    /// exported state's `active`); None while sideboarding (between the games of a match).
+    fn active_seat(&self) -> Option<usize> {
+        match self.m.sb {
+            Some(_) => None,
+            None => Some(self.g.turn().active as usize),
+        }
+    }
+
     fn bot_names() -> &'static [&'static str] {
         &["heuristic"]
     }
