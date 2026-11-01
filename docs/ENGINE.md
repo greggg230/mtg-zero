@@ -16312,3 +16312,62 @@ the design, the equivalence and the measurements), 2026-11-01. Nothing live chan
   `ram_budget_gb` would now cost little RAM but changes the window (more rows kept): a training change.
 * **Checks** (tier "opt-in core feature with byte-identical defaults"): zero-core pytest 325 passed (the
   two flaky CUDA tests of 82 deselected), mtg-zero pytest 69 passed, the equivalences above.
+
+## 84. Late sampling: whole-game variation in self-play (zero-core `feat/temp-late`, run settings `selfplay_temp_late` / `selfplay_temp_late_margin`, opt-in)
+
+Branch `temp-late` (from main 3abb2e3), zero-core `feat/temp-late` 4d68e37 (code ef1372d; its docs/search.md 3.10
+and az.md 22 have the design, tests and measurements), 2026-11-01. Prep only: nothing live changed, no run
+launched, not merged.
+
+* **Why**: self-play samples only its first `temp_moves` 60 searched decisions (~240 a game: about global turns
+  1-5) and then always plays the rule's move, so the mid and late game never sees an alternative played out (the
+  net's top prior agrees with its search 97.4%).
+* **What**: after `temp_moves`, a full or fast search's move is sampled with probability proportional to
+  N^(1 / T) over the root visits (`--selfplay-temp-late T`), optionally only among the options whose completed Q is
+  at most `--selfplay-temp-late-margin M` below the rule's move's (the rule's move always eligible). Mana payments
+  (sims_minor 4) keep the rule: 3-4 visits are too coarse to sample. The records are unchanged (the moves change).
+  Every generation's `selfplay:` log line gets `temp_late` (decisions, deviations, rates full / fast, the no-choice
+  share, the mean Q cost of a deviation, per game; this machine's driver only). The Mac's workers play it from the
+  run's config; a Mac checkout without it is refused at its hello. No mtg-zero code: the core's run settings are
+  the CLI flags.
+* **Measured** (`E:/mtg-zero-scratch/temp-late/`: measure.py, analyze.py, RESULTS.txt): the line's self-play seat
+  (iteration 534, its config.json: 64 / 16 sims, p_full 0.25, sims_minor 4, cq targets, root-view leaves, belief
+  tilt 1 / mix 0.25, `selfplay_select` 'visits' - the line's self-play rule; 'cq' n4 s0.3 is its evaluation rule),
+  150 games a setting, se clustered by game:
+
+  | T | M | dev rate full | fast | all | dev / game | Q cost mean | p90 | no choice |
+  |---|---|---|---|---|---|---|---|---|
+  | 1.0 | 0 | 0.201 | 0.102 | 0.127 | 20.2 | +0.008 | 0.040 | 0.41 |
+  | 1.0 | 0.05 | 0.178 | 0.099 | 0.119 | 18.4 | -0.001 | 0.022 | 0.49 |
+  | 1.0 | 0.02 | 0.163 | 0.090 | 0.108 | 16.9 | -0.003 | 0.007 | 0.55 |
+  | 0.7 | 0 | 0.132 | 0.075 | 0.089 | 14.8 | +0.005 | 0.032 | 0.41 |
+  | 0.7 | 0.05 | 0.122 | 0.069 | 0.083 | 13.6 | -0.001 | 0.021 | 0.49 |
+  | 0.7 | 0.02 | 0.114 | 0.064 | 0.077 | 12.9 | -0.004 | 0.007 | 0.54 |
+  | 0.5 | 0 | 0.098 | 0.055 | 0.066 | 10.9 | +0.003 | 0.031 | 0.39 |
+  | 0.5 | 0.05 | 0.092 | 0.053 | 0.063 | 10.4 | -0.002 | 0.019 | 0.47 |
+  | 0.5 | 0.02 | 0.085 | 0.048 | 0.057 | 9.7 | -0.004 | 0.007 | 0.54 |
+
+  se: rates 0.002-0.007, deviations a game 0.5-1.0. Off: 238 +- 7 searched decisions, 16.9 rounds a game; on:
+  218-233 and 17.0-17.7 (no measurable change). A second seed (T 0.5 / 0.02: 9.3 a game, rate 0.055) and the rule
+  'cq' (T 0.7 / 0.02: 0.075) agree.
+* **Read**: no gate, 7% of the late full searches and 52% of the fast ones have every visit on one option (no
+  temperature moves them), yet T 0.5 still deviates 6.6%. The gate removes few deviations but nearly all of the
+  costly tail (p90 0.03-0.04 -> 0.007); gated, the sampled move's Q is above the rule's as often as below (mean
+  cost < 0: at 16-64 sims the most visited option is often not the best by Q). What deviates (each game replayed
+  from its seed): ~45% timing (pass priority <-> crack a Bauble / fetch, Wasteland, Lightning Bolt, Brainstorm, Daze,
+  Force of Will), ~12% one action for another (targets, cards to keep / put back, attacks, blocks), ~11% trivial
+  (another copy of the same card or trigger, trigger order); the rate per decision about doubles from the turns
+  right after temp_moves (3.6% at T 0.5 / 0.02) to the late game (7%).
+* **Recommended**: T 0.5, M 0.02 - ~9.5 deviations a game (~3.6 in full searches, ~6 in fast ones, both seats),
+  each within 0.02 of the rule's Q by the search's own estimate (p90 cost 0.007). For a dose A/B, the second arm
+  T 1.0, M 0.02 (~17 a game, the same bound). Not the ungated settings: their deviations' tail costs 0.03-0.04.
+* **Launch** (written, not run): `E:/mtg-zero-scratch/temp-late/launch_fork.sh` - `check K`, `pin` (done: the
+  pinned build), `fork K`, `mac-prep` (at launch only: it pushes to the Mac), `launch K`, `verify`, `summary`,
+  `h2h N`, `stop`; a continuation of r3-2b-beliefsearch at K for 48 generations with the line's exact supervisor
+  arguments + the two flags and `FORK_VQ` (0.3 / 0.6); the main line from K is the control.
+* **Checks** (tier "opt-in core feature with byte-identical defaults"): `check_checkpoint_compat --package mtgz`
+  with iteration 534's copy and the Delver spec against the live run's engine (a copy, in a baseline worktree at
+  3abb2e3 / 13a4bd2): **identical** (visits 7a5e2a70a2cdcd0b, cq 4792f9add09e157d, results 001b5de281ba976e, 8 / 8
+  against random); `--test az` 40 passed; pytest 69 passed; delver-smoke 2 iterations with T 0.5 / M 0.02 and
+  sims_minor 2 (each `selfplay:` line with its `temp_late`); zero-core cargo 108, pytest 333 + 2 known load-flaky
+  (its az.md 22.5). No engine change: digests untouched.
