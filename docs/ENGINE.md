@@ -16284,3 +16284,31 @@ docs/az.md 10.7 has the design, the equivalence and every measurement), 2026-11-
   CUDA tests of test_token_graphs.py (`test_graphs_match_eager_and_follow_new_weights` 3.7e-5 against
   its 2e-5, `test_absent_slots_are_never_read` one ulp) fail about 2 runs in 3 on the shared GPU, on main
   c6b959b too (hub todo); the new loop test; the Delver equivalence above; mtg-zero pytest.
+
+
+## 83. A sparse training window (zero-core `feat/window-sparse`, run setting `window_sparse`, opt-in)
+
+Branch `window-sparse` (from main 783aa5f), zero-core `feat/window-sparse` 13a4bd2 (its docs/az.md 10.8 has
+the design, the equivalence and the measurements), 2026-11-01. Nothing live changed.
+
+* **Why**: the Delver line's window (iteration 489: 73 shards, 864k rows, 7 local shards of 29.8 GB plain
+  + 66 remote ones, 36 GB inflated) is over its 34 GB budget, so it is subsampled to 438k rows and the
+  WindowCache (`window_cache` 1 since 10-31) reused nothing: 40-54 s of every ~100 s training reloaded
+  every shard. A row is 252 non-zeros of 37,620 floats on average.
+* **What**: zero-core run setting `window_sparse` (default 0): the window keeps rows as their non-zeros
+  (float16 bits, -0.0 kept); with `window_cache` every shard is cached whole also over budget and the
+  window subsampled from the cache, so an iteration loads only its new shards. Local shards (stored
+  plain) are read in place (np.memmap) and converted on 8 threads. The budget still counts dense rows:
+  the same 438k rows, the same batches.
+* **Equivalence**: the dense and sparse windows of iteration 489 (40k-row budget) and the cached and
+  uncached sparse ones (full budget): every array equal, 20 batches of 512 bit for bit. End to end:
+  `delver-smoke` 2 iterations, dense against `--window-sparse 1 --window-cache 1 --sparse 1` (seed 1,
+  CPU): iteration 1 and 2 networks identical tensor for tensor, iteration 2 reusing 836 rows.
+* **Measured** (iteration 488 then 489, budget 438,636 rows, the desktop shared with r3-2b-exploit475):
+  cold 29.8 s, warm **6.6 s** (8 new shards, 2 local) against 54.1 s dense; the process 4.3 GB in all
+  against a 34 GB window; batches of 512 in 19-21 ms.
+* **Turning it on**: `--window-sparse 1` (with `--window-cache 1`, which the main line has) at a restart on
+  a build with zero-core 13a4bd2 or later; together with 82's `--sparse 1 --conc 768`. A larger
+  `ram_budget_gb` would now cost little RAM but changes the window (more rows kept): a training change.
+* **Checks** (tier "opt-in core feature with byte-identical defaults"): zero-core pytest 325 passed (the
+  two flaky CUDA tests of 82 deselected), mtg-zero pytest 69 passed, the equivalences above.
