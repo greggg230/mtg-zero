@@ -16197,3 +16197,229 @@ and zero-core c15e3d0 (E:/zero-scratch/light/base-c15e3d0), each built in its ow
   the fingerprint names them).
 * **Not done here**: the A/B itself (77.6), the Mac checkout of the fork's commit (`mac.sh
   --eval-checkout`: the coordinator), the evidence on the Mac.
+
+## 79. Heavy decisions: searching deeper where hidden information is about to be revealed (zero-core `sims_heavy`)
+
+(Section 78 is main's: token-network CUDA graphs.) Branch `heavy-decisions` from `light-decisions` 35d330e;
+zero-core `feat/heavy-decisions` from `feat/light-decisions` a797384 (docs/search.md 3.11, docs/az.md 23).
+Not merged, not pushed; the fork (79.7) prepared, not launched - the user launches it after the position
+lab (76) confirms the Bauble trick is real. To be merged with the light-decisions branches' merge with the
+new mains (token-graph inference, infer.py: untouched here) before a launch.
+
+### 79.1 Why
+
+The line never Baubles its own library before it cracks a fetchland (E:/mtg-zero-scratch/measure-play:
+report.json, cf_report.json). The expert line: look at the top card, then fetch (shuffle) only if it is bad;
+on turn 1 with an Island-type land, a fetch, Mishra's Bauble and Tamiyo, look first and choose the land drop
+by what was seen. Three links block self-discovery: (1) the search barely looks - the Bauble's prior is
+~0.009 at those spots (median ~0.0001), ~1 of 64 simulations; (2) when it looks it cannot see the payoff -
+at `chance_k` 0 each revealed card gets ~1 visit and the follow-up decision is never searched below it; (3)
+no data - its games never hold the line. Single knobs everywhere failed (Gumbel root, root noise,
+tag-based exploration, 2x simulations, `chance_k` 4: 0.490 +- 0.014). This build loosens (1) and (2)
+together, only where hidden information is about to be revealed to the decider, only in self-play.
+
+### 79.2 The detector and the game's hooks
+
+zero-core's reveal probe (docs/search.md 3.11, `heavy::probe`): on one world determinized for the decider
+(so the keys are its view), each candidate option starts a line - the option, then up to 12 steps:
+single options stepped, the other player's passive option, the decider's payments their first option, its
+forced choices (a required target) branching, its passable decisions branching once more (depth 2: the
+root option and one follow-up action, e.g. cast Mishra's Bauble, then activate it at its own library) and
+otherwise passing; never into the next turn (`rounds`: the next draw step comes with time); a line reveals
+when a key on it tells the decider something beyond what passing at the root shows. Generic: no card list.
+MTG Zero's hooks (`engine/src/az/mod.rs`): `passive_action` = `act::PASS` when legal (pass priority, keep,
+no attackers / blocks, find nothing, decline, done), none for a forced choice; `reveals` = the decider's own
+`KEY_DRAW` / `KEY_LOOK` (another player's private draws and looks are masked `HIDDEN` in the decider's world:
+**opponent-only reveals never count**), `KEY_REVEAL` of the opponent's card (it learns it), coins and dice;
+never `KEY_AUTO` (bookkeeping), `KEY_GAME`, or the decider's own card made public (it knew its hand; a reveal
+from its own library would be news - none in the Delver deck: a limitation).
+
+**Measured on checkpoint 368** (E:/mtg-zero-scratch/heavy-decisions/share.py, share.log; the Rust probe):
+
+| gate (prior <=) | depth | measured Bauble spots flagged (300) | searched decisions heavy (24 games, 4,276) | of them outside the timing windows | probe ms a decision |
+|---|---|---|---|---|---|
+| 1.0 | 1 | 20% | 45.6% | 30.7% of all | 0.28 |
+| 1.0 | 2 | 99% | 57.2% | 41.4% | 0.23 |
+| 0.05 | 2 | 96% | 38.2% | 26.7% | 0.14 |
+| 0.01 | 2 | 93% | 32.0% | 23.2% | 0.12 |
+
+Depth 1 misses the spots (the look is a follow-up action: 87% of the spots hold the Bauble in hand); depth
+2 finds 93-99%. **The heavy share is large**: the Delver deck is made of revelations (Brainstorm, Ponder, Dragon's
+Rage Channeler's surveil on every noncreature spell, Thundering Falls' surveil, Clues, both Baubles), so a
+generic detector flags a third of the decisions or more; the prior gate (options the search would barely
+look at) trims it modestly. With light decisions (77) first, the windows are never probed: in self-play
+(79.5) 25.6% of the searched decisions are heavy at gate 0.05. Cost: ~0.3 ms a probed decision in the
+driver, 5.5% of its CPU search time (busy_s) at the line's settings.
+
+### 79.3 The settings
+
+zero-core run settings (docs/az.md 23), flags of `python -m mtgz.az.run` / `tools/supervise.py`:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--selfplay-sims-heavy N` | 0 | a heavy decision's full draw: N simulations instead of `sims`; 0 = off (no probe, no hook read) |
+| `--selfplay-sims-heavy-fast M` | 0 | its fast draw: M instead of `sims_fast` (required: the line has `sims_fast` 16) |
+| `--selfplay-chance-k-heavy K` | -1 | `chance_k` inside heavy searches (-1 = the run's, 0) |
+| `--selfplay-root-min-visits-heavy F` | 0 | the heavy floor: F visits per root option, at most half the budget (min(F, budget / 2m)); full and fast draws; forced walks out of the 'visits' targets, temperature sampling and q (3.5's accounting) |
+| `--selfplay-heavy-prior-max P` | 1.0 | the probe's gate: options of prior <= P |
+| `--selfplay-heavy-depth / -horizon / -lines` | 2 / 12 / 64 | the probe's lines |
+| `--selfplay-chance-mode-heavy` | sample | `stratified`: the decider's own library top dealt without replacement across a heavy search's simulations (79.4; heavy chance_k 0) |
+
+Saved in config.json; self-play seats only (evaluation, Elo, anchors, h2h, replays unchanged); a heavy full
+draw is recorded with the heavy search's targets. Remote workers: the hello's fingerprint, a worker that
+searches otherwise refused ("REFUSED: its checkout searches heavy decisions as ..."). The self-play line's
+`heavy`: per game, share, probed share, recorded, simulations and their share, forced walks, probe cost.
+
+### 79.4 Systematic chance outcomes (the coordinator's option, user-approved)
+
+**Built: stratified worlds** (`--selfplay-chance-mode-heavy stratified`; zero-core `Tree::set_stratified`,
+the hooks `strata` / `set_stratum`; here `Game::top_strata` / `set_top_stratum` in `hidden.rs`). After each
+simulation's deal, the decider's own library top takes the next unit of a random permutation of the cards
+interchangeable with it (unknown to everyone, in the same cloud domains - what `force_library_card` may swap):
+over a pass every unit is on top once. The estimator is the plain average of the backups: each world is still
+a draw of the deal's distribution (the deal shuffles those cards uniformly: within a pass the top's identity
+is uniform over them, i.e. count(identity) / units - the exact distribution from the decider's view, known
+cards and clouds respected), so the average stays unbiased with less variance, and the walks through a look
+see distinct cards within a pass. It covers the decider's own revelations of its library top (a Bauble look
+at its own library, its next draw, a cantrip's first card). **Not built: enumeration** (each distinct
+outcome once, probability-weighted, backgammon-style): it needs the outcome distribution before the step
+that reveals it and probability-weighted backups through chance edges (the tree's edge Q is the plain mean
+PUCT, the targets and q read) - a tree change of its own; and identity-level without-replacement needs the
+same weighting. **Limitation**: a look at the opponent's library keeps the independent deal; positions the
+opponent knows but the decider does not (after their Brainstorm put-back or Ponder keep, 72's who-knows) get
+the determinization's treatment (uniform over the decider's unknowns, the belief weighting only for the
+hand) - a belief-head extension to the opponent's owner-known top cards would supply exact weights there (a
+hub todo, not this build).
+
+### 79.5 CPU evidence (checkpoint 368)
+
+A read-only copy of `runs/r3-2b-beliefsearch/models/iter_0368.pt` and the line's config.json
+(E:/mtg-zero-scratch/heavy-decisions/: `ckpt/`, `evidence/` - play.sh, *.json, report_*.json, spots*.json),
+CPU only, 2 + 2 threads a process, below normal, beside the live line.
+
+**Self-play, 96 games a variant** (`tools/heavy_eval.py play`, the line's self-play search: 64 / 16, p_full
+0.25, minor 4, temperature 60, 'cq' 0.3, root-view leaves, the belief search; seed 1, the same deals):
+
+| | off (today) | light 16 / 4 rec | light + heavy A: 128 / 24, k 4, f 8, gate 0.05 | light + heavy B: 256 / 64, k 8, f 8, gate 0.05 |
+|---|---|---|---|---|
+| simulations per game | 6,667 | 5,433 (-18.5%) | 6,992 (+4.9%) | 10,663 (+59.9%) |
+| seconds per game (CPU) | 15.97 | 13.37 | 17.53 (+9.8%) | 25.51 (+59.7%) |
+| searched decisions per game | 242.7 | 255.6 | 261.4 | 247.0 |
+| light decisions (share) | - | 75.2 (29.4%) | 77.3 (29.6%) | 71.0 (28.7%) |
+| heavy decisions (share of searched; probed) | - | - | 66.9 (25.6%; 68.6%) | 64.4 (26.1%; 69.5%) |
+| simulations on heavy decisions | - | - | 3,294 (47.1% of all) | 7,147 (67.0% of all) |
+| forced walks per game | - | - | 594 | 978 |
+| probe: lines / ms a probed decision; share of the CPU search time | - | - | 7.9 / 0.30; 5.5% | 7.5 / 0.28; 3.1% |
+| recorded samples per game | 88.5 | 93.3 | 95.2 | 90.2 |
+| canary (b) looked first / decided episodes | 8 / 89 | 10 / 93 | 9 / 90 | 8 / 88 |
+| canary (b) cracked after a seen land / spell | 0 / 6, 10 / 31 | 1 / 8, 7 / 33 | 0 / 8, 7 / 30 | 0 / 8, 8 / 32 |
+| canary (a) turn-1 hands ('any'), looked before the land | 0 / 12 | 0 / 12 | 0 / 12 | 0 / 12 |
+
+Small samples (96 games; no 'clean' turn-1 hand among them): the canaries do not move within their noise.
+
+**The heavy search at the spots** (`tools/heavy_eval.py spots`: 64 measured Bauble spots - a fetch cracked
+with an empty stack while a Bauble was castable or activatable, the line's replays - and 24 turn-1 hands
+from a seed search with an Island-type land, a fetch, Mishra's Bauble and Tamiyo ('any' composition; no
+'clean' one in 6,000 seeds' first 24 finds was required), 4 reps each, no root noise; the Bauble options'
+pruned visit share, the visit rule's and the 'cq' rule's move, Q(Bauble) - Q(best other option)):
+
+| setting | spots: Bauble visits | share (PUCT's) | visit / cq move Bauble | dQ | turn 1: visits | dQ |
+|---|---|---|---|---|---|---|
+| normal 64 | 0.48 | 0.8% | 0 / 0% | -0.023 (n 28) | 0 | - (never visited) |
+| normal 64, floor 8 | 8.2 | 0.5% | 0 / 0% | -0.042 | 7.0 | -0.062 |
+| heavy 128, k 4, floor 8 | 8.6 | 0.5% | 0 / 0% | -0.045 | 8.0 | -0.069 |
+| heavy 128, k 4, no floor | 0.98 | 0.8% | 0 / 0% | -0.026 (n 28) | 0 | - |
+| heavy 256, k 8, floor 8 | 9.3 | 0.5% | 0 / 0% | -0.048 | 8.0 | -0.073 |
+| heavy 256, k 0, floor 8 | 9.4 | 0.6% | 0 / 0.8% | -0.046 | 8.0 | -0.074 |
+| heavy 128, stratified, floor 8 | 8.7 | 0.5% | 0 / 0.4% | -0.044 | 8.0 | -0.068 |
+| heavy 256, stratified, floor 8 | 9.5 | 0.6% | 0 / 0.8% | -0.046 | 8.0 | -0.075 |
+| heavy 256, k 0, floor 32 | 32.8 | 0.5% | 0 / 0% | -0.036 | 28.3 | -0.043 |
+| heavy 256, stratified, floor 32 | 32.8 | 0.5% | 0 / 0% | -0.036 | 28.3 | -0.043 |
+
+**The heavy search does not pick Bauble-first.** The floor fixes link 1 (the Bauble is measured: ~8-9
+visits instead of ~0.5), but its Q comes out below the crack's by 0.04-0.05 at the spots and 0.06-0.07 on
+turn 1, so PUCT gives it no visits of its own (its share stays ~0.5%) and neither rule plays it. chance_k 4 /
+8 and the stratified deal change nothing measurable (the walks through the look are few: ~8); a deeper look
+(floor 32 at 256) narrows the gap to -0.036 / -0.043 - the Bauble line gains as its follow-ups are searched,
+but stays below at affordable budgets. With the network's own values, the heavy self-play would keep
+measuring and rejecting the Bauble: the discovery needs the value of the post-look positions to be right
+(the position lab's question: is the trick real for this network's play, and by how much).
+
+### 79.6 Budget accounting and the proposed setting
+
+Per game on the CPU batch: off 6,667 simulations; light alone 5,433 (-1,234); light + heavy A 6,992
+(+325: 66.9 heavy decisions a game at ~49 simulations each - 0.25 x 128 + 0.75 x 24). Budget-neutral
+(~6,667): ~44 simulations a heavy decision - **`--selfplay-sims-heavy 128 --selfplay-sims-heavy-fast 16
+--selfplay-chance-k-heavy 4 --selfplay-root-min-visits-heavy 8 --selfplay-heavy-prior-max 0.05`** with the
+light windows `--selfplay-sims-light 16 --selfplay-sims-light-fast 4 --selfplay-light-record 1`: the heavy
+budget goes to the recorded full draws (2x: 128 vs 64, floor 8 per option), the fast draws keep 16 (their
+floor clipped to 16 / 2m, ~1 visit an option; chance_k 4). Estimated 0.25 x 128 + 0.75 x 16 = 44 a heavy
+decision -> ~6,640 a game (-0.4%). Heavy B (256 / 64) costs +60% (10,663 simulations a game, 25.5 s on the CPU). Wall time: the probe adds ~5% CPU
+search time on top of the simulations; on the line (GPU-bound inference, CUDA graphs) measure it in the
+fork's first iterations (`selfplay_s`, leaves per game, `heavy.probe_ms`).
+
+### 79.7 The fork (prepared, not launched)
+
+`E:/mtg-zero-scratch/heavy-decisions/run/launch_fork.sh` (check / launch / control / judge):
+
+* **Prerequisite**: a pinned worktree of a commit holding both these branches and the token-network CUDA
+  graphs (the light-decisions branches merged with main c6b959b / e057c87, then heavy-decisions merged on
+  top: the merge is not done here), its own target, `gate.py repin --expect-digest 132437374243f7b2
+  --no-mac` passed there, and the coordinator's `mac.sh --eval-checkout` from it (else the Mac's workers are
+  refused: no heavy fingerprint). `check WT` verifies each (heavy.py, TokenGraphRunner, the hooks, the pyd,
+  the flag, the gate report) and refuses otherwise - it refuses this branch (no CUDA graphs).
+* **Launch** (`launch WT [K]`): STOP the main line (`runs/r3-2b-beliefsearch/STOP`; wait for its supervisor
+  to exit; STOP removed) - never PAUSE (kill_orphans' self-kill after a PAUSE) -, K = its newest checkpoint,
+  `fork_run.py --source MAIN --dest runs/r3-2b-heavy --iter K`, then a fresh supervisor (hidden,
+  `ZERO_TOKEN_GRAPHS=1 MTGZ_SUPERVISE_STALL=7200`) with the line's own flags (supervisor_state.json args:
+  `--selfplay-remote-procs 3`, `--lr 3e-5 --lr-min 3e-5`, anchors, held-out shards) + `--iters K+48` + the
+  light + heavy settings of 79.6; `watch_run.sh` armed. Check after the first iteration: the start-up lines
+  "light decisions: ..." and "heavy decisions: 128 simulations (full draws) / 16 (fast draws), chance_k 4,
+  root floor 8; probe: options of prior <= 0.05, depth 2, horizon 12, 64 lines", the `selfplay:` line's
+  `heavy` (share ~0.25, sims_share ~0.45) and `light` (share ~0.29), no REFUSED.
+* **Control** (`control`, after the fork's 48 generations, its supervisor gone): the main line relaunched
+  from K with a fresh supervisor (its code run-e057c87, its command line, `ZERO_TOKEN_GRAPHS=1`).
+* **Judge** (`judge WT GEN`, at K+16 / K+32 / K+48 as the control reaches them, and the canaries at any
+  generation of the fork): the paired h2h fork vs main at the same generation (`--graphs 1`, `--spec` the
+  run's, `--chance-k 0`, SPRT(0, 20), 600-2,400 games, the eval rule cq-n4 0.3, root-view leaves); the
+  canaries of each arm (200 self-mirror games with move logs, `tools/heavy_canary.py --h2h`: (a) turn-1 Bauble
+  looks before the land and the land by the seen card, (b) look-first rate and crack after a seen land vs
+  spell); the anchored Elo lines of both logs.
+* **Verdict** (the user's): the fork's canaries moving toward look-first (b's look-first rate, a's looks)
+  with the crack conditional on the seen card, at no loss of strength (the h2h within ~1 se of 0 or above,
+  anchored Elo not below the line).
+
+### 79.8 Checks
+
+Desktop 2026-10-31, CPU only, below normal; own targets (`E:/cargo-target/mtg-zero/heavy-decisions`, zero-core
+`E:/cargo-target/zero-core/feat_heavy-decisions`); the pyd built with `tools/build_py.sh`.
+
+* **`tools/gate.py optin-core` PASSED** on a2c9517 (zero-core pin 0470996; `gates/a2c951707069.json`): core tests
+  107, checkpoint_compat byte identity against `run-757dfa1` (35d330e's code), `--test az` 39, `--test hidden`
+  16, Glass Road c1f56dc / Caverna a6fad73 / Kingdom Builder 4202a4a build against this core GREEN
+  (`--other-games` one path per argument; `SKIP_CORE=1`: the core's pytest ran on its own, below). The first
+  run on 091a62e failed only in that pytest step, on the co-training pause test (below).
+* **Digests unchanged**: full 132437374243f7b2, encoding-free (`DIGEST_ENCODING=0`) a0d54562c8330271.
+* zero-core: `cargo test -p zero_search` heavy tests 8 (the probe's lines, candidates and worlds, stratified
+  worlds, settings, off changes nothing - the toy's golden records with and without `sims_heavy` -, budgets and
+  records decision by decision, chance_k and the gate, light first and evaluation seats never probe);
+  `tests/test_heavy.py` 21 passed; the whole core pytest 349 passed / 3 skipped plus
+  `test_cotrain_pause_mid_iteration_replays_it`, which failed until 0470996 fixed the test itself: it read
+  the run's output through a pipe only after polling, and the start-up lines (the whole config, longer by
+  the heavy settings) filled the pipe and blocked the run (passes in 12 s; a797384 passed by a margin of
+  pipe buffer).
+* `check_checkpoint_compat`: identical across 35d330e's code (the worktree `run-757dfa1`) and this branch.
+* This repo: `pytest tests` 72 passed, 3 of them new in `tests/test_heavy.py` (the hooks and the probe at a turn-1 Bauble, a Delver driver with
+  light and heavy decisions, the run flags).
+
+### 79.9 Risks and open points
+
+* **The network rejects the Bauble** (79.5): the floor measures it, its Q stays below the crack's. Heavy
+  self-play then records targets that keep its prior low; discovery needs the value head to price the
+  post-look positions right - the position lab's verdict first (as planned).
+* **Share**: a third of the decisions are heavy in this deck; the budget-neutral setting gives each only
+  ~1.6x (128 / 16 on 0.25 / 0.75 draws) - not the 4x the plan pictured. A tighter gate (0.01: 23% outside
+  windows) or depth 2 only for passable root options would trim it.
+* **Probe cost** ~5% of the CPU search time; on the GPU line it may weigh more or less (measure).
+* **Stratified worlds** cover only the decider's own library top; enumeration not built (79.4).
+* **The merge**: these branches lack the token-graph inference; the run needs the merged build (79.7).
