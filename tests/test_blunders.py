@@ -380,7 +380,7 @@ def test_canary_search_of_a_rebuilt_spot():
     labels = {o['a']: o['t'] for o in st['decision']['options']}
     per = [dict(collections.Counter(labels[a] for a in chosen))]
     t = B.canary_table({'spots': [spot], 'repeats': 3, 'results': {'x_0001': {'8': per}}})
-    assert 'land_drop_tapout (1)' in t and 'x_0001 s8' in t
+    assert 'ld_tapout (1)' in t and 'x_0001 s8' in t
 
 
 # ------------------------------------------------------------------------------ baseline, flags, the watcher

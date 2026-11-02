@@ -92,6 +92,11 @@ TARGET_RE = re.compile(r'target (.+?)#(\d+)')
 DMG_RE = re.compile(r'(\d+) damage to ')
 
 
+def say(*a):
+    """The tool's log: print, flushed (a watcher's console is a file)."""
+    print(*a, flush=True)
+
+
 # ====================================================================================== the scan
 def pool(ps):
     """The number of mana in a player's pool (the view's 'pool': one letter a mana, absent when empty)."""
@@ -640,7 +645,7 @@ def versus(value, se, base, n=None):
     return gap, z, abs(z) > 2 and (n is None or n >= 10)
 
 
-def make_baseline(scan_path, out=BASELINE_PATH, games_path=None, replace=False, digest=None, log=print):
+def make_baseline(scan_path, out=BASELINE_PATH, games_path=None, replace=False, digest=None, log=say):
     """Add the metrics a baseline file lacks (all of them for a new file) from a scan of the baseline
     checkpoint's fixed games; the entries already there stay (`replace`: overwrite them) - a new category
     joins with the baseline games re-scanned, the old ones keep their numbers."""
@@ -909,7 +914,7 @@ def mirror(ckpt, seat, games, sims, chance_k, seed, threads, groups, device, spe
 
 
 def play(ckpt, out, games=1000, seed=DEFAULT_SEED, opp='self', sims=None, device='cuda', threads=12, groups=4,
-         conc=512, sparse=True, graphs=None, engine_path=ROOT, log=print, select=None, c_scale=None):
+         conc=512, sparse=True, graphs=None, engine_path=ROOT, log=say, select=None, c_scale=None):
     """`games` games of `ckpt` (its run's evaluation seat; against itself or the anchor `opp`), with move
     logs -> the path of <out>/<label>.games.json.gz."""
     from zero import h2h
@@ -1023,7 +1028,7 @@ def _scan_row(args):
             'ex': [list(e) for e in ex[:20]], 'spots': [list(x) for x in sp[:20]]}
 
 
-def scan_file(path, engine_path=ROOT, jobs=4, log=print):
+def scan_file(path, engine_path=ROOT, jobs=4, log=say):
     """Rebuild and count every game of a .games.json.gz -> the path of its .scan.json."""
     with gzip.open(path, 'rt', encoding='utf-8') as f:
         rec = json.load(f)
@@ -1101,7 +1106,7 @@ CANARY_KINDS = {
 }
 
 
-def build_spots(games_paths, per_kind=12, play=(), engine_path=ROOT, log=print):
+def build_spots(games_paths, per_kind=12, play=(), engine_path=ROOT, log=say):
     """A fixed canary set: the first `per_kind` candidates of each kind (CANARY_KINDS) in the games' scans
     (game order), and the Play-tab spots `play` ('<game.json>:<action index>'), each as a game seed +
     the actions up to the decision + the watched option -> a spots dict. The spots replay only on an
@@ -1214,7 +1219,7 @@ def search_many(ev, games, seeds, sims, seat, chance_k=0):
     return out
 
 
-def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_path=ROOT, log=print, select=None,
+def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_path=ROOT, log=say, select=None,
            c_scale=None, rules=None):
     """Each checkpoint's evaluation seat searches every spot `repeats` times (seeds apart) at each budget ->
     {label: {sims: [per spot: {option label: searches}]}}. `rules`: [(select, c_scale), ...] move rules to
@@ -1263,38 +1268,44 @@ def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_
 
 
 def canary_table(C):
-    """Per kind: the mean share of searches choosing the watched option over its spots (+- se over spots);
-    each Play-tab spot on its own row."""
+    """One row a checkpoint x rule x budget, one column a spot kind (the mean share over its spots of the
+    searches choosing the watched option, +- se over spots) or a Play-tab spot (its share)."""
     spots, rep = C['spots'], C['repeats']
-    cols = [(lab, sims) for lab, by in C['results'].items() for sims in by]
-    rows = []
+    rows_ = [(lab, sims) for lab, by in C['results'].items() for sims in by]
+    cols = []
+    short = {'daze_payable_land': 'daze_pay', 'waste_brainstorm': 'waste_bs', 'burn_could_not_kill': 'burn_cnk',
+             'burn_damaged_survivor': 'burn_dmg', 'land_drop_tapout': 'ld_tapout'}
     for kind in CANARY_KINDS:
         idx = [i for i, sp in enumerate(spots) if sp['kind'] == kind]
-        if not idx:
-            continue
-        groups = [(f'{kind} ({len(idx)})', idx)] if kind != 'play' else [
-            (f'play {spots[i]["source"]} #{spots[i]["k"]}: {spots[i]["watch"]}', [i]) for i in idx]
-        for name, ii in groups:
-            cells = []
-            for lab, sims in cols:
-                sh = [C['results'][lab][sims][i].get(spots[i]['watch'], 0) / rep for i in ii]
-                m = sum(sh) / len(sh)
-                se = math.sqrt(sum((x - m) ** 2 for x in sh) / (len(sh) - 1) / len(sh)) if len(sh) > 1 else None
-                cells.append(f'{100 * m:.0f}%' + (f' +-{100 * se:.0f}' if se is not None else ''))
-            rows.append((name, cells))
-    w0 = max([len(r[0]) for r in rows] + [10]) + 2
-    heads = [f'{lab} s{sims}' for lab, sims in cols]
-    ws = [max(14, len(h) + 2) for h in heads]
-    out = [f'share of {rep} searches a spot choosing the watched option (mean over spots +- se)',
-           'spot kind (spots)'.ljust(w0) + ''.join(h.rjust(w) for h, w in zip(heads, ws))]
-    out += [n.ljust(w0) + ''.join(c.rjust(w) for c, w in zip(cells, ws)) for n, cells in rows]
+        if kind == 'play':
+            cols += [(f'#{spots[i]["k"]} {spots[i]["source"][-6:]}', [i]) for i in idx]
+        elif idx:
+            cols.append((f'{short.get(kind, kind)} ({len(idx)})', idx))
+    ws = [max(12, len(c) + 2) for c, _ in cols]
+    w0 = max([len(f'{lab} s{sims}') for lab, sims in rows_] + [10]) + 2
+    out = [f'share of {rep} searches a spot choosing the watched option (mean over the spots of a kind +- se over spots)']
+    for kind, desc in CANARY_KINDS.items():
+        out.append(f'  {short.get(kind, kind)}: {desc}')
+    for i, sp in enumerate(spots):
+        if sp['kind'] == 'play':
+            out.append(f'  #{sp["k"]} {sp["source"]}: turn {sp.get("turn")} {sp.get("step")}, watched {sp["watch"]}')
+    out.append('')
+    out.append('checkpoint, rule, budget'.ljust(w0) + ''.join(c.rjust(w) for (c, _), w in zip(cols, ws)))
+    for lab, sims in rows_:
+        cells = []
+        for _, ii in cols:
+            sh = [C['results'][lab][sims][i].get(spots[i]['watch'], 0) / rep for i in ii]
+            m = sum(sh) / len(sh)
+            se = math.sqrt(sum((x - m) ** 2 for x in sh) / (len(sh) - 1) / len(sh)) if len(sh) > 1 else None
+            cells.append(f'{100 * m:.0f}%' + (f' +-{100 * se:.0f}' if se is not None else ''))
+        out.append(f'{lab} s{sims}'.ljust(w0) + ''.join(c.rjust(w) for c, w in zip(cells, ws)))
     return '\n'.join(out)
 
 
 # ====================================================================================== the sidecar
 def watch(run, engine_path=ROOT, games=1000, seed=DEFAULT_SEED, sims=None, every=None, loop=300, min_iter=None,
           backfill=False, once=False, baseline=BASELINE_PATH, device='cuda', conc=1000, threads=16, groups=4, jobs=4,
-          settle=60, log=print):
+          settle=60, log=say):
     """Follow a run's evaluated checkpoints (models/iter_N.pt, N a multiple of its eval_every) and measure
     each one: <run>/blunders/iter_NNNN.json (every metric, value / se / n, against the baseline) and a
     line of <run>/blunders.jsonl (flat, one per measurement: the plot's rows). Newest first: when it falls
@@ -1455,6 +1466,8 @@ def main(argv=None):
     p.add_argument('--select', default=None, choices=['visits', 'cq'])
     p.add_argument('--c-scale', type=float, default=None)
     p.add_argument('--rules', default=None, help="several move rules in turn, e.g. 'run,visits,cq:0.1' (run = the run's own)")
+    p = sub.add_parser('canary-report', help='print saved canary results (several files are merged)')
+    p.add_argument('files', nargs='+')
     p = sub.add_parser('baseline', help='add the metrics a baseline file lacks, from a scan of the baseline checkpoint')
     p.add_argument('scan')
     p.add_argument('--out', default=BASELINE_PATH)
@@ -1500,6 +1513,17 @@ def main(argv=None):
     elif a.cmd == 'scan':
         for f in a.files:
             scan_file(f, a.engine, a.jobs)
+        return 0
+    elif a.cmd == 'canary-report':
+        C = None
+        for f in a.files:
+            with open(f, encoding='utf-8') as fh:
+                X = json.load(fh)
+            if C is None:
+                C = X
+            else:
+                C['results'].update(X['results'])
+        print(canary_table(C))
         return 0
     elif a.cmd == 'baseline':
         make_baseline(a.scan, a.out, a.games_file, a.replace, a.digest)
