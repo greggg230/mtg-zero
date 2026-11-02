@@ -48,7 +48,9 @@ pub mod act {
     /// Slots per graveyard.
     pub const GRAVEYARD_N: u16 = 64;
     /// Activate ability i of the decider's permanent in `MY_PERM` slot s:
-    /// `ACTIVATE + s * 4 + i` (at priority, and mana abilities while paying).
+    /// `ACTIVATE + s * 4 + i` (at priority, and mana abilities while paying;
+    /// in a `Sacrifice` or `BounceCost` decision: its mana ability i, then
+    /// the permanent is the one sacrificed or returned, ENGINE.md 86.2).
     pub const ACTIVATE: u16 = 532;
     /// Activate the ability of the card in the decider's hand slot 0..63
     /// (cycling, Spirit Guides).
@@ -99,7 +101,9 @@ pub enum DecisionKind {
     /// Which mana a mana ability makes (`NUMBER` = production index, CR
     /// 106.1b).
     ChooseMana,
-    /// A permanent to sacrifice as a cost (CR 701.17).
+    /// A permanent to sacrifice as a cost (CR 701.17): `MY_PERM` + its slot;
+    /// `ACTIVATE` + slot x 4 + i: an untapped mana source's mana ability i
+    /// first (CR 601.2g-h, ENGINE.md 86.2), then it is the one sacrificed.
     Sacrifice,
     /// A card to discard as a cost.
     DiscardCost,
@@ -142,7 +146,8 @@ pub enum DecisionKind {
     ChooseAltCost,
     /// A card in the decider's hand to exile as a cost.
     ExileCost,
-    /// A permanent to return to its owner's hand as a cost.
+    /// A permanent to return to its owner's hand as a cost (Daze): as
+    /// `Sacrifice`, `ACTIVATE` ids included (ENGINE.md 86.2).
     BounceCost,
     /// The amount of divided damage for the next target (`NUMBER`, CR
     /// 601.2d).

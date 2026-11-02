@@ -284,12 +284,20 @@ impl Game {
             (K::Priority, Choice::Companion) => "Put the companion into hand".into(),
             (_, Choice::Ability(i, slot)) => {
                 let d = self.def_of(i);
-                let loyalty = match slot {
-                    AbilitySlot::Activated(k) => d.activated.get(k as usize).and_then(|a| a.loyalty),
+                let ad = match slot {
+                    AbilitySlot::Activated(k) => d.activated.get(k as usize),
                     _ => None,
                 };
+                let loyalty = ad.and_then(|a| a.loyalty);
+                // A mana ability that taps its permanent: at priority, floating
+                // mana in response; in a cost's choice, before the permanent is
+                // sacrificed or returned (ENGINE.md 86).
+                let taps_for_mana = ad.is_some_and(|a| a.mana().is_some() && a.cost.tap);
                 match (kind, loyalty) {
                     (K::PayMana, _) => format!("Tap {} for mana", nm(i)),
+                    (K::Sacrifice, _) => format!("Tap {} for mana, then sacrifice it", nm(i)),
+                    (K::BounceCost, _) => format!("Tap {} for mana, then return it to hand", nm(i)),
+                    (K::Priority, _) if taps_for_mana => format!("Tap {} for mana", nm(i)),
                     (_, Some(l)) => format!("Activate {} ({}{})", nm(i), if l > 0 { "+" } else { "" }, l),
                     _ => format!("Activate {}", nm(i)),
                 }

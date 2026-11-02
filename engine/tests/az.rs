@@ -2256,6 +2256,15 @@ fn a_sharp_belief_concentrates_the_deal() {
         if m < 2 {
             continue;
         }
+        // (A cloud over the hand - "one of these cards is Thundering Falls", after a known card went
+        // back among hidden ones - takes the whole hand as its domain, and its free places are filled
+        // from the uniform rest of the pool before the weights choose among them: the weighted deal
+        // cannot concentrate there (`Game::resample_weighted`; ENGINE.md 86.5). Such positions are
+        // left out: the positions are played partly at random, so float-mana's new options moved them
+        // onto one.)
+        if g.g.clouds().iter().any(|k| k.viewer == v as u8 && k.owner == o && k.hand) {
+            continue;
+        }
         let pool = g.g.unknown_to(v as u8, o);
         let mut h = vec![0u32; identity::D];
         for &c in &pool {

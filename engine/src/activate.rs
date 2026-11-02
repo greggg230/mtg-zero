@@ -122,7 +122,7 @@ impl Game {
         for c in self.permanents_of(p) {
             let d = self.abilities(c);
             for (i, ad) in d.activated.iter().enumerate() {
-                if ad.mana().is_some() && !self.mana_with_priority(c, ad) {
+                if ad.mana().is_some() && !self.mana_at_priority(c, ad) {
                     continue; // paid with while paying a cost (ENGINE.md 18)
                 }
                 if d.latent > 0 && !self.has_activated(c, i) {
@@ -247,7 +247,7 @@ impl Game {
         locks: u16,
     ) -> bool {
         let mana_ability = ad.mana().is_some();
-        if mana_ability && !self.mana_with_priority(card, ad) {
+        if mana_ability && !self.mana_at_priority(card, ad) {
             return false; // activated while paying (ENGINE.md 18)
         }
         // Turning a face-down permanent face up (CR 708.7, 116.2b): any time
@@ -755,6 +755,23 @@ impl Game {
             .collect()
     }
 
+    /// The options of a cost's choice of a permanent to sacrifice or return
+    /// (`Sacrifice`, `BounceCost`): `MY_PERM` + its slot, and for an untapped
+    /// mana source also `ACTIVATE` + its slot x 4 + i = "activate its mana
+    /// ability i first, then sacrifice or return it" (ENGINE.md 86.2; CR
+    /// 601.2g-h; `float_before_cost`, `life_after` = the cost's life).
+    fn cost_pick_options(&self, p: PlayerId, cands: &[CardIdx], life_after: u8) -> Vec<Opt> {
+        let mut opts = Vec::with_capacity(cands.len());
+        for &c in cands {
+            opts.push(Opt { action: self.perm_action(p, c), choice: Choice::Card(c) });
+            for i in self.float_before_cost(p, c, life_after) {
+                let slot = crate::db::AbilitySlot::Activated(i);
+                opts.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+            }
+        }
+        opts
+    }
+
     /// The rest of a cost after its mana (601.2h): sacrifice and discard
     /// choices, one decision per object; then {T}, life, and the source's
     /// own costs.
@@ -772,9 +789,16 @@ impl Game {
         if picked.is_empty() && self.answer.is_none() {
             self.new_event();
         }
+        // A permanent to return or sacrifice, its mana ability activated
+        // first (ENGINE.md 86.2).
+        let mut float = None;
         if let Some(ch) = self.answer.take() {
             let c = match ch {
                 Choice::Card(c) => c,
+                Choice::Ability(c, slot) => {
+                    float = Some(slot);
+                    c
+                }
                 // CR 702.122a: enough power tapped for crew.
                 Choice::Pass => {
                     crew_done = true;
@@ -797,6 +821,15 @@ impl Game {
             } else {
                 picked.push(c);
             }
+            if let Some(slot) = float {
+                // CR 601.2g before 601.2h: the mana ability now, its mana to
+                // the pool (it stays there until the step ends); then the
+                // rest of the cost as chosen.
+                debug_assert!(picked.len() <= n_sac || (n_exile < picked.len() && picked.len() <= n_bounce));
+                self.agenda.push(Task::PayCosts { id, picked });
+                self.begin_activate(p, c, slot);
+                return;
+            }
         }
         if picked.len() < n_sac {
             let s = cost.sacrifice.as_ref().unwrap();
@@ -811,12 +844,12 @@ impl Game {
                 0
             };
             let only_cards = need > 0 && need >= n_sac - picked.len();
-            let opts: Vec<Opt> = self
+            let cands: Vec<CardIdx> = self
                 .sacrifice_candidates(p, card, s)
                 .into_iter()
                 .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(p, *c)))
-                .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
                 .collect();
+            let opts = self.cost_pick_options(p, &cands, cost.life);
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
             return;
         }
@@ -849,12 +882,9 @@ impl Game {
         }
         if picked.len() < n_bounce {
             let b = cost.bounce.as_ref().unwrap();
-            let opts: Vec<Opt> = self
-                .sacrifice_candidates(p, card, b)
-                .into_iter()
-                .filter(|c| !picked[n_exile..].contains(c))
-                .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
-                .collect();
+            let cands: Vec<CardIdx> =
+                self.sacrifice_candidates(p, card, b).into_iter().filter(|c| !picked[n_exile..].contains(c)).collect();
+            let opts = self.cost_pick_options(p, &cands, cost.life);
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::BounceCost, opts);
             return;
         }
@@ -1019,8 +1049,9 @@ impl Game {
     /// a triggered ability of its own as it goes (Chromatic Star, Wizard's
     /// Rockets: "when this is put into a graveyard, draw a card"; activated
     /// for nothing but that, CR 605.3a). Every other mana ability is
-    /// activated while paying a cost only: floating its mana first can't
-    /// matter (the pool empties between steps, CR 106.4, 500.4).
+    /// activated while paying a cost only - floating its mana first can't
+    /// matter (the pool empties between steps, CR 106.4, 500.4) - but for a
+    /// source about to be lost (`mana_at_priority`, ENGINE.md 86).
     pub(crate) fn mana_with_priority(&self, c: CardIdx, ad: &ActivatedDef) -> bool {
         fn is_self(p: &crate::db::TrigPred) -> bool {
             match p {
@@ -1035,6 +1066,88 @@ impl Game {
                     && self.def_of(c).triggers.iter().any(|t| {
                         matches!(t.event, crate::db::EventKind::Dies | crate::db::EventKind::LeavesBattlefield) && is_self(&t.pred)
                     })))
+    }
+
+    /// Is mana ability `ad` of permanent `c` offered with priority now: one
+    /// `mana_with_priority` names, or any mana ability of a source about to
+    /// be lost (`floats_in_response`)?
+    pub(crate) fn mana_at_priority(&self, c: CardIdx, ad: &ActivatedDef) -> bool {
+        self.mana_with_priority(c, ad) || self.floats_in_response(c)
+    }
+
+    /// Floating mana in response (ENGINE.md 86.1; docs/shortcuts.md 13.12):
+    /// permanent `c` is untapped and an object on the stack targets it (a
+    /// Wasteland's ability at a Volcanic Island, a Lightning Bolt at a Birds
+    /// of Paradise). Its controller may then activate its mana abilities
+    /// with priority (CR 605.3a, 117.1d): the mana stays in the pool until
+    /// the step ends (106.4, 500.4), to be spent after the source is gone.
+    /// Every other priority leaves mana abilities to the payments (ENGINE.md
+    /// 18): floating mana there is the same as activating the ability while
+    /// paying later in the step.
+    pub(crate) fn floats_in_response(&self, c: CardIdx) -> bool {
+        if self.stack.is_empty() || self.objs[c.i()].tapped {
+            return false;
+        }
+        let t = Target::Obj(self.obj_ref(c));
+        self.stack.iter().any(|s| s.targets.iter().any(|&(_, x)| x == t))
+    }
+
+    /// The mana abilities of permanent `c` that `p` may activate before a
+    /// cost returns or sacrifices `c` (ENGINE.md 86.2; CR 601.2g comes before
+    /// 601.2h): Daze's Island tapped for {U}, then returned. Only an untapped
+    /// source's abilities whose cost is {T} (and life: `life_after` more is
+    /// paid by the cost afterwards, CR 119.4), so the activation leaves `c`
+    /// where the cost needs it and nothing else the cost chooses from
+    /// changes. A cost that taps the source itself (a fetch land, Wasteland:
+    /// the source of the ability) is not one of these: its source isn't
+    /// picked.
+    pub(crate) fn float_before_cost(&self, p: PlayerId, c: CardIdx, life_after: u8) -> crate::svec::SVec<u8, 4> {
+        let mut out = crate::svec::SVec::new();
+        let o = &self.objs[c.i()];
+        if o.zone != Zone::Battlefield || o.controller != p || o.tapped {
+            return out;
+        }
+        let d = self.abilities(c);
+        let locks = self.activation_locks();
+        let life = self.players[p as usize].life;
+        for (i, ad) in d.activated.iter().enumerate() {
+            let Some(m) = ad.mana() else { continue };
+            let k = &ad.cost;
+            let only_tap = k.tap
+                && k.mana.is_zero()
+                && !ad.x
+                && !(k.sac_self || k.exile_self || k.discard_self || k.discard_hand || k.exert || k.waterbend)
+                && k.sacrifice.is_none()
+                && k.bounce.is_none()
+                && k.discard == 0
+                && k.exile_from_hand.is_none()
+                && k.exile_graveyard == 0
+                && k.remove_counters.is_none()
+                && k.tap_untapped.is_none()
+                && k.crew == 0
+                && m.sac_if_no.is_none()
+                && !matches!(m.prod, crate::db::ManaProd::SacrificedLand);
+            if !only_tap || ad.special.is_some() || ad.instant_only {
+                continue;
+            }
+            if (d.latent > 0 && !self.has_activated(c, i)) || (ad.exhaust && self.exhausted(c, i as u8)) {
+                continue;
+            }
+            if !self.activation_ready(p, c, ad, locks) {
+                continue;
+            }
+            // CR 119.4: its life, and the cost's life after it (with a
+            // painland's damage first).
+            let spent = k.life as i32 + if life_after > 0 { m.damage_to_you as i32 } else { 0 };
+            if (k.life as i32) > life || (life_after > 0 && life - spent < life_after as i32) {
+                continue;
+            }
+            if productions(self, p, &m.prod, Some(c)).is_empty() {
+                continue;
+            }
+            out.push(i as u8);
+        }
+        out
     }
 
     /// Has `c` activated its exhaust ability `i` (CR 702.177a)?
