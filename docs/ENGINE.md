@@ -16312,3 +16312,43 @@ the design, the equivalence and the measurements), 2026-11-01. Nothing live chan
   `ram_budget_gb` would now cost little RAM but changes the window (more rows kept): a training change.
 * **Checks** (tier "opt-in core feature with byte-identical defaults"): zero-core pytest 325 passed (the
   two flaky CUDA tests of 82 deselected), mtg-zero pytest 69 passed, the equivalences above.
+
+## 85. The static training step and local linger (zero-core `feat/train-speed`, run settings `train_static` and `selfplay_local_linger`, opt-in)
+
+Branch `train-speed` (from main 3abb2e3), zero-core `feat/train-speed` (its docs/az.md 10.9 and 10.10 have
+the design, the equivalence and the measurements), 2026-11-01, the user's go-ahead ("yes to 1 and 2" after a
+throughput review of r3-2b-late550). Nothing live changed.
+
+* **Why**: with 82 and 83 a Delver generation (r3-2b-late550, warm gens 567-580) was ~183 s = self-play
+  ~133 s + training ~49 s (542 steps at ~91 ms; the window 3 s). The training step was the eager token
+  forward (per-segment packing, chunks of 64 rows, ~20 host syncs) with a foreach AdamW, and the desktop -
+  ~75% of the games - idled through it while the Mac lingered.
+* **What**: `train_static` 1 = training through `TokenNet.forward_static` (the inference graphs' forward:
+  each batch one chunk, no host sync) with a fused AdamW on CUDA; a sparse window's batches travel as their
+  non-zeros (~2.5 MB instead of 77 MB a batch of 512) and are made dense on the device. `selfplay_local_linger`
+  1 = the desktop's self-play plays on with the previous checkpoint while the run trains (a thread, its
+  CUDA batches on a stream of their own), its games held for the next iteration's quota (lag 1, as the
+  Mac's linger). CUDA graph captures are thread-local now (a capture beside the training thread failed
+  both under torch's default mode).
+* **Equivalence**: a training step's loss and gradients equal the eager step's to float32 rounding; one
+  generation of the line's training (iteration 585 from 584 and its optimizer state, same window, same
+  process): the logged losses equal to 5 decimals (policy 0.22216, value 0.37837, margin 0.17771 / 0.17770,
+  entropy 0.22322, belief 2.50654), the networks 1.6% of the update's norm apart (AdamW amplifying rounding).
+* **Measured** (the GPU shared with the live run): a training step 113.9 ms eager -> 40.4 ms (32.8 ms in a
+  quieter minute); ~23 ms of it float32 kernels, half of that padding rows to the batch's longest. A 3-generation GPU smoke forked from
+  late550@589 (400 games, 384 in flight, both settings, the desktop alone): the linger played 80 and 57 games
+  during trainings of 31.3 s (cold window) and 12.9 s, none after the last generation, quotas exact; the
+  training beside it 68-78 ms a step against 50 ms alone. The desktop's samples one checkpoint behind rise
+  (67% / 54% at that small quota; the live line's ~35% today, from the games in flight carried over).
+* **Turning them on**: `--train-static 1 --selfplay-local-linger 1` at a restart on a build with zero-core
+  feat/train-speed, on top of 82/83's flags (`--sparse 1 --conc 768 --window-sparse 1`, ZERO_TOKEN_GRAPHS=1).
+  Expected: training ~49 -> ~20 s; with the linger the desktop keeps playing through it (~9 games a second
+  minus the training's share of the GPU), a generation ~183 -> ~140-150 s. Measure on the first real
+  generations (the Mac's linger and the shared queue's rates are not in the smoke).
+* **Checks** (tier "opt-in core feature with byte-identical defaults"): zero-core pytest 327 passed + the two known flaky CUDA graph
+  tests (hub todo; one of them failed on main 13a4bd2 in the same session, both pass on a rerun); toy runs
+  from main 13a4bd2 and this core with default settings (MLP and tokens, 3 iterations, seed 3, CPU) byte
+  identical - every shard, checkpoint, optimizer state and the metrics without timings; mtg-zero pytest 69
+  passed; the equivalences above. A full-suite run caught `data.batches` passing the new arguments to
+  window-likes without them (distill's `Taught`, a test stand-in): fixed - the default path calls
+  `W.batch(idx, device)` as before.
