@@ -372,7 +372,16 @@ impl Game {
             (K::ChooseAltCost, Choice::Number(n)) => format!("Alternative cost {n}"),
             (K::ChooseCost, Choice::Number(n)) => format!("Additional cost {}", n + 1),
             (K::PayPhyrexian, Choice::Number(n)) => format!("Pay {} life ({n} Phyrexian)", 2 * n as u32),
-            (K::ChooseMana, Choice::Number(n)) => format!("Mana option {}", n + 1),
+            // A mana ability activated outside a payment (a float, ENGINE.md 86; Lion's Eye
+            // Diamond): the mana it adds, e.g. "Add {R}".
+            (K::ChooseMana, Choice::Number(n)) => match self.agenda.last() {
+                Some(Task::ManaNowPick { prods, .. }) if (n as usize) < prods.len() => {
+                    let v = prods[n as usize];
+                    let s: String = (0..6).flat_map(|t| std::iter::repeat(crate::mana::LETTERS[t]).take(v[t] as usize)).map(|c| format!("{{{c}}}")).collect();
+                    format!("Add {s}")
+                }
+                _ => format!("Mana option {}", n + 1),
+            },
             (K::DivideDamage, Choice::Number(n)) => format!("{n} damage"),
             (K::ChooseFace, Choice::Number(0)) => "Front face".into(),
             (K::ChooseFace, Choice::Number(_)) => "Other face".into(),

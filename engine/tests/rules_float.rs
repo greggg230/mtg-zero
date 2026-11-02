@@ -359,8 +359,10 @@ fn labels(g: &Game) -> Vec<String> {
 
 #[test]
 fn the_spectator_view_names_the_float_options() {
-    let (g, _) = wasteland_at_volcanic(&[]);
+    let (mut g, volc) = wasteland_at_volcanic(&[]);
     assert!(labels(&g).contains(&"Tap Volcanic Island for mana".to_string()), "{:?}", labels(&g));
+    g.choose(act(volc, 0));
+    assert_eq!(labels(&g), vec!["Add {U}", "Add {R}"]);
     let mut g = scen()
         .battlefield(0, &["Mountain"])
         .hand(0, &["Lightning Bolt"])
