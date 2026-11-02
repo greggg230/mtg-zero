@@ -1,0 +1,970 @@
+"""Blunder measurement for the Legacy Izzet Delver mirror (docs/blunders.md): specific mistakes per checkpoint,
+as rates with standard errors, from a fixed seeded set of evaluation-setting games - next to Elo, before
+and during a training fork. Read-only for runs (writes only under --out).
+
+  python tools/delver_blunders.py run CKPT [CKPT ...] --out DIR [--games 2000] [--sims N] [--seed 20261102]
+      [--opp self | ANCHOR.pt] [--engine CHECKOUT] [--device cuda] [--conc 1000] [--jobs 6] [--diff 2-1]
+  python tools/delver_blunders.py play CKPT [CKPT ...] --out DIR ...     # the games only (move logs)
+  python tools/delver_blunders.py scan DIR/x.games.json.gz [...]         # rebuild + count -> <label>.scan.json
+  python tools/delver_blunders.py report DIR/*.scan.json [--diff 2-1,4-3] [--json OUT]   # the table
+  python tools/delver_blunders.py replays RUN [--min-gen G --max-gen H]  # the same counts over recorded
+                                                                         # zero-replay/1 games (no rebuild)
+
+The games. Each checkpoint plays itself (`--opp self`, the default) with its run's evaluation seat on both
+sides: zero.h2h's match (its run's chance_k, the 'cq' move rule, root-view leaves, the belief tilt -
+h2h.run_rule), unpaired, driver seed `--seed`, so every checkpoint gets the same game seeds (the same
+opening deals; the games diverge from there), with the driver's move log. The search budget is `--sims`
+(default: the run's eval_sims, 32; every decision gets it, mana payments too, as zero.h2h's and the
+Delver Lab Play tab's seats); a scan's label is <run>_<iter>_s<sims>. Both seats are the checkpoint, so
+every decision counts. `--opp ANCHOR.pt`: the checkpoint against a fixed anchor (its own run's evaluation
+seat), only the checkpoint's seat counted. The games are then rebuilt in Python from their seeds and
+move logs (`rebuild`: zero-core's Driver derives a game's engine seed from the driver seed and its gid -
+`game_seed`), the spectator view at every engine step, and scanned.
+
+The engine. `--engine CHECKOUT` (default: this checkout) is the mtg-zero checkout whose mtgz (its built
+mtgz/_engine.pyd and pinned zero-core) plays and rebuilds the games: e.g. a float-mana build later. Its
+git commit is recorded in every output file; a scan rebuilds with the engine given to it (the same one
+that played the games - a different build stops at the first move it cannot replay).
+
+The standard errors are cluster (per-game) standard errors of a ratio: games are independent, the
+events of one game are not (two seats of one game, the same Daze opportunity at two decisions).
+
+Metrics (a "mana land" = Volcanic Island, Island, Thundering Falls, Wasteland; a "fetch" = the four
+fetchlands; the AI = the counted players: both seats with --opp self). Exact definitions in the
+functions below; docs/blunders.md has a summary.
+
+  Daze          the AI casts Daze at an opponent's spell; payable = the spell's controller could pay
+                {1} at the cast: floating mana in its pool, else an untapped mana land, else only an
+                uncracked fetch (crack in response, fetch an untapped land); paid = it was asked at
+                Daze's resolution and paid. Daze at its own spell (a Cori-Steel Cutter flurry trigger)
+                is counted apart.
+  floating      (an engine with mana floating; 0 elsewhere by construction: the current engine never
+                leaves mana in a pool outside a payment) a float = mana in a player's pool that outlives
+                the action that made it (`floats`); spent = the pool fell again before the step ended;
+                pointless = nothing of it spent. Opportunities: Wasteland targeting a player's untapped
+                mana land (used = the land tapped for mana before it died, any way: floating or paying
+                for a spell; missed spend = not used while an instant the land could help pay -
+                Brainstorm, Lightning Bolt, Unholy Heat, Prismari Charm - was a legal cast), and Daze
+                returning an untapped Island (floated = the caster floated while casting it; missed spend
+                = no float with such an instant in hand); a Daze returning an untapped Island while a
+                tapped one was there, without a float, is a mana lost on any engine.
+  burn          Lightning Bolt / Unholy Heat resolving at an opponent's creature: the creature
+                survived; could not kill (damage dealt < toughness - damage already marked); into an
+                already damaged creature that survived (the Murktide double-Bolt pattern).
+  land drop     a non-cantrip spell cast in the caster's own main phase with its land drop unused and
+                an untapped-entering land in hand that left it with no untapped land (mana land or
+                fetch), then that land played later the same turn (the 11-01 scan's definition).
+  habits        tools/delver_fingerprints.py's metrics (fetch cracked at once, Brainstorm with a
+                shuffle, Murktide delve, FoW pitches, tap-out into Daze, T1-2 Volcanic, ...).
+"""
+import argparse
+import collections
+import gzip
+import hashlib
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import delver_fingerprints as F  # noqa: E402  (pure Python: the habit metrics, the run lookup)
+
+GAMES_FORMAT = 'delver-blunders-games/1'
+SCAN_FORMAT = 'delver-blunders-scan/1'
+DEFAULT_SEED = 20261102
+MANA_LANDS = {'Volcanic Island': 'UR', 'Island': 'U', 'Thundering Falls': 'UR', 'Wasteland': 'C'}
+ENTERS_TAPPED = {'Thundering Falls'}
+ISLANDS = F.ISLANDS                                       # Daze returns an Island (by type)
+FETCH = F.FETCH
+INSTANTS = {'Brainstorm': 'U', 'Lightning Bolt': 'R', 'Unholy Heat': 'R', 'Prismari Charm': 'UR'}
+INSTANT_COST = {'Brainstorm': 1, 'Lightning Bolt': 1, 'Unholy Heat': 1, 'Prismari Charm': 2}
+BURN = {'Lightning Bolt', 'Unholy Heat'}
+CANTRIPS = {'Brainstorm', 'Ponder'}
+LANDS = set(MANA_LANDS) | FETCH
+TARGET_RE = re.compile(r'target (.+?)#(\d+)')
+DMG_RE = re.compile(r'(\d+) damage to ')
+
+
+# ====================================================================================== the scan
+def pool(ps):
+    """The number of mana in a player's pool (the view's 'pool': one letter a mana, absent when empty)."""
+    return len(ps.get('pool') or '')
+
+
+def lands_of(ps):
+    return [c for c in ps.get('battlefield') or [] if 'land' in c.get('types', ['land'])]
+
+
+def untapped_mana(ps):
+    return [c for c in lands_of(ps) if c.get('name') in MANA_LANDS and not c.get('tapped')]
+
+
+def untapped_fetch(ps):
+    return [c for c in lands_of(ps) if c.get('name') in FETCH and not c.get('tapped')]
+
+
+def dec_of(s):
+    return s.get('decision') or {}
+
+
+def label_of(s, a):
+    if a is None:
+        return None
+    for o in dec_of(s).get('options') or []:
+        if o.get('a') == a:
+            return o.get('t')
+    return None
+
+
+class Game:
+    """A game as a sequence of states: seq[k] is the state at the k-th recorded step (the last one the
+    final state), lab[k] the option chosen there (None at the end). Rebuilt games have a state at every
+    engine step; zero-replay/1 games at every frame (forced picks have none: coarser, still usable)."""
+
+    def __init__(self, d):
+        st, fr = d['states'], d['frames']
+        self.seq = [st[fm.get('s', k)] for k, fm in enumerate(fr)]
+        self.lab = [label_of(s, fm.get('a')) for s, fm in zip(self.seq, fr)]
+        fin = st[d.get('final', len(st) - 1)]
+        if not self.seq or fin is not self.seq[-1]:
+            self.seq.append(fin)
+            self.lab.append(None)
+        self.n = len(self.seq)
+
+    def new_log(self, k):
+        """The log lines that appeared from seq[k - 1] to seq[k]."""
+        if k <= 0:
+            return list(self.seq[0].get('log') or [])
+        a, b = self.seq[k - 1].get('log_n', 0), self.seq[k].get('log_n', 0)
+        lines = self.seq[k].get('log') or []
+        new = b - a
+        if new <= 0:
+            return []
+        return lines[-new:] if new <= len(lines) else list(lines)
+
+    def segment(self, k):
+        s = self.seq[k]
+        return (s.get('turn'), s.get('step'))
+
+    def next_priority(self, k):
+        """The first index after k whose decision is a Priority one (a cast or an activation is
+        complete: costs paid, targets chosen), or None."""
+        for j in range(k + 1, self.n):
+            if dec_of(self.seq[j]).get('kind') == 'Priority':
+                return j
+        return None
+
+    def stack_window(self, sid, j0):
+        """(first, last) indices from j0 on while stack object `sid` is on the stack."""
+        j = j0
+        while j + 1 < self.n and any(o.get('stack') == sid for o in self.seq[j + 1].get('stack') or []):
+            j += 1
+        return j0, j
+
+
+def obj_on_bf(s, oid):
+    for p in s['players']:
+        for c in p.get('battlefield') or []:
+            if c.get('id') == oid:
+                return p['id'], c
+    return None, None
+
+
+PAYMENT = ('PayMana', 'PayPool')            # mid-payment decisions: a pool there may be a payment's
+LOG_FLOAT_KINDS = ('Priority', 'BounceCost')  # where a float is a decision of its own (not a cast's payment)
+
+
+def float_cause(G, p, k):
+    """Why player p floated mana at the step from seq[k]: 'wasteland' (an opponent's Wasteland ability
+    targeting one of p's lands is on the stack), 'daze' (p is returning an Island for its Daze: the
+    decision is Daze's alternative cost, or p returns an Island within the next steps while its Daze is
+    on the stack), else 'other'."""
+    s = G.seq[k]
+    for o in s.get('stack') or []:
+        if o.get('name') == 'Wasteland' and o.get('ability') and o.get('controller') != p and any(
+                obj_on_bf(s, t.get('id'))[0] == p for t in o.get('targets') or []):
+            return 'wasteland'
+    if dec_of(s).get('kind') in ('BounceCost', 'ChooseAltCost'):
+        return 'daze'
+    if any(o.get('name') == 'Daze' and o.get('controller') == p for o in s.get('stack') or []):
+        for x in range(k + 1, min(G.n, k + 4)):
+            if any(f'P{p} returns ' in ln for ln in G.new_log(x)):
+                return 'daze'
+    return 'other'
+
+
+def floats(G, p):
+    """Player p's floats: [(index, units, spent units, cause)]. A float = mana in p's pool that outlives
+    the action that made it: p's pool larger at a state than at the previous observation of the same
+    step (0 at the step's start), observations being the step's states outside mid-payment decisions
+    (PayMana, PayPool: a payment's mana there is not floating) and its last state - or, when no state
+    shows it (the engine passes priority by itself when pass is the only option, so the step may end
+    first), a Priority or BounceCost decision of p, not a cast or a land, whose step logged 'P<p>
+    activates a mana ability of ...' and no cast, payment or other activation of p (one unit a line;
+    nothing of it spent). Spent: falls of the pool at later
+    observations of the step. Index: the state that shows it (the step's next state for a log float).
+    Cause: `float_cause` at the step that made it."""
+    out = []
+    k = 0
+    while k < G.n:
+        seg = G.segment(k)
+        j = k
+        while j + 1 < G.n and G.segment(j + 1) == seg:
+            j += 1
+        obs = [i for i in range(k, j + 1) if dec_of(G.seq[i]).get('kind') not in PAYMENT or i == j]
+        prev, prev_i = 0, None
+        open_ = []                                  # this step's floats, in order
+        for i in obs:
+            v = pool(G.seq[i]['players'][p])
+            if v > prev:
+                src = i - 1 if i > k else i         # the step that made it (the previous state's decision)
+                if prev_i is not None:
+                    # the latest decision of p since the previous observation (the float's own step)
+                    src = next((x for x in range(i - 1, prev_i - 1, -1) if dec_of(G.seq[x]).get('player') == p), i - 1)
+                open_.append([i, v - prev, 0, float_cause(G, p, max(src, 0))])
+            elif v < prev:
+                for f in open_:
+                    f[2] += prev - v
+            prev, prev_i = v, i
+        out.extend(tuple(f) for f in open_)
+        k = j + 1
+    # floats no state shows
+    seen = {f[0] for f in out}
+    other = re.compile(rf'P{p} (casts |pays |activates (?!a mana ability))')
+    for k in range(G.n - 1):
+        d = dec_of(G.seq[k])
+        lab = G.lab[k] or ''
+        if d.get('player') != p or d.get('kind') not in LOG_FLOAT_KINDS or lab.startswith(('Cast ', 'Play ')):
+            continue
+        lines = G.new_log(k + 1)
+        n = sum(1 for ln in lines if f'P{p} activates a mana ability of ' in ln)
+        if not n or any(other.search(ln) for ln in lines):
+            continue
+        if k + 1 in seen or pool(G.seq[k + 1]['players'][p]) > pool(G.seq[k]['players'][p]):
+            continue                                 # shown by a state: counted above
+        out.append((k + 1, n, 0, float_cause(G, p, k)))
+    return sorted(out)
+
+
+def scan_daze(G, C, players, ex):
+    """Daze cast at an opponent's spell: can its controller pay {1}, and does it."""
+    for k in range(G.n - 1):
+        if G.lab[k] != 'Cast Daze':
+            continue
+        s = G.seq[k]
+        p = dec_of(s).get('player')
+        if players is not None and p not in players:
+            continue
+        before = {o.get('stack') for o in s.get('stack') or []}
+        daze = jd = None
+        for j in range(k + 1, min(G.n, k + 16)):
+            new = [o for o in G.seq[j].get('stack') or [] if o.get('name') == 'Daze' and o.get('spell')
+                   and o.get('controller') == p and o.get('stack') not in before]
+            if new and new[0].get('targets'):
+                daze, jd = new[0], j
+                break
+        if daze is None:
+            continue
+        # (a spell target is the spell's card: {id, name, live}; the stack object of a spell has its card's id)
+        t = daze['targets'][0]
+        tobj = next((o for o in G.seq[jd].get('stack') or [] if o.get('spell') and (
+            o.get('id') == t.get('id') if 'id' in t else o.get('stack') == t.get('stack'))), None)
+        if tobj is None:
+            continue
+        q = tobj.get('controller')
+        if q == p:
+            C['daze_own_spell'] += 1
+            continue
+        them = s['players'][q]
+        cls = 'pool' if pool(them) else ('land' if untapped_mana(them) else ('fetch' if untapped_fetch(them) else None))
+        C['daze_cast'] += 1
+        if cls:
+            C['daze_payable'] += 1
+            C['daze_pay_' + cls] += 1
+        _, j1 = G.stack_window(daze['stack'], jd)
+        asked = paid = False
+        for j in range(jd, j1 + 1):
+            sj = G.seq[j]
+            dj = dec_of(sj)
+            stk = sj.get('stack') or []
+            if dj.get('kind') == 'YesNo' and dj.get('player') == q and stk and stk[-1].get('stack') == daze['stack']:
+                asked = True
+                paid = paid or G.lab[j] == 'Yes'
+        C['daze_asked'] += asked
+        if cls:
+            C['daze_paid'] += paid
+            C['daze_paid_' + cls] += paid
+            if cls == 'pool':
+                ex.append(('daze into floating mana', k, s.get('turn'), f'P{p} Daze at {tobj.get("name")}, '
+                                                                       f'P{q} pool {them.get("pool")}, paid {paid}'))
+
+
+def scan_floats(G, C, players, ex):
+    """Floats, and the two kinds of opportunities (Wasteland at an untapped mana land; Daze returning an
+    untapped Island)."""
+    fls = {p: floats(G, p) for p in (0, 1) if players is None or p in players}
+    for p, fs in fls.items():
+        for i, units, spent, cause in fs:
+            C['float'] += 1
+            C['float_units'] += units
+            C['float_spent'] += spent > 0
+            C['float_pointless'] += spent == 0
+            C['float_wasted_units'] += max(0, units - spent)
+            C['float_' + cause] += 1
+            if cause == 'other':
+                ex.append(('float outside a Wasteland / Daze', i, G.seq[i].get('turn'), f'P{p} pool {units}'))
+    # ---- Wasteland targeting an untapped mana land
+    seen = set()
+    for k in range(G.n):
+        for o in G.seq[k].get('stack') or []:
+            if o.get('name') != 'Wasteland' or not o.get('ability') or not o.get('targets') or o.get('stack') in seen:
+                continue
+            seen.add(o.get('stack'))
+            tid = o['targets'][0].get('id')
+            q, land = obj_on_bf(G.seq[k], tid)
+            if land is None or q == o.get('controller') or land.get('name') not in MANA_LANDS or land.get('tapped'):
+                continue
+            if players is not None and q not in players:
+                continue
+            _, k1 = G.stack_window(o['stack'], k)
+            C['waste_opp'] += 1
+            fl = [f for f in fls.get(q, []) if k < f[0] <= k1 + 1 and f[3] == 'wasteland']
+            used = bool(fl) or any((obj_on_bf(G.seq[j], tid)[1] or {}).get('tapped') for j in range(k, k1 + 1))
+            C['waste_used'] += used
+            C['waste_float'] += bool(fl)
+            C['waste_float_spent'] += any(f[2] > 0 for f in fl)
+            if not used:
+                colors = set(MANA_LANDS[land['name']])
+                can = set()
+                for j in range(k, k1 + 1):
+                    dj = dec_of(G.seq[j])
+                    if dj.get('kind') != 'Priority' or dj.get('player') != q:
+                        continue
+                    for opt in dj.get('options') or []:
+                        t = opt.get('t') or ''
+                        if t.startswith('Cast ') and t[5:] in INSTANTS and colors & set(INSTANTS[t[5:]]):
+                            can.add(t[5:])
+                if can:
+                    C['waste_missed_spend'] += 1
+                    C['waste_missed_spend_bs'] += 'Brainstorm' in can
+                    ex.append(('Wasteland: castable instant, land unused', k, G.seq[k].get('turn'),
+                               f'P{q} {land["name"]} doomed, could cast {sorted(can)}'))
+    # ---- Daze returning an untapped Island
+    for k in range(G.n - 1):
+        if G.lab[k] != 'Cast Daze':
+            continue
+        s = G.seq[k]
+        p = dec_of(s).get('player')
+        if players is not None and p not in players:
+            continue
+        me0 = s['players'][p]
+        isl = [c for c in lands_of(me0) if c.get('name') in ISLANDS]
+        back = jb = None
+        for x in range(k + 1, min(G.n, k + 20)):
+            if G.segment(x) != G.segment(k):
+                break
+            ids = {c.get('id') for c in G.seq[x]['players'][p].get('battlefield') or []}
+            gone = [c for c in isl if c.get('id') not in ids]
+            if gone:
+                back, jb = gone[0], x
+                break
+        if back is None:
+            continue                                  # hard cast (paid {1}{U}), or no Island left
+        C['daze_bounce'] += 1
+        fl = [f for f in fls.get(p, []) if k < f[0] <= jb + 1 and f[3] == 'daze']
+        # a choice: a tapped and an untapped Island both there (returning the untapped one without a float
+        # loses a mana; returning the tapped one does not)
+        if any(c.get('tapped') for c in isl) and any(not c.get('tapped') for c in isl):
+            C['daze_bounce_choice'] += 1
+            C['daze_bounce_untapped_over_tapped'] += not back.get('tapped') and not fl
+        if back.get('tapped'):
+            continue
+        C['daze_bounce_untapped'] += 1
+        C['daze_bounce_float'] += bool(fl)
+        C['daze_bounce_float_spent'] += any(f[2] > 0 for f in fl)
+        if not fl:
+            me1 = G.seq[jb]['players'][p]
+            colors = set(MANA_LANDS.get(back['name'], ''))
+            other = len(untapped_mana(me1))
+            hand = [c.get('name') for c in me1.get('hand') or []]
+            can = [x for x in hand if x in INSTANTS and colors & set(INSTANTS[x]) and INSTANT_COST[x] <= 1 + other]
+            if can:
+                C['daze_bounce_missed_spend'] += 1
+    return fls
+
+
+def scan_burn(G, C, players, ex):
+    """Lightning Bolt / Unholy Heat leaving the stack aimed at an opponent's creature."""
+    seen = set()
+    for k in range(G.n):
+        for o in G.seq[k].get('stack') or []:
+            if o.get('name') not in BURN or not o.get('spell') or o.get('stack') in seen:
+                continue
+            caster = o.get('controller')
+            if players is not None and caster not in players:
+                seen.add(o.get('stack'))
+                continue
+            _, j1 = G.stack_window(o['stack'], k)
+            if j1 + 1 >= G.n:
+                continue                          # still on the stack at the end
+            seen.add(o.get('stack'))
+            pend = G.seq[j1]
+            obj = next(x for x in pend.get('stack') or [] if x.get('stack') == o['stack'])
+            text = ' | '.join(G.new_log(j1 + 1))
+            tid = ((obj.get('targets') or [{}])[0]).get('id')
+            if tid is None:
+                m = TARGET_RE.search(text)
+                tid = int(m.group(2)) if m else None
+            ctl, c = obj_on_bf(pend, tid)
+            if c is None or 'creature' not in c.get('types', []) or ctl == caster:
+                continue
+            if f'counters {o["name"]}' in text or 'damage to' not in text:
+                C['burn_countered'] += 1
+                continue
+            m = DMG_RE.search(text)
+            dealt = int(m.group(1)) if m else 0
+            tough = (c.get('pt') or [0, 0])[1]
+            dmg = c.get('damage', 0) or 0
+            survived = obj_on_bf(G.seq[j1 + 1], tid)[1] is not None
+            C['burn_creature'] += 1
+            C['burn_survived'] += survived
+            C['burn_hopeless'] += dealt < tough - dmg
+            if dmg > 0:
+                C['burn_damaged'] += 1
+                C['burn_damaged_survived'] += survived
+            if survived:
+                C['burn_survived_' + ('heat' if o['name'] == 'Unholy Heat' else 'bolt')] += 1
+                ex.append(('burn survivor' + (' (already damaged)' if dmg else ''), j1, pend.get('turn'),
+                           f'P{caster} {o["name"]} for {dealt} at {c.get("name")} {c.get("pt")} damage {dmg}'))
+
+
+def scan_land_drop(G, C, players, ex):
+    """A non-cantrip spell cast with the land drop unused and an untapped-entering land in hand that
+    tapped the caster out (no untapped mana land or fetch at the next priority decision), then a land
+    from that hand played the same turn."""
+    for k in range(G.n - 1):
+        lab = G.lab[k]
+        if not lab or not lab.startswith('Cast '):
+            continue
+        card = lab[5:]
+        if card in CANTRIPS or card in F.FREE:
+            continue
+        s = G.seq[k]
+        d = dec_of(s)
+        p = d.get('player')
+        if players is not None and p not in players:
+            continue
+        if d.get('kind') != 'Priority' or s.get('active') != p or s.get('step') not in ('main1', 'main2') or s.get('stack'):
+            continue
+        me = s['players'][p]
+        if me.get('lands_played', 0) != 0:
+            continue
+        hand_lands = {c.get('name') for c in me.get('hand') or [] if c.get('name') in LANDS and c.get('name') not in ENTERS_TAPPED}
+        if not hand_lands:
+            continue
+        C['ld_cast'] += 1
+        j = G.next_priority(k)
+        if j is None:
+            continue
+        mj = G.seq[j]['players'][p]
+        if untapped_mana(mj) or untapped_fetch(mj):
+            continue
+        C['ld_tapout'] += 1
+        played = None
+        for x in range(k + 1, G.n):
+            stop = False
+            for ln in G.new_log(x):
+                if 'Untap turn' in ln:
+                    stop = True
+                    break
+                m = re.search(rf'P{p} plays (.*)$', ln)
+                if m and m.group(1) in hand_lands:
+                    played = m.group(1)
+            if stop or played:
+                break
+        if not played:
+            continue
+        C['ld_blunder'] += 1
+        op = 1 - p
+        them = G.seq[j]['players'][op]
+        live = any(c.get('name') == 'Daze' for c in them.get('hand') or []) and any(
+            c.get('name') in ISLANDS for c in them.get('battlefield') or [])
+        C['ld_blunder_live_daze'] += live
+        dazed = False
+        for x in range(k + 1, G.n):
+            lines = G.new_log(x)
+            if any(f'P{op} casts Daze' in ln for ln in lines):
+                dazed = True
+                break
+            if any(f'{card} Stack ->' in ln for ln in lines):
+                break
+        C['ld_blunder_dazed'] += dazed
+        ex.append(('tap-out with an unused land drop', k, s.get('turn'), f'P{p} cast {card}, then played {played}'))
+
+
+def scan_game(d, players=None, examples=None):
+    """All counts of one game `d` (zero-replay/1-like: states, frames, result) -> Counter. `players`: the
+    counted players (None: both). `examples`: a list that gets (metric, step index, turn, text) rows."""
+    C = collections.Counter()
+    ex = examples if examples is not None else []
+    G = Game(d)
+    C['games'] = 1
+    C['pool_states'] = sum(1 for s in G.seq if any(pool(ps) for ps in s.get('players') or []))
+    scan_daze(G, C, players, ex)
+    scan_floats(G, C, players, ex)
+    scan_burn(G, C, players, ex)
+    scan_land_drop(G, C, players, ex)
+    B = F.Band()
+    F.scan_game(d, B, players)
+    for key, v in B.c.items():
+        C['fp_' + key] += v
+    for (lands, pos), (keep, n, prior, vis) in B.mull.items():
+        if lands == 1:
+            C['mull1_n'] += n
+            C['mull1_keep'] += keep
+    return C
+
+
+# ====================================================================================== the report
+# (section, label, numerator, denominator); denominator None = per 100 games
+METRICS = [
+    ('Daze', 'Daze cast at an opponent spell (/100 g)', 'daze_cast', None),
+    ('Daze', 'into payable mana (any)', 'daze_payable', 'daze_cast'),
+    ('Daze', '  ... floating mana in the pool', 'daze_pay_pool', 'daze_cast'),
+    ('Daze', '  ... an untapped mana land', 'daze_pay_land', 'daze_cast'),
+    ('Daze', '  ... only an uncracked fetch', 'daze_pay_fetch', 'daze_cast'),
+    ('Daze', 'payable: then paid', 'daze_paid', 'daze_payable'),
+    ('Daze', '  floating: then paid', 'daze_paid_pool', 'daze_pay_pool'),
+    ('Daze', '  land: then paid', 'daze_paid_land', 'daze_pay_land'),
+    ('Daze', 'Daze at its own spell (/100 g)', 'daze_own_spell', None),
+    ('float', 'floats (/100 g)', 'float', None),
+    ('float', '  spent before the pool emptied', 'float_spent', 'float'),
+    ('float', '  pointless (none of it spent)', 'float_pointless', 'float'),
+    ('float', '  outside Wasteland / Daze (/100 g)', 'float_other', None),
+    ('float', 'Wasteland at an untapped mana land (/100 g)', 'waste_opp', None),
+    ('float', '  land used before it died', 'waste_used', 'waste_opp'),
+    ('float', '  floated', 'waste_float', 'waste_opp'),
+    ('float', '  floated and spent', 'waste_float_spent', 'waste_opp'),
+    ('float', '  unused, a castable instant could use it', 'waste_missed_spend', 'waste_opp'),
+    ('float', 'Daze returning an untapped Island (/100 g)', 'daze_bounce_untapped', None),
+    ('float', '  floated', 'daze_bounce_float', 'daze_bounce_untapped'),
+    ('float', '  floated and spent', 'daze_bounce_float_spent', 'daze_bounce_untapped'),
+    ('float', '  no float, an instant in hand could use it', 'daze_bounce_missed_spend', 'daze_bounce_untapped'),
+    ('float', 'Daze returned untapped over a tapped Island', 'daze_bounce_untapped_over_tapped', 'daze_bounce_choice'),
+    ('burn', 'burn at an opponent creature (/100 g)', 'burn_creature', None),
+    ('burn', '  creature survived', 'burn_survived', 'burn_creature'),
+    ('burn', '  could not kill (dealt < toughness left)', 'burn_hopeless', 'burn_creature'),
+    ('burn', '  into a damaged creature that survived', 'burn_damaged_survived', 'burn_damaged'),
+    ('burn', '  damaged survivor (/100 g)', 'burn_damaged_survived', None),
+    ('land drop', 'tap-out, then the land played', 'ld_blunder', 'ld_cast'),
+    ('land drop', '  (/100 g)', 'ld_blunder', None),
+    ('land drop', '  ... into a live Daze', 'ld_blunder_live_daze', 'ld_blunder'),
+    ('land drop', '  ... Dazed', 'ld_blunder_dazed', 'ld_blunder'),
+    ('habits', 'fetch cracked at once', 'fp_fetch_now', 'fp_fetch_cracked'),
+    ('habits', 'Brainstorm with a shuffle', 'fp_bs_shuffle', 'fp_bs'),
+    ('habits', 'Murktide delve best', 'fp_murk_best', 'fp_murk'),
+    ('habits', 'FoW pitched a FoW', 'fp_fow_pitch_fow', 'fp_fow_alt'),
+    ('habits', 'tap-out into a live Daze', 'fp_daze_tapout', 'fp_daze_live'),
+    ('habits', '  ... then Dazed', 'fp_daze_tapout_dazed', 'fp_daze_tapout'),
+    ('habits', 'T1-2 Volcanic, blue only', 'fp_t12_ublue_volc', 'fp_t12_ublue'),
+    ('habits', 'kept a 1-land seven', 'mull1_keep', 'mull1_n'),
+    ('habits', 'starting player won', 'fp_starter_won', 'fp_decided'),
+]
+
+
+def ratio_se(xs, ns):
+    """The ratio sum(x) / sum(n) of per-game counts and its cluster standard error (games independent)."""
+    X, N, G = sum(xs), sum(ns), len(xs)
+    if N == 0:
+        return None, None, 0
+    r = X / N
+    if G < 2:
+        return r, None, N
+    v = sum((x - r * n) ** 2 for x, n in zip(xs, ns)) * G / (G - 1)
+    return r, math.sqrt(v) / N, N
+
+
+def per100_se(xs):
+    G = len(xs)
+    if G == 0:
+        return None, None, 0
+    m = sum(xs) / G
+    if G < 2:
+        return 100 * m, None, G
+    v = sum((x - m) ** 2 for x in xs) / (G - 1)
+    return 100 * m, 100 * math.sqrt(v / G), G
+
+
+def metric(per_game, num, den):
+    """-> (value, se, n): a rate (den given) or a count per 100 games (den None)."""
+    xs = [g.get(num, 0) for g in per_game]
+    if den is None:
+        return per100_se(xs)
+    return ratio_se(xs, [g.get(den, 0) for g in per_game])
+
+
+def fmt(v, se, n, den):
+    if v is None:
+        return f'- ({n})'
+    if den is None:
+        return f'{v:.1f} +-{se:.1f}' if se is not None else f'{v:.1f}'
+    return f'{100 * v:.1f} +-{100 * se:.1f} ({n})' if se is not None else f'{100 * v:.1f} ({n})'
+
+
+def parse_diffs(spec, n):
+    """`--diff` '2-1,4-3' -> [(1, 0), (3, 2)] (column j minus column i, 1-based); None: last - first when
+    there are two columns."""
+    if spec is None:
+        return [(n - 1, 0)] if n == 2 else []
+    out = []
+    for part in filter(None, spec.split(',')):
+        j, i = (int(x) for x in part.split('-'))
+        if not (1 <= i <= n and 1 <= j <= n):
+            raise SystemExit(f'--diff {part}: columns are 1..{n}')
+        out.append((j - 1, i - 1))
+    return out
+
+
+def table(scans, diffs=None):
+    """The report: one column a scan (a checkpoint at a budget), then the differences `diffs` [(j, i)]:
+    column j minus column i, with the se of two independent sets of games."""
+    diffs = parse_diffs(None, len(scans)) if diffs is None else diffs
+    names = [s['label'] for s in scans]
+    w0 = max(len(m[1]) for m in METRICS) + 2
+    cols = names + [f'({j + 1}) - ({i + 1})' for j, i in diffs]
+    ws = [max(22, len(c) + 2) for c in cols]
+    out = [f'({k + 1}) {c}' for k, c in enumerate(names)] + ['']
+    out.append('metric'.ljust(w0) + ''.join(f'({k + 1})'.rjust(w) for k, w in enumerate(ws[:len(names)]))
+               + ''.join(c.rjust(w) for c, w in zip(cols[len(names):], ws[len(names):])))
+    out.append('games'.ljust(w0) + ''.join(str(len(s['games'])).rjust(w) for s, w in zip(scans, ws)))
+    sec = None
+    for section, label, num, den in METRICS:
+        if section != sec:
+            sec = section
+            out.append(f'-- {section}')
+        vals = [metric([g['c'] for g in s['games']], num, den) for s in scans]
+        row = label.ljust(w0) + ''.join(fmt(v, se, n, den).rjust(w) for (v, se, n), w in zip(vals, ws))
+        for (j, i), w in zip(diffs, ws[len(names):]):
+            (a, sa, _), (b, sb, _) = vals[i], vals[j]
+            if a is not None and b is not None and sa is not None and sb is not None:
+                k = 1 if den is None else 100
+                row += f'{k * (b - a):+.1f} +-{k * math.hypot(sa, sb):.1f}'.rjust(w)
+            else:
+                row += '-'.rjust(w)
+        out.append(row)
+    fl = sum(g['c'].get('float', 0) for s in scans for g in s['games'])
+    ps = sum(g['c'].get('pool_states', 0) for s in scans for g in s['games'])
+    out.append('')
+    out.append('rates in % +- 1 se (n = the denominator); /100 g = per 100 games +- 1 se; se: per-game clusters')
+    out.append(f'mana in a pool at {ps} recorded states, {fl} floats' +
+               (' - this engine does not float mana: the float rows are 0 by construction' if ps == 0 else ''))
+    return '\n'.join(out)
+
+
+def as_json(scans):
+    res = []
+    for s in scans:
+        pg = [g['c'] for g in s['games']]
+        res.append({'label': s['label'], 'meta': s.get('meta'), 'games': len(pg),
+                    'metrics': {f'{sec}: {lab.strip()}': dict(zip(('value', 'se', 'n'), metric(pg, num, den)),
+                                                             num=num, den=den) for sec, lab, num, den in METRICS},
+                    'totals': dict(sum((collections.Counter(c) for c in pg), collections.Counter()))})
+    return res
+
+
+# ====================================================================================== the games
+def load_engine(path):
+    """Import mtgz (and its pinned zero-core) from the checkout `path`; -> the engine module."""
+    path = os.path.abspath(path)
+    if not os.path.isfile(os.path.join(path, 'mtgz', '__init__.py')):
+        raise SystemExit(f'--engine {path}: not an mtg-zero checkout (no mtgz/)')
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    import mtgz  # noqa: F401
+    import mtgz.az  # noqa: F401
+    real = os.path.normcase(os.path.realpath(mtgz.__file__))
+    if not real.startswith(os.path.normcase(os.path.realpath(path))):
+        raise SystemExit(f'mtgz was imported from {mtgz.__file__}, not --engine {path} (import order)')
+    from zero.games import engine
+    return engine()
+
+
+def engine_info(path):
+    path = os.path.abspath(path)
+
+    def git(*a):
+        try:
+            return subprocess.run(['git', '-C', path, *a], capture_output=True, text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+    pyd = os.path.join(path, 'mtgz', '_engine.pyd')
+    if not os.path.exists(pyd):
+        pyd = next((os.path.join(path, 'mtgz', f) for f in os.listdir(os.path.join(path, 'mtgz'))
+                    if f.startswith('_engine') and f.endswith(('.so', '.pyd'))), None)
+    h = None
+    if pyd and os.path.exists(pyd):
+        with open(pyd, 'rb') as f:
+            h = hashlib.sha256(f.read()).hexdigest()[:16]
+    return {'checkout': path, 'commit': git('rev-parse', 'HEAD'), 'branch': git('rev-parse', '--abbrev-ref', 'HEAD'),
+            'dirty': bool(git('status', '--porcelain', '--untracked-files=no')), 'engine_sha256': h}
+
+
+def sha256(path):
+    with open(path, 'rb') as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def label_for(ckpt):
+    run = os.path.basename(os.path.dirname(os.path.dirname(os.path.abspath(ckpt))))
+    m = re.search(r'iter_(\d+)\.pt$', ckpt)
+    return f'{run}_{m.group(1)}' if m else os.path.splitext(os.path.basename(ckpt))[0]
+
+
+def play(ckpt, out, games=1000, seed=DEFAULT_SEED, opp='self', sims=None, device='cuda', threads=12, groups=4,
+         conc=512, sparse=True, graphs=None, engine_path=ROOT, log=print):
+    """`games` games of `ckpt` (its run's evaluation seat; against itself or the anchor `opp`), with move
+    logs -> the path of <out>/<label>.games.json.gz."""
+    from zero import h2h
+    cfg = h2h.run_config(ckpt)
+    if not cfg.get('spec'):
+        raise SystemExit(f'{ckpt}: no run config.json with a spec next to its models/')
+    spec = cfg.get('eval_spec') or cfg['spec']
+    sims = int(sims or cfg.get('eval_sims', 32))
+    chance_k = int(cfg.get('chance_k', 0))
+    sa = dict(h2h.run_rule(ckpt))
+    b = ckpt if opp == 'self' else opp
+    sb = dict(sa) if opp == 'self' else dict(h2h.run_rule(opp))
+    if graphs is None:
+        graphs = device.startswith('cuda')
+    t0 = time.time()
+    r = h2h.match(ckpt, b, games=games, sims=sims, chance_k=chance_k, seed=seed, threads=threads, groups=groups,
+                  device=device, spec=spec, conc=min(conc, games), seat_a=sa, seat_b=sb, max_steps=5000,
+                  move_log=1_000_000, rows=True, paired=False, graphs=graphs or None, sparse=sparse)
+    wall = time.time() - t0
+    rec = {'format': GAMES_FORMAT, 'label': label_for(ckpt) + f'_s{sims}' + ('' if opp == 'self' else '_vs_' + label_for(opp)),
+           'ckpt': os.path.abspath(ckpt), 'ckpt_sha256': sha256(ckpt)[:16], 'opp': 'self' if opp == 'self' else os.path.abspath(opp),
+           'spec': spec, 'driver_seed': seed, 'paired': False, 'sims': sims, 'chance_k': chance_k, 'seat_a': sa,
+           'seat_b': sb, 'engine': engine_info(engine_path), 'device': device, 'created': int(time.time()),
+           'wall_s': round(wall, 1), 'summary': {k: v for k, v in r.items() if k != 'rows'}, 'rows': r['rows']}
+    os.makedirs(out, exist_ok=True)
+    path = os.path.join(out, rec['label'] + '.games.json.gz')
+    with gzip.open(path, 'wt', encoding='utf-8') as f:
+        json.dump(rec, f, separators=(',', ':'))
+    log(f'{rec["label"]}: {games} games in {wall:.0f} s ({wall / games:.2f} s a game) -> {path}')
+    return path
+
+
+M64 = (1 << 64) - 1
+
+
+def split64(x):
+    z = (x + 0x9E3779B97F4A7C15) & M64
+    z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & M64
+    z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & M64
+    return z ^ (z >> 31)
+
+
+def _rotl(x, k):
+    return ((x << k) | (x >> (64 - k))) & M64
+
+
+def game_seed(driver_seed, gid, paired=False):
+    """The engine seed zero-core's Driver gives game `gid` (its rng: split64 of the driver seed and the
+    game's stream - the pair's with `paired` -, the first draw of a xoshiro256++ seeded by splitmix)."""
+    x = split64(int(driver_seed) ^ split64((gid // 2 if paired else gid) + 1))
+    s = []
+    for _ in range(4):
+        x = (x + 0x9E3779B97F4A7C15) & M64
+        s.append(split64(x))
+    if not any(s):
+        s[0] = 1
+    return (_rotl((s[0] + s[3]) & M64, 23) + s[0]) & M64
+
+
+def rebuild(E, spec, driver_seed, row, paired=False):
+    """A game of the driver's move log rebuilt in the engine `E` -> a zero-replay/1-like dict (a state at
+    every engine step; frames {s, p, k 'nn' | 'forced', a}). Raises when the log does not replay."""
+    sp = json.loads(spec)
+    sp['log'] = True
+    g = E.Game('mtg', json.dumps(sp), 2, game_seed(driver_seed, int(row['gid']), paired))
+    states, frames = [], []
+
+    def step(a, kind):
+        states.append(json.loads(g.export_state()))
+        frames.append({'s': len(states) - 1, 'p': g.to_move, 'k': kind, 'a': int(a)})
+        g.step(int(a))
+
+    def auto():
+        while g.to_move is not None and len(g.legal()) == 1:
+            step(g.legal()[0], 'forced')
+    for mi, (seat, a, legal) in enumerate(row['moves']):
+        if not (len(legal) == 1 and g.to_move == seat and list(g.legal()) == list(legal)):
+            auto()
+        if g.to_move != seat or list(g.legal()) != list(legal):
+            raise RuntimeError(f'game {row["gid"]}: the rebuilt game left its move log at move {mi} (another engine?)')
+        step(a, 'nn')
+    auto()
+    if g.to_move is not None:
+        raise RuntimeError(f'game {row["gid"]}: the move log ended before the game (move_log too small?)')
+    states.append(json.loads(g.export_state()))
+    return {'format': 'zero-replay/1', 'states': states, 'frames': frames, 'result': row['result'],
+            'rounds': row['rounds'], 'gid': row['gid'], 'final': len(states) - 1}
+
+
+_W = {}
+
+
+def _init_worker(engine_path):
+    import psutil
+    try:
+        psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == 'nt' else 10)
+    except (psutil.Error, AttributeError):
+        pass
+    _W['E'] = load_engine(engine_path)
+
+
+def _scan_row(args):
+    spec, seed, row, players, paired = args
+    d = rebuild(_W['E'], spec, seed, row, paired)
+    ex = []
+    c = scan_game(d, players, ex)
+    return {'gid': row['gid'], 'result': row['result'], 'rounds': row['rounds'], 'c': dict(c),
+            'ex': [list(e) for e in ex[:20]]}
+
+
+def scan_file(path, engine_path=ROOT, jobs=4, log=print):
+    """Rebuild and count every game of a .games.json.gz -> the path of its .scan.json."""
+    with gzip.open(path, 'rt', encoding='utf-8') as f:
+        rec = json.load(f)
+    if rec.get('format') != GAMES_FORMAT:
+        raise SystemExit(f'{path}: not a {GAMES_FORMAT} file')
+    eng = engine_info(engine_path)
+    if rec['engine'].get('commit') and eng.get('commit') and rec['engine']['commit'] != eng['commit']:
+        log(f'note: games played by commit {rec["engine"]["commit"][:12]}, rebuilt by {eng["commit"][:12]}')
+    t0 = time.time()
+    rows = rec['rows']
+    args = [(rec['spec'], rec['driver_seed'], row, None if rec['opp'] == 'self' else {row['gid'] % 2}, rec.get('paired', False))
+            for row in rows]
+    if jobs > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=jobs, initializer=_init_worker, initargs=(engine_path,)) as ex:
+            games = list(ex.map(_scan_row, args, chunksize=8))
+    else:
+        _init_worker(engine_path)
+        games = [_scan_row(a) for a in args]
+    if not re.search(r'_s\d+', rec['label']):
+        rec['label'] = f"{rec['label']}_s{rec['sims']}"
+    meta = {k: rec.get(k) for k in ('label', 'ckpt', 'ckpt_sha256', 'opp', 'driver_seed', 'sims', 'chance_k', 'seat_a',
+                                    'device', 'wall_s', 'created')}
+    meta['engine_play'] = rec['engine']
+    meta['engine_scan'] = eng
+    meta['scan_s'] = round(time.time() - t0, 1)
+    meta['score'] = (rec.get('summary') or {}).get('a_score')
+    out = os.path.join(os.path.dirname(path), rec['label'] + '.scan.json')
+    with open(out, 'w', encoding='utf-8') as f:
+        json.dump({'format': SCAN_FORMAT, 'label': rec['label'], 'meta': meta, 'games': games}, f, separators=(',', ':'))
+    log(f'{rec["label"]}: scanned {len(games)} games in {meta["scan_s"]} s -> {out}')
+    return out
+
+
+def load_scan(path):
+    with open(path, encoding='utf-8') as f:
+        s = json.load(f)
+    if s.get('format') != SCAN_FORMAT:
+        raise SystemExit(f'{path}: not a {SCAN_FORMAT} file')
+    return s
+
+
+def scan_replays(run, lo=0, hi=10 ** 9):
+    """The counts over a run's recorded evaluation replays (runs/<run>/replays, zero-replay/1) -> a scan
+    dict (games of generations lo..hi; frames, not every engine step: coarser than a rebuilt game)."""
+    import glob
+    d0 = F.run_dir(run)
+    games = []
+    for f in sorted(glob.glob(os.path.join(d0, 'replays', '*.json.gz'))):
+        with gzip.open(f, 'rt', encoding='utf-8') as fh:
+            d = json.load(fh)
+        if d.get('format') != 'zero-replay/1' or d.get('selfplay'):
+            continue
+        g = F.gen_of(d)
+        if g is None or g < lo or g > hi:
+            continue
+        ex = []
+        c = scan_game(d, None, ex)
+        games.append({'gid': os.path.basename(f), 'gen': g, 'result': d.get('result'), 'c': dict(c),
+                      'ex': [list(e) for e in ex[:20]]})
+    return {'format': SCAN_FORMAT, 'label': f'{os.path.basename(os.path.normpath(d0))} {lo}-{hi} replays',
+            'meta': {'replays': d0, 'min_gen': lo, 'max_gen': hi}, 'games': games}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    sub = ap.add_subparsers(dest='cmd', required=True)
+
+    def game_args(p):
+        p.add_argument('ckpts', nargs='+')
+        p.add_argument('--out', required=True)
+        p.add_argument('--games', type=int, default=2000)
+        p.add_argument('--seed', type=int, default=DEFAULT_SEED, help=f'the driver seed (default {DEFAULT_SEED})')
+        p.add_argument('--opp', default='self', help="'self' (default) or a fixed anchor checkpoint")
+        p.add_argument('--sims', type=int, default=None, help="default: the run's eval_sims")
+        p.add_argument('--device', default='cuda')
+        p.add_argument('--threads', type=int, default=16)
+        p.add_argument('--groups', type=int, default=4)
+        p.add_argument('--conc', type=int, default=1000)
+        p.add_argument('--sparse', type=int, default=1)
+    for name in ('run', 'play'):
+        p = sub.add_parser(name)
+        game_args(p)
+        p.add_argument('--engine', default=ROOT, help='the mtg-zero checkout that plays and rebuilds (default: this one)')
+        p.add_argument('--jobs', type=int, default=6)
+        p.add_argument('--json', default=None)
+        p.add_argument('--diff', default=None, help="difference columns, e.g. '2-1,4-3' (default: 2-1 for two columns)")
+    p = sub.add_parser('scan')
+    p.add_argument('files', nargs='+')
+    p.add_argument('--engine', default=ROOT)
+    p.add_argument('--jobs', type=int, default=6)
+    p = sub.add_parser('report')
+    p.add_argument('files', nargs='+')
+    p.add_argument('--json', default=None)
+    p.add_argument('--diff', default=None, help="difference columns, e.g. '2-1,4-3' (default: 2-1 for two columns)")
+    p = sub.add_parser('replays')
+    p.add_argument('run')
+    p.add_argument('--min-gen', type=int, default=0)
+    p.add_argument('--max-gen', type=int, default=10 ** 9)
+    p.add_argument('--json', default=None)
+    a = ap.parse_args(argv)
+    if a.cmd in ('run', 'play'):
+        os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
+        import psutil
+        try:
+            psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == 'nt' else 10)
+        except (psutil.Error, AttributeError):
+            pass
+        load_engine(a.engine)
+        paths = [play(c, a.out, a.games, a.seed, a.opp, a.sims, a.device, a.threads, a.groups, a.conc, bool(a.sparse),
+                      engine_path=a.engine) for c in a.ckpts]
+        if a.cmd == 'play':
+            return 0
+        scans = [load_scan(scan_file(p, a.engine, a.jobs)) for p in paths]
+    elif a.cmd == 'scan':
+        for f in a.files:
+            scan_file(f, a.engine, a.jobs)
+        return 0
+    elif a.cmd == 'replays':
+        scans = [scan_replays(a.run, a.min_gen, a.max_gen)]
+    else:
+        scans = [load_scan(f) for f in a.files]
+    print(table(scans, parse_diffs(getattr(a, 'diff', None), len(scans))))
+    if getattr(a, 'json', None):
+        with open(a.json, 'w', encoding='utf-8') as f:
+            json.dump(as_json(scans), f, indent=1)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
