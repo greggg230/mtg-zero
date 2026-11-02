@@ -446,7 +446,34 @@ impl Game {
             v["winner"] = json!(o.winner);
             v["reason"] = json!(format!("{:?}", o.reason));
         }
+        v["known"] = json!([self.view_known(0), self.view_known(1)]);
         v
+    }
+
+    /// Player `p`'s hidden cards and who knows them (`Obj.known`, ENGINE.md 10 and 72; exact knowledge only,
+    /// not the partial "clouds"): `library`, its known cards top first as `[position from the top, mask,
+    /// name]` (mask bit q: player q knows the card there); `hand`, the cards of its hand the other player
+    /// knows, `[id, name]` (an Urza's Bauble look, a card returned from play); `order`, the library's card
+    /// ids top first (for a seat's view to follow a look the engine does not remember: a Mishra's Bauble at
+    /// a card its owner does not know, 23.7). A spectator sees everything; a seat's view (the Delver Lab
+    /// Play tab) keeps only what that seat may know. Read only: no behaviour or encoding depends on it.
+    fn view_known(&self, p: u8) -> Value {
+        let pl = self.player(p);
+        let library: Vec<Value> = pl
+            .library
+            .iter()
+            .rev()
+            .enumerate()
+            .filter_map(|(i, &c)| {
+                let mask: u8 = (0..2u8).filter(|&q| self.obj(c).known & (1 << q) != 0).fold(0, |m, q| m | (1 << q));
+                (mask != 0).then(|| json!([i, mask, self.name(c)]))
+            })
+            .collect();
+        let other = 1 - p;
+        let hand: Vec<Value> =
+            pl.hand.iter().filter(|&&c| self.obj(c).known & (1 << other) != 0).map(|&c| json!([c.0, self.name(c)])).collect();
+        let order: Vec<u32> = pl.library.iter().rev().map(|&c| c.0 as u32).collect();
+        json!({"library": library, "hand": hand, "order": order})
     }
 }
 
