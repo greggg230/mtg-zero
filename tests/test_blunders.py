@@ -1,6 +1,7 @@
 """tools/delver_blunders.py (docs/blunders.md): the blunder counts on crafted games (states and frames
 as the spectator view writes them), the standard errors, the fingerprints' frame / state pairing, and
 the rebuild of a driver's move log from its seed (the engine)."""
+import collections
 import importlib.util
 import json
 import math
@@ -330,3 +331,53 @@ def test_game_seed_pairs_and_rebuilds_a_driver_game():
         raise AssertionError('a wrong move log replayed')
     except RuntimeError:
         pass
+
+
+# ------------------------------------------------------------------------------ canaries
+def test_scans_record_canary_spots():
+    sp = []
+    B.scan_game(land_drop_game(), None, None, sp)
+    assert sp == [('land_drop_tapout', 0, "Cast Dragon's Rage Channeler")]
+    sp = []
+    B.scan_game(daze_game(them_bf=[card('Island', 11)], pay=True), None, None, sp)
+    assert sp == [('daze_payable_land', 0, 'Cast Daze')]
+    sp = []
+    B.scan_game(wasteland_game(), None, None, sp)
+    assert sp == [('waste_brainstorm', 0, 'Cast Brainstorm')]
+
+
+def test_canary_search_of_a_rebuilt_spot():
+    """A spot (seed + actions) replays to its decision, and the evaluation seat's lockstep search (a tiny
+    random network, the 'cq' rule, root-view leaves) picks a legal option at every repeat; the table
+    reads the results."""
+    import torch
+    import mtgz.az as P
+    from mtgz.az import games as G
+    from mtgz.az.infer import drive
+    from zero.games import engine
+    from zero.infer import NetEvaluator
+    from zero.net import make_net
+    h, r = G.seat_dict('heuristic'), G.seat_dict('random')
+    drv = G.Driver('mtg', [[h, r]], spec=P.SPEC_DELVER, concurrency=1, threads=1, seed=5, max_steps=20000, move_log=1_000_000)
+    drive(drv, {})
+    row = drv.take_results()[0]
+    E = engine()
+    d = B.rebuild(E, P.SPEC_DELVER, 5, row)
+    k = next(i for i, s in enumerate(d['states'][:-1]) if (s.get('decision') or {}).get('kind') == 'Priority'
+             and len(s['decision']['options']) >= 2 and s['turn'] >= 3)
+    st = d['states'][k]
+    spot = {'kind': 'land_drop_tapout', 'source': 't', 'gid': 0, 'k': k, 'spec': P.SPEC_DELVER, 'seed': B.game_seed(5, 0),
+            'actions': [f['a'] for f in d['frames'][:k]], 'watch': st['decision']['options'][0]['t'],
+            'decider': st['decision']['player']}
+    g = B.spot_game(E, spot)
+    assert json.loads(g.export_state())['decision'] == st['decision']
+    torch.manual_seed(0)
+    ev = NetEvaluator(make_net(G.info('mtg'), 'mtg', 'tokens', 16, 1, heads=2), 'cpu')
+    seat = {'select': 'cq', 'select_min_visits': 4, 'cq_c_visit': 50.0, 'cq_c_scale': 0.3, 'leaf_value_view': 'root'}
+    chosen = B.search_many(ev, [g.clone() for _ in range(3)], [1, 2, 3], 8, seat)
+    legal = {o['a'] for o in st['decision']['options']}
+    assert len(chosen) == 3 and set(chosen) <= legal
+    labels = {o['a']: o['t'] for o in st['decision']['options']}
+    per = [dict(collections.Counter(labels[a] for a in chosen))]
+    t = B.canary_table({'spots': [spot], 'repeats': 3, 'results': {'x_0001': {'8': per}}})
+    assert 'land_drop_tapout (1)' in t and 'x_0001 s8' in t

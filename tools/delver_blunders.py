@@ -134,6 +134,7 @@ class Game:
             self.seq.append(fin)
             self.lab.append(None)
         self.n = len(self.seq)
+        self.spots = []                             # (kind, decision index, watched option): canary candidates
 
     def new_log(self, k):
         """The log lines that appeared from seq[k - 1] to seq[k]."""
@@ -285,6 +286,8 @@ def scan_daze(G, C, players, ex):
         if cls:
             C['daze_payable'] += 1
             C['daze_pay_' + cls] += 1
+            if cls == 'land':
+                G.spots.append(('daze_payable_land', k, 'Cast Daze'))
         _, j1 = G.stack_window(daze['stack'], jd)
         asked = paid = False
         for j in range(jd, j1 + 1):
@@ -351,6 +354,10 @@ def scan_floats(G, C, players, ex):
                 if can:
                     C['waste_missed_spend'] += 1
                     C['waste_missed_spend_bs'] += 'Brainstorm' in can
+                    if 'Brainstorm' in can:
+                        j = next(j for j in range(k, k1 + 1) if dec_of(G.seq[j]).get('player') == q and any(
+                            o.get('t') == 'Cast Brainstorm' for o in dec_of(G.seq[j]).get('options') or []))
+                        G.spots.append(('waste_brainstorm', j, 'Cast Brainstorm'))
                     ex.append(('Wasteland: castable instant, land unused', k, G.seq[k].get('turn'),
                                f'P{q} {land["name"]} doomed, could cast {sorted(can)}'))
     # ---- Daze returning an untapped Island
@@ -433,6 +440,10 @@ def scan_burn(G, C, players, ex):
             C['burn_creature'] += 1
             C['burn_survived'] += survived
             C['burn_hopeless'] += dealt < tough - dmg
+            cast = next((x for x in range(k - 1, max(-1, k - 12), -1) if G.lab[x] == f'Cast {o["name"]}'
+                         and dec_of(G.seq[x]).get('player') == caster), None)
+            if cast is not None and survived:
+                G.spots.append(('burn_damaged_survivor' if dmg > 0 else 'burn_could_not_kill', cast, G.lab[cast]))
             if dmg > 0:
                 C['burn_damaged'] += 1
                 C['burn_damaged_survived'] += survived
@@ -489,6 +500,7 @@ def scan_land_drop(G, C, players, ex):
         if not played:
             continue
         C['ld_blunder'] += 1
+        G.spots.append(('land_drop_tapout', k, lab))
         op = 1 - p
         them = G.seq[j]['players'][op]
         live = any(c.get('name') == 'Daze' for c in them.get('hand') or []) and any(
@@ -506,9 +518,10 @@ def scan_land_drop(G, C, players, ex):
         ex.append(('tap-out with an unused land drop', k, s.get('turn'), f'P{p} cast {card}, then played {played}'))
 
 
-def scan_game(d, players=None, examples=None):
+def scan_game(d, players=None, examples=None, spots=None):
     """All counts of one game `d` (zero-replay/1-like: states, frames, result) -> Counter. `players`: the
-    counted players (None: both). `examples`: a list that gets (metric, step index, turn, text) rows."""
+    counted players (None: both). `examples`: a list that gets (metric, step index, turn, text) rows;
+    `spots`: a list that gets the canary candidates (kind, decision index, watched option)."""
     C = collections.Counter()
     ex = examples if examples is not None else []
     G = Game(d)
@@ -518,6 +531,8 @@ def scan_game(d, players=None, examples=None):
     scan_floats(G, C, players, ex)
     scan_burn(G, C, players, ex)
     scan_land_drop(G, C, players, ex)
+    if spots is not None:
+        spots.extend(G.spots)
     B = F.Band()
     F.scan_game(d, B, players)
     for key, v in B.c.items():
@@ -830,10 +845,10 @@ def _init_worker(engine_path):
 def _scan_row(args):
     spec, seed, row, players, paired = args
     d = rebuild(_W['E'], spec, seed, row, paired)
-    ex = []
-    c = scan_game(d, players, ex)
+    ex, sp = [], []
+    c = scan_game(d, players, ex, sp)
     return {'gid': row['gid'], 'result': row['result'], 'rounds': row['rounds'], 'c': dict(c),
-            'ex': [list(e) for e in ex[:20]]}
+            'ex': [list(e) for e in ex[:20]], 'spots': [list(x) for x in sp[:20]]}
 
 
 def scan_file(path, engine_path=ROOT, jobs=4, log=print):
@@ -843,8 +858,9 @@ def scan_file(path, engine_path=ROOT, jobs=4, log=print):
     if rec.get('format') != GAMES_FORMAT:
         raise SystemExit(f'{path}: not a {GAMES_FORMAT} file')
     eng = engine_info(engine_path)
-    if rec['engine'].get('commit') and eng.get('commit') and rec['engine']['commit'] != eng['commit']:
-        log(f'note: games played by commit {rec["engine"]["commit"][:12]}, rebuilt by {eng["commit"][:12]}')
+    if rec['engine'].get('engine_sha256') != eng.get('engine_sha256'):
+        log(f'note: games played by the engine build {rec["engine"].get("engine_sha256")} (commit '
+            f'{(rec["engine"].get("commit") or "?")[:12]}), rebuilt by {eng.get("engine_sha256")} ({(eng.get("commit") or "?")[:12]})')
     t0 = time.time()
     rows = rec['rows']
     args = [(rec['spec'], rec['driver_seed'], row, None if rec['opp'] == 'self' else {row['gid'] % 2}, rec.get('paired', False))
@@ -901,6 +917,203 @@ def scan_replays(run, lo=0, hi=10 ** 9):
             'meta': {'replays': d0, 'min_gen': lo, 'max_gen': hi}, 'games': games}
 
 
+# ====================================================================================== canaries
+SPOTS_FORMAT = 'delver-blunders-spots/1'
+CANARY_KINDS = {
+    'daze_payable_land': 'Daze while the spell\'s controller has an untapped mana land (watched: Cast Daze)',
+    'waste_brainstorm': 'Wasteland at an untapped land, Brainstorm castable from it (watched: Cast Brainstorm, the good line)',
+    'burn_could_not_kill': 'burn cast at an undamaged creature it could not kill (watched: the cast)',
+    'burn_damaged_survivor': 'burn cast into a damaged creature that survived (watched: the cast)',
+    'land_drop_tapout': 'tap-out with the land drop unused, the land played after (watched: the cast)',
+    'play': 'a Delver Lab Play-tab spot (watched: the AI\'s move there)',
+}
+
+
+def build_spots(games_paths, per_kind=12, play=(), engine_path=ROOT, log=print):
+    """A fixed canary set: the first `per_kind` candidates of each kind (CANARY_KINDS) in the games' scans
+    (game order), and the Play-tab spots `play` ('<game.json>:<action index>'), each as a game seed +
+    the actions up to the decision + the watched option -> a spots dict. The spots replay only on an
+    engine whose rules agree up to them (build them from games of the engine that will search them)."""
+    E = load_engine(engine_path)
+    spots = []
+    for path in games_paths:
+        with gzip.open(path, 'rt', encoding='utf-8') as f:
+            rec = json.load(f)
+        label = rec['label'] if re.search(r'_s\d+', rec['label']) else f"{rec['label']}_s{rec['sims']}"
+        scan = load_scan(os.path.join(os.path.dirname(path), label + '.scan.json'))
+        rows = {r['gid']: r for r in rec['rows']}
+        taken = collections.Counter()
+        for g in sorted(scan['games'], key=lambda g: g['gid']):
+            for kind, k, watch in g.get('spots') or []:
+                if taken[kind] >= per_kind or any(x['source'] == label and x['gid'] == g['gid'] and x['k'] == k for x in spots):
+                    continue
+                d = rebuild(E, rec['spec'], rec['driver_seed'], rows[g['gid']], rec.get('paired', False))
+                st = d['states'][k]
+                spots.append({'kind': kind, 'source': label, 'gid': g['gid'], 'k': k, 'spec': rec['spec'],
+                              'seed': game_seed(rec['driver_seed'], g['gid'], rec.get('paired', False)),
+                              'actions': [f['a'] for f in d['frames'][:k]], 'watch': watch,
+                              'decider': st['decision']['player'], 'turn': st['turn'], 'step': st['step']})
+                taken[kind] += 1
+    for item in play:
+        path, idx = item.rsplit(':', 1)
+        idx = int(idx)
+        with open(path, encoding='utf-8') as f:
+            rec = json.load(f)
+        from zero import replay as core
+        import mtgz.az.replays as R
+        run, _ = core.run_of(rec['model']['path'])
+        spec = R.spec_with_log(core.run_config(run)['spec'])
+        g = E.Game('mtg', spec, 2, int(rec['seed']))
+        for a in rec['actions'][:idx]:
+            g.step(int(a))
+        st = json.loads(g.export_state())
+        a = rec['actions'][idx]
+        watch = next(o['t'] for o in st['decision']['options'] if o['a'] == a)
+        spots.append({'kind': 'play', 'source': rec.get('id', os.path.basename(os.path.dirname(path))), 'gid': None, 'k': idx,
+                      'spec': spec, 'seed': int(rec['seed']), 'actions': [int(x) for x in rec['actions'][:idx]], 'watch': watch,
+                      'decider': st['decision']['player'], 'turn': st['turn'], 'step': st['step']})
+    log(f'{len(spots)} spots: {dict(collections.Counter(x["kind"] for x in spots))}')
+    return {'format': SPOTS_FORMAT, 'engine': engine_info(engine_path), 'created': int(time.time()), 'spots': spots}
+
+
+def spot_game(E, sp):
+    sj = json.loads(sp['spec'])
+    sj['log'] = True
+    g = E.Game('mtg', json.dumps(sj), 2, int(sp['seed']))
+    for a in sp['actions']:
+        g.step(int(a))
+    return g
+
+
+def search_many(ev, games, seeds, sims, seat, chance_k=0):
+    """The evaluation seat's search (the run's rule and transform, leaf view, root belief: `seat` =
+    h2h.run_rule's dict) of every game's pending decision, in lockstep batches -> [chosen action]."""
+    import numpy as np
+    from zero.protocol import ROW_BELIEF
+    trees = [g.search_tree(True, int(sd)) for g, sd in zip(games, seeds)]
+    if seat.get('belief_tilt'):
+        B = len(games)
+        x = np.stack([np.asarray(g.encode(g.to_move), np.float32) for g in games])
+        pred = ev.evaluate(x, np.full(B, 2, np.int32), np.zeros(B + 1, np.int32), np.zeros(0, np.int32),
+                           np.full(B, ROW_BELIEF, np.uint8))[3]
+        for t, g, pr in zip(trees, games, pred):
+            t.set_belief(np.asarray(pr, np.float32), g, float(seat['belief_tilt']), float(seat.get('belief_clip', 20.0)),
+                         float(seat.get('belief_mix', 0.0)))
+    root_view = seat.get('leaf_value_view') == 'root'
+    for _ in range(sims):
+        rows, back = [], []
+        for k, (t, g) in enumerate(zip(trees, games)):
+            leaf = t.simulate(g, float(seat.get('c_puct', 1.0)), int(chance_k), 0.0, root_view=root_view)
+            if leaf is None:
+                continue
+            _, x, acts, vx = leaf
+            rows.append((np.asarray(x, np.float32), list(acts)))
+            vi = None
+            if vx is not None:
+                rows.append((np.asarray(vx, np.float32), []))
+                vi = len(rows) - 1
+            back.append((k, len(rows) - (2 if vx is not None else 1), vi))
+        if not rows:
+            break
+        res_p, res_v = [], []
+        for a in range(0, len(rows), 1024):
+            ch = rows[a:a + 1024]
+            off = np.zeros(len(ch) + 1, np.int32)
+            off[1:] = np.cumsum([len(r[1]) for r in ch])
+            acts = np.asarray([x for r in ch for x in r[1]], np.int32)
+            pri, val, mar = ev.evaluate(np.stack([r[0] for r in ch]), np.full(len(ch), 2, np.int32), off, acts)[:3]
+            for i in range(len(ch)):
+                res_p.append(pri[off[i]:off[i + 1]])
+                res_v.append((val[i], mar[i]))
+        for k, li, vi in back:
+            v, m = res_v[vi if vi is not None else li]
+            trees[k].expand([float(x) for x in res_p[li]], [float(x) for x in v], [float(x) for x in m], 0.0)
+    rule = seat.get('select', 'visits')
+    args = (rule, int(seat.get('select_min_visits', 0)), float(seat.get('cq_c_visit', 50.0)), float(seat.get('cq_c_scale', 1.0)))
+    out = []
+    for t in trees:
+        acts = list(t.root_acts)
+        if rule == 'visits':
+            nv, p0 = list(t.root_visits), list(t.root_priors0)
+            i = max(range(len(acts)), key=lambda j: (nv[j], p0[j]))
+        else:
+            i = t.root_select(*args)
+        out.append(int(acts[i]))
+    return out
+
+
+def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_path=ROOT, log=print):
+    """Each checkpoint's evaluation seat searches every spot `repeats` times (seeds apart) at each budget ->
+    {label: {sims: [per spot: {option label: searches}]}}."""
+    E = load_engine(engine_path)
+    from zero import h2h
+    from zero.infer import NetEvaluator
+    from zero.net import load
+    with open(spots_path, encoding='utf-8') as f:
+        S = json.load(f)
+    spots = S['spots']
+    base = [spot_game(E, sp) for sp in spots]
+    for sp, g in zip(spots, base):
+        st = json.loads(g.export_state())
+        sp['_labels'] = {o['a']: o['t'] for o in (st.get('decision') or {}).get('options') or []}
+        if sp['watch'] not in sp['_labels'].values() or g.to_move != sp['decider']:
+            raise SystemExit(f'spot {sp["kind"]} {sp["source"]} {sp["gid"]}:{sp["k"]} does not replay on this engine')
+    res = {}
+    for ck in ckpts:
+        model, _ = load(ck, device, game='mtg')
+        ev = NetEvaluator(model, device, graphs=True if device.startswith('cuda') else None)
+        seat = dict(h2h.run_rule(ck))
+        chance_k = int(h2h.run_config(ck).get('chance_k', 0))
+        lab = label_for(ck)
+        res[lab] = {}
+        for sims in sims_list:
+            t0 = time.time()
+            games, seeds, owner = [], [], []
+            for i, g in enumerate(base):
+                for r in range(repeats):
+                    games.append(g.clone())
+                    seeds.append(7919 * (i + 1) + r)
+                    owner.append(i)
+            chosen = search_many(ev, games, seeds, int(sims), seat, chance_k)
+            per = [collections.Counter() for _ in spots]
+            for i, a in zip(owner, chosen):
+                per[i][spots[i]['_labels'].get(a, str(a))] += 1
+            res[lab][str(sims)] = [dict(c) for c in per]
+            log(f'{lab} at {sims} sims: {len(games)} searches in {time.time() - t0:.0f} s')
+    for sp in spots:
+        sp.pop('_labels', None)
+    return {'spots': spots, 'repeats': repeats, 'results': res}
+
+
+def canary_table(C):
+    """Per kind: the mean share of searches choosing the watched option over its spots (+- se over spots);
+    each Play-tab spot on its own row."""
+    spots, rep = C['spots'], C['repeats']
+    cols = [(lab, sims) for lab, by in C['results'].items() for sims in by]
+    rows = []
+    for kind in CANARY_KINDS:
+        idx = [i for i, sp in enumerate(spots) if sp['kind'] == kind]
+        if not idx:
+            continue
+        groups = [(f'{kind} ({len(idx)})', idx)] if kind != 'play' else [
+            (f'play {spots[i]["source"]} #{spots[i]["k"]}: {spots[i]["watch"]}', [i]) for i in idx]
+        for name, ii in groups:
+            cells = []
+            for lab, sims in cols:
+                sh = [C['results'][lab][sims][i].get(spots[i]['watch'], 0) / rep for i in ii]
+                m = sum(sh) / len(sh)
+                se = math.sqrt(sum((x - m) ** 2 for x in sh) / (len(sh) - 1) / len(sh)) if len(sh) > 1 else None
+                cells.append(f'{100 * m:.0f}%' + (f' +-{100 * se:.0f}' if se is not None else ''))
+            rows.append((name, cells))
+    w0 = max([len(r[0]) for r in rows] + [10]) + 2
+    heads = [f'{lab} s{sims}' for lab, sims in cols]
+    ws = [max(14, len(h) + 2) for h in heads]
+    out = [f'share of {rep} searches a spot choosing the watched option (mean over spots +- se)',
+           'spot kind (spots)'.ljust(w0) + ''.join(h.rjust(w) for h, w in zip(heads, ws))]
+    out += [n.ljust(w0) + ''.join(c.rjust(w) for c, w in zip(cells, ws)) for n, cells in rows]
+    return '\n'.join(out)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -932,6 +1145,20 @@ def main(argv=None):
     p.add_argument('files', nargs='+')
     p.add_argument('--json', default=None)
     p.add_argument('--diff', default=None, help="difference columns, e.g. '2-1,4-3' (default: 2-1 for two columns)")
+    p = sub.add_parser('spots', help='freeze a canary set from games (+ their scans) and Play-tab spots')
+    p.add_argument('games', nargs='*')
+    p.add_argument('--out', required=True)
+    p.add_argument('--per-kind', type=int, default=12)
+    p.add_argument('--play', action='append', default=[], help='<Delver Lab game.json>:<action index>')
+    p.add_argument('--engine', default=ROOT)
+    p = sub.add_parser('canary', help="each checkpoint's evaluation search at the frozen spots")
+    p.add_argument('spots')
+    p.add_argument('ckpts', nargs='+')
+    p.add_argument('--sims', default='32', help="budgets, e.g. '32,1024'")
+    p.add_argument('--repeats', type=int, default=8)
+    p.add_argument('--device', default='cuda')
+    p.add_argument('--engine', default=ROOT)
+    p.add_argument('--out', default=None)
     p = sub.add_parser('replays')
     p.add_argument('run')
     p.add_argument('--min-gen', type=int, default=0)
@@ -954,6 +1181,24 @@ def main(argv=None):
     elif a.cmd == 'scan':
         for f in a.files:
             scan_file(f, a.engine, a.jobs)
+        return 0
+    elif a.cmd == 'spots':
+        S = build_spots(a.games, a.per_kind, a.play, a.engine)
+        with open(a.out, 'w', encoding='utf-8') as f:
+            json.dump(S, f, separators=(',', ':'))
+        return 0
+    elif a.cmd == 'canary':
+        import psutil
+        try:
+            psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == 'nt' else 10)
+        except (psutil.Error, AttributeError):
+            pass
+        os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
+        C = canary(a.spots, a.ckpts, [int(x) for x in a.sims.split(',')], a.repeats, a.device, a.engine)
+        print(canary_table(C))
+        if a.out:
+            with open(a.out, 'w', encoding='utf-8') as f:
+                json.dump(C, f, separators=(',', ':'))
         return 0
     elif a.cmd == 'replays':
         scans = [scan_replays(a.run, a.min_gen, a.max_gen)]
