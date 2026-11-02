@@ -73,7 +73,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import delver_fingerprints as F  # noqa: E402  (pure Python: the habit metrics, the run lookup)
 
+SUITE_VERSION = 1                          # bump when a metric's definition changes (the baseline records it)
 GAMES_FORMAT = 'delver-blunders-games/1'
+BASELINE_FORMAT = 'delver-blunder-baseline/1'
+BASELINE_PATH = os.path.join(ROOT, 'data', 'delver_blunder_baseline.json')
 SCAN_FORMAT = 'delver-blunders-scan/1'
 DEFAULT_SEED = 20261102
 MANA_LANDS = {'Volcanic Island': 'UR', 'Island': 'U', 'Thundering Falls': 'UR', 'Wasteland': 'C'}
@@ -442,7 +445,7 @@ def scan_burn(G, C, players, ex):
             C['burn_hopeless'] += dealt < tough - dmg
             cast = next((x for x in range(k - 1, max(-1, k - 12), -1) if G.lab[x] == f'Cast {o["name"]}'
                          and dec_of(G.seq[x]).get('player') == caster), None)
-            if cast is not None and survived:
+            if cast is not None and survived and (dmg > 0 or dealt < tough):
                 G.spots.append(('burn_damaged_survivor' if dmg > 0 else 'burn_could_not_kill', cast, G.lab[cast]))
             if dmg > 0:
                 C['burn_damaged'] += 1
@@ -591,6 +594,85 @@ METRICS = [
 ]
 
 
+def metric_key(num, den):
+    """A metric's stable key (the baseline's, the JSONL's): its numerator, '_per100g' for a per-game count."""
+    return num if den else num + '_per100g'
+
+
+def summarize(per_game):
+    """{key: {section, label, value, se, n}} of a scan's per-game counts (rates as fractions)."""
+    out = {}
+    for sec, lab, num, den in METRICS:
+        v, se, n = metric(per_game, num, den)
+        out[metric_key(num, den)] = {'section': sec, 'label': lab.strip(), 'num': num, 'den': den, 'value': v, 'se': se, 'n': n}
+    return out
+
+
+def load_baseline(path=BASELINE_PATH):
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        b = json.load(f)
+    if b.get('format') != BASELINE_FORMAT:
+        raise SystemExit(f'{path}: not a {BASELINE_FORMAT} file')
+    return b
+
+
+def versus(value, se, base, n=None):
+    """(gap, z, flag) of a measurement against a baseline entry: z = gap / the se of the difference (two
+    independent sets of games), the measurement's se floored at what the baseline's rate would give with
+    its n (a binomial se for a rate, the baseline's se scaled by its games for a /100 g count: a small set
+    with every event alike has se 0); flagged when |z| > 2 and n >= 10."""
+    if value is None or not base or base.get('value') is None:
+        return None, None, False
+    gap = value - base['value']
+    se = se or 0.0
+    if n:
+        if base.get('den'):
+            p0 = min(max(base['value'], 0.0), 1.0)
+            se = max(se, math.sqrt(p0 * (1 - p0) / n))
+        elif base.get('games'):
+            se = max(se, (base.get('se') or 0.0) * math.sqrt(base['games'] / n))
+    sd = math.hypot(se, base.get('se') or 0.0)
+    if sd == 0:
+        return gap, None, False
+    z = gap / sd
+    return gap, z, abs(z) > 2 and (n is None or n >= 10)
+
+
+def make_baseline(scan_path, out=BASELINE_PATH, games_path=None, replace=False, digest=None, log=print):
+    """Add the metrics a baseline file lacks (all of them for a new file) from a scan of the baseline
+    checkpoint's fixed games; the entries already there stay (`replace`: overwrite them) - a new category
+    joins with the baseline games re-scanned, the old ones keep their numbers."""
+    S = load_scan(scan_path)
+    meta = S.get('meta') or {}
+    b = load_baseline(out) or {
+        'format': BASELINE_FORMAT, 'what': 'Delver mirror blunder rates of the fixed baseline checkpoint (tools/delver_blunders.py)',
+        'checkpoint': meta.get('label'), 'ckpt': meta.get('ckpt'), 'ckpt_sha256': meta.get('ckpt_sha256'),
+        'games': {'n': len(S['games']), 'seed': meta.get('driver_seed'), 'sims': meta.get('sims'), 'chance_k': meta.get('chance_k'),
+                  'seat': meta.get('seat_a'), 'opp': meta.get('opp'), 'file': games_path},
+        'engine': {k: (meta.get('engine_play') or {}).get(k) for k in ('digest', 'engine_sha256', 'commit', 'branch')},
+        'metrics': {}}
+    if digest:
+        b['engine']['digest'] = digest
+    if b.get('ckpt_sha256') and meta.get('ckpt_sha256') and b['ckpt_sha256'] != meta['ckpt_sha256']:
+        raise SystemExit(f'{scan_path} measures {meta.get("label")}, the baseline is {b.get("checkpoint")}')
+    added = []
+    today = time.strftime('%Y-%m-%d')
+    for key, m in summarize([g['c'] for g in S['games']]).items():
+        if key in b['metrics'] and not replace:
+            continue
+        b['metrics'][key] = dict(m, suite=SUITE_VERSION, measured=today, games=len(S['games']))
+        added.append(key)
+    b['suite'] = SUITE_VERSION
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with open(out, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(b, f, indent=1)
+        f.write('\n')
+    log(f'{out}: {len(added)} metrics added ({len(b["metrics"])} in all)')
+    return b
+
+
 def ratio_se(xs, ns):
     """The ratio sum(x) / sum(n) of per-game counts and its cluster standard error (games independent)."""
     X, N, G = sum(xs), sum(ns), len(xs)
@@ -644,10 +726,13 @@ def parse_diffs(spec, n):
     return out
 
 
-def table(scans, diffs=None):
+def table(scans, diffs=None, baseline=None):
     """The report: one column a scan (a checkpoint at a budget), then the differences `diffs` [(j, i)]:
-    column j minus column i, with the se of two independent sets of games."""
+    column j minus column i, with the se of two independent sets of games. `baseline` (a baseline file's
+    dict): its column first, and a '*' on every cell more than 2 se from it."""
     diffs = parse_diffs(None, len(scans)) if diffs is None else diffs
+    if baseline:
+        return _table_vs(scans, diffs, baseline)
     names = [s['label'] for s in scans]
     w0 = max(len(m[1]) for m in METRICS) + 2
     cols = names + [f'({j + 1}) - ({i + 1})' for j, i in diffs]
@@ -677,6 +762,35 @@ def table(scans, diffs=None):
     out.append('rates in % +- 1 se (n = the denominator); /100 g = per 100 games +- 1 se; se: per-game clusters')
     out.append(f'mana in a pool at {ps} recorded states, {fl} floats' +
                (' - this engine does not float mana: the float rows are 0 by construction' if ps == 0 else ''))
+    return '\n'.join(out)
+
+
+def _table_vs(scans, diffs, base):
+    bm = base['metrics']
+    bcol = f'baseline {base.get("checkpoint")}'
+    w0 = max(len(m[1]) for m in METRICS) + 2
+    names = [s['label'] for s in scans]
+    ws = [max(22, len(bcol) + 2)] + [max(24, len(c) + 2) for c in names]
+    out = [f'(B) {bcol} ({base["games"]["n"]} games, {base["games"]["sims"]} sims, engine {base["engine"].get("digest")})']
+    out += [f'({k + 1}) {c}' for k, c in enumerate(names)] + ['']
+    out.append('metric'.ljust(w0) + '(B)'.rjust(ws[0]) + ''.join(f'({k + 1})'.rjust(w) for k, w in enumerate(ws[1:])))
+    out.append('games'.ljust(w0) + str(base['games']['n']).rjust(ws[0]) + ''.join(str(len(s['games'])).rjust(w) for s, w in zip(scans, ws[1:])))
+    sec, flagged = None, 0
+    for section, label, num, den in METRICS:
+        if section != sec:
+            sec = section
+            out.append(f'-- {section}')
+        key = metric_key(num, den)
+        b = bm.get(key)
+        row = label.ljust(w0) + (fmt(b['value'], b['se'], b['n'], den) if b else 'new').rjust(ws[0])
+        for s, w in zip(scans, ws[1:]):
+            v, se, n = metric([g['c'] for g in s['games']], num, den)
+            _, z, flag = versus(v, se, b, n)
+            flagged += flag
+            row += (fmt(v, se, n, den) + (' *' if flag else '  ')).rjust(w)
+        out.append(row)
+    out.append('')
+    out.append(f'* = more than 2 se from the baseline (the se of the difference): {flagged} cells; rates in % +- 1 se (n)')
     return '\n'.join(out)
 
 
@@ -724,8 +838,17 @@ def engine_info(path):
     if pyd and os.path.exists(pyd):
         with open(pyd, 'rb') as f:
             h = hashlib.sha256(f.read()).hexdigest()[:16]
-    return {'checkout': path, 'commit': git('rev-parse', 'HEAD'), 'branch': git('rev-parse', '--abbrev-ref', 'HEAD'),
-            'dirty': bool(git('status', '--porcelain', '--untracked-files=no')), 'engine_sha256': h}
+    commit = git('rev-parse', 'HEAD')
+    digest = None
+    gate = os.path.join(path, 'gates', f'{(commit or "")[:12]}.json')
+    if commit and os.path.exists(gate):
+        try:
+            with open(gate, encoding='utf-8') as f:
+                digest = (json.load(f).get('digests') or {}).get('full')
+        except (OSError, ValueError):
+            digest = None
+    return {'checkout': path, 'commit': commit, 'branch': git('rev-parse', '--abbrev-ref', 'HEAD'),
+            'dirty': bool(git('status', '--porcelain', '--untracked-files=no')), 'engine_sha256': h, 'digest': digest}
 
 
 def sha256(path):
@@ -739,8 +862,54 @@ def label_for(ckpt):
     return f'{run}_{m.group(1)}' if m else os.path.splitext(os.path.basename(ckpt))[0]
 
 
+RULE_KEYS = ('select', 'select_min_visits', 'cq_c_visit', 'cq_c_scale')
+
+
+def eval_seat(ckpt, select=None, c_scale=None):
+    """The checkpoint's run's evaluation seat (h2h.run_rule) with its move rule overridden: `select` 'visits'
+    (the most visited option; the 'cq' keys dropped, as zero.h2h's --select visits) or 'cq' (the run's
+    guard and transform, or min-visits 4 / c_visit 50 when the run has none), `c_scale` the 'cq' rule's
+    scale -> (seat dict, label suffix: '' for the run's own rule)."""
+    from zero import h2h
+    seat = dict(h2h.run_rule(ckpt))
+    if select is None and c_scale is None:
+        return seat, ''
+    if select == 'visits':
+        if c_scale is not None:
+            raise SystemExit("--c-scale is the 'cq' rule's (not with --select visits)")
+        for k in RULE_KEYS:
+            seat.pop(k, None)
+        return seat, '_visits'
+    if seat.get('select') != 'cq':
+        seat.update(select='cq', select_min_visits=4, cq_c_visit=50.0, cq_c_scale=1.0)
+    if c_scale is not None:
+        seat['cq_c_scale'] = float(c_scale)
+    return seat, f'_cq{seat["cq_c_scale"]:g}'
+
+
+def mirror(ckpt, seat, games, sims, chance_k, seed, threads, groups, device, spec, conc, graphs, sparse):
+    """The checkpoint against itself: zero.h2h's match, but both seats on ONE evaluator (h2h gives each side
+    its own, so a mirror's leaves went out in two half batches) - the same driver, seeds and game seeds
+    (game k: `game_seed(seed, k)`), unpaired, with the move log -> h2h-like {summary keys, rows}."""
+    from zero import games as G
+    from zero.infer import NetEvaluator, drive
+    from zero.net import load
+    model, _ = load(ckpt, device, game='mtg')
+    sa = G.nn_seat('a', int(sims), 1.0, chance_k=int(chance_k))
+    sa.update(seat)
+    drv = G.Driver('mtg', [[sa, sa] for _ in range(games)], spec=spec, concurrency=conc, seed=seed, threads=threads,
+                   groups=groups, max_steps=5000, move_log=1_000_000, sparse=bool(sparse))
+    ev = NetEvaluator(model, device, graphs=bool(graphs) or None)
+    drive(drv, {'a': ev})
+    rows = sorted(drv.take_results(), key=lambda r: r['gid'])
+    w0 = sum(r['result'][0] for r in rows) / max(1, len(rows))
+    return {'a': ckpt, 'b': ckpt, 'game': 'mtg', 'sims': int(sims), 'chance_k': int(chance_k), 'games': len(rows),
+            'seat0_score': round(w0, 4), 'unfinished': sum(1 for r in rows if not r['over']), 'one_evaluator': True,
+            'rows': rows}
+
+
 def play(ckpt, out, games=1000, seed=DEFAULT_SEED, opp='self', sims=None, device='cuda', threads=12, groups=4,
-         conc=512, sparse=True, graphs=None, engine_path=ROOT, log=print):
+         conc=512, sparse=True, graphs=None, engine_path=ROOT, log=print, select=None, c_scale=None):
     """`games` games of `ckpt` (its run's evaluation seat; against itself or the anchor `opp`), with move
     logs -> the path of <out>/<label>.games.json.gz."""
     from zero import h2h
@@ -750,17 +919,20 @@ def play(ckpt, out, games=1000, seed=DEFAULT_SEED, opp='self', sims=None, device
     spec = cfg.get('eval_spec') or cfg['spec']
     sims = int(sims or cfg.get('eval_sims', 32))
     chance_k = int(cfg.get('chance_k', 0))
-    sa = dict(h2h.run_rule(ckpt))
+    sa, rule = eval_seat(ckpt, select, c_scale)
     b = ckpt if opp == 'self' else opp
     sb = dict(sa) if opp == 'self' else dict(h2h.run_rule(opp))
     if graphs is None:
         graphs = device.startswith('cuda')
     t0 = time.time()
-    r = h2h.match(ckpt, b, games=games, sims=sims, chance_k=chance_k, seed=seed, threads=threads, groups=groups,
-                  device=device, spec=spec, conc=min(conc, games), seat_a=sa, seat_b=sb, max_steps=5000,
-                  move_log=1_000_000, rows=True, paired=False, graphs=graphs or None, sparse=sparse)
+    if opp == 'self':
+        r = mirror(ckpt, sa, games, sims, chance_k, seed, threads, groups, device, spec, min(conc, games), graphs, sparse)
+    else:
+        r = h2h.match(ckpt, b, games=games, sims=sims, chance_k=chance_k, seed=seed, threads=threads, groups=groups,
+                      device=device, spec=spec, conc=min(conc, games), seat_a=sa, seat_b=sb, max_steps=5000,
+                      move_log=1_000_000, rows=True, paired=False, graphs=graphs or None, sparse=sparse)
     wall = time.time() - t0
-    rec = {'format': GAMES_FORMAT, 'label': label_for(ckpt) + f'_s{sims}' + ('' if opp == 'self' else '_vs_' + label_for(opp)),
+    rec = {'format': GAMES_FORMAT, 'label': label_for(ckpt) + f'_s{sims}{rule}' + ('' if opp == 'self' else '_vs_' + label_for(opp)),
            'ckpt': os.path.abspath(ckpt), 'ckpt_sha256': sha256(ckpt)[:16], 'opp': 'self' if opp == 'self' else os.path.abspath(opp),
            'spec': spec, 'driver_seed': seed, 'paired': False, 'sims': sims, 'chance_k': chance_k, 'seat_a': sa,
            'seat_b': sb, 'engine': engine_info(engine_path), 'device': device, 'created': int(time.time()),
@@ -1042,9 +1214,11 @@ def search_many(ev, games, seeds, sims, seat, chance_k=0):
     return out
 
 
-def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_path=ROOT, log=print):
+def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_path=ROOT, log=print, select=None,
+           c_scale=None, rules=None):
     """Each checkpoint's evaluation seat searches every spot `repeats` times (seeds apart) at each budget ->
-    {label: {sims: [per spot: {option label: searches}]}}."""
+    {label: {sims: [per spot: {option label: searches}]}}. `rules`: [(select, c_scale), ...] move rules to
+    search with in turn (None: [(select, c_scale)]; each rule's label suffix as `eval_seat`'s)."""
     E = load_engine(engine_path)
     from zero import h2h
     from zero.infer import NetEvaluator
@@ -1059,12 +1233,15 @@ def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_
         if sp['watch'] not in sp['_labels'].values() or g.to_move != sp['decider']:
             raise SystemExit(f'spot {sp["kind"]} {sp["source"]} {sp["gid"]}:{sp["k"]} does not replay on this engine')
     res = {}
-    for ck in ckpts:
+    if device == 'cpu':
+        import torch
+        torch.set_num_threads(min(8, os.cpu_count() or 8))
+    for ck, (sel, cs) in [(c, r) for c in ckpts for r in (rules or [(select, c_scale)])]:
         model, _ = load(ck, device, game='mtg')
         ev = NetEvaluator(model, device, graphs=True if device.startswith('cuda') else None)
-        seat = dict(h2h.run_rule(ck))
+        seat, rule = eval_seat(ck, sel, cs)
         chance_k = int(h2h.run_config(ck).get('chance_k', 0))
-        lab = label_for(ck)
+        lab = label_for(ck) + rule
         res[lab] = {}
         for sims in sims_list:
             t0 = time.time()
@@ -1114,6 +1291,118 @@ def canary_table(C):
     return '\n'.join(out)
 
 
+# ====================================================================================== the sidecar
+def watch(run, engine_path=ROOT, games=1000, seed=DEFAULT_SEED, sims=None, every=None, loop=300, min_iter=None,
+          backfill=False, once=False, baseline=BASELINE_PATH, device='cuda', conc=1000, threads=16, groups=4, jobs=4,
+          settle=60, log=print):
+    """Follow a run's evaluated checkpoints (models/iter_N.pt, N a multiple of its eval_every) and measure
+    each one: <run>/blunders/iter_NNNN.json (every metric, value / se / n, against the baseline) and a
+    line of <run>/blunders.jsonl (flat, one per measurement: the plot's rows). Newest first: when it falls
+    behind, older checkpoints are skipped (`backfill`: measured when nothing newer waits). Resumable (a
+    checkpoint with its iter_NNNN.json is done; the move logs stay in blunders/work/). min_iter None: the
+    newest evaluated checkpoint at launch onward. Stops on <run>/blunders/STOP; one watcher a run
+    (blunders/watch.pid)."""
+    import glob
+    import psutil
+    d = F.run_dir(run)
+    out = os.path.join(d, 'blunders')
+    work = os.path.join(out, 'work')
+    os.makedirs(work, exist_ok=True)
+    pidf = os.path.join(out, 'watch.pid')
+    if os.path.exists(pidf):
+        try:
+            other = int(open(pidf).read().strip() or 0)
+        except ValueError:
+            other = 0
+        if other and other != os.getpid() and psutil.pid_exists(other):
+            raise SystemExit(f'{d}: another watcher (pid {other}) follows this run ({pidf})')
+    with open(pidf, 'w') as f:
+        f.write(str(os.getpid()))
+    base = load_baseline(baseline)
+    load_engine(engine_path)
+    eng = engine_info(engine_path)
+    log(f'watching {d} (engine {eng.get("commit", "?")[:12]} digest {eng.get("digest")}, {games} games at '
+        f'{sims or "eval_sims"} sims, baseline {base.get("checkpoint") if base else None})')
+    failed = set()
+    try:
+        while True:
+            if os.path.exists(os.path.join(out, 'STOP')):
+                log('STOP file: exiting')
+                return 0
+            with open(os.path.join(d, 'config.json'), encoding='utf-8') as f:
+                ev_every = int(every or json.load(f).get('eval_every', 8))
+            ck = {}
+            for f in glob.glob(os.path.join(d, 'models', 'iter_*.pt')):
+                m = re.search(r'iter_(\d+)\.pt$', f)
+                if m and int(m.group(1)) % ev_every == 0 and time.time() - os.path.getmtime(f) > settle:
+                    ck[int(m.group(1))] = f
+            if min_iter is None:
+                min_iter = max(ck) if ck else 0
+                log(f'measuring evaluated checkpoints from iteration {min_iter} on (every {ev_every})')
+            done = {int(m.group(1)) for m in (re.search(r'iter_(\d+)\.json$', x) for x in os.listdir(out)) if m}
+            pending = sorted(i for i in ck if i >= min_iter and i not in done and i not in failed)
+            target = None
+            if pending:
+                newest = pending[-1]
+                target = newest
+                if len(pending) > 1 and not backfill:
+                    log(f'behind: skipping {pending[:-1]} for {newest}')
+                    min_iter = newest
+            if target is not None:
+                try:
+                    measure_one(d, target, ck[target], out, work, engine_path, eng, base, games, seed, sims, device, conc,
+                                threads, groups, jobs, log)
+                except Exception as e:                      # noqa: BLE001  (log it, go on with the next one)
+                    failed.add(target)
+                    with open(os.path.join(out, f'iter_{target:04d}.error.txt'), 'w', encoding='utf-8') as f:
+                        f.write(f'{type(e).__name__}: {e}\n')
+                    log(f'iteration {target}: failed ({type(e).__name__}: {e})')
+                continue
+            if once:
+                return 0
+            time.sleep(loop)
+    finally:
+        try:
+            if open(pidf).read().strip() == str(os.getpid()):
+                os.remove(pidf)
+        except OSError:
+            pass
+
+
+def measure_one(d, it, ckpt, out, work, engine_path, eng, base, games, seed, sims, device, conc, threads, groups, jobs, log):
+    """One evaluated checkpoint: the games (kept in work/), the scan, <out>/iter_NNNN.json, a JSONL line."""
+    t0 = time.time()
+    gp = play(ckpt, work, games, seed, 'self', sims, device, threads, groups, conc, True, engine_path=engine_path, log=log)
+    sp = scan_file(gp, engine_path, jobs, log=log)
+    S = load_scan(sp)
+    summ = summarize([g['c'] for g in S['games']])
+    flags = []
+    for key, m in summ.items():
+        b = (base or {}).get('metrics', {}).get(key)
+        gap, z, flag = versus(m['value'], m['se'], b, m['n'])
+        m.update(base=None if not b else b.get('value'), base_se=None if not b else b.get('se'), gap=gap, z=z, flag=flag)
+        if flag:
+            flags.append(key)
+    meta = S['meta']
+    rec = {'iter': it, 'run': os.path.basename(os.path.normpath(d)), 'time': time.strftime('%Y-%m-%dT%H:%M:%S'),
+           'suite': SUITE_VERSION, 'games': len(S['games']), 'sims': meta.get('sims'), 'seed': meta.get('driver_seed'),
+           'seat': meta.get('seat_a'), 'engine': {k: eng.get(k) for k in ('commit', 'digest', 'engine_sha256')},
+           'baseline': None if not base else {'checkpoint': base.get('checkpoint'), 'engine': base.get('engine'),
+                                               'suite': base.get('suite')},
+           'seconds': round(time.time() - t0, 1), 'flags': flags, 'metrics': summ}
+    with open(os.path.join(out, f'iter_{it:04d}.json'), 'w', encoding='utf-8') as f:
+        json.dump(rec, f, indent=1)
+    line = {'iter': it, 'time': rec['time'], 'games': rec['games'], 'sims': rec['sims'], 'suite': SUITE_VERSION,
+            'engine': eng.get('digest') or eng.get('engine_sha256'), 'flags': flags}
+    for key, m in summ.items():
+        line[key] = None if m['value'] is None else round(m['value'], 5)
+        line[key + '_se'] = None if m['se'] is None else round(m['se'], 5)
+    with open(os.path.join(os.path.dirname(out), 'blunders.jsonl'), 'a', encoding='utf-8') as f:
+        f.write(json.dumps(line) + '\n')
+    log(f'iteration {it}: {rec["games"]} games in {rec["seconds"]:.0f} s; {len(flags)} flagged vs the baseline: {flags}')
+    return rec
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -1130,6 +1419,9 @@ def main(argv=None):
         p.add_argument('--groups', type=int, default=4)
         p.add_argument('--conc', type=int, default=1000)
         p.add_argument('--sparse', type=int, default=1)
+        p.add_argument('--select', default=None, choices=['visits', 'cq'],
+                       help="the move rule (default: the run's eval_select; the label gets _visits / _cq<scale>)")
+        p.add_argument('--c-scale', type=float, default=None, help="the 'cq' rule's scale (default: the run's)")
     for name in ('run', 'play'):
         p = sub.add_parser(name)
         game_args(p)
@@ -1144,6 +1436,7 @@ def main(argv=None):
     p = sub.add_parser('report')
     p.add_argument('files', nargs='+')
     p.add_argument('--json', default=None)
+    p.add_argument('--baseline', default=None, help=f'compare with a baseline file (e.g. {os.path.relpath(BASELINE_PATH, ROOT)})')
     p.add_argument('--diff', default=None, help="difference columns, e.g. '2-1,4-3' (default: 2-1 for two columns)")
     p = sub.add_parser('spots', help='freeze a canary set from games (+ their scans) and Play-tab spots')
     p.add_argument('games', nargs='*')
@@ -1159,6 +1452,32 @@ def main(argv=None):
     p.add_argument('--device', default='cuda')
     p.add_argument('--engine', default=ROOT)
     p.add_argument('--out', default=None)
+    p.add_argument('--select', default=None, choices=['visits', 'cq'])
+    p.add_argument('--c-scale', type=float, default=None)
+    p.add_argument('--rules', default=None, help="several move rules in turn, e.g. 'run,visits,cq:0.1' (run = the run's own)")
+    p = sub.add_parser('baseline', help='add the metrics a baseline file lacks, from a scan of the baseline checkpoint')
+    p.add_argument('scan')
+    p.add_argument('--out', default=BASELINE_PATH)
+    p.add_argument('--games-file', default=None, help='the baseline games (recorded in the file)')
+    p.add_argument('--replace', action='store_true', help='overwrite the entries already there')
+    p.add_argument('--digest', default=None, help="the engine's behaviour digest (its gate report's 'full'), when the "
+                                                   "checkout has no gates/<commit>.json")
+    p = sub.add_parser('watch', help="a sidecar: measure every evaluated checkpoint of a run as it appears")
+    p.add_argument('run')
+    p.add_argument('--engine', default=ROOT, help="the run's engine checkout (its pinned worktree)")
+    p.add_argument('--games', type=int, default=1000)
+    p.add_argument('--seed', type=int, default=DEFAULT_SEED)
+    p.add_argument('--sims', type=int, default=None)
+    p.add_argument('--every', type=int, default=None, help="default: the run's eval_every")
+    p.add_argument('--loop', type=int, default=300, help='seconds between looks')
+    p.add_argument('--min-iter', type=int, default=None, help='default: the newest evaluated checkpoint at launch')
+    p.add_argument('--backfill', action='store_true', help='measure skipped checkpoints when nothing newer waits')
+    p.add_argument('--once', action='store_true', help='measure what is pending, then exit')
+    p.add_argument('--baseline', default=BASELINE_PATH)
+    p.add_argument('--device', default='cuda')
+    p.add_argument('--conc', type=int, default=1000)
+    p.add_argument('--threads', type=int, default=16)
+    p.add_argument('--jobs', type=int, default=4)
     p = sub.add_parser('replays')
     p.add_argument('run')
     p.add_argument('--min-gen', type=int, default=0)
@@ -1174,7 +1493,7 @@ def main(argv=None):
             pass
         load_engine(a.engine)
         paths = [play(c, a.out, a.games, a.seed, a.opp, a.sims, a.device, a.threads, a.groups, a.conc, bool(a.sparse),
-                      engine_path=a.engine) for c in a.ckpts]
+                      engine_path=a.engine, select=a.select, c_scale=a.c_scale) for c in a.ckpts]
         if a.cmd == 'play':
             return 0
         scans = [load_scan(scan_file(p, a.engine, a.jobs)) for p in paths]
@@ -1182,6 +1501,18 @@ def main(argv=None):
         for f in a.files:
             scan_file(f, a.engine, a.jobs)
         return 0
+    elif a.cmd == 'baseline':
+        make_baseline(a.scan, a.out, a.games_file, a.replace, a.digest)
+        return 0
+    elif a.cmd == 'watch':
+        import psutil
+        try:
+            psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == 'nt' else 10)
+        except (psutil.Error, AttributeError):
+            pass
+        os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
+        return watch(a.run, a.engine, a.games, a.seed, a.sims, a.every, a.loop, a.min_iter, a.backfill, a.once,
+                     a.baseline, a.device, a.conc, a.threads, 4, a.jobs)
     elif a.cmd == 'spots':
         S = build_spots(a.games, a.per_kind, a.play, a.engine)
         with open(a.out, 'w', encoding='utf-8') as f:
@@ -1194,7 +1525,14 @@ def main(argv=None):
         except (psutil.Error, AttributeError):
             pass
         os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
-        C = canary(a.spots, a.ckpts, [int(x) for x in a.sims.split(',')], a.repeats, a.device, a.engine)
+        rules = None
+        if a.rules:
+            rules = []
+            for r in a.rules.split(','):
+                name, _, sc = r.partition(':')
+                rules.append((None if name == 'run' else name, float(sc) if sc else None))
+        C = canary(a.spots, a.ckpts, [int(x) for x in a.sims.split(',')], a.repeats, a.device, a.engine,
+                   select=a.select, c_scale=a.c_scale, rules=rules)
         print(canary_table(C))
         if a.out:
             with open(a.out, 'w', encoding='utf-8') as f:
@@ -1204,7 +1542,8 @@ def main(argv=None):
         scans = [scan_replays(a.run, a.min_gen, a.max_gen)]
     else:
         scans = [load_scan(f) for f in a.files]
-    print(table(scans, parse_diffs(getattr(a, 'diff', None), len(scans))))
+    print(table(scans, parse_diffs(getattr(a, 'diff', None), len(scans)),
+                load_baseline(a.baseline) if getattr(a, 'baseline', None) else None))
     if getattr(a, 'json', None):
         with open(a.json, 'w', encoding='utf-8') as f:
             json.dump(as_json(scans), f, indent=1)

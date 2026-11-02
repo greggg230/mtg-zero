@@ -381,3 +381,65 @@ def test_canary_search_of_a_rebuilt_spot():
     per = [dict(collections.Counter(labels[a] for a in chosen))]
     t = B.canary_table({'spots': [spot], 'repeats': 3, 'results': {'x_0001': {'8': per}}})
     assert 'land_drop_tapout (1)' in t and 'x_0001 s8' in t
+
+
+# ------------------------------------------------------------------------------ baseline, flags, the watcher
+def _scan_file(tmp_path, games, label='x_0424_s32'):
+    p = tmp_path / f'{label}.scan.json'
+    p.write_text(json.dumps({'format': B.SCAN_FORMAT, 'label': label, 'games': games,
+                             'meta': {'label': label, 'ckpt_sha256': 'abc', 'driver_seed': 1, 'sims': 32,
+                                      'engine_play': {'digest': None, 'engine_sha256': 'e', 'commit': 'c'}}}))
+    return str(p)
+
+
+def test_baseline_file_adds_only_new_metrics_and_flags_at_two_se(tmp_path):
+    games = [{'c': dict(B.scan_game(daze_game(them_bf=[card('Island', 11)], pay=True)))} for _ in range(20)]
+    games += [{'c': dict(B.scan_game(daze_game(them_bf=[card('Island', 11, tapped=True)])))} for _ in range(20)]
+    out = str(tmp_path / 'base.json')
+    b = B.make_baseline(_scan_file(tmp_path, games), out, digest='d1', log=lambda *a: None)
+    assert b['engine']['digest'] == 'd1' and b['metrics']['daze_payable']['value'] == 0.5
+    assert b['metrics']['daze_cast_per100g']['value'] == 100.0 and b['suite'] == B.SUITE_VERSION
+    # an entry already there is kept; a missing one is added (a new category joins)
+    b['metrics']['daze_payable']['value'] = 0.25
+    del b['metrics']['ld_blunder']
+    json.dump(b, open(out, 'w'))
+    b2 = B.make_baseline(_scan_file(tmp_path, games), out, log=lambda *a: None)
+    assert b2['metrics']['daze_payable']['value'] == 0.25 and 'ld_blunder' in b2['metrics']
+    base = b2['metrics']['daze_payable']
+    assert B.versus(0.25, 0.01, base, 100)[2] is False
+    gap, z, flag = B.versus(0.75, 0.0, base, 400)        # se 0 floored at sqrt(p0 (1 - p0) / n)
+    assert flag and math.isclose(z, 0.5 / math.hypot(math.sqrt(0.25 * 0.75 / 400), base['se']))
+    assert B.versus(0.75, 0.0, base, 5)[2] is False       # too few events to flag
+    t = B.table([B.load_scan(_scan_file(tmp_path, games))], None, B.load_baseline(out))
+    assert '(B) baseline x_0424_s32' in t and ' *' in t
+
+
+def test_watch_measures_the_newest_evaluated_checkpoint_first(tmp_path, monkeypatch):
+    run = tmp_path / 'fork'
+    os.makedirs(run / 'models')
+    (run / 'config.json').write_text(json.dumps({'eval_every': 8}))
+    old = 1_000_000_000
+    for it in (528, 530, 536, 544):
+        f = run / 'models' / f'iter_{it:04d}.pt'
+        f.write_bytes(b'')
+        os.utime(f, (old, old))
+    seen = []
+
+    def fake(d, it, ckpt, out, *a, **k):
+        seen.append(it)
+        open(os.path.join(out, f'iter_{it:04d}.json'), 'w').write('{}')
+    monkeypatch.setattr(B, 'measure_one', fake)
+    quiet = dict(once=True, baseline=None, log=lambda *a: None)
+    B.watch(str(run), min_iter=528, **quiet)
+    assert seen == [544]                                  # behind: 528, 536 skipped
+    B.watch(str(run), min_iter=528, backfill=True, **quiet)
+    assert seen == [544, 536, 528]                        # backfill: newest pending first
+    f = run / 'models' / 'iter_0552.pt'
+    f.write_bytes(b'')
+    B.watch(str(run), **quiet)                            # default: the newest at launch on
+    assert seen == [544, 536, 528] and not (run / 'blunders' / 'iter_0552.json').exists()  # (too fresh: settling)
+    os.utime(f, (old, old))
+    B.watch(str(run), **quiet)
+    assert seen[-1] == 552
+    (run / 'blunders' / 'STOP').write_text('')
+    assert B.watch(str(run), **quiet) == 0 and seen[-1] == 552
