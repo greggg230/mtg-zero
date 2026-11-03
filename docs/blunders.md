@@ -293,6 +293,7 @@ cannot reach a pool at a decision.
 
 * Value readouts at burn resolutions (E:/mtg-zero-scratch/burn-scan): the suite counts outcomes, not the
   network's pending-damage misreads; burn_scan.py remains the tool for that.
+* 550 under 'visits' at 1024 in games (stopped unfinished: the GPU was shared; the canaries have it, section 6).
 * The 1024-simulation games' tail: the last few long games run alone (1,024 sequential network calls a
   decision); several checkpoints or rules in one driver (per-game seats) would overlap the tails.
 * Value probes: none (the suite counts outcomes and search choices; a value head is relative to the
