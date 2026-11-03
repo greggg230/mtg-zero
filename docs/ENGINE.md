@@ -17082,3 +17082,199 @@ mana abilities of the player's untapped sources matching a filter of an object o
 in 86.1 - as cheap as the target test (a scan of the stack's items' facts), exact for those ops,
 conservative for the rest (an `Ext` op not annotated offers nothing). The Delver mirror has none of
 these cards, so it would change cube play only.
+
+## 87. Forked self-play games and start-position archives (zero-core `feat/forked-games`, run settings `selfplay_branch*` and `selfplay_archive*`, opt-in)
+
+Branch `forked-games` (from main 37d6574, which carries the float-mana rules the main line trains with, plus
+a merge of `position-lab` a335129 for its `start` block, section 76), zero-core `feat/forked-games` (its
+docs/az.md 24 and docs/search.md 2.11 have the design and the driver's protocol), 2026-11-03, the user's
+"go" on review 5's step 2 (hub `delver_review_5_2026-11-03.md` section 5). Nothing live changed; nothing is
+merged or pushed.
+
+### 87.1 Why
+
+Review 5: the line's value head rates the lines it never plays like the lines it plays (62 of 71
+human-flagged mistakes at a 0.000 gap for three generations), the habits humans beat it with are ones
+self-play never punishes, and every search- or representation-side lever since review 4 was null. The
+cheap untried levers change **which positions the value head sees**: KataGo's side games (branch a share
+of the games at a random move into games of their own) and Go-Exploit's start-state archive.
+
+### 87.2 What (zero-core docs/az.md 24)
+
+* **Branched games** (`--selfplay-branch 0.2 --selfplay-branch-moves 3 --selfplay-branch-temp 2.0
+  [--selfplay-branch-differ 1]`): 20% of the games each draw a branch point uniformly among their decisions
+  (a recording seat's searched decision, not a mana payment); when the game ends, its slot plays the
+  branch: 1-3 deviation moves sampled from the network's priors at temperature 2 (one network row each; no
+  search, **recorded nowhere** - neither a policy nor a value target), then normal self-play; the branch's
+  rows get **its own z**. The game is untouched (its moves, rows and streams) and nothing before the branch
+  point is recorded twice. `differ` 1: the first deviation is never the game's own move (87.4: without it
+  gen 808 re-plays its own move first in 79% of the branches).
+* **Archive starts** (`--selfplay-archive F --selfplay-archive-p 0.1`): 10% of the games start from a
+  position of the archive instead of a new deal: the mtg spec's `start` block (section 76) with the
+  source game's seed and root actions and `deal` "actual" - every card stays where it is, both hands and
+  every card a player knows, and only the library orders nobody knows are dealt again, from the game's own
+  seed (a fresh future each time the same spot is played).
+* **No masked value targets.** The exploration feature (section 75) masks z := q before its forced
+  deviation because there the deviation is inside the game whose outcome those rows get; here no row
+  precedes a deviation of its own game (the deviations are recorded nowhere, a branch's rows come after
+  them, an archive game's after its start), so every row keeps its real outcome and the shards have no new
+  column.
+* **Quota.** A branch is one of the generation's 1,600 games (the arms play the same number of games); a
+  branch starts mid-game and an archive game at turn 3-15, so the forked arm records ~9% fewer rows and
+  searches ~10% fewer decisions a generation (87.4) - fewer training steps (steps = new rows x reuse /
+  batch). Raising its `--games` to ~1,760 would match the rows instead (the user's call: 87.7).
+
+### 87.3 The archive: `tools/delver_archive.py`
+
+Every position is replayed on this checkout's engine and checked, or skipped with its reason in the build
+report (never dropped silently): **canary** spots (both canary libraries: main's 60, branch `blunders`'s 76,
+by id once) - their raw steps replayed and checked by the library's own fingerprint (`spot_sig`), the
+single-option steps dropped for the `start` block; **human** Play-tab games (`delver-lab/data/play`) - the
+whole game replayed and its end compared with its recorded view (`view.json`: turn, step, active,
+priority, life, library and hand counts, the human's hand, every public object with ids, tapped and
+counters, the stack), then the first decision of each turn 3-8; **report** positions (`data/reports`),
+checked against the report's own view. Every entry is then rebuilt through its `start` block and must equal
+the source replay's whole exported state (deal "none"), and start with deal "actual" for the same decider
+and fingerprint. `--canary none | half-a | half-b` keeps the canary spots out (or half of them, the other
+listed as held out): a run that trains from those spots can no longer be scored on them.
+
+Built for the line's spec (its config.json) at 13:35 on 2026-11-03: **331 entries - 76 canary, 252 human
+(turns 3-8 of 52 Play games), 3 report** (entries' sha ac52a7bbf257ce81, 3 s); the smoke used the 13:05
+build (321 entries: 76 / 242 / 3, sha a3cd874b0bacada5). **Skipped, listed in the report: 10 of the 62 Play
+games** - 4 that do not replay on this engine (20261102-081857-df381d, -083313-639f05, -085829-5c5023,
+-095929-30b17f: an action of theirs not offered - games of the view-known build before the 11:20
+float-mana switch, review 5 section 6) and 6 that end before turn 3. The games played on the float build
+replay. Every canary spot and report replays. The Play tab keeps adding games: the A/B rebuilds the archive at its fork.
+
+### 87.4 Measured (CPU, the desktop shared with the live line, below-normal priority)
+
+**At the driver** (`tools/forks_check.py`: a self-play driver of the line's seat - sims 16 / fast 4, p_full
+0.25, mana payments at 4, 'cq' targets - on the Delver spec, a list of games and their branches played to
+the end, then the same games with both off; branch 0.2 / moves 3 / temperature 2, archive 0.1 of the
+321-entry archive; CPU, `E:/mtg-zero-scratch/review-5/ckpt/f550_iter_0808.pt` read-only; reports in
+`C:/mtgz-scratch/forked-games/smoke/check_*.json`):
+
+| | gen 808, differ 0 (64 games) | gen 808, differ 1 (128 games) |
+|---|---|---|
+| branches / games | 14 / 64 = 21.9% +- 5.0 (p 0.2) | 27 / 128 = 21.1% +- 3.5 |
+| deviation moves drawn 1 / 2 / 3; played (mean) | 5 / 2 / 7; 2.14 | 11 / 3 / 13; 2.04 (= the driver's dev_moves 55) |
+| first deviation = the game's own move | **79%** (11 of 14) | 0% |
+| branch point's place in its game (mean) | 0.50 | 0.44 |
+| rows a game / a branch | 59.6 / 29.8 | 62.6 / 39.1 |
+| searched decisions a game / a branch (after its point) | 243 / 129 | 251 / 161 |
+| branch rows with another z than the branch's own | 0 | 0 |
+| branch rows beyond its searched decisions after the deviations | 0 | 0 |
+| branch rows whose encoding is one of its game's rows | 30 (all in branches whose first deviation was the game's move: re-played lines) | 14 in 6 branches (transpositions: an option among equivalent ones - e.g. two copies of a card - reaches the game's state) |
+| archive starts / games | 7 / 64 = 10.9% +- 3.8 (p 0.1): 5 human, 2 canary | 14 / 128 = 10.9% +- 2.7: 11 human, 2 canary, 1 report, 14 distinct entries |
+| rows an archive game; its last turn (mean) | 56.3; 19.4 | 52.7; 18.3 |
+| seconds on / off | 79 / 68 | 162 / 143 |
+
+With a uniform evaluator (48 and 96 games) every game is identical to its twin without branching (44 of
+44, 87 of 87; the Rust tests prove it on the toy with every search recorded). With the CPU network the
+twins differ (0 of 114) while two runs without branching are identical (32 of 32): the token network's CPU
+answers depend on the batch's other rows (its padding to the longest), and the branches and archive
+games change which rows share a batch - the games themselves are untouched wherever the evaluator is
+batch-invariant.
+
+**What it means for the A/B.** Without `differ` gen 808's sharp policy at temperature 2 samples the game's
+own move first in ~4 of 5 branches, and a one-move branch (a third of them) then re-plays its game's line
+(a second outcome of the same position, not an unplayed line). `--selfplay-branch-differ 1` makes every
+branch leave its game's line at once; the launch recipe uses it (DIFFER=0 for the literal design). At p
+0.2 / 0.1 the arm's games are ~74% plain, ~17% branches and ~9% archive starts, so it records **~8% fewer
+rows** (57.6 against 62.6 a game) and searches ~8% fewer decisions a generation at the same 1,600 games.
+
+### 87.5 The run-level smoke
+
+`python -m mtgz.az.run --preset delver-mirror` on CPU with a 32 x 1 token network, 4 iterations, the
+line's flags (`--sparse 1 --window-sparse 1 --window-cache 1 --train-static 1 --selfplay-local-linger 1
+--selfplay-remote-linger 1 --aux-belief-w 0.25 --value-q 0.6`) and both features on (`--selfplay-branch 0.2
+--selfplay-branch-moves 3 --selfplay-branch-temp 2.0 --selfplay-branch-differ 1 --selfplay-archive <the
+321-entry archive> --selfplay-archive-p 0.1`), runs in `C:/mtgz-scratch/forked-games/smoke/`:
+
+* **run1** (96 games an iteration; the remote 'local' refused by MTG Zero's own commit check - a dirty
+  checkout - so this machine alone): every iteration exactly 96 games, `selfplay.forks` = 75 / 76 / 74 / 77
+  games, 11 / 14 / 17 / 11 branches, 10 / 6 / 5 / 8 archive starts, their samples summing to the shards';
+  `same_first` 0; the local linger playing through training.
+* **run2** (192 games an iteration, remote self-play on the remote 'local' with one worker: the code path
+  of the Mac's, `--selfplay-remote mac` - MTGZ_REMOTE_COMMIT set, the checkout committed and its engine
+  stamped): the archive shipped into the mirror (`<mirror>/archive.json`, byte for byte the run's), the
+  worker's hello accepted (no REFUSED), every iteration exactly 192 games (this machine 115 / 93 / 73 / 58,
+  the worker 77 / 99 / 119 / 134), `selfplay.forks` = the iteration's games and samples, the worker's own
+  tally among them (`forks.remote`: 77 / 99 / 119 / 134 games); over the run 590 games, 115 branches, 63
+  archive starts (17.6% branches and 9.6% archive starts per game that can spawn one; branches lag their
+  games by up to a phase); rows a game / branch / archive game 82.8 / 55.4 / 63.0 (the tiny network's long
+  games).
+* **The Mac** was offline (not tested). Its path is the one run2 took with the remote 'local' (zero-core's
+  remote self-play: the mirror's config.json and archive.json, the worker's hello); what the Mac needs
+  besides is the fork's commit checked out and built there - `tools/mac.sh --eval-checkout` in the fork's
+  worktree (launch.sh `mac`: it pushes the commit to the Mac's bare repo), as for every re-pin. An older
+  checkout there (one without the feature) is refused by its hello and the run plays alone, saying so.
+
+### 87.6 Checks
+
+* zero-core `feat/forked-games` 137cd19 (code at 5164693, then docs and a test fix): `cargo test` 108 passed
+  (the driver's 6 new tests); pytest 334 passed, 9 skipped (CPU: no GPU beside the live line), 1 failed -
+  `test_cotrain_pause_mid_iteration_replays_it`, a hang on a full Windows pipe that the six new settings'
+  longer start-up lines caused (the exploration branch's test fix, `feat/explore` 7985add, cherry-picked:
+  the PAUSE tests pass); `tests/test_forks.py` 15. A toy-smoke rolling run (seed 3, 3 iterations, default
+  settings) on zero-core cd2f43f and on this core: every shard byte for byte, every checkpoint and the
+  optimizer state tensor for tensor and key for key (their zip containers differ: torch's random
+  serialization id), the metrics without timings identical.
+* Off = the games of before: `check_checkpoint_compat` main 37d6574 (zero-core cd2f43f) against forked-games
+  e3fe6c2 - random network on the cube spec (the optin-core tier's: visits records 6bb82850b165d917, cq
+  caf64df11fd4e38e, 1,114 samples) and checkpoint 808 on the Delver spec at 16 simulations (1,161 samples,
+  visits cc72319a5d5ca31d, cq 5a26e15c983461e8, 16/16 vs random): **identical**. Engine digest
+  **f6543eb2b1b8752f** (`cargo test --release -p engine --test digest -- --ignored`: the main line's, so the
+  position-lab merge kept the float-mana rules) - unchanged.
+* `cargo test --release -p engine --test az` 40, `--test hidden` 16, `--test lab` 13 passed; mtg-zero
+  pytest 108 passed (after one fix: `position_lab.check_spot` compared a replay recorded before view-known's
+  spectator `known` block with it - the merge's only interaction).
+* The other games' build-only step (Glass Road, Caverna, Kingdom Builder) was not run: `smoke_all.sh` builds
+  into E:/cargo-target and E:/zero-smoke (no E: writes beside the live line). None of their Rust names the
+  changed structs (`DriverCfg`, `GameResult` gained fields; they construct neither: grep), so they
+  compile unchanged; run `bash tools/smoke_all.sh --with-this-core --build-only` before a merge.
+
+### 87.7 The A/B (prepared, not launched): `E:/mtg-zero-scratch/forked-games/launch.sh`
+
+`E:/mtg-zero-scratch/forked-games/launch.sh` (modelled on float-fork's `launch.sh` and `relaunch_speed.sh`):
+`check` (read-only: the line stopped cleanly at K = 1000, its arguments - every flag of its supervisor's
+start line, `--train-static 1 --selfplay-local-linger 1 --selfplay-remote mac --selfplay-remote-procs 3
+--games 1600` checked -, the builds, disk, RAM, a dry archive build), `prepare` (the fork's pinned worktree
+`mtg-zero-wt/run-<PIN7>` at the forked-games commit, its engine built into `C:/cargo-target/mtg-zero/`),
+`mac` (`tools/mac.sh --eval-checkout` there: pushes the commit to the Mac, the Mac online), `fork`
+(`tools/fork_run.py` line@1000 -> `E:/mtg-zero/runs/r3-2b-forked1000` + junction, its checkpoint and
+optimizer state checked, the archive rebuilt there from the newest Play games and both canary libraries),
+`launch` (the control: the line itself continued to 1040 by `relaunch_speed.sh` from its own pin
+run-1d67542; the fork: a hidden supervisor from its worktree with the line's arguments + `--selfplay-branch
+0.2 --selfplay-branch-moves 3 --selfplay-branch-temp 2.0 --selfplay-branch-differ 1 --selfplay-archive
+<fork>/archive.json --selfplay-archive-p 0.1`, env `ZERO_TOKEN_GRAPHS=1 MTGZ_SUPERVISE_STALL=7200`), `verify`
+(the fork's config.json = the line's but for the new keys and iters), `sidecar` (the blunder sidecar on the
+fork), `summary` (both arms per generation: games, branch / archive shares, rows, losses, minutes; the
+sidecars' Tamiyo rate and canary scores; h2h; readouts), `readout G` (review 5's `readout_stream.py` on each
+arm's gen-G rows with both arms' checkpoints G-3 and K), `h2h N` (paired fork N vs control N, 1,200 games,
+32 simulations, GPU), `stop`.
+
+**Waiting on the user** (none of it decided here):
+1. **Disk.** The fork copies the line's window (6 generations of shards, 57 GB at 910) and keeps 6 of its
+   own: **~60-65 GB more on E: for the A/B's duration**, plus ~10 GB transients while each arm writes a
+   generation before its oldest goes. E: had 75 GB free at 13:20 (C: 50): too little margin (`fork` refuses
+   below the line's data size + 30 GB; `relaunch_speed.sh` refuses the control below 40 GB free unless
+   CTRL_MIN_FREE_GB says otherwise). E.g. `E:/mtg-zero/runs/r3-2b-beliefsearch-data` (50 GB, the old line's
+   shards) would cover it.
+2. **RAM / GPU / Mac.** The desktop has 64 GB (29 GB free beside the line, whose run process holds ~12 GB);
+   two arms run two trainings, two token-graph inferences and two local lingers on one GPU and 2 x 3 worker
+   processes on the Mac: each arm's generations will be slower (compute per generation is matched: the
+   same 1,600 games and search), the 40 generations ~1.5-2x longer than the line's ~3 h.
+3. **`differ`.** Recommended (87.4); DIFFER=0 is the literal design.
+4. **The canary endpoint.** With the canary spots in the archive the fork self-plays from those very
+   positions, so its canary scores (`canary_s32_*`) are no longer a clean endpoint. Either keep them in and
+   judge on the Tamiyo rate in fresh games (`tam_flip_clean_pre`), the human-labelled set, fresh-row CE and
+   the h2h, or `ARCHIVE_ARGS="--canary none"` (or `half-a`, scoring the held-out half) to keep the canary.
+5. **Rows per generation.** At the same 1,600 games the fork records ~8% fewer rows (fewer training steps:
+   rows x reuse / batch). `--games 1740` would match rows instead of games (not done: the brief's default
+   is games).
+
+**Endpoints** (review 5 step 2): the sidecar's Tamiyo rate (`tam_flip_clean_pre`, 1,000 fresh games every
+8th checkpoint; the line's 0.68-0.74 at 776-904) and canary (see 4), fresh-row value CE (`readout`), paired
+h2h at +20 / +40 (safety). Adopt if a class moves and the h2h is within noise; lower p if the rate moves and
+Elo drops; stop exploration work if nothing moves.
