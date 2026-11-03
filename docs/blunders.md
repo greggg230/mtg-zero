@@ -482,6 +482,29 @@ costs nothing); the main line's history every 16 generations (`--every 16`), the
 a lock file keeps a backfill and the sidecar's hook from scoring a run at once (the hook skips a round).
 The sidecar's own library score (canary_s32_*) stays at the evaluation budget and rule.
 
+## 6b. The Blunders tab: a generation playing each test case
+
+The user (11-03): "pick a generation and see how it plays each test case. Starting from the canary case, record
+until end of the turn and let me click through the steps with a game player UI". `tools/delverai_blunder_games.py
+RUN [--iters N,M | --every K] [--upload]`: for a checkpoint and every user-kept spot, with the Play tab's seat
+(delver-lab playcore.Net: the run's evaluation seat, 1024 simulations, the most-visited move, the full budget for
+every decision - zero-core's Python driver has no sims_minor), zero.replay's RecordingDriver started at the spots
+(`SpotDriver`: a slot's game replaced by the spot's, a game ended when its turn number changes):
+
+1. 8 fresh searches at the spot (first decision only): the tally per option, the verdict (right in 5 of 8);
+2. the move most of them chose (its search is the spot's frame), then the generation plays both seats to the end
+   of that turn, every decision recorded (search, win chance, hand read).
+
+One zero-replay/1 game a spot (~5 KB gzipped) with a `blunder` block, uploaded as a game of `blunders.<run>`
+(listing record kind 'blunder'; the generation's earlier upload deleted first) - the site's #/blunders tab lists
+a generation's cases by kind with each case's verdict over the recorded generations, and opens each in the game
+viewer with a test-case panel. Files: runs/<run>/blunders/games/iter_NNNN/ (`<spot>.json.gz`, `tally.json`,
+`uploaded.json`); a generation recorded for the current library (tally.json's library id) is not recorded again.
+~10-15 min of CPU a generation for 53 spots (the turns' searches dominate). The tallies replace the scoring
+cache's scores of those generations and spots (`delverai_blunders.merge_games`, whenever the cache is read under
+its lock; `refresh` merges and uploads without scoring), so the Progress tab's counts and the tab's verdicts are
+the same searches. The public reason drops the library's notes to the reviewer (`public_why`).
+
 ## 7. Not done
 
 * Value readouts at burn resolutions (E:/mtg-zero-scratch/burn-scan): the suite counts outcomes, not the

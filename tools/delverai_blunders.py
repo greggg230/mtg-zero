@@ -14,6 +14,11 @@ pass_rule, iters [{iter, passed, total, share, kinds {kind: [passed, n]}}]}.
 
 RUN: a run directory or name (runs/<name>). --max-iter bounds a run another one continues (the main line up to
 its fork point). The sidecar (`delver_blunders.py watch --site`) calls `sync` after each measurement.
+
+The Blunders tab's games (tools/delverai_blunder_games.py: a generation playing each test case) carry their own
+8 searches a spot; their tallies (runs/<run>/blunders/games/iter_NNNN/tally.json) replace the cache's scores of
+those generations and spots whenever the cache is read under its lock (`merge_games`), so the Progress tab's
+counts and the Blunders tab's verdicts are the same searches. `refresh` merges and uploads without scoring.
 """
 import argparse
 import hashlib
@@ -105,6 +110,41 @@ def save_cache(run_dir, c):
     os.replace(tmp, cache_path(run_dir))
 
 
+def game_tallies(run_dir, key):
+    """The Blunders tab's tallies at this setup (tools/delverai_blunder_games.py writes
+    runs/<run>/blunders/games/iter_NNNN/tally.json: {setup, scores {spot id: right-answer share}}) -> {iter: scores}."""
+    out = {}
+    root = os.path.join(run_dir, 'blunders', 'games')
+    if not os.path.isdir(root):
+        return out
+    for name in os.listdir(root):
+        m = re.match(r'iter_(\d+)$', name)
+        p = os.path.join(root, name, 'tally.json')
+        if not m or not os.path.exists(p):
+            continue
+        try:
+            with open(p, encoding='utf-8') as f:
+                t = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if t.get('setup') == key:
+            out[int(m.group(1))] = t.get('scores') or {}
+    return out
+
+
+def merge_games(run_dir, c):
+    """The Blunders tab's tallies into the cache `c` (they replace its scores of those generations and spots: the
+    searches the tab shows) -> whether anything changed."""
+    changed = False
+    for it, sc in game_tallies(run_dir, c['setup']).items():
+        have = c['scores'].setdefault(str(it), {})
+        for sid, v in sc.items():
+            if have.get(sid) != v:
+                have[sid] = v
+                changed = True
+    return changed
+
+
 class Busy(Exception):
     """Another process is scoring this run (a backfill, or the sidecar's hook)."""
 
@@ -148,6 +188,8 @@ def _score(run_dir, L, engine_path, sims=SIMS, select=SELECT, lo=None, hi=None, 
     stale {iter: [ids]}}."""
     kept = scored_spots(L)
     c = load_cache(run_dir, setup_key(sims, select))
+    if merge_games(run_dir, c):
+        save_cache(run_dir, c)
     ck = checkpoints(run_dir, lo, hi, every)
     groups = {}
     for i in sorted(ck):
@@ -230,6 +272,39 @@ def sync(run, engine_path, sims=SIMS, lo=None, hi=None, do_upload=True, url=URL,
         upload(rec, url)
         last = rec['iters'][-1] if rec['iters'] else None
         log(f'{rec["run"]}: uploaded {len(rec["iters"])} generations' + (f'; gen {last["iter"]}: {last["passed"]} of {last["total"]} passed' if last else ''))
+    return rec
+
+
+def refresh(run, do_upload=True, url=URL, library=B.LIBRARY_PATH, log=B.say, wait=0, sims=SIMS, select=SELECT):
+    """The run's record again without scoring: the Blunders tab's tallies merged into the cache (under its lock,
+    waiting up to `wait` s for a scorer), then uploaded -> the record, or None (no library, or still busy)."""
+    run_dir = F.run_dir(run)
+    L = B.load_library(library)
+    if not L or not scored_spots(L):
+        return None
+    t0 = time.time()
+    while True:
+        try:
+            lock = _lock(run_dir)
+            break
+        except Busy as e:
+            if time.time() - t0 >= wait:
+                log(f'{os.path.basename(os.path.normpath(run_dir))}: blunder checks not refreshed ({e})')
+                return None
+            time.sleep(30)
+    try:
+        c = load_cache(run_dir, setup_key(sims, select))
+        if merge_games(run_dir, c):
+            save_cache(run_dir, c)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+    rec = record(os.path.basename(os.path.normpath(run_dir)), L, c, sims, select)
+    if do_upload:
+        upload(rec, url)
+        log(f'{rec["run"]}: uploaded {len(rec["iters"])} generations (refreshed)')
     return rec
 
 
