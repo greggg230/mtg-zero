@@ -2016,7 +2016,7 @@ fn selfplay_records_the_belief_target_with_the_samples() {
         s.p_full = 0.5;
         let cfg = DriverCfg { spec: spec.clone(), seats: vec![SeatCfg::Nn(s)], games: vec![vec![0, 0]; 2], keys: vec![("m".into(), KeyKind::Nn)],
                               concurrency: 2, seed: 5, record: true, threads: 2, groups: 1, max_steps: 100_000, rolling: false, net: 0,
-                              queue_only: false, move_log: 0, aux, paired: false, sparse: false };
+                              queue_only: false, move_log: 0, aux, paired: false, sparse: false, branch: None, starts: None };
         let mut d = Driver::<MtgAz>::new(cfg).unwrap();
         let mut recs = Vec::new();
         while let Some(b) = d.next_batch(true).unwrap() {

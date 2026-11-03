@@ -31,6 +31,8 @@ fn cfg(players: usize, events: usize, spec: &str, sims: u32) -> DriverCfg {
         aux: false,
         paired: false,
         sparse: false,
+        branch: None,
+        starts: None,
     }
 }
 
