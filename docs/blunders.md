@@ -298,7 +298,7 @@ table is the share of searches choosing the watched option, mean over a kind's s
 | tamiyo_flip_precombat | (suite 3) the AI's own cantrip or Clue, cast before combat on a clean board, that flipped its attack-ready Tamiyo | the cast |
 | tamiyo_legend_flip | (suite 4) the AI's own cantrip or Clue that flipped a Tamiyo with a Seasoned Scholar already in play | the cast |
 | burn_no_kill | (suite 4) burn at an opponent's creature that survived the turn (nothing finished it) | the cast |
-| murktide_delve_short | a Murktide delve pick that gives up an instant/sorcery the delve could still exile (`tools/delver_murktide_spots.py`: the engine searches every delve choice) | the pick |
+| murktide_delve_short | a short Murktide delve by the user's rule (after all picks: fewer than 5 instants/sorceries exiled, and 2+ instants or 2+ sorceries left in the graveyard - one of each can stay for delirium); the spot is the first pick after which no delve can avoid it (`tools/delver_murktide_spots.py`: the engine searches every delve choice) | the pick |
 | play | the user's game 20261101-215939-adeb97: #174 the first Lightning Bolt at the 7/7 Murktide, #178 the second into it (3 damage marked) | Cast Lightning Bolt |
 | play | game 20261102-092826-5b7aab #51 (turn 3, declare blockers): a no-delirium Unholy Heat at a 0/3 Tamiyo (the d7 session's horizon-effect find) | Cast Unholy Heat |
 | play | game 20261102-181844-24ecfc #47 (turn 4, main 1; report 20261102-183938-f44695): Brainstorm as the third draw, flipping an attack-ready Tamiyo before combat (section 3b) | Cast Brainstorm |
@@ -367,7 +367,7 @@ each with that answer and the reason:
   its searches choosing a right answer; a kind's score the mean over its spots (the Play-tab reports
   together are the kind `play`); **all kinds** the mean over the kinds. Each spot's own score is kept too.
 * **which kinds**: only those with a clear right answer (`KIND_ANSWER`): tamiyo_flip_precombat (attack
-  first), murktide_delve_short (keep the instant in the delve),
+  first), murktide_delve_short (a delve short by the user's rule),
   burn_no_kill (the burn killed nothing), land_drop_tapout (play the land first), daze_payable_pool (the
   opponent has the mana floating). Daze into an untapped land and burn that could not kill stay out (a tax
   or a bait can be right); waste_brainstorm was taken out by the user (11-02: not a clear class of blunder;
@@ -430,13 +430,19 @@ play), 12 murktide_delve_short, 12 burn_no_kill. Every Tamiyo spot was replayed:
 third draw and she flips as it resolves (`E:/mtg-zero-scratch/tamiyo-bs/verify_tamiyo.py`).
 
 **The library after the audit** (62 spots, 56 scored, 6 held; the 12 tamiyo_legend_flip spots removed with
-their kind): reference generation 424, 8 searches a spot:
+their kind; the Murktide spots re-mined by the user's rule - the first rule flagged any pick that lowered the
+best count still reachable, which caught harmless picks such as a Wasteland first while every instant could
+still go): reference generation 424, 8 searches a spot:
 
 ```
 budget  burn_nokill  daze_float  ld_tapout  murk_delve  tam_flip  play  all kinds
-s32         30%          9%         12%         67%         0%      25%     24%
-s1024       45%         92%         36%         75%        19%      59%     54%
+s32         30%          9%         12%         56%         0%      25%     22%
+s1024       45%         92%         36%         57%        19%      59%     52%
 ```
+
+Murktide by the user's rule (the first 1,000 of float550@550's games): 61 of 1,290 casts short (4.7%), every
+one avoidable; under the first rule 13%. Two of the 12 spots (games 99 and 208) give the same Murktide either
+way: a sorcery exiled where an instant would have left one of each in the graveyard.
 
 First scores (the first library, before the audit; CPU, 8 searches a spot; share choosing a right answer; `E:/mtg-zero-scratch/tamiyo-bs/lib_*.json`):
 

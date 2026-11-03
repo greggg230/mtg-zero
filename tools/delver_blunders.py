@@ -1231,8 +1231,9 @@ KIND_ANSWER = {
     'land_drop_tapout': ('bad', 'play the land first: the cast taps out, then the land is played anyway'),
     'daze_payable_pool': ('bad', 'the opponent has the mana floating: Daze is paid for free'),
     'burn_no_kill': ('bad', 'the burn did not kill the creature, and nothing finished it that turn: a card spent for no kill'),
-    'murktide_delve_short': ('bad', 'this pick gives up an instant or sorcery the delve could still exile: Murktide enters '
-                                    'with one +1/+1 counter fewer for each'),
+    'murktide_delve_short': ('bad', 'after this pick no delve can exile 5 instants/sorceries or leave at most one instant '
+                                    'and one sorcery in the graveyard (the user\'s rule): a smaller Murktide than the '
+                                    'graveyard allows, with spare instants or sorceries left behind'),
 }
 CANARY_KINDS = {
     'daze_payable_land': 'Daze while the spell\'s controller has an untapped mana land (watched: Cast Daze)',
