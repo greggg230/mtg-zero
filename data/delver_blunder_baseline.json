@@ -545,9 +545,69 @@
    "suite": 2,
    "measured": "2026-11-02",
    "games": 2000
+  },
+  "tam_flip_per100g": {
+   "section": "Tamiyo",
+   "label": "own cantrip flipped her, she could attack (/100 g)",
+   "num": "tam_flip",
+   "den": null,
+   "value": 52.75,
+   "se": 1.4941000359610228,
+   "n": 2000,
+   "suite": 3,
+   "measured": "2026-11-02",
+   "games": 2000
+  },
+  "tam_flip_pre": {
+   "section": "Tamiyo",
+   "label": "before her attack (the Clue lost)",
+   "num": "tam_flip_pre",
+   "den": "tam_flip",
+   "value": 0.8549763033175355,
+   "se": 0.010974492646874112,
+   "n": 1055,
+   "suite": 3,
+   "measured": "2026-11-02",
+   "games": 2000
+  },
+  "tam_flip_noattack": {
+   "section": "Tamiyo",
+   "label": "after combat without an attack",
+   "num": "tam_flip_noattack",
+   "den": "tam_flip",
+   "value": 0.012322274881516588,
+   "se": 0.0033823711445525716,
+   "n": 1055,
+   "suite": 3,
+   "measured": "2026-11-02",
+   "games": 2000
+  },
+  "tam_flip_clean_pre": {
+   "section": "Tamiyo",
+   "label": "clean board: before her attack",
+   "num": "tam_flip_clean_pre",
+   "den": "tam_flip_clean",
+   "value": 0.8777472527472527,
+   "se": 0.012352137722793366,
+   "n": 728,
+   "suite": 3,
+   "measured": "2026-11-02",
+   "games": 2000
+  },
+  "tam_flip_clean_pre_per100g": {
+   "section": "Tamiyo",
+   "label": "clean board: before her attack (/100 g)",
+   "num": "tam_flip_clean_pre",
+   "den": null,
+   "value": 31.95,
+   "se": 1.188614804121288,
+   "n": 2000,
+   "suite": 3,
+   "measured": "2026-11-02",
+   "games": 2000
   }
  },
- "suite": 2,
+ "suite": 3,
  "history": [
   "suite 1 (2026-11-02): the first 41 metrics, gen 424 at 32 sims, 2,000 games seed 20261102, engine digest 132437374243f7b2",
   "suite 2 (2026-11-02): floats read from the float build's options; Wasteland \"no value taken\"; added float_unlabeled_per100g and daze_bounce_floatwaste_over_tapped (re-scan of the same games; every suite-1 value identical under suite 2 on them)"

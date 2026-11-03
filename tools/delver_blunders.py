@@ -54,6 +54,13 @@ functions below; docs/blunders.md has a summary.
   land drop     a non-cantrip spell cast in the caster's own main phase with its land drop unused and
                 an untapped-entering land in hand that left it with no untapped land (mana land or
                 fetch), then that land played later the same turn (the 11-01 scan's definition).
+  Tamiyo        the AI's own draw spell or Clue (Brainstorm, Ponder, Prismari Charm, Clue) drew the third
+                card of its own turn and flipped its Tamiyo, Inquisitive Student while she could attack
+                (not summoning sick; untapped, or attacked this turn; no untapped opposing flier or
+                reach creature with power 3+): before her attack = before the declare-attackers step,
+                the Clue her attack makes lost (the 11-02 Play-tab report); clean board = no Dragon's
+                Rage Channeler, Monk or Cori-Steel Cutter of the AI's (no surveil, prowess or flurry
+                upside to a cantrip before combat).
   habits        tools/delver_fingerprints.py's metrics (fetch cracked at once, Brainstorm with a
                 shuffle, Murktide delve, FoW pitches, tap-out into Daze, T1-2 Volcanic, ...).
 """
@@ -73,7 +80,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import delver_fingerprints as F  # noqa: E402  (pure Python: the habit metrics, the run lookup)
 
-SUITE_VERSION = 2                          # bump when a metric's definition changes (the baseline records it)
+SUITE_VERSION = 3                          # bump when a metric's definition changes (the baseline records it)
 GAMES_FORMAT = 'delver-blunders-games/1'
 BASELINE_FORMAT = 'delver-blunder-baseline/1'
 BASELINE_PATH = os.path.join(ROOT, 'data', 'delver_blunder_baseline.json')
@@ -87,6 +94,13 @@ INSTANTS = {'Brainstorm': 'U', 'Lightning Bolt': 'R', 'Unholy Heat': 'R', 'Prism
 INSTANT_COST = {'Brainstorm': 1, 'Lightning Bolt': 1, 'Unholy Heat': 1, 'Prismari Charm': 2}
 BURN = {'Lightning Bolt', 'Unholy Heat'}
 CANTRIPS = {'Brainstorm', 'Ponder'}
+TAMIYO = 'Tamiyo, Inquisitive Student // Tamiyo, Seasoned Scholar'
+TAMIYO_FLIP = f'{TAMIYO} Battlefield -> Exile'            # her transform: exiled, back as the planeswalker
+TAMIYO_TRIGGER = f'trigger of {TAMIYO} goes on the stack'  # her attack trigger and her third-draw trigger
+LOG_STEP = re.compile(r'^T\d+ (\w+) ')                     # a log line's step: 'T4 Main1 ...'
+BEFORE_ATTACKS = ('Untap', 'Upkeep', 'Draw', 'Main1', 'BeginCombat')
+TAMIYO_DRAWERS = {'Brainstorm', 'Ponder', 'Prismari Charm', 'Clue'}       # the stack objects that draw
+COMBAT_UPSIDE = {"Dragon's Rage Channeler", 'Monk', 'Cori-Steel Cutter'}  # surveil / prowess / flurry
 LANDS = set(MANA_LANDS) | FETCH
 TARGET_RE = re.compile(r'target (.+?)#(\d+)')
 DMG_RE = re.compile(r'(\d+) damage to ')
@@ -532,6 +546,72 @@ def scan_land_drop(G, C, players, ex):
         ex.append(('tap-out with an unused land drop', k, s.get('turn'), f'P{p} cast {card}, then played {played}'))
 
 
+def _turn_lines_back(G, k, upto, t):
+    """Turn t's log lines from seq[k] back (newest step first) as (index, lines); seq[k]'s own lines cut
+    at `upto` (None: all of them)."""
+    for j in range(k, 0, -1):
+        if G.seq[j - 1].get('turn') != t:
+            return
+        lines = G.new_log(j)
+        yield j, (lines if j != k or upto is None else lines[:upto])
+
+
+def scan_tamiyo(G, C, players, ex):
+    """The AI's own draw spell or Clue flipping its Tamiyo, Inquisitive Student on its own turn while she
+    could attack: before her attack (the Clue lost), after it, or after combat without one. The flip's
+    cause is the top stack object (the flipper's) where her third-draw trigger went on the stack."""
+    for k in range(1, G.n):
+        lines = G.new_log(k)
+        i = next((x for x, ln in enumerate(lines) if ln.endswith(TAMIYO_FLIP)), None)
+        if i is None:
+            continue
+        prev, nxt = G.seq[k - 1], G.seq[k]
+        t = prev.get('turn')
+        for ps in prev['players']:
+            p = ps['id']
+            if prev.get('active') != p or (players is not None and p not in players):
+                continue
+            for c in ps.get('battlefield') or []:
+                after = obj_on_bf(nxt, c['id'])[1]                    # the planeswalker may keep her id
+                if c.get('name') != TAMIYO or (after is not None and after.get('name') == TAMIYO):
+                    continue
+                tj, tline = next(((j, [ln for ln in lj if ln.endswith(TAMIYO_TRIGGER)][-1])
+                                  for j, lj in _turn_lines_back(G, k, i, t) if any(ln.endswith(TAMIYO_TRIGGER) for ln in lj)),
+                                 (None, None))
+                if tj is None:
+                    continue
+                top = (G.seq[tj - 1].get('stack') or [{}])[-1]
+                cause = top.get('name') if top.get('controller') == p else None
+                if cause not in TAMIYO_DRAWERS:
+                    continue                                          # a draw step, a Bauble, an ultimate
+                m = LOG_STEP.match(tline)
+                step = m.group(1) if m else None
+                cut = G.new_log(tj).index(tline)
+                attacked = any('attacks with ' + TAMIYO in ln for _, lj in _turn_lines_back(G, tj, cut, t) for ln in lj)
+                if c.get('sick') or (c.get('tapped') and not attacked):
+                    continue
+                opp = prev['players'][1 - p]
+                if any('creature' in x.get('types', []) and not x.get('tapped') and {'flying', 'reach'} & set(x.get('kw') or [])
+                       and (x.get('pt') or [0, 0])[0] >= 3 for x in opp.get('battlefield') or []):
+                    continue                                          # attacking could lose her
+                clean = not ({x.get('name') for x in ps.get('battlefield') or []} & COMBAT_UPSIDE)
+                when = 'pre' if step in BEFORE_ATTACKS else ('after' if attacked else 'noattack')
+                C['tam_flip'] += 1
+                C['tam_flip_' + when] += 1
+                if clean:
+                    C['tam_flip_clean'] += 1
+                    C['tam_flip_clean_' + when] += 1
+                if when != 'pre':
+                    continue
+                want = 'Activate Clue' if cause == 'Clue' else 'Cast ' + cause
+                cast = next((j for j in range(tj - 1, -1, -1) if G.seq[j].get('turn') == t and G.lab[j] == want
+                             and dec_of(G.seq[j]).get('player') == p), None)
+                if clean and cast is not None:
+                    G.spots.append(('tamiyo_flip_precombat', cast, want))
+                ex.append(('Tamiyo flipped before her attack' + ('' if clean else ' (DRC / Monk / Cutter out)'), tj, t,
+                           f'P{p} {cause} in {step}'))
+
+
 def scan_game(d, players=None, examples=None, spots=None):
     """All counts of one game `d` (zero-replay/1-like: states, frames, result) -> Counter. `players`: the
     counted players (None: both). `examples`: a list that gets (metric, step index, turn, text) rows;
@@ -545,6 +625,7 @@ def scan_game(d, players=None, examples=None, spots=None):
     scan_floats(G, C, players, ex)
     scan_burn(G, C, players, ex)
     scan_land_drop(G, C, players, ex)
+    scan_tamiyo(G, C, players, ex)
     if spots is not None:
         spots.extend(G.spots)
     B = F.Band()
@@ -595,6 +676,11 @@ METRICS = [
     ('land drop', '  (/100 g)', 'ld_blunder', None),
     ('land drop', '  ... into a live Daze', 'ld_blunder_live_daze', 'ld_blunder'),
     ('land drop', '  ... Dazed', 'ld_blunder_dazed', 'ld_blunder'),
+    ('Tamiyo', 'own cantrip flipped her, she could attack (/100 g)', 'tam_flip', None),
+    ('Tamiyo', '  before her attack (the Clue lost)', 'tam_flip_pre', 'tam_flip'),
+    ('Tamiyo', '  after combat without an attack', 'tam_flip_noattack', 'tam_flip'),
+    ('Tamiyo', '  clean board: before her attack', 'tam_flip_clean_pre', 'tam_flip_clean'),
+    ('Tamiyo', '  clean board: before her attack (/100 g)', 'tam_flip_clean_pre', None),
     ('habits', 'fetch cracked at once', 'fp_fetch_now', 'fp_fetch_cracked'),
     ('habits', 'Brainstorm with a shuffle', 'fp_bs_shuffle', 'fp_bs'),
     ('habits', 'Murktide delve best', 'fp_murk_best', 'fp_murk'),
@@ -1111,6 +1197,7 @@ CANARY_KINDS = {
     'burn_could_not_kill': 'burn cast at an undamaged creature it could not kill (watched: the cast)',
     'burn_damaged_survivor': 'burn cast into a damaged creature that survived (watched: the cast)',
     'land_drop_tapout': 'tap-out with the land drop unused, the land played after (watched: the cast)',
+    'tamiyo_flip_precombat': 'own cantrip / Clue flipping an able Tamiyo before her attack, clean board (watched: the cast)',
     'play': 'a Delver Lab Play-tab spot (watched: the AI\'s move there)',
 }
 
@@ -1283,7 +1370,7 @@ def canary_table(C):
     rows_ = [(lab, sims) for lab, by in C['results'].items() for sims in by]
     cols = []
     short = {'daze_payable_land': 'daze_pay', 'daze_payable_pool': 'daze_float', 'waste_brainstorm': 'waste_bs', 'burn_could_not_kill': 'burn_cnk',
-             'burn_damaged_survivor': 'burn_dmg', 'land_drop_tapout': 'ld_tapout'}
+             'burn_damaged_survivor': 'burn_dmg', 'land_drop_tapout': 'ld_tapout', 'tamiyo_flip_precombat': 'tam_flip'}
     for kind in CANARY_KINDS:
         idx = [i for i, sp in enumerate(spots) if sp['kind'] == kind]
         if kind == 'play':
