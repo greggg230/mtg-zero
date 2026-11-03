@@ -629,30 +629,6 @@
    "suite": 4,
    "measured": "2026-11-02",
    "games": 2000
-  },
-  "tam_legend_per100g": {
-   "section": "Tamiyo",
-   "label": "own cantrip flipped her into the legend rule (/100 g)",
-   "num": "tam_legend",
-   "den": null,
-   "value": 3.5999999999999996,
-   "se": 0.43429748692984255,
-   "n": 2000,
-   "suite": 4,
-   "measured": "2026-11-02",
-   "games": 2000
-  },
-  "tam_legend": {
-   "section": "Tamiyo",
-   "label": "share of all her flips by own cantrips",
-   "num": "tam_legend",
-   "den": "tam_flip_any",
-   "value": 0.049315068493150684,
-   "se": 0.005614404338210993,
-   "n": 1460,
-   "suite": 4,
-   "measured": "2026-11-02",
-   "games": 2000
   }
  },
  "suite": 4,

@@ -29,7 +29,7 @@ one of the four fetchlands.
 | Tamiyo | own cantrip flipped her, she could attack | (suite 3; the user's Play-tab report of 11-02) the AI's own Brainstorm, Ponder, Prismari Charm or Clue - the stack's top object, the AI's, where her third-draw trigger went on the stack - flipped its Tamiyo, Inquisitive Student on its own turn while she could attack: not summoning sick, untapped or attacked this turn, no untapped opposing flier or reach creature with power 3+ (attacking would risk her). /100 g. |
 | | before her attack (the Clue lost) | of those, the share whose trigger came before the declare-attackers step (upkeep, draw, main 1, beginning of combat): her attack's investigate never happened. Attacking first and casting the cantrip after (or in response to her attack trigger) flips her the same and keeps the Clue. **after combat without an attack**: main 2 or later, she never attacked. |
 | | clean board: before her attack | the same share where the AI had no Dragon's Rage Channeler, Monk or Cori-Steel Cutter (a cantrip before combat has no surveil, prowess or flurry upside there: the Clue is the whole difference); also /100 g. |
-| | into the legend rule | (suite 4; the user, 11-02) the AI's own cantrip or Clue flipped a Tamiyo while it already controlled a Tamiyo, Seasoned Scholar: one of the two dies (a card lost, on either player's turn). /100 g, and the share of all her flips by its own cantrips (`tam_flip_any`). These flips are out of the before-her-attack rows. |
+| | (into the legend rule) | (suite 4) a flip while the AI already controls a Tamiyo, Seasoned Scholar is out of the before-her-attack rows. Not reported as a blunder (the user, 11-02: the card now against flipping her later is a judgment call); the scan still counts it (`tam_legend`, of `tam_flip_any`): 3.5-5.5 a 100 games. |
 | habits | | `tools/delver_fingerprints.py`'s metrics (ENGINE.md 73.5): fetch cracked at once, Brainstorm with a shuffle, Murktide delve best, FoW pitched a FoW, tap-out into a live Daze (+ then Dazed), T1-2 Volcanic for blue only, kept a one-land seven, starting player won. |
 
 The float block is a no-op on an engine without floating: today's engine never leaves mana in a pool
@@ -367,11 +367,12 @@ each with that answer and the reason:
   its searches choosing a right answer; a kind's score the mean over its spots (the Play-tab reports
   together are the kind `play`); **all kinds** the mean over the kinds. Each spot's own score is kept too.
 * **which kinds**: only those with a clear right answer (`KIND_ANSWER`): tamiyo_flip_precombat (attack
-  first), tamiyo_legend_flip (hold the cantrip), murktide_delve_short (keep the instant in the delve),
+  first), murktide_delve_short (keep the instant in the delve),
   burn_no_kill (the burn killed nothing), land_drop_tapout (play the land first), daze_payable_pool (the
   opponent has the mana floating). Daze into an untapped land and burn that could not kill stay out (a tax
   or a bait can be right); waste_brainstorm was taken out by the user (11-02: not a clear class of blunder;
-  10 of its 12 spots marked drop). Every Play-tab report goes in with the user's reason (`--why`).
+  10 of its 12 spots marked drop), and so was tamiyo_legend_flip (11-02: the card now against flipping
+  Tamiyo later is a judgment call). Every Play-tab report goes in with the user's reason (`--why`).
 * **review**: the user audits the spots on a review page (each spot drawn as the Play tab's board, its
   answer, the context the board does not show; Keep / Drop / Unsure: https://claude.ai/artifact/1HPUzAhC5Q3rofWB9uS5ms,
   verdicts in its db collection `verdicts`, doc id = spot id). A drop leaves the library (`dropped`: id -> why);
@@ -428,12 +429,13 @@ tamiyo_legend_flip (game 3 turn 5 + 11 mined; each replayed: the cast flips her 
 play), 12 murktide_delve_short, 12 burn_no_kill. Every Tamiyo spot was replayed: the cast makes the turn's
 third draw and she flips as it resolves (`E:/mtg-zero-scratch/tamiyo-bs/verify_tamiyo.py`).
 
-**The library after the audit** (74 spots, 68 scored, 6 held): reference generation 424, 8 searches a spot:
+**The library after the audit** (62 spots, 56 scored, 6 held; the 12 tamiyo_legend_flip spots removed with
+their kind): reference generation 424, 8 searches a spot:
 
 ```
-budget  burn_nokill  daze_float  ld_tapout  murk_delve  tam_flip  tam_legend  play  all kinds
-s32         30%          9%         12%         67%         0%        24%      25%     24%
-s1024       45%         92%         36%         75%        19%        34%      59%     52%
+budget  burn_nokill  daze_float  ld_tapout  murk_delve  tam_flip  play  all kinds
+s32         30%          9%         12%         67%         0%      25%     24%
+s1024       45%         92%         36%         75%        19%      59%     54%
 ```
 
 First scores (the first library, before the audit; CPU, 8 searches a spot; share choosing a right answer; `E:/mtg-zero-scratch/tamiyo-bs/lib_*.json`):

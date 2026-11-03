@@ -64,9 +64,10 @@ functions below; docs/blunders.md has a summary.
                 reach creature with power 3+): before her attack = before the declare-attackers step,
                 the Clue her attack makes lost (the 11-02 Play-tab report); clean board = no Dragon's
                 Rage Channeler, Monk or Cori-Steel Cutter of the AI's (no surveil, prowess or flurry
-                upside to a cantrip before combat). Into the legend rule (suite 4, apart): the AI's own
-                cantrip or Clue flipped a Tamiyo while it already controlled a Tamiyo, Seasoned Scholar -
-                one of the two dies, a card lost whenever it happens (either player's turn).
+                upside to a cantrip before combat). Flips into the legend rule (the AI already controls a
+                Tamiyo, Seasoned Scholar) are out of these rows (suite 4) and not reported as a blunder (the
+                user, 11-02: the card now against flipping her later is a judgment call); the scan still
+                counts them (tam_legend, tam_flip_any).
   habits        tools/delver_fingerprints.py's metrics (fetch cracked at once, Brainstorm with a
                 shuffle, Murktide delve, FoW pitches, tap-out into Daze, T1-2 Volcanic, ...).
 """
@@ -708,8 +709,6 @@ METRICS = [
     ('Tamiyo', '  after combat without an attack', 'tam_flip_noattack', 'tam_flip'),
     ('Tamiyo', '  clean board: before her attack', 'tam_flip_clean_pre', 'tam_flip_clean'),
     ('Tamiyo', '  clean board: before her attack (/100 g)', 'tam_flip_clean_pre', None),
-    ('Tamiyo', 'own cantrip flipped her into the legend rule (/100 g)', 'tam_legend', None),
-    ('Tamiyo', '  share of all her flips by own cantrips', 'tam_legend', 'tam_flip_any'),
     ('habits', 'fetch cracked at once', 'fp_fetch_now', 'fp_fetch_cracked'),
     ('habits', 'Brainstorm with a shuffle', 'fp_bs_shuffle', 'fp_bs'),
     ('habits', 'Murktide delve best', 'fp_murk_best', 'fp_murk'),
@@ -1224,14 +1223,13 @@ LIBRARY_PATH = os.path.join(ROOT, 'data', 'delver_canary_library.json')
 HELD = ('unsure', 'recheck')            # a spot's review verdicts that keep it out of the scores until resolved
 # the right answer of a mined kind's spot: its watched option is the blunder ('bad') or the good line ('good');
 # kinds with no clear right answer stay out of the library: Daze into an untapped land, burn that could not kill
-# (burn_no_kill, which allows a follow-up, is in), Brainstorm off a Wastelanded land (the user, 11-02: not a clear class)
+# (burn_no_kill, which allows a follow-up, is in), Brainstorm off a Wastelanded land (the user, 11-02: not a clear class),
+# Tamiyo flipped into the legend rule (the user, 11-02: the card now against flipping her later is a judgment call)
 KIND_ANSWER = {
     'tamiyo_flip_precombat': ('bad', 'attack with Tamiyo first: the cantrip after (or in response to her attack '
                                      'trigger) flips her the same and keeps the Clue; nothing else gains from it first'),
     'land_drop_tapout': ('bad', 'play the land first: the cast taps out, then the land is played anyway'),
     'daze_payable_pool': ('bad', 'the opponent has the mana floating: Daze is paid for free'),
-    'tamiyo_legend_flip': ('bad', 'a Tamiyo, Seasoned Scholar is already in play: this third draw of the turn flips the '
-                                  'second Tamiyo into the legend rule and one of the two dies - hold the cantrip'),
     'burn_no_kill': ('bad', 'the burn did not kill the creature, and nothing finished it that turn: a card spent for no kill'),
     'murktide_delve_short': ('bad', 'this pick gives up an instant or sorcery the delve could still exile: Murktide enters '
                                     'with one +1/+1 counter fewer for each'),
