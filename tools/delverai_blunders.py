@@ -50,6 +50,7 @@ LABELS = {
     'chump_block': 'Chump block at high life',
     'fow_over_free_daze': 'Force of Will where Daze was free',
     'fourth_land_empty_hand': 'Played out a 4th land from an empty hand',
+    'bauble_trick_missed': 'Missed the Bauble trick',
 }
 
 
