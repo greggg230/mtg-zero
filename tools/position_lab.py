@@ -235,6 +235,10 @@ def check_spot(spot):
     g = spot_game(spot, log=True)
     st = json.loads(g.export_state())
     st.pop('lab', None)
+    if 'known' not in spot['state']:
+        # (the spectator view's `known` block, view-known 7a53953: view only - a replay recorded before it
+        # has none; nothing in a game depends on it)
+        st.pop('known', None)
     if st != spot['state']:
         diff = sorted(k for k in set(st) | set(spot['state']) if st.get(k) != spot['state'].get(k))
         raise SystemExit(f'{spot["id"]}: the rebuilt spot differs from the replay frame in {diff}')
