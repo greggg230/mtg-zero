@@ -1220,6 +1220,7 @@ def scan_replays(run, lo=0, hi=10 ** 9):
 SPOTS_FORMAT = 'delver-blunders-spots/1'
 LIBRARY_FORMAT = 'delver-canary-library/1'
 LIBRARY_PATH = os.path.join(ROOT, 'data', 'delver_canary_library.json')
+LIVE = (0.10, 0.90)                     # the decider's raw value range of a spot in an undecided game (the user, 11-02)
 HELD = ('unsure', 'recheck')            # a spot's review verdicts that keep it out of the scores until resolved
 # the right answer of a mined kind's spot: its watched option is the blunder ('bad') or the good line ('good');
 # kinds with no clear right answer stay out of the library: Daze into an untapped land, burn that could not kill
@@ -1481,11 +1482,30 @@ def save_library(L, path=LIBRARY_PATH):
         f.write('\n')
 
 
-def library_add(spots_path, path=LIBRARY_PATH, kinds=None, why=(), engine_path=ROOT, log=say):
+_VALUE_NETS = {}
+
+
+def spot_value(ckpt, g, p):
+    """The raw value of player p's position in game g by checkpoint ckpt's network (value heads are relative to
+    the encoded player: val[0][0])."""
+    import numpy as np
+    if ckpt not in _VALUE_NETS:
+        from zero.infer import NetEvaluator
+        from zero.net import load
+        model, _ = load(ckpt, 'cpu', game='mtg')
+        _VALUE_NETS[ckpt] = NetEvaluator(model, 'cpu')
+    legal = [int(v) for v in g.legal()]
+    out = _VALUE_NETS[ckpt].evaluate(np.asarray(g.encode(p), np.float32)[None], np.asarray([2], np.int32),
+                                      np.asarray([0, len(legal)], np.int32), np.asarray(legal, np.int32))
+    return float(out[1][0][0])
+
+
+def library_add(spots_path, path=LIBRARY_PATH, kinds=None, why=(), engine_path=ROOT, log=say, live_ckpt=None):
     """Spots of a frozen set (`spots`' output) into the library, each with its right answer: a mined kind's
     from KIND_ANSWER, a Play-tab spot's watched move = the reported blunder ('bad'), its reason from `why`
     ('<source>:<k>=<reason>'; required). Each gets its fingerprint on `engine_path` (the engine it is
-    scored on); spots already in (same source, game and k) stay as they are."""
+    scored on); spots already in (same source, game and k) stay as they are. Only spots in undecided games go in
+    (LIVE: the decider's raw value - the spot's `value`, else by `live_ckpt`'s network - between 0.10 and 0.90)."""
     with open(spots_path, encoding='utf-8') as f:
         S = json.load(f)
     reasons = {}
@@ -1497,7 +1517,7 @@ def library_add(spots_path, path=LIBRARY_PATH, kinds=None, why=(), engine_path=R
                                'engine': engine_info(engine_path), 'reference': {}, 'spots': []}
     have = {(x['source'], x.get('gid'), x['k']) for x in L['spots']}
     E = load_engine(engine_path)
-    added = 0
+    added = skipped = 0
     for sp in S['spots']:
         if (sp['source'], sp.get('gid'), sp['k']) in have or (kinds and sp['kind'] not in kinds and sp['kind'] != 'play'):
             continue
@@ -1508,17 +1528,29 @@ def library_add(spots_path, path=LIBRARY_PATH, kinds=None, why=(), engine_path=R
             answer = 'bad'
         elif sp['kind'] in KIND_ANSWER:
             answer, reason = KIND_ANSWER[sp['kind']]
+        elif sp.get('answer') in ('good', 'bad') and sp.get('why'):
+            answer, reason = sp['answer'], sp['why']                 # a kind mined elsewhere, its answer on the spot
         else:
             continue
-        st = json.loads(spot_game(E, sp).export_state())
+        g = spot_game(E, sp)
+        st = json.loads(g.export_state())
         labels = [o['t'] for o in (st.get('decision') or {}).get('options') or []]
         if sp['watch'] not in labels:
             raise SystemExit(f'spot {sp["source"]}:{sp["k"]} does not replay on {engine_path}')
+        # undecided games only (the user, 11-02): the decider's raw value, the spot's own or by live_ckpt
+        v = sp.get('value')
+        if v is None and live_ckpt:
+            v = spot_value(live_ckpt, g, sp['decider'])
+        if v is not None and not LIVE[0] <= v <= LIVE[1]:
+            skipped += 1
+            continue
         L['spots'].append(dict(sp, id=f'{sp["kind"]}:{sp["source"]}:{sp["gid"]}:{sp["k"]}', answer=answer, why=reason,
-                               sig=spot_sig(st), added=time.strftime('%Y-%m-%d')))
+                               sig=spot_sig(st), added=time.strftime('%Y-%m-%d'), **({'value': round(v, 4)} if v is not None else {})))
         have.add((sp['source'], sp.get('gid'), sp['k']))
         added += 1
     save_library(L, path)
+    if skipped:
+        log(f'{skipped} spots left out: decided games (value outside {LIVE})')
     log(f'{path}: {added} spots added ({len(L["spots"])} in all: '
         f'{dict(collections.Counter(x["kind"] for x in L["spots"]))})')
     return L
@@ -1792,6 +1824,7 @@ def main(argv=None):
     p.add_argument('--kinds', default=None, help=f'mined kinds to take (default all of {sorted(KIND_ANSWER)}; Play spots always)')
     p.add_argument('--why', action='append', default=[], help="a Play spot's reason: '<source>:<k>=<why its move was wrong>'")
     p.add_argument('--engine', default=ROOT, help='the engine the library is scored on (its fingerprints)')
+    p.add_argument('--live-ckpt', default=None, help="the network that judges a spot's game undecided (spots without a value)")
     p = sub.add_parser('library-score', help="each checkpoint's right-answer share on the canary library")
     p.add_argument('ckpts', nargs='+')
     p.add_argument('--library', default=LIBRARY_PATH)
@@ -1855,7 +1888,7 @@ def main(argv=None):
             scan_file(f, a.engine, a.jobs)
         return 0
     elif a.cmd == 'library-add':
-        library_add(a.spots, a.library, set(a.kinds.split(',')) if a.kinds else None, a.why, a.engine)
+        library_add(a.spots, a.library, set(a.kinds.split(',')) if a.kinds else None, a.why, a.engine, live_ckpt=a.live_ckpt)
         return 0
     elif a.cmd == 'library-score':
         os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')

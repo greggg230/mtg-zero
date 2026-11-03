@@ -469,6 +469,19 @@ fixes the floating Daze (~90%) and both Murktide Bolts; it never fixes Brainstor
 (0% everywhere) or the Tamiyo flip (#47 0% everywhere, the mined ones <= 25%) - those need training. The
 Heat at Tamiyo is the 'cq' rule's at 1024 (38% right for 424, 100% under 'visits').
 
+**Decided games out; the site at the Play tab's setup** (11-02, the user): a spot in a game the network already
+counts as won or lost tests only habit (a deep dive found 11/12 land-drop, 5/5 Murktide and 5/11 burn spots
+there). LIVE = (0.10, 0.90): the decider's raw value at the spot by the network that played it (gen 550 for
+spots mined from float550@550's games, a Play game's own model for the reports); the library dropped the 26
+decided spots (`dropped` names each value; Murktide's kind emptied, land drops kept 1) and `library-add` now
+refuses decided spots (a spot's `value`, else `--live-ckpt CKPT`'s network). The site's blunder checks
+(`tools/delverai_blunders.py`) search with the Play tab's setup: the run's evaluation seat at 1024 simulations
+taking the most-visited move (delver-lab PLAY_SELECT 'visits'), 8 searches a spot, ~95 s of CPU a
+generation for ~27 spots; scores cached per run and spot (a spot added is scored everywhere, a spot dropped
+costs nothing); the main line's history every 16 generations (`--every 16`), the fork every evaluated one;
+a lock file keeps a backfill and the sidecar's hook from scoring a run at once (the hook skips a round).
+The sidecar's own library score (canary_s32_*) stays at the evaluation budget and rule.
+
 ## 7. Not done
 
 * Value readouts at burn resolutions (E:/mtg-zero-scratch/burn-scan): the suite counts outcomes, not the

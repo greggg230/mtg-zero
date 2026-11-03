@@ -1,15 +1,16 @@
 """The canary library's results per generation for delverai.greggg230.com's Progress tab (the user's ask of
 11-02: "how many of the blunder cases we passed"). Every evaluated checkpoint of a run (models/iter_N.pt, N a
-multiple of its eval_every) is searched on the current library (tools/delver_blunders.py library_score: the
-run's evaluation seat, 8 searches a spot, CPU) and a spot is PASSED when a right answer won at least 5 of
-its 8 searches. The results are cached per run (runs/<run>/blunders/library_scores.json, keyed by the
-library's id: a changed library - a spot added, dropped or held - scores every checkpoint again, so a run's
-generations are always counted on one set of positions). The site record is `blunders.<run>` (kind
+multiple of its eval_every) is searched on the user-kept spots of the current library with the Play tab's
+setup (the user, 11-02: "the same exact set up as the play tab" - the run's evaluation seat at 1024
+simulations, the most-visited move; tools/delver_blunders.py library_score, 8 searches a spot, CPU) and a spot
+is PASSED when a right answer won at least 5 of its 8 searches. Scores are cached per run and spot
+(runs/<run>/blunders/library_scores.json, keyed by the setup): a spot added is scored on every checkpoint, a
+spot dropped costs nothing, so every generation is counted on the current set. The site record is `blunders.<run>` (kind
 'blunders', delverai worker/index.js): {for_run, library {id, spots, kinds, labels}, sims, repeats,
 pass_rule, iters [{iter, passed, total, share, kinds {kind: [passed, n]}}]}.
 
   python tools/delverai_blunders.py RUN [RUN ...] [--min-iter N] [--max-iter N] [--engine CHECKOUT]
-      [--sims 32] [--upload] [--url https://delverai.greggg230.com] [--key-file F] [--dry-run]
+      [--sims 1024] [--select visits] [--upload] [--url https://delverai.greggg230.com] [--key-file F] [--dry-run]
 
 RUN: a run directory or name (runs/<name>). --max-iter bounds a run another one continues (the main line up to
 its fork point). The sidecar (`delver_blunders.py watch --site`) calls `sync` after each measurement.
@@ -29,6 +30,7 @@ import delver_fingerprints as F  # noqa: E402
 
 PASS = 5                                  # right answers out of REPEATS searches for a spot to pass
 REPEATS = 8
+SIMS, SELECT = 1024, 'visits'             # the Play tab's (delver-lab play.PLAY_SELECT, its 1024 simulations)
 URL = 'https://delverai.greggg230.com'
 KEY_ENV = 'MTGZ_DELVERAI_KEY'
 KEY_FILE = os.path.join(os.path.expanduser('~'), 'delverai', '.upload_key')
@@ -57,10 +59,10 @@ def library_id(L):
     return hashlib.sha1(json.dumps(key).encode()).hexdigest()[:12]
 
 
-def checkpoints(run_dir, lo=None, hi=None):
-    """{iter: path} of a run's evaluated checkpoints (N a multiple of eval_every) in [lo, hi]."""
+def checkpoints(run_dir, lo=None, hi=None, every=None):
+    """{iter: path} of a run's evaluated checkpoints (N a multiple of eval_every, or of `every`) in [lo, hi]."""
     with open(os.path.join(run_dir, 'config.json'), encoding='utf-8') as f:
-        every = int(json.load(f).get('eval_every', 8))
+        every = int(every or json.load(f).get('eval_every', 8))
     out = {}
     for name in os.listdir(os.path.join(run_dir, 'models')):
         m = re.match(r'iter_(\d+)\.pt$', name)
@@ -73,15 +75,19 @@ def cache_path(run_dir):
     return os.path.join(run_dir, 'blunders', 'library_scores.json')
 
 
-def load_cache(run_dir, lib_id, sims):
+def setup_key(sims, select):
+    return f'{select or "run"}@{sims}x{REPEATS}'
+
+
+def load_cache(run_dir, key):
     try:
         with open(cache_path(run_dir), encoding='utf-8') as f:
             c = json.load(f)
-        if c.get('library') == lib_id and c.get('sims') == sims and c.get('repeats') == REPEATS:
+        if c.get('setup') == key:
             return c
     except (OSError, ValueError):
         pass
-    return {'library': lib_id, 'sims': sims, 'repeats': REPEATS, 'scores': {}, 'stale': {}}
+    return {'setup': key, 'scores': {}, 'stale': {}}
 
 
 def save_cache(run_dir, c):
@@ -92,29 +98,73 @@ def save_cache(run_dir, c):
     os.replace(tmp, cache_path(run_dir))
 
 
-def score(run_dir, L, engine_path, sims=32, lo=None, hi=None, batch=8, log=B.say):
-    """Score the evaluated checkpoints the cache lacks on library L -> the cache {library, scores {iter: {spot
-    id: right-answer share}}, stale {iter: [ids]}}."""
-    lib_id = library_id(L)
-    kept = dict(L, spots=scored_spots(L))
-    c = load_cache(run_dir, lib_id, sims)
-    ck = checkpoints(run_dir, lo, hi)
-    todo = sorted(i for i in ck if str(i) not in c['scores'])
-    if todo:
-        log(f'{os.path.basename(run_dir)}: scoring {len(todo)} checkpoints on library {lib_id} ({len(kept["spots"])} kept spots, '
-            f'{sims} simulations, {REPEATS} searches a spot)')
-    for k in range(0, len(todo), batch):
-        its = todo[k:k + batch]
-        R = B.library_score(kept, [ck[i] for i in its], [sims], REPEATS, 'cpu', engine_path, log=log)
-        for lab, by in R['scores'].items():
-            it = int(re.search(r'_(\d+)$', lab).group(1))
-            c['scores'][str(it)] = by[str(sims)]['spots']
-            c['stale'][str(it)] = R['stale']
-        save_cache(run_dir, c)
+class Busy(Exception):
+    """Another process is scoring this run (a backfill, or the sidecar's hook)."""
+
+
+def _lock(run_dir):
+    """Take the run's scoring lock (a file holding the owner's pid; a dead owner's lock is taken over)."""
+    import psutil
+    path = cache_path(run_dir) + '.lock'
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return path
+        except FileExistsError:
+            try:
+                pid = int(open(path).read().strip() or 0)
+            except (OSError, ValueError):
+                pid = 0
+            if pid and pid != os.getpid() and psutil.pid_exists(pid):
+                raise Busy(f'{path}: pid {pid} is scoring this run')
+            os.remove(path)
+    raise Busy(path)
+
+
+def score(run_dir, L, engine_path, sims=SIMS, select=SELECT, lo=None, hi=None, batch=8, log=B.say, every=None):
+    lock = _lock(run_dir)
+    try:
+        return _score(run_dir, L, engine_path, sims, select, lo, hi, batch, log, every)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+
+
+def _score(run_dir, L, engine_path, sims=SIMS, select=SELECT, lo=None, hi=None, batch=8, log=B.say, every=None):
+    """Score every evaluated checkpoint on the kept spots its cache lacks (the checkpoints missing the same
+    spots go in one library_score call) -> the cache {setup, scores {iter: {spot id: right-answer share}},
+    stale {iter: [ids]}}."""
+    kept = scored_spots(L)
+    c = load_cache(run_dir, setup_key(sims, select))
+    ck = checkpoints(run_dir, lo, hi, every)
+    groups = {}
+    for i in sorted(ck):
+        have = set(c['scores'].get(str(i), {})) | set(c['stale'].get(str(i), []))
+        missing = tuple(sp['id'] for sp in kept if sp['id'] not in have)
+        if missing:
+            groups.setdefault(missing, []).append(i)
+    for missing, its in groups.items():
+        spots = [sp for sp in kept if sp['id'] in set(missing)]
+        log(f'{os.path.basename(run_dir)}: {len(spots)} spots on {len(its)} checkpoints ({sims} simulations, '
+            f'{select or "the run's rule"}, {REPEATS} searches a spot)')
+        for k in range(0, len(its), batch):
+            part = its[k:k + batch]
+            R = B.library_score(dict(L, spots=spots), [ck[i] for i in part], [sims], REPEATS, 'cpu', engine_path,
+                                rules=[(select, None)] if select else None, log=log)
+            for lab, by in R['scores'].items():
+                it = int(re.match(r'.*_(\d+)(?:_[a-z][\w.]*)?$', lab).group(1))
+                c['scores'].setdefault(str(it), {}).update(by[str(sims)]['spots'])
+                c['stale'][str(it)] = sorted(set(c['stale'].get(str(it), [])) | set(R['stale']))
+            save_cache(run_dir, c)
     return c
 
 
-def record(run_name, L, c, sims):
+def record(run_name, L, c, sims, select=SELECT):
     """The site record of a run from its cache."""
     kinds = {}
     for sp in scored_spots(L):
@@ -132,8 +182,9 @@ def record(run_name, L, c, sims):
         iters.append({'iter': int(it), 'passed': sum(p for p, _ in per.values()), 'total': len(sc),
                       'share': round(sum(sc.values()) / len(sc), 4), 'kinds': {k: [p, n] for k, (p, n) in sorted(per.items())}})
     return {'run': f'blunders.{run_name}', 'kind': 'blunders', 'for_run': run_name, 'updated': int(time.time()),
-            'sims': sims, 'repeats': REPEATS, 'pass_rule': f'a right answer in at least {PASS} of {REPEATS} searches',
-            'library': {'id': c['library'], 'spots': len(kind_of), 'kinds': kinds,
+            'sims': sims, 'repeats': REPEATS, 'rule': select or 'run',
+            'pass_rule': f'a right answer in at least {PASS} of {REPEATS} searches',
+            'library': {'id': library_id(L), 'spots': len(kind_of), 'kinds': kinds,
                         'labels': {k: LABELS.get(k, k.replace('_', ' ')) for k in kinds}, 'note': NOTE},
             'iters': iters}
 
@@ -155,14 +206,19 @@ def upload(rec, url=URL, key=None, timeout=60):
         return json.loads(r.read().decode() or '{}')
 
 
-def sync(run, engine_path, sims=32, lo=None, hi=None, do_upload=True, url=URL, library=B.LIBRARY_PATH, log=B.say):
+def sync(run, engine_path, sims=SIMS, lo=None, hi=None, do_upload=True, url=URL, library=B.LIBRARY_PATH, log=B.say,
+         select=SELECT, every=None):
     """Score what the cache lacks and upload the run's record (the sidecar's hook) -> the record."""
     run_dir = F.run_dir(run)
     L = B.load_library(library)
     if not L or not scored_spots(L):
         return None
-    c = score(run_dir, L, engine_path, sims, lo, hi, log=log)
-    rec = record(os.path.basename(os.path.normpath(run_dir)), L, c, sims)
+    try:
+        c = score(run_dir, L, engine_path, sims, select, lo, hi, log=log, every=every)
+    except Busy as e:
+        log(f'{os.path.basename(os.path.normpath(run_dir))}: blunder checks not updated this time ({e})')
+        return None
+    rec = record(os.path.basename(os.path.normpath(run_dir)), L, c, sims, select)
     if do_upload:
         upload(rec, url)
         last = rec['iters'][-1] if rec['iters'] else None
@@ -175,8 +231,10 @@ def main(argv=None):
     ap.add_argument('runs', nargs='+')
     ap.add_argument('--min-iter', type=int, default=None)
     ap.add_argument('--max-iter', type=int, default=None)
+    ap.add_argument('--every', type=int, default=None, help="score every Nth generation (default: the run's eval_every)")
     ap.add_argument('--engine', default=B.ROOT)
-    ap.add_argument('--sims', type=int, default=32)
+    ap.add_argument('--sims', type=int, default=SIMS)
+    ap.add_argument('--select', default=SELECT, help="the move rule ('visits', the Play tab's; 'run' = the run's own)")
     ap.add_argument('--library', default=B.LIBRARY_PATH)
     ap.add_argument('--upload', action='store_true')
     ap.add_argument('--url', default=URL)
@@ -184,7 +242,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
     for run in a.runs:
-        rec = sync(run, a.engine, a.sims, a.min_iter, a.max_iter, do_upload=a.upload and not a.dry_run, url=a.url, library=a.library)
+        rec = sync(run, a.engine, a.sims, a.min_iter, a.max_iter, do_upload=a.upload and not a.dry_run, url=a.url, library=a.library,
+                   select=None if a.select == 'run' else a.select, every=a.every)
         if rec is None:
             print('no library')
             continue
