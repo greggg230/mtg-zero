@@ -17257,14 +17257,17 @@ arm's gen-G rows with both arms' checkpoints G-3 and K), `h2h N` (paired fork N 
 **Waiting on the user** (none of it decided here):
 1. **Disk.** The fork copies the line's window (6 generations of shards, 57 GB at 910) and keeps 6 of its
    own: **~60-65 GB more on E: for the A/B's duration**, plus ~10 GB transients while each arm writes a
-   generation before its oldest goes. E: had 75 GB free at 13:20 (C: 50): too little margin (`fork` refuses
+   generation before its oldest goes. E: had 75-87 GB free at 13:20-14:04 (C: 48): too little margin (`fork` refuses
    below the line's data size + 30 GB; `relaunch_speed.sh` refuses the control below 40 GB free unless
    CTRL_MIN_FREE_GB says otherwise). E.g. `E:/mtg-zero/runs/r3-2b-beliefsearch-data` (50 GB, the old line's
    shards) would cover it.
-2. **RAM / GPU / Mac.** The desktop has 64 GB (29 GB free beside the line, whose run process holds ~12 GB);
-   two arms run two trainings, two token-graph inferences and two local lingers on one GPU and 2 x 3 worker
-   processes on the Mac: each arm's generations will be slower (compute per generation is matched: the
-   same 1,600 games and search), the 40 generations ~1.5-2x longer than the line's ~3 h.
+2. **RAM / GPU / Mac.** The desktop has 64 GB; the line's run process alone held 12-14 GB in self-play and
+   **34.4 GB during its training** (14:04, `--ram-budget-gb 34 --window-cache 1`), 9 GB left free then: two
+   arms at the line's flags would not fit if their trainings overlap (69 GB). Concurrent arms need the
+   user's choice - both arms at a smaller `--ram-budget-gb` (a recipe change for both, the same for both),
+   or the arms one after the other (not concurrent: ~2 x 3 h). Beside it, two trainings, two token-graph
+   inferences and two local lingers share one GPU and 2 x 3 worker processes the Mac: each arm's
+   generations slower (compute per generation is matched: the same 1,600 games and search).
 3. **`differ`.** Recommended (87.4); DIFFER=0 is the literal design.
 4. **The canary endpoint.** With the canary spots in the archive the fork self-plays from those very
    positions, so its canary scores (`canary_s32_*`) are no longer a clean endpoint. Either keep them in and
