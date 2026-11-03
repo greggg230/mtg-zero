@@ -17254,28 +17254,26 @@ sidecars' Tamiyo rate and canary scores; h2h; readouts), `readout G` (review 5's
 arm's gen-G rows with both arms' checkpoints G-3 and K), `h2h N` (paired fork N vs control N, 1,200 games,
 32 simulations, GPU), `stop`.
 
-**Waiting on the user** (none of it decided here):
-1. **Disk.** The fork copies the line's window (6 generations of shards, 57 GB at 910) and keeps 6 of its
-   own: **~60-65 GB more on E: for the A/B's duration**, plus ~10 GB transients while each arm writes a
-   generation before its oldest goes. E: had 75-87 GB free at 13:20-14:04 (C: 48): too little margin (`fork` refuses
-   below the line's data size + 30 GB; `relaunch_speed.sh` refuses the control below 40 GB free unless
-   CTRL_MIN_FREE_GB says otherwise). E.g. `E:/mtg-zero/runs/r3-2b-beliefsearch-data` (50 GB, the old line's
-   shards) would cover it.
-2. **RAM / GPU / Mac.** The desktop has 64 GB; the line's run process alone held 12-14 GB in self-play and
-   **34.4 GB during its training** (14:04, `--ram-budget-gb 34 --window-cache 1`), 9 GB left free then: two
-   arms at the line's flags would not fit if their trainings overlap (69 GB). Concurrent arms need the
-   user's choice - both arms at a smaller `--ram-budget-gb` (a recipe change for both, the same for both),
-   or the arms one after the other (not concurrent: ~2 x 3 h). Beside it, two trainings, two token-graph
-   inferences and two local lingers share one GPU and 2 x 3 worker processes the Mac: each arm's
-   generations slower (compute per generation is matched: the same 1,600 games and search).
-3. **`differ`.** Recommended (87.4); DIFFER=0 is the literal design.
-4. **The canary endpoint.** With the canary spots in the archive the fork self-plays from those very
-   positions, so its canary scores (`canary_s32_*`) are no longer a clean endpoint. Either keep them in and
-   judge on the Tamiyo rate in fresh games (`tam_flip_clean_pre`), the human-labelled set, fresh-row CE and
-   the h2h, or `ARCHIVE_ARGS="--canary none"` (or `half-a`, scoring the held-out half) to keep the canary.
-5. **Rows per generation.** At the same 1,600 games the fork records ~8% fewer rows (fewer training steps:
-   rows x reuse / batch). `--games 1740` would match rows instead of games (not done: the brief's default
-   is games).
+**Decided** (the user, 2026-11-03 ~14:40, through the coordinator):
+1. **Disk**: the old line's 50 GB of shards deleted (E: ~133 GB free); `fork` keeps its guard (the line's data +
+   30 GB).
+2. **In turn**, not concurrent (two arms at the line's flags do not fit 64 GB while both train: the line's run
+   process held 34.4 GB in training): the fork first, `r3-2b-forked1000` 1000 -> 1040; when it exits cleanly at
+   1040, a detached waiter (`handoff.sh`, copied per launch and started hidden) starts the control - the main
+   line itself continued 1000 -> 1040 by `ITERS=1040 relaunch_speed.sh launch` (its pin run-1d67542, both speed
+   flags, its env). It refuses, logged, on a fork crash or a supervisor giving up, a STOP or PAUSE file, a STOP
+   exit, a missing checkpoint 1040 or metrics row, a line that moved past 1000 or runs, a CANCEL file, a bad
+   argument at arming (tested on fake runs: the clean case starts the stand-in launcher, the 7 others refuse,
+   and the hidden start through `launch_hidden.py` with Git's bash works). The arms are compared at equal
+   generations (`summary`, `canary N`, `h2h N`, `readout 1040`); in turn, both arms keep shards only for their
+   last 6 generations, so the fresh-row readout is at G = 1040 (checkpoints 1037).
+3. **Canary**: half in, half held out - the archive with `--canary half-a` (spots whose id's sha1 is even), the
+   other half (`half-b`: 41 spots, replayed and checked like the archive's) written as its own canary library
+   (`--held-out-library`, `<fork>/canary_heldout.json`) and scored for both arms at equal generations
+   (`canary N`: `delver_blunders.py library-score`, 8 searches a spot at 32 simulations, CPU) and by the fork's
+   sidecar. The archive built so at 14:4x: 298 entries - 35 canary (half-a), 260 human, 3 report.
+4. **differ** on (`--selfplay-branch-differ 1`).
+Games stay 1,600 a generation (the fork records ~8% fewer rows).
 
 **Endpoints** (review 5 step 2): the sidecar's Tamiyo rate (`tam_flip_clean_pre`, 1,000 fresh games every
 8th checkpoint; the line's 0.68-0.74 at 776-904) and canary (see 4), fresh-row value CE (`readout`), paired

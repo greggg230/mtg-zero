@@ -190,9 +190,7 @@ class Builder:
             src = sp['id']
             extra = {'class': sp['kind'], 'file': fname}
             half = 'half-a' if int(hashlib.sha1(src.encode()).hexdigest(), 16) % 2 == 0 else 'half-b'
-            if which == 'none' or (which.startswith('half') and half != which):
-                self.held_out.append({'id': src, 'class': sp['kind'], 'half': half})
-                continue
+            out = which == 'none' or (which.startswith('half') and half != which)
             if spec_key(sp['spec']) != self.key:
                 self.skip('canary', src, 'played with another spec than the run\'s', **extra)
                 continue
@@ -219,6 +217,10 @@ class Builder:
                 continue
             if g.to_move != sp['decider']:
                 self.skip('canary', src, f'the decider is P{g.to_move}, the library says P{sp["decider"]}', **extra)
+                continue
+            if out:
+                # held out of the archive (replayed and checked like the others: a clean canary set)
+                self.held_out.append({'id': src, 'class': sp['kind'], 'half': half, 'spot': sp, 'file': fname})
                 continue
             self.add('canary', src, sp['seed'], roots, state_of(g), extra)
 
@@ -334,6 +336,9 @@ def main(argv=None):
     ap.add_argument('--deal', default='actual', choices=['actual', 'uniform', 'none'])
     ap.add_argument('--canary', default='all', choices=['all', 'none', 'half-a', 'half-b'],
                     help="the canary spots in the archive: all, none, or one half by their id's sha1 (the other held out)")
+    ap.add_argument('--held-out-library', default=None,
+                    help='write the held-out canary spots (replayed and checked) as a canary library file there '
+                         '(delver_blunders.py library-score / watch --library): the clean canary set of an A/B')
     a = ap.parse_args(argv)
     E = DB.load_engine(ROOT)
     from zero.games import spec_json
@@ -358,12 +363,25 @@ def main(argv=None):
            'built': {'date': time.strftime('%Y-%m-%d %H:%M'), 'engine': info, 'seconds': round(time.time() - t, 1)},
            'counts': counts, 'skipped_counts': skipped, 'canary': a.canary,
            'canary_held_out': [h['id'] for h in B.held_out], 'entries': B.entries}
+    if a.held_out_library:
+        if not B.held_out:
+            raise SystemExit('--held-out-library: no canary spot is held out (--canary all)')
+        half = sorted({h['half'] for h in B.held_out})
+        HL = {'format': DB.LIBRARY_FORMAT, 'what': f'the canary spots held out of the archive {a.out} ({", ".join(half)} by the '
+                                               f"id's sha1; tools/delver_archive.py --canary {a.canary})",
+              'held_out': {'archive': a.out, 'canary': a.canary, 'half': half, 'built': out['built']},
+              'spots': [h['spot'] for h in B.held_out]}
+        with open(a.held_out_library, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(HL, f, indent=1)
+        print(f'{a.held_out_library}: {len(HL["spots"])} held-out canary spots ({", ".join(half)}): '
+              f'{dict(collections.Counter(h["class"] for h in B.held_out))}')
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or '.', exist_ok=True)
     with open(a.out, 'w', encoding='utf-8', newline='\n') as f:
         json.dump(out, f, indent=1)
     rp = a.report or os.path.splitext(a.out)[0] + '.report.json'
     with open(rp, 'w', encoding='utf-8', newline='\n') as f:
-        json.dump({'entries': counts, 'skipped': B.skipped, 'skipped_counts': skipped, 'canary_held_out': B.held_out,
+        json.dump({'entries': counts, 'skipped': B.skipped, 'skipped_counts': skipped,
+                   'canary_held_out': [{k: v for k, v in h.items() if k != 'spot'} for h in B.held_out],
                    'duplicates': {e['id']: e['also'] for e in B.entries if e['also']}}, f, indent=1)
     print(f'{a.out}: {len(B.entries)} entries {counts}; {len(B.skipped)} sources skipped {skipped} (reasons in {rp})')
     for s in B.skipped:
