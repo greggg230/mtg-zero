@@ -25,6 +25,9 @@ one of the four fetchlands.
 | burn | creature survived / could not kill | of Lightning Bolts and Unholy Heats resolving at an opponent's creature (countered or fizzled ones apart): it survived; the damage dealt was below its toughness minus damage already marked. |
 | | into a damaged creature that survived | of burn into a creature already damaged, the share that survived (the Play-tab double Bolt into a 7/7 Murktide); also /100 g. |
 | land drop | tap-out, then the land played | of the non-cantrip, non-free spells cast in the caster's own main phase (empty stack) with its land drop unused and an untapped-entering land in hand, the share that left it no untapped mana land or fetch and was followed by that land played the same turn (the 11-01 scan's definition); also /100 g, into a live Daze, Dazed. |
+| Tamiyo | own cantrip flipped her, she could attack | (suite 3; the user's Play-tab report of 11-02) the AI's own Brainstorm, Ponder, Prismari Charm or Clue - the stack's top object, the AI's, where her third-draw trigger went on the stack - flipped its Tamiyo, Inquisitive Student on its own turn while she could attack: not summoning sick, untapped or attacked this turn, no untapped opposing flier or reach creature with power 3+ (attacking would risk her). /100 g. |
+| | before her attack (the Clue lost) | of those, the share whose trigger came before the declare-attackers step (upkeep, draw, main 1, beginning of combat): her attack's investigate never happened. Attacking first and casting the cantrip after (or in response to her attack trigger) flips her the same and keeps the Clue. **after combat without an attack**: main 2 or later, she never attacked. |
+| | clean board: before her attack | the same share where the AI had no Dragon's Rage Channeler, Monk or Cori-Steel Cutter (a cantrip before combat has no surveil, prowess or flurry upside there: the Clue is the whole difference); also /100 g. |
 | habits | | `tools/delver_fingerprints.py`'s metrics (ENGINE.md 73.5): fetch cracked at once, Brainstorm with a shuffle, Murktide delve best, FoW pitched a FoW, tap-out into a live Daze (+ then Dazed), T1-2 Volcanic for blue only, kept a one-land seven, starting player won. |
 
 The float block is a no-op on an engine without floating: today's engine never leaves mana in a pool
@@ -157,6 +160,37 @@ floating-and-wasting an untapped Island when a tapped one could go back, while i
 pointless. Files: `E:/mtg-zero-scratch/blunders/float550/` (report_float.txt, report_float_vs_baseline.txt,
 spots_float550.json, canary_s32.json).
 
+## 3b. Tamiyo flipped before her attack (suite 3, 11-02)
+
+The user's Play-tab report (game 20261102-181844-24ecfc #47, report 20261102-183938-f44695): the AI, its
+untapped Tamiyo, Inquisitive Student its only creature, cast Brainstorm in main 1 as its third draw of the
+turn; she flipped before combat and the Clue her attack makes was lost. At that root the policy gives
+Brainstorm 0.9998 and Pass 1.7e-4, so a 1024-simulation search spends 1023 visits on Brainstorm (both
+rules); after a forced pass it Brainstorms again at beginning of combat (0.994), though at declare attackers
+it does attack with her (0.85). With 150 forced root visits a branch, Pass and Brainstorm score about
+alike (+0.016 / +0.006 / -0.002): inside Pass the network again cantrips before attacking. Its value head
+prices the Clue (the same position at the opponent's next upkeep, identical but for the Clue: 0.251
+against 0.220). Probes: `E:/mtg-zero-scratch/tamiyo-bs/` (probe.py, line.py).
+
+The same games re-scanned (no new play; the old metrics unchanged):
+
+```
+                                          424 s32     424 s1024 cq  424 s1024 visits     550 s32    550 s1024 cq   f550@550 s32  f550@598 s32
+games                                        2000             400               400        2000             400           3000          3000
+own cantrip flipped her, she could (/100g) 52.8 +-1.5   48.8 +-3.3        54.2 +-3.4   50.1 +-1.5      47.8 +-3.3     51.1 +-1.3    49.4 +-1.2
+  before her attack (the Clue lost)        85.5 +-1.1   85.1 +-2.5        82.9 +-2.7   82.1 +-1.3      86.4 +-2.3     80.9 +-1.1    82.8 +-1.0
+  after combat without an attack            1.2 +-0.3    0.5 +-0.5         0.0 +-0.0    1.1 +-0.3       0.5 +-0.5      1.1 +-0.3     0.3 +-0.2
+  clean board: before her attack           87.8 +-1.2   87.3 +-2.9        86.6 +-2.7   82.8 +-1.6      89.0 +-2.6     81.6 +-1.3    83.4 +-1.2
+  clean board: before (/100 g)             31.9 +-1.2   29.2 +-2.6        34.0 +-2.7   28.0 +-1.1      30.2 +-2.6     27.1 +-0.9    27.7 +-0.9
+```
+
+(f550 = runs/r3-2b-float550 on the float build.) The network's habit: ~85% of the flips it causes on its
+own turn, ~30 a 100 games on a clean board, at every budget, under both rules, and flat from 424 to
+550 and over the float fork's 48 generations. 96% of the clean pre-combat casts (424 s32: 616 of 639) went on an empty stack -
+proactive, not answers (18 answered an opponent's object, mostly a Bauble); 228 of them were in the AI's
+own draw step and 79 in its upkeep. Search cannot repair it (it needs two low-prior passes in a row); a
+fix is a training matter (exploration of the pass at roots like this one).
+
 ## 4. The fixed baseline and the per-generation sidecar
 
 **Baseline** (`data/delver_blunder_baseline.json`, versioned in the repo): generation 424 of
@@ -257,8 +291,10 @@ table is the share of searches choosing the watched option, mean over a kind's s
 | burn_could_not_kill | burn cast at an undamaged creature it could not kill | the cast |
 | burn_damaged_survivor | burn cast into an already damaged creature that survived | the cast |
 | land_drop_tapout | the tap-out with the land drop unused, the land played after | the cast |
+| tamiyo_flip_precombat | (suite 3) the AI's own cantrip or Clue, cast before combat on a clean board, that flipped its attack-ready Tamiyo | the cast |
 | play | the user's game 20261101-215939-adeb97: #174 the first Lightning Bolt at the 7/7 Murktide, #178 the second into it (3 damage marked) | Cast Lightning Bolt |
 | play | game 20261102-092826-5b7aab #51 (turn 3, declare blockers): a no-delirium Unholy Heat at a 0/3 Tamiyo (the d7 session's horizon-effect find) | Cast Unholy Heat |
+| play | game 20261102-181844-24ecfc #47 (turn 4, main 1; report 20261102-183938-f44695): Brainstorm as the third draw, flipping an attack-ready Tamiyo before combat (section 3b) | Cast Brainstorm |
 
 The first set (`E:/mtg-zero-scratch/blunders/base/spots_424.json`: 12 spots of each kind from generation
 424's 32-simulation games + the three Play-tab spots), 8 searches a spot, CPU (8 threads): 8 s a
@@ -289,6 +325,105 @@ mana ability at priority when Wasteland targets a land), so its canary set is fr
 casting Brainstorm into a held Daze) comes from its `daze into floating mana` examples; today's engine
 cannot reach a pool at a decision.
 
+**Tamiyo** (suite 3; `E:/mtg-zero-scratch/blunders/float550/spots_tamiyo.json`: 12 clean-board spots from
+the float fork's 550 games + the Play spot #47, float engine; `canary_tamiyo.json`), share casting the
+flipping cantrip:
+
+```
+checkpoint, rule, budget     tam_flip (12)  #47 24ecfc
+424 cq0.3 (run's)  s32           100% +-0        100%
+424 cq0.3 (run's)  s1024          85% +-9        100%
+424 visits         s32           100% +-0        100%
+424 visits         s1024          92% +-8        100%
+550 cq0.3 (run's)  s32           100% +-0        100%
+550 cq0.3 (run's)  s1024         74% +-12        100%
+550 visits         s32            99% +-1        100%
+550 visits         s1024          92% +-8        100%
+f550@624 cq0.3     s32            91% +-6        100%
+f550@624 cq0.3     s1024         83% +-10        100%
+f550@624 visits    s32           83% +-11        100%
+f550@624 visits    s1024         85% +-10        100%
+```
+
+The user's spot: Brainstorm in all 8 searches of every checkpoint, rule and budget - the network's.
+
+## 6a. The canary library: known right answers, scored every generation
+
+The canaries above are mined per measurement, from one checkpoint's own games, and only say which move it
+made. The library (`data/delver_canary_library.json`, versioned in the repo; the user's ask of 11-02) is a
+fixed, curated set of positions where the right answer is known and the network is known to go wrong,
+each with that answer and the reason:
+
+* **answer**: `bad` - the spot's watched option is the blunder, any other option is right (a Play-tab
+  report: the AI's move there; a mined kind whose watched option is the mistake) - or `good` - the watched
+  option is the right line (Brainstorm with a Wastelanded land's mana). A spot's **score** is the share of
+  its searches choosing a right answer; a kind's score the mean over its spots (the Play-tab reports
+  together are the kind `play`); **all kinds** the mean over the kinds. Each spot's own score is kept too.
+* **which kinds**: only those with a clear right answer (`KIND_ANSWER`): tamiyo_flip_precombat (attack
+  first), land_drop_tapout (play the land first), waste_brainstorm (use the dying land), daze_payable_pool
+  (the opponent has the mana floating). Daze into an untapped land and burn that cannot kill stay out
+  (a tax or a bait can be right). Every Play-tab report goes in with the user's reason (`--why`).
+* **the fingerprint**: each spot stores `sig` (`spot_sig`: turn, step, decider, the options' words, the
+  decider's hand, the life totals) on the engine it was added on. A later engine whose rules change the
+  game before the spot replays it to another position: the spot is then **stale** - not scored, listed by
+  id in the output and the sidecar's line (`canary_stale`), never silently skipped; if none replays, the
+  scoring fails. The four Play spots replay to the same fingerprint on run-4589760, view-known and the
+  float build.
+* **the reference**: `library-score CKPT --reference` stores the first checkpoint's scores (the run's rule)
+  in the file: generation 424, the Play tab's network.
+
+```
+cd "C:/Users/Gregg Keithley/mtg-zero-wt/blunders"
+ENG="C:/Users/Gregg Keithley/mtg-zero-wt/run-1d67542"
+# mined spots (`spots` output) + Play spots, each Play spot with its reason:
+python tools/delver_blunders.py spots GAMES.games.json.gz --engine "$ENG" --out spots.json \
+    --play "<delver-lab>/data/play/<game>/game.json:<k>"
+python tools/delver_blunders.py library-add spots.json --engine "$ENG" --why "<game>:<k>=<why the AI's move was wrong>"
+# a checkpoint's scores (CPU; ~1 s at 32 simulations, ~3 min at 1024 for ~50 spots x 8 searches):
+python tools/delver_blunders.py library-score CKPT [CKPT ...] --engine "$ENG" --sims 32,1024 --rules run,visits
+```
+
+**In the sidecar**: `watch` scores every measured checkpoint on the library (CPU, 8 searches a spot, at
+the games' budget; `--library-sims 1024` adds the Play tab's budget, ~3 min of CPU a checkpoint; `--library
+''` turns it off). The library is re-read at every measurement, so a spot added today counts from the next
+generation on without a restart. iter_NNNN.json gets `canary` (per spot, per kind, all kinds, the stale
+ids, the reference); blunders.jsonl gets `canary_s<sims>_all` and `canary_s<sims>_<kind>` beside the game
+rates.
+
+The first library (11-02, float engine 1d67542): 12 spots each of the four kinds, mined from the float
+fork's 550 games, and the four Play-tab reports (#174 and #178 Murktide Bolts, #51 Heat at Tamiyo, #47
+Brainstorm before Tamiyo's attack). The mined spots favour 550's choices (they are where it made them):
+read the generations against each other and against the reference, not as absolute skill.
+
+**Audit** (11-02, every mined board read with both hands: `E:/mtg-zero-scratch/tamiyo-bs/audit.md`; the
+file's `audit` key): tamiyo_flip and daze_float 12/12 hold; waste_bs 11/12 - one dropped (the dying land
+was the only mana and the opponent held a free Daze: keeping Brainstorm is arguable); land_drop_tapout
+12/12 kept, though in 8 the opponent's actual hand had no Daze - the AI cannot see that hand, and the land
+first is never worse (the same mana at the end, and mana up while the spell is on the stack). Remove a
+spot by deleting its entry (the reference's per-spot scores let the kind means be recomputed).
+
+First scores (CPU, 8 searches a spot; share choosing a right answer; `E:/mtg-zero-scratch/tamiyo-bs/lib_*.json`):
+
+```
+checkpoint, rule, budget   daze_float (12)  ld_tapout (12)  tam_flip (12)  waste_bs (11)  #47 Tamiyo  #174 Bolt  #178 Bolt  #51 Heat  all kinds
+424 cq0.3 (ref)   s32                  8%             17%             0%             0%          0%        12%        12%      100%        11%
+424 cq0.3 (ref)   s1024               89%             32%            15%             0%          0%       100%       100%       38%        39%
+424 visits        s32                  0%             17%             0%             0%          0%         0%         0%      100%         8%
+424 visits        s1024               58%             17%             8%             0%          0%        88%       100%      100%        31%
+550 cq0.3         s32                  0%              4%             0%             0%          0%       100%        12%      100%        11%
+550 cq0.3         s1024               91%              8%            25%             0%          0%       100%       100%      100%        40%
+f550@624 cq0.3    s32                 50%              0%             9%             0%          0%       100%        12%      100%        22%
+f550@624 cq0.3    s1024               93%             24%            21%             0%          0%       100%       100%       88%        42%
+f550@632 cq0.3    s32                 50%              8%             6%             0%          0%       100%        38%      100%        25%
+```
+
+(The `all kinds` column counts the four Play spots as one kind, `play`.) Read: at the evaluation budget
+the library is hard by construction (mined where 550 went wrong); the float fork's 32-simulation score
+rose 11% -> 22-25%, all of it Daze into floating mana (0 -> 50%, what the fork trains on). At 1024 search
+fixes the floating Daze (~90%) and both Murktide Bolts; it never fixes Brainstorm with a Wastelanded land
+(0% everywhere) or the Tamiyo flip (#47 0% everywhere, the mined ones <= 25%) - those need training. The
+Heat at Tamiyo is the 'cq' rule's at 1024 (38% right for 424, 100% under 'visits').
+
 ## 7. Not done
 
 * Value readouts at burn resolutions (E:/mtg-zero-scratch/burn-scan): the suite counts outcomes, not the
@@ -298,5 +433,9 @@ cannot reach a pool at a decision.
   decision); several checkpoints or rules in one driver (per-game seats) would overlap the tails.
 * Value probes: none (the suite counts outcomes and search choices; a value head is relative to the
   encoded player: for `g.encode(p)` read `val[0][0]`, not `val[0][p]` - burn_scan.py is right).
-* The sidecar runs on no run yet (no run is training on today's engine); the display (section 4) is a
-  proposal for the user's screenshot approval.
+* The display (section 4) is a proposal for the user's screenshot approval; it should show the canary
+  library's scores (6a) beside the game rates.
+* The canary library: the mined spots' right answers follow their kind's rule, checked by an audit of
+  each board (11-02), not by the user; a review page (each spot's board, its answer, keep / drop) would
+  let the user curate it. More kinds with clear answers as reports come in; the library's 1024 budget in
+  the sidecar is opt-in (`--library-sims 1024`, ~3 min of CPU a checkpoint).

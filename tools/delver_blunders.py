@@ -9,6 +9,8 @@ and during a training fork. Read-only for runs (writes only under --out).
   python tools/delver_blunders.py report DIR/*.scan.json [--diff 2-1,4-3] [--json OUT]   # the table
   python tools/delver_blunders.py replays RUN [--min-gen G --max-gen H]  # the same counts over recorded
                                                                          # zero-replay/1 games (no rebuild)
+  python tools/delver_blunders.py library-add SPOTS.json [--kinds K,...] [--why SOURCE:K=REASON] # into the library
+  python tools/delver_blunders.py library-score CKPT [...] [--sims 32,1024] [--rules run,visits] [--reference]
 
 The games. Each checkpoint plays itself (`--opp self`, the default) with its run's evaluation seat on both
 sides: zero.h2h's match (its run's chance_k, the 'cq' move rule, root-view leaves, the belief tilt -
@@ -1190,6 +1192,17 @@ def scan_replays(run, lo=0, hi=10 ** 9):
 
 # ====================================================================================== canaries
 SPOTS_FORMAT = 'delver-blunders-spots/1'
+LIBRARY_FORMAT = 'delver-canary-library/1'
+LIBRARY_PATH = os.path.join(ROOT, 'data', 'delver_canary_library.json')
+# the right answer of a mined kind's spot: its watched option is the blunder ('bad') or the good line ('good');
+# kinds with no clear right answer (Daze into an untapped land, burn that may be bait) stay out of the library
+KIND_ANSWER = {
+    'tamiyo_flip_precombat': ('bad', 'attack with Tamiyo first: the cantrip after (or in response to her attack '
+                                     'trigger) flips her the same and keeps the Clue; nothing else gains from it first'),
+    'land_drop_tapout': ('bad', 'play the land first: the cast taps out, then the land is played anyway'),
+    'waste_brainstorm': ('good', "Brainstorm with the Wastelanded land's mana: the land dies either way"),
+    'daze_payable_pool': ('bad', 'the opponent has the mana floating: Daze is paid for free'),
+}
 CANARY_KINDS = {
     'daze_payable_land': 'Daze while the spell\'s controller has an untapped mana land (watched: Cast Daze)',
     'daze_payable_pool': 'Daze while the spell\'s controller has mana floating (watched: Cast Daze)',
@@ -1324,14 +1337,18 @@ def canary(spots_path, ckpts, sims_list=(32,), repeats=8, device='cuda', engine_
     from zero import h2h
     from zero.infer import NetEvaluator
     from zero.net import load
-    with open(spots_path, encoding='utf-8') as f:
-        S = json.load(f)
+    if isinstance(spots_path, dict):
+        S = spots_path
+    else:
+        with open(spots_path, encoding='utf-8') as f:
+            S = json.load(f)
     spots = S['spots']
     base = [spot_game(E, sp) for sp in spots]
     for sp, g in zip(spots, base):
         st = json.loads(g.export_state())
         sp['_labels'] = {o['a']: o['t'] for o in (st.get('decision') or {}).get('options') or []}
-        if sp['watch'] not in sp['_labels'].values() or g.to_move != sp['decider']:
+        if (sp['watch'] not in sp['_labels'].values() or g.to_move != sp['decider']
+                or (sp.get('sig') and spot_sig(st) != sp['sig'])):
             raise SystemExit(f'spot {sp["kind"]} {sp["source"]} {sp["gid"]}:{sp["k"]} does not replay on this engine')
     res = {}
     if device == 'cpu':
@@ -1398,17 +1415,151 @@ def canary_table(C):
     return '\n'.join(out)
 
 
+# ====================================================================================== the canary library
+def spot_sig(st):
+    """A spot's fingerprint: its decision as the engine shows it (turn, step, decider, the options' words,
+    the decider's hand, the life totals). A library spot that replays to another position on a later
+    engine (the same actions meaning other things) fails loudly instead of being scored."""
+    d = st.get('decision') or {}
+    p = d.get('player')
+    key = [st.get('turn'), st.get('step'), p, sorted(o['t'] for o in d.get('options') or []),
+           sorted(c.get('name') for c in (st['players'][p].get('hand') or [])) if p is not None else None,
+           [ps.get('life') for ps in st['players']]]
+    return hashlib.sha1(json.dumps(key).encode()).hexdigest()[:16]
+
+
+def load_library(path=LIBRARY_PATH):
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, encoding='utf-8') as f:
+        L = json.load(f)
+    if L.get('format') != LIBRARY_FORMAT:
+        raise SystemExit(f'{path}: not a {LIBRARY_FORMAT} file')
+    return L
+
+
+def save_library(L, path=LIBRARY_PATH):
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(L, f, indent=1)
+        f.write('\n')
+
+
+def library_add(spots_path, path=LIBRARY_PATH, kinds=None, why=(), engine_path=ROOT, log=say):
+    """Spots of a frozen set (`spots`' output) into the library, each with its right answer: a mined kind's
+    from KIND_ANSWER, a Play-tab spot's watched move = the reported blunder ('bad'), its reason from `why`
+    ('<source>:<k>=<reason>'; required). Each gets its fingerprint on `engine_path` (the engine it is
+    scored on); spots already in (same source, game and k) stay as they are."""
+    with open(spots_path, encoding='utf-8') as f:
+        S = json.load(f)
+    reasons = {}
+    for w in why:
+        key, _, text = w.partition('=')
+        reasons[key] = text
+    L = load_library(path) or {'format': LIBRARY_FORMAT, 'what': 'Delver mirror canary spots with their right answers '
+                                                                 '(tools/delver_blunders.py, docs/blunders.md 6a)',
+                               'engine': engine_info(engine_path), 'reference': {}, 'spots': []}
+    have = {(x['source'], x.get('gid'), x['k']) for x in L['spots']}
+    E = load_engine(engine_path)
+    added = 0
+    for sp in S['spots']:
+        if (sp['source'], sp.get('gid'), sp['k']) in have or (kinds and sp['kind'] not in kinds and sp['kind'] != 'play'):
+            continue
+        if sp['kind'] == 'play':
+            reason = reasons.get(f'{sp["source"]}:{sp["k"]}')
+            if not reason:
+                raise SystemExit(f'Play spot {sp["source"]}:{sp["k"]}: give its reason (--why {sp["source"]}:{sp["k"]}=...)')
+            answer = 'bad'
+        elif sp['kind'] in KIND_ANSWER:
+            answer, reason = KIND_ANSWER[sp['kind']]
+        else:
+            continue
+        st = json.loads(spot_game(E, sp).export_state())
+        labels = [o['t'] for o in (st.get('decision') or {}).get('options') or []]
+        if sp['watch'] not in labels:
+            raise SystemExit(f'spot {sp["source"]}:{sp["k"]} does not replay on {engine_path}')
+        L['spots'].append(dict(sp, id=f'{sp["kind"]}:{sp["source"]}:{sp["gid"]}:{sp["k"]}', answer=answer, why=reason,
+                               sig=spot_sig(st), added=time.strftime('%Y-%m-%d')))
+        have.add((sp['source'], sp.get('gid'), sp['k']))
+        added += 1
+    save_library(L, path)
+    log(f'{path}: {added} spots added ({len(L["spots"])} in all: '
+        f'{dict(collections.Counter(x["kind"] for x in L["spots"]))})')
+    return L
+
+
+def library_score(L, ckpts, sims_list=(32,), repeats=8, device='cpu', engine_path=ROOT, rules=None, log=say):
+    """Every library spot searched by each checkpoint (`canary`) -> {'stale': [ids that no longer replay
+    to their position on this engine], 'scores': {label: {sims: {'spots': {id: score}, 'kinds': {kind:
+    mean}, 'all': mean over kinds}}}}. A spot's score = the share of its searches choosing the right
+    answer ('good': its option; 'bad': any other)."""
+    E = load_engine(engine_path)
+    ok, stale = [], []
+    for sp in L['spots']:
+        try:
+            st = json.loads(spot_game(E, sp).export_state())
+        except Exception:                                       # noqa: BLE001  (an action the engine refuses)
+            st = None
+        if st is None or spot_sig(st) != sp['sig']:
+            stale.append(sp['id'])
+        else:
+            ok.append(sp)
+    if stale:
+        log(f'canary library: {len(stale)} of {len(L["spots"])} spots no longer replay on this engine: {stale}')
+    if not ok:
+        raise RuntimeError('canary library: no spot replays on this engine')
+    C = canary({'spots': [dict(sp) for sp in ok]}, ckpts, sims_list, repeats, device, engine_path, log, rules=rules)
+    out = {}
+    for lab, by in C['results'].items():
+        out[lab] = {}
+        for sims, per in by.items():
+            sc = {}
+            for sp, counts in zip(ok, per):
+                hit = counts.get(sp['watch'], 0) / repeats
+                sc[sp['id']] = hit if sp['answer'] == 'good' else 1.0 - hit
+            kinds = collections.defaultdict(list)
+            for sp in ok:
+                kinds[sp['kind']].append(sc[sp['id']])
+            km = {k: sum(v) / len(v) for k, v in kinds.items()}
+            out[lab][sims] = {'spots': sc, 'kinds': km, 'all': sum(km.values()) / len(km), 'n': len(ok)}
+    return {'stale': stale, 'scores': out, 'repeats': repeats}
+
+
+def library_table(R, L):
+    """One row a checkpoint x rule x budget: the right-answer share per kind (mean over its spots), each
+    Play-tab spot apart, and the mean over kinds."""
+    kinds = sorted({sp['kind'] for sp in L['spots'] if sp['kind'] != 'play'})
+    plays = [sp for sp in L['spots'] if sp['kind'] == 'play']
+    short = {'daze_payable_pool': 'daze_float', 'waste_brainstorm': 'waste_bs', 'land_drop_tapout': 'ld_tapout',
+             'tamiyo_flip_precombat': 'tam_flip'}
+    n = collections.Counter(sp['kind'] for sp in L['spots'])
+    cols = [f'{short.get(k, k)} ({n[k]})' for k in kinds] + [f'#{sp["k"]} {sp["source"][-6:]}' for sp in plays] + ['all kinds']
+    rows = [(lab, sims) for lab, by in R['scores'].items() for sims in by]
+    w0 = max([len(f'{lab} s{sims}') for lab, sims in rows] + [10]) + 2
+    ws = [max(11, len(c) + 2) for c in cols]
+    out = [f'right-answer share of {R["repeats"]} searches a spot (mean over a kind\'s spots); stale: {len(R["stale"])}']
+    for sp in plays:
+        out.append(f'  #{sp["k"]} {sp["source"]}: turn {sp.get("turn")} {sp.get("step")}, not {sp["watch"]}: {sp["why"]}')
+    out.append('checkpoint, rule, budget'.ljust(w0) + ''.join(c.rjust(w) for c, w in zip(cols, ws)))
+    for lab, sims in rows:
+        r = R['scores'][lab][sims]
+        cells = [r['kinds'].get(k) for k in kinds] + [r['spots'].get(sp['id']) for sp in plays] + [r['all']]
+        out.append(f'{lab} s{sims}'.ljust(w0) + ''.join(('-' if c is None else f'{100 * c:.0f}%').rjust(w) for c, w in zip(cells, ws)))
+    return '\n'.join(out)
+
+
 # ====================================================================================== the sidecar
 def watch(run, engine_path=ROOT, games=1000, seed=DEFAULT_SEED, sims=None, every=None, loop=300, min_iter=None,
           backfill=False, once=False, baseline=BASELINE_PATH, device='cuda', conc=1000, threads=16, groups=4, jobs=4,
-          settle=60, log=say):
+          settle=60, log=say, library=LIBRARY_PATH, library_sims=None):
     """Follow a run's evaluated checkpoints (models/iter_N.pt, N a multiple of its eval_every) and measure
     each one: <run>/blunders/iter_NNNN.json (every metric, value / se / n, against the baseline) and a
     line of <run>/blunders.jsonl (flat, one per measurement: the plot's rows). Newest first: when it falls
     behind, older checkpoints are skipped (`backfill`: measured when nothing newer waits). Resumable (a
     checkpoint with its iter_NNNN.json is done; the move logs stay in blunders/work/). min_iter None: the
     newest evaluated checkpoint at launch onward. Stops on <run>/blunders/STOP; one watcher a run
-    (blunders/watch.pid)."""
+    (blunders/watch.pid). `library`: the canary library each checkpoint is also scored on (CPU, at the
+    games' budget, + `library_sims`; '' = none), re-read at every measurement."""
     import glob
     import psutil
     d = F.run_dir(run)
@@ -1458,7 +1609,7 @@ def watch(run, engine_path=ROOT, games=1000, seed=DEFAULT_SEED, sims=None, every
             if target is not None:
                 try:
                     measure_one(d, target, ck[target], out, work, engine_path, eng, base, games, seed, sims, device, conc,
-                                threads, groups, jobs, log)
+                                threads, groups, jobs, log, library, library_sims)
                 except Exception as e:                      # noqa: BLE001  (log it, go on with the next one)
                     failed.add(target)
                     with open(os.path.join(out, f'iter_{target:04d}.error.txt'), 'w', encoding='utf-8') as f:
@@ -1476,8 +1627,10 @@ def watch(run, engine_path=ROOT, games=1000, seed=DEFAULT_SEED, sims=None, every
             pass
 
 
-def measure_one(d, it, ckpt, out, work, engine_path, eng, base, games, seed, sims, device, conc, threads, groups, jobs, log):
-    """One evaluated checkpoint: the games (kept in work/), the scan, <out>/iter_NNNN.json, a JSONL line."""
+def measure_one(d, it, ckpt, out, work, engine_path, eng, base, games, seed, sims, device, conc, threads, groups, jobs, log,
+                library=None, library_sims=None):
+    """One evaluated checkpoint: the games (kept in work/), the scan, the canary library's scores, <out>/iter_NNNN.json,
+    a JSONL line."""
     t0 = time.time()
     gp = play(ckpt, work, games, seed, 'self', sims, device, threads, groups, conc, True, engine_path=engine_path, log=log)
     sp = scan_file(gp, engine_path, jobs, log=log)
@@ -1491,12 +1644,27 @@ def measure_one(d, it, ckpt, out, work, engine_path, eng, base, games, seed, sim
         if flag:
             flags.append(key)
     meta = S['meta']
+    canary_rec = None
+    L = load_library(library) if library else None
+    if L and L['spots']:
+        try:
+            budgets = sorted({int(meta.get('sims') or 32), *(library_sims or [])})
+            R = library_score(L, [ckpt], budgets, 8, 'cpu', engine_path, log=log)
+            (lab, by), = R['scores'].items()
+            canary_rec = {'stale': R['stale'], 'repeats': R['repeats'], 'reference': L.get('reference'),
+                          'scores': by, 'library_spots': len(L['spots'])}
+            for sims_, r in by.items():
+                log(f'iteration {it}: canary library at {sims_} sims: {100 * r["all"]:.0f}% right over {len(r["kinds"])} '
+                    f'kinds ({r["n"]} spots, {len(R["stale"])} stale)')
+        except Exception as e:                                  # noqa: BLE001  (the games' measurement still counts)
+            canary_rec = {'error': f'{type(e).__name__}: {e}'}
+            log(f'iteration {it}: canary library failed ({type(e).__name__}: {e})')
     rec = {'iter': it, 'run': os.path.basename(os.path.normpath(d)), 'time': time.strftime('%Y-%m-%dT%H:%M:%S'),
            'suite': SUITE_VERSION, 'games': len(S['games']), 'sims': meta.get('sims'), 'seed': meta.get('driver_seed'),
            'seat': meta.get('seat_a'), 'engine': {k: eng.get(k) for k in ('commit', 'digest', 'engine_sha256')},
            'baseline': None if not base else {'checkpoint': base.get('checkpoint'), 'engine': base.get('engine'),
                                                'suite': base.get('suite')},
-           'seconds': round(time.time() - t0, 1), 'flags': flags, 'metrics': summ}
+           'seconds': round(time.time() - t0, 1), 'flags': flags, 'metrics': summ, 'canary': canary_rec}
     with open(os.path.join(out, f'iter_{it:04d}.json'), 'w', encoding='utf-8') as f:
         json.dump(rec, f, indent=1)
     line = {'iter': it, 'time': rec['time'], 'games': rec['games'], 'sims': rec['sims'], 'suite': SUITE_VERSION,
@@ -1504,6 +1672,13 @@ def measure_one(d, it, ckpt, out, work, engine_path, eng, base, games, seed, sim
     for key, m in summ.items():
         line[key] = None if m['value'] is None else round(m['value'], 5)
         line[key + '_se'] = None if m['se'] is None else round(m['se'], 5)
+    for sims_, r in ((canary_rec or {}).get('scores') or {}).items():
+        line[f'canary_s{sims_}_all'] = round(r['all'], 4)
+        for k, v in r['kinds'].items():
+            line[f'canary_s{sims_}_{k}'] = round(v, 4)
+    if canary_rec and (canary_rec.get('stale') or canary_rec.get('error')):
+        line['canary_stale'] = len(canary_rec.get('stale') or [])
+        line['canary_error'] = canary_rec.get('error')
     with open(os.path.join(os.path.dirname(out), 'blunders.jsonl'), 'a', encoding='utf-8') as f:
         f.write(json.dumps(line) + '\n')
     log(f'iteration {it}: {rec["games"]} games in {rec["seconds"]:.0f} s; {len(flags)} flagged vs the baseline: {flags}')
@@ -1562,6 +1737,22 @@ def main(argv=None):
     p.add_argument('--select', default=None, choices=['visits', 'cq'])
     p.add_argument('--c-scale', type=float, default=None)
     p.add_argument('--rules', default=None, help="several move rules in turn, e.g. 'run,visits,cq:0.1' (run = the run's own)")
+    p = sub.add_parser('library-add', help='spots of a frozen set into the canary library, with their right answers')
+    p.add_argument('spots')
+    p.add_argument('--library', default=LIBRARY_PATH)
+    p.add_argument('--kinds', default=None, help=f'mined kinds to take (default all of {sorted(KIND_ANSWER)}; Play spots always)')
+    p.add_argument('--why', action='append', default=[], help="a Play spot's reason: '<source>:<k>=<why its move was wrong>'")
+    p.add_argument('--engine', default=ROOT, help='the engine the library is scored on (its fingerprints)')
+    p = sub.add_parser('library-score', help="each checkpoint's right-answer share on the canary library")
+    p.add_argument('ckpts', nargs='+')
+    p.add_argument('--library', default=LIBRARY_PATH)
+    p.add_argument('--sims', default='32')
+    p.add_argument('--repeats', type=int, default=8)
+    p.add_argument('--device', default='cpu')
+    p.add_argument('--engine', default=ROOT)
+    p.add_argument('--rules', default=None, help="e.g. 'run,visits,cq:0.1'")
+    p.add_argument('--reference', action='store_true', help="store the first checkpoint's scores (run's rule) as the library's reference")
+    p.add_argument('--out', default=None)
     p = sub.add_parser('canary-report', help='print saved canary results (several files are merged)')
     p.add_argument('files', nargs='+')
     p = sub.add_parser('baseline', help='add the metrics a baseline file lacks, from a scan of the baseline checkpoint')
@@ -1587,6 +1778,8 @@ def main(argv=None):
     p.add_argument('--conc', type=int, default=1000)
     p.add_argument('--threads', type=int, default=16)
     p.add_argument('--jobs', type=int, default=4)
+    p.add_argument('--library', default=LIBRARY_PATH, help="the canary library scored per checkpoint ('' = none)")
+    p.add_argument('--library-sims', default='', help="budgets besides the games' one, e.g. '1024' (CPU, ~1 s a spot)")
     p = sub.add_parser('replays')
     p.add_argument('run')
     p.add_argument('--min-gen', type=int, default=0)
@@ -1610,6 +1803,32 @@ def main(argv=None):
         for f in a.files:
             scan_file(f, a.engine, a.jobs)
         return 0
+    elif a.cmd == 'library-add':
+        library_add(a.spots, a.library, set(a.kinds.split(',')) if a.kinds else None, a.why, a.engine)
+        return 0
+    elif a.cmd == 'library-score':
+        os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
+        L = load_library(a.library)
+        if not L:
+            raise SystemExit(f'{a.library}: no library')
+        rules = None
+        if a.rules:
+            rules = []
+            for r in a.rules.split(','):
+                name, _, sc = r.partition(':')
+                rules.append((None if name == 'run' else name, float(sc) if sc else None))
+        R = library_score(L, a.ckpts, [int(x) for x in a.sims.split(',')], a.repeats, a.device, a.engine, rules)
+        print(library_table(R, L))
+        if a.reference:
+            lab = label_for(a.ckpts[0]) + eval_seat(a.ckpts[0])[1]
+            L['reference'] = {'checkpoint': label_for(a.ckpts[0]), 'ckpt': a.ckpts[0], 'repeats': a.repeats,
+                              'measured': time.strftime('%Y-%m-%d'), 'scores': R['scores'][lab]}
+            save_library(L, a.library)
+            print(f'{a.library}: reference = {lab}')
+        if a.out:
+            with open(a.out, 'w', encoding='utf-8') as f:
+                json.dump(R, f, indent=1)
+        return 0
     elif a.cmd == 'canary-report':
         C = None
         for f in a.files:
@@ -1632,7 +1851,8 @@ def main(argv=None):
             pass
         os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
         return watch(a.run, a.engine, a.games, a.seed, a.sims, a.every, a.loop, a.min_iter, a.backfill, a.once,
-                     a.baseline, a.device, a.conc, a.threads, 4, a.jobs)
+                     a.baseline, a.device, a.conc, a.threads, 4, a.jobs, library=a.library,
+                     library_sims=[int(x) for x in a.library_sims.split(',') if x])
     elif a.cmd == 'spots':
         S = build_spots(a.games, a.per_kind, a.play, a.engine)
         with open(a.out, 'w', encoding='utf-8') as f:
