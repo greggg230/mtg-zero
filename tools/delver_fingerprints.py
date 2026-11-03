@@ -138,7 +138,11 @@ def scan_game(d, B, players=None):
             B.c['starter_won'] += 1
     log = full_log(d)
     # ---------------------------------------------------------------- decision-driven
-    for i, (s, fm) in enumerate(zip(st, fr)):
+    # (a frame's state is states[frame['s']]: zero-replay/1 stores a state once per change, so frames
+    # and states are not 1:1 in ~5% of recorded games; `i` is the state index, as the log's)
+    for fi, fm in enumerate(fr):
+        i = fm.get('s', fi)
+        s = st[i]
         dec = s.get('decision') or {}
         if not dec:
             continue
