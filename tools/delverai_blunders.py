@@ -32,6 +32,9 @@ REPEATS = 8
 URL = 'https://delverai.greggg230.com'
 KEY_ENV = 'MTGZ_DELVERAI_KEY'
 KEY_FILE = os.path.join(os.path.expanduser('~'), 'delverai', '.upload_key')
+# the chart's caveat (the site shows it under the chart): where the positions come from
+NOTE = ("Most positions were collected from generation 550's own games, where it made these mistakes, so the "
+        "generations around 550 score low by construction: read the line's trend after that, not its level there.")
 LABELS = {
     'tamiyo_flip_precombat': 'Tamiyo flipped before attacking',
     'murktide_delve_short': 'Murktide delve cost a counter',
@@ -131,7 +134,7 @@ def record(run_name, L, c, sims):
     return {'run': f'blunders.{run_name}', 'kind': 'blunders', 'for_run': run_name, 'updated': int(time.time()),
             'sims': sims, 'repeats': REPEATS, 'pass_rule': f'a right answer in at least {PASS} of {REPEATS} searches',
             'library': {'id': c['library'], 'spots': len(kind_of), 'kinds': kinds,
-                        'labels': {k: LABELS.get(k, k.replace('_', ' ')) for k in kinds}},
+                        'labels': {k: LABELS.get(k, k.replace('_', ' ')) for k in kinds}, 'note': NOTE},
             'iters': iters}
 
 
