@@ -44,6 +44,12 @@ LABELS = {
     'land_drop_tapout': 'Tapped out before the land drop',
     'daze_payable_pool': 'Daze into floating mana',
     'play': 'Reported from the Play tab',
+    'daze_free_not_cast': 'Free Daze not cast',
+    'clue_not_cracked_end': 'Clue not cracked at end of turn',
+    'suicide_attack': 'Attacked into a bigger blocker',
+    'chump_block': 'Chump block at high life',
+    'fow_over_free_daze': 'Force of Will where Daze was free',
+    'fourth_land_empty_hand': 'Played out a 4th land from an empty hand',
 }
 
 
