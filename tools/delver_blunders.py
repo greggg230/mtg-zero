@@ -197,8 +197,8 @@ def float_cause(G, p, k):
         if o.get('name') == 'Wasteland' and o.get('ability') and o.get('controller') != p and any(
                 obj_on_bf(s, t.get('id'))[0] == p for t in o.get('targets') or []):
             return 'wasteland'
-    if dec_of(s).get('kind') in ('BounceCost', 'ChooseAltCost'):
-        return 'daze'
+    if dec_of(s).get('kind') in ('BounceCost', 'ChooseAltCost', 'Sacrifice'):
+        return 'daze' if any(o.get('name') == 'Daze' and o.get('controller') == p for o in s.get('stack') or []) else 'cost'
     if any(o.get('name') == 'Daze' and o.get('controller') == p for o in s.get('stack') or []):
         for x in range(k + 1, min(G.n, k + 4)):
             if any(f'P{p} returns ' in ln for ln in G.new_log(x)):
@@ -206,56 +206,59 @@ def float_cause(G, p, k):
     return 'other'
 
 
+FLOAT_LABEL = re.compile(r'^Tap (.+) for mana')   # the float build's options (its ENGINE.md 86.4): at priority
+#   "Tap Volcanic Island for mana", in a cost "Tap Island for mana, then return it to hand"
+
+
 def floats(G, p):
-    """Player p's floats: [(index, units, spent units, cause)]. A float = mana in p's pool that outlives
-    the action that made it: p's pool larger at a state than at the previous observation of the same
-    step (0 at the step's start), observations being the step's states outside mid-payment decisions
-    (PayMana, PayPool: a payment's mana there is not floating) and its last state - or, when no state
-    shows it (the engine passes priority by itself when pass is the only option, so the step may end
-    first), a Priority or BounceCost decision of p, not a cast or a land, whose step logged 'P<p>
-    activates a mana ability of ...' and no cast, payment or other activation of p (one unit a line;
-    nothing of it spent). Spent: falls of the pool at later
-    observations of the step. Index: the state that shows it (the step's next state for a log float).
-    Cause: `float_cause` at the step that made it."""
-    out = []
+    """Player p's floats: [(index, units, spent units, cause, decision index)], read from the decisions
+    (ENGINE.md 86 of the float build: a mana ability taken outside a payment is the option 'Tap <source>
+    for mana' at priority, or '... then return it to hand' / '... then sacrifice it' in a cost; a
+    Volcanic Island then asks ChooseMana 'Add {U}' / 'Add {R}'). Index: the first state of the step whose
+    pool shows it (the decision's next state when none does: the step ended first). Spent: the pool's
+    falls after that, before the step ended. Cause: `float_cause` at the decision. A float no option names
+    - p's pool larger at a state outside a payment than at the previous such state, with no such decision
+    since - comes out with cause 'unlabeled' (none expected: a check of the detector)."""
+    out, arrivals = [], set()
+    for k in range(G.n - 1):
+        d = dec_of(G.seq[k])
+        if d.get('player') != p or d.get('kind') in PAYMENT or not FLOAT_LABEL.match(G.lab[k] or ''):
+            continue
+        seg, base = G.segment(k), pool(G.seq[k]['players'][p])
+        arr = None
+        for x in range(k + 1, G.n):
+            if G.segment(x) != seg:
+                break
+            if pool(G.seq[x]['players'][p]) > base:
+                arr = x
+                break
+        spent = 0
+        if arr is not None:
+            prev = pool(G.seq[arr]['players'][p])
+            for x in range(arr + 1, G.n):
+                if G.segment(x) != seg:
+                    break
+                v = pool(G.seq[x]['players'][p])
+                spent += max(0, prev - v)
+                prev = v
+            arrivals.add(arr)
+        out.append((arr if arr is not None else k + 1, 1, min(1, spent), float_cause(G, p, k), k))
+    # pool growth no option explains (a detector check)
     k = 0
     while k < G.n:
         seg = G.segment(k)
         j = k
         while j + 1 < G.n and G.segment(j + 1) == seg:
             j += 1
-        obs = [i for i in range(k, j + 1) if dec_of(G.seq[i]).get('kind') not in PAYMENT or i == j]
-        prev, prev_i = 0, None
-        open_ = []                                  # this step's floats, in order
-        for i in obs:
+        prev = 0
+        for i in range(k, j + 1):
+            if dec_of(G.seq[i]).get('kind') in PAYMENT and i != j:
+                continue
             v = pool(G.seq[i]['players'][p])
-            if v > prev:
-                src = i - 1 if i > k else i         # the step that made it (the previous state's decision)
-                if prev_i is not None:
-                    # the latest decision of p since the previous observation (the float's own step)
-                    src = next((x for x in range(i - 1, prev_i - 1, -1) if dec_of(G.seq[x]).get('player') == p), i - 1)
-                open_.append([i, v - prev, 0, float_cause(G, p, max(src, 0))])
-            elif v < prev:
-                for f in open_:
-                    f[2] += prev - v
-            prev, prev_i = v, i
-        out.extend(tuple(f) for f in open_)
+            if v > prev and i not in arrivals and not any(e[4] < i <= e[0] for e in out):
+                out.append((i, v - prev, 0, 'unlabeled', i))
+            prev = v
         k = j + 1
-    # floats no state shows
-    seen = {f[0] for f in out}
-    other = re.compile(rf'P{p} (casts |pays |activates (?!a mana ability))')
-    for k in range(G.n - 1):
-        d = dec_of(G.seq[k])
-        lab = G.lab[k] or ''
-        if d.get('player') != p or d.get('kind') not in LOG_FLOAT_KINDS or lab.startswith(('Cast ', 'Play ')):
-            continue
-        lines = G.new_log(k + 1)
-        n = sum(1 for ln in lines if f'P{p} activates a mana ability of ' in ln)
-        if not n or any(other.search(ln) for ln in lines):
-            continue
-        if k + 1 in seen or pool(G.seq[k + 1]['players'][p]) > pool(G.seq[k]['players'][p]):
-            continue                                 # shown by a state: counted above
-        out.append((k + 1, n, 0, float_cause(G, p, k)))
     return sorted(out)
 
 
@@ -294,8 +297,8 @@ def scan_daze(G, C, players, ex):
         if cls:
             C['daze_payable'] += 1
             C['daze_pay_' + cls] += 1
-            if cls == 'land':
-                G.spots.append(('daze_payable_land', k, 'Cast Daze'))
+            if cls in ('land', 'pool'):
+                G.spots.append(('daze_payable_' + cls, k, 'Cast Daze'))
         _, j1 = G.stack_window(daze['stack'], jd)
         asked = paid = False
         for j in range(jd, j1 + 1):
@@ -319,7 +322,7 @@ def scan_floats(G, C, players, ex):
     untapped Island)."""
     fls = {p: floats(G, p) for p in (0, 1) if players is None or p in players}
     for p, fs in fls.items():
-        for i, units, spent, cause in fs:
+        for i, units, spent, cause, _ in fs:
             C['float'] += 1
             C['float_units'] += units
             C['float_spent'] += spent > 0
@@ -343,12 +346,13 @@ def scan_floats(G, C, players, ex):
                 continue
             _, k1 = G.stack_window(o['stack'], k)
             C['waste_opp'] += 1
-            fl = [f for f in fls.get(q, []) if k < f[0] <= k1 + 1 and f[3] == 'wasteland']
+            fl = [f for f in fls.get(q, []) if k <= f[4] <= k1 and f[3] == 'wasteland']
             used = bool(fl) or any((obj_on_bf(G.seq[j], tid)[1] or {}).get('tapped') for j in range(k, k1 + 1))
             C['waste_used'] += used
             C['waste_float'] += bool(fl)
             C['waste_float_spent'] += any(f[2] > 0 for f in fl)
-            if not used:
+            # value taken from the doomed land: tapped to pay for something (no float of it), or a float of it spent
+            if not ((used and not fl) or any(f[2] > 0 for f in fl)):
                 colors = set(MANA_LANDS[land['name']])
                 can = set()
                 for j in range(k, k1 + 1):
@@ -390,12 +394,14 @@ def scan_floats(G, C, players, ex):
         if back is None:
             continue                                  # hard cast (paid {1}{U}), or no Island left
         C['daze_bounce'] += 1
-        fl = [f for f in fls.get(p, []) if k < f[0] <= jb + 1 and f[3] == 'daze']
+        fl = [f for f in fls.get(p, []) if k < f[4] <= jb and f[3] == 'daze']
         # a choice: a tapped and an untapped Island both there (returning the untapped one without a float
         # loses a mana; returning the tapped one does not)
         if any(c.get('tapped') for c in isl) and any(not c.get('tapped') for c in isl):
             C['daze_bounce_choice'] += 1
             C['daze_bounce_untapped_over_tapped'] += not back.get('tapped') and not fl
+            # the float rule's version of the same loss: the untapped Island floated, returned, its mana unspent
+            C['daze_bounce_floatwaste_over_tapped'] += not back.get('tapped') and bool(fl) and not any(f[2] > 0 for f in fl)
         if back.get('tapped'):
             continue
         C['daze_bounce_untapped'] += 1
@@ -568,16 +574,18 @@ METRICS = [
     ('float', '  spent before the pool emptied', 'float_spent', 'float'),
     ('float', '  pointless (none of it spent)', 'float_pointless', 'float'),
     ('float', '  outside Wasteland / Daze (/100 g)', 'float_other', None),
+    ('float', '  pool growth no option explains (/100 g)', 'float_unlabeled', None),
     ('float', 'Wasteland at an untapped mana land (/100 g)', 'waste_opp', None),
     ('float', '  land used before it died', 'waste_used', 'waste_opp'),
     ('float', '  floated', 'waste_float', 'waste_opp'),
     ('float', '  floated and spent', 'waste_float_spent', 'waste_opp'),
-    ('float', '  unused, a castable instant could use it', 'waste_missed_spend', 'waste_opp'),
+    ('float', '  no value taken, a castable instant could use it', 'waste_missed_spend', 'waste_opp'),
     ('float', 'Daze returning an untapped Island (/100 g)', 'daze_bounce_untapped', None),
     ('float', '  floated', 'daze_bounce_float', 'daze_bounce_untapped'),
     ('float', '  floated and spent', 'daze_bounce_float_spent', 'daze_bounce_untapped'),
     ('float', '  no float, an instant in hand could use it', 'daze_bounce_missed_spend', 'daze_bounce_untapped'),
     ('float', 'Daze returned untapped over a tapped Island', 'daze_bounce_untapped_over_tapped', 'daze_bounce_choice'),
+    ('float', '  ... floated it, mana unspent', 'daze_bounce_floatwaste_over_tapped', 'daze_bounce_choice'),
     ('burn', 'burn at an opponent creature (/100 g)', 'burn_creature', None),
     ('burn', '  creature survived', 'burn_survived', 'burn_creature'),
     ('burn', '  could not kill (dealt < toughness left)', 'burn_hopeless', 'burn_creature'),
@@ -1098,6 +1106,7 @@ def scan_replays(run, lo=0, hi=10 ** 9):
 SPOTS_FORMAT = 'delver-blunders-spots/1'
 CANARY_KINDS = {
     'daze_payable_land': 'Daze while the spell\'s controller has an untapped mana land (watched: Cast Daze)',
+    'daze_payable_pool': 'Daze while the spell\'s controller has mana floating (watched: Cast Daze)',
     'waste_brainstorm': 'Wasteland at an untapped land, Brainstorm castable from it (watched: Cast Brainstorm, the good line)',
     'burn_could_not_kill': 'burn cast at an undamaged creature it could not kill (watched: the cast)',
     'burn_damaged_survivor': 'burn cast into a damaged creature that survived (watched: the cast)',
@@ -1273,7 +1282,7 @@ def canary_table(C):
     spots, rep = C['spots'], C['repeats']
     rows_ = [(lab, sims) for lab, by in C['results'].items() for sims in by]
     cols = []
-    short = {'daze_payable_land': 'daze_pay', 'waste_brainstorm': 'waste_bs', 'burn_could_not_kill': 'burn_cnk',
+    short = {'daze_payable_land': 'daze_pay', 'daze_payable_pool': 'daze_float', 'waste_brainstorm': 'waste_bs', 'burn_could_not_kill': 'burn_cnk',
              'burn_damaged_survivor': 'burn_dmg', 'land_drop_tapout': 'ld_tapout'}
     for kind in CANARY_KINDS:
         idx = [i for i, sp in enumerate(spots) if sp['kind'] == kind]

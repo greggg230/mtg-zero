@@ -130,12 +130,12 @@ def wasteland_game(float_=None, cast_bs=False, castable=True, end_float_unseen=F
          'targets': [{'id': 21, 'name': 'Volcanic Island', 'live': True}]}
     p0 = player(0, bf=[card('Island', 1)])
     p1 = player(1, hand=['Brainstorm'], bf=[land])
-    opts = ('Pass priority', 'Cast Brainstorm', 'Activate Volcanic Island') if castable else ('Pass priority', 'Activate Volcanic Island')
+    opts = ('Pass priority', 'Cast Brainstorm', 'Tap Volcanic Island for mana') if castable else ('Pass priority', 'Tap Volcanic Island for mana')
     c = Craft()
     if float_ is None and not end_float_unseen:
         c.add([p0, p1], 1, options=opts, stack=[w], log=['P0 activates Wasteland (Activated(1))', 'target Volcanic Island#21'])
         return c.done([p0, player(1, hand=['Brainstorm'])], log=['Volcanic Island Battlefield -> Graveyard'], step='end')
-    c.add([p0, p1], 1, options=opts, chosen='Activate Volcanic Island', stack=[w],
+    c.add([p0, p1], 1, options=opts, chosen='Tap Volcanic Island for mana', stack=[w],
           log=['P0 activates Wasteland (Activated(1))', 'target Volcanic Island#21'])
     tapped = player(1, hand=['Brainstorm'], bf=[card('Volcanic Island', 21, tapped=True)], pool='U')
     if end_float_unseen:
@@ -160,7 +160,7 @@ def test_wasteland_float_then_spent():
 def test_wasteland_float_pointless():
     c = counts(wasteland_game(float_=True, cast_bs=False))
     assert (c['float'], c['float_spent'], c['float_pointless'], c['float_wasted_units']) == (1, 0, 1, 1)
-    assert (c['waste_float'], c['waste_float_spent'], c['waste_missed_spend']) == (1, 0, 0)
+    assert (c['waste_float'], c['waste_float_spent'], c['waste_missed_spend']) == (1, 0, 1)  # a float no spell used
 
 
 def test_a_float_no_state_shows_is_read_from_the_log():
@@ -185,7 +185,9 @@ def bounce_game(back_tapped=False, other_tapped=True, float_=False, hand=('Brain
     c = Craft()
     c.add([player(0, hand=['Daze'] + list(hand), bf=isl), p1], 0, options=('Pass priority', 'Cast Daze'), chosen='Cast Daze',
           stack=[spell], active=1)
-    c.add([player(0, hand=list(hand), bf=isl), p1], 0, kind='BounceCost', options=('Return Island to hand', 'Return Volcanic Island to hand'),
+    c.add([player(0, hand=list(hand), bf=isl), p1], 0, kind='BounceCost',
+          options=('Return Island to hand', 'Tap Island for mana, then return it to hand', 'Return Volcanic Island to hand'),
+          chosen='Tap Island for mana, then return it to hand' if float_ else 'Return Island to hand',
           stack=[spell, dict(daze, targets=None)], log=['Daze Hand -> Stack', 'P0 casts Daze (Hand)'], active=1)
     rest = [isl[1]]
     c.add([player(0, hand=list(hand) + ['Island'], bf=rest, pool='U' if float_ else None), p1], 0,
@@ -443,3 +445,14 @@ def test_watch_measures_the_newest_evaluated_checkpoint_first(tmp_path, monkeypa
     assert seen[-1] == 552
     (run / 'blunders' / 'STOP').write_text('')
     assert B.watch(str(run), **quiet) == 0 and seen[-1] == 552
+
+
+def test_pool_growth_without_a_float_option_is_flagged_unlabeled():
+    """Mana in a pool that no 'Tap X for mana' decision explains (a detector check: none expected)."""
+    c = Craft()
+    p1 = player(1)
+    c.add([player(0, bf=[card('Island', 1)]), p1], 0, options=('Pass priority', 'Cast Brainstorm'))
+    c.add([player(0, bf=[card('Island', 1, tapped=True)], pool='U'), p1], 1, options=('Pass priority', 'Cast Daze'))
+    d = c.done([player(0, bf=[card('Island', 1, tapped=True)]), p1], step='end')
+    k = counts(d)
+    assert (k['float'], k['float_unlabeled'], k['float_pointless']) == (1, 1, 1)
