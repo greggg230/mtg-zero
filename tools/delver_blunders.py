@@ -52,7 +52,9 @@ functions below; docs/blunders.md has a summary.
                 tapped one was there, without a float, is a mana lost on any engine.
   burn          Lightning Bolt / Unholy Heat resolving at an opponent's creature: the creature
                 survived; could not kill (damage dealt < toughness - damage already marked); into an
-                already damaged creature that survived (the Murktide double-Bolt pattern).
+                already damaged creature that survived (the Murktide double-Bolt pattern); killed
+                nothing (suite 4): it survived the turn - no second burn, combat or anything else
+                finished it before the turn ended.
   land drop     a non-cantrip spell cast in the caster's own main phase with its land drop unused and
                 an untapped-entering land in hand that left it with no untapped land (mana land or
                 fetch), then that land played later the same turn (the 11-01 scan's definition).
@@ -62,7 +64,9 @@ functions below; docs/blunders.md has a summary.
                 reach creature with power 3+): before her attack = before the declare-attackers step,
                 the Clue her attack makes lost (the 11-02 Play-tab report); clean board = no Dragon's
                 Rage Channeler, Monk or Cori-Steel Cutter of the AI's (no surveil, prowess or flurry
-                upside to a cantrip before combat).
+                upside to a cantrip before combat). Into the legend rule (suite 4, apart): the AI's own
+                cantrip or Clue flipped a Tamiyo while it already controlled a Tamiyo, Seasoned Scholar -
+                one of the two dies, a card lost whenever it happens (either player's turn).
   habits        tools/delver_fingerprints.py's metrics (fetch cracked at once, Brainstorm with a
                 shuffle, Murktide delve, FoW pitches, tap-out into Daze, T1-2 Volcanic, ...).
 """
@@ -82,7 +86,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import delver_fingerprints as F  # noqa: E402  (pure Python: the habit metrics, the run lookup)
 
-SUITE_VERSION = 3                          # bump when a metric's definition changes (the baseline records it)
+SUITE_VERSION = 4                          # bump when a metric's definition changes (the baseline records it)
 GAMES_FORMAT = 'delver-blunders-games/1'
 BASELINE_FORMAT = 'delver-blunder-baseline/1'
 BASELINE_PATH = os.path.join(ROOT, 'data', 'delver_blunder_baseline.json')
@@ -467,13 +471,19 @@ def scan_burn(G, C, players, ex):
             tough = (c.get('pt') or [0, 0])[1]
             dmg = c.get('damage', 0) or 0
             survived = obj_on_bf(G.seq[j1 + 1], tid)[1] is not None
+            # finished later the same turn (a second burn, combat, anything): the burn did its part
+            later = survived and any(obj_on_bf(G.seq[x], tid)[1] is None for x in range(j1 + 1, G.n)
+                                     if G.seq[x].get('turn') == pend.get('turn'))
             C['burn_creature'] += 1
             C['burn_survived'] += survived
+            C['burn_no_kill'] += survived and not later
             C['burn_hopeless'] += dealt < tough - dmg
             cast = next((x for x in range(k - 1, max(-1, k - 12), -1) if G.lab[x] == f'Cast {o["name"]}'
                          and dec_of(G.seq[x]).get('player') == caster), None)
             if cast is not None and survived and (dmg > 0 or dealt < tough):
                 G.spots.append(('burn_damaged_survivor' if dmg > 0 else 'burn_could_not_kill', cast, G.lab[cast]))
+            if cast is not None and survived and not later:
+                G.spots.append(('burn_no_kill', cast, G.lab[cast]))
             if dmg > 0:
                 C['burn_damaged'] += 1
                 C['burn_damaged_survived'] += survived
@@ -559,9 +569,11 @@ def _turn_lines_back(G, k, upto, t):
 
 
 def scan_tamiyo(G, C, players, ex):
-    """The AI's own draw spell or Clue flipping its Tamiyo, Inquisitive Student on its own turn while she
-    could attack: before her attack (the Clue lost), after it, or after combat without one. The flip's
-    cause is the top stack object (the flipper's) where her third-draw trigger went on the stack."""
+    """The AI's own draw spell or Clue flipping its Tamiyo, Inquisitive Student. With a Tamiyo, Seasoned
+    Scholar of its own already in play (either player's turn): into the legend rule, one of the two dies
+    (tam_legend, out of the rest). Else on its own turn while she could attack: before her attack (the
+    Clue lost), after it, or after combat without one. The flip's cause is the top stack object (the
+    flipper's) where her third-draw trigger went on the stack."""
     for k in range(1, G.n):
         lines = G.new_log(k)
         i = next((x for x, ln in enumerate(lines) if ln.endswith(TAMIYO_FLIP)), None)
@@ -571,7 +583,7 @@ def scan_tamiyo(G, C, players, ex):
         t = prev.get('turn')
         for ps in prev['players']:
             p = ps['id']
-            if prev.get('active') != p or (players is not None and p not in players):
+            if players is not None and p not in players:
                 continue
             for c in ps.get('battlefield') or []:
                 after = obj_on_bf(nxt, c['id'])[1]                    # the planeswalker may keep her id
@@ -588,6 +600,18 @@ def scan_tamiyo(G, C, players, ex):
                     continue                                          # a draw step, a Bauble, an ultimate
                 m = LOG_STEP.match(tline)
                 step = m.group(1) if m else None
+                want = 'Activate Clue' if cause == 'Clue' else 'Cast ' + cause
+                C['tam_flip_any'] += 1
+                if any(x.get('name') == 'Tamiyo, Seasoned Scholar' for x in ps.get('battlefield') or []):
+                    C['tam_legend'] += 1                              # her planeswalker side meets the one in play
+                    cast = next((j for j in range(tj - 1, -1, -1) if G.seq[j].get('turn') == t and G.lab[j] == want
+                                 and dec_of(G.seq[j]).get('player') == p), None)
+                    if cast is not None:
+                        G.spots.append(('tamiyo_legend_flip', cast, want))
+                    ex.append(('Tamiyo flipped into the legend rule', tj, t, f'P{p} {cause} in {step}'))
+                    continue
+                if prev.get('active') != p:
+                    continue
                 cut = G.new_log(tj).index(tline)
                 attacked = any('attacks with ' + TAMIYO in ln for _, lj in _turn_lines_back(G, tj, cut, t) for ln in lj)
                 if c.get('sick') or (c.get('tapped') and not attacked):
@@ -605,7 +629,6 @@ def scan_tamiyo(G, C, players, ex):
                     C['tam_flip_clean_' + when] += 1
                 if when != 'pre':
                     continue
-                want = 'Activate Clue' if cause == 'Clue' else 'Cast ' + cause
                 cast = next((j for j in range(tj - 1, -1, -1) if G.seq[j].get('turn') == t and G.lab[j] == want
                              and dec_of(G.seq[j]).get('player') == p), None)
                 if clean and cast is not None:
@@ -674,6 +697,8 @@ METRICS = [
     ('burn', '  could not kill (dealt < toughness left)', 'burn_hopeless', 'burn_creature'),
     ('burn', '  into a damaged creature that survived', 'burn_damaged_survived', 'burn_damaged'),
     ('burn', '  damaged survivor (/100 g)', 'burn_damaged_survived', None),
+    ('burn', '  killed nothing (survived the turn)', 'burn_no_kill', 'burn_creature'),
+    ('burn', '  killed nothing (/100 g)', 'burn_no_kill', None),
     ('land drop', 'tap-out, then the land played', 'ld_blunder', 'ld_cast'),
     ('land drop', '  (/100 g)', 'ld_blunder', None),
     ('land drop', '  ... into a live Daze', 'ld_blunder_live_daze', 'ld_blunder'),
@@ -683,6 +708,8 @@ METRICS = [
     ('Tamiyo', '  after combat without an attack', 'tam_flip_noattack', 'tam_flip'),
     ('Tamiyo', '  clean board: before her attack', 'tam_flip_clean_pre', 'tam_flip_clean'),
     ('Tamiyo', '  clean board: before her attack (/100 g)', 'tam_flip_clean_pre', None),
+    ('Tamiyo', 'own cantrip flipped her into the legend rule (/100 g)', 'tam_legend', None),
+    ('Tamiyo', '  share of all her flips by own cantrips', 'tam_legend', 'tam_flip_any'),
     ('habits', 'fetch cracked at once', 'fp_fetch_now', 'fp_fetch_cracked'),
     ('habits', 'Brainstorm with a shuffle', 'fp_bs_shuffle', 'fp_bs'),
     ('habits', 'Murktide delve best', 'fp_murk_best', 'fp_murk'),
@@ -1194,14 +1221,20 @@ def scan_replays(run, lo=0, hi=10 ** 9):
 SPOTS_FORMAT = 'delver-blunders-spots/1'
 LIBRARY_FORMAT = 'delver-canary-library/1'
 LIBRARY_PATH = os.path.join(ROOT, 'data', 'delver_canary_library.json')
+HELD = ('unsure', 'recheck')            # a spot's review verdicts that keep it out of the scores until resolved
 # the right answer of a mined kind's spot: its watched option is the blunder ('bad') or the good line ('good');
-# kinds with no clear right answer (Daze into an untapped land, burn that may be bait) stay out of the library
+# kinds with no clear right answer stay out of the library: Daze into an untapped land, burn that could not kill
+# (burn_no_kill, which allows a follow-up, is in), Brainstorm off a Wastelanded land (the user, 11-02: not a clear class)
 KIND_ANSWER = {
     'tamiyo_flip_precombat': ('bad', 'attack with Tamiyo first: the cantrip after (or in response to her attack '
                                      'trigger) flips her the same and keeps the Clue; nothing else gains from it first'),
     'land_drop_tapout': ('bad', 'play the land first: the cast taps out, then the land is played anyway'),
-    'waste_brainstorm': ('good', "Brainstorm with the Wastelanded land's mana: the land dies either way"),
     'daze_payable_pool': ('bad', 'the opponent has the mana floating: Daze is paid for free'),
+    'tamiyo_legend_flip': ('bad', 'a Tamiyo, Seasoned Scholar is already in play: this third draw of the turn flips the '
+                                  'second Tamiyo into the legend rule and one of the two dies - hold the cantrip'),
+    'burn_no_kill': ('bad', 'the burn did not kill the creature, and nothing finished it that turn: a card spent for no kill'),
+    'murktide_delve_short': ('bad', 'this pick gives up an instant or sorcery the delve could still exile: Murktide enters '
+                                    'with one +1/+1 counter fewer for each'),
 }
 CANARY_KINDS = {
     'daze_payable_land': 'Daze while the spell\'s controller has an untapped mana land (watched: Cast Daze)',
@@ -1211,6 +1244,9 @@ CANARY_KINDS = {
     'burn_damaged_survivor': 'burn cast into a damaged creature that survived (watched: the cast)',
     'land_drop_tapout': 'tap-out with the land drop unused, the land played after (watched: the cast)',
     'tamiyo_flip_precombat': 'own cantrip / Clue flipping an able Tamiyo before her attack, clean board (watched: the cast)',
+    'tamiyo_legend_flip': 'own cantrip / Clue flipping a Tamiyo into the legend rule (a Seasoned Scholar already in play) (watched: the cast)',
+    'burn_no_kill': 'burn at a creature that survived the turn: nothing finished it (watched: the cast)',
+    'murktide_delve_short': "a Murktide delve pick that gives up an instant/sorcery the delve could still exile (tools: murk_mine; watched: the pick)",
     'play': 'a Delver Lab Play-tab spot (watched: the AI\'s move there)',
 }
 
@@ -1387,7 +1423,8 @@ def canary_table(C):
     rows_ = [(lab, sims) for lab, by in C['results'].items() for sims in by]
     cols = []
     short = {'daze_payable_land': 'daze_pay', 'daze_payable_pool': 'daze_float', 'waste_brainstorm': 'waste_bs', 'burn_could_not_kill': 'burn_cnk',
-             'burn_damaged_survivor': 'burn_dmg', 'land_drop_tapout': 'ld_tapout', 'tamiyo_flip_precombat': 'tam_flip'}
+             'burn_damaged_survivor': 'burn_dmg', 'land_drop_tapout': 'ld_tapout', 'tamiyo_flip_precombat': 'tam_flip',
+             'tamiyo_legend_flip': 'tam_legend', 'burn_no_kill': 'burn_nokill', 'murktide_delve_short': 'murk_delve'}
     for kind in CANARY_KINDS:
         idx = [i for i, sp in enumerate(spots) if sp['kind'] == kind]
         if kind == 'play':
@@ -1490,12 +1527,15 @@ def library_add(spots_path, path=LIBRARY_PATH, kinds=None, why=(), engine_path=R
 
 def library_score(L, ckpts, sims_list=(32,), repeats=8, device='cpu', engine_path=ROOT, rules=None, log=say):
     """Every library spot searched by each checkpoint (`canary`) -> {'stale': [ids that no longer replay
-    to their position on this engine], 'scores': {label: {sims: {'spots': {id: score}, 'kinds': {kind:
-    mean}, 'all': mean over kinds}}}}. A spot's score = the share of its searches choosing the right
-    answer ('good': its option; 'bad': any other)."""
+    to their position on this engine], 'held': [ids under review (HELD), not searched], 'scores': {label:
+    {sims: {'spots': {id: score}, 'kinds': {kind: mean}, 'all': mean over kinds}}}}. A spot's score = the
+    share of its searches choosing the right answer ('good': its option; 'bad': any other)."""
     E = load_engine(engine_path)
-    ok, stale = [], []
+    ok, stale, held = [], [], []
     for sp in L['spots']:
+        if (sp.get('review') or {}).get('verdict') in HELD:
+            held.append(sp['id'])                               # under review: kept, not scored
+            continue
         try:
             st = json.loads(spot_game(E, sp).export_state())
         except Exception:                                       # noqa: BLE001  (an action the engine refuses)
@@ -1522,7 +1562,7 @@ def library_score(L, ckpts, sims_list=(32,), repeats=8, device='cpu', engine_pat
                 kinds[sp['kind']].append(sc[sp['id']])
             km = {k: sum(v) / len(v) for k, v in kinds.items()}
             out[lab][sims] = {'spots': sc, 'kinds': km, 'all': sum(km.values()) / len(km), 'n': len(ok)}
-    return {'stale': stale, 'scores': out, 'repeats': repeats}
+    return {'stale': stale, 'held': held, 'scores': out, 'repeats': repeats}
 
 
 def library_table(R, L):
@@ -1531,13 +1571,15 @@ def library_table(R, L):
     kinds = sorted({sp['kind'] for sp in L['spots'] if sp['kind'] != 'play'})
     plays = [sp for sp in L['spots'] if sp['kind'] == 'play']
     short = {'daze_payable_pool': 'daze_float', 'waste_brainstorm': 'waste_bs', 'land_drop_tapout': 'ld_tapout',
-             'tamiyo_flip_precombat': 'tam_flip'}
+             'tamiyo_flip_precombat': 'tam_flip', 'tamiyo_legend_flip': 'tam_legend', 'burn_no_kill': 'burn_nokill',
+             'murktide_delve_short': 'murk_delve'}
     n = collections.Counter(sp['kind'] for sp in L['spots'])
     cols = [f'{short.get(k, k)} ({n[k]})' for k in kinds] + [f'#{sp["k"]} {sp["source"][-6:]}' for sp in plays] + ['all kinds']
     rows = [(lab, sims) for lab, by in R['scores'].items() for sims in by]
     w0 = max([len(f'{lab} s{sims}') for lab, sims in rows] + [10]) + 2
     ws = [max(11, len(c) + 2) for c in cols]
-    out = [f'right-answer share of {R["repeats"]} searches a spot (mean over a kind\'s spots); stale: {len(R["stale"])}']
+    out = [f'right-answer share of {R["repeats"]} searches a spot (mean over a kind\'s spots); stale: {len(R["stale"])}; '
+           f'held for review (not scored): {len(R.get("held") or [])}']
     for sp in plays:
         out.append(f'  #{sp["k"]} {sp["source"]}: turn {sp.get("turn")} {sp.get("step")}, not {sp["watch"]}: {sp["why"]}')
     out.append('checkpoint, rule, budget'.ljust(w0) + ''.join(c.rjust(w) for c, w in zip(cols, ws)))
@@ -1651,7 +1693,7 @@ def measure_one(d, it, ckpt, out, work, engine_path, eng, base, games, seed, sim
             budgets = sorted({int(meta.get('sims') or 32), *(library_sims or [])})
             R = library_score(L, [ckpt], budgets, 8, 'cpu', engine_path, log=log)
             (lab, by), = R['scores'].items()
-            canary_rec = {'stale': R['stale'], 'repeats': R['repeats'], 'reference': L.get('reference'),
+            canary_rec = {'stale': R['stale'], 'held': R.get('held'), 'repeats': R['repeats'], 'reference': L.get('reference'),
                           'scores': by, 'library_spots': len(L['spots'])}
             for sims_, r in by.items():
                 log(f'iteration {it}: canary library at {sims_} sims: {100 * r["all"]:.0f}% right over {len(r["kinds"])} '

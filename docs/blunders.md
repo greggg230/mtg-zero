@@ -24,10 +24,12 @@ one of the four fetchlands.
 | | Daze returned untapped over a tapped Island | of the Dazes paid with a tapped and an untapped Island both there, the share returning the untapped one without a float (a mana lost on any engine); **... floated it, mana unspent**: returning it after floating its mana and not spending the mana (the float rule's version of the same loss). |
 | burn | creature survived / could not kill | of Lightning Bolts and Unholy Heats resolving at an opponent's creature (countered or fizzled ones apart): it survived; the damage dealt was below its toughness minus damage already marked. |
 | | into a damaged creature that survived | of burn into a creature already damaged, the share that survived (the Play-tab double Bolt into a 7/7 Murktide); also /100 g. |
+| | killed nothing (survived the turn) | (suite 4; the user, 11-02) of burn at an opponent's creature, the share where it survived and nothing finished it before the turn ended - a follow-up burn, combat or anything else that killed it the same turn takes it out (the burn did its part); also /100 g. |
 | land drop | tap-out, then the land played | of the non-cantrip, non-free spells cast in the caster's own main phase (empty stack) with its land drop unused and an untapped-entering land in hand, the share that left it no untapped mana land or fetch and was followed by that land played the same turn (the 11-01 scan's definition); also /100 g, into a live Daze, Dazed. |
 | Tamiyo | own cantrip flipped her, she could attack | (suite 3; the user's Play-tab report of 11-02) the AI's own Brainstorm, Ponder, Prismari Charm or Clue - the stack's top object, the AI's, where her third-draw trigger went on the stack - flipped its Tamiyo, Inquisitive Student on its own turn while she could attack: not summoning sick, untapped or attacked this turn, no untapped opposing flier or reach creature with power 3+ (attacking would risk her). /100 g. |
 | | before her attack (the Clue lost) | of those, the share whose trigger came before the declare-attackers step (upkeep, draw, main 1, beginning of combat): her attack's investigate never happened. Attacking first and casting the cantrip after (or in response to her attack trigger) flips her the same and keeps the Clue. **after combat without an attack**: main 2 or later, she never attacked. |
 | | clean board: before her attack | the same share where the AI had no Dragon's Rage Channeler, Monk or Cori-Steel Cutter (a cantrip before combat has no surveil, prowess or flurry upside there: the Clue is the whole difference); also /100 g. |
+| | into the legend rule | (suite 4; the user, 11-02) the AI's own cantrip or Clue flipped a Tamiyo while it already controlled a Tamiyo, Seasoned Scholar: one of the two dies (a card lost, on either player's turn). /100 g, and the share of all her flips by its own cantrips (`tam_flip_any`). These flips are out of the before-her-attack rows. |
 | habits | | `tools/delver_fingerprints.py`'s metrics (ENGINE.md 73.5): fetch cracked at once, Brainstorm with a shuffle, Murktide delve best, FoW pitched a FoW, tap-out into a live Daze (+ then Dazed), T1-2 Volcanic for blue only, kept a one-land seven, starting player won. |
 
 The float block is a no-op on an engine without floating: today's engine never leaves mana in a pool
@@ -160,7 +162,7 @@ floating-and-wasting an untapped Island when a tapped one could go back, while i
 pointless. Files: `E:/mtg-zero-scratch/blunders/float550/` (report_float.txt, report_float_vs_baseline.txt,
 spots_float550.json, canary_s32.json).
 
-## 3b. Tamiyo flipped before her attack (suite 3, 11-02)
+## 3b. Tamiyo flipped before her attack (suite 3, 11-02; the legend rule split out in suite 4)
 
 The user's Play-tab report (game 20261102-181844-24ecfc #47, report 20261102-183938-f44695): the AI, its
 untapped Tamiyo, Inquisitive Student its only creature, cast Brainstorm in main 1 as its third draw of the
@@ -172,7 +174,9 @@ alike (+0.016 / +0.006 / -0.002): inside Pass the network again cantrips before 
 prices the Clue (the same position at the opponent's next upkeep, identical but for the Clue: 0.251
 against 0.220). Probes: `E:/mtg-zero-scratch/tamiyo-bs/` (probe.py, line.py).
 
-The same games re-scanned (no new play; the old metrics unchanged):
+The same games re-scanned (no new play; the old metrics unchanged; suite 3 numbers - suite 4 takes the
+legend-rule flips out, e.g. 424 s32 85.5 -> 85.9 before her attack, n 1055 -> 1011, and adds them apart: 3.5-5.5
+a 100 games at every checkpoint and budget, ~5-8% of all her flips by the AI's own cantrips):
 
 ```
                                           424 s32     424 s1024 cq  424 s1024 visits     550 s32    550 s1024 cq   f550@550 s32  f550@598 s32
@@ -292,6 +296,9 @@ table is the share of searches choosing the watched option, mean over a kind's s
 | burn_damaged_survivor | burn cast into an already damaged creature that survived | the cast |
 | land_drop_tapout | the tap-out with the land drop unused, the land played after | the cast |
 | tamiyo_flip_precombat | (suite 3) the AI's own cantrip or Clue, cast before combat on a clean board, that flipped its attack-ready Tamiyo | the cast |
+| tamiyo_legend_flip | (suite 4) the AI's own cantrip or Clue that flipped a Tamiyo with a Seasoned Scholar already in play | the cast |
+| burn_no_kill | (suite 4) burn at an opponent's creature that survived the turn (nothing finished it) | the cast |
+| murktide_delve_short | a Murktide delve pick that gives up an instant/sorcery the delve could still exile (`tools/delver_murktide_spots.py`: the engine searches every delve choice) | the pick |
 | play | the user's game 20261101-215939-adeb97: #174 the first Lightning Bolt at the 7/7 Murktide, #178 the second into it (3 damage marked) | Cast Lightning Bolt |
 | play | game 20261102-092826-5b7aab #51 (turn 3, declare blockers): a no-delirium Unholy Heat at a 0/3 Tamiyo (the d7 session's horizon-effect find) | Cast Unholy Heat |
 | play | game 20261102-181844-24ecfc #47 (turn 4, main 1; report 20261102-183938-f44695): Brainstorm as the third draw, flipping an attack-ready Tamiyo before combat (section 3b) | Cast Brainstorm |
@@ -356,13 +363,20 @@ each with that answer and the reason:
 
 * **answer**: `bad` - the spot's watched option is the blunder, any other option is right (a Play-tab
   report: the AI's move there; a mined kind whose watched option is the mistake) - or `good` - the watched
-  option is the right line (Brainstorm with a Wastelanded land's mana). A spot's **score** is the share of
+  option is the right line (no kind uses it today). A spot's **score** is the share of
   its searches choosing a right answer; a kind's score the mean over its spots (the Play-tab reports
   together are the kind `play`); **all kinds** the mean over the kinds. Each spot's own score is kept too.
 * **which kinds**: only those with a clear right answer (`KIND_ANSWER`): tamiyo_flip_precombat (attack
-  first), land_drop_tapout (play the land first), waste_brainstorm (use the dying land), daze_payable_pool
-  (the opponent has the mana floating). Daze into an untapped land and burn that cannot kill stay out
-  (a tax or a bait can be right). Every Play-tab report goes in with the user's reason (`--why`).
+  first), tamiyo_legend_flip (hold the cantrip), murktide_delve_short (keep the instant in the delve),
+  burn_no_kill (the burn killed nothing), land_drop_tapout (play the land first), daze_payable_pool (the
+  opponent has the mana floating). Daze into an untapped land and burn that could not kill stay out (a tax
+  or a bait can be right); waste_brainstorm was taken out by the user (11-02: not a clear class of blunder;
+  10 of its 12 spots marked drop). Every Play-tab report goes in with the user's reason (`--why`).
+* **review**: the user audits the spots on a review page (each spot drawn as the Play tab's board, its
+  answer, the context the board does not show; Keep / Drop / Unsure: https://claude.ai/artifact/1HPUzAhC5Q3rofWB9uS5ms,
+  verdicts in its db collection `verdicts`, doc id = spot id). A drop leaves the library (`dropped`: id -> why);
+  a keep is recorded on the spot (`review`); `unsure` (or `recheck`) **holds** a spot - kept, not scored
+  (`HELD`), listed as `held` in the scores and the sidecar's record.
 * **the fingerprint**: each spot stores `sig` (`spot_sig`: turn, step, decider, the options' words, the
   decider's hand, the life totals) on the engine it was added on. A later engine whose rules change the
   game before the spot replays it to another position: the spot is then **stale** - not scored, listed by
@@ -379,7 +393,10 @@ ENG="C:/Users/Gregg Keithley/mtg-zero-wt/run-1d67542"
 python tools/delver_blunders.py spots GAMES.games.json.gz --engine "$ENG" --out spots.json \
     --play "<delver-lab>/data/play/<game>/game.json:<k>"
 python tools/delver_blunders.py library-add spots.json --engine "$ENG" --why "<game>:<k>=<why the AI's move was wrong>"
-# a checkpoint's scores (CPU; ~1 s at 32 simulations, ~3 min at 1024 for ~50 spots x 8 searches):
+# Murktide delve spots (the engine searches every delve choice; not in the scan: it needs the engine):
+python tools/delver_murktide_spots.py GAMES.games.json.gz murk.json 12 --engine="$ENG"
+python tools/delver_blunders.py library-add murk.json --kinds murktide_delve_short --engine "$ENG"
+# a checkpoint's scores (CPU; ~1 s at 32 simulations, ~5 min at 1024 for ~70 spots x 8 searches):
 python tools/delver_blunders.py library-score CKPT [CKPT ...] --engine "$ENG" --sims 32,1024 --rules run,visits
 ```
 
@@ -390,7 +407,7 @@ generation on without a restart. iter_NNNN.json gets `canary` (per spot, per kin
 ids, the reference); blunders.jsonl gets `canary_s<sims>_all` and `canary_s<sims>_<kind>` beside the game
 rates.
 
-The first library (11-02, float engine 1d67542): 12 spots each of the four kinds, mined from the float
+The first library (11-02, before the audit; float engine 1d67542): 12 spots each of the four kinds, mined from the float
 fork's 550 games, and the four Play-tab reports (#174 and #178 Murktide Bolts, #51 Heat at Tamiyo, #47
 Brainstorm before Tamiyo's attack). The mined spots favour 550's choices (they are where it made them):
 read the generations against each other and against the reference, not as absolute skill.
@@ -402,7 +419,24 @@ was the only mana and the opponent held a free Daze: keeping Brainstorm is argua
 first is never worse (the same mana at the end, and mana up while the spell is on the stack). Remove a
 spot by deleting its entry (the reference's per-spot scores let the kind means be recomputed).
 
-First scores (CPU, 8 searches a spot; share choosing a right answer; `E:/mtg-zero-scratch/tamiyo-bs/lib_*.json`):
+**The user's audit** (11-02, all 52 spots then on the page): play 4/4 keep; tamiyo_flip 9 keep, 1 unsure (game 3
+turn 5: a Seasoned Scholar already in play - the legend rule, now its own kind), 2 drop - games 7 and 13,
+Ponders the page had not shown to be the third draw (a Bauble's upkeep draw + the draw step: the replay
+confirms both flip her), held as `recheck`; daze_float 11 keep, 1 drop; land_drop 8 keep, 4 unsure (held);
+waste_bs 10 drop, 2 unsure (the kind removed). Then added for review (not yet audited by the user): 12
+tamiyo_legend_flip (game 3 turn 5 + 11 mined; each replayed: the cast flips her with a Seasoned Scholar in
+play), 12 murktide_delve_short, 12 burn_no_kill. Every Tamiyo spot was replayed: the cast makes the turn's
+third draw and she flips as it resolves (`E:/mtg-zero-scratch/tamiyo-bs/verify_tamiyo.py`).
+
+**The library after the audit** (74 spots, 68 scored, 6 held): reference generation 424, 8 searches a spot:
+
+```
+budget  burn_nokill  daze_float  ld_tapout  murk_delve  tam_flip  tam_legend  play  all kinds
+s32         30%          9%         12%         67%         0%        24%      25%     24%
+s1024       45%         92%         36%         75%        19%        34%      59%     52%
+```
+
+First scores (the first library, before the audit; CPU, 8 searches a spot; share choosing a right answer; `E:/mtg-zero-scratch/tamiyo-bs/lib_*.json`):
 
 ```
 checkpoint, rule, budget   daze_float (12)  ld_tapout (12)  tam_flip (12)  waste_bs (11)  #47 Tamiyo  #174 Bolt  #178 Bolt  #51 Heat  all kinds
