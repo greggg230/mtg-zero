@@ -810,7 +810,9 @@ pub fn perturbations() -> Vec<Perturbation> {
             mark(&mut a.g, c, crate::game::Mark::Exerted)
         }),
         p!("a spell can't be countered", "Game.marks", |a, r| {
-            let (_, c) = pick(&stack_spells(&a.g), r)?;
+            // (Not a spell that already can't be: Abrupt Decay, ENGINE.md 86.5.)
+            let spells: Vec<(usize, CardIdx)> = stack_spells(&a.g).into_iter().filter(|&(_, c)| !a.g.spell_uncounterable(c)).collect();
+            let (_, c) = pick(&spells, r)?;
             mark(&mut a.g, c, crate::game::Mark::Uncounterable)
         }),
         // A delve in progress (CR 702.66a, 601.2h): a graveyard card chosen,
@@ -913,7 +915,8 @@ pub fn perturbations() -> Vec<Perturbation> {
                 Some(format!("type {k}"))
             })
         }),
-        p!("colorless mana for artifacts only", "ManaPool.art", |a, r| pl(a, r, |p| {
+        // (Rare: it needs {C} in a pool at a sampled decision, as haste needs {R}; ENGINE.md 86.5.)
+        p!(rare "colorless mana for artifacts only", "ManaPool.art", |a, r| pl(a, r, |p| {
             if p.pool.amt[5] == p.pool.art {
                 return None;
             }

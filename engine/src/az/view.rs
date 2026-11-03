@@ -284,12 +284,20 @@ impl Game {
             (K::Priority, Choice::Companion) => "Put the companion into hand".into(),
             (_, Choice::Ability(i, slot)) => {
                 let d = self.def_of(i);
-                let loyalty = match slot {
-                    AbilitySlot::Activated(k) => d.activated.get(k as usize).and_then(|a| a.loyalty),
+                let ad = match slot {
+                    AbilitySlot::Activated(k) => d.activated.get(k as usize),
                     _ => None,
                 };
+                let loyalty = ad.and_then(|a| a.loyalty);
+                // A mana ability that taps its permanent: at priority, floating
+                // mana in response; in a cost's choice, before the permanent is
+                // sacrificed or returned (ENGINE.md 86).
+                let taps_for_mana = ad.is_some_and(|a| a.mana().is_some() && a.cost.tap);
                 match (kind, loyalty) {
                     (K::PayMana, _) => format!("Tap {} for mana", nm(i)),
+                    (K::Sacrifice, _) => format!("Tap {} for mana, then sacrifice it", nm(i)),
+                    (K::BounceCost, _) => format!("Tap {} for mana, then return it to hand", nm(i)),
+                    (K::Priority, _) if taps_for_mana => format!("Tap {} for mana", nm(i)),
                     (_, Some(l)) => format!("Activate {} ({}{})", nm(i), if l > 0 { "+" } else { "" }, l),
                     _ => format!("Activate {}", nm(i)),
                 }
@@ -364,7 +372,16 @@ impl Game {
             (K::ChooseAltCost, Choice::Number(n)) => format!("Alternative cost {n}"),
             (K::ChooseCost, Choice::Number(n)) => format!("Additional cost {}", n + 1),
             (K::PayPhyrexian, Choice::Number(n)) => format!("Pay {} life ({n} Phyrexian)", 2 * n as u32),
-            (K::ChooseMana, Choice::Number(n)) => format!("Mana option {}", n + 1),
+            // A mana ability activated outside a payment (a float, ENGINE.md 86; Lion's Eye
+            // Diamond): the mana it adds, e.g. "Add {R}".
+            (K::ChooseMana, Choice::Number(n)) => match self.agenda.last() {
+                Some(Task::ManaNowPick { prods, .. }) if (n as usize) < prods.len() => {
+                    let v = prods[n as usize];
+                    let s: String = (0..6).flat_map(|t| std::iter::repeat(crate::mana::LETTERS[t]).take(v[t] as usize)).map(|c| format!("{{{c}}}")).collect();
+                    format!("Add {s}")
+                }
+                _ => format!("Mana option {}", n + 1),
+            },
             (K::DivideDamage, Choice::Number(n)) => format!("{n} damage"),
             (K::ChooseFace, Choice::Number(0)) => "Front face".into(),
             (K::ChooseFace, Choice::Number(_)) => "Other face".into(),
@@ -446,7 +463,34 @@ impl Game {
             v["winner"] = json!(o.winner);
             v["reason"] = json!(format!("{:?}", o.reason));
         }
+        v["known"] = json!([self.view_known(0), self.view_known(1)]);
         v
+    }
+
+    /// Player `p`'s hidden cards and who knows them (`Obj.known`, ENGINE.md 10 and 72; exact knowledge only,
+    /// not the partial "clouds"): `library`, its known cards top first as `[position from the top, mask,
+    /// name]` (mask bit q: player q knows the card there); `hand`, the cards of its hand the other player
+    /// knows, `[id, name]` (an Urza's Bauble look, a card returned from play); `order`, the library's card
+    /// ids top first (for a seat's view to follow a look the engine does not remember: a Mishra's Bauble at
+    /// a card its owner does not know, 23.7). A spectator sees everything; a seat's view (the Delver Lab
+    /// Play tab) keeps only what that seat may know. Read only: no behaviour or encoding depends on it.
+    fn view_known(&self, p: u8) -> Value {
+        let pl = self.player(p);
+        let library: Vec<Value> = pl
+            .library
+            .iter()
+            .rev()
+            .enumerate()
+            .filter_map(|(i, &c)| {
+                let mask: u8 = (0..2u8).filter(|&q| self.obj(c).known & (1 << q) != 0).fold(0, |m, q| m | (1 << q));
+                (mask != 0).then(|| json!([i, mask, self.name(c)]))
+            })
+            .collect();
+        let other = 1 - p;
+        let hand: Vec<Value> =
+            pl.hand.iter().filter(|&&c| self.obj(c).known & (1 << other) != 0).map(|&c| json!([c.0, self.name(c)])).collect();
+        let order: Vec<u32> = pl.library.iter().rev().map(|&c| c.0 as u32).collect();
+        json!({"library": library, "hand": hand, "order": order})
     }
 }
 

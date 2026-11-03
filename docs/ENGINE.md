@@ -222,7 +222,10 @@ internally instead of being exposed. zero-core would auto-step it anyway; doing 
   ability later in the step (the pool empties between steps). With priority: abilities that may
   be activated "only as an instant" (Lion's Eye Diamond: never while paying) and those that
   sacrifice a source with a triggered ability of its own (Chromatic Star, Wizard's Rockets: also
-  while paying; `Game::mana_with_priority`). Mana already in a pool (Dark Ritual) joins the
+  while paying; `Game::mana_with_priority`), and the mana abilities of an untapped source that an
+  object on the stack targets (floating mana in response to a Wasteland: section 86). A cost that
+  sacrifices or returns an untapped mana source offers its mana ability first (Daze's Island:
+  section 86). Mana already in a pool (Dark Ritual) joins the
   payment's virtual pool: the payment spends as much of it as it can, and the player chooses
   which mana stays when that matters (`PayPool`, 106.4, 601.2h). docs/shortcuts.md 13.1, 13.2,
   13.12.
@@ -1738,7 +1741,11 @@ it (tap it for mana, then sacrifice it, 601.2g). Where they are activated:
 * "activate only as an instant" ones (Lion's Eye Diamond): only with priority, never while
   paying (its ruling); costs, then a `ChooseMana` decision, mana to the pool, priority stays.
   Chromatic Star and Wizard's Rockets (a triggered ability as they go) are offered with priority
-  as well (`Game::mana_with_priority`); every other mana ability only while paying.
+  as well (`Game::mana_with_priority`); every other mana ability only while paying;
+* any mana ability of an untapped permanent an object on the stack targets: with priority, to
+  float its mana before the source is lost (`Game::floats_in_response`, section 86.1); and the
+  {T} mana abilities of an untapped permanent a cost sacrifices or returns, before it goes
+  (`ACTIVATE` ids in the cost's `Sacrifice` / `BounceCost` decision, section 86.2).
 
 **`PayMana` in detail.** State: the remaining cost, the picks so far, `Keep` (what later parts
 of the cost need: the excluded source, life, a sacrifice or discard reservation; at most one
@@ -16352,3 +16359,166 @@ throughput review of r3-2b-late550). Nothing live changed.
   passed; the equivalences above. A full-suite run caught `data.batches` passing the new arguments to
   window-likes without them (distill's `Taught`, a test stand-in): fixed - the default path calls
   `W.batch(idx, device)` as before.
+
+## 86. Floating mana from a source about to be lost (Wasteland, Daze)
+
+Branch `float-mana` (from `view-known` 7a53953 = main 8e67300 plus the spectator view's known block),
+2026-11-02. The user's report from the Delver Lab's Play tab: "I had my untapped Volcanic Island
+Wastelanded and I was not able to float mana in response." docs/shortcuts.md 13.12 kept mana abilities
+out of priority (floating there is activating the ability while paying later in the step) and named
+this exception without handling it. The user approved a narrow fix plus one extension (Daze: "should
+give you the option to float when you are returning an untapped land with Daze"). **Layout v5, its
+width, every offset and every action id are unchanged**; the gen-424 checkpoint of
+`runs/r3-2b-beliefsearch` loads (`mtgz.az.replays.check_encoding`).
+
+### 86.1 In response: a targeted untapped source (CR 605.3a, 117.1d)
+
+With priority, a player may activate the mana abilities of an untapped permanent they control while an
+object on the stack targets it (`Game::floats_in_response`; `mana_at_priority` = `mana_with_priority`
+or it, read by `activation_options` and `can_activate`). Wasteland's ability at a Volcanic Island:
+tap the Island for {U} or {R} in response; Wasteland resolves; cast Lightning Bolt with the {R} later
+in the same step. Also a Thundering Falls, a Wasteland, a Bolt at a Birds of Paradise, a Shatter at a
+Sol Ring. The activation is the Lion's Eye Diamond path (`begin_activate` -> `ManaNow`: its costs,
+then `ChooseMana` when it has several productions, mana to the pool, priority stays: 605.3a; `passes`
+resets as for any activation, so both players pass again before the stack resolves). Tapped, the
+source offers nothing more; a mana ability that doesn't tap (none in the Delver deck) can be offered
+again while its cost can be paid. Every other priority is as before: an untargeted source, an empty
+stack, a source already tapped.
+
+### 86.2 Before a cost sacrifices or returns it (CR 601.2g before 601.2h)
+
+A cost's choice of a permanent to sacrifice (`Sacrifice`) or to return (`BounceCost`) in `PayCosts`
+offers, beside each candidate's `MY_PERM` id, `ACTIVATE` + its slot x 4 + i for each mana ability i
+that `float_before_cost` allows: "activate its mana ability i, then it is the one sacrificed or
+returned" (`cost_pick_options`). Chosen, the pick is recorded, `PayCosts` is pushed again and the
+ability activates (`begin_activate`, the 86.1 path): the mana goes to the pool and stays there; the
+rest of the cost follows as chosen. Daze: return the untapped Island, or tap it for {U} and return it,
+then Brainstorm with the {U}. `float_before_cost` allows only an untapped source's abilities whose cost
+is {T} (and life: the cost's own life is paid after it, CR 119.4, with a painland's damage first), so
+the activation leaves the permanent where the cost needs it and changes nothing else the cost chooses
+from: no mana cost, X, self-sacrifice, other sacrifice, counters, "sacrifice it if no counters" (a
+Lotus Petal, a Treasure, Gemstone Mine are left out). A cost that taps its source (a fetch land,
+Wasteland, Mishra's Bauble) never picks it, so nothing changes there.
+
+Where it reaches (`CardDb::constructed`, scanned on this branch): Daze (return an Island), Tinker,
+Goblin Engineer, Legion Extruder, Thopter Foundry (an artifact: a Sol Ring or a Mox first), Natural
+Order, Bone Shards, Goblin Bombardment (a creature: a Birds of Paradise), Crop Rotation, Zuran Orb,
+Sylvan Safekeeper, Baloth Prime, Mine Collapse (a land), Fallen Shinobi's and Kaito's ninjutsu (an
+attacker, usually tapped), Retrofitter Foundry, Bolas's Citadel, Magda (Treasures: excluded, their
+mana ability sacrifices them). Not included: emerge's sacrifice (Crabomination), chosen before the
+total cost: the payment that follows may already tap that creature for the spell's mana, and a float
+there would be spent by it (13.13); and no mana source of the pool has an ability that sacrifices or
+exiles itself without {T}.
+
+### 86.3 The pool
+
+Floated mana is in `Player.pool` until the step ends (`flow.rs`, CR 500.4, 106.4) and pays through the
+payment's virtual pool like a Dark Ritual's (section 34: the payment spends as much of it as it can;
+`PayPool` when the pools it can leave differ). It is public state the network reads: the per-player
+globals `g[24 + 40 side + 6 + k]` (viewer first) and `g5::POOL_ART` / `POOL_HASTE`; the public-state
+gate's "mana in a pool" perturbation reaches both viewers' encodings (58.6). Those inputs were
+untrained for this: in 400 recorded main-line games (r3-2b-beliefsearch, gens ~510-550, 97,809
+decisions) no decision had mana in either pool. The network sees floated mana (that the opponent can
+pay Daze's {1}, that a Bolt is live) but learns what it means only once a run trains on this engine.
+
+### 86.4 Ids, decisions, bots, the spectator view
+
+* **Ids**: the priority case uses the priority's `ACTIVATE` + slot x 4 + i (a land's mana ability is
+  ability 0, the intrinsic one first: section 19); the cost case the same ids inside the existing
+  `Sacrifice` / `BounceCost` decisions. No new decision kind, task or id range; the context block is
+  unchanged (kind, the `PayCosts` task, the spell or ability being paid). A source's `ACTIVATE` ids are
+  pointer logits from its token (22.2), as its `MY_PERM` id.
+* **Bots**: the heuristic never takes them (its priority scores only non-mana abilities; its
+  `Sacrifice` / `BounceCost` answer picks a `Card` option). Random play takes them uniformly (the fuzzer,
+  the digests).
+* **Spectator view** (`az/view.rs` `option_text`, what the Play tab shows): at priority "Tap Volcanic
+  Island for mana" (`Choice::Ability`, kind `Priority`, the option's `c` = the permanent); in a cost
+  "Tap Island for mana, then return it to hand" / "Tap Sol Ring for mana, then sacrifice it" beside
+  "Return Island to hand". A source with several productions asks `ChooseMana` next, now worded by the
+  mana outside a payment ("Add {U}" / "Add {R}" for a Volcanic Island; `NUMBER` + the production index;
+  inside a payment still "Mana option k"). The pool is each player's `"pool"` string ("R", "UU": W U B R
+  G C letters, present only when non-empty). The Play tab's default stops already include an
+  opponent's object on the stack (the Wasteland float); the Daze float makes a one-Island `BounceCost`
+  a real decision (two options) where it used to be answered alone.
+
+### 86.5 Tests and gates
+
+`tests/rules_float.rs` (11, CR-named): float in response to Wasteland, then Bolt after it resolves in the
+same step (605.3a); the pool empties at the end of the step and the Bolt is no longer castable (500.4);
+no option for a tapped source or an untargeted one, none at an empty stack; Daze: tap the Island, return
+it, Brainstorm with the {U} (601.2g-h), a Volcanic Island floats either colour, a tapped Island offers
+only the return, two untapped Islands offer four options; Tinker taps the Sol Ring it sacrifices; fetch
+land and Wasteland activations unchanged (and the opponent of a Wasteland target gets the float); the
+spectator view's labels.
+
+The gate positions (az.rs) are played partly at random, so the new options moved them, and three
+checks met positions they had not met before - none a fault of this change:
+* the public-state gate's "a spell can't be countered" perturbation hit Abrupt Decay, already
+  uncounterable (the perturbation's own fault, like 58.8's 7/7 on a 7/7): it skips such spells now;
+* "colorless mana for artifacts only" needs {C} in a pool at a sampled decision and found none: marked
+  rare, as "red mana that gives haste" (`AZ_SCALE=3`: applied twice, encoded for both viewers);
+* `a_sharp_belief_concentrates_the_deal` met a Delver position with a cloud over the opponent's hand
+  (P0 knows one of P1's hand cards is a Thundering Falls). A hand cloud's domain is the whole hand and
+  `resample_weighted` fills its free places from the shuffled rest of the pool before the weights
+  choose among them, so a sharp belief cannot concentrate there (0.09 of 1 dealt, uniform 0.07): a
+  limitation of 69.2's weighted deal, not of this change (the test now skips such positions; a fix -
+  weighted draws for a hand cloud's free places - changes belief search's behaviour and is left to the
+  user). At `AZ_SCALE=3` the public-state gate also meets two more perturbation artefacts of the same
+  kind (a base 7/7 set on Torsten, a 7/7; "can't block" on Headliner Scarlett): not part of the gate's
+  default scale, left as they are.
+
+Checks (tier "engine rules/cards"): the full suite (`cargo test --release -p engine -p card_ir
+--no-fail-fast`) 1,507 passed and the 2 position-set failures above, fixed and rerun (`az` 40 passed,
+`rules_float` 11); `FUZZ_GAMES=20000`: 20,000 games and 1,000 matches, no failure (519 s, 5,712,518
+options completed); `FUZZ_POOL=delver FUZZ_GAMES=20000`: no failure (330 s, 4,459,370 options
+completed); pytest 69 passed; digests re-recorded (`DIGEST_WRITE=1`, 70b545f): full **f6543eb2b1b8752f**
+(was 132437374243f7b2), encoding-free **1c61c689e1829386** (was a0d54562c8330271), id-agnostic
+(`DIGEST_IDS=choices`) dd91f84dfe3a262b; 1,083 of the 2,000 random games and 193 of the 500 heuristic
+games changed (the random side takes the new options; the heuristic's own option lists grew).
+`python tools/gate.py engine --no-mac --expect-digest f6543eb2b1b8752f --expect-digest0 1c61c689e1829386`: **GATE
+PASSED** on 70b545f in 584 s (build, both digests as expected, `az` 40, `limits` 9, `hidden` 16, pytest 69, the
+1-config search smoke: random seed 0, 0 of 1 failed).
+
+### 86.6 The network on the new engine (gen 424)
+
+264 games of `runs/r3-2b-beliefsearch/models/iter_0424.pt` against itself on this branch's engine
+(`python -m mtgz.az.replays ... --games 200 --conc 32 --device cuda --seed 424`, 3,809 s on a GPU shared
+with another session's job, and `--games 64 --device cpu --seed 425`, 1,036 s; the run's settings: 64
+simulations, `sims_minor` 4, evaluation rules, root-view leaves; replays in
+`E:/mtg-zero-scratch/float-mana/replays{,_cpu}`, scanned with `float_scan.py` / `float_q.py` there
+(`pool_scan.py`: 86.3's count): the frames' options by their spectator-view words, `acts`, `n`, `q`, `p0`):
+
+| | Offered | A game | Taken | Prior on it (median) | Visit share | Q(float) - Q(best other) | Mana spent in the same step |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| With priority (all 150: an opponent's Wasteland; half in the floater's own turn) | 150 | 0.57 | 127 (85%) | 0.98 | 0.84 | median -0.0001, mean -0.005 (80 with both visited) | 13 of 127 (10%) |
+| Daze's `BounceCost` | 139 | 0.53 | 121 (87%) | 0.995 | 0.88 | median -0.003, mean -0.016 (72) | 42 of 121 (35%) |
+
+* **Why it takes them**: the prior. A land's `ACTIVATE` + 4 s + 0 is the pointer logit the network learned
+  in `PayMana` ("tap this land"), and nothing taught it otherwise here; the search agrees (Q equal to the
+  alternatives within noise), as it should: in both spots the source is lost anyway (destroyed; back in
+  hand), so a float costs nothing but the information that mana floats. No harmful tap-out is possible
+  by construction (86.1-86.2 offer only sources about to be lost) and none was seen.
+* **What it does next** with priority after floating (127): passes 45, plays a land 27 (a Wasteland in
+  its own upkeep or main phase), Brainstorm 11, another activation 7, Mishra's Bauble 5, Lightning Bolt
+  4, Dragon's Rage Channeler / Murktide Regent / Cori-Steel Cutter 3 each, Force of Will 2, Ponder,
+  Unholy Heat, Prismari Charm, Urza's Bauble 1 each: most floated mana empties unused (the opponent's
+  turn, nothing instant to cast), which is free.
+* **The pool as an input**: 913 of these games' 63,080 decisions (1.4%) had mana in a pool, against 0 of
+  97,809 in 400 recorded main-line games before (86.3). The small negative Q gaps are the value head's
+  untrained reaction to pool mana (the two options' positions differ only by the pool and a land that
+  leaves either way): noise of ~0.01-0.02 in value until a run trains on this engine.
+* Not measured: strength (the mirror plays itself; there is no old-engine opponent in one process), and
+  the human Play tab, where the AI's float decisions are these.
+
+### 86.7 Not done: removal that doesn't target
+
+The rule follows targets only. A source lost to an effect that doesn't target it is not covered: a
+Wrath of God or Toxic Deluge at a Birds of Paradise, Armageddon, Balance, an edict ("each player
+sacrifices a creature", chosen on resolution), Council's Judgment (votes, no target), Upheaval.
+Proposed, not built: a per-ability fact computed once at lowering, the filter of permanents its program
+moves off the battlefield without targeting them (`DestroyAll`, `ExileAll`, `BounceAll`, `Sacrifice`
+by a player, lethal `DamageAll`; each `Ext` op that does so annotated once), and with priority the
+mana abilities of the player's untapped sources matching a filter of an object on the stack offered as
+in 86.1 - as cheap as the target test (a scan of the stack's items' facts), exact for those ops,
+conservative for the rest (an `Ext` op not annotated offers nothing). The Delver mirror has none of
+these cards, so it would change cube play only.
