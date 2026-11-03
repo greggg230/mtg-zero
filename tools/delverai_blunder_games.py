@@ -130,7 +130,9 @@ def record(ckpt, spots, engine_path=B.ROOT, log=B.say, seed=SEED):
             continue
         ok.append(sp)
         base.append((g, st))
-    spec = json.dumps(dict(json.loads(ok[0]['spec']), log=True)) if ok else None
+    if not ok:
+        return {}, stale
+    spec = json.dumps(dict(json.loads(ok[0]['spec']), log=True))
     t0 = time.time()
     # 1. the tally: REPEATS fresh searches a spot
     starts = [g.clone() for g, _ in base for _ in range(D.REPEATS)]
@@ -270,16 +272,17 @@ def write_tally(run_dir, it, reps, L):
     os.replace(tmp, os.path.join(d, 'tally.json'))
 
 
-def load_recorded(run_dir, it, L, spots):
-    """The generation's games already on disk for this library (every spot), else None."""
+def load_recorded(run_dir, it, spots):
+    """The generation's games already on disk, at this setup, of these spots -> {spot id: game} (a spot added to
+    the library since: not there; one dropped: not asked for)."""
     d = gen_dir(run_dir, it)
     try:
         with open(os.path.join(d, 'tally.json'), encoding='utf-8') as f:
             t = json.load(f)
     except (OSError, ValueError):
-        return None
-    if t.get('library') != D.library_id(L) or t.get('setup') != D.setup_key(D.SIMS, D.SELECT):
-        return None
+        return {}
+    if t.get('setup') != D.setup_key(D.SIMS, D.SELECT):
+        return {}
     reps = {}
     for sp in spots:
         p = os.path.join(d, re.sub(r'[^A-Za-z0-9._-]', '_', sp['id']) + '.json.gz')
@@ -298,9 +301,9 @@ def uploaded_to(run_dir, it):
         return {}
 
 
-def mark_uploaded(run_dir, it, url, lib):
+def mark_uploaded(run_dir, it, url, lib, n):
     u = uploaded_to(run_dir, it)
-    u[url.rstrip('/')] = {'library': lib, 'at': time.strftime('%Y-%m-%d %H:%M:%S')}
+    u[url.rstrip('/')] = {'library': lib, 'n': n, 'at': time.strftime('%Y-%m-%d %H:%M:%S')}
     with open(os.path.join(gen_dir(run_dir, it), 'uploaded.json'), 'w', encoding='utf-8') as f:
         json.dump(u, f, indent=1)
 
@@ -320,43 +323,97 @@ def main(argv=None):
     ap.add_argument('--key', default=None, help="the site's upload key (default: delverai_blunders.upload_key)")
     ap.add_argument('--redo', action='store_true', help='record generations that already have games')
     ap.add_argument('--wait', type=int, default=7200, help='seconds to wait for a scorer before the last record refresh')
+    ap.add_argument('--follow', type=int, default=None, metavar='START',
+                    help='keep going: every --stride th evaluated generation from START on, the newest first (stop: '
+                         'runs/<run>/blunders/games/STOP)')
+    ap.add_argument('--stride', type=int, default=16)
+    ap.add_argument('--loop', type=int, default=600, help='--follow: seconds between looks for a new checkpoint')
     a = ap.parse_args(argv)
     os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
     B.load_engine(a.engine)                           # (its packages on the path: an upload of recorded games needs mtgz)
     run_dir = F.run_dir(a.run)
     run = os.path.basename(os.path.normpath(run_dir))
+    prod = a.url.rstrip('/') == D.URL.rstrip('/')
+    if a.follow is not None:
+        return follow(a, run_dir, run, prod)
     L = B.load_library(a.library)
-    lib = D.library_id(L)
     spots = D.scored_spots(L)
     if a.spots:
         want = set(a.spots.split(','))
         spots = [sp for sp in spots if sp['id'] in want]
     ck = D.checkpoints(run_dir, a.min_iter, a.max_iter, a.every)
     its = [int(x) for x in a.iters.split(',')] if a.iters else sorted(ck, reverse=True)[:None if a.every else 1]
-    prod = a.url.rstrip('/') == D.URL.rstrip('/')
     sent = False
     for it in its:
-        path = ck.get(it) or os.path.join(run_dir, 'models', f'iter_{it:04d}.pt')
-        reps = None if (a.redo or a.spots) else load_recorded(run_dir, it, L, spots)
-        if reps is None:
-            reps, stale = record(path, spots, a.engine)
-            if stale:
-                B.say(f'{len(stale)} spots no longer replay on this engine: {stale}')
-            d = save(reps, run_dir, it)
-            if a.spots:
-                B.say(f'{run} iter {it}: test spots in {d}')
-                continue
-            write_tally(run_dir, it, reps, L)
-        passed = sum(r['blunder']['passed'] for r in reps.values())
-        B.say(f'{run} iter {it}: {passed} of {len(reps)} right')
-        if a.upload and uploaded_to(run_dir, it).get(a.url.rstrip('/'), {}).get('library') != lib:
-            upload_all(reps, run, it, a.url, a.key)
-            mark_uploaded(run_dir, it, a.url, lib)
-            sent = True
-            if prod:                                  # the Progress tab's counts: these searches (no wait between)
-                D.refresh(run_dir, do_upload=True, url=a.url, library=a.library)
+        sent |= one(a, run_dir, run, it, ck.get(it), L, spots, prod)
     if sent and prod:
         D.refresh(run_dir, do_upload=True, url=a.url, library=a.library, wait=a.wait)
+    return 0
+
+
+def done(a, run_dir, it, L):
+    """Whether generation `it` needs nothing: uploaded for this library (with --upload), else recorded for it."""
+    lib = D.library_id(L)
+    if a.upload:
+        return uploaded_to(run_dir, it).get(a.url.rstrip('/'), {}).get('library') == lib
+    try:
+        with open(os.path.join(gen_dir(run_dir, it), 'tally.json'), encoding='utf-8') as f:
+            return json.load(f).get('library') == lib
+    except (OSError, ValueError):
+        return False
+
+
+def one(a, run_dir, run, it, path, L, spots, prod):
+    """Generation `it`: the spots it lacks recorded (all of them with --redo), then uploaded unless it is already
+    -> whether it was sent."""
+    path = path or os.path.join(run_dir, 'models', f'iter_{it:04d}.pt')
+    have = {} if (a.redo or a.spots) else load_recorded(run_dir, it, spots)
+    missing = [sp for sp in spots if sp['id'] not in have]
+    if missing:
+        new, stale = record(path, missing, a.engine)
+        if stale:
+            B.say(f'{len(stale)} spots no longer replay on this engine: {stale}')
+        d = save(new, run_dir, it)
+        if a.spots:
+            B.say(f'{run} iter {it}: test spots in {d}')
+            return False
+        have.update(new)
+    order = {sp['id']: k for k, sp in enumerate(spots)}
+    reps = {sid: dict(r, game_index=order[sid]) for sid, r in have.items() if sid in order}
+    write_tally(run_dir, it, reps, L)
+    passed = sum(r['blunder']['passed'] for r in reps.values())
+    B.say(f'{run} iter {it}: {passed} of {len(reps)} right ({len(missing)} recorded now)')
+    if not a.upload or done(a, run_dir, it, L):
+        return False
+    upload_all(reps, run, it, a.url, a.key)
+    mark_uploaded(run_dir, it, a.url, D.library_id(L), len(reps))
+    if prod:                                          # the Progress tab's counts: these searches
+        D.refresh(run_dir, do_upload=True, url=a.url, library=a.library)
+    return True
+
+
+def follow(a, run_dir, run, prod):
+    """Every `stride`th evaluated generation from `follow` on (the user, 11-03: "record the latest checkpoint we
+    evaluated and start from there"), the newest not done first; the library re-read every round (a spot kept
+    since: recorded for the generations done, only it). Stops on runs/<run>/blunders/games/STOP."""
+    stop = os.path.join(run_dir, 'blunders', 'games', 'STOP')
+    B.say(f'{run}: following from generation {a.follow}, every {a.stride}th (stop: {stop})')
+    while not os.path.exists(stop):
+        L = B.load_library(a.library)
+        spots = D.scored_spots(L)
+        ck = D.checkpoints(run_dir, a.follow)
+        todo = [i for i in sorted(ck, reverse=True) if (i - a.follow) % a.stride == 0 and not done(a, run_dir, i, L)]
+        if not todo:
+            time.sleep(a.loop)
+            continue
+        try:
+            one(a, run_dir, run, todo[0], ck[todo[0]], L, spots, prod)
+        except Exception as e:                        # noqa: BLE001  (an upload failing: logged, tried next round)
+            import traceback
+            B.say(f'{run} iter {todo[0]}: failed ({type(e).__name__}: {e})')
+            traceback.print_exc()
+            time.sleep(a.loop)
+    B.say(f'{run}: STOP')
     return 0
 
 

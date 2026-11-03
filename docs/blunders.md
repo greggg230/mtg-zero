@@ -505,6 +505,12 @@ cache's scores of those generations and spots (`delverai_blunders.merge_games`, 
 its lock; `refresh` merges and uploads without scoring), so the Progress tab's counts and the tab's verdicts are
 the same searches. The public reason drops the library's notes to the reviewer (`public_why`).
 
+No history backfill (the user, 11-03: "just record the latest checkpoint we evaluated and start from there"):
+`--follow 808 --stride 16 --upload` records r3-2b-float550's generation 808 and every 16th evaluated one after it,
+the newest first, re-reading the library each round (a spot kept later is recorded for the generations done,
+only it; a generation's games keep the library's order). Stop: runs/<run>/blunders/games/STOP. Log:
+E:/mtg-zero-scratch/tamiyo-bs/blunder_games_follow.log.
+
 ## 7. Not done
 
 * Value readouts at burn resolutions (E:/mtg-zero-scratch/burn-scan): the suite counts outcomes, not the
