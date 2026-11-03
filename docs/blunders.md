@@ -298,7 +298,7 @@ table is the share of searches choosing the watched option, mean over a kind's s
 | tamiyo_flip_precombat | (suite 3) the AI's own cantrip or Clue, cast before combat on a clean board, that flipped its attack-ready Tamiyo | the cast |
 | tamiyo_legend_flip | (suite 4) the AI's own cantrip or Clue that flipped a Tamiyo with a Seasoned Scholar already in play | the cast |
 | burn_no_kill | (suite 4) burn at an opponent's creature that survived the turn (nothing finished it) | the cast |
-| murktide_delve_short | a short Murktide delve by the user's rule (after all picks: fewer than 5 instants/sorceries exiled, and 2+ instants or 2+ sorceries left in the graveyard - one of each can stay for delirium); the spot is the first pick after which no delve can avoid it (`tools/delver_murktide_spots.py`: the engine searches every delve choice) | the pick |
+| murktide_delve_short | a short Murktide delve by the user's rule (after all picks: fewer than 5 instants/sorceries exiled, and 2+ instants or 2+ sorceries left in the graveyard - one of each can stay for delirium) that lost a counter; the spot is the pick that cost it (`tools/delver_murktide_spots.py`: the engine searches every delve choice) | the pick |
 | play | the user's game 20261101-215939-adeb97: #174 the first Lightning Bolt at the 7/7 Murktide, #178 the second into it (3 damage marked) | Cast Lightning Bolt |
 | play | game 20261102-092826-5b7aab #51 (turn 3, declare blockers): a no-delirium Unholy Heat at a 0/3 Tamiyo (the d7 session's horizon-effect find) | Cast Unholy Heat |
 | play | game 20261102-181844-24ecfc #47 (turn 4, main 1; report 20261102-183938-f44695): Brainstorm as the third draw, flipping an attack-ready Tamiyo before combat (section 3b) | Cast Brainstorm |
@@ -441,8 +441,11 @@ s1024       45%         92%         36%         57%        19%      59%     52%
 ```
 
 Murktide by the user's rule (the first 1,000 of float550@550's games): 61 of 1,290 casts short (4.7%), every
-one avoidable; under the first rule 13%. Two of the 12 spots (games 99 and 208) give the same Murktide either
-way: a sorcery exiled where an instant would have left one of each in the graveyard.
+one avoidable; under the first rule 13%. The spot is the pick that cost the counter: the first pick that lowers
+the most instants/sorceries the delve can still exile (the user, spot 55: the first cut froze game 99's last
+pick, a Ponder that changed only what was left behind, not the size - the counter was lost two picks earlier to
+Tamiyo). A short delve that still got every counter it could is not a spot (none in these 1,000 games). Reference
+424 on these spots: 50% at 32, 49% at 1024; the library 21% at 32, 50% at 1024.
 
 First scores (the first library, before the audit; CPU, 8 searches a spot; share choosing a right answer; `E:/mtg-zero-scratch/tamiyo-bs/lib_*.json`):
 

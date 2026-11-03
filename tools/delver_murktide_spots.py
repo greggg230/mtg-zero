@@ -1,9 +1,11 @@
 """Murktide delve spots by the user's rule (11-02). A delve is short when, after all its picks:
   1) fewer than 5 instants/sorceries were exiled, and
   2) the caster's graveyard still holds 2+ instants or 2+ sorceries (one of each left can be right: delirium).
-For each Murktide Regent cast whose actual delve is short, the engine searches every delve choice on the actual
-path for whether a delve that is not short can still be reached; the spot is the first pick after which none can
-(watched = that pick; 'No' = stop delving). Casts where no delve could avoid it are not spots.
+A cast counts when its actual delve is short and exiled fewer instants/sorceries than the graveyard allowed (the
+Murktide lost a counter: a delve that kept its size but left two of one type, e.g. a sorcery exiled where an
+instant would have left one of each, is not a spot - the user, 11-02, spot 55). The engine searches every delve
+choice on the actual path; the spot is the first pick that lowers the most instants/sorceries the delve can
+still exile (the pick that cost the counter; watched = that pick, 'No' = stop delving).
 
 The delve: the engine fixes the number of cards by the generic mana left to pay (or offers 'No' once paid), the
 picks go in graveyard order (a pick skips every card before it), the forced remainder is taken without a
@@ -123,10 +125,10 @@ for row in rec['rows'][:max_games]:
         g1 = B.spot_game(E, dict(sp0, actions=acts[:k + 1]))
         memo = {}
         avoidable, best_total = search(g1, p, (0, 0, 0), base, memo)
-        if not avoidable:
-            C['short, unavoidable'] += 1
+        if exiled >= best_total:
+            C['short, the most counters it could get'] += 1      # only what was left behind differs: not a spot
             continue
-        C['short, avoidable'] += 1
+        C['short, a counter lost'] += 1
         picks, pi, ps, found = 0, 0, 0, None
         for j in range(k + 1, m):
             dj = B.dec_of(G.seq[j])
@@ -141,7 +143,7 @@ for row in rec['rows'][:max_games]:
             h = gj.clone()
             h.step(int(acts[j]))
             after = search(h, p, nxt, base, memo)
-            if here[0] and not after[0]:
+            if after[1] < here[1]:
                 found = (j, lab, here[1], after[1])
                 break
             picks, pi, ps = nxt
