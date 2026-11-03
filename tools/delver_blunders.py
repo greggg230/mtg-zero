@@ -1592,7 +1592,7 @@ def library_table(R, L):
 # ====================================================================================== the sidecar
 def watch(run, engine_path=ROOT, games=1000, seed=DEFAULT_SEED, sims=None, every=None, loop=300, min_iter=None,
           backfill=False, once=False, baseline=BASELINE_PATH, device='cuda', conc=1000, threads=16, groups=4, jobs=4,
-          settle=60, log=say, library=LIBRARY_PATH, library_sims=None):
+          settle=60, log=say, library=LIBRARY_PATH, library_sims=None, site=False):
     """Follow a run's evaluated checkpoints (models/iter_N.pt, N a multiple of its eval_every) and measure
     each one: <run>/blunders/iter_NNNN.json (every metric, value / se / n, against the baseline) and a
     line of <run>/blunders.jsonl (flat, one per measurement: the plot's rows). Newest first: when it falls
@@ -1656,6 +1656,14 @@ def watch(run, engine_path=ROOT, games=1000, seed=DEFAULT_SEED, sims=None, every
                     with open(os.path.join(out, f'iter_{target:04d}.error.txt'), 'w', encoding='utf-8') as f:
                         f.write(f'{type(e).__name__}: {e}\n')
                     log(f'iteration {target}: failed ({type(e).__name__}: {e})')
+                if site:
+                    # the site's blunder checks (tools/delverai_blunders.py): score what its cache lacks on the
+                    # user-kept spots, upload the run's record; a failure costs the upload only
+                    try:
+                        import delverai_blunders
+                        delverai_blunders.sync(d, engine_path, library=library or LIBRARY_PATH, log=log)
+                    except Exception as e:                  # noqa: BLE001
+                        log(f'iteration {target}: site upload failed ({type(e).__name__}: {e})')
                 continue
             if once:
                 return 0
@@ -1821,6 +1829,8 @@ def main(argv=None):
     p.add_argument('--jobs', type=int, default=4)
     p.add_argument('--library', default=LIBRARY_PATH, help="the canary library scored per checkpoint ('' = none)")
     p.add_argument('--library-sims', default='', help="budgets besides the games' one, e.g. '1024' (CPU, ~1 s a spot)")
+    p.add_argument('--site', action='store_true', help="after each measurement, upload the run's blunder checks to "
+                   'delverai.greggg230.com (tools/delverai_blunders.py: the user-kept spots)')
     p = sub.add_parser('replays')
     p.add_argument('run')
     p.add_argument('--min-gen', type=int, default=0)
@@ -1893,7 +1903,7 @@ def main(argv=None):
         os.environ.setdefault('ZERO_TOKEN_GRAPHS', '1')
         return watch(a.run, a.engine, a.games, a.seed, a.sims, a.every, a.loop, a.min_iter, a.backfill, a.once,
                      a.baseline, a.device, a.conc, a.threads, 4, a.jobs, library=a.library,
-                     library_sims=[int(x) for x in a.library_sims.split(',') if x])
+                     library_sims=[int(x) for x in a.library_sims.split(',') if x], site=a.site)
     elif a.cmd == 'spots':
         S = build_spots(a.games, a.per_kind, a.play, a.engine)
         with open(a.out, 'w', encoding='utf-8') as f:
