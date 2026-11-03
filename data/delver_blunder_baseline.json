@@ -521,7 +521,35 @@
    "suite": 1,
    "measured": "2026-11-02",
    "games": 2000
+  },
+  "float_unlabeled_per100g": {
+   "section": "float",
+   "label": "pool growth no option explains (/100 g)",
+   "num": "float_unlabeled",
+   "den": null,
+   "value": 0.0,
+   "se": 0.0,
+   "n": 2000,
+   "suite": 2,
+   "measured": "2026-11-02",
+   "games": 2000
+  },
+  "daze_bounce_floatwaste_over_tapped": {
+   "section": "float",
+   "label": "... floated it, mana unspent",
+   "num": "daze_bounce_floatwaste_over_tapped",
+   "den": "daze_bounce_choice",
+   "value": 0.0,
+   "se": 0.0,
+   "n": 773,
+   "suite": 2,
+   "measured": "2026-11-02",
+   "games": 2000
   }
  },
- "suite": 1
+ "suite": 2,
+ "history": [
+  "suite 1 (2026-11-02): the first 41 metrics, gen 424 at 32 sims, 2,000 games seed 20261102, engine digest 132437374243f7b2",
+  "suite 2 (2026-11-02): floats read from the float build's options; Wasteland \"no value taken\"; added float_unlabeled_per100g and daze_bounce_floatwaste_over_tapped (re-scan of the same games; every suite-1 value identical under suite 2 on them)"
+ ]
 }

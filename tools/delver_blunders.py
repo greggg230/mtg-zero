@@ -73,7 +73,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import delver_fingerprints as F  # noqa: E402  (pure Python: the habit metrics, the run lookup)
 
-SUITE_VERSION = 1                          # bump when a metric's definition changes (the baseline records it)
+SUITE_VERSION = 2                          # bump when a metric's definition changes (the baseline records it)
 GAMES_FORMAT = 'delver-blunders-games/1'
 BASELINE_FORMAT = 'delver-blunder-baseline/1'
 BASELINE_PATH = os.path.join(ROOT, 'data', 'delver_blunder_baseline.json')
