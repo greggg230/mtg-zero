@@ -1224,6 +1224,7 @@ they isolate one keyword or trigger each.
 | `tests/rules_castpay.rs` | M6 (section 49): castability and payment agree, on cube cards: 601.2g and 605.3a (Wizard's Rockets turning mana into colours is not also an artifact tapped for Urza's {U}: no Griselbrand from seven mana), 107.3 (Green Sun's Zenith's X with the Rockets and Urza), 702.126a (nor tapped for improvise: Kappa Cannoneer), 106.6 (Mishra's Workshop's mana never turned into colours: Cryogen Relic), 601.2h (two Lotus Petals for Psychic Frog's graveyard cost of no mana), 702.66a (two Petals delved for Treasure Cruise), 614.1a (no delve of Petals under Dauthi Voidwalker), 702.138a (escape's discard feeds the graveyard: not Blightsteel Colossus), 712.11b (a face-down hideaway card cast with a choice of faces is revealed: worlds `determinize` samples keep it), 707.2 (a copy of Llanowar Elves that is also an artifact for Urza: the Elves offered for {G}); the ten and the agreement fuzz fail on 01fa623; the agreement fuzz: random cube boards, every spell and ability offered at priority followed to the next priority (`CASTPAY_BOARDS`, `CASTPAY_PATHS`, `CASTPAY_FROM`, `CASTPAY_LOG`) |
 | `tests/rules_farm.rs` | M6 (section 51): the fuzz farm's first bugs, each state built on cube cards: the hidden pool's deal holds the clouds while the opponent pays (Elvish Spirit Guide, a best-of-three match from a scenario: every world is the sampled deck), 400.3 (an opponent's Lotus Petal is not in your graveyard: no Psychic Frog exile, no delve for Treasure Cruise), 605.3a (Gaea's Cradle animated by Nissa with 28 creatures and Aang's waterbend: checked and paid within 30 s on a thread), 701.25a (a surveiled Blightsteel Colossus shuffles the library after the pile is placed: the decider's worlds and encoding keep the other card), 709.3 (Life // Death from Shelldock Isle revealed before the half is chosen: fixed by 49.6, fails on 075649c), 601.2g-h (delve's cards exiled after the mana abilities: Fanatic of Rhonas with a delirious Dragon's Rage Channeler pays Dig Through Time); five fail on ab02574, all six on 075649c; `pay.rs` unit tests: `covers` on 255 units and an augmenting path, an exhausted search's panic |
 | `tests/rules_chance.rs` | section 74: forced chance outcomes as the search replays them (the recorded world and the replaying one): Bolas's Citadel's look before Priority's options (a Brazen Borrower made a Bolt, a Bolt made a Forest), a mill as one action (Barrowgoyf over Blightsteel Colossus, CR 701.13a; a replayed mill offering each card once), Urza's Bauble's random look beside a known twin |
+| `tests/lab.rs` | section 76: the position lab's `start` block - a spec without it plays the games of before; the block's checks; the spot is the source game after its actions (deal "none"); the actual deal keeps both hands and every known card, dealing only the library orders nobody knows; deals paired by their deal seed whatever the candidate or game seed; held cards in hand, excluded ones not, an impossible pin an error; the belief deal toward its prediction (uniform < mix 0.5 < belief); the forced line and the `bauble_fetch` rule (a bad card forces the crack, a good one masks it, the decider's worlds keep the decision, a missing label breaks the line); the rule's branch lines; `resolve`; an ambiguous label an error; `top` pins; lab games played to the end |
 | `tests/support.rs` | the support report and its threat view, the exact supported list, loud failures (on an edited IR since every cube card is supported), the IR consistency checks of section 32; `SUPPORT_DEFS=<file>` dumps every lowered definition (`tools/diff_defs.py` compares two dumps by name) |
 | `tests/bots.rs` | the heuristic bot (21.4): every answer legal and every game ended (against random, `HeuristicV1` and itself, and half-random play; `--ignored`: 8,000 games with every decision asked, all 39 decision kinds answered; M7e's two kinds have their own answers, not measured that way), the registered `heuristic` beats random, the policy in set situations (a loyalty minus for a creature, else the plus that is not mana; the ultimate; no minus at its own permanents; a fetch land first; equip once, at the creature that attacks; crew with a creature that would not attack; no loop with Basalt Monolith and Sensei's Divining Top; Mind Stone only when flooded, at the opponent's end step; the largest X); `--ignored --nocapture --test-threads=1`: strength against `HeuristicV1` and random by deck subsets, speed, activation counts, a trace (`BOTS_TRACE_SEED`), the cube's activated abilities, the X cards |
 | `tests/az.rs` | the zero-core game `mtg` (section 21.8): games end with sane results, the turn cap, clones, `determinize` keeps features and legal actions for both viewers, equal keys mean equal features, `force_chance` replays and stays aligned, encoding slots, decks, spec parsing, heuristic vs random (`AZ_SCALE=k` for more games); the opening (section 55: the declared mulligan encoded, seen by the second player, cleared once taken, kept by clones and `determinize`; the opening's other floats bit for bit as before; no hidden information in any opening state); the public-state gate (section 58.6: every public field of the game state classified and perturbed on 240 positions of four kinds of games, the change public and in both viewers' encodings, but the listed limits) and its fixes read back (58.8); a Murktide Regent delve's ids, picks, context and bags (section 65) |
@@ -15841,6 +15842,565 @@ distillation's, then a run's; the Mac at `nice -n 19`, one job at a time, beside
 * **h2h at `chance_k` 2** is safe again on cube specs as far as these two causes go; the chance fuzz
   (`FUZZ_CHANCE`) is the gate for that path, and a candidate for the Mac farm's modes.
 * **Not fixed**: 74.3's `PayMana` (seed 523, the farm's expected bucket).
+
+## 76. The position lab: a real spot, each candidate played to the end (`start`, `tools/position_lab.py`)
+
+Branch `position-lab` (from main 5f7e427; section 75 is the `explore` branch's, not merged here). The
+user approved it on 2026-10-31 as a way to check their judgement about the network's play - take a spot
+from a real game, and for each candidate play, play a few hundred games to the end from there with the
+network on both sides, every candidate on the same hidden-card deals - and later perhaps to teach the
+network a trick. The first demo is measure-play's finding (`E:/mtg-zero-scratch/measure-play/`,
+report.json): the network never Baubles its own library before cracking a fetchland (0 looks before
+203 / 627 / 336 cracks with a Bauble castable), and 14 +- 2% of the cracks with a Bauble available fetched
+a land that stayed untapped that turn (31 spots in the 222 recent replays, gen >= 240). Was the look
+worth anything? Two later additions (the coordinator, user-approved): the same spots searched deeply at
+`chance_k` 0 and 8 (76.6), and the canonical turn-1 position built from game seeds (76.7).
+
+### 76.1 The `start` block (`engine/src/az/lab.rs`)
+
+A game-spec extension, chosen over a Python driver because zero-core's match driver then plays these
+games batched, seeded and paired like any other, and the same mechanism can seed self-play later: an
+optional `start` object in the `mtg` spec (`MtgSpec::start`; `new_game` -> `MtgAz::from_start`). Without
+it nothing changes: `MtgSpec::parse` of every existing spec is what it was, `MtgAz::lab` is `None`,
+`legal_actions` and `step` take their old path (one `is_none` test), the spectator view has no `lab`
+field; the digests and the network's play are byte-identical (76.10).
+
+```json
+"start": {"seed": 889364660, "actions": [384, 0, 97], "deal": "belief", "deal_seed": 7,
+          "pred": [... 1024 floats ...], "tilt": 1, "clip": 20, "mix": 0.25,
+          "hold": ["Daze"], "exclude": [], "top": [["Brainstorm"], []], "top_known": true, "tries": 100000,
+          "forced": ["Cast Mishra's Bauble", "resolve", "Activate Mishra's Bauble", "Target P2", "resolve"],
+          "follow": {"rule": "bauble_fetch", "land_min": 4, "fetches": ["Flooded Strand", "..."],
+                     "bad": ["..."], "good": ["..."]}}
+```
+
+* **The spot.** The source game is `MtgAz::new` of the same spec without `start`, game seed `seed`;
+  `actions` are taken in order, each after the single-option decisions before it are auto-stepped (as
+  zero-core's transitions and a replay's frames have them: `tools/root_view.py`'s `rebuild`), and the
+  single-option decisions after the last too. An action the source game does not offer is an error naming
+  its index. The player to move there is the decider (`viewer` overrides). A replay's frame k is the spot
+  of its first k frames' actions; the rebuilt spot's spectator state, log included, equals the replay's
+  stored state for frame k (every demo spot; every tenth frame of the last three main-line replays in the
+  tests).
+* **The deal** (`deal`), from its own stream - `split64(deal_seed ^ salt)`, the deal seed given (else the
+  driver's game seed): two games with the same deal seed deal the same world whatever their candidate and
+  gid (the pairing).
+  * `belief` (the default): `MtgAz::determinize_belief` for the decider with the network's prediction
+    `pred` (the `belief` aux target's 1,024 floats, `MtgAz::AUX` order) - exactly the search's world
+    (ENGINE.md 69): everything the decider cannot see dealt again, the opponent's hand by the belief's
+    weights, tilted and clipped; a share `mix` of the deals uniform, one `unit()` draw per deal when mix > 0,
+    as zero-core's tree draws it. The lab passes the run's evaluation settings (tilt 1, clip 20, mix 0.25)
+    and the head's prediction at the spot for the decider (`encode(decider)` as a root belief row: what the
+    search's own root asks). The decider's own unknown library order is dealt again too.
+  * `uniform`: `determinize` for the decider (for comparison).
+  * `actual`: `Game::redeal_unknown_library_orders` (hidden.rs): every card stays where it is - both hands,
+    every card some player knows exactly - but the library cards nobody knows, whose identities are
+    shuffled among themselves within each group of library cards every cloud treats alike (the same
+    membership in each cloud's domain, as `force_library_card` swaps), so each cloud's identities stay in
+    its domain; the state's stream is reseeded. The opponent's real hand: a hindsight check.
+  * `none`: the source game itself, its stream continuing (tests, building).
+
+  `hold` (a multiset of names) / `exclude` (names): the opponent's hand must hold at least these and none
+  of those; `top` ([[P1's], [P2's]] names, top first): each library starts so, and with `top_known` its
+  owner knows those cards (as after a Brainstorm's put-back). All three **condition** the belief (or
+  uniform) deal by rejection: deals are drawn from the same stream until one fits (at most `tries`, default
+  100,000), so a pinned deal is the belief's distribution restricted to the worlds that fit (a held Force
+  of Will makes two more likely than the belief alone would, as Bayes says). A pin no world can hold - more
+  held cards than the hand has, or than the decider's unknown pool and its known hand cards offer - is an
+  error at once. Every deal ends with `Game::check_knowledge` (an error, never a silent world) and without
+  determinize's observer (`after_deal` sets it to mask later private keys; the dealt world is a real game
+  from here).
+* **The forced line** (`forced`): the decider's next non-minor decisions (not `PayMana` / `PayPool`) take
+  these options in order: an option label (`view.rs`'s `option_text`, now `pub(crate)`), an action id,
+  `"*"` (the network's own choice there), or `"resolve"`: pass whenever the decider has priority with
+  something on the stack, the network answering any other question on the way (a trigger's surveil, a
+  Daze's tax), done at the first decision with an empty stack, whoever's - the next item applies at the
+  decider's next decision. `legal_actions` offers that option alone, so zero-core's driver steps it without
+  a search (no sample, no tree); `step` moves the line on. When the next item is not among the options (the
+  opponent's answer changed the decision) the line is broken (`Lab::broken`): the network plays on from
+  there, and the follow rule never starts. **A label that names two options is an error** (at the spot when
+  the game starts, later in `step`: give the action id) - two "Activate Clue", two "Target Volcanic
+  Island" are common. Two lessons on the way: a first version's `"Pass priority"` after the Bauble broke
+  the line whenever a trigger sat above it (a Dragon's Rage Channeler's surveil, a Cori-Steel Cutter's
+  Monk: 2 of the first 8 demo spots), hence `"resolve"`; and the engine asks no decision whose only option
+  is a pass, so `"resolve"` cannot wait for the decider's own empty-stack priority (after Tamiyo resolves
+  on turn 1 with nothing else to do it never comes - a trailing `"resolve"` then stayed pending into the
+  opponent's turn and forced passes there; found by the turn-1 lines' scripted check, fixed before their
+  play-outs).
+* **The follow rule** `bauble_fetch` (`follow`; one rule): at the decider's first decision after the line,
+  if it knows its library's top card (a Mishra's Bauble look resolved) the rule holds while that card stays
+  its known top card. The card is **bad** if it is a land and the decider has at least `land_min` lands
+  (battlefield + hand, the fetches included): its next priority with an option to activate one of
+  `fetches` activates it (the lowest action id) and the rule ends. Else it is **good**: the decider
+  activates no fetch of its own accord (an empty stack or its own item on top) until the card is drawn or
+  moved; in answer to the opponent's spell or ability (a Daze's tax, a Wasteland) the network decides, and
+  a crack there ends the rule. With `bad` / `good` (forced lines) the verdict's line continues the forced
+  line from that decision first - a branch ("a land seen: play the fetch, crack it, cast Tamiyo; else play
+  the Island, cast Tamiyo"), the rule as above after it. With no known top card at that decision (the look
+  was answered) the rule ends. The rule reads the true identity of a card the decider knows - no leak.
+* **The line and the rule are game state** (`MtgAz::lab`, cloned with the game): the searches' worlds keep
+  them, so the root decision is the same in every world of the decider's (zero-core checks it; the rule's
+  verdict reads the decider's own known card, which `determinize` keeps). The opponent's search sees the
+  decider's scripted moves too - a small leak (it "knows" the decider will activate the Bauble, or will not
+  crack this turn; in its worlds the decider's top card is dealt again, so it does not know the verdict's
+  card). Clearing them in search worlds would change the root decision (the driver's error) and model a
+  decider who might not follow its own script. A lab game's spectator view has a `lab` field: the line's
+  state, the rule's, the seen card and both libraries top first (diagnostics, the tests).
+
+Best-of-one only (`start` with `"seed"` or `"format": "bo3"` is an error).
+
+### 76.2 `tools/position_lab.py`, and its API
+
+```
+python tools/position_lab.py spot   --model M (--replay R --frame N | --site-id ID --frame N | --record F[:i])
+                                    [--modes belief,actual,pinned --hold X --exclude Y] [--top-k 3] [--cand ...]
+python tools/position_lab.py bauble --model M --record spots.jsonl [--land-min 4] [--deep-sims 800 ...]
+python tools/position_lab.py t1     --model M [--seeds 1-60000 --spots 4 | --scenario S.json ...] [--draw] [--one-ply 300]
+python tools/position_lab.py canary [--replays DIR] [--selfplay fp_*.json ...] [--out F]
+python tools/position_lab.py show   --report R.json
+```
+
+* **Spots**: a zero-replay/1 file and a frame (the state before that frame's move; the game seed from the
+  replay's seed and game index as zero.replay derives it); a site replay id, mapped to the local file the
+  publisher saved by its log (`E:/mtg-zero-scratch/delverai-publish.log`: each "recording N games of
+  iteration I (checkpoint)" block's "uploaded ... id" lines in game order, the file
+  `<run>/replays/*-<recorded HHMMSS>_<game>.json.gz` whose title is "Generation I"; the site is not asked);
+  a position record (`{"replay" | "file", "frame" | "k"}`, a JSON line - measure-play's frame index `k`); a
+  scenario (`position-lab/1` JSON: `save_scenario` / `load_scenario`, the lab's own format for built
+  positions); or an opening built from a game seed (76.7). Every spot is rebuilt and checked against its
+  stored state first (a mismatch is an error).
+* **The network's view** at the spot: the prior per option and the value, the belief's expected opponent
+  hand (n x the head's distribution) beside the real one, and `--view-reps` (4) searches of `--view-sims`
+  (64) simulations with the run's evaluation seat (`zero.h2h.run_rule` of the checkpoint's run: the cq rule
+  with its guard 4 and scale 0.3, root-view leaf values, the root belief at tilt 1 / mix 0.25): mean visits
+  and Q per option, the rule's moves; per mode, the share of the played deals in which the opponent holds
+  each card (the uniform deal beside them). The deep view (`--deep-sims`, 76.6): seeds x settings of a
+  large search (`chance_k`, a root floor of visits).
+* **Candidates**: the network's `--top-k` options by prior, `--cand` (a label, a ';'-separated forced
+  sequence, or a JSON object with `forced` and / or `follow`); `bauble` and `t1` build their demos'
+  candidates; a deep setting's pick joins them (forced alone, the network on) unless it already is one.
+  Every candidate's start game is built at the spot before any play-out (an ambiguous or unknown first
+  label: an error there).
+* **Play-outs**: both seats the checkpoint at the run's evaluation search (`--sims`, default 32;
+  `chance_k` 0, c_puct 1). One zero-core driver per (spot, candidate, mode) - a rolling `queue_only` driver
+  (search.md 2.9: a classic driver starts its first games with the driver's spec at construction, before
+  anything is queued) with one queued setup per deal i, the deal seed of deal i the same for every
+  candidate and mode of the spot; every candidate's driver has the same seed and queue order, so its game
+  gid is the other candidates' game gid: the same deal and the same search streams, which part where the
+  games do. The drivers run in `--procs` worker processes (`--threads` torch threads - 2: 4 gain nothing on
+  this network -, `--search-threads`, below-normal priority, CPU only: `CUDA_VISIBLE_DEVICES=-1` is set
+  before torch is imported), mode-major (the first mode complete for every spot first). `move_log` 150
+  lets each game of a forced line be replayed afterwards (`diagnose`: did the line hold, what the Bauble
+  showed, the rule's verdict, whether the network cracked a fetch while the seen card was still on top).
+  `--cache DIR` keeps each finished job's games and each deep view (a job is reused only when everything it
+  depends on - the spot, the start block, the seat, the checkpoint's sha256 - is the same): a stopped lab
+  resumes; `--cached-only` reports what is there; `--play-cands` plays some candidates only (beside a
+  running lab).
+* **Report** (JSON + a text table): per spot, mode and candidate the score from the decider's seat (a win
+  1, a draw 0.5) +- its se, the difference to the best candidate and to the first (the actual play) +- the
+  **paired** se (the sd of the per-deal differences / sqrt(n)), games, the mean final turn and turns played
+  from the spot, the per-deal results; pooled over spots (equal weight: the mean of the spots' mean
+  differences, its se stratified by spot).
+* **The API** (the CLI's own functions, `import position_lab as L`; the lab UI at
+  `C:/Users/Gregg Keithley/delver-lab` builds on it): `build_position` (a replay + frame, a site id, a
+  record, a scenario or an opening seed), `save_scenario` / `load_scenario`, `search_params` +
+  `evaluate_position` (prior, value, searches with explicit settings - sims, chance_k, c_puct, the root
+  belief, the leaf view, a root floor, the rule, seeds -; results keyed by action id, the label a display
+  field: two options may share one), `sweep` (a grid of them), `play_out` (candidates from a position in
+  one deal mode, `progress(done, total)` and `cancel()` callbacks), `opening_spot` / `opening_spot_draw`,
+  `one_ply_t1`, `t1_canary`, `run_lab` (the whole lab).
+
+### 76.3 What a lab game is, and is not
+
+* **A real game from a dealt world.** From the deal on, both seats play the network at the run's
+  evaluation search; each search determinizes from its own player's view as in any game. In `belief` and
+  `pinned` the opponent's hand is one the decider's belief finds plausible: the opponent "knows" it (its
+  known bits stay on its hand's slots); its past play was its real hand's, and the belief head's read of
+  that past is exactly what weights the deal (ENGINE.md 66, 69).
+* **The scripted lines leak to the opponent's searches** (76.1): its tree models the decider as following
+  its script. For the demos' lines this is the Bauble's activation and target and, under the rule, "no
+  fetch of the decider's own accord while the seen card is on top" - which the opponent's worlds evaluate on
+  their own dealt top card, so it does not learn the seen card.
+* **The rule is a script, not a player**: it reads one card and a land count. It cracks at once when the
+  card is bad and holds otherwise until the card is drawn, but lets the network answer the opponent - and
+  the network uses that to crack anyway (76.5).
+* **The play-outs are the network against itself**: a candidate's score is "what this network wins from
+  here after that move". A move the network cannot follow up scores low for that reason; (b) against (c)
+  separates the move from the network's follow-up.
+
+### 76.4 Tests
+
+* `engine/tests/lab.rs` (13): a spec without `start` is the spec of before (`new_game` = `MtgAz::new`, the
+  same legal actions and spectator states for 400 random moves, no `lab` field); the block's checks; the
+  spot is the source game after its actions (deal `none`; an action the game does not offer is an error
+  naming its index); `actual` keeps everything a spectator sees and every known library card (12 deal seeds,
+  >= 20 distinct library orders, `check_knowledge`); deals paired by the deal seed whatever the forced line
+  or the game seed; held cards in every dealt hand, excluded ones in none, an impossible pin an error; the
+  belief deal toward a constructed prediction (Force of Will 0.5 of the hand: uniform < mix 0.5 < belief,
+  belief > 1.8 x uniform); the forced line and `bauble_fetch` on a random game's Bauble + fetch spot (a land
+  forcing the crack and ending the rule, a spell masking every crack, the decider's own worlds offering the
+  same options, both verdicts seen, a missing label breaking the line); the branch (`bad` / `good` lines);
+  `resolve` passing until the stack is empty; an ambiguous label an error, its action id fine; `top` pins
+  (the cards on top, known to their owner); lab games played to the end by random play.
+* `tests/test_position_lab.py` (15): the rebuilt spot matches the replay frame (a recorder-shaped random
+  game; a changed state an error) and every tenth frame of the last three main-line replays; paired deals
+  identical across four candidates (both hands, both libraries); `actual` keeps the hands and re-deals the
+  decider's library order; pins; belief toward a constructed prediction; no start block = the same game
+  move for move; forced lines through zero-core's driver (queued setups, every row tagged, the line's option
+  alone, deals paired; `UniformEvaluator`); deal summaries; paired summaries; spot-stratified pooling; site
+  ids through a publisher log; candidate parsing; the turn-1 compositions, the opening spot and scenarios;
+  the canary reading a scripted Bauble look.
+
+### 76.5 The first demo: Mishra's Bauble before the crack, at replay spots
+
+**The spots** (`E:/mtg-zero-scratch/position-lab/bauble_spots.jsonl`): measure-play's 31 "fetched land
+unused that turn, Bauble available" cracks in the main line's replays of generation >= 240
+(`raw_replay.jsonl`'s fetch activations with a Bauble castable or on the battlefield, no own look that
+turn, the fetched land untapped for the rest of the turn; all 31 in the cracker's own first main phase with
+an empty stack), rebuilt: **in 8 of the 31 the decider already knew its library's top card** (a
+Brainstorm's or a surveil's put-back: Unholy Heat, Force of Will twice, Daze, Volcanic Island twice,
+Thundering Falls twice - the card is the same in every deal of its library), so a Bauble look there tells
+it nothing and measure-play's 14% overstates the spots the trick applies to (23 of 31: 10.5 +- 2% of the
+cracks); and 4 of those 8 shuffled away a known *good* card (Unholy Heat, Force of Will twice, Daze) - the
+same habit without the Bauble. The demo takes 8 of the 23 with an unknown top card: 5 with the Bauble in
+hand (turns 1, 3, 6, 8, 11) and the 3 there are with it on the battlefield (turns 3, 8, 14); 8 games,
+generations 240-308. Each is the frame where the network chose "Activate <fetch>".
+
+**The candidates** (`position_lab.py bauble`): (a) the actual play, the crack; (b) the Bauble at the
+decider's own library first - `Cast Mishra's Bauble`, `resolve` when it is in hand, then `Activate Mishra's
+Bauble`, `Target P<decider>`, `resolve` - and the network on from the decision after the look; (c) the
+same line with `bauble_fetch` at `land_min` 4 (crack iff the seen card is a land and the decider has >= 4
+lands in play + hand, else hold the fetch until the card is drawn). (At the 4 earliest spots no deal gives
+4 lands, so there (c) is "Bauble, then hold the fetch until the seen card is drawn" whatever it was.)
+
+**The run**: checkpoint 308 of r3-2b-beliefsearch (a read-only copy with its run's config.json:
+`E:/mtg-zero-scratch/position-lab/run/`) on both seats at the run's evaluation search (32 simulations; cq
+rule, guard 4, scale 0.3; root-view leaves; root belief tilt 1 / mix 0.25); 200 deals per spot in `belief`
+and `actual`, 100 in `pinned` with `--hold Daze` (the opponent holds a Daze: the line exposes a Bauble cast
+from hand to it, and a held fetch is no mana for its tax - the most direct interaction with the trick; N
+halved for CPU time, 76.9); 5 worker processes x 2 torch + 1 search threads, below-normal priority, CPU
+only (the pinned run on 5 processes too). Every rebuilt spot equals its replay frame; every forced line
+held in every game of every mode (the opponent never countered the Bauble, even holding a Daze).
+
+**The deals differ from the uniform deal where the belief has something to read**: the share of deals in
+which the opponent holds Force of Will is 0.47 against 0.245 uniform at the turn-8 spot `015056_000@70`,
+0.305 against 0.185 at turn 14; Daze 0.415 against 0.155 at turn 11; at turn 1 (nothing seen yet) the two
+are close (Tamiyo 0.445 against 0.47).
+
+**belief** (N = 200 deals per spot, each played by every candidate):
+
+| spot | turn | (a) crack | (b) Bauble first | (c) + rule | (b) - (a) | (c) - (a) | (c) - (b) |
+|---|---|---|---|---|---|---|---|
+| 011557_005@4 | 1 | 0.570 +- 0.035 | 0.570 +- 0.035 | 0.550 +- 0.035 | +0.000 +- 0.035 | -0.020 +- 0.050 | -0.020 +- 0.050 |
+| 041019_002@20 | 3 | 0.390 +- 0.035 | 0.400 +- 0.035 | 0.410 +- 0.035 | +0.010 +- 0.044 | +0.020 +- 0.046 | +0.010 +- 0.036 |
+| 030754_005@49 | 6 | 0.520 +- 0.035 | 0.535 +- 0.035 | 0.570 +- 0.035 | +0.015 +- 0.039 | +0.050 +- 0.041 | +0.035 +- 0.038 |
+| 015056_000@70 | 8 | 0.345 +- 0.034 | 0.315 +- 0.033 | 0.290 +- 0.032 | -0.030 +- 0.037 | -0.055 +- 0.039 | -0.025 +- 0.034 |
+| 084307_002@100 | 11 | 0.095 +- 0.021 | 0.135 +- 0.024 | 0.125 +- 0.023 | +0.040 +- 0.027 | +0.030 +- 0.029 | -0.010 +- 0.019 |
+| 100705_002@44 | 3 | 0.800 +- 0.028 | 0.815 +- 0.028 | 0.855 +- 0.025 | +0.015 +- 0.034 | +0.055 +- 0.034 | +0.040 +- 0.031 |
+| 032002_001@133 | 8 | 0.145 +- 0.025 | 0.130 +- 0.024 | 0.115 +- 0.023 | -0.015 +- 0.031 | -0.030 +- 0.032 | -0.015 +- 0.023 |
+| 085036_002@255 | 14 | 1.000 +- 0.000 | 1.000 +- 0.000 | 1.000 +- 0.000 | +0.000 +- 0.000 | +0.000 +- 0.000 | +0.000 +- 0.000 |
+| **pooled** (8 spots) | | 0.483 | 0.487 | 0.489 | **+0.004 +- 0.012** | **+0.006 +- 0.013** | **+0.002 +- 0.011** |
+
+**actual** (N = 200 deals per spot, each played by every candidate):
+
+| spot | turn | (a) crack | (b) Bauble first | (c) + rule | (b) - (a) | (c) - (a) | (c) - (b) |
+|---|---|---|---|---|---|---|---|
+| 011557_005@4 | 1 | 0.470 +- 0.035 | 0.440 +- 0.035 | 0.535 +- 0.035 | -0.030 +- 0.036 | +0.065 +- 0.049 | +0.095 +- 0.048 |
+| 041019_002@20 | 3 | 0.340 +- 0.034 | 0.365 +- 0.034 | 0.350 +- 0.034 | +0.025 +- 0.043 | +0.010 +- 0.044 | -0.015 +- 0.034 |
+| 030754_005@49 | 6 | 0.920 +- 0.019 | 0.965 +- 0.013 | 0.960 +- 0.014 | +0.045 +- 0.023 | +0.040 +- 0.022 | -0.005 +- 0.017 |
+| 015056_000@70 | 8 | 0.270 +- 0.031 | 0.270 +- 0.031 | 0.235 +- 0.030 | +0.000 +- 0.039 | -0.035 +- 0.042 | -0.035 +- 0.033 |
+| 084307_002@100 | 11 | 0.125 +- 0.023 | 0.145 +- 0.025 | 0.145 +- 0.025 | +0.020 +- 0.031 | +0.020 +- 0.030 | +0.000 +- 0.017 |
+| 100705_002@44 | 3 | 0.760 +- 0.030 | 0.735 +- 0.031 | 0.750 +- 0.031 | -0.025 +- 0.038 | -0.010 +- 0.041 | +0.015 +- 0.037 |
+| 032002_001@133 | 8 | 0.595 +- 0.035 | 0.525 +- 0.035 | 0.585 +- 0.035 | -0.070 +- 0.037 | -0.010 +- 0.038 | +0.060 +- 0.035 |
+| 085036_002@255 | 14 | 0.995 +- 0.005 | 1.000 +- 0.000 | 0.995 +- 0.005 | +0.005 +- 0.005 | +0.000 +- 0.007 | -0.005 +- 0.005 |
+| **pooled** (8 spots) | | 0.559 | 0.556 | 0.569 | **-0.004 +- 0.012** | **+0.010 +- 0.013** | **+0.014 +- 0.011** |
+
+**pinned** (N = 100 deals per spot (halved: 76.9), each played by every candidate):
+
+| spot | turn | (a) crack | (b) Bauble first | (c) + rule | (b) - (a) | (c) - (a) | (c) - (b) |
+|---|---|---|---|---|---|---|---|
+| 011557_005@4 | 1 | 0.640 +- 0.048 | 0.680 +- 0.047 | 0.560 +- 0.050 | +0.040 +- 0.049 | -0.080 +- 0.060 | -0.120 +- 0.059 |
+| 041019_002@20 | 3 | 0.450 +- 0.050 | 0.390 +- 0.049 | 0.410 +- 0.049 | -0.060 +- 0.063 | -0.040 +- 0.070 | +0.020 +- 0.045 |
+| 030754_005@49 | 6 | 0.500 +- 0.050 | 0.540 +- 0.050 | 0.590 +- 0.049 | +0.040 +- 0.055 | +0.090 +- 0.057 | +0.050 +- 0.056 |
+| 015056_000@70 | 8 | 0.400 +- 0.049 | 0.400 +- 0.049 | 0.350 +- 0.048 | +0.000 +- 0.060 | -0.050 +- 0.059 | -0.050 +- 0.052 |
+| 084307_002@100 | 11 | 0.060 +- 0.024 | 0.090 +- 0.029 | 0.100 +- 0.030 | +0.030 +- 0.033 | +0.040 +- 0.035 | +0.010 +- 0.022 |
+| 100705_002@44 | 3 | 0.850 +- 0.036 | 0.880 +- 0.033 | 0.890 +- 0.031 | +0.030 +- 0.050 | +0.040 +- 0.042 | +0.010 +- 0.044 |
+| 032002_001@133 | 8 | 0.210 +- 0.041 | 0.160 +- 0.037 | 0.200 +- 0.040 | -0.050 +- 0.046 | -0.010 +- 0.046 | +0.040 +- 0.032 |
+| 085036_002@255 | 14 | 1.000 +- 0.000 | 1.000 +- 0.000 | 1.000 +- 0.000 | +0.000 +- 0.000 | +0.000 +- 0.000 | +0.000 +- 0.000 |
+| **pooled** (8 spots) | | 0.514 | 0.518 | 0.512 | **+0.004 +- 0.017** | **-0.001 +- 0.018** | **-0.005 +- 0.015** |
+
+**The verdict**: pooled over the 8 spots, Bauble-first is worth +0.004 +- 0.012 (belief) and -0.004 +- 0.012
+(actual hands) against the crack, Bauble-first with the scripted follow-up +0.006 +- 0.013 / +0.010 +- 0.013, the
+script against the network's own follow-up +0.002 +- 0.011 / +0.014 +- 0.011; with a Daze in the opponent's
+hand +0.004 +- 0.017 (Bauble first) and -0.001 +- 0.018 (+ the rule). **None is distinguishable from zero at +-0.012 pooled** (+-0.017 pinned; +-0.03-0.06
+per spot): at these spots the look is worth at most ~2-3 points of win rate, and the network's habit of
+cracking first costs little in its own games. Of the 72 per-spot comparisons (8 spots x 3 pairs x 3 modes)
+one passes 2 paired se (the turn-1 spot's (c) - (b) with a Daze held, -0.120 +- 0.059) and four more reach
+1.8-2.0 (both signs) - about what chance gives.
+
+**What the network does after a forced look** (`diagnose` over the move logs): in (b) it cracks a fetch
+while the seen card is still on top in 24-100% of the games by spot and mode (100% at turn 1, 95-97% at
+turns 3 and 8 with the Bauble on the battlefield, 50-84% at turns 3-8 from hand, 24-60% at turns 11-14) - it
+seldom keeps a card it saw, whatever it was (measure-play's cf probe saw the same: 65% after a good card,
+89% after an excess land); in (c) the script holds, but the network still cracks "in answer" to an
+opponent's spell at one spot (turn 3 from hand: 68-93% of its games by mode), 0-27% elsewhere. The script's own verdicts at the late spots: bad 27-62 of 200
+(cracked), and its bad and good branches score alike (e.g. 0.852 / 0.856 at turn 3, 0.113 / 0.116 at
+turn 8).
+
+### 76.6 Deep search at the same spots (`--deep-sims 800 --deep-k 0,8 --deep-floor 100`)
+
+The question (the coordinator, user-approved, after a whole-game h2h of a gen-304 network at `chance_k` 4
+against 0, 64 simulations, came out 0.490 +- 0.014): is searching hypothetical states further after a
+hidden outcome a blind spot that a deeper search fixes here? At each spot, 8 seeds of 800 simulations
+(the same seeds for every setting: paired searches) with the run's evaluation seat otherwise (cq rule,
+guard 4, scale 0.3; root-view leaves; the root belief at tilt 1 / mix 0.25), at `chance_k` 8 and 0, and the
+same two with a **root floor** of 100 visits per option (search.md 3.5's forced walks, at most half the
+budget). Without the floor an option of prior ~0.0001 gets no visit at 800 simulations - the Bauble at 5
+of the 8 spots, whatever `chance_k` (the PUCT term c P sqrt(N) / (1 + n) is ~0.003 there) - so its Q is
+never measured and `chance_k` cannot act on it. Visit share / Q of the best crack and of the Bauble (cast
+or activated), and the rule's moves over the 8 seeds:
+
+| spot (turn) | prior Bauble | k=8 | k=0 | k=8 floor 100 | k=0 floor 100 |
+|---|---|---|---|---|---|
+| 011557_005@4 (1) | 0.0000 | crack 1.00/0.4977; bauble 0.00/- -> Activate Misty Rainforest 8 | crack 1.00/0.4954; bauble 0.00/- -> Activate Misty Rainforest 8 | crack 0.75/0.4968; bauble 0.13/0.4966 -> Activate Misty Rainforest 8 | crack 0.75/0.4948; bauble 0.13/0.499 -> Activate Misty Rainforest 8 |
+| 041019_002@20 (3) | 0.1952 | crack 0.73/0.3696; bauble 0.27/0.383 -> Cast Mishra's Bauble 8 | crack 0.77/0.3811; bauble 0.23/0.3877 -> Activate Polluted Delta 5, Cast Mishra's Bauble 3 | crack 0.65/0.3709; bauble 0.23/0.3844 -> Cast Mishra's Bauble 8 | crack 0.68/0.3818; bauble 0.19/0.3881 -> Activate Polluted Delta 7, Cast Mishra's Bauble 1 |
+| 030754_005@49 (6) | 0.0001 | crack 0.96/0.6431; bauble 0.00/0.6608 -> Pass priority 7, Activate Polluted Delta 1 | crack 0.97/0.6492; bauble 0.00/0.6608 -> Pass priority 8 | crack 0.75/0.6368; bauble 0.13/0.671 -> Activate Polluted Delta 7, Pass priority 1 | crack 0.75/0.6516; bauble 0.13/0.6746 -> Activate Polluted Delta 8 |
+| 015056_000@70 (8) | 0.0004 | crack 0.79/0.3418; bauble 0.00/- -> Activate Flooded Strand 8 | crack 0.81/0.3472; bauble 0.00/- -> Activate Flooded Strand 8 | crack 0.56/0.3441; bauble 0.10/0.3201 -> Activate Flooded Strand 8 | crack 0.56/0.3491; bauble 0.10/0.3193 -> Activate Flooded Strand 8 |
+| 084307_002@100 (11) | 0.0480 | crack 0.97/0.0817; bauble 0.02/0.0416 -> Activate Polluted Delta 8 | crack 0.97/0.0806; bauble 0.02/0.043 -> Activate Polluted Delta 8 | crack 0.75/0.0824; bauble 0.13/0.0552 -> Activate Polluted Delta 8 | crack 0.75/0.0789; bauble 0.13/0.0529 -> Activate Polluted Delta 8 |
+| 100705_002@44 (3) | 0.0001 | crack 1.00/0.8007; bauble 0.00/- -> Activate Scalding Tarn 8 | crack 1.00/0.8002; bauble 0.00/- -> Activate Scalding Tarn 8 | crack 0.75/0.7981; bauble 0.13/0.7402 -> Activate Scalding Tarn 8 | crack 0.75/0.7983; bauble 0.13/0.7418 -> Activate Scalding Tarn 8 |
+| 032002_001@133 (8) | 0.0001 | crack 1.00/0.1698; bauble 0.00/- -> Activate Scalding Tarn 8 | crack 1.00/0.1707; bauble 0.00/- -> Activate Scalding Tarn 8 | crack 0.75/0.1689; bauble 0.13/0.1081 -> Activate Scalding Tarn 8 | crack 0.75/0.1691; bauble 0.13/0.1095 -> Activate Scalding Tarn 8 |
+| 085036_002@255 (14) | 0.0049 | crack 0.63/0.9983; bauble 0.00/0.9989 -> Activate Flooded Strand 8 | crack 0.63/0.9983; bauble 0.00/0.9989 -> Activate Flooded Strand 8 | crack 0.56/0.9984; bauble 0.13/0.9985 -> Activate Flooded Strand 8 | crack 0.56/0.9983; bauble 0.13/0.9986 -> Activate Flooded Strand 8 |
+
+Pooled over the 8 spots: k=8: Bauble share 0.037, Q(Bauble) - Q(crack) -0.0021 over the 4 spots measuring both, picks Bauble 1 / crack 6 / other 1; k=0: Bauble share 0.032, Q(Bauble) - Q(crack) -0.0047 over the 4 spots measuring both, picks Bauble 0 / crack 7 / other 1; k=8 floor 100: Bauble share 0.135, Q(Bauble) - Q(crack) -0.0153 over the 8 spots measuring both, picks Bauble 1 / crack 7 / other 0; k=0 floor 100: Bauble share 0.131, Q(Bauble) - Q(crack) -0.0173 over the 8 spots measuring both, picks Bauble 0 / crack 8 / other 0.
+
+* `chance_k` 8 against 0 moves Q(Bauble) - Q(crack) by +0.002 (floor) / +0.003 (PUCT): replaying
+  hypothetical outcomes after the look changes almost nothing at these spots.
+* One spot is different: turn 3 with the Bauble in hand (`041019_002@20`), where the prior already gives
+  the Bauble 0.195 - the deep search there picks the Bauble at 8 of 8 seeds at k 8 against 3 of 8 at k 0
+  (with the floor 8 of 8 against 1 of 8). At another (turn 6, `030754_005@49`) the 800-simulation searches
+  pass priority (hold the fetch) at both k. Those two picks joined the belief play-outs as (d); the floor's
+  picks are the crack everywhere.
+* The floor's Q is the Bauble subtree's average under PUCT (whom the Bauble targets, whether to crack after
+  the look - all searched), not its best line, at 100 visits.
+
+Played out (belief, 200 deals): the turn-3 spot's "Cast Mishra's Bauble, network on" -0.015 +- 0.030 against
+the crack; the turn-6 spot's "Pass priority, network on" +0.065 +- 0.035. Pooled over the 8 spots (a spot whose
+deep pick is the crack contributes 0): the deep k=8 pick +0.006 +- 0.006, the deep k=0 pick +0.008 +- 0.004.
+
+### 76.7 The second demo: the turn-1 Bauble position, built from game seeds (`position_lab.py t1`)
+
+The user's canonical case, cleaner than the replay spots: on turn 1 our hand holds an Island-type land
+(Island or Volcanic Island), a fetchland that can fetch it, Mishra's Bauble and Tamiyo, Inquisitive
+Student. The expert line: cast the Bauble (free) and look at our own top card; a good card - play the
+Island-type land and cast Tamiyo, keeping the fetch; a bad card - play the fetch, crack it (shuffling the
+card away), fetch a blue land, cast Tamiyo. Tamiyo comes down on turn 1 either way, and the land choice
+uses the information.
+
+**The spots** are built without replays: `opening_spot(spec, seed)` plays a seed of the Delver mirror's
+spec to the starting player's first main-phase priority (the chooser plays first, both keep their seven,
+priority passes - only the shuffle and the deal, ~0.3 ms a seed); `t1_composition` keeps the **clean**
+hands - exactly one Island-type land, one fetchland, one Mishra's Bauble, one Tamiyo, and three cards of
+Force of Will, Daze, Cori-Steel Cutter, Murktide Regent, Prismari Charm (none castable on our turn 1;
+Force of Will and Daze reactive only; no Dragon's Rage Channeler, Brainstorm, Ponder, Lightning Bolt,
+Unholy Heat, second land, Urza's Bauble or second Mishra's Bauble). Seeds 1-24,006 hold 12 such hands on
+the play (about 1 in 2,000); the demo takes four, two with each Island-type land: `seed1754` (Cori-Steel Cutter, Force of Will, Force of Will, Mishra's Bauble, Polluted Delta, Tamiyo, Volcanic Island); `seed2100` (Daze, Daze, Flooded Strand, Force of Will, Mishra's Bauble, Tamiyo, Volcanic Island); `seed19613` (Cori-Steel Cutter, Daze, Force of Will, Island, Mishra's Bauble, Misty Rainforest, Tamiyo); `seed20416` (Daze, Island, Mishra's Bauble, Murktide Regent, Murktide Regent, Polluted Delta, Tamiyo).
+On the draw (views only - the network's view, the deep search, the one-ply check; no play-outs, for time) (`--draw`, `opening_spot_draw`): the second player's seven and its draw (its library's top
+before the turn) filtered first (cheap), then the starting player's turn 1 played by the network's
+evaluation search to the second player's first main phase, its eight cards filtered again; seeds
+1-25,702 hold 6 (both demo spots' opponents played a land and Tamiyo on their turn 1): the demo views two of them, `seed2604d` (Daze, Flooded Strand, Force of Will, Mishra's Bauble, Murktide Regent, Prismari Charm, Tamiyo, Volcanic Island); `seed17385d` (Cori-Steel Cutter, Cori-Steel Cutter, Daze, Force of Will, Mishra's Bauble, Misty Rainforest, Tamiyo, Volcanic Island).
+Each spot is kept as a scenario (`E:/mtg-zero-scratch/position-lab/t1_spots/`); everything a player knows
+is kept, and each play-out re-deals the unknown libraries (and, in `belief`, the opponent's hand), paired
+across candidates.
+
+**The candidates**: (a) the network's own play (`"*"`); (b) no Bauble: play the fetch, crack it, cast
+Tamiyo (`[Play F, Activate F, resolve, Cast Tamiyo, resolve]` - the fetch's find is the network's); (c) no
+Bauble: the Island-type land and Tamiyo, the fetch kept; (d) the Bauble at our own library first
+(`[Cast Mishra's Bauble, resolve, Activate Mishra's Bauble, Target P<us>, resolve]`), then the network; (e)
+the same with the branch rule (`bauble_fetch`, `land_min` 0, `bad` = (b)'s line, `good` = (c)'s: a land
+seen - the fetch, cracked, Tamiyo; a nonland seen - the land, Tamiyo, the fetch kept); (f) the deep
+searches' pick (800 simulations x 8 seeds at `chance_k` 8 and 0, with and without a floor of 100: 76.6's
+settings), forced alone and the network on. Belief deals, 100 per spot (every candidate the same deals).
+
+**The network's view and the deep search** at the four spots on the play: 
+
+| spot | value | prior (64-sim search: all 4 seeds) | deep 800 x 8, k 8 / k 0: picks | with the floor 100: Q of fetch / Island-type / Bauble (k 8; k 0) |
+|---|---|---|---|---|
+| `seed1754` | 0.605 | Polluted Delta 0.988, Volcanic Island 0.012 (Play Polluted Delta) | Polluted Delta 8 / Polluted Delta 8 | 0.598 / 0.606 / 0.560; 0.598 / 0.605 / 0.560 |
+| `seed2100` | 0.553 | Flooded Strand 0.075, Volcanic Island 0.925 (Play Volcanic Island) | Volcanic Island 8 / Volcanic Island 8 | 0.635 / 0.632 / 0.615; 0.632 / 0.631 / 0.617 |
+| `seed19613` | 0.653 | Island 1.000 (Play Island) | Island 8 / Island 8 | 0.673 / 0.699 / 0.635; 0.674 / 0.699 / 0.636 |
+| `seed20416` | 0.603 | Island 1.000 (Play Island) | Island 8 / Island 8 | 0.593 / 0.632 / 0.609; 0.592 / 0.633 / 0.608 |
+| `seed2604d` | 0.472 | Flooded Strand 0.048, Volcanic Island 0.952 (Play Volcanic Island) | Flooded Strand 5, Volcanic Island 3 / Volcanic Island 4, Flooded Strand 4 | 0.491 / 0.483 / 0.478; 0.492 / 0.482 / 0.478 |
+| `seed17385d` | 0.494 | Misty Rainforest 0.993, Volcanic Island 0.007 (Play Misty Rainforest) | Misty Rainforest 8 / Misty Rainforest 8 | 0.491 / 0.461 / 0.414; 0.491 / 0.461 / 0.415 |
+
+
+**Results** (belief): 
+
+| spot | hand (besides Bauble, Tamiyo) | (a) network | (b) crack + Tamiyo | (c) Island + Tamiyo | (d) Bauble, network | (e) Bauble + branch | (f) deep pick |
+|---|---|---|---|---|---|---|---|
+| seed1754 | Cori-Steel Cutter, Force of Will, Force of Will, Polluted Delta, Volcanic Island | 0.630 +- 0.049 | 0.650 (+0.020 +- 0.032) | 0.710 (+0.080 +- 0.060) | 0.630 (+0.000 +- 0.060) | 0.640 (+0.010 +- 0.056) | 0.640 (+0.010 +- 0.036) |
+| seed2100 | Daze, Daze, Flooded Strand, Force of Will, Volcanic Island | 0.660 +- 0.048 | 0.660 (+0.000 +- 0.067) | 0.650 (-0.010 +- 0.039) | 0.600 (-0.060 +- 0.051) | 0.590 (-0.070 +- 0.057) | 0.640 (-0.020 +- 0.045) |
+| seed19613 | Cori-Steel Cutter, Daze, Force of Will, Island, Misty Rainforest | 0.770 +- 0.042 | 0.730 (-0.040 +- 0.057) | 0.750 (-0.020 +- 0.038) | 0.740 (-0.030 +- 0.050) | 0.730 (-0.040 +- 0.055) | 0.780 (+0.010 +- 0.039) |
+| seed20416 | Daze, Island, Murktide Regent, Murktide Regent, Polluted Delta | 0.550 +- 0.050 | 0.650 (+0.100 +- 0.058) | 0.600 (+0.050 +- 0.050) | 0.580 (+0.030 +- 0.058) | 0.520 (-0.030 +- 0.058) | 0.560 (+0.010 +- 0.046) |
+| **pooled** (4 spots) | | 0.653 | 0.672 (**+0.020 +- 0.027**) | 0.677 (**+0.025 +- 0.024**) | 0.637 (**-0.015 +- 0.027**) | 0.620 (**-0.033 +- 0.028**) | 0.655 (**+0.003 +- 0.021**) |
+
+
+**The one-ply check** (the user's point: does the value network alone prefer the right branch, before any
+search?). For 300 belief deals per spot: the Bauble line scripted with the opponent passing; then each
+branch scripted - "keep it" (the Island-type land + Tamiyo, the fetch held) and "crack" (the fetch,
+cracked for a Volcanic Island - an Island without one -, Tamiyo) - and the network's raw value (its own
+view) at the first decision after Tamiyo resolved (the opponent's turn 2 when we have nothing left to do).
+By the seen card's class and by the six most common seen cards, the mean value of each branch and the share
+of deals where "keep" is valued higher:
+
+| spot | land seen: keep / crack (keep preferred) | nonland seen: keep / crack (keep preferred) | by card: keep preferred |
+|---|---|---|---|
+| seed1754 | 0.548 / 0.558 (0.39, n 96) | 0.577 / 0.561 (0.65, n 204) | Dragon's Rage Channeler 0.72; Brainstorm 1.00; Wasteland 0.68; Lightning Bolt 0.24; Ponder 0.80; Tamiyo 0.60 |
+| seed2100 | 0.567 / 0.587 (0.35, n 97) | 0.612 / 0.596 (0.58, n 203) | Brainstorm 0.96; Lightning Bolt 0.38; Ponder 0.87; Wasteland 0.68; Dragon's Rage Channeler 0.85; Volcanic Island 0.32 |
+| seed19613 | 0.592 / 0.619 (0.40, n 89) | 0.619 / 0.605 (0.60, n 211) | Wasteland 0.71; Ponder 0.81; Dragon's Rage Channeler 0.42; Brainstorm 1.00; Lightning Bolt 0.52; Mishra's Bauble 0.95 |
+| seed20416 | 0.570 / 0.571 (0.52, n 95) | 0.593 / 0.575 (0.69, n 205) | Lightning Bolt 0.84; Force of Will 0.66; Dragon's Rage Channeler 0.67; Volcanic Island 0.27; Wasteland 0.86; Daze 0.94 |
+| seed2604d | 0.421 / 0.459 (0.19, n 103) | 0.475 / 0.463 (0.56, n 197) | Wasteland 0.08; Force of Will 0.75; Ponder 0.67; Polluted Delta 0.17; Brainstorm 0.95; Lightning Bolt 0.86 |
+| seed17385d | 0.428 / 0.438 (0.40, n 105) | 0.429 / 0.437 (0.42, n 195) | Dragon's Rage Channeler 0.16; Wasteland 0.25; Lightning Bolt 0.79; Volcanic Island 0.71; Ponder 0.35; Brainstorm 0.80 |
+
+**Reading it.**
+
+* **The network's own play** on turn 1 is a land, never the Bauble: with a basic Island it plays the Island
+  and keeps the fetch (prior 1.000 at both spots); with a Volcanic Island it plays the Volcanic Island
+  beside a Flooded Strand (0.925) but plays the Polluted Delta beside a Volcanic Island (0.988) - a land
+  choice that reads the hand, never the top card. The Bauble's prior is 0.000 at every spot.
+* **Deep search does not find Bauble-first** here: at 800 simulations x 8 seeds its share is 0 at every spot
+  and either `chance_k`; with the floor its Q is below the best land's at every spot (by 0.02-0.06 on the
+  play, 0.013 and 0.077 on the draw) - above the fetch's at one (`seed20416`: 0.609 against 0.593) -,
+  `chance_k` 8 against 0 moving it by at most 0.002. The deep picks are the 64-sim search's moves but on the
+  draw at `seed2604d`, where k 8 splits 5 / 3 toward the Flooded Strand and k 0 4 / 4.
+* **Played out**, the expert line (e) scores -0.033 +- 0.028 against the network's own play pooled over the four
+  spots on the play, Bauble-first with the network's follow-up (d) -0.015 +- 0.027, and the two no-Bauble lines
+  (b) +0.020 +- 0.027 and (c) +0.025 +- 0.024 - none beyond 1.3 paired se, at +-0.024-0.028 pooled (+-0.04-0.07 per
+  spot, N = 100). The branch's own verdicts: a land seen in 24-38% of the looks, and its two branches score
+  alike (e.g. 0.694 bad / 0.609 good at `seed1754`, 0.500 / 0.618 at `seed2100`).
+* **The one-ply check: the value network alone leans the right way, weakly.** After a forced look it values
+  "crack" above "keep" when a land was seen (keep preferred in 35-52% of the land deals by spot on the play,
+  19-40% on the draw) and "keep" above "crack" when a spell was seen (58-69% on the play; 42-56% on the
+  draw) - by card on the play strongest for a cantrip seen (Brainstorm 0.96-1.00, Ponder 0.80-0.87 keep), a
+  Volcanic Island seen leaning crack (0.27-0.32), but a Wasteland seen leaning keep (0.68-0.86: the value net
+  counts it a good card) and Lightning Bolt split (0.24-0.84); on the draw at `seed17385d` the classes hardly
+  separate (40% / 42%) and a Volcanic Island seen leans keep (0.71). The mean value gaps are small (0.01-0.04), and casting
+  the Bauble itself costs ~0.1 of value in the network's eyes at `seed1754` (0.605 at the spot, 0.509 after
+  the cast, 0.48-0.54 after the look by the seen card) - a state the network almost never visits.
+
+**In one line (the coordinator's question 3):** deeper search after the look (`chance_k` 8 at 800
+simulations) does not find Bauble-first - with prior ~0 it is never searched, and forced into the tree it
+still values below the land plays, `chance_k` changing nothing - and Bauble-first does not win more when
+played out (replay spots: +0.004 +- 0.012 belief, -0.004 +- 0.012 actual, +0.004 +- 0.017 with a Daze held, pooled over 8 spots; turn 1: -0.015 +- 0.027 with the network's follow-up, -0.033 +- 0.028 with the expert branch, pooled over 4 spots); the value net's raw one-ply
+preference after a look is in the expert's direction but small.
+
+### 76.8 The turn-1 Bauble canary (`position_lab.py canary`, a fingerprint)
+
+Over the game records - every main-line replay on disk (810 at the run, generations 90-348) and the 384
+self-play games of generation 241 measure-play read (`E:/mtg-zero-scratch/explore/ab/fp_*_241.json`) - each
+player's first main-phase priority (its first turn; on the draw its hand has the draw): the hand's
+composition ('any': at least one Island-type land, a fetchland, Mishra's Bauble and Tamiyo; 'clean': as
+76.7's), whether it activated Mishra's Bauble at its own library before its land drop that turn (the seen
+card: its library's top when the ability was targeted, read from a deal-`none` start game of the prefix),
+and the land it played (Island-type / fetch, cracked that turn or not). `t1_canary` reports it per
+composition and side and per generation (`by_gen`: hands, looks, clean hands) - run it per generation.
+
+| records | composition | side | hands | Bauble look before the land | fetch played + cracked | Island-type played | other land first |
+|---|---|---|---|---|---|---|---|
+| measure-play's (672 replays, gen 90-312, + 384 self-play, gen 241) | any | play | 35 | 0 | 26 | 9 | 0 |
+| measure-play's (672 replays, gen 90-312, + 384 self-play, gen 241) | any | draw | 65 | 0 | 38 | 19 | 8 |
+| measure-play's (672 replays, gen 90-312, + 384 self-play, gen 241) | clean | play | 3 | 0 | 2 | 1 | 0 |
+| measure-play's (672 replays, gen 90-312, + 384 self-play, gen 241) | clean | draw | 0 | 0 | 0 | 0 | 0 |
+| every replay on disk (810, gen 90-348) | any | play | 24 | 0 | 19 | 5 | 0 |
+| every replay on disk (810, gen 90-348) | any | draw | 49 | 0 | 28 | 15 | 6 |
+| every replay on disk (810, gen 90-348) | clean | play | 3 | 0 | 2 | 1 | 0 |
+| every replay on disk (810, gen 90-348) | clean | draw | 0 | 0 | 0 | 0 | 0 |
+
+**The network never Baubles its own library before its turn-1 land drop** - 0 of 100 hands with
+the four cards, 0 of 3 clean ones; it plays the fetch and cracks it in 64 and
+the Island-type land in 28 (the rest another land first), and casts the Bauble later.
+
+### 76.9 Cost
+
+CPU only, below-normal priority, beside other agents' runs (the desktop's GPU and the Mac on the live A/B):
+a play-out costs ~8 process-seconds per game from a mid-game spot (`--threads 2 --search-threads 1`: one
+process ~1,050-1,800 network rows a second, about 1.3 cores - this network's CPU inference does not scale
+past 2 torch threads, so the lab scales by processes), ~13.5 from turn 1 (16 turns to play). A job (one
+spot, one candidate, one mode, 200 deals) took 685 s (turn 14) to 2,390 s (turn 1), typically 1,300-1,900
+s; **a typical lab query** - one spot, three candidates, one mode, 200 deals - is ~600 games, about 25-40
+minutes on 3-5 processes. The first demo's belief + actual runs: 10,000 games, 78,600 process-seconds,
+~4.4 h on 5 processes; pinned (N halved to 100 for time) ~1.3 h; the turn-1 demo 2,400 games, 32,500
+process-seconds, ~3 h on 3 processes; the deep searches ~50 s a spot (4 settings x 8 seeds x 800
+simulations); the one-ply check ~5 s a spot (300 deals); the canary 3 s over 1,194 games. The spot search
+over seeds: ~0.3 ms a seed on the play (24,006 seeds in 6 s for 12 clean hands), on the draw ~25 s for
+80,000 seeds (a network search per hit).
+
+### 76.10 Checks
+
+Tier "opt-in core feature with byte-identical defaults" (feedback_tiered_gates: here an opt-in *engine*
+spec key, no core change; the desktop CPU only, `CUDA_VISIBLE_DEVICES=-1`, below-normal priority, own
+target `E:/cargo-target/mtg-zero/position-lab`, the baseline `E:/mtg-zero-scratch/position-lab/base-5f7e427`
+with its own target `.../position-lab-base`):
+
+* **`python tools/gate.py optin-core --baseline-root E:/mtg-zero-scratch/position-lab/base-5f7e427
+  --feature-tests az,hidden,lab,constructed --other-games <glassroad-zero> <caverna-zero>
+  <kingdombuilder-zero>`**: GATE FAILED on one step outside this branch's code (`gates/f74cd1e1ab07.json`, 1,306 s): core tests 92 passed; checkpoint_compat byte identity against 5f7e427 (`--net random`, the default spec) identical; feature tests az 39, hidden 16, lab 13, constructed 7 passed; the build-only step built Glass Road, Caverna and Kingdom Builder against the core but its zero-core pytest failed one test, `test_remoteplay.py::test_cotrain_the_local_driver_is_never_starved` (a share-of-work timing assertion: 22 of 160 matches local against >= 15%; zero-core is the unchanged pin c15e3d0) - in both full-suite runs (on a465017 beside the demo's play-outs, and on f74cd1e on a quiet CPU), while it passes alone (twice) and with its whole file (27 / 27): a flake of that suite, not of this change (301 passed, 3 skipped). (The `--other-games` fix a291de7 is cherry-picked as 40f5655: main's
+  gate.py split the paths on their space.)
+* **Digests unchanged**: full **132437374243f7b2**, encoding-free **a0d54562c8330271** (`cargo test --release
+  -p engine --test digest -- --ignored --nocapture`, with and without `DIGEST_ENCODING=0`, on 759acdd and on
+  f74cd1e) - the digest games use `Game` directly; the `MtgAz` path is the compat checks'.
+* **The Delver mirror with the network**: `check_checkpoint_compat.py --old base-5f7e427 --new position-lab
+  --package mtgz --model iter_0308.pt --game mtg --spec <SPEC_DELVER>`: identical (1,521 self-play samples
+  each for 'visits' and 'cq', records d4ba79371565077d / d04f627abf5c78d8, results 6794c07fe3c6d591, 16/16
+  against random, fe83b9addf131f5f).
+* **Tests**: `engine/tests/lab.rs` 13, `az` 39, `hidden` 16, `constructed` 7; pytest 80 (65 + `tests/test_position_lab.py` 15).
+* **Every demo spot rebuilt exactly** (the spectator state with the log equals the replay's stored state,
+  with and without the log key; the legal actions are the frame's); the Bauble line held in all 31
+  measure-play spots with an opponent that passes, and in every one of the demo's play-outs.
+
+### 76.11 Building an arbitrary position (an assessment, not built)
+
+What it would take to start a lab game from a description - cards per zone from the two fixed 60-card
+decks, tapped / counters, life, turn / step / active player, the known library top, the opponent's hand
+known or unknown: `engine/src/testkit.rs`'s `Scenario` already builds a `Game` at a chosen step from card
+names per zone (library in order, hand, `hand_known`, battlefield without summoning sickness, graveyard,
+exile, counters, life, lands played, mana pool, turn number, active player, monarch, ...) and `start()`
+runs the step's turn-based actions to the first decision. Missing for the lab: (1) a `start.build` JSON
+schema feeding it, wrapped as an `MtgAz` (the match state from the spec, `set_known_pools`); (2) the deck
+partition - best-of-one decklists are open, so every one of each deck's 60 cards must be placed (the rest
+into the library, unknown), and the description checked against the list; (3) setters it lacks: tapped,
+"entered this turn" (summoning sickness), per-turn history the rules and the encoding read (spells cast
+this turn - Cori-Steel Cutter's flurry, prowess -, cards drawn, a declared mulligan, damage), a known
+library top (`learn`) and partial knowledge (clouds - leave out); (4) the stack (start at an empty stack,
+or build it by actions); (5) checks: `Game::check_invariants` and `check_knowledge`, the encoding's leak
+tests on a built state, and a fuzz of built positions played to the end. About a day, mostly (2)-(3) and
+their tests; the risk is states no game could reach (inconsistent per-turn counters), which the checks
+reduce but do not rule out.
+
+### 76.12 Risks, limits, open questions
+
+* **The scripted lines leak to the opponent's searches** (76.3): small here; a candidate whose point is
+  surprise (a bluff, a held counter) would be measured against an opponent that knows the script.
+* **The score is the network's against itself**: a better move the network cannot follow up scores low;
+  (c) / (e) against (b) / (d) isolate the follow-up for the Bauble. The script's "hold" lets the network
+  answer the opponent - and it cracks then (76.5), so (c) is not a pure hold at every spot.
+* **N and power**: N = 200 (100 pinned, 100 turn 1) gives +-0.03-0.05 per spot and +-0.012 pooled (replay
+  spots) / +-0.025 (turn 1); an effect of 1-2 points of win rate is below that. The paired streams help only
+  until the candidates' games part (the first move here).
+* **One checkpoint for every spot** (308), while the replay spots come from generations 240-308's games.
+* **`actual` is hindsight**: N library orders of one real hand; its se says nothing about other hands.
+* **The site-id mapping reads the publisher's log** (its line formats); ids not in the log are not found (an
+  error, never a guess). The site is not asked.
+* **Pins and `top` condition by rejection**: an unlikely pin costs up to `tries` deals per game (100,000 x ~6
+  us = 0.6 s at worst) before the error; the report has the deals' card shares.
+* **Seeding self-play** with `start` blocks works as specs do (no deal seed: the driver's game seed deals;
+  forced moves are single options, never recorded): a run could play from a pool of real spots. Teaching a
+  trick needs more - the forced move itself is no training sample (a single option has no search and no
+  target); a recorded root at the spot with the trick forced into its tree, or a policy-target override,
+  is not built.
+* **The value net's view after a self-look is off its distribution** (76.7: casting the Bauble on turn 1
+  costs ~0.1 of value; the network never does it in self-play), so the deep searches' Q of Bauble-first
+  inherits that bias - which is also the most likely reason the habit persists: nothing in self-play ever
+  measures the line.
 
 ## 78. CUDA graphs of the token network's inference (zero-core `feat/token-graphs`, opt-in)
 

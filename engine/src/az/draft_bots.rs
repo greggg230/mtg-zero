@@ -133,7 +133,7 @@ pub fn match_game(setup: &MatchSetup, max_turns: u32, format: Format) -> Result<
     let [a, b] = &seats;
     let g = Game::with_sideboards(db, gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], setup.seed)?;
     let m = MatchState::new(db, format, gspec, &seats, setup.seed)?;
-    let mut az = MtgAz { g, m };
+    let mut az = MtgAz { g, m, lab: None };
     az.set_known_pools();
     Ok(az)
 }

@@ -29,6 +29,7 @@ pub mod draft_bots;
 pub mod draft_encode;
 pub mod encode;
 pub mod identity;
+pub mod lab;
 pub mod matches;
 pub mod pools;
 pub mod sample;
@@ -107,6 +108,10 @@ pub enum DeckMode {
 ///
 /// `"log": true` keeps each game's log (`GameSpec::log`) for the spectator view
 /// (`view.rs`, the replay recorder); it changes nothing else.
+///
+/// The position lab (ENGINE.md 76): `"start"` starts every game at a spot of another game of
+/// this spec (its seed and actions), the hidden cards dealt again, the decider's first moves
+/// forced (`lab.rs`); best-of-one only, not with `"seed"`. Without it every game is what it was.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MtgSpec {
     pub max_turns: u32,
@@ -124,6 +129,8 @@ pub struct MtgSpec {
     /// Keep the games' log (`GameSpec::log`): the replay recorder's games, for the viewer's
     /// play-by-play (`view.rs`). Off in self-play and evaluation (it costs a clone per log line).
     pub log: bool,
+    /// The position lab's start (ENGINE.md 76, `lab.rs`): games begin at this spot.
+    pub start: Option<std::sync::Arc<lab::Start>>,
 }
 
 impl Default for MtgSpec {
@@ -141,6 +148,7 @@ impl Default for MtgSpec {
             seed: None,
             constructed: false,
             log: false,
+            start: None,
         }
     }
 }
@@ -214,6 +222,7 @@ impl MtgSpec {
                 "seed" => s.seed = Some(int()?),
                 "constructed" => {}
                 "log" => s.log = x.as_bool().ok_or("mtg spec: log must be a boolean")?,
+                "start" => s.start = Some(std::sync::Arc::new(lab::Start::parse(x, db)?)),
                 "chooser" => {
                     let c = int()?;
                     if c > 1 {
@@ -285,6 +294,9 @@ impl MtgSpec {
         }
         if s.max_turns == 0 {
             return Err("mtg spec: max_turns must be positive".into());
+        }
+        if s.start.is_some() && (s.seed.is_some() || s.format != Format::Bo1) {
+            return Err("mtg spec: start is for best-of-one games without a match seed".into());
         }
         s.pools = pools.unwrap_or(s.format == Format::Bo3);
         if s.constructed {
@@ -408,6 +420,9 @@ impl MtgSpec {
 pub struct MtgAz {
     pub g: Game,
     pub m: MatchState,
+    /// A position-lab game's forced line and follow rule (ENGINE.md 76, `lab.rs`); None in every
+    /// other game.
+    pub lab: Option<Box<lab::Lab>>,
 }
 
 impl MtgAz {
@@ -426,7 +441,7 @@ impl MtgAz {
         let [a, b] = &seats;
         let g = Game::with_sideboards(spec.db(), gspec, [&a.deck, &b.deck], [&a.sideboard, &b.sideboard], seed)?;
         let m = MatchState::new(spec.db(), spec.format, gspec, &seats, seed)?;
-        let mut az = MtgAz { g, m };
+        let mut az = MtgAz { g, m, lab: None };
         az.set_known_pools();
         Ok(az)
     }
@@ -460,7 +475,10 @@ impl SearchGame for MtgAz {
         if players != 2 {
             return Err(format!("mtg: {players} players (two only)"));
         }
-        // (A drafted match's spec carries the event's match seed.)
+        // (A drafted match's spec carries the event's match seed; a lab game's start, its spot.)
+        if spec.start.is_some() {
+            return MtgAz::from_start(spec, seed);
+        }
         MtgAz::new(spec, spec.seed.unwrap_or(seed))
     }
 
@@ -481,12 +499,32 @@ impl SearchGame for MtgAz {
                 out.clear();
                 out.extend(sb.decision.options.iter().map(|o| o.action));
             }
-            None => self.g.legal_actions(out),
+            None => {
+                self.g.legal_actions(out);
+                if let Some(l) = &self.lab {
+                    l.filter(&self.g, out);
+                }
+            }
         }
     }
 
     fn step(&mut self, a: u16, chance: &mut Vec<u64>) -> Result<(), String> {
-        self.match_step(a, chance)
+        if self.lab.is_none() {
+            return self.match_step(a, chance);
+        }
+        // a position-lab game (ENGINE.md 76): its line and rule follow the step (an ambiguous label is
+        // an error, never a guess)
+        if let Some(l) = self.lab.as_mut() {
+            if let Some(e) = l.ambiguity(&self.g) {
+                return Err(e);
+            }
+            l.before_step(&self.g, a);
+        }
+        self.match_step(a, chance)?;
+        if let Some(l) = self.lab.as_mut() {
+            l.after_step(&self.g);
+        }
+        Ok(())
     }
 
     fn force_chance(&mut self, forced: &[u64]) {
