@@ -174,6 +174,58 @@ fn determinize_keeps_features_and_legal_actions_for_both_viewers() {
     assert!(changed > checked / 2, "determinize rarely resampled anything: {changed}/{checked}");
 }
 
+/// zero-core's sparse rows (its docs/search.md 2.12, ENGINE.md 89): a sparse
+/// driver reads every row with `SearchGame::encode_sparse` (MTG: the default,
+/// `encode` + `sparse_scan`) and keys its evaluation cache by
+/// `obs_hash_sparse` of the pairs. For both viewers of mid-game states of the
+/// cube's and the Delver mirror's games: the pairs are exactly the non-zero
+/// floats of `encode` (bits, index order), the scratch is zeroed again, and
+/// the key is the dense row's `obs_hash`. (A guard for an MTG override that
+/// emits its pairs directly: it must pass unchanged.)
+#[test]
+fn encode_sparse_is_the_rows_non_zeros_with_the_same_key() {
+    use zero_search::lookahead::{obs_hash, obs_hash_sparse};
+    let names = engine::az::constructed::Decklist::izzet_delver().main_names();
+    let mirror = serde_json::json!({"max_turns": 60, "constructed": true, "decks": {"p0": names, "p1": names}}).to_string();
+    let mut gs = states(scale(12), 5, 5);
+    let sp = MtgSpec::parse(&mirror).unwrap();
+    let mut rng = Rng::new(6);
+    let mut h = Heuristic::new(6);
+    for s in 0..scale(12) {
+        let mut g = MtgAz::new_game(&sp, 2, 6000 + s).unwrap();
+        let mut keys = Vec::new();
+        while g.to_move().is_some() {
+            if rng.below(5) == 0 {
+                gs.push(g.clone());
+            }
+            let a = mixed(&g, &mut h, &mut rng);
+            g.step(a, &mut keys).unwrap();
+        }
+    }
+    let mut scratch = vec![0.0f32; NUM_FEATURES];
+    let (mut idx, mut val) = (Vec::new(), Vec::new());
+    let mut rows = 0;
+    for g in &gs {
+        for viewer in 0..2 {
+            let x = enc(g, viewer);
+            idx.clear();
+            val.clear();
+            idx.push(u32::MAX);
+            val.push(1.0);
+            g.encode_sparse(viewer, &mut scratch, &mut idx, &mut val);
+            let want: Vec<(u32, u32)> = x.iter().enumerate().filter(|(_, v)| v.to_bits() != 0).map(|(i, v)| (i as u32, v.to_bits())).collect();
+            let got: Vec<(u32, u32)> = idx[1..].iter().zip(&val[1..]).map(|(&i, v)| (i, v.to_bits())).collect();
+            assert_eq!(got, want, "encode_sparse is not encode's non-zeros (viewer {viewer})");
+            assert_eq!((idx[0], val[0]), (u32::MAX, 1.0), "encode_sparse did not append");
+            assert!(scratch.iter().all(|v| v.to_bits() == 0), "the scratch not zeroed again");
+            assert_eq!(obs_hash_sparse(&idx[1..], &val[1..], NUM_FEATURES), obs_hash(&x), "another cache key");
+            rows += 1;
+        }
+    }
+    println!("encode_sparse checked on {rows} rows");
+    assert!(rows > 1000, "{rows}");
+}
+
 /// zero-core keys children by (chance keys, next decider, next legal
 /// actions): two worlds sampled for the decider, played with the same
 /// actions, must give the decider the same features while those agree.

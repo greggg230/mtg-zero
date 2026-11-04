@@ -17306,3 +17306,67 @@ simulations/s, 34% of the rows cached; at N 8192 a game's cache filled ~0.3 time
 **Adopting it**: a run picks it up at a re-pin onto a checkout with this core (the Mac's remote checkout
 too: a worker of an older core refuses the seat key) and `--eval-cache 8192` (or 16384). Not in the forked-
 games A/B (both arms stay as pinned: the throughput moves the data mix); for runs launched after it.
+
+## 89. Where a self-play simulation's thread time goes, and sparse rows without the full-row scans (zero-core `feat/sparse-encode`, no setting)
+
+**Why** (2026-11-04, report 2.3 of the idea review E:/mtg-zero-scratch/fable-ideas/report.md): with the eval
+cache (88) the line's self-play evaluator is busy only 62-70 s of a 92-102 s phase, and the arithmetic over
+`metrics.jsonl` put a simulation at ~140 us of search-thread time against 21.2's 41 us. The suspects: the
+thread count, and the per-row work - each row zeroed, encoded, scanned float by float for its non-zeros
+(`LeafBuf::seal`) and scanned again for the cache key (`obs_hash`).
+
+**The profile** (`rowcost`, a Rust micro-benchmark with no network: E:/mtg-zero-scratch/ideas-3/rowcost,
+mimalloc as `mtgz._engine`; 15 Delver mirror games searched with the line's seat shape - 64 / 16 simulations,
+p_full 0.25, minor 4, a belief deal with mix 0.25 for full searches, a fresh world per simulation - and a
+stand-in evaluator, priors 0.85 on the heuristic bot's move (the network's top prior is ~0.87, 68.5), value
+0.5; every 16th leaf kept: 10,001 rows, both rows of a root-view leaf; five runs beside the live run, the
+spread is the machine's load). Per row: `encode` 13-22 us (p50 of a row's best 8-13 us, p90 21-31 us: a
+long tail), `seal` 11-14 us, `obs_hash` 3.0-4.6 us, a cached row's zeroing 1.9-2.3 us; ~252 non-zeros of
+37,620 in ~82 of the 587 blocks of 64. The rest of a simulation (the deal, the walk, the engine's steps,
+expansion and backup) 14-22 us. At the run's mix (gpu_timing.json, cache 8192: 1.48 rows encoded per
+simulation, 0.98 sent and 0.50 answered from the cache) one simulation's measured work was ~50 us: the
+walk 28%, `encode` 39%, the scan 22%, the key 9%, the zeroing 2%. So `encode` + scan + key + zeroing was
+~72% of it - far above the 15% that would make a sparse path worth building. Not in it: the driver's own
+bookkeeping (the cache's map and answer copies, the leaf buffers, the batch assembly, `decide`'s records)
+and the group barrier. The 140 us is cycle time x threads / simulations, an upper bound: the isolated GPU
+benchmark of 88 (8 threads, cache 8192) ran 99.5k simulations/s with the evaluator 93% busy - at most
+80 us a simulation on a quiet machine, the threads not the bottleneck there. The allocator: the run's
+build (619f1f2) is mimalloc (`py/src/lib.rs`, `#[global_allocator]`, unconditional; its strings are in the
+`.pyd`), so 17's Windows-heap contention does not apply. The chunk locks: a chunk is one job (its mutex
+taken once per group dispatch by one thread), the job queue's mutex ~34 times per group cycle at 8 threads
+(32 chunks of 12 games a group): nothing to contend; the parallel loss is the group barrier (a group's walk
+ends with its slowest chunk), which the thread sweep's `threads_busy` shows.
+
+**What** (zero-core docs/search.md 2.12, docs/az.md 28): `SearchGame::encode_sparse` (default: `encode` into
+the zeroed scratch + `game::sparse_scan`, which skips 32-float zero blocks by an OR and takes a block's
+non-zero lanes from a bit mask), `lookahead::obs_hash_sparse` (== `obs_hash` of the dense row: the same
+cache key), the driver's sparse leaf / root-view / belief rows through them, a cached row's pairs truncated
+instead of the scratch zeroed. The same batches byte for byte, so no setting. MTG keeps the default: its
+own pair-emitting encoder would save only what is left of the scan (~3 us a row, ~4-5 us a simulation)
+at the price of rewriting `encode.rs`'s ~2,000 lines of index arithmetic (overwrites and `max` updates
+inside slots), every float of which the digest guards - not worth it now; `encode` itself (the long tail
+above) is the larger remaining cost.
+
+**Measured** (2026-11-04, beside the live run: CPU timings inflated by it, compared within one process or
+under the same load). Per row, old -> new, interleaved row by row on the 10,001 rows (`rowcost` phase D):
+**a sent row 21.0 -> 11.8 us, a cached row 12.4 -> 11.4 us** (the scan 10.7-12.3 -> 3.0-3.9 us, the key
+3.0-3.5 -> 0.65-0.88 us); at the run's mix -9.5 us a simulation, -23% of the ~41 us measured in the same
+process. The driver (this line's self-play seat with gen 1000 on the CPU, eval_cache 8192, root-view rows,
+the belief, sparse batches; 24 games in flight, 2 threads x 2 groups, one seed; the old build, eval-cache
+619f1f2, and this one at the same time: E:/mtg-zero-scratch/ideas-3/ab_conc.sh): the search threads' time per
+simulation (`busy_s` / sims) **103.4 -> 87.0 us and 93.8 -> 80.8 us (-16%, -14%)**, the same 62,578 rows
+sent in the timed window. Byte identity end to end (E:/mtg-zero-scratch/ideas-3/digest_ab.py: the same seat,
+6 games, answered by a function of each row's non-zeros - torch's CPU floats are not reproducible run to
+run): the old and the new build give the same 29,114 batches, samples and results digest for digest, the
+same 25,428 cache hits, 14,533 value-only and 536 belief rows. What it buys a run depends on whether its
+self-play is thread-bound: the GPU sweep at the gen-1200 stop answers that
+(E:/mtg-zero-scratch/ideas-3/bench_threads.sh: threads 8 / 12 / 16 x groups 2 / 3 on the run's build, and
+8 x 2 with the run's per-batch sample handling and dense float16 shard writes on the caller thread, ~9 GB a
+generation, which gpu_timing.py left out - the other candidate for the GPU's idle third).
+
+**Checks.** `engine/tests/az.rs::encode_sparse_is_the_rows_non_zeros_with_the_same_key` (1,642 rows of cube
+and Delver mirror states, both viewers: the pairs are `encode`'s non-zero bits in index order, the scratch
+zeroed again, `obs_hash_sparse` == `obs_hash`; the guard any MTG override must pass); `rowcost` phase D (the
+same on 10,001 search-leaf rows); zero-core's cargo test 114 and pytest -k "sparse or cache"; the re-pin
+gate on this commit (`python tools/gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset
+delver-mirror --no-mac`): see the next commit.
