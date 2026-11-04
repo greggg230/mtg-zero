@@ -14784,7 +14784,9 @@ the checkpoint rate change is live either way (it also fires under a plain `carg
 "does an opt-in core feature's byte-identical-by-default build still compile against Glass Road,
 Caverna and Kingdom Builder" without paying for their full suites. Default game discovery now
 includes `../kingdombuilder-zero` alongside `../glassroad-zero` / `../caverna-zero`. zero-core
-docs/az.md 17 has the details; `gate.py`'s `optin-core` tier's last step is this command.
+docs/az.md 17 has the details; `gate.py`'s `optin-core` tier's last step is this command. (Without
+`--other-games` that step built no game - smoke_all found none from the gated worktree's submodule and
+printed GREEN - until 90.)
 
 ### 70.4 The Mac fuzz farm's guaranteed slice (`tools/fuzz_farm.py`, `tools/mac_backoff.py`)
 
@@ -17371,3 +17373,75 @@ same on 10,001 search-leaf rows); zero-core's cargo test 114 and pytest -k "spar
 gate on this commit (`python tools/gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset
 delver-mirror --no-mac`) on 79a3e27: PASSED in 207 s - the build, the digest f6543eb2b1b8752f (= main's), the
 1-config search smoke on the Delver spec (0/1 failed); the Mac step skipped.
+
+## 90. The optin-core gate's build-only step built no game: smoke_all.sh from the gated worktree's submodule (2026-11-04)
+
+Branch `fix/gate-smoke-games` (from main e098aff); zero-core branch `fix/smoke-all-games` (7d3dbd8, docs
+045ee8d, on aa10733; zero-core docs/az.md 29) - **not pinned here**: the gate fix works with the pinned
+aa10733's smoke_all.sh too.
+
+**The bug.** `gate.py optin-core`'s last step, "build-only: the other games" (70.3), ran `bash
+third_party/zero-core/tools/smoke_all.sh --with-this-core --build-only` from the checkout under gate and
+passed on exit 0. Without `--other-games` it gave no game, and smoke_all's discovery looked only beside its
+own checkout: from `<checkout>/third_party/zero-core` that is `<checkout>/third_party/`, where no game lives
+(worktree or main checkout alike). It found none, ran the core's cargo test, build and ~12-16 min pytest,
+and printed GREEN. (The `--other-games` help even said the default "finds none from a pinning checkout's
+third_party/zero-core".) Before 40f5655 (2026-10-30) a given `--other-games` was also split on spaces, so
+`C:/Users/Gregg Keithley/...` became path fragments smoke_all skipped silently (one `skip` line each) -
+GREEN again.
+
+**Consequence** (every `gates/logs/*optin-core-build-only*` log on the desktop: 18, the last run per commit,
+2026-10-29 to 11-04): 12 built all three games (the paths passed with `--other-games`); **6 built none** -
+three printed GREEN, so the step passed: the Gumbel gate on bb56855 and b212420 (68: "Glass Road Zero, Caverna Zero and
+Kingdom Builder Zero build against the core (GREEN ...)" was not true of that gate - its logs hold six empty
+`skip`s and no game build), and 619f1f2 (2026-11-03, `mtg-zero-wt/eval-cache`); the other three (explore
+db3bb5a, heavy-decisions 091a62e, e098aff) failed on the core pytest's load flake
+`test_cotrain_the_local_driver_is_never_starved` instead (explore's and heavy-decisions' later gates passed
+`--other-games`). Main's core today is fine: aa10733 builds Glass Road, Caverna and Kingdom Builder (the
+explicit run below, and E:/mtg-zero-scratch/ab-ideas/smoke_build_only.log).
+
+**The fix** (`tools/gate.py`):
+
+* The step names the games itself: `glassroad-zero`, `caverna-zero` and `kingdombuilder-zero` beside this
+  repo's MAIN checkout (from `git rev-parse --git-common-dir`, so it works from any worktree), else beside
+  this checkout - all three required, or the gate stops before running anything (exit 2, naming the missing
+  repo). `--other-games` paths must exist (exit 2 otherwise).
+* Positive evidence: an `ok <game>: build ...` summary line for EVERY game the step names, a `=== <game>:
+  worktree ... with zero-core <sha>` line matching this checkout's core pin, and exit 0. GREEN alone is no
+  longer a pass.
+* `SKIP_CORE=1`: the core's cargo tests are the tier's own "core tests" step, and its pytest is not in the
+  tier's recipe - it rode along inside this step, took most of its time and failed it on load flakes (76,
+  78 and three of the six runs above). This is a deliberate narrowing: the step now checks only what its
+  name says.
+* Its own `SMOKE_TARGET` (`mtgz-gate-<checkout dir>`, the games' target dirs
+  `E:/cargo-target/<game>/mtgz-gate-<checkout dir>`) and `SMOKE_DIR` (`E:/zero-smoke/mtgz-gate-<checkout
+  dir>`), and the gate's own `CARGO_TARGET_DIR` unset for the step (a `None` step env value now unsets a
+  variable), so no game builds into this repo's target dir and two checkouts never share one.
+* `--dry-run` prints each step's env overrides too (70.1 said it did; it did not).
+
+zero-core's side (az.md 29): with no game arguments smoke_all now also looks beside the main checkout of a
+worktree and, for a submodule, beside the superproject's checkout and its main checkout; finding no game
+fails (exit 1, never GREEN) unless `--core-only`; the summary counts the games checked; a missing explicit
+path, an unknown option, a non-game directory or a `--with-this-core` submodule that could not be moved to
+the core's HEAD fail instead of being skipped.
+
+**Checks** (2026-11-04, IDLE priority, 2 build jobs, CPU only, beside the r3-2b A/B). `tests/test_gate.py`
+(4 passed): the checker fails the e098aff output (core steps only), a missing game, a failed build, exit 1
+and a build against another core, and passes three ok lines; the default games found beside a fake main
+checkout and a missing one refused; the step's argv / env; a `None` env value unsets. zero-core's
+`tests/test_smoke_all.py` 5 passed. The old smoke_all (aa10733) from this worktree's submodule,
+`SKIP_CORE=1 ... --with-this-core --build-only`: an empty summary and GREEN, exit 0; the new one (7d3dbd8)
+finds `C:/Users/Gregg Keithley/{glassroad,caverna,kingdombuilder}-zero` from there (`--dry-run`), and
+exits 1 without GREEN when they are hidden (`SMOKE_GAMES_ROOT` pointing nowhere). The step itself through
+gate.py's own `build_only_step` / `run_step` / checker (E:/mtg-zero-scratch/gate-fix/gate_step_driver.py,
+the submodule at 7d3dbd8): **PASS in 159 s** - Glass Road 41 s, Caverna 43 s, Kingdom Builder 66 s against
+7d3dbd8, `games: 3 of 3 checked`, the scratch worktrees removed by smoke_all; with `--other-games` a
+directory that is not a game repo: FAIL (no `ok not-a-game: build` line) with the new smoke_all (a FAIL
+line, exit 1) and with the old one (a `skip` and GREEN, exit 0 - the checker still fails it); a missing
+`--other-games` path: gate.py exits 2 before running anything. `gate.py optin-core --dry-run` shows the
+three paths, `SKIP_CORE=1`, `SMOKE_TARGET=mtgz-gate-gate-fix`. Not done: a full optin-core gate run (only
+this step was run).
+
+Caveat: with the pinned aa10733 smoke_all, a scratch worktree whose zero-core fetch fails still prints the
+`with zero-core <sha>` line and builds the game's own pin - only zero-core 7d3dbd8+ fails that loudly, so
+re-pin onto it (or later) when the core next moves.

@@ -170,6 +170,34 @@ def check_checkpoint_compat(output, rc):
     return True, 'identical across both checkouts', {}
 
 
+BUILD_OK_RE = re.compile(r'^\s*ok\s+(\S+): build \S+ \(\d+ s\)\s*$', re.M)
+WITH_CORE_RE = re.compile(r'^=== (\S+): worktree .* with zero-core ([0-9a-f]+)\s*$', re.M)
+
+
+def make_build_only_checker(names, core_pin=None):
+    """smoke_all.sh --with-this-core --build-only's positive evidence: an "ok <game>: build ..." summary
+    line for EVERY game the step names (and, with a known pin, its "worktree ... with zero-core <sha>"
+    line matching this checkout's core) - not just exit 0 / GREEN, which smoke_all printed with no
+    game at all when it found none (ENGINE.md 90)."""
+    def checker(output, rc):
+        built = set(BUILD_OK_RE.findall(output)) - {'core'}       # ("ok core: build zero._engine" is the core's)
+        missing = [n for n in names if n not in built]
+        if missing:
+            return False, (f'no "ok <game>: build" line for {", ".join(missing)} (built: '
+                           f'{", ".join(sorted(built)) or "none"}) - a game never built is not a pass'), \
+                {'built': sorted(built)}
+        if core_pin:
+            cores = dict(WITH_CORE_RE.findall(output))
+            wrong = [n for n in names if not core_pin.startswith(cores.get(n) or 'x')]
+            if wrong:
+                return False, (f'{", ".join(wrong)}: not built in a worktree with zero-core {core_pin[:12]} '
+                               f'(seen: {cores or "none"})'), {'built': sorted(built)}
+        if rc != 0:
+            return False, f'exit {rc}: ' + (output.strip().splitlines() or ['?'])[-1][:300], {'built': sorted(built)}
+        return True, f'{len(names)} game(s) built against this core: {", ".join(names)}', {'built': sorted(built)}
+    return checker
+
+
 def make_metrics_checker(run_dir, want_games=None, want_iters=1):
     """A run-loop smoke's real positive evidence: metrics.jsonl itself (not log text) - every
     iteration present, no unfinished games, the expected game count."""
@@ -233,8 +261,11 @@ def run_step(ctx, step):
     # DIGEST_ENCODING / DIGEST_IDS must never leak between steps: each step states what it wants.
     env.pop('DIGEST_ENCODING', None)
     env.pop('DIGEST_IDS', None)
-    if step.env:
-        env.update(step.env)
+    for k, v in (step.env or {}).items():   # None = unset (e.g. the gate's own CARGO_TARGET_DIR)
+        if v is None:
+            env.pop(k, None)
+        else:
+            env[k] = v
     popen_kwargs = {}
     if WIN:
         popen_kwargs['creationflags'] = subprocess.BELOW_NORMAL_PRIORITY_CLASS
@@ -331,7 +362,8 @@ def print_plan(ctx, steps):
             if s2.skip_reason:
                 print(f'{prefix}- {s2.name}{mac}: SKIPPED ({s2.skip_reason})')
             else:
-                print(f'{prefix}- {s2.name}{mac}: {" ".join(s2.argv)}  (cwd={s2.cwd or ctx.root})')
+                env = f', env {s2.env}' if s2.env else ''
+                print(f'{prefix}- {s2.name}{mac}: {" ".join(s2.argv)}  (cwd={s2.cwd or ctx.root}{env})')
         i = j if len(same) > 1 else i + 1
 
 
@@ -539,13 +571,67 @@ def tier_optin_core(ctx, args):
     for t in feature_tests:
         steps.append(Step(f'feature tests: cargo test --test {t}', ['cargo', 'test', '--release', '-p', 'engine',
                                                                      '--test', t]))
-    # (each --other-games value is one checkout path, never split: 'C:/Users/Gregg Keithley/...' has a space)
-    other = [p for p in (args.other_games or []) if p]
-    smoke_all = os.path.join(CORE, 'tools', 'smoke_all.sh')
-    steps.append(Step('build-only: the other games (Glass Road, Caverna, Kingdom Builder)',
-                       ['bash', smoke_all, '--with-this-core', '--build-only', *other],
-                       cwd=CORE, checker=lambda out, rc: (rc == 0, (out.strip().splitlines() or ['?'])[-1][:300], {})))
+    steps.append(build_only_step(ctx, args))
     return steps
+
+
+OTHER_GAMES = ('glassroad-zero', 'caverna-zero', 'kingdombuilder-zero')
+
+
+def repo_name(path):
+    """smoke_all.sh's name for a game checkout: its main repo's directory (a worktree's too)."""
+    common = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], cwd=path, check=False)
+    return os.path.basename(os.path.dirname(os.path.normpath(common))) if common else \
+        os.path.basename(os.path.normpath(path))
+
+
+def default_other_games():
+    """The other zero-core games' repos, beside this repo's MAIN checkout (from the git common dir, so
+    it works from any worktree - the checkout under gate always is one), else beside this checkout.
+    Every one of OTHER_GAMES must be found: a game that is not there is a setup error, never a skip."""
+    roots = []
+    common = os.path.normpath(git(['rev-parse', '--path-format=absolute', '--git-common-dir'], check=False) or '.')
+    if os.path.basename(common) == '.git':
+        roots.append(os.path.dirname(os.path.dirname(common)))
+    if os.path.dirname(ROOT) not in roots:
+        roots.append(os.path.dirname(ROOT))
+    found, missing = [], []
+    for g in OTHER_GAMES:
+        hit = next((os.path.join(r, g) for r in roots if os.path.exists(os.path.join(r, g, 'third_party', 'zero-core'))),
+                   None)
+        if hit:
+            found.append(hit)
+        else:
+            missing.append(g)
+    if missing:
+        raise GateError(f'the build-only step builds {", ".join(OTHER_GAMES)}; not found beside '
+                         f'{" or ".join(roots)}: {", ".join(missing)} (clone them there, or pass --other-games)')
+    return found
+
+
+def build_only_step(ctx, args):
+    """zero-core's smoke_all.sh --with-this-core --build-only on the other games, named EXPLICITLY:
+    its own discovery found none from a pinning checkout's third_party/zero-core before zero-core
+    fix/smoke-all-games and printed GREEN anyway (ENGINE.md 90). SKIP_CORE=1: the core's cargo tests
+    are this tier's 'core tests' step, and its ~15 min pytest is not part of this tier's recipe (it
+    rode along inside this step and failed it on load flakes). Own SMOKE_TARGET / SMOKE_DIR per
+    checkout, and the gate's CARGO_TARGET_DIR unset so no game ever builds into this repo's target."""
+    if args.other_games:
+        # (each --other-games value is one checkout path, never split: 'C:/Users/Gregg Keithley/...' has a space)
+        games = [os.path.abspath(p) for p in args.other_games if p]
+        bad = [p for p in games if not os.path.isdir(p)]
+        if bad:
+            raise GateError(f'--other-games: no such checkout: {", ".join(bad)}')
+    else:
+        games = default_other_games()
+    names = [repo_name(p) for p in games]
+    smoke_target = 'mtgz-gate-' + slug(os.path.basename(ROOT))
+    smoke_dir = (f'E:/zero-smoke/{smoke_target}' if WIN else os.path.join(GATES_DIR, 'tmp', smoke_target))
+    return Step(f'build-only: the other games ({", ".join(names)})',
+                ['bash', os.path.join(CORE, 'tools', 'smoke_all.sh'), '--with-this-core', '--build-only', *games],
+                cwd=CORE, env={'SKIP_CORE': '1', 'SMOKE_TARGET': smoke_target, 'SMOKE_DIR': smoke_dir,
+                               'CARGO_TARGET_DIR': None},
+                checker=make_build_only_checker(names, ctx.core_pin))
 
 
 def tier_repin(ctx, args):
@@ -648,8 +734,8 @@ def build_parser():
                      'targets for the new feature (default az,hidden)')
     ap.add_argument('--other-games', nargs='+', action='extend', default=None, help='optin-core tier: the game '
                      'checkouts for the build-only step, one path per argument (quote a path with a space; the '
-                     'option may repeat; default: smoke_all.sh\'s own discovery of its siblings, which finds none '
-                     'from a pinning checkout\'s third_party/zero-core)')
+                     'option may repeat; default: glassroad-zero, caverna-zero and kingdombuilder-zero beside this '
+                     'repo\'s main checkout, all three required); the step passes each "ok <game>: build" line only')
     ap.add_argument('--files', nargs='*', default=None, help='docs tier: the touched tool files to py_compile '
                      '(default: every tools/*.py)')
     ap.add_argument('--smoke-preset', default=None, help='python tier: the run-loop smoke preset (default '
