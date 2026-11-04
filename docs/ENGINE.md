@@ -17369,4 +17369,5 @@ and Delver mirror states, both viewers: the pairs are `encode`'s non-zero bits i
 zeroed again, `obs_hash_sparse` == `obs_hash`; the guard any MTG override must pass); `rowcost` phase D (the
 same on 10,001 search-leaf rows); zero-core's cargo test 114 and pytest -k "sparse or cache"; the re-pin
 gate on this commit (`python tools/gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset
-delver-mirror --no-mac`): see the next commit.
+delver-mirror --no-mac`) on 79a3e27: PASSED in 207 s - the build, the digest f6543eb2b1b8752f (= main's), the
+1-config search smoke on the Delver spec (0/1 failed); the Mac step skipped.
