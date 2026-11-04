@@ -14722,7 +14722,9 @@ Replaces the hand-written `gate_repin2.sh` / `gate_delve.sh` / `gate_v5.sh` / `g
   build fails before any test runs (no "test result:" line at all, so no FAILED line either).
   Every checker requires a positive marker - a "test result: ok" line (with its failed count at
   0), a "combined digest" line, "N passed", "0 failed of N configurations" - and fails loudly when
-  it is missing, not just when a bad one is found.
+  it is missing, not just when a bad one is found. (Not every step had one: the builds,
+  `check_checkpoint_compat` and the Mac steps passed on exit 0 alone, and "N passed" was the first
+  one anywhere in pytest's output - fixed in 91, which lists each step's marker.)
 
 The seven tiers are the policy's table verbatim (`gate.py --help` prints each one's recipe and
 budget): `docs`, `python`, `encoding`, `engine`, `search-core`, `optin-core`, `repin`. Run it from
@@ -14748,8 +14750,9 @@ the real worktree's build before M8d part 3).
 Windows), `CARGO_BUILD_JOBS` (default 4), below-normal process priority. A tier whose recipe has a
 Mac part (`engine`'s conditional full-suite recheck, `repin`'s `mac.sh --eval-checkout`) runs it in
 a thread alongside its desktop steps so neither waits on the other needlessly; `--no-mac` skips
-Mac steps (marked skipped, not failed). `--dry-run` prints the plan - command, cwd, env overrides,
-which steps are parallel, which are skipped and why - and runs nothing.
+Mac steps (marked skipped, not failed; since 91 also named in the final line). `--dry-run` prints
+the plan - command, cwd, env overrides, which steps are parallel, which are skipped and why - and
+runs nothing.
 
 **What `gate.py` deliberately leaves out**: `repin`'s `watch_run` (it watches a *live* run
 directory after the re-pin takes effect; a one-shot gate has no natural pass/fail endpoint for an
@@ -14759,7 +14762,10 @@ against a moving core commit - zero-core's own `tools/smoke_all.sh --build-only`
 whoever moves zero-core's main, not this repo's gate); `encoding`'s checkpoint-load and
 `search-core`/`optin-core`'s `check_checkpoint_compat` need a `--checkpoint` / `--baseline-root`
 the caller supplies (a specific run's checkpoint, or another checkout to diff against) - omitted,
-the step is marked skipped with the reason, never silently treated as passing.
+the step is marked skipped with the reason, never silently treated as passing. (The run still
+ended "GATE PASSED" with the skip unmentioned on that line. Since 91 these inputs are required unless
+the caller opts out by name, `--allow-skip <step>`, and the final line then says "GATE PASSED WITH
+SKIPS ... skipped: <step> (...)".)
 
 ### 70.2 `tools/search_smoke.py --jobs N`
 
@@ -17412,7 +17418,8 @@ explicit run below, and E:/mtg-zero-scratch/ab-ideas/smoke_build_only.log).
 * `SKIP_CORE=1`: the core's cargo tests are the tier's own "core tests" step, and its pytest is not in the
   tier's recipe - it rode along inside this step, took most of its time and failed it on load flakes (76,
   78 and three of the six runs above). This is a deliberate narrowing: the step now checks only what its
-  name says.
+  name says. (91 makes the core pytest a step of the tier itself, "core pytest", with a retry policy for
+  `tests/test_remoteplay.py`.)
 * Its own `SMOKE_TARGET` (`mtgz-gate-<checkout dir>`, the games' target dirs
   `E:/cargo-target/<game>/mtgz-gate-<checkout dir>`) and `SMOKE_DIR` (`E:/zero-smoke/mtgz-gate-<checkout
   dir>`), and the gate's own `CARGO_TARGET_DIR` unset for the step (a `None` step env value now unsets a
@@ -17444,4 +17451,238 @@ this step was run).
 
 Caveat: with the pinned aa10733 smoke_all, a scratch worktree whose zero-core fetch fails still prints the
 `with zero-core <sha>` line and builds the game's own pin - only zero-core 7d3dbd8+ fails that loudly, so
-re-pin onto it (or later) when the core next moves.
+re-pin onto it (or later) when the core next moves. (Done in 91: zero-core 045ee8d.)
+
+## 91. The gate never passes a check it did not perform: required inputs, named skips, a positive marker for every step, the core's pytest as its own step (2026-11-04)
+
+Branch `fix/gate-no-silent-pass` (from main 38fc995): `tools/gate.py`, `tests/test_gate.py`; zero-core pinned
+at 045ee8d (91.7).
+
+**Why.** gate.py promised "positive evidence, not absence of FAILED" (70.1), and 90 fixed one place that
+broke the promise (the build-only step that built no game). The review after 90 found more ways a tier
+could print GATE PASSED for a check it never made:
+
+1. A skipped step still ended "GATE PASSED": optin-core and search-core without `--baseline-root` skipped
+   `check_checkpoint_compat` (the point of those tiers), encoding without `--checkpoint` skipped the
+   checkpoint load, engine without `--tested-sha` skipped the Mac recheck. Only the step's own line said so.
+2. A digest step without `--expect-digest` / `--expect-digest0` recorded the digest and passed.
+3. The build steps, `check_checkpoint_compat` and the Mac steps (the engine tier's Mac `cargo test
+   --no-fail-fast` too, which never looked for a "test result:" line) passed on exit 0 alone.
+4. The pytest check took the first "N passed" anywhere in the output, and the first "N failed|error".
+5. The core's pytest was in no tier's recipe: 90 took it out of the build-only step (`SKIP_CORE=1`), where it
+   had ridden along and failed it on load flakes. The user's decision: a labelled step of its own in
+   search-core and optin-core.
+6. The pinned zero-core (aa10733) smoke_all.sh could report a game built "with zero-core <sha>" when moving
+   the game's core had failed (90's caveat).
+
+Scanning gate.py for more found the ones in 91.6.
+
+### 91.1 Required inputs and named opt-outs
+
+| tier | required | opt-out (named in the final line) |
+|---|---|---|
+| docs | - | - |
+| python | - | `--allow-skip build` (the build step is new, 91.6) |
+| encoding | `--expect-digest`, `--expect-digest0`, `--checkpoint` | `--record-digest full` / `encoding-free` (91.2), `--allow-skip checkpoint-load` |
+| engine | `--expect-digest`, `--expect-digest0`, `--tested-sha` | `--record-digest ...`; `--no-mac` or `--allow-skip mac-recheck` |
+| search-core | `--baseline-root` | `--allow-skip checkpoint-compat` |
+| optin-core | `--baseline-root` | `--allow-skip checkpoint-compat` |
+| repin | `--expect-digest`, `--spec`, `--preset` | none (`--no-mac` skips `mac-eval-checkout`) |
+
+Without a required input gate.py refuses before running anything (exit 2, at `--dry-run` too), naming the
+input and its opt-out. An opted-out step is SKIPPED (a record-only digest RECORDED, 91.2) - never PASSED -
+in its step line and the report, and the final line names each one:
+
+```
+GATE PASSED <tier> <sha> in Ns; report <path>                    (every step on its own positive evidence)
+GATE PASSED WITH SKIPS <tier> <sha> in Ns - skipped: <step> (<why>), ...; recorded, not compared:
+    digest-full = <digest> (--record-digest); report <path>
+GATE PASSED WITH FLAKY RETRIES <tier> <sha> in Ns - flaky, passed on retry: core-pytest: <test>; report <path>
+GATE PASSED WITH SKIPS AND FLAKY RETRIES ...
+GATE FAILED <tier> <sha> in Ns - <step>: <reason>; not run: <steps>; report <path>
+```
+
+Exit status 0 for every GATE PASSED form: an opt-out is the caller's explicit choice (`--no-mac` on the
+A/B's re-pins is the usual one), and the final line, the step and the report (`clean: false`, `skipped`,
+`recorded`, `flaky`) say what was not checked; 1 for GATE FAILED; 2 for a refusal. `--dry-run` prints each
+step's positive evidence ("passes on: ...") and ends with the line a pass would print ("on success: GATE
+PASSED WITH SKIPS - skipped: ...").
+
+Also refused: an option the tier does not use (it was ignored silently - `--expect-digest0` on repin,
+`--checkpoint` on optin-core - and the check it names did not run); an `--allow-skip` whose input was given
+too, or naming a step the tier cannot skip; `--record-digest X` together with X's expected value; a
+`--checkpoint` that does not exist; a digest that is not 16 hex digits.
+
+A conditional step whose condition is false is not a skip: the engine tier's Mac recheck when
+`--tested-sha` is this commit, or differs from it only outside `engine/` and `card_ir/`, is "N/A (not
+needed: <why>)" in its step line and the report, and the final line stays GATE PASSED. Without
+`--tested-sha` (with `--no-mac` / `--allow-skip mac-recheck`) it is a skip: whether it was needed was never
+decided.
+
+### 91.2 Digests
+
+The tiers whose digest step is a comparison require the expected value: encoding and engine both digests,
+repin the full one (as before). `--record-digest full|encoding-free` (encoding, engine) records a digest
+without comparing it; the step is RECORDED, never PASSED, and the final line says "recorded, not compared:
+digest-full = <d> (--record-digest)". (The full digest test also compares with the checkout's own
+`engine/tests/data/digests.txt` either way: it fails on a mismatch.)
+
+The digest checker also wants exactly one "N random + M heuristic games in ... s; combined digest <16
+hex>" line, over the full 2,000 + 500 games (`DIGEST_RANDOM` / `DIGEST_HEURISTIC` give the digest of fewer
+games); no "wrote ...digests.txt" (`DIGEST_WRITE` re-records instead of comparing); and the digest test's
+own "test result: ok. 1 passed" line. A caller's `DIGEST_*` no longer reaches any step (91.6): before,
+`DIGEST_WRITE=1` in the environment made the full digest step rewrite digests.txt and pass - only
+`DIGEST_ENCODING` and `DIGEST_IDS` were dropped.
+
+### 91.3 A positive marker for every step
+
+On top of exit 0:
+
+| step | positive evidence |
+|---|---|
+| build (`tools/build_py.sh`) | build_engine.sh's last line, `mtgz._engine OK: <file> \| games: [...]`, printed only after it imported the module it installed: the file in THIS checkout's `mtgz/`, at least one game |
+| core build (zero-core `tools/build_py.sh`) | `zero._engine OK: <core>/python/zero/_engine.* \| games: [...]` |
+| `check_checkpoint_compat` | its result line `{"identical": true, "differences": []}`; an `old:` line for the baseline and a `new:` line for this checkout, each importing its own `mtgz/_engine`; every policy target with samples > 0 on both sides (identical digests of nothing prove nothing) |
+| cargo test | "test result:" lines, all ok, 0 failed, more than 0 passed in total; a `--test <name>` step exactly one such line |
+| digest | 91.2 |
+| pytest (this repo's, the core's) | 91.4 |
+| Mac steps | mac.sh's `[mac] <host> <branch> @ <sha9>:` line for THIS commit (it reached the Mac and ran the gated commit), then the step's own: the engine recheck's cargo lines; `--eval-checkout`'s Mac build line under `run-<sha12>/`, `mtgz remote: ... is <sha12>, unchanged, its engine built there` and `eval checkout ready: .../run-<sha12>` |
+| build-only (90) | also smoke_all's `games: N of N checked` for exactly the N games named |
+| docs | `py_compile: N file(s) compiled` for exactly the N files (the step is now `python -c` over `py_compile.compile(..., doraise=True)`: `-m py_compile` prints nothing) |
+| search smoke | `search smoke: 0 failed of N configurations` with N the configurations asked for (any N passed, 0 too) |
+| checkpoint-load (h2h) | h2h's final result line (a JSON object, not a `# batch` line - the old regex took the first `"unfinished"` anywhere): 8 games, 0 unfinished |
+| run-loop smoke | metrics.jsonl's last row with self-play `games` and `unfinished` both present (a missing `unfinished` read as 0), 0 unfinished, games > 0 (exactly 16 for mtg-smoke / delver-smoke) |
+
+### 91.4 pytest: the final summary line
+
+`parse_pytest_summary` reads the LAST pytest summary line ("1 failed, 301 passed, 3 skipped, 1 warning in
+881.28s (0:14:41)", with or without the "=" fill; "no tests ran in ..." too), never the first "N passed"
+anywhere (a test's own output can print one). `check_pytest` passes only on 0 failed, 0 errors, N > 0
+passed and exit 0; "no tests ran", only skips, no summary line at all (a crash, a timeout) and a non-zero
+exit under a clean summary each fail with their own reason.
+
+### 91.5 The core's pytest as its own step, and its flaky policy
+
+search-core and optin-core end with two new steps:
+
+* **core build**: `bash tools/build_py.sh` in `third_party/zero-core` - zero-core's own engine module,
+  `python/zero/_engine` (the toy games), which its tests import. search-core's old "zero-core pytest" step
+  ran the suite without it: a fresh worktree has no such module, a reused one an old one.
+* **core pytest**: `python -m pytest tests -q -p no:cacheprovider -rfE -W ignore::pytest.PytestWarning
+  --basetemp=<dir>` in the core checkout - the way zero-core's AGENTS.md and `smoke_all.sh` run it (its
+  conftest puts `python/` on `sys.path`, so `../tests` from `python/` is the same suite). The base temp dir
+  is off C: on the desktop like smoke_all's (`E:/zero-smoke/mtgz-gate-<checkout>-pytest/core-<sha12>-<id>`)
+  and removed after a pass. CPU only and below normal priority, like every step. Last in the tier: it is the
+  longest (12-16 min in 90's gate logs), so the cheaper checks fail first. optin-core's budget goes from ~10
+  to ~25 min, search-core's from ~20 to ~35.
+
+**The flaky policy** (zero-core AGENTS.md: `tests/test_remoteplay.py` "times real threads and can fail on
+a loaded machine: rerun it alone before you call it a regression"). When the core pytest fails and EVERY
+failure is a test in that file - read from the last "short test summary info" block's FAILED / ERROR lines
+(hence `-rfE`), whose number must equal the summary line's failed + errors - each failed test is rerun
+alone once (`python -m pytest <node id> ...`, its own base temp dir), into the same log. The step passes
+only if every one passes alone, and is then recorded as "flaky, passed on retry" in its reason, the report
+(`flaky`, the step's `retries`) and the final line ("GATE PASSED WITH FLAKY RETRIES ... flaky, passed on
+retry: core-pytest: tests/test_remoteplay.py::<test>"). A failure anywhere else, a collection error (a
+path, not a test), a count that does not add up or a retry that fails again fails the step; nothing else is
+ever retried.
+
+### 91.6 Other ways a tier could pass without evidence (found scanning gate.py)
+
+* **No build in search-core, optin-core or python.** pytest, the smokes and `check_checkpoint_compat`
+  imported whatever `mtgz/_engine.pyd` the checkout had - possibly built from an earlier commit, so
+  "identical" could compare the baseline with an old build of itself. Each now starts with the build step
+  (91.3), which installs this commit's module (incremental in the gate's per-checkout target dir). The python
+  tier may skip it by name (`--allow-skip build`: its changes are Python only), named in the final line.
+* **An uncommitted tree was gated under the commit's name**, a zero-core submodule off the pin included
+  (`build_py.sh` builds one under a caller's `ZERO_CORE_UNPINNED=1`). gate.py now refuses a checkout whose
+  tracked files differ from HEAD (`git status --porcelain --untracked-files=no`: the submodule counts,
+  untracked files do not) unless `--allow-dirty` (named in the final line), and a step that changes a tracked
+  file fails the gate (a last pseudo-step, "tracked files unchanged by the gate").
+* **The caller's environment** could change what a step checks: `DIGEST_*` (91.2), `PYTEST_ADDOPTS` (`-k`
+  deselects tests), `PYTHONPATH` (another checkout's modules), `ZERO_CORE_UNPINNED`. None of them reaches a
+  step now.
+* **The baseline** was passed through unchecked: it must exist, not be this checkout, not be at this commit
+  with this core (a vacuous comparison), and have its `mtgz/_engine` built (refused before anything runs,
+  instead of failing after the build); its HEAD, pin and engine module (sha256, mtime) go in the report.
+  `--baseline-root` is resolved against the caller's directory.
+* **repin's `--spec` / `--preset` had defaults** (delver / delver-mirror): a re-pin of another run
+  smoke-tested the Delver mirror and passed. Both are required now.
+* **The build-only step's core check was skipped** while the submodule was not initialised (the pin was read
+  from the submodule's HEAD: None then). It now comes from HEAD's gitlink, always known.
+* **`--sha`** accepted any prefix, one character too, and the report kept the prefix; it now needs 7+
+  characters, and the report has the full sha.
+* Smaller: a step's stdin is closed (a command reading it got gate.py's); a step timeout no longer crashes
+  on `TimeoutExpired`'s bytes output; a step never runs above gate.py's own priority (it raised an
+  idle-priority caller's children to below normal); `--jobs` defaults to the environment's
+  `CARGO_BUILD_JOBS` (it overrode it with 4); output is decoded as UTF-8 (was the locale's code page); after a
+  failure the report and the final line list the steps not run.
+
+### 91.7 The zero-core pin: aa10733 -> 045ee8d
+
+045ee8d = aa10733 + zero-core `fix/smoke-all-games` (7d3dbd8, docs 045ee8d; zero-core docs/az.md 29),
+zero-core main since 2026-11-04. `git diff --stat aa10733 045ee8d`: `AGENTS.md`, `README.md`, `docs/az.md`,
+`docs/pinning.md`, `tests/test_smoke_all.py`, `tools/smoke_all.sh` - nothing under `crates/` or
+`python/zero/`. The engine module is built from the same sources, so the behaviour digest is unchanged (full
+f6543eb2b1b8752f, main's; not re-run: no crate changed). With it the build-only step's smoke_all fails a
+game whose scratch worktree could not be moved to this core, instead of printing "with zero-core <sha>" over
+the game's own pin (90's caveat), and fails when it finds no game.
+
+### 91.8 What callers must change
+
+| tier | before | now |
+|---|---|---|
+| docs | `gate.py docs` | unchanged |
+| python | `gate.py python` | unchanged (builds first now; `--allow-skip build` keeps the existing module) |
+| encoding | `gate.py encoding --expect-digest D --expect-digest0 D0` (`--checkpoint` optional) | `gate.py encoding --expect-digest D --expect-digest0 D0 --checkpoint <run>/models/iter_N.pt` (or `--allow-skip checkpoint-load`; `--record-digest ...` for a digest without an expected value) |
+| engine | `gate.py engine --expect-digest D --expect-digest0 D0` | `gate.py engine --expect-digest D --expect-digest0 D0 --tested-sha <the agent's sha>` (the commit's own when gated directly; or `--no-mac`) |
+| search-core | `gate.py search-core` (`--baseline-root` optional) | `gate.py search-core --baseline-root ../merge-main` (or `--allow-skip checkpoint-compat`) |
+| optin-core | `gate.py optin-core --baseline-root ../merge-main` | unchanged; ~25 min (build, core build, core pytest added) |
+| repin | `gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset delver-mirror` | unchanged (`--spec` / `--preset` are required now); with `--no-mac` it ends "GATE PASSED WITH SKIPS ... skipped: mac-eval-checkout (--no-mac)" |
+
+Every tier: a committed checkout (or `--allow-dirty`). A script that greps for "GATE PASSED" should read
+the whole line (or the report's `clean`): "GATE PASSED WITH SKIPS" is a pass the caller opted into, not a
+clean one.
+
+### 91.9 Checks (2026-11-04, IDLE priority, CPU only, beside the r3-2b A/B)
+
+* `tests/test_gate.py`: **55 passed** in 0.7 s, every command stubbed (`gate.execute`) except two tiny
+  python probes of a step's environment - nothing built. 90's four tests, plus: each tier's missing
+  essential input refuses with exit 2 before any command runs, at `--dry-run` too (7 cases); options a tier
+  does not use, contradictions and a missing checkpoint file refuse (7), a malformed digest too; a dirty tree
+  refuses and `--allow-dirty` is named; a baseline that is this checkout, unbuilt or at this commit refuses;
+  a clean pass prints plain "GATE PASSED" (report `clean`); `--allow-skip checkpoint-load` and `--no-mac`
+  (repin; engine without `--tested-sha`) are named in "GATE PASSED WITH SKIPS ..."; the engine tier's Mac
+  recheck is N/A for its own sha, runs for an overlapping one, and fails without the `[mac]` line or without a
+  "test result:" line; `--record-digest full` -> RECORDED (never PASS; report `recorded`); the digest checker
+  against another digest, 10 + 500 games, a re-record, no "test result", exit 101, two digest lines; the
+  build, cargo, compat, Mac, eval-checkout, smoke, h2h, py_compile and metrics checkers each reject output
+  without their marker and accept the real one (formats from this desktop's gate logs); a step that rewrites
+  `digests.txt` fails the gate; the pytest summary parser (7 forms) and `check_pytest` (the "first N passed"
+  trap, errors, no tests ran, only skips, a crash, exit 3); the flaky policy - remoteplay-only failures
+  retried alone, passing, recorded and named ("GATE PASSED WITH FLAKY RETRIES"); a failure elsewhere, mixed
+  with remoteplay, or a remoteplay collection error -> no retry, FAIL; a retry that fails again -> FAIL; a
+  count that does not add up -> no retry; whole optin-core and search-core runs through `main`, in their new
+  order (build ... core build, core pytest), with a flaky retry named; a failed build stops optin-core before
+  the comparison and lists the steps not run; `--dry-run` per tier prints each step's evidence and the line a
+  pass would end with.
+* `--dry-run` of every tier on 668a3de (E:/mtg-zero-scratch/gate-strict/dryruns.txt): each plan with its
+  "passes on:" lines and "on success: GATE PASSED (every step on positive evidence)"; the refusals (encoding
+  without `--checkpoint`, engine without `--tested-sha`, search-core / optin-core without `--baseline-root`,
+  repin without `--spec` / `--preset`, `--baseline-root .`, `docs --checkpoint`) exit 2; the opt-outs end
+  "on success: GATE PASSED WITH SKIPS - skipped: ..." (plus "recorded, not compared: digest-full
+  (--record-digest)"). engine `--tested-sha 688770a`: the Mac recheck N/A (4 files differ, none under engine/
+  or card_ir/); `--tested-sha 2daa19e`: planned (engine/tests/az.rs differs).
+* The new checkers against REAL step logs of earlier gate runs on this desktop
+  (E:/mtg-zero-scratch/gate-strict/real_logs.py, read only), each PASS: compat (eval-cache e098aff, 1114
+  samples per target; the same log against another new side FAILs), build (run-e098aff), eval-checkout (the
+  Mac's run-e098aff20e40), core cargo test (126 passed, 4 binaries), `--test az` (41, one binary), digest full
+  (float-mana: f6543eb2b1b8752f), pytest (69 passed), the 1-config smoke, h2h (8 games, 0 unfinished), and
+  90's build-only run against 7d3dbd8 (3 games). The flaky parser on a real core pytest failure (explore
+  db3bb5a's old build-only log) picks `tests/test_remoteplay.py::test_a_dying_worker_gives_its_accepted_games_back`
+  alone.
+* One real tier: `gate.py docs` on 668a3de - **GATE PASSED docs 668a3de24fcf in 0s**: "30 file(s) compiled
+  cleanly", "tracked files unchanged by the gate", report `clean: true`, zero-core pin 045ee8d.
+* Not done: a real python, encoding, engine, search-core, optin-core or repin run (10-35 min of builds and
+  tests each, with the three-arm A/B on this desktop). The core build and core pytest steps have only run
+  stubbed: the first real search-core / optin-core gate is their first real check.

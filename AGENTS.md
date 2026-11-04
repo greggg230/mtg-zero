@@ -69,7 +69,11 @@ Python 3.13 (not 3.14) with `torch numpy psutil flask pytest`. Use Git Bash on W
 
 `python tools/gate.py <tier>`, run from inside a checkout of the commit being gated (a
 worktree you create; gate.py never makes one). `--help` lists each tier's exact recipe,
-`--dry-run` shows the plan, and `--no-mac` skips the maintainer's MacBook steps.
+`--dry-run` shows the plan, and `--no-mac` skips the maintainer's MacBook steps. A tier's
+essential inputs (the expected digests, a checkpoint, the checkout before the change, the sha
+the agent tested) are required; a step you skip on purpose (`--allow-skip <step>`,
+`--record-digest`, `--no-mac`) turns the last line into `GATE PASSED WITH SKIPS ...`, naming it
+(`docs/ENGINE.md` 91).
 
 | Your change | Tier |
 |---|---|
