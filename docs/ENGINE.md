@@ -17686,3 +17686,56 @@ clean one.
 * Not done: a real python, encoding, engine, search-core, optin-core or repin run (10-35 min of builds and
   tests each, with the three-arm A/B on this desktop). The core build and core pytest steps have only run
   stubbed: the first real search-core / optin-core gate is their first real check.
+
+## 92. Information-set merging in self-play: zero-core `feat/infoset-merge-selfplay` (`selfplay_infoset_merge`, off by default; 2026-11-04)
+
+Branch `feat/infoset-selfplay` (from main a81b59b); zero-core pinned at 62881d7 = main's 045ee8d +
+`feat/infoset-merge-build` (70e4c2e the read-only `Tree::shape` split, 5ee4bd3 the merged tree, ef4381a the driver,
+bindings, `eval_infoset_merge` and h2h's flags, 176afdf docs: the evaluation build of
+E:/mtg-zero-scratch/ideas-4b/) + `feat/infoset-merge-selfplay` (6dbd7f4 merge of main, e815fc4 self-play, 62881d7
+docs). Notes: E:/mtg-zero-scratch/ideas-4c/NOTES.md.
+
+**Why.** The evaluation-only paired h2h of the merged search (zero-core docs/az.md 30: one checkpoint of this line on
+both sides, the run's evaluation seat, side A merged) came out **+9.3 +- 5.3 Elo over 2,400 paired games**, above
+its stop rule's +7: self-play support, then a self-play A/B on the GPU (the main session's).
+
+**What changes here.** Nothing by default. The core adds `selfplay_infoset_merge` (default 0) beside
+`eval_infoset_merge` (default 0); off, both give the seats of before key for key and the core's golden records and
+matches are unchanged. No crate of this repo changed: the engine digest stays **f6543eb2b1b8752f**. To turn it on for
+self-play: `selfplay_infoset_merge 1` with `selfplay_leaf_value_view root` (this line has it); every search of the
+self-play seat merges (full 64, fast 16, minor 4); the records ('cq', `cq_prior_w`), the root value q, the value-only
+samples' `next_q`, resignation and the moves read the root as before (zero-core docs/search.md 3.16, Self-play).
+Remote self-play: the Mac's checkout must have this core - a worker whose hello does not report merging is REFUSED,
+killed and retried in 10 minutes, never used. New metrics `selfplay.merge` (links, merged, aliases, growths, shared,
+merged_per_leaf; this machine's driver). The leaf's row of the root decider comes from the merged tree's own
+encoding of it (`Tree::leaf_obs`: one encode fewer per leaf, the same batches byte for byte).
+
+**Measured on this line** (CPU, the run's self-play seat and driver from gen 1000's config with eval_cache 8192;
+E:/mtg-zero-scratch/ideas-4c/throughput.py, throughput.log): per simulation, off -> on (8 configurations of 12 games alternating, 24
+games in flight, 2 threads x 2 groups, the gen-1000 network on the CPU, idle priority beside the live run): rows sent
+to the network **0.988 -> 1.200 (+21.5%)** - the same 1.49 rows are needed, but the eval cache answers 0.29 instead
+of 0.50 (the repeats it answered are merged away) -, value-only rows 0.188 -> 0.317, encodes 1.49 -> 1.77 (+19%; +83%
+without the leaf-row reuse), the search threads' time 99.0 -> 140.1 us median (84.9 -> 113.0 min; loaded, noisy),
+simulations per wall second 1,008 -> 723 (CPU network). Merged trees: 1.23 links, 0.40 merges, 0.125 growth leaves
+and 0.96 shared rows per simulation. Every game finished and every record checked valid (pi a distribution, q in
+range, z the result; 607 + 301 value-only records per 12 games merged, 634 + 318 not), the same in every repeat. So
+expect a merged generation to take ~20% more evaluator time (GPU-bound) and up to ~+40% search-thread time.
+
+**The self-play A/B** (proposed for the GPU, the main session's): zero-core docs/az.md 30.1 has it in full. As the three-arm A/B
+(E:/mtg-zero-scratch/ab-ideas/RESULTS.md): one fork point K, arms in turn on this checkout (off = the line bit for
+bit), 40 generations each at 1,600 games, `eval_infoset_merge` 0 in both. Arms: control vs ism (`--selfplay-infoset-
+merge 1`). Primary: paired h2h ism@K+40 vs control@K+40, 1,200 paired games, 32 sims, both sides unmerged (what the
+network learned), readout at K+20. Secondary: ism merged vs control unmerged (deployable), both merged, the fresh-row
+value CE on the control's rows, target h_norm / max_share, `selfplay.merge`, min/gen and the evaluator's busy share,
+the blunder suite / fingerprints / canary. Stop rule: K+20 primary < -14 -> stop ism; K+40 primary > +7 -> extend to
+K+80 and SPRT-confirm (`--sprt -7,7`), adopt if it holds; within +-7 -> do not adopt (it costs ~20% evaluator time);
+< -7 -> drop. Remote self-play only with this core on the Mac (else its workers are refused): the same remote setting
+in both arms.
+
+**Checks.** zero-core (62881d7): cargo test 139 + webnet 3 (the golden records and matches unchanged; 6
+new self-play driver tests: records valid and reproducible across threads and with the eval cache, Gumbel / root
+floor / belief / minor decisions, the leaf-row reuse byte for byte - dense and sparse, eval cache 0 / 256 -,
+resignation and branches, rolling quotas across network changes), pytest `tests/test_infoset_merge.py` 8 (the run
+setting, a rolling toy run with exact quotas and `selfplay.merge`, remote workers merging, an older worker refused)
+and `test_resign.py` / `test_forks.py` / `test_bindings.py` 37. Here: the build, and the gates on this commit (results
+in 92.1).
