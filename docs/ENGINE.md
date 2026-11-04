@@ -17279,3 +17279,30 @@ Games stay 1,600 a generation (the fork records ~8% fewer rows).
 8th checkpoint; the line's 0.68-0.74 at 776-904) and canary (see 4), fresh-row value CE (`readout`), paired
 h2h at +20 / +40 (safety). Adopt if a class moves and the h2h is within noise; lower p if the rate moves and
 Elo drops; stop exploration work if nothing moves.
+
+## 88. The game's evaluation cache (zero-core `feat/eval-cache`, run setting `eval_cache`, opt-in)
+
+**Why** (2026-11-03, the user's question whether "functionally the same" states could share a value): the
+main search has no transposition table and no evaluation cache. Measured on r3-2b-float550's self-play
+(gen 960, its exact seat, 48 games on the CPU, every row hashed: E:/mtg-zero-scratch/state-dedup/RESULTS.md):
+33.8% of the network rows repeat a row the same game sent earlier - root-view value rows 62.6%, leaf rows
+19.0%, belief rows 100% - none across games. The source is hidden information (each simulation deals the
+opponent a new hand: its option lists differ, so its nodes, while the root decider sees one position: the root
+decider's own decisions repeat 34%, the opponent's 3.8%), not permanent order: the permanents put in a
+canonical order (cross-references relabelled) add 0.6 points. Equal features always had equal options.
+
+**What** (zero-core docs/search.md 3.12, docs/az.md 25): `--eval-cache N` keeps each game's network answers,
+at most N per game in flight, by (evaluator key, network id, 128-bit hash of the row's features and options);
+a leaf whose rows are all cached is expanded at once, a root-view leaf sends only the row it misses. Off (0,
+the default) the run of before; on, the answers are the network's to the same rows in another batch (float
+rounding), games finish in another order (the shared queue's desktop / Mac split and the linger share move
+with the throughput). The engine is untouched (digest f6543eb2b1b8752f).
+
+**Measured** (the desktop's RTX 5090 alone after float550's gen 1000, MTG Zero main 37d6574 on the core,
+E:/mtg-zero-scratch/state-dedup/gpu_timing.py): the line's self-play seat with gen 1000, 768 games in flight,
+sparse batches, token CUDA graphs, two off / on pairs: **10.55 -> 14.15 games/s (+34%)**, 73k -> 99k
+simulations/s, 34% of the rows cached; at N 8192 a game's cache filled ~0.3 times.
+
+**Adopting it**: a run picks it up at a re-pin onto a checkout with this core (the Mac's remote checkout
+too: a worker of an older core refuses the seat key) and `--eval-cache 8192` (or 16384). Not in the forked-
+games A/B (both arms stay as pinned: the throughput moves the data mix); for runs launched after it.
