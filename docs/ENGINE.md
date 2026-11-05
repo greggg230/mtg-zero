@@ -17813,3 +17813,20 @@ busy share back to ~0.9. If it is, turn it on at a restart of the line: `--shard
 **Checks.** zero-core (d494da4): cargo test 139 + webnet 3; the full pytest 383 passed / 9 skipped on 57fd981 (main's
 367 + 16 of `tests/test_shard_thread.py`; for its 17th and the docs commit's remote refusal the file again, 17
 passed, and three remote tests). Here: the build, and the gates on this commit (93.1).
+
+### 93.1 The gates on 7aed275 (2026-11-04, IDLE priority, CPU only, 4 build jobs, beside the live run)
+
+* `python tools/gate.py optin-core --baseline-root ../merge-main`: build 1.4 s; core tests (`cargo test --release` in
+  the core) **142 passed** (4 binaries); checkpoint_compat byte identity against merge-main **identical** (visits 1114
+  samples, cq 1114 - take_samples through the core's shared conversion gives the same records); `--test az` 41 passed;
+  `--test hidden` 16 passed; build-only: glassroad-zero, caverna-zero, kingdombuilder-zero built against core d494da4
+  (3 of 3); core build; core pytest **384 passed, 9 skipped** (1379 s, no flaky retry; main's 367 + the 17 of
+  `tests/test_shard_thread.py`); tracked files unchanged. Final line: **GATE PASSED optin-core 7aed275ac486 in 2311s**.
+* `python tools/gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset delver-mirror --no-mac`: build
+  1.0 s; digest **f6543eb2b1b8752f (= expected)**; the 1-config Delver search smoke 0/1 failed; the Mac step skipped
+  (--no-mac: the main session's). Final line: **GATE PASSED WITH SKIPS repin 7aed275ac486 in 195s - skipped:
+  mac-eval-checkout (--no-mac)**.
+
+Logs: E:/mtg-zero-scratch/shard-thread/gate_optin.log, gate_repin.log (`gates/7aed275ac486.json` holds the last tier's
+report only). The Mac needs this core (its checkout rebuilt: `mac.sh --eval-checkout`) only for its workers to use the
+writer thread; without it they ignore the setting and write the same shards as before.
