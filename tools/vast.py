@@ -40,6 +40,7 @@ import shlex
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 import zlib
 
@@ -597,33 +598,47 @@ def remote_listing(name, rd):
     return out
 
 
-def tar_fetch(name, rd, run, paths):
+def tar_fetch(name, rd, run, paths, timeout_s=1800):
     """Fetch `paths` (relative) from the box's `rd` into `run`, each file written to a temporary name and
-    renamed (readers never see half a file)."""
+    renamed (readers never see half a file). The stream is read to its end: tarfile stops at the end-of-archive
+    marker, and the record padding after it, left unread, kept ssh blocked on a full pipe forever (the main line's
+    sync loop hung 2026-11-05 14:40). A transfer still running after `timeout_s` is killed (the pass fails, the
+    next one retries)."""
     if not paths:
         return 0
     proc = subprocess.Popen(['ssh', '-o', 'BatchMode=yes', alias(name), f'cd {rd} && tar cf - --files-from=-'],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    proc.stdin.write(('\n'.join(paths) + '\n').encode())
-    proc.stdin.close()
+    killer = threading.Timer(timeout_s, proc.kill)
+    killer.daemon = True
+    killer.start()
     n = 0
-    with tarfile.open(fileobj=proc.stdout, mode='r|') as tf:
-        for m in tf:
-            if not m.isfile():
-                continue
-            dst = os.path.join(run, *m.name.split('/'))
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            src = tf.extractfile(m)
-            with open(dst + '.vasttmp', 'wb') as f:
-                while True:
-                    b = src.read(1 << 20)
-                    if not b:
-                        break
-                    f.write(b)
-            os.replace(dst + '.vasttmp', dst)
-            n += m.size
-    if proc.wait():
-        die(f'fetch from {alias(name)}:{rd} failed')
+    try:
+        proc.stdin.write(('\n'.join(paths) + '\n').encode())
+        proc.stdin.close()
+        with tarfile.open(fileobj=proc.stdout, mode='r|') as tf:
+            for m in tf:
+                if not m.isfile():
+                    continue
+                dst = os.path.join(run, *m.name.split('/'))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                src = tf.extractfile(m)
+                with open(dst + '.vasttmp', 'wb') as f:
+                    while True:
+                        b = src.read(1 << 20)
+                        if not b:
+                            break
+                        f.write(b)
+                os.replace(dst + '.vasttmp', dst)
+                n += m.size
+        while proc.stdout.read(1 << 16):                   # the archive's trailing padding (see above)
+            pass
+    except (tarfile.TarError, OSError) as ex:
+        proc.kill()
+        die(f'fetch from {alias(name)}:{rd} failed: {type(ex).__name__}: {ex}')
+    finally:
+        killer.cancel()
+    if proc.wait(timeout=120):
+        die(f'fetch from {alias(name)}:{rd} failed (ssh exit {proc.returncode})')
     return n
 
 
@@ -689,8 +704,8 @@ def cmd_run_sync(a):
             with open(os.path.join(run, 'vast_sync.json'), 'w', encoding='utf-8') as f:
                 json.dump({'time': time.time(), 'files': nf, 'bytes': nb, 'box': a.name,
                            'pid': os.getpid() if a.loop else None}, f)
-        except (SystemExit, subprocess.TimeoutExpired, OSError) as ex:
-            say(f'sync failed (retrying): {ex}')
+        except (SystemExit, Exception) as ex:                  # never let one bad pass end the mirror
+            say(f'sync failed (retrying): {type(ex).__name__}: {ex}')
         if not a.loop:
             return
         time.sleep(max(5.0, a.loop - (time.time() - t0)))
