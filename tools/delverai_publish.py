@@ -547,11 +547,30 @@ def migrated_from(run):
             'layout': m.get('layout'), 'time': m.get('time')}
 
 
+def on_box_status(run, st):
+    """A run living on a rented GPU box (tools/vast.py on main, ENGINE.md 97): this dir is the box's mirror (a sync
+    loop pulls its checkpoints, metrics and log) and its PAUSE file only guards the desktop copy, so run_status would
+    say 'paused'. The state then comes from the mirror: running while the sync is fresh (15 min) and the box's log
+    grows (30 min), else stopped."""
+    m = _json(os.path.join(run, 'ON_VAST.json'))
+    if not m or m.get('homing'):
+        return st
+    now = time.time()
+    synced = now - float((_json(os.path.join(run, 'vast_sync.json'), {}) or {}).get('time') or 0)
+    log = os.path.join(run, 'log.txt')
+    grew = now - os.path.getmtime(log) if os.path.exists(log) else 1e9
+    if synced < 900 and grew < 1800:
+        return dict(st, state='running', detail='Running on a rented cloud GPU (this page follows its mirror).',
+                    paused_since=None, pause=False)
+    return dict(st, state='stopped', paused_since=None, pause=False,
+                detail=f'On a rented cloud GPU: no news for {min(synced, grew) / 60:.0f} min.')
+
+
 def progress(run, every=1, forks=None, extra=None):
     """The site's progress record of a run (`every`: which iterations get games recorded;
     `forks`: fork_registry, for the lineage; `extra`: more fields - title, note, side, record_vs)."""
     cfg = _json(os.path.join(run, 'config.json'), {}) or {}
-    st = runctl.run_status(run)
+    st = on_box_status(run, runctl.run_status(run))
     prog = _json(os.path.join(run, 'progress.json'))
     idx = _json(os.path.join(run, 'models', 'index.json'), {}) or {}
     tag, pool = zelo.active_pool(run)             # the Elo pool of the run's evaluation move rule now
