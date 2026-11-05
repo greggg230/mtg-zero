@@ -20,7 +20,7 @@ pub const VIEW_VERSION: u32 = 1;
 /// consecutive states' tails and `log_n`).
 const LOG_TAIL: usize = 40;
 
-const KWS: [(Kw, &str); 22] = [
+pub(crate) const KWS: [(Kw, &str); 22] = [
     (Kw::Flying, "flying"),
     (Kw::Reach, "reach"),
     (Kw::FirstStrike, "first strike"),
@@ -45,7 +45,7 @@ const KWS: [(Kw, &str); 22] = [
     (Kw::Forestwalk, "forestwalk"),
 ];
 
-const TYPES: [(u16, &str); 9] = [
+pub(crate) const TYPES: [(u16, &str); 9] = [
     (types::LAND, "land"),
     (types::CREATURE, "creature"),
     (types::ARTIFACT, "artifact"),
@@ -59,7 +59,7 @@ const TYPES: [(u16, &str); 9] = [
 
 const COLORS: [&str; 6] = ["white", "blue", "black", "red", "green", "colorless"];
 
-fn step_name(s: Step) -> &'static str {
+pub(crate) fn step_name(s: Step) -> &'static str {
     match s {
         Step::Setup => "setup",
         Step::Untap => "untap",
@@ -78,7 +78,7 @@ fn step_name(s: Step) -> &'static str {
     }
 }
 
-fn counter_name(g: &Game, k: Counter) -> String {
+pub(crate) fn counter_name(g: &Game, k: Counter) -> String {
     match k {
         Counter::P1P1 => "+1/+1".into(),
         Counter::M1M1 => "-1/-1".into(),
@@ -539,6 +539,10 @@ impl MtgAz {
         // a position-lab game's line, rule and libraries (ENGINE.md 76; no other game has it)
         if let Some(l) = &self.lab {
             v["lab"] = l.view(&self.g);
+        }
+        // each seat's description of the position (spec "describe": true; ENGINE.md 93)
+        if self.describe {
+            v["describe"] = (0..2u8).map(|p| self.describe(p).unwrap_or_else(|e| json!({"error": e}))).collect();
         }
         v["match"] = json!({
             "format": format!("{:?}", self.m.format).to_lowercase(),
