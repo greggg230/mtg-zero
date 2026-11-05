@@ -17739,3 +17739,19 @@ resignation and branches, rolling quotas across network changes), pytest `tests/
 setting, a rolling toy run with exact quotas and `selfplay.merge`, remote workers merging, an older worker refused)
 and `test_resign.py` / `test_forks.py` / `test_bindings.py` 37. Here: the build, and the gates on this commit (results
 in 92.1).
+
+### 92.1 The gates on f13390c (2026-11-04, IDLE priority, CPU only, 2 build jobs, beside the live run)
+
+* `python tools/gate.py optin-core --baseline-root ../merge-main`: build 1.3 s; core tests (`cargo test --release` in
+  the core) **142 passed** (4 binaries); checkpoint_compat byte identity against merge-main **identical** (visits 1114
+  samples, cq 1114); `--test az` 41 passed; `--test hidden` 16 passed; build-only: glassroad-zero, caverna-zero,
+  kingdombuilder-zero built against core 62881d7 (3 of 3); core build; core pytest **367 passed, 9 skipped** (1149 s,
+  no flaky retry); tracked files unchanged. Final line: **GATE PASSED optin-core f13390cd216a in 1849s**.
+* `python tools/gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset delver-mirror --no-mac`: build
+  1.0 s; digest **f6543eb2b1b8752f (= expected)**; the 1-config Delver search smoke 0/1 failed; the Mac step skipped
+  (--no-mac: the main session's). Final line: **GATE PASSED WITH SKIPS repin f13390cd216a in 217s - skipped:
+  mac-eval-checkout (--no-mac)**.
+
+Logs: E:/mtg-zero-scratch/ideas-4c/gate_optin.log, gate_repin.log (`gates/f13390cd216a.json` holds the last tier's
+report only: the two tiers share the sha's file). Before a self-play A/B that uses the Mac: the repin gate's Mac step
+on this commit (`mac.sh --eval-checkout`), else the Mac's workers are refused by their hello (92).
