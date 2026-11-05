@@ -139,3 +139,15 @@ def test_an_exploiter_fork_finds_its_anchors_in_its_parent_and_labels_its_games(
     assert P.seat_labels(rep, os.path.join('runs', 'x', 'models', 'iter_0480.pt'), a, 480) == ['Gen 475 (frozen)', 'Exploiter gen 480']
     assert P.record_extra(a) == {'title': 'Exploiter: trained only against gen 475', 'note': 'Every self-play game against a frozen 475.',
                                  'side': True, 'record_vs': {'label': 'Gen 475 (frozen)', 'sha': hashlib.sha256(b'net 475').hexdigest()[:12]}}
+
+
+def test_the_upload_body_is_compact_and_drops_none_fields():
+    p = {'run': 'r', 'best': None, 'iters': [{'iter': 1, 'time': 1793869394.534, 'elo': None, 'h2h': [], 'phases': {'a': None}}],
+         'lineage': {'segments': [{'run': 'r', 'last': None}], 'rows': [{'iter': 1, 'g': 7, 'elo': None, 'time': 5.6}]}}
+    body = P.wire_progress(p)
+    assert b': ' not in body and b', ' not in body
+    w = json.loads(body)
+    assert w['iters'] == [{'iter': 1, 'time': 1793869395, 'h2h': [], 'phases': {'a': None}}]   # only the rows' own None fields go
+    assert w['lineage'] == {'segments': [{'run': 'r', 'last': None}], 'rows': [{'iter': 1, 'g': 7, 'time': 6}]}
+    assert w['best'] is None and p['iters'][0]['elo'] is None                                 # the record itself unchanged
+    assert json.loads(P.wire_progress({'run': 'r', 'iters': [], 'lineage': None}))['lineage'] is None

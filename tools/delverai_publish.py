@@ -518,13 +518,30 @@ def seat_labels(rep, ckpt, a, it):
     return [me if os.path.basename(str(s.get('checkpoint') or '')) == mine else vs for s in rep['seats']]
 
 
+def _wire_rows(rows):
+    """Iteration rows as posted: without their None fields (the site reads a missing field as null) and the
+    time in whole seconds."""
+    return [{k: (round(v) if k == 'time' and isinstance(v, float) else v) for k, v in r.items() if v is not None}
+            for r in rows]
+
+
+def wire_progress(p):
+    """The progress record's upload body: compact JSON of `p` with _wire_rows' iters and lineage rows. The site
+    refuses a body over 1,800 KiB (D1 rows: at most 2,000,000 bytes); the default form passed that at
+    r3-2b-float550's 1,260 (a lineage of ~1,400 rows twice: the run's own rows are in both), this one is ~60% of it."""
+    w = dict(p, iters=_wire_rows(p.get('iters') or []))
+    if isinstance(p.get('lineage'), dict) and isinstance(p['lineage'].get('rows'), list):
+        w['lineage'] = dict(p['lineage'], rows=_wire_rows(p['lineage']['rows']))
+    return json.dumps(w, separators=(',', ':')).encode('utf-8')
+
+
 def post_progress(run, a, key, log=print):
     p = progress(run, a.every, fork_registry([a.follow] + (a.forks or [])), record_extra(a))
     if a.dry_run:
         log(json.dumps({k: v for k, v in p.items() if k != 'iters'})[:800])
-        log(f'{len(p["iters"])} iteration rows')
+        log(f'{len(p["iters"])} iteration rows; upload body {len(wire_progress(p)):,} bytes')
     else:
-        replays.post(a.url.rstrip('/') + '/api/progress/upload', json.dumps(p).encode('utf-8'), key)
+        replays.post(a.url.rstrip('/') + '/api/progress/upload', wire_progress(p), key)
 
 
 def one_pass(run, a, key, log=print, kick=None):
