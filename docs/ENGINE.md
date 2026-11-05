@@ -17755,3 +17755,78 @@ in 92.1).
 Logs: E:/mtg-zero-scratch/ideas-4c/gate_optin.log, gate_repin.log (`gates/f13390cd216a.json` holds the last tier's
 report only: the two tiers share the sha's file). Before a self-play A/B that uses the Mac: the repin gate's Mac step
 on this commit (`mac.sh --eval-checkout`), else the Mac's workers are refused by their hello (92).
+
+## 93. Self-play's shards on a writer thread: zero-core `feat/shard-writer-thread` (`shard_writer_thread`, off by default; 2026-11-04)
+
+Branch `feat/shard-writer-thread` (from main 9397d67); zero-core pinned at d494da4 = main's 62881d7 +
+`feat/shard-writer-thread` (57fd981 the binding, the writer thread, the loop and its tests; d1930c8 a writer that keeps
+its rows' non-zeros gets float32 rows; d494da4 docs: zero-core docs/az.md 31, docs/search.md 2.4). Notes and the
+bench: E:/mtg-zero-scratch/shard-thread/.
+
+**Why.** The thread benchmark of the Delver line's self-play (E:/mtg-zero-scratch/ideas-3/bench_threads_ab.json, the
+GPU, gen 1000's seat and driver, 8 threads x 2 groups, 768 games in flight): **13.7 games/s without the run's sample
+handling, 10.7 with it** (-22%; the evaluator's busy share 0.92 -> 0.71, the live run's phases ~66-71%). The thread
+that feeds the GPU also took every batch's samples (`take_samples`: a dense float32 copy, 37,620 floats a row),
+split, tallied and wrote them - 117k rows, ~9 GB of float16 shards a generation, each 65,536-row shard concatenated,
+cast, checked and written between two batches. Of the pump's 15.4 s of caller time there, 11.6 s were shard writes
+and ~3 s the take's copy.
+
+**What changes here.** Nothing by default: the core adds `shard_writer_thread` (default 0) and `shard_writer_queue_mb`
+(default 4096). Off, the loop is the one of before (take_samples, the synchronous ShardWriter, no new metrics key);
+no crate of this repo changed - the engine digest stays **f6543eb2b1b8752f**. On (`--shard-writer-thread 1` at a
+restart; config.json keeps it): the caller only takes `take_results` and the records (`SearchDriver.take_records`,
+moved, not copied), splits them per game and queues them; a writer thread converts them (take_samples' arrays, built
+off the GIL; float16 features), tallies them and writes the same shards byte for byte (zero-core docs/az.md 31). The
+caller blocks only when 4 GB of records wait (counted). Every shard is on disk before the training reads the window;
+PAUSE mid-phase completes the shard being written and leaves no temporary file. This machine's self-play, the shared
+queue's accounting, the local linger (its held games keep their records) and the remote's workers (their config's: the
+Mac's checkout ignores the setting until it has this core - its shards are the same, written by its old background
+writer). New metrics, only when on: `selfplay.shard_writer` (`samples_s` = the caller's seconds in its sample handling,
+`waits` / `wait_s` for room, `close_s`, `writer_s`, `queue_peak_mb`), `linger.samples_s`,
+`selfplay.remote.shard_writer`; a log line per generation. It changes timing only, but timing decides which games a
+rolling / shared quota takes, so it is opt-in.
+
+**With sparse shards** (the parallel `feat/sparse-shards`, its section 32 in zero-core's az.md): the two compose. The
+writer thread wraps whichever ShardWriter the phase makes; a writer that keeps its rows' non-zeros (`sparse`) gets the
+float32 rows and casts them itself. The branches touch run.py / remoteplay.py in different lines (the shards' meta
+there, the writer and the take here); docs/az.md's ends both append a section (31 here, 32 there): a trivial
+conflict at the end of the file when both merge.
+
+**Measured here** (CPU only, IDLE priority beside the live run and other jobs; relative numbers): the thread bench with
+the 't' configurations (E:/mtg-zero-scratch/shard-thread/bench_threads.py, bench_cpu.log / .json; gen 1000's seat
+and driver, the network on the CPU, 48 games in flight, 4 threads x 2 groups, the same 32 games / 2,849 rows / 3
+shards of 1,024 rows per configuration, p and t interleaved twice): the caller's sample handling inside the phase
+**529 / 442 ms per 1,000 rows synchronously ('p') -> 13 / 8 ms with the writer thread ('t')** - take_samples' copy
+alone was 120-160 us a row (take_results + take_records 7-12 us), the shard writes ~0.3-0.4 ms a row; the writer
+thread was busy 1.5 / 0.9 s; the queue never filled (peak 20 MB of 4,096). The phase end waits for the last shard
+either way (0.1-0.2 s here). Games per second on the CPU are the network's and the load's (0.14-0.21, noise), not this.
+
+**The GPU bench for the main session** (the live run stopped, as for ideas-3's; ~15 min; the plain and 'p'
+configurations run this build's unchanged take_samples path, 't' the setting's):
+
+    CONFIGS=8x2,8x2p,8x2t,16x3,16x3p,16x3t bash E:/mtg-zero-scratch/shard-thread/bench_threads.sh
+
+Expected from the per-row costs: 't' at about the plain configuration's games/s (8x2: 13.7, 16x3: 19.6 on gen 1000),
+or above it (the plain one still pays take_samples' copy every 64 batches, ~6% of its caller's time); the evaluator's
+busy share back to ~0.9. If it is, turn it on at a restart of the line: `--shard-writer-thread 1`.
+
+**Checks.** zero-core (d494da4): cargo test 139 + webnet 3; the full pytest 383 passed / 9 skipped on 57fd981 (main's
+367 + 16 of `tests/test_shard_thread.py`; for its 17th and the docs commit's remote refusal the file again, 17
+passed, and three remote tests). Here: the build, and the gates on this commit (93.1).
+
+### 93.1 The gates on 7aed275 (2026-11-04, IDLE priority, CPU only, 4 build jobs, beside the live run)
+
+* `python tools/gate.py optin-core --baseline-root ../merge-main`: build 1.4 s; core tests (`cargo test --release` in
+  the core) **142 passed** (4 binaries); checkpoint_compat byte identity against merge-main **identical** (visits 1114
+  samples, cq 1114 - take_samples through the core's shared conversion gives the same records); `--test az` 41 passed;
+  `--test hidden` 16 passed; build-only: glassroad-zero, caverna-zero, kingdombuilder-zero built against core d494da4
+  (3 of 3); core build; core pytest **384 passed, 9 skipped** (1379 s, no flaky retry; main's 367 + the 17 of
+  `tests/test_shard_thread.py`); tracked files unchanged. Final line: **GATE PASSED optin-core 7aed275ac486 in 2311s**.
+* `python tools/gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset delver-mirror --no-mac`: build
+  1.0 s; digest **f6543eb2b1b8752f (= expected)**; the 1-config Delver search smoke 0/1 failed; the Mac step skipped
+  (--no-mac: the main session's). Final line: **GATE PASSED WITH SKIPS repin 7aed275ac486 in 195s - skipped:
+  mac-eval-checkout (--no-mac)**.
+
+Logs: E:/mtg-zero-scratch/shard-thread/gate_optin.log, gate_repin.log (`gates/7aed275ac486.json` holds the last tier's
+report only). The Mac needs this core (its checkout rebuilt: `mac.sh --eval-checkout`) only for its workers to use the
+writer thread; without it they ignore the setting and write the same shards as before.
