@@ -550,8 +550,9 @@ def migrated_from(run):
 def on_box_status(run, st):
     """A run living on a rented GPU box (tools/vast.py on main, ENGINE.md 97): this dir is the box's mirror (a sync
     loop pulls its checkpoints, metrics and log) and its PAUSE file only guards the desktop copy, so run_status would
-    say 'paused'. The state then comes from the mirror: running while the sync is fresh (15 min) and the box's log
-    grows (30 min), else stopped."""
+    say 'paused'. The state then comes from the mirror: stopped when the mirror is fresh (15 min) but the box's log
+    has not grown for 30 min (the box run ended); a late mirror (the sync loop slow or stuck: 2026-11-05 14:40) is
+    not a stopped run - running, with how far behind the page is, up to 3 hours without news."""
     m = _json(os.path.join(run, 'ON_VAST.json'))
     if not m or m.get('homing'):
         return st
@@ -559,11 +560,15 @@ def on_box_status(run, st):
     synced = now - float((_json(os.path.join(run, 'vast_sync.json'), {}) or {}).get('time') or 0)
     log = os.path.join(run, 'log.txt')
     grew = now - os.path.getmtime(log) if os.path.exists(log) else 1e9
-    if synced < 900 and grew < 1800:
-        return dict(st, state='running', detail='Running on a rented cloud GPU (this page follows its mirror).',
-                    paused_since=None, pause=False)
-    return dict(st, state='stopped', paused_since=None, pause=False,
-                detail=f'On a rented cloud GPU: no news for {min(synced, grew) / 60:.0f} min.')
+    base = dict(st, paused_since=None, pause=False)
+    if synced < 900:
+        if grew < 1800:
+            return dict(base, state='running', detail='Running on a rented cloud GPU (this page follows its mirror).')
+        return dict(base, state='stopped', detail=f'On a rented cloud GPU: its log has not moved for {grew / 60:.0f} min.')
+    if synced < 3 * 3600:
+        return dict(base, state='running', detail=f'Running on a rented cloud GPU (this page is {synced / 60:.0f} min '
+                                                   f'behind its mirror).')
+    return dict(base, state='stopped', detail=f'On a rented cloud GPU: no news for {synced / 60:.0f} min.')
 
 
 def progress(run, every=1, forks=None, extra=None):
