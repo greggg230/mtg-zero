@@ -17808,3 +17808,23 @@ dense windows bit for bit, a toy run's self-play writing the same samples, spars
 network weight for weight, the guard, remote self-play, heldout, distill). Here: `tests/test_sparse_shards.py`
 (two Delver mirror games' rows written dense and sparse: every array and the features bit for bit, uint16 indexes,
 the dense and sparse windows and batches equal; the presets leave the setting off), the build, and the gates (94.1).
+
+### 94.1 The gates on e9fc5cf (2026-11-04, IDLE priority, CPU only, 4 build jobs, beside the live line)
+
+* `python tools/gate.py optin-core --baseline-root ../merge-main`: build 1.1 s; core tests (`cargo test --release` in
+  the core) **142 passed** (4 binaries); checkpoint_compat byte identity against merge-main **identical** (visits 1114
+  samples, cq 1114); `--test az` 41 passed; `--test hidden` 16 passed; build-only: glassroad-zero, caverna-zero,
+  kingdombuilder-zero built against core 3f830c5 (3 of 3); core build; core pytest **377 passed, 9 skipped** (1600 s,
+  no flaky retry); tracked files unchanged. Final line: **GATE PASSED optin-core e9fc5cfbe4b0 in 2547s**.
+* `python tools/gate.py repin --expect-digest f6543eb2b1b8752f --spec delver --preset delver-mirror --no-mac`: build
+  1.0 s; digest **f6543eb2b1b8752f (= expected)**; the 1-config Delver search smoke 0/1 failed; the Mac step skipped
+  (--no-mac). Final line: **GATE PASSED WITH SKIPS repin e9fc5cfbe4b0 in 210s - skipped: mac-eval-checkout
+  (--no-mac)**.
+
+Logs: E:/mtg-zero-scratch/sparse-shards/gate_optin.log, gate_repin.log. Also checked (zero-core, outside the gates): a
+test merge of this core with `feat/shard-writer-thread` 57fd981 (the parallel writer-thread branch; `git merge-tree`:
+no conflict) - an iteration's toy self-play, one-shot and rolling, writes the same samples with `shard_writer_thread`
+x `shard_sparse` in all four combinations, and both branches' shard tests pass on it (28;
+E:/mtg-zero-scratch/sparse-shards/merge_check.py). Before turning `shard_sparse` on with the Mac: the repin gate's Mac
+step on this commit, so the Mac's workers write sparse shards too (an older Mac checkout writes dense ones, accepted).
+The pin 3f830c5 exists only in the local zero-core repo (not pushed).
