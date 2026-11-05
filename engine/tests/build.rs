@@ -1,4 +1,4 @@
-//! Building a described position (ENGINE.md 93, `az/build.rs`): the round trip engine position ->
+//! Building a described position (ENGINE.md 95, `az/build.rs`): the round trip engine position ->
 //! description from the deciding seat's view -> built game, at decision points of random and
 //! heuristic games of the Delver mirror (and of Delver against the MTGO test deck), and the leak test
 //! (other deal seeds, the same encoding).
@@ -19,7 +19,7 @@ fn delver() -> Vec<String> {
     Decklist::izzet_delver().main_names()
 }
 
-/// The MTGO test deck (ENGINE.md 93.6): every card is in the engine's pool.
+/// The MTGO test deck (ENGINE.md 95.6): every card is in the engine's pool.
 fn mtgo_test_deck() -> Vec<String> {
     let mut v = Vec::new();
     for (n, c) in [
@@ -507,7 +507,7 @@ fn build_with(base: &Value, desc: &Value, seed: u64) -> Result<MtgAz, String> {
     MtgAz::new_game(&spec, 2, seed)
 }
 
-/// The leak test (ENGINE.md 93.5): the description holds nothing the viewer does not know, and the
+/// The leak test (ENGINE.md 95.5): the description holds nothing the viewer does not know, and the
 /// deal follows the deal seed only: other deal seeds give the same encoding and view for the viewer
 /// (bitwise), while the opponent's hand and the libraries are dealt differently.
 #[test]
@@ -542,7 +542,7 @@ fn other_deal_seeds_give_the_same_encoding() {
     assert!(dealt_apart * 10 >= spots.len() * 9, "the deal changed the hidden cards in only {dealt_apart} of {} positions", spots.len());
 }
 
-/// The description of ENGINE.md 93.2: the opponent (P1) cast Lightning Bolt at our Dragon's Rage
+/// The description of ENGINE.md 95.2: the opponent (P1) cast Lightning Bolt at our Dragon's Rage
 /// Channeler; we (P0) hold priority with Daze and Force of Will.
 fn docs_example() -> Value {
     json!({

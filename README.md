@@ -143,7 +143,7 @@ py/ ── binding crate ──▶ mtgz._engine ──▶ mtgz.az.* (= zero-core
 | `engine/` | the Rust rules engine: `src/` (state, turn flow, casting, payment, the effect VM, combat, SBAs, triggers, layers, hidden information), `src/az/` (the zero-core games, encoding, bots, team draft), `tests/` (100+ files: rules tests named by CR rule, card tests, rulings, interactions, fuzz, digests) |
 | `card_ir/` | Rust types generated from the IR schema (`tools/codegen/gen_card_ir.py`; don't hand-edit `generated.rs`) |
 | `py/` | the PyO3 binding crate (`mtgz._engine`: zero-core's driver + the games) |
-| `mtgz/` | the Python package: `mtgz/__init__.py` puts the pinned zero-core on `sys.path`; `mtgz/az/` registers the game package (presets, specs, layouts) and holds the shims (`mtgz.az.run` IS `zero.run`) plus MTG glue (`decklists`, `evaldecks`, `drafted`, `human_picks`, `belief`, `replays`) |
+| `mtgz/` | the Python package: `mtgz/__init__.py` puts the pinned zero-core on `sys.path`; `mtgz/az/` registers the game package (presets, specs, layouts) and holds the shims (`mtgz.az.run` IS `zero.run`) plus MTG glue (`decklists`, `evaldecks`, `drafted`, `human_picks`, `belief`, `replays`, `build`: a position built from a description, docs/ENGINE.md 95) |
 | `data/` | card IR + schema, decklists, the cube's official rulings, card values |
 | `tools/` | `build_py.sh`, `gate.py` (tiered verification), `search_smoke.py`, fuzz farm, run control (`supervise`, `pause_run`, `kill_run`, `fork_run`, `watch_run.sh`), analysis scripts |
 | `tests/` | pytest: the bindings, the loop on MTG, presets, team draft glue, smoke iteration |

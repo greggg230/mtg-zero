@@ -540,7 +540,7 @@ impl MtgAz {
         if let Some(l) = &self.lab {
             v["lab"] = l.view(&self.g);
         }
-        // each seat's description of the position (spec "describe": true; ENGINE.md 93)
+        // each seat's description of the position (spec "describe": true; ENGINE.md 95)
         if self.describe {
             v["describe"] = (0..2u8).map(|p| self.describe(p).unwrap_or_else(|e| json!({"error": e}))).collect();
         }

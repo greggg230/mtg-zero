@@ -1,4 +1,4 @@
-"""mtgz.az.build (docs/ENGINE.md 93): building an engine position from a description, and the inverse,
+"""mtgz.az.build (docs/ENGINE.md 95): building an engine position from a description, and the inverse,
 through the PyO3 module - the round trip at random decisions of the Delver mirror and of Delver against
 the MTGO test deck, the leak test (other seeds, the same encoding), the documented example, the
 description checks, and a search on a built game. CPU only, no network (a uniform evaluator)."""

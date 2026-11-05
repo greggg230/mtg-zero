@@ -695,6 +695,7 @@ network code), its runs under `runs/delver1`, apart from the cube's work.
 | D1 | The deck, the two maindeck cards (full oracle fidelity, rulings as tests), constructed best-of-one (CR 100.2a), the preset and its measurements, gates, docs | done (branch delver-d1, mtg-bot feature/legacy-delver-ir; ENGINE.md 54) |
 | D2 | The run `runs/delver1` | the user's go-ahead |
 | D3 | Best-of-three with constructed sideboarding; the five sideboard cards | sideboarding, the hidden 60s, the deck target and tilt (branch delver-bo3, ENGINE.md 120); one episode per game, the label each game's outcome (branch bo3-game-episodes, ENGINE.md 121); the five sideboard cards (branch delver-sb-cards, ENGINE.md 122); integrated with presets `delver-mirror-bo3` and `delver-bo3-smoke` on the full 75, one episode per game (branch delver-bo3-int, ENGINE.md 129): done; post-sideboard games only (`"start_game": 2` in both presets) and the keep-its-deck yardstick `mtgz.az.keep_h2h` (branch bo3-postboard, ENGINE.md 130) |
+| D4 | Real MTGO games: the engine builds the position the MTGO adapter describes (spec `build`, `describe`, `mtgz.az.build`) | engine side built (branch mtgo-build; ENGINE.md 95); the adapter next |
 
 ## 9. Sealed deckbuilding: Edge of Eternities first (user, 2026-11-07)
 

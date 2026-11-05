@@ -1,4 +1,4 @@
-//! Building an arbitrary position from a description (ENGINE.md 93): the spec's optional `build`
+//! Building an arbitrary position from a description (ENGINE.md 95): the spec's optional `build`
 //! block starts every game of `mtg` at the position it describes, as one seat (`viewer`) sees it,
 //! with what that seat cannot see dealt at random; `describe` is the inverse - the description of an
 //! engine position from a seat's view (the round-trip test, and the schema's executable
@@ -74,7 +74,7 @@ pub struct Build {
 
 impl Build {
     pub fn parse(v: &Value) -> Result<Build, String> {
-        let o = v.as_object().ok_or("mtg spec: build must be an object (docs/ENGINE.md 93)")?;
+        let o = v.as_object().ok_or("mtg spec: build must be an object (docs/ENGINE.md 95)")?;
         let viewer = match o.get("viewer").and_then(|x| x.as_u64()) {
             Some(p) if p < 2 => p as PlayerId,
             _ => return Err("mtg spec: build.viewer (0 or 1, the seat whose view it is) is required".into()),
@@ -331,7 +331,7 @@ fn lookup_any(db: &CardDb, name: &str) -> Result<DefId, String> {
 // ---------------------------------------------------------------------------------------------
 // describe
 
-/// The description of `g`'s position from `viewer`'s view (module docs; ENGINE.md 93): everything the
+/// The description of `g`'s position from `viewer`'s view (module docs; ENGINE.md 95): everything the
 /// viewer sees and knows, nothing it does not. An error names what the schema does not support.
 pub fn describe(g: &Game, viewer: PlayerId) -> Result<Value, String> {
     if viewer > 1 {
@@ -1423,7 +1423,7 @@ impl Builder<'_> {
 }
 
 impl MtgAz {
-    /// A game started at the position of `spec.build` (module docs; ENGINE.md 93), its unknown cards
+    /// A game started at the position of `spec.build` (module docs; ENGINE.md 95), its unknown cards
     /// dealt from the deal seed (the build's `deal_seed`, else `game_seed`).
     pub fn from_build(spec: &MtgSpec, game_seed: u64) -> Result<MtgAz, String> {
         let b = spec.build.as_deref().ok_or("from_build: a spec without build")?;

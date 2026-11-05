@@ -168,7 +168,7 @@ impl Eq for Share {}
 /// Best-of-one only; not with `constructed`, `pools`, `lands` (the builder has its own) or
 /// decklists. Without the key every spec is what it was.
 ///
-/// A described position (ENGINE.md 93): `"build"` starts every game at the position it describes from
+/// A described position (ENGINE.md 95): `"build"` starts every game at the position it describes from
 /// one seat's view (`build.rs`: the zones by card name, the stack, the turn, the decision), the
 /// decklists partitioned over it and what that seat cannot see dealt from the deal seed; best-of-one
 /// only, not with `"start"` or `"seed"`. `"describe": true` makes `export_state` carry `describe`, each
@@ -210,7 +210,7 @@ pub struct MtgSpec {
     pub start_game: u8,
     /// The seats that keep their deck at every sideboarding (ENGINE.md 130; an evaluation yardstick).
     pub keep_deck: [bool; 2],
-    /// A described position (ENGINE.md 93, `build.rs`): games begin there.
+    /// A described position (ENGINE.md 95, `build.rs`): games begin there.
     pub build: Option<std::sync::Arc<build::Build>>,
     /// `export_state` carries each seat's description of the position (`build::describe`).
     pub describe: bool,
@@ -711,7 +711,7 @@ pub struct MtgAz {
     /// A position-lab game's forced line and follow rule (ENGINE.md 76, `lab.rs`); None in every
     /// other game.
     pub lab: Option<Box<lab::Lab>>,
-    /// The spec's `describe`: `export_state` carries each seat's description (ENGINE.md 93).
+    /// The spec's `describe`: `export_state` carries each seat's description (ENGINE.md 95).
     pub describe: bool,
 }
 

@@ -1,7 +1,7 @@
-"""Build an engine position from a description, and describe one (docs/ENGINE.md 93).
+"""Build an engine position from a description, and describe one (docs/ENGINE.md 95).
 
 For playing real Magic Online games with the network: at each decision our seat faces, the MTGO
-adapter describes the position as MTGO shows it to our seat (a dict: the schema of ENGINE.md 93.2,
+adapter describes the position as MTGO shows it to our seat (a dict: the schema of ENGINE.md 95.2,
 `EXAMPLE` below), the engine builds it - the decklists partitioned over the description, what our seat
 cannot see dealt from the seed - and the usual search runs on the built game (`legal()`,
 `encode(viewer)`, `export_state()`, `search_tree(...)`, `zero.parity.search_rs`, ...)::
@@ -26,7 +26,7 @@ import json
 
 from . import decklists
 
-# The documented example (ENGINE.md 93.2): the opponent (P1) cast Lightning Bolt at our Dragon's Rage
+# The documented example (ENGINE.md 95.2): the opponent (P1) cast Lightning Bolt at our Dragon's Rage
 # Channeler; we (P0) hold priority with Daze and Force of Will. Places name objects: b<i> the i-th
 # permanent of `battlefield`, g<p>.<i> a graveyard card, x<i> an exile card, s<i> a stack item.
 EXAMPLE = {
@@ -82,14 +82,14 @@ def spec_json(description=None, spec=None, p1_deck=None, describe=True):
 
 
 def build_game(description, seed=0, spec=None, p1_deck=None, describe=True):
-    """An engine Game at the described position (ENGINE.md 93): its unknown cards dealt from `seed`
+    """An engine Game at the described position (ENGINE.md 95): its unknown cards dealt from `seed`
     (the description's `deal_seed`, if it has one, wins). A description that does not fit its decks, or
     names something the schema does not build, is a ValueError naming it."""
     return engine().Game('mtg', spec_json(description, spec, p1_deck, describe), 2, int(seed))
 
 
 def describe_from_engine(game, viewer):
-    """The description of `game`'s position from `viewer`'s view (a dict; ENGINE.md 93). `game`'s spec
+    """The description of `game`'s position from `viewer`'s view (a dict; ENGINE.md 95). `game`'s spec
     must have `"describe": true`. A position the schema does not reach is a ValueError naming why."""
     st = json.loads(game.export_state())
     if 'describe' not in st:
@@ -169,7 +169,7 @@ def viewer_view(state, viewer, decides):
 
 def round_trip(game, viewer, seed=0, spec=None, p1_deck=None):
     """Describe `game` (its spec with "describe": true) from `viewer`'s view, build the description and
-    compare (ENGINE.md 93.4): the legal options when the viewer decides, the encoding (bitwise), the
+    compare (ENGINE.md 95.4): the legal options when the viewer decides, the encoding (bitwise), the
     viewer's export_state view, the description of the built game. -> (description, [differences]);
     a position the schema does not reach raises ValueError."""
     import numpy as np
