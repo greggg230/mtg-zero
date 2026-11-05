@@ -59,8 +59,8 @@ BOX_PY = '/usr/bin/python'
 GUARD_DIR = '/root/mtgz/guard'
 GUARD_MARGIN_S = 600          # the box's own guard fires this long after the ledger's deadline
 # CPUs whose per-core speed is close to the desktop's i9-13900K (search threads): preferred, then price
-FAST_CPU = r'9950X|9900X|7950X|7900X|9800X3D|7800X3D|9700X|7700X|1[34]900|1[34]700|285K|265K|Ultra 9|Ultra 7'
-FILTERS = dict(vp.FILTERS, gpu_name='RTX 5090', min_cores=16, min_ram_gb=64, max_dph=1.2, min_disk_gb=DISK_GB)
+FAST_CPU = r'9950X|9900X|7950X|7945HX|9955HX|7900X|9800X3D|7800X3D|9700X|7700X|1[34]900|1[34]700|285K|265K|Ultra 9|Ultra 7'
+FILTERS = dict(vp.FILTERS, gpu_name='RTX 5090', min_cores=16, min_ram_gb=60, max_dph=1.2, min_disk_gb=DISK_GB)
 ON_VAST = 'ON_VAST.json'
 PAUSE_BY = 'tools/vast.py'
 # settings run-start changes for the box (no Mac from there; nothing remote) and run-home restores
@@ -177,8 +177,13 @@ def onstart_script(deadline):
             f'(nohup "$P" "$G/vast_guard.py" "$G" >> "$G/guard.out" 2>&1 &)')
 
 
-def ranked_offers(p, f, hours):
+def ranked_offers(p, f, hours, region='na'):
+    """Offers passing the filters, in `region` ('na': the US and Canada - near the desktop; 'any'), fast desktop
+    CPUs first, then by price. A far box is slow for everything: Taiwan (160 ms) moved ~0.1 MB/s each way on
+    2026-11-05 (a 7 MB checkpoint took 73 s; remote self-play's shards missed their phase), Texas ~9 MB/s."""
     offers = [o for o in p.search(f, DISK_GB) if not vp.offer_problems(o, f, need_hours=hours)]
+    if region == 'na':
+        offers = [o for o in offers if re.search(r',\s*(US|CA)$', o['geo'] or '')]
     fast = re.compile(FAST_CPU, re.I)
     return sorted(offers, key=lambda o: (0 if fast.search(o['cpu']) else 1, vp.hourly(o, DISK_GB), -o['cores']))
 
@@ -195,7 +200,7 @@ def filters_from(a):
 
 def cmd_offers(a):
     p = vp.VastCLI()
-    offers = ranked_offers(p, filters_from(a), a.hours)
+    offers = ranked_offers(p, filters_from(a), a.hours, a.region)
     for o in offers[:20]:
         print(fmt_offer(o))
     print(f'{len(offers)} offers pass the filters (* = a fast desktop CPU, preferred); balance ${p.balance():.2f}')
@@ -229,7 +234,7 @@ def cmd_rent(a):
         die('NAME: a short lowercase word (letters, digits)')
     p = vp.VastCLI()
     f = filters_from(a)
-    offers = ranked_offers(p, f, a.hours)
+    offers = ranked_offers(p, f, a.hours, a.region)
     if a.offer:
         offers = [o for o in offers if o['id'] == a.offer]
         if not offers:
@@ -760,6 +765,7 @@ def main():
         p.add_argument('--min-ram', type=int, default=FILTERS['min_ram_gb'])
         p.add_argument('--min-cores', type=int, default=FILTERS['min_cores'])
         p.add_argument('--hours', type=float, default=2.0)
+        p.add_argument('--region', choices=('na', 'any'), default='na', help='na: US + Canada (default)')
 
     p = sub.add_parser('offers')
     filt(p)
