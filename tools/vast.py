@@ -138,9 +138,14 @@ def remove_alias(name):
 
 
 def ssh(name, cmd, input=None, check=True, timeout=600, capture=True):
-    """Run `cmd` (a bash script) on box `name` -> CompletedProcess (text)."""
-    r = subprocess.run(['ssh', '-o', 'BatchMode=yes', alias(name), cmd], input=input, text=True,
+    """Run `cmd` (a bash script) on box `name` -> CompletedProcess (stdout / stderr decoded). `input` goes as
+    UTF-8 bytes: a text-mode pipe on Windows would turn its newlines into CRLF (bash: "pipefail\\r")."""
+    r = subprocess.run(['ssh', '-o', 'BatchMode=yes', alias(name), cmd],
+                       input=input.encode('utf-8') if input is not None else None,
                        capture_output=capture, timeout=timeout, stdin=None if input is not None else subprocess.DEVNULL)
+    if capture:
+        r.stdout = r.stdout.decode('utf-8', 'replace')
+        r.stderr = r.stderr.decode('utf-8', 'replace')
     if check and r.returncode:
         die(f'ssh {alias(name)} failed ({r.returncode}): {((r.stderr or "") + (r.stdout or "")).strip()[-1500:]}')
     return r
