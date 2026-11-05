@@ -151,3 +151,48 @@ def test_the_upload_body_is_compact_and_drops_none_fields():
     assert w['lineage'] == {'segments': [{'run': 'r', 'last': None}], 'rows': [{'iter': 1, 'g': 7, 'time': 6}]}
     assert w['best'] is None and p['iters'][0]['elo'] is None                                 # the record itself unchanged
     assert json.loads(P.wire_progress({'run': 'r', 'iters': [], 'lineage': None}))['lineage'] is None
+
+
+def test_the_averaged_anchored_elo_takes_twelve_readings_with_their_covariance(tmp_path):
+    # 14 evaluated generations (every 8), each 100 games against two fixed anchors and 24 against 8 back
+    run = str(tmp_path / 'avg')
+    gens = [8 * k for k in range(1, 15)]
+    pairs = {}
+    for k, g in enumerate(gens):
+        pairs[f'anchor:a|iter_{g:04d}'] = [50.0 - k, 100]
+        pairs[f'anchor:b|iter_{g:04d}'] = [40.0 - k, 100]
+        if k:
+            pairs[f'iter_{gens[k - 1]:04d}|iter_{g:04d}'] = [11.0, 24]
+    res = {'anchor': 'heuristic', 'anchors': {'anchor:a': {'elo': 1600.0}, 'anchor:b': {'elo': 1550.0}}, 'pairs': pairs}
+    _write(os.path.join(run, 'elo', TAG, 'results.json'), res)
+    idx, cov = P.anchored_cov(run, TAG)
+    fit = P.zelo.fit_fixed(res, {'anchor:a': 1600.0, 'anchor:b': 1550.0}, prior_sd=P.PRIOR_SD)
+    for g in gens:                                   # the covariance's diagonal is the fit's se^2
+        n = f'iter_{g:04d}'
+        assert abs(cov[idx[n], idx[n]] ** 0.5 - fit[n][1]) < 1e-6
+    rows = [{'iter': g, 'select': TAG, 'elo_anchored': round(fit[f'iter_{g:04d}'][0], 1),
+             'elo_anchored_se': round(fit[f'iter_{g:04d}'][1], 1)} for g in gens]
+    rows.insert(3, {'iter': 27, 'select': TAG, 'elo_anchored': None})       # a generation without a reading
+    assert P.add_anchored_averages(rows, lambda t: P.anchored_cov(run, t)) == 0
+    avg = [r for r in rows if 'elo_avg' in r]
+    assert [r['iter'] for r in avg] == [96, 104, 112]                       # from the 12th reading
+    win = [r for r in rows if r.get('elo_anchored') is not None][:12]
+    assert abs(avg[0]['elo_avg'] - sum(r['elo_anchored'] for r in win) / 12) < 0.051
+    ii = [idx[f'iter_{r["iter"]:04d}'] for r in win]
+    se = cov[P.np.ix_(ii, ii)].sum() ** 0.5 / 12
+    assert abs(avg[0]['elo_avg_se'] - se) < 0.051
+    naive = sum(r['elo_anchored_se'] ** 2 for r in win) ** 0.5 / 12
+    assert se > naive                                # the games between them correlate the readings
+    # a stretch of more than 12 generations starts again; so does another pool
+    bare = lambda r: {k: v for k, v in r.items() if not k.startswith('elo_avg')}
+    gap = [bare(r) for r in rows if r.get('elo_anchored') is not None]
+    for r in gap[6:]:
+        r['iter'] += 40
+    assert P.add_anchored_averages(gap, lambda t: None) == 0 and not any('elo_avg' in r for r in gap)
+    other = [dict(bare(r), select=('visits' if k == 5 else TAG)) for k, r in enumerate(win + rows[-2:])]
+    P.add_anchored_averages(other, lambda t: P.anchored_cov(run, t))
+    assert not any('elo_avg' in r for r in other)
+    # a window with a checkpoint the fit doesn't rate: no average, counted
+    lost = [bare(r) for r in win]
+    lost[0]['iter'] = 4
+    assert P.add_anchored_averages(lost, lambda t: P.anchored_cov(run, t)) == 1 and 'elo_avg' not in lost[-1]

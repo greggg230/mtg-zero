@@ -48,6 +48,14 @@ the yardstick. `anchors`: the active pool's, in its order - {label, iter (the ru
 a copy of), g (in the lineage's numbering), elo, se, how (set / calibrated), since}. A row without
 it (before the anchors, older runs) has None: its `elo` is the pool's.
 
+Averaged anchored Elo (`elo_avg` / `elo_avg_se` in each row, the user 2026-11-05): a row with an
+anchored Elo and AVG_N - 1 more before it in the same pool (no stretch of more than AVG_GAP
+generations between two of them) has the mean of those AVG_N readings and its standard error from
+the pool's anchored fit with its covariance (anchored_cov: the readings share games - their Elo
+matches with each other - so they are not quite independent: ~10% wider than sqrt(sum se^2) / N on
+r3-2b-float550). The lineage's rows average across forks (a fork's pool holds its parent's games);
+a run's own rows from its own first reading.
+
 Lineage (`lineage` in the progress record): the run's history since its first ancestor, for the
 site's charts from the beginning. A fork (the A/B experiments' `done` entries of --follow's file:
 the fork's directory, the run it forked from and at which iteration, its changed setting) keeps
@@ -63,12 +71,15 @@ mtg5-network Delver games of 36 and 45 turns took 5.5 min).
 """
 import argparse
 import json
+import math
 import os
 import re
 import sys
 import threading
 import time
 import traceback
+
+import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mtgz.az import decklists, replays  # noqa: E402
@@ -98,6 +109,9 @@ def _jsonl(path):
                 except ValueError:
                     pass                          # a line being written
     return rows
+AVG_N = 12          # the anchored readings an averaged Elo takes (the user, 2026-11-05)
+AVG_GAP = 12        # a longer stretch between two readings starts a new average (the chart breaks its line there)
+PRIOR_SD = 8.0      # zelo.fit_fixed's prior (log-odds): given to it, and anchored_cov's curvature has it too
 
 
 def _r(x, n=4):
@@ -378,6 +392,84 @@ def fork_registry(paths):
     return out
 
 
+_covs = {}          # results.json path -> (its mtime, anchored_cov's answer)
+
+
+def anchored_cov(run, tag='visits'):
+    """The run's pool `tag` rated with its fixed anchors held (zelo.fit_fixed, as the run's evaluation
+    does) and that fit's covariance: ({player: index}, matrix in Elo^2) - the inverse of the
+    log-likelihood's curvature (and the prior's) at the fit, whose diagonal is the fit's se^2. None
+    for a pool without anchors. Cached until the pool's results.json changes."""
+    path = os.path.join(zelo.pool_dir(run, tag), 'results.json')
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    if path in _covs and _covs[path][0] == mtime:
+        return _covs[path][1]
+    res = _json(path, {}) or {}
+    fixed = {n: a['elo'] for n, a in (res.get('anchors') or {}).items() if a.get('elo') is not None}
+    out = None
+    if fixed and res.get('pairs'):
+        fit = zelo.fit_fixed(res, fixed, prior_sd=PRIOR_SD)
+        free = sorted(p for p in fit if p not in fixed)
+        idx = {p: i for i, p in enumerate(free)}
+        x = {p: (e - zelo.ANCHOR_ELO) / zelo.SCALE for p, (e, _, _) in fit.items()}
+        info = np.eye(len(free)) / PRIOR_SD ** 2
+        for k, (sc, n) in res['pairs'].items():
+            a, b = k.split('|')
+            ia, ib = idx.get(a), idx.get(b)
+            if n <= 0 or (ia is None and ib is None):
+                continue
+            p = 1.0 / (1.0 + math.exp(-(x[a] - x[b])))
+            w = n * p * (1 - p)
+            for i in (ia, ib):
+                if i is not None:
+                    info[i, i] += w
+            if ia is not None and ib is not None:
+                info[ia, ib] -= w
+                info[ib, ia] -= w
+        out = (idx, np.linalg.inv(info) * zelo.SCALE ** 2)
+    _covs[path] = (mtime, out)
+    return out
+
+
+def add_anchored_averages(rows, cov_of, pool=lambda r: r.get('select') or 'visits', gen=lambda r: r['iter'],
+                          ckpt=lambda r: r['iter']):
+    """In place, `rows` in generation order: each row with an anchored Elo and AVG_N - 1 more before
+    it of the same `pool(row)` (a new pool, or more than AVG_GAP generations since the last reading,
+    starts again) gets `elo_avg`, the mean of those AVG_N readings, and `elo_avg_se`, its standard
+    error from cov_of(pool) (anchored_cov: the readings are correlated through the games between
+    them). `gen`: a row's generation for the gaps; `ckpt`: its checkpoint's iteration in that pool.
+    -> the rows left without one because the fit doesn't rate a checkpoint of their window."""
+    win, key, last, missing = [], None, None, 0
+    for r in rows:
+        if r.get('elo_anchored') is None:
+            continue
+        k, g = pool(r), gen(r)
+        if not win or k != key or g - last > AVG_GAP:
+            win, key = [], k
+        win = (win + [r])[-AVG_N:]
+        last = g
+        if len(win) < AVG_N:
+            continue
+        cv = cov_of(k)
+        names = [zelo.ckpt_name(ckpt(x)) for x in win]
+        if cv is None or any(n not in cv[0] for n in names):
+            missing += 1
+            continue
+        ii = [cv[0][n] for n in names]
+        r['elo_avg'] = _r(sum(x['elo_anchored'] for x in win) / AVG_N, 1)
+        r['elo_avg_se'] = _r(math.sqrt(max(cv[1][np.ix_(ii, ii)].sum(), 0.0)) / AVG_N, 1)
+    return missing
+
+
+def _warn_missing(n, run):
+    if n:
+        print(f'delverai_publish: {n} averaged-Elo rows of {os.path.basename(os.path.abspath(run))} skipped: '
+              f'their pool fit does not rate a checkpoint of their window', file=sys.stderr, flush=True)
+
+
 def lineage(run, forks, depth=0):
     """The run's segments from its first ancestor: [{dir, run, label, kind (root / fork /
     migrate), first, last (its own iterations: None = to the end), offset (global generation =
@@ -433,6 +525,12 @@ def lineage_record(run, forks):
             # the opponents' global generations too (in the run's own numbering: offset + its iteration)
             h2h = [dict(m, g=None if m.get('iter') is None else sg['offset'] + m['iter']) for m in r.get('h2h') or []]
             rows.append(dict(r, g=sg['offset'] + it, gen=it, run=sg['run'], seg=k, h2h=h2h))
+    # averaged across forks: a numbering's (same offset's) last segment's pool holds its ancestors' games
+    last_dir = {sg['offset']: sg['dir'] for sg in segs}
+    _warn_missing(add_anchored_averages(
+        sorted(rows, key=lambda r: (r['g'], r['seg'])), lambda k: anchored_cov(last_dir[k[0]], k[1]),
+        pool=lambda r: (segs[r['seg']]['offset'], r.get('select') or 'visits'), gen=lambda r: r['g'],
+        ckpt=lambda r: r['gen']), run)
     return {'segments': [{x: sg[x] for x in ('run', 'label', 'kind', 'first', 'last', 'offset')}
                          | {'from_g': sg['offset'] + sg['first']} for sg in segs], 'rows': rows}
 
@@ -462,6 +560,7 @@ def progress(run, every=1, forks=None, extra=None):
     segs = lineage(run, forks or {})
     also = same_numbering(segs, len(segs) - 1)
     rows = iteration_rows(run, also)
+    _warn_missing(add_anchored_averages(sorted((r for r in rows if isinstance(r.get('iter'), int)), key=lambda r: r['iter']), lambda t: anchored_cov(run, t)), run)
     state = _json(os.path.join(run, 'delverai.json'), {}) or {}
     lin = lineage_record(run, forks or {})
     offset = lin['segments'][-1]['offset'] if lin else 0
