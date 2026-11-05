@@ -84,7 +84,8 @@ def verify_checkout(root=ROOT, expect=None):
     p = problems(root, expect)
     if p:
         raise SystemExit(f'mtgz remote: {root} is not the run\'s code: {"; ".join(p)}. In the run\'s checkout '
-                         f'(at {expect[:12] or "its commit"}): bash tools/mac.sh --eval-checkout')
+                         f'(at {expect[:12] or "its commit"}): bash tools/mac.sh --eval-checkout (the Mac) or '
+                         f'python tools/vast.py prep <box> (a rented box)')
 
 
 class RunCommitRemote(Mapping):
@@ -94,8 +95,10 @@ class RunCommitRemote(Mapping):
 
     KEYS = ('host', 'repo', 'python', 'workdir', 'env', 'overrides', 'selfplay')
 
-    def __init__(self, root, host, home, python, workdir, env=None, overrides=None, selfplay=None):
+    def __init__(self, root, host, home, python, workdir, env=None, overrides=None, selfplay=None,
+                 prepare='bash tools/mac.sh --eval-checkout'):
         self.root = root
+        self.prepare = prepare          # how to prepare the remote's checkout (the preflight's message)
         self.fixed = {'host': host, 'python': python, 'workdir': workdir}
         self.home = home
         self.env = dict(env or {})
@@ -150,5 +153,5 @@ class RunCommitRemote(Mapping):
         if r.returncode:
             raise SystemExit(f'eval_remote: {spec["host"]}:{spec["repo"]} is not the run\'s code ({head[:12]}): '
                              f'{(r.stderr or r.stdout).strip()[-600:]}\n  prepare it: in {self.root}: '
-                             f'bash tools/mac.sh --eval-checkout')
+                             f'{self.prepare}')
 

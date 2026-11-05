@@ -115,8 +115,9 @@ note or PR.
 * **Live runs.** Never start, resume, edit or delete anything under someone's `runs/` unless
   asked. Runs train from their own pinned worktrees (`git worktree add --detach ...`), never
   from a checkout being edited, and a live run's workers import the code of that checkout.
-* **Maintainer-only paths.** `E:/...` defaults, the `mac` remote and `*-mac` presets,
-  `tools/mac.sh`, `tools/data/*` (hard-coded paths), and `tools/delverai_publish.py` all
+* **Maintainer-only paths.** `E:/...` defaults, the `mac` and `vast` remotes and `*-mac` presets,
+  `tools/mac.sh`, `tools/vast*.py` (rented boxes on the maintainer's Vast.ai account: they cost
+  money), `tools/data/*` (hard-coded paths), and `tools/delverai_publish.py` all
   belong to the maintainer's machines. Leave the remote settings empty. Tests that need
   private data skip without it.
 * **Windows.** Bash scripts only (Git Bash). When a Python script rewrites a file, open it
