@@ -41,7 +41,9 @@
 //! an unsupported field set (an error naming it), and the builder has no key for it. The decisions:
 //! priority (any step, any stack), declaring attackers / an attacker's target / blockers, the cleanup
 //! discard, play-or-draw, mulligan and the mulligan's bottom; never a decision inside a resolving
-//! spell or a cast being announced (build the priority before it and step the engine).
+//! spell or a cast being announced: those are reached by `then`, the actions (option labels or action
+//! ids) taken from the built decision on, before the deal (the opponent's Daze resolving and asking
+//! us to pay: the priority before it, then `["Pass priority"]`).
 use super::matches::MatchState;
 use super::view::{counter_name, step_name, KWS, TYPES};
 use super::{MtgAz, MtgSpec};
@@ -1437,7 +1439,7 @@ impl MtgAz {
             &[
                 "format", "viewer", "deal_seed", "turn", "active", "step", "priority", "passes", "starting", "chooser", "cleanup_again", "decision", "players",
                 "battlefield", "exile", "stack", "emblems", "effects", "delayed", "temp_triggers", "marks", "discarded", "resolved", "done_once",
-                "activations", "clouds", "void",
+                "activations", "clouds", "then", "void",
             ],
             "build",
         )?;
@@ -1451,6 +1453,12 @@ impl MtgAz {
         let m = MatchState::new(db, spec.format, gspec, &seats, game_seed)?;
         let mut az = MtgAz { g, m, lab: None, describe: spec.describe };
         az.set_known_pools();
+        // `then`: actions taken from the built decision on (an option label or an action id each), before
+        // the deal - a decision inside a resolution is the priority before it and the passes to it
+        for (i, x) in arr(d, "then")?.iter().enumerate() {
+            let a = then_action(&az.g, x).map_err(|e| format!("build: then[{i}]: {e}"))?;
+            zero_search::game::SearchGame::step(&mut az, a, &mut Vec::new()).map_err(|e| format!("build: then[{i}]: {e}"))?;
+        }
         // the deal: everything the viewer does not know, dealt again (the description has none of it)
         let deal_seed = b.deal_seed.unwrap_or(game_seed);
         let mut rng = zero_search::rng::Rng::new(zero_search::rng::split64(deal_seed ^ SALT));
@@ -1459,6 +1467,27 @@ impl MtgAz {
         az.g.observer = None;
         az.g.check_invariants().map_err(|e| format!("build: the built position breaks an invariant: {e}"))?;
         Ok(az)
+    }
+}
+
+/// A `then` item at the pending decision: an action id among its options, or the one option whose
+/// label (`view.rs`'s words, as `export_state` shows them) it is.
+fn then_action(g: &Game, x: &Value) -> Result<u16, String> {
+    let d = g.pending.as_ref().ok_or("the game is over")?;
+    match x {
+        Value::Number(n) => {
+            let a = n.as_u64().ok_or("an action id is a non-negative integer")?;
+            d.options.iter().find(|o| o.action as u64 == a).map(|o| o.action).ok_or_else(|| format!("{a} is not an option of P{}'s {:?} decision", d.player, d.kind))
+        }
+        Value::String(l) => {
+            let m: Vec<u16> = d.options.iter().filter(|o| g.option_text(d.kind, o.choice) == *l).map(|o| o.action).collect();
+            match m[..] {
+                [a] => Ok(a),
+                [] => Err(format!("{l:?} is not an option of P{}'s {:?} decision", d.player, d.kind)),
+                _ => Err(format!("{l:?} names {} options of P{}'s {:?} decision (actions {m:?}): give an action id", m.len(), d.player, d.kind)),
+            }
+        }
+        _ => Err(format!("{x} is neither an option label nor an action id")),
     }
 }
 

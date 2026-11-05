@@ -276,6 +276,11 @@ impl Report {
         match r {
             Ok(d) => {
                 self.ok += 1;
+                // (a `then` trip's summary: its decision kind)
+                if d.get("stack").is_none() {
+                    *self.covered.entry("then").or_default() += 1;
+                    return;
+                }
                 let stack = d["stack"].as_array().unwrap();
                 let bf = d["battlefield"].as_array().unwrap();
                 let mut cover = |k: &'static str, b: bool| {
@@ -352,13 +357,48 @@ fn env(k: &str, d: u64) -> u64 {
     std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
 }
 
+/// A decision the schema does not build (inside a cast or a resolution), reached from the last
+/// built position `b` by `then` (the actions since, as ids) with no chance key on the way (nothing
+/// hidden revealed, nothing random): the built game must reach the same decision as `g` sees it.
+fn then_trip(base: &Value, b: &MtgAz, then: &[u16], g: &MtgAz, viewer: u8, seed: u64) -> Result<Value, (String, String)> {
+    let mut desc = b.describe(viewer).map_err(|e| ("then: the start not described".to_string(), e))?;
+    desc["then"] = json!(then);
+    let mut sj = base.clone();
+    sj["build"] = desc.clone();
+    let spec = MtgSpec::parse(&sj.to_string()).map_err(|e| ("then: build error".to_string(), format!("{e}
+{desc}")))?;
+    let x = MtgAz::new_game(&spec, 2, seed).map_err(|e| ("then: build error".to_string(), e))?;
+    let fail = |c: &str, d: String| Err((format!("then: {c}"), format!("{d}
+{desc}")));
+    if let Err(e) = x.g.check_invariants() {
+        return fail("invariants", e);
+    }
+    if legal(g) != legal(&x) {
+        return fail("legal", format!("{:?} vs {:?}", legal(g), legal(&x)));
+    }
+    let (ea, eb) = (encoding(g, viewer), encoding(&x, viewer));
+    if let Some(i) = (0..ea.len()).find(|&i| ea[i].to_bits() != eb[i].to_bits()) {
+        return fail("encode", format!("first at {} ({}): {} vs {}", i, block(i), ea[i], eb[i]));
+    }
+    if let Some(d) = diff(&viewer_view(&state(g), viewer, true), &viewer_view(&state(&x), viewer, true), "") {
+        return fail("export_state view", d);
+    }
+    let mut d = Map::new();
+    d.insert("then".into(), json!(then.len()));
+    d.insert("decision".into(), state(g)["decision"]["kind"].clone());
+    Ok(Value::Object(d))
+}
+
 /// Play games of `base` (half random, half the heuristic bot) and round-trip every sampled
-/// multi-option decision from the decider's view (and a quarter of them from the other seat's).
+/// multi-option decision from the decider's view (and a quarter of them from the other seat's); a
+/// sampled decision the schema does not build is reached by `then` from the last built one when no
+/// chance key came between (`then_trip`).
 fn run(base: &Value, what: &str, seed0: u64) -> Report {
     let spec = MtgSpec::parse(&base.to_string()).unwrap();
     let games = env("BUILD_GAMES", 40);
     let pct = env("BUILD_SAMPLE", 25) as u32;
     let mut rep = Report::default();
+    let mut thens = Report::default();
     for gi in 0..games {
         let seed = seed0 + gi;
         let mut g = MtgAz::new_game(&spec, 2, seed).unwrap();
@@ -366,21 +406,50 @@ fn run(base: &Value, what: &str, seed0: u64) -> Report {
         let mut h = [Heuristic::new(seed), Heuristic::new(seed ^ 1)];
         let heuristic = gi % 2 == 1;
         let mut k = Vec::new();
+        // the last built position, the actions since, and whether a chance key came since
+        let mut last: Option<(MtgAz, Vec<u16>, bool)> = None;
         for _ in 0..4000 {
             let Some(p) = g.to_move() else { break };
             let l = legal(&g);
-            if l.len() > 1 && r.below(100) < pct {
-                rep.add(round_trip(base, &g, p as u8, seed * 7 + 3));
-                if r.below(4) == 0 {
-                    rep.add(round_trip(base, &g, 1 - p as u8, seed * 7 + 5));
+            if l.len() > 1 {
+                let built = g.describe(p as u8).is_ok();
+                if r.below(100) < pct {
+                    if built {
+                        rep.add(round_trip(base, &g, p as u8, seed * 7 + 3));
+                        if r.below(4) == 0 {
+                            rep.add(round_trip(base, &g, 1 - p as u8, seed * 7 + 5));
+                        }
+                    } else {
+                        rep.add(round_trip(base, &g, p as u8, seed * 7 + 3));
+                        if let Some((b, then, false)) = &last {
+                            thens.add(then_trip(base, b, then, &g, p as u8, seed * 7 + 9));
+                        }
+                    }
+                }
+                if built {
+                    last = Some((g.clone(), Vec::new(), false));
                 }
             }
             let a = if heuristic { h[p].choose(&g.g, &l) } else { l[r.below(l.len() as u32) as usize] };
             g.step(a, &mut k).unwrap();
+            if let Some((_, then, keyed)) = &mut last {
+                then.push(a);
+                *keyed |= !k.is_empty();
+            }
             k.clear();
         }
     }
     rep.print(what);
+    if thens.positions > 0 {
+        println!("== {what}, decisions not built reached by `then` (no chance key since the last built position): {} of {} exact", thens.ok, thens.positions);
+        for (c, (n, d)) in &thens.classes {
+            println!("  {n:5} {c}
+        e.g. {}", d.lines().next().unwrap_or(""));
+        }
+    }
+    for (c, x) in thens.classes {
+        rep.classes.entry(c).or_insert((0, x.1)).0 += x.0;
+    }
     rep
 }
 
