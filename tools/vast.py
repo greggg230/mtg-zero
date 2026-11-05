@@ -555,9 +555,11 @@ def cmd_run_start(a):
     args = run_args(run, marker) + list(a.extra or [])
     rd = box_run_dir(run)
     envs = 'ZERO_TOKEN_GRAPHS=1 MTGZ_SUPERVISE_STALL=7200'
+    # (the braces: `a && b && c &` would background the whole list in a subshell that keeps the ssh channel
+    # open until the run ends; only the supervisor goes to the background, its own session, no ssh fds)
     cmd = (f'cd {repo} && {BOX_PY} -m mtgz.az.remote check {sha} >/dev/null && rm -f {rd}/PAUSE && '
-           f'{envs} nohup {BOX_PY} tools/supervise.py {rd} {" ".join(shlex.quote(x) for x in args)} '
-           f'> {rd}/supervisor_console.txt 2>&1 < /dev/null & sleep 2; echo started')
+           f'{{ {envs} setsid nohup {BOX_PY} tools/supervise.py {rd} {" ".join(shlex.quote(x) for x in args)} '
+           f'> {rd}/supervisor_console.txt 2>&1 < /dev/null & }} && sleep 2 && echo started')
     say(f'run-start on {alias(a.name)} from {repo}:\n  {envs} python tools/supervise.py {rd} {" ".join(args)}')
     print(ssh(a.name, cmd).stdout.strip())
     led = load_ledger()
@@ -670,6 +672,9 @@ def cmd_run_sync(a):
     rd = m['remote_dir']
     while True:
         t0 = time.time()
+        if a.loop and homing(run):
+            say(f'run-home has the run ({ON_VAST} gone or homing): sync loop ends')
+            return
         try:
             nf, nb, nr = sync_once(a.name, run, rd, data=not a.no_data)
             prog = ssh(a.name, f'cat {rd}/progress.json 2>/dev/null; echo; tail -1 {rd}/supervisor.log', check=False,
@@ -677,15 +682,45 @@ def cmd_run_sync(a):
             say(f'sync: {nf} files + logs, {nb / 1e6:.1f} MB in {time.time() - t0:.0f} s'
                 + (f', {nr} old data dirs pruned' if nr else '') + f'; box: {prog[:200]}')
             with open(os.path.join(run, 'vast_sync.json'), 'w', encoding='utf-8') as f:
-                json.dump({'time': time.time(), 'files': nf, 'bytes': nb, 'box': a.name}, f)
+                json.dump({'time': time.time(), 'files': nf, 'bytes': nb, 'box': a.name,
+                           'pid': os.getpid() if a.loop else None}, f)
         except (SystemExit, subprocess.TimeoutExpired, OSError) as ex:
             say(f'sync failed (retrying): {ex}')
         if not a.loop:
             return
-        if not os.path.exists(os.path.join(run, ON_VAST)):
-            say(f'{ON_VAST} is gone (run-home): sync loop ends')
-            return
         time.sleep(max(5.0, a.loop - (time.time() - t0)))
+
+
+def homing(run):
+    """True once run-home has taken the run (its marker says so, or is gone): a sync loop stops pulling."""
+    try:
+        with open(os.path.join(run, ON_VAST), encoding='utf-8') as f:
+            return bool(json.load(f).get('homing'))
+    except (OSError, ValueError):
+        return True
+
+
+def wait_sync_loop(run, timeout_s=300):
+    """Wait for a sync loop of this run (its pid in vast_sync.json) to see the homing marker and exit, so that
+    no pass of it overwrites what run-home pulls and writes."""
+    try:
+        with open(os.path.join(run, 'vast_sync.json'), encoding='utf-8') as f:
+            pid = json.load(f).get('pid')
+    except (OSError, ValueError):
+        return
+    if not pid:
+        return
+    import psutil
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        try:
+            p = psutil.Process(pid)
+            if 'run-sync' not in ' '.join(p.cmdline()):
+                return
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return
+        time.sleep(2)
+    die(f'the sync loop (pid {pid}) did not end within {timeout_s} s (stop it, then run-home again)')
 
 
 def cmd_run_ctl(a):
@@ -708,7 +743,10 @@ def cmd_run_ctl(a):
 
 
 def box_supervisor_running(name):
-    r = ssh(name, "pgrep -f 'tools/supervise.py' >/dev/null && echo yes || echo no", check=False, timeout=60)
+    # anchored to the supervisor's own command line (python tools/supervise.py ...): an unanchored pattern also
+    # matches the `bash -c` that runs pgrep, whose command line contains it
+    r = ssh(name, "pgrep -f '^[^ ]*python[0-9.]* tools/supervise[.]py ' >/dev/null && echo yes || echo no", check=False,
+            timeout=60)
     return r.stdout.strip() == 'yes'
 
 
@@ -717,6 +755,9 @@ def cmd_run_home(a):
     run = os.path.abspath(a.run)
     m = read_marker(run, a.name)
     rd = m['remote_dir']
+    m['homing'] = time.time()                              # a sync loop of the run ends at its next pass
+    with open(os.path.join(run, ON_VAST), 'w', encoding='utf-8') as f:
+        json.dump(m, f, indent=1)
     if box_supervisor_running(a.name):
         ssh(a.name, f'echo \'{{"time": {time.time()}, "by": "{PAUSE_BY}"}}\' > {rd}/STOP')
         say(f'STOP on the box; waiting up to {a.wait_min} min for the run to end its iteration')
@@ -725,6 +766,7 @@ def cmd_run_home(a):
             if time.time() - t0 > a.wait_min * 60:
                 die('the box run did not stop in time (nothing changed on the desktop; run-home again later)')
             time.sleep(15)
+    wait_sync_loop(run)
     say('box run stopped: full pull (data window, optimizer, checkpoints, logs)')
     t0 = time.time()
     nf, nb, nr = sync_once(a.name, run, rd, data=True, final=True)
@@ -743,12 +785,16 @@ def cmd_run_home(a):
     if not os.path.exists(os.path.join(run, 'STOP')):
         with open(os.path.join(run, 'STOP'), 'w', encoding='utf-8') as f:
             json.dump({'time': time.time(), 'by': PAUSE_BY}, f)
+    pause = os.path.join(run, 'PAUSE')
     try:
-        with open(os.path.join(run, 'PAUSE'), encoding='utf-8') as f:
-            if PAUSE_BY in f.read():
-                os.remove(os.path.join(run, 'PAUSE'))
+        with open(pause, encoding='utf-8') as f:
+            ours = PAUSE_BY in f.read()
     except OSError:
-        pass
+        ours = False                                       # (none: nothing to remove)
+    if ours:                                               # (closed first: Windows cannot delete an open file)
+        os.remove(pause)
+    elif os.path.exists(pause):
+        say(f'WARNING: {pause} is not tools/vast.py\'s (someone paused the run): left in place')
     os.replace(os.path.join(run, ON_VAST), os.path.join(run, ON_VAST.replace('.json', f'_{int(time.time())}.json')))
     say(f'{run} is home at iteration {k} (STOP left in place: relaunch on the desktop as usual); the box keeps its '
         f'copy until `destroy {a.name}`')
