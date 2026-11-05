@@ -657,8 +657,11 @@ def sync_once(name, run, rd, data=True, final=False):
             continue
         if base.endswith(('.tmp', '.vasttmp')) or base.startswith('.'):
             continue
-        if not final and now - mtime < 20 and not p.endswith('.json'):
-            continue                                         # still being written
+        # a file written in the last 20 s may be half written: next pass - except the append-only logs, which take
+        # only their new bytes (a partial last line is completed by the next pass); the box's log.txt is written
+        # every few seconds and was never pulled under this rule (the main line's mirror, 2026-11-05)
+        if not final and now - mtime < 20 and not p.endswith('.json') and p not in APPEND:
+            continue
         local = os.path.join(run, *p.split('/'))
         have = os.path.getsize(local) if os.path.exists(local) else -1
         if p in APPEND and 0 <= have < size:
