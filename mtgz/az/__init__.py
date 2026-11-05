@@ -229,5 +229,21 @@ PACKAGE = register(GamePackage(
                                               'env': {'OMP_NUM_THREADS': '3'},
                                               'overrides': {'infer_device': 'cpu', 'train_device': 'cpu', 'conc': 768,
                                                             'threads': 12, 'groups': 4, 'infer_workers': 4,
-                                                            'torch_threads': 3, 'shard_rows': 8192, 'sparse': 0}})},
+                                                            'torch_threads': 3, 'shard_rows': 8192, 'sparse': 0}}),
+             # a rented GPU box (tools/vast.py, docs/ENGINE.md 95): RTX 5090 + a 16-core CPU, Linux, the image's
+             # /usr/bin/python; `python tools/vast.py rent vast` + `prep vast --checkout <the run's checkout>` make
+             # ~/mtg-zero-wt/run-<sha12> there (ssh alias mtgz-vast, or $MTGZ_VAST_HOST). Self-play (run setting
+             # selfplay_remote 'vast'): one worker process, CUDA inference with token CUDA graphs, the Delver line's
+             # 16 threads x 3 groups and 1,536 games in flight (the box's bench: ~25 games/s, GPU-bound from 16x3,
+             # E:/mtg-zero-scratch/vast-test/NOTES.md); sparse batches. Evaluation (eval_remote 'vast'): CUDA too.
+             'vast': RunCommitRemote(ROOT, host=os.environ.get('MTGZ_VAST_HOST', 'mtgz-vast'), home='/root',
+                                     python='/usr/bin/python', workdir='/root/mtgz-remote',
+                                     env={'ZERO_TOKEN_GRAPHS': '1'}, prepare='python tools/vast.py prep vast',
+                                     overrides={'infer_device': 'cuda', 'train_device': 'cuda', 'threads': 16,
+                                                'groups': 3, 'sparse': 1},
+                                     selfplay={'workdir': '/root/mtgz-selfplay', 'procs': 1, 'nice': 0,
+                                               'env': {'ZERO_TOKEN_GRAPHS': '1'},
+                                               'overrides': {'infer_device': 'cuda', 'train_device': 'cuda',
+                                                             'conc': 1536, 'threads': 16, 'groups': 3,
+                                                             'shard_rows': 8192, 'sparse': 1}})},
 ))
