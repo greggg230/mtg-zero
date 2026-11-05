@@ -17755,3 +17755,56 @@ in 92.1).
 Logs: E:/mtg-zero-scratch/ideas-4c/gate_optin.log, gate_repin.log (`gates/f13390cd216a.json` holds the last tier's
 report only: the two tiers share the sha's file). Before a self-play A/B that uses the Mac: the repin gate's Mac step
 on this commit (`mac.sh --eval-checkout`), else the Mac's workers are refused by their hello (92).
+
+## 94. Sparse sample shards: zero-core `feat/sparse-shards` (`shard_sparse`, off by default; 2026-11-04)
+
+Branch `feat/sparse-shards` (from main 9397d67); zero-core pinned at 3f830c5 = main 62881d7 + the sparse shards
+(zero-core docs/az.md 32). Scratch: E:/mtg-zero-scratch/sparse-shards/ (measure.py, measure2.py, real/measure*.json;
+the shard copies deleted).
+
+**Why.** zero-core's ShardWriter stored each row's features dense as float16: 37,620 floats (75 KB) a row, ~9.6 GB
+per generation of the Delver line (iteration 1289: 124,581 local rows in two shards, 9,632 MB) for ~242 non-zeros a
+row. The window keeps only the non-zeros (`window_sparse`, zero-core docs/az.md 10.8), so the dense files cost disk
+(E: has run short; a forked A/B arm needs ~50 GB of shards of its own), write time on the run's caller thread (part
+of the 22% of self-play throughput lost to sample handling, E:/mtg-zero-scratch/ideas-3/bench_threads_ab.json), RAM
+(the writer buffers the driver's float32 rows until a shard is full: ~9.5 GB, ~20 GB at the flush) and the Mac's
+compression and copies.
+
+**What changes here.** Nothing by default: every preset (delver-mirror included) leaves `shard_sparse` 0, the shards
+of before. No crate of this repo changed: the engine digest stays **f6543eb2b1b8752f**. To turn it on: `--shard-sparse
+1` at a restart of the line (a run setting: the window then reads the dense generations on disk beside the new sparse
+ones - the samples, window, batches and training are the same, so no fork is needed). Remote self-play: a Mac worker
+writes sparse shards when its checkout has this core; an older one writes dense shards, accepted as before (no
+refusal: every reader takes both). Going back: `--shard-sparse 0`; a checkout with an older core cannot read a sparse
+shard (KeyError 'x') - `zero.data.convert_shard(src, dst, sparse=False)` rewrites one dense.
+
+**The consumers here** (grep for np.load / read_shard / the `x` member):
+
+* `tools/belief_eval.py`: `read_shard` (a sparse shard densified): unchanged, works.
+* `tests/test_mac_remote.py`: `read_shard`: unchanged.
+* `tools/root_view.py`: its own sample files (np.savez of driver samples), not shards: unaffected.
+* The `mtgz/az/*` shims (`data`, `heldout`, `distill`, `bench`, `remote`): zero-core's readers.
+* The review-5 readout (E:/mtg-zero-scratch/review-5/readout_stream.py) and its copies (ab-ideas/, ab-ism/
+  readout_stream_ab.py) - outside the repo, run from pinned worktrees with older cores, streaming the `x` member -
+  patched in place with a self-contained `iter_rows`: a sparse shard's rows scattered chunk by chunk from x_ptr /
+  x_idx / x_val, a dense shard's streamed as before (the same code; backups `*.dense-only.bak`). Checked on the
+  scratch copy of iteration 1289's 65,566-row shard: every chunk bit for bit, plain and zlib-1 sparse
+  (sparse-shards/check_readout.py).
+* Not updated: one-off scripts under E:/mtg-zero-scratch (compact/, derived-features/, ...) that read the `x`
+  member; any pinned run worktree's tools (their older core).
+
+**Measured** (the line's iteration 1289, copied to scratch and converted offline; the desktop beside the live line,
+IDLE priority; zero-core docs/az.md 32 has the table): a local 65,566-row shard **5,069 MB -> 200 MB (25.3x)** - the
+features 4,933 -> 63.9 MB (77x; 15.85 M non-zeros, 242 a row), `aux` (the belief targets) 134 MB unchanged - and 11.0
+MB at zlib 1; a generation ~9.6 GB -> ~380 MB; the Mac's shards 6.8-7.6 -> 1.1-1.25 MB (6.1x), written at zlib 1 in
+0.44-0.56 s instead of 1.77-2.00 s (on the desktop). Writing through ShardWriter from float32 rows: ~4.6 s for the
+65k-row shard (4.1 s of it the conversion in `add`, spread over the phase) against ~21-25 s (the 4,096- and
+8,192-row dense flushes scaled: a full one needs ~20 GB), the writer's buffer ~0.3 GB instead of ~9.5 GB. A shard
+into the sparse window (whole, with the cache): 1.77 -> 0.36 s. Every row came back bit for bit, every other array
+equal, and the writer's own sparse shard was `convert_shard`'s.
+
+**Checks.** zero-core 3f830c5: the sparse-shard tests of its docs/az.md 32 (round trip, sparse and mixed windows =
+dense windows bit for bit, a toy run's self-play writing the same samples, sparse and mixed shards training the same
+network weight for weight, the guard, remote self-play, heldout, distill). Here: `tests/test_sparse_shards.py`
+(two Delver mirror games' rows written dense and sparse: every array and the features bit for bit, uint16 indexes,
+the dense and sparse windows and batches equal; the presets leave the setting off), the build, and the gates (94.1).
