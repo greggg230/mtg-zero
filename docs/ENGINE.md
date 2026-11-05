@@ -17903,3 +17903,80 @@ x `shard_sparse` in all four combinations, and both branches' shard tests pass o
 E:/mtg-zero-scratch/sparse-shards/merge_check.py). Before turning `shard_sparse` on with the Mac: the repin gate's Mac
 step on this commit, so the Mac's workers write sparse shards too (an older Mac checkout writes dense ones, accepted).
 The pin 3f830c5 exists only in the local zero-core repo (not pushed).
+
+## 97. Rented GPU boxes (Vast.ai): `tools/vast.py` and the remote `'vast'` (branch `vast`, 2026-11-05)
+
+**Why.** The user asked what it takes to distribute work to a rented Vast.ai GPU, then wanted "the flexibility of
+both" ways: (1) a box playing self-play for a run on the desktop, (2) a whole run on a box while the desktop does
+other work (the Delver main line stopped at 1610 while the land-hold work had the desktop). Dominion Zero has
+complete Vast tooling (`domz/az/vast.py`, `fleet.py`, `gpuhost.py`, `box_guard.py`), but it never moved into
+zero-core; mtg-zero had one remote, the hard-wired `'mac'`.
+
+**What.** No crate changed (engine digest stays **f6543eb2b1b8752f**); no zero-core change (pin d499716).
+
+* `tools/vast_provider.py` (domz's Vast client copied at 6048187, without its mock) and `tools/vast_guard.py`
+  (domz's deadline guard): the instance's start script writes the guard and runs it before anything else, so a box
+  destroys itself at its deadline + 10 min even if the desktop never reaches it (per-instance `CONTAINER_API_KEY`).
+* `tools/vast_bootstrap.sh`: apt, rustup 1.95.0 (= the desktop's), pip numpy / psutil / pytest / flask, a CUDA
+  matmul check. The image `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime` (= the desktop's torch 2.11.0+cu128)
+  has /usr/bin/python 3.12 under PEP 668: pip takes `--break-system-packages --ignore-installed blinker`.
+* `tools/vast.py`: `offers`, `rent NAME --hours H` (RTX 5090, >= 16 threads, >= 60 GB RAM, reliability >= 0.98,
+  verified, **US/Canada by default** (`--region any`), fast desktop CPUs first, then price; waits for the instance,
+  writes a managed `Host mtgz-NAME` block into ~/.ssh/config, confirms the guard), `prep NAME [--checkout DIR]
+  [--gate DIGEST]` (push the checkout's commit and zero-core pin to bare repos on the box, worktree
+  `~/mtg-zero-wt/run-<sha12>`, build, stamp, `mtgz.az.remote check`; `--gate` runs `gate.py repin` there),
+  `status`, `extend`, `ssh`, `destroy NAME | --all`; ledger ~/.config/vastai/mtgz_boxes.json.
+* **(1) remote `'vast'`** (`mtgz/az/__init__.py`): a `RunCommitRemote` on host `mtgz-vast` (or `$MTGZ_VAST_HOST`),
+  /root, /usr/bin/python, `ZERO_TOKEN_GRAPHS=1`; self-play: one worker, CUDA, conc 1536, 16 threads x 3 groups,
+  sparse. `eval_remote` and `selfplay_remote` resolve separately, so a run can self-play on the box and evaluate on
+  the Mac: `--selfplay-remote vast --selfplay-remote-procs 1 --eval-remote mac`. `RunCommitRemote` takes `prepare`
+  (the preflight's hint: mac.sh for the Mac, `vast.py prep vast` here). zero-core still takes one self-play remote
+  per run.
+* **(2) a whole run on a box**: `run-push NAME RUN` (the run stopped; uploads config.json with the box's paths and
+  remote settings off, run_state, metrics / evals / logs, elo/, data/ (the window), the last 33 checkpoints + the
+  best + opt_latest + index.json, the anchors and held-out shards to /root/runs/_ext; clears an older copy on the box
+  first; the desktop copy gets `ON_VAST.json` and a PAUSE file by 'tools/vast.py', so a desktop supervisor started by
+  mistake waits instead of forking the run), `run-start NAME RUN [-- args]` (the desktop supervisor's arguments minus
+  eval_remote / selfplay_remote / their procs and lingers, paths remapped, + extra args; `supervise.py` detached on the
+  box with `ZERO_TOKEN_GRAPHS=1 MTGZ_SUPERVISE_STALL=7200`), `run-sync NAME RUN [--loop SEC] [--no-data]` (new and
+  changed files by tar over ssh, written to a temporary name and renamed; append-only logs by their new bytes; the
+  window's pruning mirrored; never config.json, supervisor_state.json or the control files), `run-ctl
+  stop|pause|resume|tail`, `run-home NAME RUN` (marks the run homing so a sync loop ends and waits for it, STOP on the
+  box, waits for the run's iteration to end, full pull, restores the desktop's paths and remote settings, removes its
+  PAUSE, leaves STOP: relaunch as usual).
+
+**Measured** (E:/mtg-zero-scratch/vast-test/NOTES.md):
+
+* Delver self-play bench (`bench_threads.py`, gen 1000, conc 768, cache 8192) on a 5090 + Ryzen 7950X3D: **~25.4
+  games/s**, GPU-bound from 16x3 (evaluator busy 0.93) vs the quiet desktop's 19.6 (~1.3x); 8x2 19.0 vs 13.7.
+* A Linux box builds bit-identically: `gate.py repin` passed on three boxes (digest = f6543eb2b1b8752f, the 1-config
+  Delver smoke 0/1 failed). Rent to a verified box: ~4-5 min in Texas (build 38-43 s), 11 min in Taiwan (the first
+  push of the repo's history alone took 5 min).
+* **Distance decides**: Texas ~8-11 MB/s each way (scp; run-push 1.74 GB in 160 s, run-sync 508 MB in 60 s); Taiwan
+  (160 ms) ~0.1 MB/s - a 7 MB checkpoint took 73 s, the remote's shards missed their phase (iteration "SHORT 96").
+  Hence `--region na` by default.
+* (1) on a fork of the main line at 1610 (E:/mtg-zero-scratch/vast-test/vt1610), 400 games per generation, the
+  desktop at 8 threads beside the land-hold lab: Texas box **326 of 400 games** (8.3 games/s vs the desktop's 4.7),
+  2 shards (2.1 MB compressed) back in 2 s, staleness 100% <= 1. Shards are small: ~20 MB for a 2,000-game
+  generation.
+* (2) the fork pushed to the box, 1613 -> 1627 there in five starts (16x3, 400 games: 12-37 s of self-play a
+  generation at ~135k leaves/s; the 1616 / 1624 evaluations ran on the box: anchored Elo 1706 +- 48 at 1616),
+  synced live, brought home mid-run (STOP at 1627, the run ended 17 s later), and **resumed on the desktop** at 1628
+  with self-play on the box.
+
+**Bugs found by the tests and fixed:** a text-mode pipe on Windows sent the bootstrap with CRLF (bash: "pipefail\r");
+`a && b && cmd &` backgrounded the whole list and held the ssh channel until the run ended; `pgrep -f` matched the
+`bash -c` running it (now anchored to `python tools/supervise.py`); deleting the PAUSE file while open failed silently
+on Windows; a sync pass after run-home overwrote supervisor.log (now the homing marker + waiting for the loop).
+
+**Tests:** `tests/test_vast_tool.py` (6: run arguments for the box, path remapping, ssh-config blocks, the homing
+marker, the guard's start script, the remote spec) + `tests/test_mac_remote.py` (11, `RunCommitRemote` changed): 17
+passed. Spend: ~$1.00 for the session's boxes (balance $26.30 -> $25.31).
+
+**Using it on the main line.** (1): re-pin the line onto a commit with this branch, `rent vast --hours H`, `prep vast
+--checkout <the run's worktree>`, relaunch with `--selfplay-remote vast --selfplay-remote-procs 1` (the Mac then only
+evaluates). (2): stop the line (STOP, clean exit), `rent`, `prep --gate f6543eb2b1b8752f`, `run-push`, `run-start`,
+`run-sync --loop 120` in the background (the publisher and the blunder sidecar read the desktop mirror), later
+`run-home` and `destroy`. Pick boxes with >= 64 GB for the line (desktop peaks ~49 GB) and set `--hours` to the span
+plus margin (`extend` moves the deadline; at the deadline the guard stops the run and destroys the box: the desktop
+keeps what the last sync pulled).

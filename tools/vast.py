@@ -516,6 +516,11 @@ def cmd_run_push(a):
     with open(os.path.join(run, ON_VAST), 'w', encoding='utf-8') as f:
         json.dump(marker, f, indent=1)
     t0 = time.time()
+    # the desktop copy is the run now: an older copy on the box (an earlier push) could hold newer checkpoints
+    # or data the run would resume from
+    rd = box_run_dir(run)
+    assert rd.startswith(BOX_RUNS + '/') and len(rd) > len(BOX_RUNS) + 1, rd
+    ssh(a.name, f'rm -rf {shlex.quote(rd)}')
     tar_upload(a.name, f'{BOX_RUNS}/_ext', [(os.path.basename(p), p) for p in ext])
     tar_upload(a.name, box_run_dir(run), members)
     say(f'uploaded in {time.time() - t0:.0f} s; desktop copy PAUSEd + {ON_VAST}; next: run-start')

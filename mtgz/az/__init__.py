@@ -230,7 +230,7 @@ PACKAGE = register(GamePackage(
                                               'overrides': {'infer_device': 'cpu', 'train_device': 'cpu', 'conc': 768,
                                                             'threads': 12, 'groups': 4, 'infer_workers': 4,
                                                             'torch_threads': 3, 'shard_rows': 8192, 'sparse': 0}}),
-             # a rented GPU box (tools/vast.py, docs/ENGINE.md 95): RTX 5090 + a 16-core CPU, Linux, the image's
+             # a rented GPU box (tools/vast.py, docs/ENGINE.md 97): RTX 5090 + a 16-core CPU, Linux, the image's
              # /usr/bin/python; `python tools/vast.py rent vast` + `prep vast --checkout <the run's checkout>` make
              # ~/mtg-zero-wt/run-<sha12> there (ssh alias mtgz-vast, or $MTGZ_VAST_HOST). Self-play (run setting
              # selfplay_remote 'vast'): one worker process, CUDA inference with token CUDA graphs, the Delver line's
