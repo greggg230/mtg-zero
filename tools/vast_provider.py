@@ -347,7 +347,7 @@ class VastCLI:
                            timeout=self.timeout, stdin=subprocess.DEVNULL,
                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         out = (r.stdout + r.stderr).decode('utf-8', 'replace')
-        if r.returncode or "'success': True" not in out:
+        if r.returncode or ("'success': True" not in out and 'already associated' not in out):
             raise ProviderError(f'attach ssh to {iid} failed (exit {r.returncode}): {out.strip()[-300:]}')
         return out.strip()
 
