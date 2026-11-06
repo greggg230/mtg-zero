@@ -17980,3 +17980,66 @@ evaluates). (2): stop the line (STOP, clean exit), `rent`, `prep --gate f6543eb2
 `run-home` and `destroy`. Pick boxes with >= 64 GB for the line (desktop peaks ~49 GB) and set `--hours` to the span
 plus margin (`extend` moves the deadline; at the deadline the guard stops the run and destroys the box: the desktop
 keeps what the last sync pulled).
+
+### 97.1 The Delver main line on a box: 1610 -> 1810 (2026-11-05)
+
+The user had the line (r3-2b-float550) moved onto a box for one span: `rent line --hours 12 --min-ram 88` (7950X3D +
+5090, Texas, $0.907/h), `prep line --checkout mtg-zero-wt/run-a99fa6c --gate f6543eb2b1b8752f` (passed on the box),
+`run-push` (2.42 GB in 245 s), `run-start ... -- --iters 1810` (the line's own arguments minus the Mac's remotes),
+`run-sync --loop 120` on the desktop, and a finish watcher (E:/mtg-zero-scratch/vast-test/line_finish_watch.py: on the
+box run's clean exit, `run-home` then `destroy`). Before the push a hard-linked fork of the line at 1610 was frozen
+(runs/r3-2b-float550-k1610) for the land-hold A/B, whose control arm was the line itself.
+
+* **Speed**: ~78 s a generation (self-play 2,000 games ~65-85 s, training 11-13 s at 25-27k samples/s - the same
+  ~600 steps the desktop trained at 5-7k samples/s while its GPU also played), the Elo evaluation every 8th generation
+  ~135-141 s on the box itself: ~93-96 s on average (the desktop with the Mac: ~95-100 s). 200 generations in 5.3 h,
+  **~$4.92**. Home at 19:10 (the data window 2.79 GB in 355 s); box destroyed by the watcher.
+* **Strength**: anchored Elo block means 1400s 1705, 1500-1609 1697, 1610-1709 1713, 1710-1810 1710 (+-13 each): no
+  change from training on the box.
+* **Fixed on the way** (main 4bf2db3, 6bea9b4): `tar_fetch` deadlocked (tarfile stops at the end-of-archive marker;
+  the record padding after it stayed unread and ssh blocked on the full pipe forever - the mirror stopped at 1640 for
+  ~45 min): the stream is read to its end, a transfer is killed after 30 min, a pass never ends the loop. run-home's
+  final pull also brought the box's supervisor_state.json (box args, /root/runs/_ext paths) over the desktop's: it is
+  never pulled now; the line's desktop args were rebuilt and checked against its logged 04:46 start. The box's
+  `log.txt`, written every few seconds, was never pulled under the 20-s settle rule: append-only logs are exempt.
+  The loop now runs with `--no-data` for a live run (the window grows ~460 MB a generation against ~7 MB/s; it
+  comes home with `run-home`).
+* **The Delver AI site** read the desktop copy's guard PAUSE as "paused": the publisher (branch delverai-float,
+  8987fc7 + 002a410) reports a run with ON_VAST.json from its mirror - running while the mirror is fresh, "N min
+  behind" when the sync is late, stopped only when the fresh mirror's log stops for 30 min.
+
+### 97.2 Any number of self-play workers: zero-core's multi-host self-play (pin 37a0cd0, 2026-11-05)
+
+**Why.** The user asked for "a setup to have any number of workers able to run and contribute simultaneously" (and
+how best to use two GPUs, and whether training can be distributed). zero-core took one self-play remote per run.
+
+**Core** (zero-core `feat/multi-remote` 37a0cd0 = d499716 + docs/az.md 34; Python only): `selfplay_remote` is a
+comma-separated list - each host its own workers, mirror, checkpoint shipping and fetches on a manager thread of its
+own, one shared quota; consumers `<name>/w<k>`, `selfplay.remotes` per host in the metrics. A name `prefix:arg` calls
+the package's callable remote `prefix:` with `arg`. The run dir's `selfplay_remotes` file (one name per line) replaces
+the setting's list and is re-read at every iteration's start: a listed host joins (resolved on a thread, retried if it
+fails, never stopping the run), an unlisted one leaves at a phase start (its unaccepted games are dropped, nothing
+double-counted); the file alone turns remote self-play on if present at the run's start. `selfplay_local` 0: this
+machine plays no games while a worker takes work (trains only - an asynchronous actor / learner split) and plays the
+quota itself when none does. One name, no file and selfplay_local 1 behave exactly as before (the agent's comparison
+against d499716: metrics key paths, log lines, shards and checkpoints identical).
+
+**mtg-zero** (d662940): remotes `vast:<box>` (any rented box: alias mtgz-<box>, its prepared checkout of the run's
+commit; `vast_remote`) and `gpu:<N>` (`LocalGpuRemote`: GPU N of this machine, a worker process in the run's own
+stamped checkout, workdir ~/mtgz-gpu<N>, `CUDA_VISIBLE_DEVICES=N` - a box with two GPUs: the run trains on GPU 0).
+`tools/vast.py`: `rent a b c`, `prep a b c` (in parallel, logs ~/.config/vastai/prep-<box>.log), `link TRAINER
+WORKERS` (the trainer box's own key into the workers' authorized_keys, their aliases into its ssh config; the desktop's
+key never goes to a box), `workers RUN show|set|add|remove|clear` (the run's selfplay_remotes file, on its box while
+the run lives there), `--gpus N`; run-sync never pulls the workers file.
+
+**Using it.** Trainer on a box with N workers: `rent t w1 w2`, `prep t w1 w2 --checkout <run worktree>`, `link t w1
+w2`, `run-push t RUN`, `workers RUN set vast:w1 vast:w2`, `run-start t RUN -- --selfplay-local 0 ...`; add a box later
+with `rent w3`, `prep w3`, `link t w3`, `workers RUN add vast:w3` (from the next generation); drop one with `workers RUN
+remove vast:w3`, wait for its `removed` log line, `destroy w3`. A 2-GPU box: `rent t --gpus 2 --min-cores 32`,
+`workers RUN set gpu:1`.
+
+**Expected** (not measured yet): self-play ~25 games/s a 5090 box, training ~12 s a generation; with the trainer only
+training, a generation takes about max(2,000 games / the workers' rate, training) + overhead: ~40-45 s with 2 workers,
+~20-25 s with 4 (vs ~95 s on one box), at about the same cost per generation. Data-parallel training across boxes is
+not worth it (a step's gradients ~7 MB x ~600 steps = ~4 GB a generation at ~8 MB/s); inside one 2-GPU box it would
+save ~5 s of ~12.

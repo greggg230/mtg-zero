@@ -69,7 +69,7 @@ BOX_SETTINGS = {'eval_remote': '', 'selfplay_remote': '', 'selfplay_remote_procs
                 'selfplay_local_linger': 0}
 PATH_SETTINGS = ('elo_anchors', 'heldout_shards')
 APPEND = ('metrics.jsonl', 'evals.jsonl', 'log.txt', 'stdout.txt', 'supervisor.log', 'supervisor_console.txt')
-NO_PULL = ('config.json', 'STOP', 'PAUSE', 'STOP.old', ON_VAST, 'selfplay_remotes')
+NO_PULL = ('config.json', 'STOP', 'PAUSE', 'STOP.old', ON_VAST, 'selfplay_remotes', 'supervisor_state.json')
 
 
 def die(msg):
