@@ -69,7 +69,7 @@ BOX_SETTINGS = {'eval_remote': '', 'selfplay_remote': '', 'selfplay_remote_procs
                 'selfplay_local_linger': 0}
 PATH_SETTINGS = ('elo_anchors', 'heldout_shards')
 APPEND = ('metrics.jsonl', 'evals.jsonl', 'log.txt', 'stdout.txt', 'supervisor.log', 'supervisor_console.txt')
-NO_PULL = ('config.json', 'STOP', 'PAUSE', 'STOP.old', ON_VAST)
+NO_PULL = ('config.json', 'STOP', 'PAUSE', 'STOP.old', ON_VAST, 'selfplay_remotes')
 
 
 def die(msg):
@@ -196,7 +196,15 @@ def fmt_offer(o):
 
 
 def filters_from(a):
-    return dict(FILTERS, max_dph=a.max_dph, min_ram_gb=a.min_ram, min_cores=a.min_cores)
+    return dict(FILTERS, max_dph=a.max_dph, min_ram_gb=a.min_ram, min_cores=a.min_cores, num_gpus=a.gpus)
+
+
+def each_name(fn):
+    """A command over several boxes (`rent w1 w2 w3`): `fn` once per name, in turn."""
+    def run(a):
+        for n in a.names:
+            fn(argparse.Namespace(**dict(vars(a), name=n)))
+    return run
 
 
 def cmd_offers(a):
@@ -346,6 +354,117 @@ def git(root, *args):
 
 def box_repo(sha):
     return f'{BOX_HOME}/mtg-zero-wt/run-{sha[:12]}'      # = mtgz.az.mac.eval_checkout(sha, BOX_HOME)
+
+
+def cmd_prep_many(a):
+    """`prep` on several boxes at once: one `vast.py prep <box>` process each (logs ~/.config/vastai/prep-<box>.log),
+    waited for together; fails if any failed."""
+    if len(a.names) == 1:
+        return cmd_prep(argparse.Namespace(**dict(vars(a), name=a.names[0])))
+    procs = {}
+    for n in a.names:
+        box(n)
+        args = [sys.executable, os.path.abspath(__file__), 'prep', n] + (['--checkout', a.checkout] if a.checkout else []) \
+            + (['--gate', a.gate] if a.gate else [])
+        logf = os.path.join(os.path.dirname(LEDGER), f'prep-{n}.log')
+        procs[n] = (subprocess.Popen(args, stdout=open(logf, 'w', encoding='utf-8'), stderr=subprocess.STDOUT,
+                                     stdin=subprocess.DEVNULL, env=dict(os.environ, PYTHONIOENCODING='utf-8')), logf)
+        say(f'prep {n}: started (log {logf})')
+    bad = []
+    for n, (p, logf) in procs.items():
+        rc = p.wait()
+        with open(logf, encoding='utf-8', errors='replace') as f:
+            last = [x for x in f.read().splitlines() if x.strip()][-1:] or ['']
+        say(f'prep {n}: exit {rc}: {last[0][:200]}')
+        if rc:
+            bad.append(n)
+    if bad:
+        die(f'prep failed on {bad} (their logs above)')
+
+
+def cmd_link(a):
+    """Let the box TRAINER (whose run reaches its workers over ssh) log in to each WORKER box: a key of the
+    trainer's own (made there once; the desktop's key never goes to a rented box) added to the workers'
+    authorized_keys, and a `Host mtgz-<worker>` block per worker in the trainer's ~/.ssh/config (the same alias
+    the run's remote 'vast:<worker>' uses). Checked by an ssh from the trainer to each worker."""
+    box(a.trainer)
+    pub = ssh(a.trainer, '[ -f ~/.ssh/id_ed25519 ] || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519; '
+                         'cat ~/.ssh/id_ed25519.pub').stdout.strip().splitlines()[-1]
+    if not pub.startswith('ssh-'):
+        die(f'no public key from {a.trainer}: {pub[:100]}')
+    blocks = []
+    for w in a.workers:
+        e = box(w)
+        r = e.get('ssh') or {}
+        if not r:
+            die(f'box {w!r} has no ssh route in the ledger')
+        ssh(w, f'mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && '
+               f'(grep -qxF {shlex.quote(pub)} ~/.ssh/authorized_keys || echo {shlex.quote(pub)} >> ~/.ssh/authorized_keys) '
+               f'&& chmod 600 ~/.ssh/authorized_keys')
+        blocks.append(f'# >>> {alias(w)} (tools/vast.py) >>>\nHost {alias(w)}\n  HostName {r["host"]}\n  Port {r["port"]}\n'
+                      f'  User root\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n'
+                      f'  ServerAliveInterval 15\n  ServerAliveCountMax 4\n  ConnectTimeout 20\n# <<< {alias(w)} <<<\n')
+    # the trainer's ssh config: our blocks replaced, the rest kept
+    script = ('import re, os, sys\np = os.path.expanduser("~/.ssh/config")\n'
+              's = open(p).read() if os.path.exists(p) else ""\n'
+              'for a in sys.argv[1:]:\n'
+              '    s = re.sub(r"# >>> " + re.escape(a) + r" \\(tools/vast\\.py\\) >>>\\n.*?# <<< " + re.escape(a) + r" <<<\\n", "", s, flags=re.S)\n'
+              'blocks = sys.stdin.read()\nopen(p, "w").write(blocks + s)\nos.chmod(p, 0o600)\n')
+    ssh(a.trainer, f'{BOX_PY} -c {shlex.quote(script)} {" ".join(alias(w) for w in a.workers)}', input=''.join(blocks))
+    for w in a.workers:
+        r = ssh(a.trainer, f'ssh -o BatchMode=yes {alias(w)} hostname', check=False, timeout=90)
+        say(f'{a.trainer} -> {w}: ' + ('ok (' + r.stdout.strip() + ')' if r.returncode == 0 else
+                                       f'FAILED: {(r.stderr or r.stdout).strip()[-200:]}'))
+
+
+def workers_file(run):
+    """(where, path): the run's selfplay_remotes file - on its box while the run lives there (ON_VAST.json),
+    else in the desktop dir."""
+    try:
+        with open(os.path.join(run, ON_VAST), encoding='utf-8') as f:
+            m = json.load(f)
+        return m['box'], m['remote_dir'] + '/selfplay_remotes'
+    except (OSError, ValueError, KeyError):
+        return None, os.path.join(run, 'selfplay_remotes')
+
+
+def cmd_workers(a):
+    """The run's self-play workers: zero-core's selfplay_remotes file (one remote name per line: 'vast:w1' = box w1,
+    'gpu:1' = this machine's GPU 1, 'mac'), re-read by the run at every generation's start (docs/ENGINE.md 97.2).
+    show | set NAMES | add NAMES | remove NAMES | clear."""
+    run = os.path.abspath(a.run)
+    where, path = workers_file(run)
+    if where:
+        cur = ssh(where, f'cat {shlex.quote(path)} 2>/dev/null || true').stdout
+    else:
+        cur = open(path, encoding='utf-8').read() if os.path.exists(path) else ''
+    names = [x.split('#')[0].strip() for x in cur.splitlines()]
+    names = [x for x in names if x]
+    if a.what == 'show':
+        print(f'{where + ":" if where else ""}{path}: {names or "(none: no file or empty)"}')
+        return
+    for n in a.names:
+        if n.startswith('vast:'):
+            box(n.split(':', 1)[1])                      # a box we rented (ledger)
+        elif not (n.startswith('gpu:') and n[4:].isdigit()) and n not in ('mac', 'vast', 'local'):
+            die(f'{n!r}: a remote name (vast:<box>, gpu:<N>, mac, vast)')
+    if a.what == 'set':
+        new = list(dict.fromkeys(a.names))
+    elif a.what == 'add':
+        new = names + [n for n in a.names if n not in names]
+    elif a.what == 'remove':
+        new = [n for n in names if n not in a.names]
+    else:
+        new = []
+    body = f'# self-play workers of this run (tools/vast.py workers, {time.strftime("%Y-%m-%d %H:%M:%S")})\n' + \
+        ''.join(n + '\n' for n in new)
+    if where:
+        ssh(where, f'cat > {shlex.quote(path)}.tmp && mv {shlex.quote(path)}.tmp {shlex.quote(path)}', input=body)
+    else:
+        with open(path + '.tmp', 'w', encoding='utf-8', newline='\n') as f:
+            f.write(body)
+        os.replace(path + '.tmp', path)
+    say(f'workers of {os.path.basename(run)}: {names} -> {new} (applies from the next generation)')
 
 
 def cmd_prep(a):
@@ -835,20 +954,30 @@ def main():
         p.add_argument('--min-cores', type=int, default=FILTERS['min_cores'])
         p.add_argument('--hours', type=float, default=2.0)
         p.add_argument('--region', choices=('na', 'any'), default='na', help='na: US + Canada (default)')
+        p.add_argument('--gpus', type=int, default=1, help='GPUs per box (2: one box, trainer on GPU 0 + gpu:1)')
 
     p = sub.add_parser('offers')
     filt(p)
     p.set_defaults(fn=cmd_offers)
     p = sub.add_parser('rent')
-    p.add_argument('name')
+    p.add_argument('names', nargs='+', metavar='name')
     p.add_argument('--offer', type=int)
     filt(p)
-    p.set_defaults(fn=cmd_rent)
+    p.set_defaults(fn=each_name(cmd_rent))
     p = sub.add_parser('prep')
-    p.add_argument('name')
+    p.add_argument('names', nargs='+', metavar='name')
     p.add_argument('--checkout')
     p.add_argument('--gate', metavar='DIGEST', help='run tools/gate.py repin on the box, expecting this engine digest')
-    p.set_defaults(fn=cmd_prep)
+    p.set_defaults(fn=cmd_prep_many)
+    p = sub.add_parser('link', help='let box TRAINER ssh to the WORKER boxes (its run reaches them as vast:<worker>)')
+    p.add_argument('trainer')
+    p.add_argument('workers', nargs='+')
+    p.set_defaults(fn=cmd_link)
+    p = sub.add_parser('workers', help="a run's self-play workers (its selfplay_remotes file, re-read every generation)")
+    p.add_argument('run')
+    p.add_argument('what', choices=('show', 'set', 'add', 'remove', 'clear'))
+    p.add_argument('names', nargs='*', help='remote names: vast:<box>, gpu:<N>, mac, vast')
+    p.set_defaults(fn=cmd_workers)
     p = sub.add_parser('status')
     p.set_defaults(fn=cmd_status)
     p = sub.add_parser('extend')

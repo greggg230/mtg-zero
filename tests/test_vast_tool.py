@@ -72,3 +72,38 @@ def test_the_vast_remote_is_a_run_commit_remote_on_the_box():
     assert spec.selfplay['procs'] == 1 and spec.selfplay['overrides']['infer_device'] == 'cuda'
     assert spec.prepare == 'python tools/vast.py prep vast'
     assert package.active().remotes['mac'].prepare == 'bash tools/mac.sh --eval-checkout'
+
+
+def test_the_workers_file_of_a_desktop_run(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(vast, 'load_ledger', lambda: {'w1': {'iid': 1}, 'w2': {'iid': 2}})
+    run = str(tmp_path)
+
+    def workers(what, *names):
+        vast.cmd_workers(vast.argparse.Namespace(run=run, what=what, names=list(names)))
+        lines = (tmp_path / 'selfplay_remotes').read_text().splitlines()
+        return [x for x in lines if x and not x.startswith('#')]
+    assert workers('set', 'vast:w1', 'gpu:1') == ['vast:w1', 'gpu:1']
+    assert workers('add', 'vast:w2', 'vast:w1') == ['vast:w1', 'gpu:1', 'vast:w2']
+    assert workers('remove', 'gpu:1') == ['vast:w1', 'vast:w2']
+    assert workers('clear') == []
+    with pytest.raises(SystemExit):
+        workers('add', 'vast:nobox')                     # not a box of the ledger
+    with pytest.raises(SystemExit):
+        workers('add', 'w1')                             # not a remote name
+
+
+def test_offers_filter_by_gpu_count():
+    a = vast.argparse.Namespace(max_dph=2.0, min_ram=96, min_cores=32, gpus=2)
+    assert vast.filters_from(a)['num_gpus'] == 2 and vast.filters_from(a)['gpu_name'] == 'RTX 5090'
+
+
+def test_any_box_and_a_local_gpu_are_remotes_of_the_package():
+    pytest.importorskip('torch')
+    import mtgz.az  # noqa: F401
+    from zero import package
+    r = package.active().remotes
+    w1 = r['vast:']('w1')
+    assert w1.fixed['host'] == 'mtgz-w1' and w1.prepare == 'python tools/vast.py prep w1'
+    assert w1.selfplay['overrides'] == r['vast'].selfplay['overrides']
+    g = r['gpu:']('1')
+    assert g.device == 1 and g.selfplay_overrides['infer_device'] == 'cuda'

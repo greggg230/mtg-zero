@@ -155,3 +155,52 @@ class RunCommitRemote(Mapping):
                              f'{(r.stderr or r.stdout).strip()[-600:]}\n  prepare it: in {self.root}: '
                              f'{self.prepare}')
 
+
+
+class LocalGpuRemote(Mapping):
+    """Another GPU of this machine as a self-play 'remote' (zero-core's multi-host self-play; run setting
+    selfplay_remote 'gpu:1', or a line `gpu:1` in the run's selfplay_remotes file; docs/ENGINE.md 97.2): a worker
+    process here, `CUDA_VISIBLE_DEVICES=<device>`, in the run's own checkout - so that checkout must be exactly
+    the run's commit with its engine stamped (`tools/vast.py prep` stamps a box's checkout; a desktop worktree is
+    stamped by `bash tools/mac.sh --eval-checkout`'s recipe), its own workdir ~/mtgz-gpu<device>. For a box with
+    two or more GPUs: the run trains (and plays) on GPU 0, each `gpu:N` plays on GPU N."""
+
+    KEYS = RunCommitRemote.KEYS
+
+    def __init__(self, root, device, selfplay_overrides, env=None):
+        self.root, self.device = root, int(device)
+        self.selfplay_overrides = dict(selfplay_overrides)
+        self.env = dict(env or {})
+        self._spec = None
+
+    def __iter__(self):
+        return iter(self.KEYS)
+
+    def __len__(self):
+        return len(self.KEYS)
+
+    def __getitem__(self, k):
+        if k not in self.KEYS:
+            raise KeyError(k)
+        if self._spec is None:
+            self._spec = self.resolve()
+        return self._spec[k]
+
+    def __repr__(self):
+        return f'LocalGpuRemote(gpu {self.device}, root={self.root!r}, resolved={self._spec is not None})'
+
+    def resolve(self):
+        head, dirty = checkout_state(self.root)
+        if dirty:
+            raise SystemExit(f'selfplay_remote gpu:{self.device}: the run\'s checkout {self.root} has uncommitted '
+                             f'changes: {"; ".join(d.strip() for d in dirty[:5])}')
+        p = problems(self.root, head)
+        if p:
+            raise SystemExit(f'selfplay_remote gpu:{self.device}: {self.root} cannot serve as its own remote: '
+                             f'{"; ".join(p)} (stamp it: python tools/vast.py prep <box> on a box)')
+        base = os.path.join(os.path.expanduser('~'), f'mtgz-gpu{self.device}').replace('\\', '/')
+        env = dict(self.env, CUDA_VISIBLE_DEVICES=str(self.device), **{ENV_COMMIT: head})
+        return {'host': 'local', 'repo': self.root, 'python': sys.executable, 'workdir': base + '/remote', 'env': env,
+                'overrides': dict(self.selfplay_overrides),
+                'selfplay': {'workdir': base + '/selfplay', 'procs': 1, 'nice': 0, 'env': dict(env),
+                             'overrides': dict(self.selfplay_overrides)}}
