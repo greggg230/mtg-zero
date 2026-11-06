@@ -641,11 +641,29 @@ def seat_labels(rep, ckpt, a, it):
     return [me if os.path.basename(str(s.get('checkpoint') or '')) == mine else vs for s in rep['seats']]
 
 
+RECENT_ROWS = 400              # every row of the newest generations is posted ...
+OLD_EVERY = 4                  # ... older ones: those with a reading (Elo, h2h, yardstick) and every 4th
+READING_KEYS = ('elo', 'elo_anchored', 'elo_avg', 'h2h', 'yard_win', 'rand_win')
+
+
+def _thin(rows):
+    """The rows the site needs: every one of the newest RECENT_ROWS generations, and of the older ones those with
+    a reading plus every OLD_EVERY-th (the charts treat steps of up to 12 generations as continuous). The body
+    grew ~1.2 KiB a generation and passed the site's 1,800 KiB again at r3-2b-float550's ~2,123 (2026-11-06,
+    HTTP 413 for ~4 h): thinning keeps it bounded by the recent rows plus a quarter of the history."""
+    its = [r.get('iter') for r in rows if isinstance(r.get('iter'), int)]
+    if not its:
+        return rows
+    cut = max(its) - RECENT_ROWS
+    return [r for r in rows if not isinstance(r.get('iter'), int) or r['iter'] > cut or r['iter'] % OLD_EVERY == 0
+            or any(r.get(k) not in (None, [], {}) for k in READING_KEYS)]     # (h2h is [] on a plain row)
+
+
 def _wire_rows(rows):
-    """Iteration rows as posted: without their None fields (the site reads a missing field as null) and the
-    time in whole seconds."""
+    """Iteration rows as posted: thinned (`_thin`), without their None fields (the site reads a missing field as
+    null) and the time in whole seconds."""
     return [{k: (round(v) if k == 'time' and isinstance(v, float) else v) for k, v in r.items() if v is not None}
-            for r in rows]
+            for r in _thin(rows)]
 
 
 def wire_progress(p):
