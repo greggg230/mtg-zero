@@ -341,10 +341,15 @@ class VastCLI:
         """Let `public_key` log in to instance `iid`: Vast manages the instance's authorized_keys (a key appended
         to it by hand is dropped when Vast rewrites the file, and the 2026-11-05 attempt locked the instance out
         until this re-attached the desktop's key)."""
-        r = self._run(['attach', 'ssh', str(iid), public_key.strip()], retry_status=(429,))
-        if isinstance(r, dict) and r.get('success') is False:
-            raise ProviderError(f'attach ssh to {iid} failed: {r}')
-        return r
+        # (the CLI prints a Python dict here, not JSON even with --raw: read its text)
+        env = dict(os.environ, VAST_API_KEY=self.key or '')
+        r = subprocess.run(self.exe + ['attach', 'ssh', str(iid), public_key.strip()], capture_output=True, env=env,
+                           timeout=self.timeout, stdin=subprocess.DEVNULL,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        out = (r.stdout + r.stderr).decode('utf-8', 'replace')
+        if r.returncode or "'success': True" not in out:
+            raise ProviderError(f'attach ssh to {iid} failed (exit {r.returncode}): {out.strip()[-300:]}')
+        return out.strip()
 
     def destroy(self, iid):
         try:
