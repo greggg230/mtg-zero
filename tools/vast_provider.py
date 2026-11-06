@@ -337,6 +337,15 @@ class VastCLI:
             rows = rows.get('instances') or []
         return [normalize_instance(r) for r in rows]
 
+    def attach_ssh(self, iid, public_key):
+        """Let `public_key` log in to instance `iid`: Vast manages the instance's authorized_keys (a key appended
+        to it by hand is dropped when Vast rewrites the file, and the 2026-11-05 attempt locked the instance out
+        until this re-attached the desktop's key)."""
+        r = self._run(['attach', 'ssh', str(iid), public_key.strip()], retry_status=(429,))
+        if isinstance(r, dict) and r.get('success') is False:
+            raise ProviderError(f'attach ssh to {iid} failed: {r}')
+        return r
+
     def destroy(self, iid):
         try:
             self._run(['destroy', 'instance', str(iid), '-y'], timeout=120)

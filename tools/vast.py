@@ -402,14 +402,15 @@ def cmd_link(a):
     if not pub.startswith('ssh-'):
         die(f'no public key from {a.trainer}: {pub[:100]}')
     blocks = []
+    p = vp.VastCLI()
     for w in a.workers:
         e = box(w)
         r = e.get('ssh') or {}
         if not r:
             die(f'box {w!r} has no ssh route in the ledger')
-        ssh(w, f'mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && '
-               f'(grep -qxF {shlex.quote(pub)} ~/.ssh/authorized_keys || echo {shlex.quote(pub)} >> ~/.ssh/authorized_keys) '
-               f'&& chmod 600 ~/.ssh/authorized_keys')
+        # through Vast, never by editing the worker's authorized_keys: Vast rewrites that file, and a hand edit
+        # locked a worker out (even the desktop's key) until its key was re-attached (2026-11-05)
+        p.attach_ssh(e['iid'], pub)
         blocks.append(f'# >>> {alias(w)} (tools/vast.py) >>>\nHost {alias(w)}\n  HostName {r["host"]}\n  Port {r["port"]}\n'
                       f'  User root\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n'
                       f'  ServerAliveInterval 15\n  ServerAliveCountMax 4\n  ConnectTimeout 20\n# <<< {alias(w)} <<<\n')
@@ -421,7 +422,11 @@ def cmd_link(a):
               'blocks = sys.stdin.read()\nopen(p, "w").write(blocks + s)\nos.chmod(p, 0o600)\n')
     ssh(a.trainer, f'{BOX_PY} -c {shlex.quote(script)} {" ".join(alias(w) for w in a.workers)}', input=''.join(blocks))
     for w in a.workers:
-        r = ssh(a.trainer, f'ssh -o BatchMode=yes {alias(w)} hostname', check=False, timeout=90)
+        for _ in range(12):                                # Vast applies an attached key within seconds
+            r = ssh(a.trainer, f'ssh -o BatchMode=yes {alias(w)} hostname', check=False, timeout=90)
+            if r.returncode == 0:
+                break
+            time.sleep(10)
         say(f'{a.trainer} -> {w}: ' + ('ok (' + r.stdout.strip() + ')' if r.returncode == 0 else
                                        f'FAILED: {(r.stderr or r.stdout).strip()[-200:]}'))
 
