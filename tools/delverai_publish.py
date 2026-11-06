@@ -655,8 +655,23 @@ def _thin(rows):
     if not its:
         return rows
     cut = max(its) - RECENT_ROWS
-    return [r for r in rows if not isinstance(r.get('iter'), int) or r['iter'] > cut or r['iter'] % OLD_EVERY == 0
-            or any(r.get(k) not in (None, [], {}) for k in READING_KEYS)]     # (h2h is [] on a plain row)
+    out, last = [], {}                             # last: per lineage segment, the kept row the dropped ones fold into
+    for r in rows:
+        keep = (not isinstance(r.get('iter'), int) or r['iter'] > cut or r['iter'] % OLD_EVERY == 0
+                or any(r.get(k) not in (None, [], {}) for k in READING_KEYS))     # (h2h is [] on a plain row)
+        seg = r.get('seg')
+        keep = keep or seg not in last              # a segment's first row: the next dropped ones fold into it
+        if keep:
+            r = dict(r)
+            out.append(r)
+            last[seg] = r
+        elif seg in last and r.get('sp_games'):
+            # the site's "Self-play games" total sums the rows' sp_games (dashboard.js): a dropped row's games go
+            # to the kept row before it, which then counts the games of its span (`sp_games_span` generations)
+            k = last[seg]
+            k['sp_games'] = (k.get('sp_games') or 0) + r['sp_games']
+            k['sp_games_span'] = k.get('sp_games_span', 1) + 1
+    return out
 
 
 def _wire_rows(rows):
