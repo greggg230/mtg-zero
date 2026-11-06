@@ -32,6 +32,7 @@ the desktop as usual: the supervisor moves STOP away).
 import argparse
 import ast
 import base64
+import ctypes
 import io
 import json
 import os
@@ -46,6 +47,11 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+# A process without a console window (a `run-sync --loop` whose launcher has exited) would give every ssh / git
+# child its own visible terminal window, each one stealing keyboard focus (5 per sync pass, 2026-11-05). Those
+# children get a hidden console instead; a process that has a console window keeps sharing it with them.
+NO_WINDOW = (subprocess.CREATE_NO_WINDOW
+             if os.name == 'nt' and not ctypes.windll.kernel32.GetConsoleWindow() else 0)
 sys.path.insert(0, HERE)
 import vast_provider as vp  # noqa: E402
 
@@ -143,7 +149,8 @@ def ssh(name, cmd, input=None, check=True, timeout=600, capture=True):
     UTF-8 bytes: a text-mode pipe on Windows would turn its newlines into CRLF (bash: "pipefail\\r")."""
     r = subprocess.run(['ssh', '-o', 'BatchMode=yes', alias(name), cmd],
                        input=input.encode('utf-8') if input is not None else None,
-                       capture_output=capture, timeout=timeout, stdin=None if input is not None else subprocess.DEVNULL)
+                       capture_output=capture, timeout=timeout, stdin=None if input is not None else subprocess.DEVNULL,
+                       creationflags=NO_WINDOW)
     if capture:
         r.stdout = r.stdout.decode('utf-8', 'replace')
         r.stderr = r.stderr.decode('utf-8', 'replace')
@@ -349,7 +356,8 @@ def cmd_ssh(a):
 # ------------------------------------------------------------------ preparing a checkout
 
 def git(root, *args):
-    return subprocess.run(['git', '-C', root, *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(['git', '-C', root, *args], capture_output=True, text=True, check=True,
+                          creationflags=NO_WINDOW).stdout.strip()
 
 
 def box_repo(sha):
@@ -368,7 +376,8 @@ def cmd_prep_many(a):
             + (['--gate', a.gate] if a.gate else [])
         logf = os.path.join(os.path.dirname(LEDGER), f'prep-{n}.log')
         procs[n] = (subprocess.Popen(args, stdout=open(logf, 'w', encoding='utf-8'), stderr=subprocess.STDOUT,
-                                     stdin=subprocess.DEVNULL, env=dict(os.environ, PYTHONIOENCODING='utf-8')), logf)
+                                     stdin=subprocess.DEVNULL, env=dict(os.environ, PYTHONIOENCODING='utf-8'),
+                                     creationflags=NO_WINDOW), logf)
         say(f'prep {n}: started (log {logf})')
     bad = []
     for n, (p, logf) in procs.items():
@@ -484,9 +493,10 @@ def cmd_prep(a):
     ssh(a.name, 'git init -q --bare ~/mtg-zero.git 2>/dev/null; git init -q --bare ~/mtg-zero-core.git 2>/dev/null; true')
     say(f'push {sha[:12]} + zero-core {pin[:12]}')
     subprocess.run(['git', '-C', co, 'push', '-q', '-f', f'{alias(a.name)}:mtg-zero.git', f'{sha}:refs/heads/run-{sha[:12]}'],
-                   check=True)
+                   check=True, creationflags=NO_WINDOW)
     subprocess.run(['git', '-C', os.path.join(co, 'third_party', 'zero-core'), 'push', '-q', '-f',
-                    f'{alias(a.name)}:mtg-zero-core.git', f'{pin}:refs/heads/pin-{pin[:12]}'], check=True)
+                    f'{alias(a.name)}:mtg-zero-core.git', f'{pin}:refs/heads/pin-{pin[:12]}'], check=True,
+                   creationflags=NO_WINDOW)
     repo = box_repo(sha)
     script = f'''set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH" PYTHON={BOX_PY} PYO3_PYTHON={BOX_PY}
@@ -567,7 +577,7 @@ def remap_paths(cfg):
 def tar_upload(name, dest, members):
     """members: [(arcname, local path | bytes)] -> extracted under `dest` on the box (one ssh stream)."""
     proc = subprocess.Popen(['ssh', '-o', 'BatchMode=yes', alias(name), f'mkdir -p {shlex.quote(dest)} && tar xf - -C {shlex.quote(dest)}'],
-                            stdin=subprocess.PIPE)
+                            stdin=subprocess.PIPE, creationflags=NO_WINDOW)
     total = 0
     with tarfile.open(fileobj=proc.stdin, mode='w|') as tf:
         for arc, src in members:
@@ -726,7 +736,7 @@ def tar_fetch(name, rd, run, paths, timeout_s=1800):
     if not paths:
         return 0
     proc = subprocess.Popen(['ssh', '-o', 'BatchMode=yes', alias(name), f'cd {rd} && tar cf - --files-from=-'],
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, creationflags=NO_WINDOW)
     killer = threading.Timer(timeout_s, proc.kill)
     killer.daemon = True
     killer.start()
@@ -785,7 +795,7 @@ def sync_once(name, run, rd, data=True, final=False):
         have = os.path.getsize(local) if os.path.exists(local) else -1
         if p in APPEND and 0 <= have < size:
             r = subprocess.run(['ssh', '-o', 'BatchMode=yes', alias(name), f'tail -c +{have + 1} {rd}/{p} | head -c {size - have}'],
-                               capture_output=True, timeout=600)
+                               capture_output=True, timeout=600, creationflags=NO_WINDOW)
             if r.returncode == 0 and len(r.stdout) == size - have:
                 with open(local, 'ab') as f:
                     f.write(r.stdout)
