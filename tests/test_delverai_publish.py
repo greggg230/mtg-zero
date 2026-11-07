@@ -196,3 +196,41 @@ def test_the_averaged_anchored_elo_takes_twelve_readings_with_their_covariance(t
     lost = [bare(r) for r in win]
     lost[0]['iter'] = 4
     assert P.add_anchored_averages(lost, lambda t: P.anchored_cov(run, t)) == 1 and 'elo_avg' not in lost[-1]
+
+
+def test_the_gap_rule_is_twice_the_measured_step_of_each_segment(tmp_path):
+    # the main line rated every 8th generation, its fork from 40 every 16th (the 128x8 run's
+    # --eval-every 16): a reading 16 after the last one is no gap there, 48 is. Measured, not the
+    # config's eval_every (1000 on runs evaluated from outside)
+    main = str(tmp_path / 'main')
+    fork = str(tmp_path / 'fork')
+    _write(os.path.join(main, 'config.json'), {'eval_every': 1000})
+    _write(os.path.join(fork, 'config.json'), {'eval_every': 16})
+    rated = lambda g: {'iter': g, 'elo': {'elo': 1500.0, 'se': 50.0, 'select': TAG}}
+    _write(os.path.join(main, 'metrics.jsonl'), [rated(g) for g in (8, 16, 24, 32, 40)], lines=True)
+    _write(os.path.join(fork, 'metrics.jsonl'), [rated(g) for g in (8, 16, 24, 32, 40)] + [{'iter': 41}]
+           + [rated(g) for g in (88, 104, 120)], lines=True)
+    assert (P.rated_every([8, 16, 24, 40]), P.rated_every([1, 2, 6, 10]), P.rated_every([5]), P.rated_every([])) == (8, 4, None, None)
+    assert P.rated_every([0, 8, 24]) == 8                                       # a tie: the smaller
+    assert (P.max_gap(8), P.max_gap(16), P.max_gap(4), P.max_gap(None)) == (16, 32, 12, 12)   # at least 12
+    forks = {P._norm(fork): {'parent': main, 'at': 40, 'label': 'deeper', 'won': False}}
+    L = P.lineage_record(fork, forks)
+    assert [(sg['run'], sg['from_g'], sg['rated_every']) for sg in L['segments']] == [('main', 0, 8), ('fork', 41, 16)]
+    rec = P.progress(fork, forks=forks)
+    assert rec['rated_every'] == [[0, 8], [41, 16]]
+    own = P.gap_rule(rec['rated_every'])
+    assert [own(g) for g in (0, 40, 41, 100)] == [16, 16, 32, 32]
+    assert P.gap_rule([])(5) == 12
+    # readings every 16 average across the fork's steps; the old 12 never did; a 48-generation hole starts again
+    rows = [{'iter': g, 'select': TAG, 'elo_anchored': 1700.0} for g in range(48, 48 + 16 * 14, 16)]
+    cov = ({f'iter_{g:04d}': k for k, g in enumerate(range(0, 400))}, P.np.eye(400))
+    assert P.add_anchored_averages(rows, lambda t: cov, gap=own) == 0
+    assert [r['iter'] for r in rows if 'elo_avg' in r] == [224, 240, 256]
+    bare = lambda r: {k: v for k, v in r.items() if not k.startswith('elo_avg')}
+    old = [bare(r) for r in rows]
+    assert P.add_anchored_averages(old, lambda t: cov) == 0 and not any('elo_avg' in r for r in old)
+    holed = [bare(r) for r in rows]
+    for r in holed[3:]:
+        r['iter'] += 32                                   # 80 -> 128: 48 apart
+    P.add_anchored_averages(holed, lambda t: cov, gap=own)
+    assert not any('elo_avg' in r for r in holed)        # 11 readings since the hole

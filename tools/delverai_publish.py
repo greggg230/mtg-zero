@@ -49,8 +49,10 @@ a copy of), g (in the lineage's numbering), elo, se, how (set / calibrated), sin
 it (before the anchors, older runs) has None: its `elo` is the pool's.
 
 Averaged anchored Elo (`elo_avg` / `elo_avg_se` in each row, the user 2026-11-05): a row with an
-anchored Elo and AVG_N - 1 more before it in the same pool (no stretch of more than AVG_GAP
-generations between two of them) has the mean of those AVG_N readings and its standard error from
+anchored Elo and AVG_N - 1 more before it in the same pool (no stretch of more than max_gap
+generations between two of them: twice the usual step between the readings of the lineage segment
+the later one is in, at least AVG_GAP - the site's charts break their lines at the same stretches,
+from the record's `rated_every`) has the mean of those AVG_N readings and its standard error from
 the pool's anchored fit with its covariance (anchored_cov: the readings share games - their Elo
 matches with each other - so they are not quite independent: ~10% wider than sqrt(sum se^2) / N on
 r3-2b-float550). The lineage's rows average across forks (a fork's pool holds its parent's games);
@@ -110,7 +112,7 @@ def _jsonl(path):
                     pass                          # a line being written
     return rows
 AVG_N = 12          # the anchored readings an averaged Elo takes (the user, 2026-11-05)
-AVG_GAP = 12        # a longer stretch between two readings starts a new average (the chart breaks its line there)
+AVG_GAP = 12        # the least max_gap: a longer stretch between two readings starts a new average
 PRIOR_SD = 8.0      # zelo.fit_fixed's prior (log-odds): given to it, and anchored_cov's curvature has it too
 
 
@@ -434,20 +436,51 @@ def anchored_cov(run, tag='visits'):
     return out
 
 
+def rated_every(gens):
+    """The usual step between rated generations (`gens` ascending): the most common one, the smaller
+    of a tie; None for fewer than two. Measured, not the config's eval_every: runs evaluated from
+    outside have 1000 there (no evaluation of their own)."""
+    steps = {}
+    for a, b in zip(gens, gens[1:]):
+        if b > a:
+            steps[b - a] = steps.get(b - a, 0) + 1
+    return min(steps, key=lambda d: (-steps[d], d)) if steps else None
+
+
+def rated_steps(rows, starts, gen):
+    """[[start, rated_every]] per segment: `starts` the segments' first generations (ascending), each
+    one's step measured on the rated rows (an Elo of either kind) from it to the next start."""
+    gens = sorted({gen(r) for r in rows if r.get('elo_anchored') is not None or r.get('elo') is not None})
+    ends = list(starts[1:]) + [math.inf]
+    return [[a, rated_every([g for g in gens if a <= g < b])] for a, b in zip(starts, ends)]
+
+
+def max_gap(every):
+    """The longest stretch between two readings that is still one average (and one line on the
+    site's charts: delverai public/dashboard.js gapRule): twice the segment's usual step (one missed
+    reading is not a gap), at least AVG_GAP."""
+    return max(AVG_GAP, 2 * (every or 0))
+
+
+def gap_rule(steps):
+    """rated_steps' -> generation -> max_gap there (the segment it falls in; before the first, the first)."""
+    return lambda g: max_gap(next((e for a, e in reversed(steps) if g >= a), steps[0][1] if steps else None))
+
+
 def add_anchored_averages(rows, cov_of, pool=lambda r: r.get('select') or 'visits', gen=lambda r: r['iter'],
-                          ckpt=lambda r: r['iter']):
+                          ckpt=lambda r: r['iter'], gap=lambda g: AVG_GAP):
     """In place, `rows` in generation order: each row with an anchored Elo and AVG_N - 1 more before
-    it of the same `pool(row)` (a new pool, or more than AVG_GAP generations since the last reading,
+    it of the same `pool(row)` (a new pool, or more than gap(its generation) since the last reading,
     starts again) gets `elo_avg`, the mean of those AVG_N readings, and `elo_avg_se`, its standard
     error from cov_of(pool) (anchored_cov: the readings are correlated through the games between
-    them). `gen`: a row's generation for the gaps; `ckpt`: its checkpoint's iteration in that pool.
-    -> the rows left without one because the fit doesn't rate a checkpoint of their window."""
+    them). `gen`: a row's generation for the gaps; `ckpt`: its checkpoint's iteration in that pool;
+    `gap`: gap_rule's. -> the rows left without one because the fit doesn't rate a checkpoint of their window."""
     win, key, last, missing = [], None, None, 0
     for r in rows:
         if r.get('elo_anchored') is None:
             continue
         k, g = pool(r), gen(r)
-        if not win or k != key or g - last > AVG_GAP:
+        if not win or k != key or g - last > gap(g):
             win, key = [], k
         win = (win + [r])[-AVG_N:]
         last = g
@@ -527,12 +560,14 @@ def lineage_record(run, forks):
             rows.append(dict(r, g=sg['offset'] + it, gen=it, run=sg['run'], seg=k, h2h=h2h))
     # averaged across forks: a numbering's (same offset's) last segment's pool holds its ancestors' games
     last_dir = {sg['offset']: sg['dir'] for sg in segs}
+    steps = rated_steps(rows, [sg['offset'] + sg['first'] for sg in segs], lambda r: r['g'])
     _warn_missing(add_anchored_averages(
         sorted(rows, key=lambda r: (r['g'], r['seg'])), lambda k: anchored_cov(last_dir[k[0]], k[1]),
         pool=lambda r: (segs[r['seg']]['offset'], r.get('select') or 'visits'), gen=lambda r: r['g'],
-        ckpt=lambda r: r['gen']), run)
+        ckpt=lambda r: r['gen'], gap=gap_rule(steps)), run)
     return {'segments': [{x: sg[x] for x in ('run', 'label', 'kind', 'first', 'last', 'offset')}
-                         | {'from_g': sg['offset'] + sg['first']} for sg in segs], 'rows': rows}
+                         | {'from_g': sg['offset'] + sg['first'], 'rated_every': st[1]} for sg, st in zip(segs, steps)],
+            'rows': rows}
 
 
 def migrated_from(run):
@@ -584,7 +619,11 @@ def progress(run, every=1, forks=None, extra=None):
     segs = lineage(run, forks or {})
     also = same_numbering(segs, len(segs) - 1)
     rows = iteration_rows(run, also)
-    _warn_missing(add_anchored_averages(sorted((r for r in rows if isinstance(r.get('iter'), int)), key=lambda r: r['iter']), lambda t: anchored_cov(run, t)), run)
+    # the gaps in the run's own numbering: per segment numbered as it is (the record's rated_every)
+    own = rated_steps([r for r in rows if isinstance(r.get('iter'), int)],
+                      [sg['first'] for sg in segs if sg['offset'] == segs[-1]['offset']], lambda r: r['iter'])
+    _warn_missing(add_anchored_averages(sorted((r for r in rows if isinstance(r.get('iter'), int)), key=lambda r: r['iter']),
+                                        lambda t: anchored_cov(run, t), gap=gap_rule(own)), run)
     state = _json(os.path.join(run, 'delverai.json'), {}) or {}
     lin = lineage_record(run, forks or {})
     offset = lin['segments'][-1]['offset'] if lin else 0
@@ -599,7 +638,7 @@ def progress(run, every=1, forks=None, extra=None):
         'anchor': {'name': ratings.get('anchor'), 'elo': ratings.get('anchor_elo')}, 'select': tag,
         'anchors': anchor_defs(run, tag, offset, also),
         'replayed': state.get('replayed', []), 'record_every': every, 'migrated_from': migrated_from(run),
-        'lineage': lin,
+        'lineage': lin, 'rated_every': own,
     }, **(extra or {}))
 
 
