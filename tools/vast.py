@@ -457,7 +457,7 @@ def cmd_workers(a):
     if a.what == 'show':
         print(f'{where + ":" if where else ""}{path}: {names or "(none: no file or empty)"}')
         return
-    for n in a.names:
+    for n in a.names if a.what in ('set', 'add') else []:    # (remove: a destroyed box's name must still go)
         if n.startswith('vast:'):
             box(n.split(':', 1)[1])                      # a box we rented (ledger)
         elif not (n.startswith('gpu:') and n[4:].isdigit()) and n not in ('mac', 'vast', 'local'):
