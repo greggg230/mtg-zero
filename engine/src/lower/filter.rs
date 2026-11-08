@@ -253,6 +253,9 @@ pub(crate) fn lower_condition(l: &mut Lowerer, c: &cats::Condition) -> Option<Co
         // "During your turn" (Memorial Team Leader; EoE lane D, ENGINE.md
         // 99.5).
         E::DuringYourTurn(nodes::DuringYourTurn {}) => Some(Cond::YourTurn),
+        // "As long as an artifact entered the battlefield under your control
+        // this turn" (Mechan Shieldmate; ENGINE.md 99.11).
+        E::ControlledArtifactEnteredThisTurn(nodes::ControlledArtifactEnteredThisTurn {}) => Some(Cond::ArtifactEnteredThisTurn),
     })
 }
 

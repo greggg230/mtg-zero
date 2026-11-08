@@ -441,6 +441,7 @@ impl Game {
             pl.spells_cast = 0;
             pl.noncreature_cast = 0;
             pl.gained_life = false;
+            pl.artifact_entered = false;
             pl.life_gained = 0;
             pl.lost_life = false;
         }

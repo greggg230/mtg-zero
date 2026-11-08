@@ -191,6 +191,10 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     if enters && event != EventKind::Enters || cast && event != EventKind::IsCast {
         l.unsupported(format!("TriggerPredicate(how it was cast, on {event:?})"));
     }
+    // The zone a permanent left for: a leave event's amount only.
+    if needs(&pred, &|p| matches!(p, TrigPred::LeftTo(_))) && event != EventKind::LeavesBattlefield {
+        l.unsupported(format!("TriggerPredicate.LeftBattlefieldTo(on {event:?})"));
+    }
     // "At the beginning of ..., if this is tapped" (Mana Vault): an
     // intervening "if" about the source (CR 603.4), checked again as the
     // ability resolves.
@@ -306,7 +310,8 @@ fn slots_used(p: &TrigPred) -> Vec<Slot> {
         | TrigPred::EnteredNotFromGyExile
         | TrigPred::InGraveyard
         | TrigPred::SpellMvParity
-        | TrigPred::AttacksMonarch => Vec::new(),
+        | TrigPred::AttacksMonarch
+        | TrigPred::LeftTo(_) => Vec::new(),
     }
 }
 
@@ -431,6 +436,29 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         P::StateBound(nodes::StateBound { inner }) => {
             let (c, intervening) = lower_state_pred(l, inner)?;
             Some(if intervening { TrigPred::If(c) } else { TrigPred::State(c) })
+        }
+        // "Dies or is put into exile" (Syr Vondam; CR 700.4): a leave event
+        // to one of these zones (ENGINE.md 99.11).
+        P::LeftBattlefieldTo(nodes::LeftBattlefieldTo { zones }) => {
+            use crate::db::left_to;
+            let mut mask = 0u8;
+            for z in zones {
+                mask |= match z {
+                    enums::ZoneName::Graveyard => left_to::GRAVEYARD,
+                    enums::ZoneName::Exile => left_to::EXILE,
+                    enums::ZoneName::Hand => left_to::HAND,
+                    enums::ZoneName::Library => left_to::LIBRARY,
+                    other => {
+                        l.unsupported(format!("LeftBattlefieldTo.zones({other:?})"));
+                        return None;
+                    }
+                };
+            }
+            if mask == 0 {
+                l.unsupported("LeftBattlefieldTo.zones(none)");
+                return None;
+            }
+            Some(TrigPred::LeftTo(mask))
         }
         other => {
             l.unsupported(format!("TriggerPredicate:{}", other.tag()));

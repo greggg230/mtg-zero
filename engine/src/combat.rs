@@ -83,12 +83,13 @@ impl Game {
         self.battlefield.iter().copied().filter(|&c| self.objs[c.i()].blocking == Some(att)).collect()
     }
 
-    /// CR 508.1a: untapped, no summoning sickness unless haste, no defender.
+    /// CR 508.1a: untapped, no summoning sickness unless haste, no defender
+    /// (unless it can attack as though it didn't have it, 702.3b).
     pub(crate) fn can_attack(&self, c: CardIdx) -> bool {
         self.is_creature(c)
             && !self.objs[c.i()].tapped
             && (!self.is_sick(c) || self.has_kw(c, Kw::Haste))
-            && !self.has_kw(c, Kw::Defender)
+            && (!self.has_kw(c, Kw::Defender) || self.flags_of(c).attack_despite_defender)
     }
 
     /// Can `b` block `a` (CR 509.1b restrictions)? Flying attackers need
@@ -128,6 +129,13 @@ impl Game {
             }
         }
         true
+    }
+
+    /// "Can't be blocked by more than one creature" (CR 509.1b): an Aura
+    /// attached to `a` says so (Meltstrider's Resolve, ENGINE.md 99.11).
+    pub(crate) fn max_one_blocker(&self, a: CardIdx) -> bool {
+        let r = self.obj_ref(a);
+        self.battlefield.iter().any(|&x| self.objs[x.i()].attached == Some(r) && self.abilities(x).attached_max_one_blocker)
     }
 
     /// The fewest creatures that may block `a` (menace 702.110b: two; "can't
@@ -265,7 +273,11 @@ impl Game {
             opts.push(Opt { action: act::PASS, choice: Choice::Pass });
         }
         for a in self.attackers() {
-            if self.can_block(b, a) && self.blocks_completable(Some((b, a)), rest) {
+            // "Can't be blocked by more than one creature": a second blocker
+            // can't join; with menace too, it can't be blocked at all (CR
+            // 509.1b).
+            let cap = self.max_one_blocker(a) && (!self.blockers_of(a).is_empty() || self.min_blockers(a) >= 2);
+            if !cap && self.can_block(b, a) && self.blocks_completable(Some((b, a)), rest) {
                 opts.push(Opt { action: self.perm_action(dp, a), choice: Choice::Card(a) });
             }
         }

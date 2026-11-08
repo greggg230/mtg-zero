@@ -233,6 +233,9 @@ pub struct Player {
     pub noncreature_cast: u8,
     /// Gained life this turn.
     pub gained_life: bool,
+    /// An artifact entered the battlefield under this player's control
+    /// this turn (Mechan Shieldmate; ENGINE.md 99.11).
+    pub artifact_entered: bool,
     /// The life gained this turn ("if you've gained 3 or more life this
     /// turn"; EoE lane D, ENGINE.md 99.5).
     pub life_gained: u32,
@@ -613,6 +616,10 @@ pub struct Game {
     /// it enters ("it's an enchantment", "it's a Phyrexian in addition";
     /// CR 614.1c-like; set and cleared around one move).
     pub(crate) entering_mods: Vec<crate::db::Mod>,
+    /// The zone the permanent whose `LeavesBattlefield` event is being
+    /// matched goes to (`db::left_to` bits, `TrigPred::LeftTo`: "dies or is
+    /// put into exile"; set and cleared around that event, ENGINE.md 99.11).
+    pub(crate) leaving_to: u8,
     /// Counters the permanent being put onto the battlefield enters with
     /// because of the effect that puts it there ("with a corpse counter on
     /// it", persist; CR 614.1c, 122.6): on it before its `Enters` event.
@@ -962,6 +969,7 @@ impl Game {
             spells_cast: 0,
             noncreature_cast: 0,
             gained_life: false,
+            artifact_entered: false,
             life_gained: 0,
             cant_gain_life: false,
             attacked_with: Vec::new(),
@@ -1044,6 +1052,7 @@ impl Game {
             entering_sunburst: 0,
             entering_exiled: 0,
             entering_mods: Vec::new(),
+            leaving_to: 0,
             entering_counters: Vec::new(),
             entering_tapped: false,
             discard_entered: false,
@@ -1456,10 +1465,17 @@ impl Game {
         }
         // "You may have this enter as a copy of ..." (CR 707.5): the choice
         // comes first (`Task::EnterAsCopy`), then what it entered as enters.
-        let copy_choice = self.def_of(idx).enters_as_copy.is_some();
+        // An effect that puts it onto the battlefield with no abilities
+        // ("It's a Skeleton ... and has no abilities": Xu-Ifit) applies as it
+        // enters: its own abilities that modify how it enters (enters tapped,
+        // with counters, as a copy, "as it enters" choices) don't apply, and
+        // its "when this enters" abilities don't trigger (CR 614.12; Xu-Ifit's
+        // ruling of 2025-07-25; ENGINE.md 99.11).
+        let own = !self.entering_mods.contains(&crate::db::Mod::LoseAllAbilities);
+        let copy_choice = own && self.def_of(idx).enters_as_copy.is_some();
         let fx_tapped = std::mem::take(&mut self.entering_tapped);
         let fx_counters = std::mem::take(&mut self.entering_counters);
-        let tapped = !copy_choice && self.enters_tapped(idx, controller);
+        let tapped = !copy_choice && self.enters_tapped_own(idx, controller, own);
         self.entering_evoked = evoked; // read as it moves (its ETB sees it)
         let escaped = std::mem::take(&mut self.entering_escaped);
         let dash = std::mem::take(&mut self.entering_dash);
@@ -1523,7 +1539,7 @@ impl Game {
             self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1 });
             return r;
         }
-        self.entering(idx, tapped, x);
+        self.entering_own(idx, tapped, x, own);
         // Multikicker (CR 702.33c): a +1/+1 counter for each time it was
         // kicked; kicker {X}: its X, for "mana value X or less".
         if cast && times > 0 {
@@ -1599,28 +1615,20 @@ impl Game {
     /// tapped", counters, loyalty, a Saga's lore counter, day and night,
     /// "as this enters" choices.
     pub(crate) fn entering(&mut self, idx: CardIdx, tapped: bool, x: u8) {
+        self.entering_own(idx, tapped, x, true);
+    }
+
+    /// [`entering`](Self::entering); without `own`, none of its own
+    /// abilities that apply as it enters (it enters with no abilities: CR
+    /// 614.12), only the rules' (loyalty, lore counters).
+    pub(crate) fn entering_own(&mut self, idx: CardIdx, tapped: bool, x: u8, own: bool) {
         if tapped {
             self.objs[idx.i()].tapped = true;
         }
-        // CR 122.6: "enters with counters".
-        for &(k, n) in &self.def_of(idx).enters_counters {
-            self.add_counters(idx, k, n as crate::num::Count);
-        }
-        if self.def_of(idx).enters_x_counters && x > 0 {
-            self.add_counters(idx, crate::db::Counter::P1P1, x as crate::num::Count);
-        }
-        // CR 702.44a-b: sunburst counters (none if it wasn't cast).
         let sun = std::mem::take(&mut self.entering_sunburst);
-        if let (Some(k), true) = (self.def_of(idx).sunburst, sun > 0) {
-            let k = if self.is_creature(idx) { crate::db::Counter::P1P1 } else { k };
-            self.add_counters(idx, k, sun as crate::num::Count);
-        }
-        // CR 607.2q, 614.1c: a +1/+1 counter for each matching card exiled
-        // to pay the cost of the spell that became it (none if it wasn't
-        // cast; Murktide Regent, ENGINE.md 54).
         let exiled = std::mem::take(&mut self.entering_exiled);
-        if exiled > 0 && self.def_of(idx).counters_per_exiled.is_some() {
-            self.add_counters(idx, crate::db::Counter::P1P1, exiled as crate::num::Count);
+        if own {
+            self.entering_abilities(idx, x, sun, exiled);
         }
         // CR 306.5b: a planeswalker enters with its printed loyalty.
         if let (Some(n), true) = (self.def_of(idx).loyalty, self.def_of(idx).is(types::PLANESWALKER)) {
@@ -1631,6 +1639,48 @@ impl Game {
         if self.def_of(idx).chapters > 0 {
             self.add_counters(idx, crate::db::Counter::Lore, 1);
         }
+        if own {
+            self.entering_choices(idx);
+        }
+    }
+
+    /// The permanent's own abilities that put counters on it as it enters.
+    fn entering_abilities(&mut self, idx: CardIdx, x: u8, sun: u8, exiled: u8) {
+        // CR 122.6: "enters with counters".
+        for &(k, n) in &self.def_of(idx).enters_counters {
+            self.add_counters(idx, k, n as crate::num::Count);
+        }
+        if self.def_of(idx).enters_x_counters && x > 0 {
+            self.add_counters(idx, crate::db::Counter::P1P1, x as crate::num::Count);
+        }
+        // CR 702.44a-b: sunburst counters (none if it wasn't cast).
+        if let (Some(k), true) = (self.def_of(idx).sunburst, sun > 0) {
+            let k = if self.is_creature(idx) { crate::db::Counter::P1P1 } else { k };
+            self.add_counters(idx, k, sun as crate::num::Count);
+        }
+        // CR 607.2q, 614.1c: a +1/+1 counter for each matching card exiled
+        // to pay the cost of the spell that became it (none if it wasn't
+        // cast; Murktide Regent, ENGINE.md 54).
+        if exiled > 0 && self.def_of(idx).counters_per_exiled.is_some() {
+            self.add_counters(idx, crate::db::Counter::P1P1, exiled as crate::num::Count);
+        }
+        // "A +1/+1 counter on it for each other <filter> you control" (CR
+        // 614.1c): the matching permanents already there, not those entering
+        // at the same time (CR 614.12a; `group_ts`).
+        if let Some(f) = self.def_of(idx).enters_counters_per.clone() {
+            let p = self.objs[idx.i()].controller;
+            let since = self.group_ts.1;
+            let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(idx)) };
+            let n = self.permanents_of(p).filter(|&c| c != idx && self.objs[c.i()].timestamp < since && self.card_matches(&f, c, &ctx)).count();
+            if n > 0 {
+                self.add_counters(idx, crate::db::Counter::P1P1, n as crate::num::Count);
+            }
+        }
+    }
+
+    /// The permanent's own "as it enters" abilities (day/night, choices,
+    /// "enters prepared").
+    fn entering_choices(&mut self, idx: CardIdx) {
         // CR 702.145d, g: a daybound (nightbound) permanent makes it day
         // (night) if it is neither; at night a daybound one transforms.
         if self.def_of(idx).daybound || self.def_of(idx).nightbound {
@@ -1854,7 +1904,11 @@ impl Game {
             if to == Zone::Graveyard {
                 self.event(Event::obj(EventKind::Dies, old));
             }
+            // (Where it goes, for "dies or is put into exile": read as the
+            // event's triggers are matched, ENGINE.md 99.11.)
+            self.leaving_to = crate::db::left_to::bit(to);
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
+            self.leaving_to = 0;
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
         let lost_granted = from == Zone::Battlefield && !self.marks.is_empty() && self.lost_abilities(idx);
@@ -2028,6 +2082,12 @@ impl Game {
             for m in std::mem::take(&mut self.entering_mods) {
                 self.add_effect(crate::layers::Affected::Obj(new), m, crate::layers::Until::Forever, ctl);
             }
+        }
+        // "An artifact entered the battlefield under your control this turn"
+        // (Mechan Shieldmate; ENGINE.md 99.11).
+        if to == Zone::Battlefield && self.is_type(idx, crate::db::types::ARTIFACT) {
+            let ctl = self.objs[idx.i()].controller;
+            self.players[ctl as usize].artifact_entered = true;
         }
         if to == Zone::Battlefield {
             // (The note: cast, times paid; an "enter as a copy" choice holds

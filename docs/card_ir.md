@@ -13,7 +13,7 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 |---|---|
 | `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/legacy-delver-ir` 140eafa9 with the legacy pool (schema `181ba4b8a1e7...`, ENGINE.md 54; the cards byte for byte those of `feature/companion-ir` 62210e89, schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
 | `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; mtg-bot's pool `legacy`), the same export and schema |
-| `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.9 the export of mtg-bot `feature/eoe-ir-fixes` 5362f5ed |
+| `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.11 the export of mtg-bot `feature/eoe-ir-fixes` 20bea9f4 (before it 5362f5ed, ENGINE.md 99.9) |
 | `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
 | `card_ir/src/generated.rs` | Generated types (do not edit) |
@@ -86,7 +86,31 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/eoe-ir-fixes` 5362f5ed)
+## Current numbers (mtg-bot `feature/eoe-ir-fixes` 20bea9f4)
+
+ENGINE.md 99.11 (W1): exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
+`feature/eoe-ir-fixes` 20bea9f4 (the second IR-fix batch, on 7af12b20), then `filter_eoe_ir.py`;
+schema sha256 `663b44095dbe1f30560a1ea30aecc00a1edf3c5c9bcefb4f4f4db47351fbcc3b` (was
+`675cfc50fc4e...`). 708 classes: six new (`ReturnTargetCardsFromYourGraveyard` and its record
+`GraveyardReturnGroup`, `ReturnTargetCardFromYourGraveyardToBattlefieldAs`,
+`ReturnCardsExiledWithSourceToBattlefield`, the trigger predicate `LeftBattlefieldTo`, the layer
+payload `CanAttackAsThoughNoDefender`), five no longer used by any card
+(`ConditionalIfSourcePowerAtLeast`, `ReturnUpToNCreaturesFromYourGraveyardToHand`,
+`ReturnUpToNNonlandPermanentCardsFromGraveyardToHand`,
+`PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact`, `RemoveKeyword`); new fields
+`CounterSpell.if_paid` / `if_mana_spent_below_mv`, `ReturnTargetCreatureToOwnersHand.if_was_attacking`
+(it replaces `create_drone_if_was_attacking`), `CreateNTokensFromLastExileRecall.token_printing`,
+`BecomeLandCreatureUEOT.all_creature_types`, `CardPrinting.enters_with_plus_one_counters_per` /
+`attached_cant_be_blocked_by_more_than_one`; new enum members `EnchantKind.creature_or_spacecraft` /
+`artifact_or_creature`, `KeywordKind.modular`, `SpendRestriction.artifact_spell_or_activation`;
+`ReturnChosenGraveyardCardToHand.card_filter` takes a `CardFilterAnyOf` too. The fixed defects are
+docs/ir_defects.md 21 (Luxknight Breacher), 24, 25, 28, 29, 30, 41 (Mutavault), 43, 44, 45, 47, 49,
+50, 61, 62 (Archenemy's Charm), 65, 67, 80, 100, 101. `powerlsv.ir.json` (546 cards, 402,200 bytes)
+and `legacy.ir.json` (2 cards) are the previous files card for card, `schema_sha256` aside (checked
+card by card); `eoe.ir.json` holds the same 320 cards, 20 of them changed (exactly the cards of
+those entries), 213,719 bytes.
+
+### Before ENGINE.md 99.11 (mtg-bot `feature/eoe-ir-fixes` 5362f5ed)
 
 ENGINE.md 99.9: exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
 `feature/eoe-ir-fixes` 5362f5ed (from main 2cb79f77), then `filter_eoe_ir.py`; schema sha256

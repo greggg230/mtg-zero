@@ -196,6 +196,12 @@ pub enum Mod {
     GainSacMana(ManaMask),
     /// Layer 6: it loses all abilities (CR 613.1f).
     LoseAllAbilities,
+    /// "Can attack as though it didn't have defender" (CR 702.3b: it keeps
+    /// defender; Mechan Shieldmate, ENGINE.md 99.11).
+    AttackDespiteDefender,
+    /// It has all creature types (CR 205.3m; layer 4: Mutavault's "a 2/2
+    /// creature with all creature types", ENGINE.md 99.11).
+    AllCreatureTypes,
     /// Layer 4: its card types become exactly `types` and its creature
     /// types exactly `subtypes` (CR 205.1a: "becomes a [subtype] creature";
     /// supertypes are kept).
@@ -824,6 +830,33 @@ pub enum TrigPred {
     /// The attacker attacks the monarch (the player, not a planeswalker;
     /// CR 724, 508.1b).
     AttacksMonarch,
+    /// A `LeavesBattlefield` event of an object that went to one of these
+    /// zones (`left_to` bits; "dies or is put into exile", CR 700.4:
+    /// `Game::leaving_to` as the event's triggers are matched; ENGINE.md
+    /// 99.11).
+    LeftTo(u8),
+}
+
+/// The zone a permanent left the battlefield for (`Game::leaving_to`,
+/// `TrigPred::LeftTo`).
+pub mod left_to {
+    use crate::ids::Zone;
+    pub const GRAVEYARD: u8 = 1;
+    pub const EXILE: u8 = 2;
+    pub const HAND: u8 = 4;
+    pub const LIBRARY: u8 = 8;
+    /// Anywhere else (a token or a copy ceasing to exist, CR 111.7).
+    pub const OTHER: u8 = 16;
+
+    pub fn bit(z: Zone) -> u8 {
+        match z {
+            Zone::Graveyard => GRAVEYARD,
+            Zone::Exile => EXILE,
+            Zone::Hand => HAND,
+            Zone::Library => LIBRARY,
+            _ => OTHER,
+        }
+    }
 }
 
 impl TrigPred {
@@ -901,6 +934,10 @@ pub enum Cond {
     SourceCountersIn(Counter, u8, Option<u8>),
     /// You gained life this turn.
     GainedLifeThisTurn,
+    /// An artifact entered the battlefield under your control this turn
+    /// (Mechan Shieldmate; whether it stayed doesn't matter, its ruling of
+    /// 2025-07-25; ENGINE.md 99.11).
+    ArtifactEnteredThisTurn,
     /// You gained n or more life this turn (EoE lane D).
     GainedLifeAtLeast(u16),
     /// An opponent has more cards in hand than you.
@@ -972,6 +1009,7 @@ impl Cond {
             | Cond::IsMonarch
             | Cond::SourceCountersIn(..)
             | Cond::GainedLifeThisTurn
+            | Cond::ArtifactEnteredThisTurn
             | Cond::GainedLifeAtLeast(_)
             | Cond::SpellsCastThisTurn { .. }
             | Cond::YourTurn
@@ -1353,6 +1391,9 @@ pub struct CardDef {
     /// "Can't be blocked except by n or more creatures" (CR 509.1b; 0 = no
     /// such ability; menace is the keyword).
     pub min_blockers: u8,
+    /// An Aura's "enchanted creature can't be blocked by more than one
+    /// creature" (CR 509.1b; Meltstrider's Resolve, ENGINE.md 99.11).
+    pub attached_max_one_blocker: bool,
     /// "Can block only creatures with flying."
     pub blocks_only_flyers: bool,
     /// "Can't be blocked by" creatures matching this filter.
@@ -1417,6 +1458,12 @@ pub struct CardDef {
     /// 607.2q; `Mark::ExiledToPay`), as they are in exile (a card's own
     /// characteristics, `CardDb::def_matches`); 614.1c.
     pub counters_per_exiled: Option<Filter>,
+    /// "This creature enters with a +1/+1 counter on it for each other
+    /// creature and/or artifact you control" (Luxknight Breacher; CR
+    /// 614.1c, 122.6): the permanents its controller controls that match,
+    /// counted as it enters, not those entering at the same time (the card's
+    /// ruling of 2025-07-25; ENGINE.md 99.11).
+    pub enters_counters_per: Option<Filter>,
     /// "You may play n additional lands on each of your turns" (`ANY_LANDS`:
     /// any number).
     pub extra_lands: u8,

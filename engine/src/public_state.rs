@@ -134,6 +134,7 @@ pub fn fields() -> Vec<Field> {
         entering_sunburst: Derived "transient: set and cleared around one move",
         entering_exiled: Derived "transient: set and cleared around one move",
         entering_mods: Derived "transient: set and cleared around one move",
+        leaving_to: Derived "transient: set and cleared around one leave event",
         entering_counters: Derived "transient: set and cleared around one move",
         entering_tapped: Derived "transient: set and cleared around one move",
         discard_entered: Derived "transient: Mox Diamond's answer, consumed by its entering",
@@ -195,6 +196,7 @@ pub fn fields() -> Vec<Field> {
         noncreature_cast: Public "noncreature spells cast this turn",
         gained_life: Public "gained life this turn",
         life_gained: Public "how much life gained this turn",
+        artifact_entered: Public "an artifact entered the battlefield under their control this turn (ENGINE.md 99.11)",
         cant_gain_life: Public "can't gain life for the rest of the game",
         attacked_with: Public "creatures declared as attackers this turn",
         draw_step_draws: Public "cards drawn in their draw step this turn",
@@ -985,6 +987,12 @@ pub fn perturbations() -> Vec<Perturbation> {
             Some(format!("P0: {}", p.life_gained))
         }),
         p!("can't gain life", "Player.cant_gain_life", |a, r| pl(a, r, |p| flip(&mut p.cant_gain_life))),
+        // (Player 0 always: no draw from the gate's random stream, which the
+        // other perturbations' positions depend on.)
+        p!("an artifact entered under a player's control this turn", "Player.artifact_entered", |a, _r| {
+            let p = &mut a.g.players[0];
+            flip(&mut p.artifact_entered).map(|s| format!("P0: {s}"))
+        }),
         p!("a creature attacked this turn", "Player.attacked_with", |a, r| {
             let c = pick(&slot_creatures(&a.g), r)?;
             let p = a.g.objs[c.i()].controller as usize;
@@ -1461,6 +1469,7 @@ pub fn limits() -> Vec<Limit> {
         l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
         l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
+        l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),
     ]
 }
 

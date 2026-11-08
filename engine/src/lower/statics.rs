@@ -355,6 +355,9 @@ pub(crate) fn lower_static(l: &mut Lowerer, s: &cats::StaticAbility, repl: &mut 
         use cats::LayerPayload as P;
         match (&**payload, layer) {
             (P::CantBeBlocked(nodes::CantBeBlocked {}), 6) => mods.push(Mod::CantBeBlocked),
+            // "This creature can attack as though it didn't have defender"
+            // (CR 702.3b; Mechan Shieldmate, ENGINE.md 99.11).
+            (P::CanAttackAsThoughNoDefender(nodes::CanAttackAsThoughNoDefender {}), 6) => mods.push(Mod::AttackDespiteDefender),
             (P::GrantKeyword(nodes::GrantKeyword { keyword }), 6) => {
                 mods.extend(super::effect_ext::keyword_mods(l, std::slice::from_ref(&**keyword)))
             }
