@@ -903,6 +903,7 @@ const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Frenzied Baloth",
     "Rust Harvester",
     "Sunstar Chaplain",
+    "Swarmyard",
 ];
 const SUPPORTED_EOE_EXILE: &[&str] = &[
 ];

@@ -738,6 +738,9 @@ pub struct Game {
     /// in the common case): exhaust abilities activated, colours chosen
     /// as a permanent entered, ...
     pub(crate) marks: Vec<(ObjRef, Mark)>,
+    /// EoE workstream W3's state (ENGINE.md 99.13): phasing, granted
+    /// triggered abilities, regeneration.
+    pub(crate) w3: crate::eoe_w3::W3State,
     /// With hidden decks (`GameSpec::hidden_decks`, ENGINE.md 36.11): per
     /// player, the card names of their pool the other player knows (the pool
     /// but the first picks not seen in earlier games, and the basic lands),
@@ -872,6 +875,11 @@ pub enum Mark {
     /// It entered as a spell cast for its warp cost (CR 702.185a: "if that
     /// creature was cast for its warp cost"; ENGINE.md 99.8).
     WarpCast,
+    /// A regeneration shield (CR 701.19a): the next time it would be
+    /// destroyed this turn, instead its damage is removed, its controller
+    /// taps it and it is removed from combat. One mark per shield; they end
+    /// in the cleanup step (514.2). EoE W3, ENGINE.md 99.13.
+    RegenShield,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -1082,6 +1090,7 @@ impl Game {
             choosing_for: 0,
             targeting: 0,
             marks: Vec::new(),
+            w3: Default::default(),
             known_pools: [None, None],
             batching: false,
             ev_seq: 0,

@@ -306,10 +306,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 }
                 Some(cats::RemovalRider::OtherPlayersCreateTokenCopy(nodes::OtherPlayersCreateTokenCopy {})) => Some(Rider::OthersCopy),
             };
-            // No card in the cube regenerates (no regeneration shield
-            // exists), so "can't be regenerated" changes nothing (CR
-            // 701.15).
-            let _ = can_be_regenerated;
+            // "It can't be regenerated" (CR 701.19c): around the
+            // destruction (EoE W3, ENGINE.md 99.13).
+            let no_regen = !*can_be_regenerated;
             // The IR repeats the target filter; the two must agree.
             let tf = lower_pred(l, target_filter);
             let tgt = if *count_from_x {
@@ -358,7 +357,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             }
             match action {
                 enums::RemovalAction::Destroy => {
-                    b.op(Op::Destroy { tgt });
+                    super::eoe_w3::cant_be_regenerated(b, no_regen, Op::Destroy { tgt });
                 }
                 enums::RemovalAction::Exile => {
                     b.op(Op::Exile { tgt });
@@ -432,10 +431,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             label,
         }) => {
             let _ = label; // display text
-            // No card in the cube regenerates (no regeneration shield
-            // exists), so "can['t] be regenerated" changes nothing (CR
-            // 701.15).
-            let _ = can_be_regenerated;
+            // "They can't be regenerated" (CR 701.19c): around the
+            // destruction (EoE W3, ENGINE.md 99.13).
+            let no_regen = !*can_be_regenerated;
             let Some(mut filter) = lower_pred(l, permanent_filter) else { return };
             // "With mana value X or less" (the spell's X: Vicious Rivalry's
             // X is the life paid, CR 107.3).
@@ -460,7 +458,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             };
             match (action, basics) {
                 (enums::RemovalAction::Destroy, None) => {
-                    b.op(Op::DestroyAll { filter });
+                    super::eoe_w3::cant_be_regenerated(b, no_regen, Op::DestroyAll { filter });
                 }
                 (enums::RemovalAction::Exile, basics) => {
                     b.op(Op::Ext(crate::program::Ext::ExileAll { filter, basics }));
@@ -949,6 +947,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::eoe_a::lower_effect_eoe_a(l, b, other)
                 && !super::effect_eoe_d::lower_effect_eoe_d(l, b, other)
                 && !super::eoe_x::lower_effect_eoe_x(l, b, other)
+                && !super::eoe_w3::lower_effect_w3(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

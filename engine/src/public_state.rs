@@ -172,9 +172,16 @@ pub fn fields() -> Vec<Field> {
         choosing_for: Derived "transient: the item whose modes are chosen (0 between tasks)",
         targeting: Derived "transient: the item whose targets are chosen (0 between tasks; ENGINE.md 58.1)",
         marks: Public "rare per-object facts (exhausted, a chosen colour, exerted, can't be countered, ...)",
+        w3: Derived "EoE workstream W3's state: its fields are classified under W3State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",
         log: Derived "the human-readable log (tests and the viewer)",
     });
+    {
+        use crate::eoe_w3::W3State;
+        classify!(v, W3State {
+            no_regen: Derived "transient: set and cleared around one destruction (\"it can't be regenerated\")",
+        });
+    }
     classify!(v, Player {
         life: Public "CR 119",
         library: Public "its size is public (its cards and order hidden: leak-tested)",

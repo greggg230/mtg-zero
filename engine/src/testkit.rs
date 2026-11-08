@@ -777,6 +777,7 @@ impl Game {
         self.activations.hash(&mut h);
         self.miracle_check.hash(&mut h);
         self.marks.hash(&mut h);
+        self.w3.hash(&mut h);
         self.face_down.hash(&mut h);
         self.face_down_ids.hash(&mut h);
         h.finish()

@@ -203,3 +203,138 @@ fn frenzied_baloth_combat_damage_cant_be_prevented_cr615_12() {
         assert_eq!(g.life(1), expect, "with the Baloth: {with_baloth}\n{}", log(&g));
     }
 }
+
+// ---- Swarmyard (regeneration) -------------------------------------------------------
+
+/// Regenerate `target` with Swarmyard and resolve it.
+fn swarmyard_regenerates(g: &mut engine::Game, target: engine::CardIdx) {
+    let yard = bf(g, 0, "Swarmyard");
+    g.choose(act(yard, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let t = g.tgt(target);
+    g.choose(t);
+    settle(g);
+}
+
+/// Swarmyard: "{T}: Add {C}." and "{T}: Regenerate target Insect, Rat,
+/// Spider, or Squirrel." (CR 701.19a: the next time it would be destroyed
+/// this turn, instead its damage is removed and its controller taps it.)
+/// Lethal damage (704.5g "destroy") is replaced; the creature stays, tapped,
+/// with no damage. A Bear is no legal target.
+#[test]
+fn swarmyard_regenerates_a_rat_from_lethal_damage_cr701_19a() {
+    let mut g = scen()
+        .battlefield(0, &["Swarmyard", "W3 Rat", "W3 Bear"])
+        .battlefield(1, &["Mountain"])
+        .hand(1, &["W3 Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let (rat, bear, yard) = (bf(&g, 0, "W3 Rat"), bf(&g, 0, "W3 Bear"), bf(&g, 0, "Swarmyard"));
+    g.choose(act(yard, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(g.tgt(rat)) && !g.has_option(g.tgt(bear)), "{:?}", g.options_desc());
+    g.choose(g.tgt(rat));
+    settle(&mut g);
+    assert!(!g.obj(rat).tapped);
+    to_opponent_priority(&mut g);
+    let t = g.tgt(rat);
+    cast(&mut g, 1, "W3 Bolt", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(rat).zone, Zone::Battlefield, "regenerated\n{}", log(&g));
+    assert!(g.obj(rat).tapped, "its controller taps it");
+    assert_eq!(g.obj(rat).damage, 0, "its damage removed");
+}
+
+/// One shield, one destruction (CR 701.19a: "the next time"): the second
+/// destruction that turn destroys it; a destroy spell is replaced like
+/// lethal damage.
+#[test]
+fn swarmyard_a_shield_replaces_one_destruction_cr701_19a() {
+    let mut g = scen()
+        .battlefield(0, &["Swarmyard", "W3 Rat"])
+        .battlefield(1, &["Swamp", "Swamp"])
+        .hand(1, &["W3 Murder", "W3 Murder"])
+        .at(Step::Main1, 0)
+        .start();
+    let rat = bf(&g, 0, "W3 Rat");
+    swarmyard_regenerates(&mut g, rat);
+    to_opponent_priority(&mut g);
+    let t = g.tgt(rat);
+    cast(&mut g, 1, "W3 Murder", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(rat).zone, Zone::Battlefield, "{}", log(&g));
+    to_opponent_priority(&mut g);
+    let t = g.tgt(rat);
+    cast(&mut g, 1, "W3 Murder", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(rat).zone, Zone::Graveyard, "the shield was used up\n{}", log(&g));
+}
+
+/// The shield lasts this turn only (CR 701.19a, 514.2: it ends in the
+/// cleanup step).
+#[test]
+fn swarmyard_the_shield_ends_with_the_turn_cr514_2() {
+    let mut g = scen()
+        .battlefield(0, &["Swarmyard", "W3 Rat"])
+        .battlefield(1, &["Swamp"])
+        .hand(1, &["W3 Murder"])
+        .at(Step::Main1, 0)
+        .start();
+    let rat = bf(&g, 0, "W3 Rat");
+    swarmyard_regenerates(&mut g, rat);
+    next_main(&mut g, 1);
+    let t = g.tgt(rat);
+    cast(&mut g, 1, "W3 Murder", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(rat).zone, Zone::Graveyard, "{}", log(&g));
+}
+
+/// "Destroy all creatures. They can't be regenerated" (CR 701.19c): the
+/// shield doesn't apply; "destroy all creatures" alone is replaced.
+#[test]
+fn swarmyard_cant_be_regenerated_ignores_the_shield_cr701_19c() {
+    for (spell, dies) in [("W3 Wrath", true), ("W3 Sweep", false)] {
+        // (A sorcery: the shield made at instant speed in P1's main phase.)
+        let mut g = scen()
+            .battlefield(0, &["Swarmyard", "W3 Rat"])
+            .battlefield(1, &["Swamp", "Swamp"])
+            .hand(1, &[spell])
+            .at(Step::Main1, 1)
+            .start();
+        let rat = bf(&g, 0, "W3 Rat");
+        g.pass();
+        g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+        swarmyard_regenerates(&mut g, rat);
+        assert_eq!(g.turn().active, 1);
+        cast(&mut g, 1, spell, &[]);
+        settle(&mut g);
+        assert_eq!(g.obj(rat).zone == Zone::Graveyard, dies, "{spell}
+{}", log(&g));
+    }
+}
+
+/// A regenerated attacking creature is removed from combat (CR 701.19a,
+/// 506.4): it deals no combat damage.
+#[test]
+fn swarmyard_a_regenerated_attacker_is_removed_from_combat_cr506_4() {
+    let mut g = scen()
+        .battlefield(0, &["Swarmyard", "W3 Rat"])
+        .battlefield(1, &["Swamp"])
+        .hand(1, &["W3 Murder"])
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    let rat = bf(&g, 0, "W3 Rat");
+    attack_with(&mut g, 0, &["W3 Rat"]);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    swarmyard_regenerates(&mut g, rat);
+    assert!(g.obj(rat).attacking);
+    to_opponent_priority(&mut g);
+    let t = g.tgt(rat);
+    cast(&mut g, 1, "W3 Murder", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(rat).zone, Zone::Battlefield, "{}", log(&g));
+    assert!(!g.obj(rat).attacking, "removed from combat");
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2);
+    assert_eq!(g.life(1), 20, "no combat damage\n{}", log(&g));
+}

@@ -93,6 +93,16 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         // "Target creature gets +3/+3 until end of turn."
         card("W3 Growth", "{G}", &["Instant"], &[], json!({"spell_effect": {"$t": "PumpTargetCreatureUntilEOT",
             "power_bonus": 3, "toughness_bonus": 3}})),
+        creature("W3 Rat", "{B}", 1, 1, &["Rat"], none.clone()),
+        // "Destroy target creature."
+        card("W3 Murder", "{B}", &["Instant"], &[], json!({"spell_effect": {"$t": "Destroy",
+            "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsCreature"}}]}})),
+        // "Destroy all creatures. They can't be regenerated."
+        card("W3 Wrath", "{2}", &["Sorcery"], &[], json!({"spell_effect": {"$t": "RemoveAllMatching", "can_be_regenerated": false,
+            "label": "all creatures", "permanent_filter": {"$t": "IsCreature"}}})),
+        // "Destroy all creatures."
+        card("W3 Sweep", "{2}", &["Sorcery"], &[], json!({"spell_effect": {"$t": "RemoveAllMatching",
+            "label": "all creatures", "permanent_filter": {"$t": "IsCreature"}}})),
         // "Counter target spell."
         card("W3 Cancel", "{1}", &["Instant"], &[], json!({"spell_effect": {"$t": "CounterTargetSpell"}})),
         // "Prevent all combat damage that would be dealt this turn."

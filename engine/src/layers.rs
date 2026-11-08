@@ -783,6 +783,8 @@ impl Game {
         self.return_control(control);
         if !self.marks.is_empty() {
             self.marks.retain(|(_, m)| !matches!(m, crate::game::Mark::DiesTriggerThisTurn { .. }));
+            // (Regeneration shields: "this turn", EoE W3.)
+            self.end_turn_w3();
         }
         self.effects_changed();
         if !self.copies.is_empty() {

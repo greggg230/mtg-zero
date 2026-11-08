@@ -1276,6 +1276,9 @@ impl Game {
         if self.indestructible(c) {
             return; // CR 702.12b
         }
+        if !self.marks.is_empty() && self.regenerated(c) {
+            return; // CR 701.19a
+        }
         self.move_card(c, Zone::Graveyard, Pos::Top);
     }
 }

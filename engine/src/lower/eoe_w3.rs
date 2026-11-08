@@ -8,6 +8,9 @@
 
 use super::Lowerer;
 use crate::db::{types, Cost, Counter, Filter};
+use crate::eoe_w3::W3;
+use crate::program::{Builder, Ext, On, Op};
+use card_ir::{cats, nodes};
 
 /// The cost atoms of `ActivationCost` this workstream implements.
 pub(crate) struct CostW3 {
@@ -45,4 +48,41 @@ pub(crate) fn lower_cost_w3(l: &mut Lowerer, cost: &mut Cost, c: CostW3) {
         l.act_x = true;
         cost.tap_x = Some(Filter::Type(types::ARTIFACT));
     }
+}
+
+fn w3(b: &mut Builder, op: W3) -> usize {
+    b.op(Op::Ext(Ext::EoeW3(op)))
+}
+
+/// `op` (a destruction), with "it can't be regenerated" if `no_regen` (CR
+/// 701.19c: the flag is set around it).
+pub(crate) fn cant_be_regenerated(b: &mut Builder, no_regen: bool, op: Op) {
+    if no_regen {
+        w3(b, W3::CantBeRegenerated(true));
+    }
+    b.op(op);
+    if no_regen {
+        w3(b, W3::CantBeRegenerated(false));
+    }
+}
+
+/// Lower an effect class of workstream W3; `false` if the class is not one
+/// of these.
+pub(crate) fn lower_effect_w3(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) -> bool {
+    use cats::Effect as E;
+    match e {
+        // "Regenerate target Insect, Rat, Spider, or Squirrel" (CR 701.19a;
+        // the target: a permanent with one of the subtypes).
+        E::RegenerateTargetCreature(nodes::RegenerateTargetCreature { allowed_subtypes }) => {
+            let filter = if allowed_subtypes.is_empty() {
+                Filter::Type(types::CREATURE)
+            } else {
+                Filter::Or(allowed_subtypes.iter().map(|s| Filter::Subtype(l.subtype(s))).collect())
+            };
+            let t = b.target(filter, 1, 1);
+            w3(b, W3::Regenerate { on: On::Target(t) });
+        }
+        _ => return false,
+    }
+    true
 }
