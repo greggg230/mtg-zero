@@ -165,8 +165,10 @@ impl Game {
             // control have '<ability>'", CR 613.1f; EoE W3): slots after its
             // own (at most four per permanent in the action layout).
             if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
+                // (After its card's own slots, whether or not it has them.)
+                let own = self.db.def(self.objs[c.i()].def).activated.len();
                 for (j, (gdef, k)) in self.granted_activated(c).into_iter().enumerate() {
-                    let i = d.activated.len() + j;
+                    let i = own + j;
                     if i >= 4 {
                         break;
                     }
@@ -435,15 +437,8 @@ impl Game {
             times: 0,
             spliced: Vec::new(),
         });
-        if ad.cost.tap_x.is_some() {
-            // "Tap X untapped artifacts": the taps before the mana (CR
-            // 601.2h, any order; `Game::tap_x_ok`; EoE W3).
-            self.agenda.push(Task::ActPay { id });
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
-        } else {
-            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
-            self.agenda.push(Task::ActPay { id });
-        }
+        self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+        self.agenda.push(Task::ActPay { id });
         let ab = self.db.ability(ability);
         if ab.has_targets() {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
@@ -798,6 +793,7 @@ impl Game {
             exile: cost.exile_from_hand.clone().map(|f| (f, card)),
             allow: 0,
             spell: None,
+            sac_taps: false,
         }
     }
 
@@ -811,6 +807,11 @@ impl Game {
         }
         let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
+        // "Tap X untapped artifacts": X of them stay for the cost (EoE W3).
+        if let Some(r) = Self::tap_x_reserve(&ad.cost, x) {
+            pm.keep.sac = Some((r, card));
+            pm.keep.sac_taps = true;
+        }
         pm.waterbend = ad.cost.waterbend;
         pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
         self.agenda.push(Task::PayMana(Box::new(pm)));
@@ -1027,25 +1028,7 @@ impl Game {
                 .collect();
             // (Leaving enough later candidates for the taps still owed.)
             let still = n_tap - picked.len();
-            let mut opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();
-            // "Tap X ...", paid before the mana: each tap leaves the rest
-            // and the mana payable (EoE W3).
-            if cost.tap_x.is_some() {
-                if let Some((_, _, ad)) = self.act_item(id) {
-                    let all: Vec<CardIdx> = cands.iter().filter_map(|o| match o.choice {
-                        Choice::Card(c) => Some(c),
-                        _ => None,
-                    }).collect();
-                    let done: Vec<CardIdx> = picked[n_gy..].to_vec();
-                    opts.retain(|o| {
-                        let Choice::Card(c) = o.choice else { return false };
-                        let k = all.iter().position(|&x| x == c).unwrap();
-                        let mut t = done.clone();
-                        t.push(c);
-                        self.tap_x_ok(p, card, ad, &t, &all[k + 1..], still - 1)
-                    });
-                }
-            }
+            let opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
             return;
         }

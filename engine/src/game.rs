@@ -887,9 +887,11 @@ pub enum Mark {
     /// end of turn (`this_turn`: it ends in the cleanup step, 514.2) or for
     /// as long as it stays this object (400.7). It is the permanent's own
     /// ability: its source is the permanent and its controller the
-    /// permanent's (113.7, 113.8). EoE lane D's "when this creature dies"
-    /// (ENGINE.md 99.5), generalised by workstream W3 (99.13).
-    Granted { def: DefId, slot: u8, this_turn: bool },
+    /// permanent's (113.7, 113.8). `ts`: its timestamp (613.7a): a layer-6
+    /// "loses all abilities" effect with a later one removes it, one with an
+    /// earlier one doesn't (613.1f, 613.7). EoE lane D's "when this creature
+    /// dies" (ENGINE.md 99.5), generalised by workstream W3 (99.13).
+    Granted { def: DefId, slot: u8, this_turn: bool, ts: u32 },
     /// It entered as a spell cast for its warp cost (CR 702.185a: "if that
     /// creature was cast for its warp cost"; ENGINE.md 99.8).
     WarpCast,
@@ -1896,7 +1898,7 @@ impl Game {
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
-        if from == Zone::Battlefield && self.w3.seen != 0 {
+        if from == Zone::Battlefield && (self.w3.seen != 0 || self.w3.granted) {
             self.w3_leaves(idx, old);
         }
         let lost_granted = from == Zone::Battlefield && !self.marks.is_empty() && self.lost_abilities(idx);

@@ -95,6 +95,10 @@ pub struct W3State {
     /// The amount of mana spent to cast the spell becoming a permanent:
     /// set and taken around one move.
     pub entering_spent: Option<u8>,
+    /// Last known information: the latest "loses all abilities" timestamp of
+    /// each permanent with a granted triggered ability that left the
+    /// battlefield this turn (CR 603.10a).
+    pub lki_loss: Vec<(crate::ids::ObjRef, u32)>,
     /// The phased-out permanents (zone `PhasedOut`, CR 702.26b), in the order
     /// they phased out.
     pub phased: Vec<CardIdx>,
@@ -168,9 +172,12 @@ impl Game {
             }
             W3::GrantTrigger { on, k, this_turn } => {
                 let slot = self.db.def(f.source_def).delayed_base + k;
+                // (One effect, one timestamp, CR 613.7a.)
+                self.next_ts += 1;
+                let ts = self.next_ts;
                 for c in self.objs_on(f, on) {
                     let r = self.obj_ref(c);
-                    self.marks.push((r, Mark::Granted { def: f.source_def, slot, this_turn: *this_turn }));
+                    self.marks.push((r, Mark::Granted { def: f.source_def, slot, this_turn: *this_turn, ts }));
                     self.w3.granted = true;
                 }
                 Flow::Next
@@ -331,6 +338,13 @@ impl Game {
     /// Permanent `idx` (object `old`) is leaving the battlefield: the last
     /// known information workstream W3's cards read (`W3State::seen`).
     pub(crate) fn w3_leaves(&mut self, idx: CardIdx, old: crate::ids::ObjRef) {
+        // (When its abilities were lost, for its granted leave triggers'
+        // look-back, CR 603.10a.)
+        if self.w3.granted && self.marks.iter().any(|&(o, m)| o == old && matches!(m, Mark::Granted { .. })) {
+            if let Some(l) = self.loss_ts(idx) {
+                self.w3.lki_loss.push((old, l));
+            }
+        }
         if self.w3.seen & SEEN_W3_HOST != 0 {
             if let Some(h) = self.objs[idx.i()].attached {
                 self.w3.lki_host.push((old, h));
@@ -341,21 +355,26 @@ impl Game {
     /// The objects with triggered abilities effects gave them that may see
     /// event `ev` (`Mark::Granted`): (object, definition, trigger slot,
     /// controller). A permanent on the battlefield that hasn't lost all its
-    /// abilities (CR 613.1f), or, for a leave-the-battlefield event, one that
-    /// left earlier in the same simultaneous move (603.10a).
+    /// abilities after the grant (CR 613.1f, 613.7: a "loses all abilities"
+    /// effect with a later timestamp removes it), or, for a
+    /// leave-the-battlefield event, one that left earlier in the same
+    /// simultaneous move, as it was then (603.10a; `W3State::lki_loss`).
     pub(crate) fn granted_observers(&self, ev: &crate::triggers::Event) -> Vec<(crate::ids::ObjRef, crate::ids::DefId, u8, PlayerId)> {
         use crate::db::EventKind as K;
         let leave = matches!(ev.kind, K::Dies | K::LeavesBattlefield | K::IsSacrificed);
         let mut out = Vec::new();
         for &(r, m) in &self.marks {
-            let Mark::Granted { def, slot, .. } = m else { continue };
+            let Mark::Granted { def, slot, ts, .. } = m else { continue };
             if self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield {
-                if !self.lost_abilities(r.idx) {
+                if self.loss_ts(r.idx).is_none_or(|l| ts > l) {
                     out.push((r, def, slot, self.objs[r.idx.i()].controller));
                 }
             } else if leave {
+                let lost = self.w3.lki_loss.iter().rev().find(|x| x.0 == r).is_some_and(|&(_, l)| ts < l);
                 if let Some(l) = self.leaving.iter().find(|l| l.old == r) {
-                    out.push((r, def, slot, l.controller));
+                    if !lost {
+                        out.push((r, def, slot, l.controller));
+                    }
                 }
             }
         }
@@ -505,17 +524,23 @@ impl Game {
     }
 
     /// The activated abilities other permanents grant permanent `c` ("artifacts
-    /// you control have '<ability>'", CR 613.1f; none once it lost all its
-    /// abilities): (granting definition, its activated slot), the granters in
-    /// battlefield order. They follow its own abilities' slots.
+    /// you control have '<ability>'", CR 613.1f): (granting definition, its
+    /// activated slot), the granters in battlefield order; they follow the
+    /// slots of its card's own abilities. A grant has its granter's timestamp
+    /// (613.7a): a "loses all abilities" effect on `c` with a later one
+    /// removes it, one with an earlier one doesn't (613.7). The grant is part
+    /// of an ability that applied in layer 4 already (the Food type), so it
+    /// applies in layer 6 even if the granter loses its abilities (613.6):
+    /// read from the granter's definition.
     pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<(crate::ids::DefId, u8)> {
         let mut out = Vec::new();
-        if self.w3.seen & SEEN_W3_GRANT_ACT == 0 || self.objs[c.i()].zone != crate::ids::Zone::Battlefield || self.lost_abilities(c) {
+        if self.w3.seen & SEEN_W3_GRANT_ACT == 0 || self.objs[c.i()].zone != crate::ids::Zone::Battlefield {
             return out;
         }
+        let loss = self.loss_ts(c);
         for &g in &self.battlefield {
-            let d = self.abilities(g);
-            if d.w3.grants_activated.is_empty() {
+            let d = self.db.def(self.objs[g.i()].def);
+            if d.w3.grants_activated.is_empty() || loss.is_some_and(|l| self.objs[g.i()].timestamp < l) {
                 continue;
             }
             let ctx = crate::cast::Ctx { controller: self.objs[g.i()].controller, source: Some(self.obj_ref(g)) };
@@ -528,21 +553,78 @@ impl Game {
         out
     }
 
-    /// Does a permanent on the battlefield give permanent `c` subtype `s`
-    /// ("artifacts you control are Foods in addition to their other types",
-    /// CR 613.1d)? (A layer 4 effect of a static ability applies even if its
-    /// source loses its abilities in layer 6, 613.6: the card's own
-    /// definition.)
-    pub(crate) fn granted_subtype(&self, c: CardIdx, s: u16) -> bool {
-        self.battlefield.iter().any(|&g| {
+    /// The timestamps (CR 613.7a: its source's) of the static abilities on
+    /// the battlefield that give permanent `c` subtype `s` ("artifacts you
+    /// control are Foods in addition to their other types", 613.1d), sorted.
+    /// Whether one applies to `c` reads `c`'s card types after layer 4: the
+    /// grant depends on any effect that changes whether `c` is an artifact
+    /// (613.8a), which applies first whatever the timestamps; it changes
+    /// only subtypes, so nothing recurses. (A layer 4 effect of a static
+    /// ability applies even if its source loses its abilities in layer 6,
+    /// 613.6: the card's own definition.)
+    pub(crate) fn granted_subtype_ts(&self, c: CardIdx, s: u16) -> Vec<u32> {
+        let mut out = Vec::new();
+        for &g in &self.battlefield {
             let d = self.db.def(self.objs[g.i()].def);
-            d.w3.grants_subtype.iter().any(|(f, k)| {
-                *k == s && {
-                    let ctx = crate::cast::Ctx { controller: self.objs[g.i()].controller, source: Some(self.obj_ref(g)) };
-                    self.card_matches(f, c, &ctx)
+            for (f, k) in &d.w3.grants_subtype {
+                if *k != s {
+                    continue;
                 }
-            })
-        })
+                let ctx = crate::cast::Ctx { controller: self.objs[g.i()].controller, source: Some(self.obj_ref(g)) };
+                if self.card_matches(f, c, &ctx) {
+                    out.push(self.objs[g.i()].timestamp);
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Does permanent `c` have subtype `s` after layer 4 (CR 613.1d), with
+    /// `has` its printed answer and `grants` the timestamps of the static
+    /// abilities that add `s` to it: the effects in timestamp order (613.7),
+    /// its own type-changing statics at its own timestamp (as
+    /// `Game::has_subtype` applies them, before the effects), each grant
+    /// adding `s` at its place; an effect that sets the subtypes later
+    /// removes it, an earlier one doesn't.
+    pub(crate) fn subtype_with_grants(&self, c: CardIdx, s: u16, mut has: bool, grants: &[u32]) -> bool {
+        let mut k = 0;
+        let own_ts = self.objs[c.i()].timestamp;
+        while k < grants.len() && grants[k] < own_ts {
+            has = true;
+            k += 1;
+        }
+        if self.n_self_types > 0 {
+            for m in self.own_type_mods(c) {
+                if let crate::db::Mod::Types { subtypes, replace, .. } = m {
+                    has = if *replace { subtypes.contains(&s) } else { has || subtypes.contains(&s) };
+                }
+            }
+        }
+        let r = self.obj_ref(c);
+        for e in self.effects.iter().filter(|e| e.on == crate::layers::Affected::Obj(r)) {
+            match &e.m {
+                crate::db::Mod::Types { .. } | crate::db::Mod::BecomeTypes { .. } => {}
+                _ => continue,
+            }
+            while k < grants.len() && grants[k] < e.ts {
+                has = true;
+                k += 1;
+            }
+            match &e.m {
+                crate::db::Mod::Types { subtypes, replace, .. } => {
+                    if *replace {
+                        has = subtypes.contains(&s);
+                    } else if subtypes.contains(&s) {
+                        has = true;
+                    }
+                }
+                // CR 205.1a: its other card types and their subtypes gone.
+                crate::db::Mod::BecomeTypes { subtypes, .. } => has = subtypes.contains(&s),
+                _ => {}
+            }
+        }
+        has || k < grants.len()
     }
 
     /// The definition and slot of activated ability `slot` of `card`: its own,
@@ -570,51 +652,47 @@ impl Game {
 }
 
 impl Game {
-    /// "Tap X untapped <permanents> you control" (CR 601.2h: the taps and
-    /// the mana in any order; mana abilities first, 601.2g, so a permanent
-    /// tapped for the cost can't make mana for it, and one tapped for mana
-    /// can't be tapped for the cost): can `need` more of `rest` (untapped
-    /// candidates) be tapped, besides `tapped`, with `card`'s ability's
-    /// mana still payable by the other sources? The taps are paid before the
-    /// mana (`Game::begin_activate`), as teamwork's are (ENGINE.md 29.6.3).
-    pub(crate) fn tap_x_ok(&self, p: PlayerId, card: CardIdx, ad: &crate::db::ActivatedDef, tapped: &[CardIdx], rest: &[CardIdx], need: usize) -> bool {
-        if rest.len() < need {
-            return false;
+    /// The reservation "tap X untapped <permanents> you control" makes in
+    /// its ability's mana payment (`Keep::sac` with `Keep::sac_taps`): the
+    /// mana abilities are activated first (CR 601.2g) and the cost paid after
+    /// (601.2h), so a source whose activation taps or sacrifices one of those
+    /// permanents (its own {T} or sacrifice, another's "tap an untapped
+    /// artifact you control" or "sacrifice an artifact") uses it up; X of
+    /// them must stay untapped. Any mana ability that doesn't (Pentad
+    /// Prism's counters) is free. None for X = 0.
+    pub(crate) fn tap_x_reserve(cost: &Cost, x: u8) -> Option<crate::db::SacCost> {
+        let f = cost.tap_x.as_ref()?;
+        if x == 0 {
+            return None;
         }
-        let mana = self.act_mana_x(p, card, ad, 0);
-        if mana.is_zero() {
-            return true;
-        }
-        let exclude = Self::mana_exclude(card, ad);
-        let classes = self.mana_classes(p, exclude);
-        let keep = Self::keep_for(card, &ad.cost, exclude);
-        // (Permanents without a mana ability first: they pay nothing.)
-        let (with_mana, plain): (Vec<CardIdx>, Vec<CardIdx>) = rest.iter().copied().partition(|&c| self.has_mana_ability(c));
-        let m = need.saturating_sub(plain.len());
-        let k = with_mana.len().min(12);
-        for mask in 0u32..(1 << k) {
-            if mask.count_ones() as usize != m {
-                continue;
-            }
-            let out: Vec<CardIdx> = tapped.iter().copied().chain((0..k).filter(|i| mask >> i & 1 != 0).map(|i| with_mana[i])).collect();
-            if self.can_pay_with(p, &mana, &self.classes_without(&classes, &out), &keep) {
-                return true;
-            }
-        }
-        false
+        let filter = Filter::And(Box::new(f.clone()), Box::new(Filter::Not(Box::new(Filter::Tapped))));
+        Some(crate::db::SacCost { filter, n: x, another: true })
     }
 
     /// The most X "tap X untapped <permanents> you control" allows for
-    /// `card`'s ability `ad` (CR 107.3a, 601.2b).
+    /// `card`'s ability `ad` (CR 107.3a, 601.2b): as many of them as stay
+    /// untapped while the mana is paid (`tap_x_reserve`).
     pub(crate) fn tap_x_most(&self, p: PlayerId, card: CardIdx, ad: &crate::db::ActivatedDef) -> u8 {
-        let Some(f) = &ad.cost.tap_x else { return u8::MAX };
-        let t = crate::db::SacCost { filter: f.clone(), n: 0, another: true };
-        let cands: Vec<CardIdx> = self.tap_candidates(p, card, &t).collect();
-        let mut x = cands.len();
-        while x > 0 && !self.tap_x_ok(p, card, ad, &[], &cands, x) {
-            x -= 1;
+        if ad.cost.tap_x.is_none() {
+            return u8::MAX;
         }
-        x.min(255) as u8
+        let Some(all) = Self::tap_x_reserve(&ad.cost, 1) else { return 0 };
+        let cands = self.sacrifice_candidates(p, card, &all).len();
+        let mana = self.act_mana_x(p, card, ad, 0);
+        let exclude = Self::mana_exclude(card, ad);
+        let classes = self.mana_classes(p, exclude);
+        let mut x = 0usize;
+        while x < cands.min(255) {
+            if !mana.is_zero() {
+                let r = Self::tap_x_reserve(&ad.cost, (x + 1) as u8).unwrap();
+                let keep = crate::pay::Keep { sac: Some((r, card)), sac_taps: true, ..Self::keep_for(card, &ad.cost, exclude) };
+                if !self.can_pay_without(p, &mana, &classes, &keep, exclude) {
+                    break;
+                }
+            }
+            x += 1;
+        }
+        x as u8
     }
 
     /// The X of stack item `id` when `cost` says "tap X untapped <permanents>

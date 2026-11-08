@@ -242,6 +242,10 @@ pub(crate) struct Keep {
     /// The spell being cast, if this pays for one ("that spell can't be
     /// countered").
     pub spell: Option<CardIdx>,
+    /// The permanents `sac` reserves are to be tapped by the cost ("tap X
+    /// untapped artifacts you control", EoE W3): a mana source whose
+    /// activation taps or sacrifices one of them uses it up (CR 601.2g-h).
+    pub sac_taps: bool,
 }
 
 /// Paying a mana cost (ENGINE.md 6, 18). Stages: Phyrexian pips (how many
@@ -995,7 +999,7 @@ impl Game {
     /// a card in hand a later discard needs.
     fn reserved(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> bool {
         match &keep.sac {
-            Some((sc, card)) if cl.sac_self => {
+            Some((sc, card)) if cl.sac_self || keep.sac_taps && cl.res != 0 => {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
                 !(sc.another && s.card == *card) && self.card_matches(&sc.filter, s.card, &ctx)
             }

@@ -100,6 +100,25 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         // "Sacrifice this creature: Add {C}." (as an Eldrazi Scion)
         creature("W3 Scion", "{1}", 1, 1, &["Eldrazi", "Scion"], json!({"activated_abilities": [{"$t": "ActivatedAbility",
             "cost": {"$t": "ActivationCost", "sacrifice_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),
+        // "{0}: This artifact becomes a Clue." (Its artifact subtypes are
+        // set: CR 205.1b.)
+        card("W3 Shifter", "{1}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
+            "cost": {"$t": "ActivationCost"}, "effect": {"$t": "SourceBecomesIfSubtype", "subtypes": ["Clue"], "base_pt": [1, 1],
+            "keywords": [], "requires_subtype": ""}}]})),
+        // "Target artifact becomes a 2/2 creature." (Its card types become
+        // creature: CR 205.1a.)
+        card("W3 Animate", "{1}", &["Instant"], &[], json!({"spell_effect": {"$t": "TargetBecomesCreatureIndefinitely",
+            "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsArtifact"}}], "base_pt": [2, 2]}})),
+        // "When this creature enters, target creature gets +1/+0 until end of
+        // turn. It loses all abilities for as long as this creature remains
+        // on the battlefield." (As Xu-Ifit's and the Auras' ability loss: a
+        // layer-6 effect with a timestamp, CR 613.1f.)
+        creature("W3 Wasp", "{1}", 1, 1, &["Insect"], json!({"triggered_abilities": [{"$t": "TriggeredAbility",
+            "event": "enters", "predicate": {"$t": "IsSelf"}, "effect": {"$t": "ThenTargetLosesAbilitiesWhileSourceRemains",
+            "inner": {"$t": "PumpTargetCreatureUntilEOT", "power_bonus": 1, "toughness_bonus": 0}}}]})),
+        // "Sacrifice this artifact: Add {C}." (No {T}.)
+        card("W3 Nugget", "{0}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
+            "cost": {"$t": "ActivationCost", "sacrifice_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),
         // "{T}: Add {C}."
         card("W3 Mox", "{0}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
             "cost": {"$t": "ActivationCost", "tap_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),

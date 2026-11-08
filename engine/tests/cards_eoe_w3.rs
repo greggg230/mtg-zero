@@ -1191,3 +1191,196 @@ fn ragost_untaps_at_each_end_step_if_you_gained_life_cr603_4() {
         assert_eq!(!g.obj(ragost).tapped, gained, "gained life: {gained}\n{}", log(&g));
     }
 }
+
+// ---- Layer 4 by timestamp: Ragost's Food type (CR 613.1d, 613.7, 613.8) -------------
+
+fn clue(g: &engine::Game, c: engine::CardIdx) -> bool {
+    g.has_subtype(c, db().subtype_id("Clue").expect("the Clue subtype"))
+}
+
+/// Ragost's "artifacts you control are Foods in addition to their other
+/// types" is a layer-4 effect with Ragost's timestamp (CR 613.7a), applied
+/// in timestamp order with the others (613.7): an effect that later sets the
+/// artifact's subtypes ("becomes a Clue", 205.1b) leaves it a Clue only; one
+/// from before leaves it a Clue and a Food.
+#[test]
+fn ragost_food_type_applies_in_timestamp_order_cr613_7() {
+    // Ragost first, then the Shifter becomes a Clue.
+    let mut g = scen().battlefield(0, &["Ragost, Deft Gastronaut", "W3 Shifter"]).at(Step::Main1, 0).start();
+    let shifter = bf(&g, 0, "W3 Shifter");
+    assert!(food(&g, shifter));
+    g.choose(act(shifter, 0));
+    settle(&mut g);
+    assert!(clue(&g, shifter), "{}", log(&g));
+    assert!(!food(&g, shifter), "the later effect sets its subtypes: no Food");
+    // The Shifter a Clue first, then Ragost enters.
+    let mut g = scen().battlefield(0, &["W3 Shifter", "Mountain", "Plains"]).hand(0, &["Ragost, Deft Gastronaut"]).at(Step::Main1, 0).start();
+    let shifter = bf(&g, 0, "W3 Shifter");
+    g.choose(act(shifter, 0));
+    settle(&mut g);
+    assert!(clue(&g, shifter) && !food(&g, shifter));
+    cast(&mut g, 0, "Ragost, Deft Gastronaut", &[]);
+    settle(&mut g);
+    assert!(clue(&g, shifter) && food(&g, shifter), "Ragost's later effect adds Food\n{}", log(&g));
+}
+
+/// The Food type depends on an effect that makes the permanent stop being an
+/// artifact (CR 613.8a), which applies first whatever the timestamps: a
+/// permanent that became only a creature isn't a Food either way.
+#[test]
+fn ragost_food_type_depends_on_artifact_becoming_a_creature_cr613_8a() {
+    for ragost_first in [true, false] {
+        let mut b = scen().battlefield(0, &["W3 Trinket", "Island", "Mountain", "Plains"]).at(Step::Main1, 0);
+        if ragost_first {
+            b = b.battlefield(0, &["Ragost, Deft Gastronaut"]).hand(0, &["W3 Animate"]);
+        } else {
+            b = b.hand(0, &["W3 Animate", "Ragost, Deft Gastronaut"]);
+        }
+        let mut g = b.start();
+        let trinket = bf(&g, 0, "W3 Trinket");
+        let t = g.tgt(trinket);
+        cast(&mut g, 0, "W3 Animate", &[t]);
+        settle(&mut g);
+        if !ragost_first {
+            cast(&mut g, 0, "Ragost, Deft Gastronaut", &[]);
+            settle(&mut g);
+        }
+        assert!(g.find_card(0, "Ragost, Deft Gastronaut", Zone::Battlefield).is_some());
+        assert_eq!(g.types_of(trinket), engine::db::types::CREATURE, "{}", log(&g));
+        assert!(!food(&g, trinket), "Ragost first: {ragost_first}");
+    }
+}
+
+// ---- Layer 6 by timestamp: granted abilities and "loses all abilities" (613.1f, 613.7) --
+
+/// Cast W3 Wasp, its enters trigger targeting `t` (it loses all abilities).
+fn wasp_strips(g: &mut engine::Game, t: engine::CardIdx) {
+    cast(g, 0, "W3 Wasp", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let c = g.tgt(t);
+    g.choose(c);
+    settle(g);
+}
+
+/// A triggered ability granted before a "loses all abilities" effect is
+/// removed with the others; one granted after it is kept (CR 613.1f, 613.7):
+/// Requiem Monolith's grant, then the Wasp, and the other way round.
+#[test]
+fn granted_trigger_and_loses_all_abilities_by_timestamp_cr613_7() {
+    for grant_first in [true, false] {
+        let mut g = scen()
+            .battlefield(0, &["Requiem Monolith", "W3 Giant", "Mountain", "Mountain", "Mountain", "Mountain"])
+            .hand(0, &["W3 Wasp", "W3 Blast"])
+            .at(Step::Main1, 0)
+            .start();
+        let giant = bf(&g, 0, "W3 Giant");
+        if grant_first {
+            monolith(&mut g, giant, 0, false);
+            wasp_strips(&mut g, giant);
+        } else {
+            wasp_strips(&mut g, giant);
+            monolith(&mut g, giant, 0, false);
+        }
+        let hand = g.player(0).hand.len();
+        let t = g.tgt(giant);
+        cast(&mut g, 0, "W3 Blast", &[t]);
+        settle(&mut g);
+        let drew = g.player(0).hand.len() - (hand - 1);
+        assert_eq!(drew, if grant_first { 0 } else { 3 }, "granted first: {grant_first}\n{}", log(&g));
+    }
+}
+
+/// The same for an activated ability another permanent grants: Ragost's
+/// grant has Ragost's timestamp (CR 613.7a); the Robot's later loss removes
+/// it, an earlier loss doesn't.
+#[test]
+fn granted_activated_ability_and_loses_all_abilities_by_timestamp_cr613_7() {
+    for ragost_first in [true, false] {
+        let mut b = scen().battlefield(0, &["W3 Robot", "Mountain", "Mountain", "Mountain", "Plains", "Plains", "Plains"]).at(Step::Main1, 0).turn_number(3);
+        if ragost_first {
+            b = b.battlefield(0, &["Ragost, Deft Gastronaut"]).hand(0, &["W3 Wasp"]);
+        } else {
+            b = b.hand(0, &["W3 Wasp", "Ragost, Deft Gastronaut"]);
+        }
+        let mut g = b.start();
+        let robot = bf(&g, 0, "W3 Robot");
+        wasp_strips(&mut g, robot);
+        if !ragost_first {
+            cast(&mut g, 0, "Ragost, Deft Gastronaut", &[]);
+            settle(&mut g);
+        }
+        assert!(food(&g, robot), "a Food either way (layer 4)");
+        assert_eq!(g.has_option(act(robot, 0)), !ragost_first, "Ragost first: {ragost_first} {:?}\n{}", g.options_desc(), log(&g));
+    }
+}
+
+/// Ragost losing all its abilities doesn't end its grant: the ability
+/// applied in layer 4 (the Food type) before it was removed in layer 6, so
+/// it goes on applying in layer 6 too (CR 613.6).
+#[test]
+fn ragost_losing_its_abilities_keeps_granting_cr613_6() {
+    let mut g = scen().battlefield(0, &["Ragost, Deft Gastronaut", "W3 Trinket", "Mountain", "Plains", "Plains"]).hand(0, &["W3 Wasp"]).at(Step::Main1, 0).start();
+    let (ragost, trinket) = (bf(&g, 0, "Ragost, Deft Gastronaut"), bf(&g, 0, "W3 Trinket"));
+    wasp_strips(&mut g, ragost);
+    assert!(food(&g, trinket));
+    assert!(g.has_option(act(trinket, 0)), "{:?}\n{}", g.options_desc(), log(&g));
+    assert!(!g.has_option(act(ragost, 0)), "Ragost's own ability is gone");
+}
+
+// ---- Secluded Starforge: the mana first, then the taps (CR 601.2g-h) ----------------
+
+/// The mana abilities are activated before the cost is paid (CR 601.2g):
+/// an artifact sacrificed for mana can't then be tapped for X. With a Plains,
+/// a "Sacrifice this artifact: Add {C}" artifact and another artifact, the
+/// {2} takes the first: X is at most 1.
+#[test]
+fn secluded_starforge_an_artifact_sacrificed_for_mana_isnt_tapped_for_x_cr601_2g() {
+    let mut g = scen()
+        .battlefield(0, &["Secluded Starforge", "Plains", "W3 Nugget", "W3 Trinket", "W3 Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, trinket, nugget) = (bf(&g, 0, "W3 Bear"), bf(&g, 0, "W3 Trinket"), bf(&g, 0, "W3 Nugget"));
+    let sf = bf(&g, 0, "Secluded Starforge");
+    g.choose(act(sf, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    let xs: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(xs, vec![Choice::Number(0), Choice::Number(1)], "{xs:?}");
+    g.choose(Choice::Number(1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let c = g.tgt(bear);
+    g.choose(c);
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+    let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(opts, vec![Choice::Card(trinket)], "{}", log(&g));
+    g.choose(Choice::Card(trinket));
+    settle(&mut g);
+    assert_eq!(g.obj(nugget).zone, Zone::Graveyard);
+    assert_eq!(g.power(bear), 3);
+}
+
+/// With other mana, any of the untapped artifacts may be tapped for X, a
+/// mana artifact too (the player's choice, CR 601.2h).
+#[test]
+fn secluded_starforge_any_artifact_left_untapped_may_pay_x_cr601_2h() {
+    let mut g = scen()
+        .battlefield(0, &["Secluded Starforge", "Plains", "Plains", "W3 Mox", "W3 Trinket", "W3 Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, mox, trinket) = (bf(&g, 0, "W3 Bear"), bf(&g, 0, "W3 Mox"), bf(&g, 0, "W3 Trinket"));
+    let sf = bf(&g, 0, "Secluded Starforge");
+    g.choose(act(sf, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let c = g.tgt(bear);
+    g.choose(c);
+    pay_without(&mut g, mox);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+    let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert!(opts.contains(&Choice::Card(mox)) && opts.contains(&Choice::Card(trinket)), "{opts:?}");
+    g.choose(Choice::Card(mox));
+    settle(&mut g);
+    assert!(g.obj(mox).tapped && !g.obj(trinket).tapped);
+    assert_eq!(g.power(bear), 3);
+}

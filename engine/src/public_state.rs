@@ -183,6 +183,7 @@ pub fn fields() -> Vec<Field> {
             granted: Derived "a fast path: some permanent may have a granted triggered ability (Game.marks)",
             seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
             lki_host: Derived "last known information (CR 608.2h): what a gone Aura enchanted",
+            lki_loss: Derived "last known information (CR 603.10a): when a gone permanent lost its abilities",
             entering_spent: Derived "transient: set and taken around one move",
             phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
             indirect: Public "which phased-out permanents phased out with what they are attached to (CR 702.26e)",
