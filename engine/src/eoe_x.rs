@@ -187,16 +187,28 @@ impl Game {
                         Flow::Next
                     }
                     None => {
-                        let Some(Target::Obj(o)) = self.targets_of(f, *tgt).into_iter().next() else { return Flow::Next };
-                        if self.objs[o.idx.i()].zone != Zone::Graveyard {
-                            return Flow::Next;
-                        }
-                        self.move_card(o.idx, Zone::Exile, Pos::Top);
-                        if self.objs[o.idx.i()].zone != Zone::Exile {
-                            return Flow::Next;
-                        }
-                        let copy = self.copy_card_in_exile(o.idx, p);
-                        f.picked = vec![copy];
+                        // The decision's task can run again before it is
+                        // answered (`determinize` refreshes a pending
+                        // decision by running its task anew): the card was
+                        // exiled and copied the first time, the copy is the
+                        // frame's pick; only the question is asked again.
+                        let again = f.picked.first().copied().filter(|&c| self.is_copy_obj(c) && self.objs[c.i()].zone == Zone::Exile);
+                        let copy = match again {
+                            Some(c) => c,
+                            None => {
+                                let Some(Target::Obj(o)) = self.targets_of(f, *tgt).into_iter().next() else { return Flow::Next };
+                                if self.objs[o.idx.i()].zone != Zone::Graveyard {
+                                    return Flow::Next;
+                                }
+                                self.move_card(o.idx, Zone::Exile, Pos::Top);
+                                if self.objs[o.idx.i()].zone != Zone::Exile {
+                                    return Flow::Next;
+                                }
+                                let copy = self.copy_card_in_exile(o.idx, p);
+                                f.picked = vec![copy];
+                                copy
+                            }
+                        };
                         let mut opts = vec![Opt { action: act::PASS, choice: Choice::Pass }];
                         if self.has_spell_face(copy) && self.can_cast_free_now(p, copy) {
                             opts.push(Opt { action: act::YES, choice: Choice::Yes });

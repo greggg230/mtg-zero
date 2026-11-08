@@ -866,3 +866,40 @@ fn tapestry_warden_station_reads_last_known_toughness_cr608_2h() {
     assert_eq!(g.obj(wall).zone, Zone::Graveyard);
     assert_eq!(g.counters_on(ship, charge()), 4, "{}", log(&g));
 }
+
+/// The pending "cast the copy?" decision, determinized for either viewer
+/// (ENGINE.md 10): the copy made in exile and everything else public are
+/// the same, and the decider's actions too. (A refresh runs the decision's
+/// task again; the exile and the copy were made once, fuzz seed 624 of
+/// eoe-base 38d6a3b: the task exiled nothing the second time and the
+/// ability ran on past the question.)
+#[test]
+fn roving_actuator_pending_copy_decision_survives_determinize_cr707_12() {
+    let mut g = actuator_with_void(&[]);
+    let bolt = g.card(0, "Cross Bolt", Zone::Graveyard);
+    g.choose(g.tgt(bolt));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::YesNo));
+    let mover = g.to_move().unwrap();
+    assert_eq!(mover, 0);
+    let mut rng = engine::rng::Rng::new(624);
+    for viewer in [0u8, 1] {
+        let mut d = g.clone();
+        d.determinize(viewer, &mut rng);
+        assert_eq!(d.to_move(), Some(mover), "viewer P{viewer}: still the decision");
+        assert_eq!(d.kind(), Some(DecisionKind::YesNo));
+        assert_eq!(g.view_of(viewer), d.view_of(viewer), "viewer P{viewer}: the view\n{}", log(&d));
+        let (mut a, mut b) = (Vec::new(), Vec::new());
+        g.legal_actions(&mut a);
+        d.legal_actions(&mut b);
+        assert_eq!(a, b, "viewer P{viewer}: the decider's actions");
+        assert_eq!(d.count_in(0, "Cross Bolt", Zone::Exile), 2, "the card and its copy, once");
+        // The determinized world plays on: the copy is cast and resolves.
+        d.choose(Choice::Yes);
+        d.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        let giant = bf(&d, 1, "Cross Giant");
+        d.choose(d.tgt(giant));
+        settle(&mut d);
+        assert_eq!(d.obj(giant).zone, Zone::Graveyard, "{}", log(&d));
+        assert_eq!(d.count_in(0, "Cross Bolt", Zone::Exile), 1);
+    }
+}

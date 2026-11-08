@@ -18840,6 +18840,24 @@ limits, 3 gaps for the next layout. `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 gam
 `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before the branch) and 1,000 matches,
 passed (397 s). (E: filled to 0 bytes for a while during the runs; the suite was run once it had
 room again.)
+
+**Fix after the merge (eoe-base 38d6a3b): the copy decision under `determinize`.** The merged
+pool's EoE fuzz, seed 624: "determinize changed the view of P1" at Roving Actuator's "cast the
+copy?" question. `determinize` refreshes a pending decision by running its task again; the task of
+`EoeX::ExileTargetCastCopyFree` exiled the target card and made the copy before it asked, so the
+second run found the card already in exile, asked nothing and let the ability run on past the
+question (in that world the copy ceased to exist and priority moved: the views differed). An op
+that suspends must be able to run again until it is answered: the copy, kept in the frame's
+`picked`, now marks the work as done (a copy slot in exile), and only the question is asked again
+(`eoe_x.rs`). No hidden information is involved (the card, its copy and exile are public).
+`tests/cards_eoe_cross_more.rs::roving_actuator_pending_copy_decision_survives_determinize_cr707_12`
+builds the position and determinizes it for both viewers (the views, the decider's actions, the
+copy made once, the world playing on); it fails without the fix. Results on 38d6a3b + the fix: seed 624 passes; `FUZZ_POOL=eoe
+FUZZ_GAMES=20000` 20,000 games (wins 9,091 / 9,081, 1,828 draws, mean 38.9 turns, 500.4 decisions),
+all four fuzz tests passed (1,215 s); the default `FUZZ_GAMES=20000` 20,000 games (9,967 / 9,994, 39
+draws) and 1,000 matches, passed; the full engine suite 1,853 passed, 0 failed, 15 ignored;
+behaviour digests unchanged (`f6543eb2b1b8752f`).
+
 ### 99.9 The IR-fix batch (branch `eoe-irfix`, mtg-bot `feature/eoe-ir-fixes` 5362f5ed)
 
 **Why.** The four lanes found the IR dropping or contradicting the Oracle text of about 45 EoE cards
