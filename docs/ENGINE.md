@@ -19730,3 +19730,10 @@ subtype grants join the Mountain's land types by timestamp; `spend_allow_from` r
 the merge: EoE support 306 / 320 (base 295 and W2's 11); Power Depot is blocked by modular,
 Sunken Citadel by its chosen colour's production (W1's IR: `produces: chosen`,
 `enters_choosing_color`), both outside W2's restrictions.
+
+The merge's EoE fuzz found one interaction (seeds 538, 5545, 15243): W3's "tap X untapped artifacts"
+cost (Secluded Starforge) reserves the artifacts it will tap (`Keep::sac_taps`), and a Gene
+Pollinator activating for the mana is an artifact tapped too: `Game::reserved_n` counts it against
+the reservation (one more for each Pollinator source when the Pollinators that can activate all
+match the cost; when only some do, which one activates would matter: a loud failure, open). Test:
+`cr_601_2h_a_pollinator_activating_isnt_an_artifact_left_to_tap`.

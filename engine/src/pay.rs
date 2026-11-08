@@ -1051,6 +1051,27 @@ impl Game {
 
     /// Mana sources whose use takes a permanent a later sacrifice needs, or
     /// a card in hand a later discard needs.
+    /// How many of the permanents a later cost needs source `s` of class
+    /// `cl` uses: [`reserved`](Self::reserved)'s, and for a Pollinator's
+    /// source (`POL_FOR`) under a later "tap n untapped permanents" the
+    /// Pollinator that activates too (ENGINE.md 99.12).
+    fn reserved_n(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> i32 {
+        let mut n = self.reserved(p, keep, cl, s) as i32;
+        if s.slot == POL_FOR && keep.sac_taps {
+            if let Some((sc, card)) = &keep.sac {
+                let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
+                let counts = |a: CardIdx| !(sc.another && a == *card) && self.card_matches(&sc.filter, a, &ctx);
+                let acts = self.pol_activators(p);
+                let k = acts.iter().filter(|&&a| counts(a)).count();
+                // (Which Pollinator activates would matter when only some
+                // count: open, a loud failure.)
+                assert!(k == 0 || k == acts.len(), "Pollinators of which only some a later tap cost needs (ENGINE.md 99.12)");
+                n += (k > 0) as i32;
+            }
+        }
+        n
+    }
+
     fn reserved(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> bool {
         match &keep.sac {
             Some((sc, card)) if cl.sac_self || keep.sac_taps && cl.res != 0 => {
@@ -1069,7 +1090,7 @@ impl Game {
     }
 
     fn cands(&self, p: PlayerId, keep: &Keep, classes: &[Class], use_src: &dyn Fn(&Src) -> bool, dmg: bool) -> Cands {
-        cands(classes, use_src, &|_| (0, 0), dmg, &|cl, s| self.reserved(p, keep, cl, s), keep.allow)
+        cands(classes, use_src, &|_| (0, 0), dmg, &|cl, s| self.reserved_n(p, keep, cl, s), keep.allow)
     }
 
     /// The candidates of the rest of payment `pm`: the sources of
@@ -1081,7 +1102,7 @@ impl Game {
             let more = plus.is_some_and(|x| x.card == s.card);
             (pm.used_res(classes, s.card) | if more { plus_res } else { 0 }, pm.uses(s.card) + more as u8)
         };
-        let mut c = cands(&classes[from..], &|_| true, &used, dmg, &|cl, s| self.reserved(pm.payer, &pm.keep, cl, s), pm.keep.allow);
+        let mut c = cands(&classes[from..], &|_| true, &used, dmg, &|cl, s| self.reserved_n(pm.payer, &pm.keep, cl, s), pm.keep.allow);
         c.converted = pm.convert;
         c
     }
@@ -1502,7 +1523,7 @@ impl Game {
             if let Yield::One(u) = cl.yld {
                 life += u.life as i32;
             }
-            let sac = self.reserved(pm.payer, &pm.keep, cl, &s) as i32;
+            let sac = self.reserved_n(pm.payer, &pm.keep, cl, &s);
             let tap = if cl.share > 0 { b.tap.min(cl.share as i32) - cl.taps.max(1) as i32 } else { b.tap };
             b = Budget { life: b.life - life, sac: b.sac - sac, tap };
             if b.life < 0 || b.sac < 0 || b.tap < 0 {
@@ -2298,7 +2319,7 @@ fn cands(
     use_src: &dyn Fn(&Src) -> bool,
     used: &dyn Fn(&Src) -> (u8, u8),
     dmg: bool,
-    reserved: &dyn Fn(&Class, &Src) -> bool,
+    reserved: &dyn Fn(&Class, &Src) -> i32,
     allow: u8,
 ) -> Cands {
     // (Sources whose mana this payment may not spend are left out.)
@@ -2397,7 +2418,7 @@ fn cands(
             if n == 0 {
                 continue;
             }
-            let sac = reserved(cl, s) as i32;
+            let sac = reserved(cl, s);
             if cl.convert {
                 // (Its card's other ways are kept apart, below: activating
                 // it taps and sacrifices the card, so they are out then.)

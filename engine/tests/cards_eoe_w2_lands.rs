@@ -525,3 +525,31 @@ fn cr_613_1f_a_mountain_keeps_an_ability_an_effect_gave_it() {
     assert!(g.is_creature(lav) && subtype(&g, lav, "Mountain") && subtype(&g, lav, "Elemental"));
     assert!(g.has_option(act(lav, 1)), "the granted pump: {:?}", g.options_desc());
 }
+
+/// A Pollinator activating for the mana of a cost that also taps X
+/// untapped artifacts is one of the artifacts that cost can't tap (CR
+/// 601.2g-h; Secluded Starforge with X = 1 and the Pollinator its only other
+/// artifact: the Pollinator's mana can't pay the {2}; EoE fuzz seed 538).
+#[test]
+fn cr_601_2h_a_pollinator_activating_isnt_an_artifact_left_to_tap() {
+    let mut g = scen()
+        .battlefield(0, &["Secluded Starforge", "Gene Pollinator", "Island", "Island", "Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let forge = bf(&g, 0, "Secluded Starforge");
+    let pol = bf(&g, 0, "Gene Pollinator");
+    let bear = bf(&g, 0, "Test Bear");
+    g.choose(act(forge, 1));
+    run_until(
+        &mut g,
+        |g| at_priority(g),
+        |g| match g.kind() {
+            Some(DecisionKind::ChooseMode) => opts(g).last().copied(),
+            Some(DecisionKind::Target) => pick(g, &[g.tgt(bear)]),
+            _ => None,
+        },
+    );
+    settle(&mut g);
+    assert!(g.obj(pol).tapped, "tapped for the cost");
+    assert_eq!(g.power(bear), 3, "X = 1");
+}
