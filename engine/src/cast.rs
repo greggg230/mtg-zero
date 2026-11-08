@@ -85,6 +85,13 @@ impl Game {
         for d in &self.def_of(card).discounts {
             cost.generic = cost.generic.saturating_sub(self.discount(d, p));
         }
+        // "The second spell you cast each turn costs {2} less", "spells you
+        // cast have affinity for artifacts" (ENGINE.md 99.4).
+        for c in self.permanents_of(p) {
+            for d in &self.abilities(c).casting.spell_discounts {
+                cost.generic = cost.generic.saturating_sub(self.discount(d, p));
+            }
+        }
         // "Spells you cast from your graveyard cost {n} less" (Green
         // Goblin): the card is in its owner's graveyard (castability) or a
         // spell cast from there.
@@ -133,6 +140,13 @@ impl Game {
             crate::db::Discount::PerBasicLandType(n) => self.basic_land_types(p).saturating_mul(*n),
             crate::db::Discount::PerControlled(f, n) => {
                 (self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u8).saturating_mul(*n)
+            }
+            crate::db::Discount::If(c, n) => {
+                if self.cond_holds(c, p) {
+                    *n
+                } else {
+                    0
+                }
             }
         }
     }
@@ -2402,6 +2416,11 @@ impl Game {
         let item = &self.stack[pos];
         let StackKind::Spell { card } = item.kind else { return };
         let p = item.controller;
+        // Void: a spell was warped this turn (cast for its warp cost, CR
+        // 702.185a; ENGINE.md 99.4).
+        if item.alt > 0 && self.def_of(card).alt_costs.get(item.alt as usize - 1).is_some_and(|a| a.warp) {
+            self.void_turn = self.turn.number;
+        }
         let pl = &mut self.players[p as usize];
         pl.spells_cast = pl.spells_cast.saturating_add(1);
         pl.spells_game = pl.spells_game.saturating_add(1);

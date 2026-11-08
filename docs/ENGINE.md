@@ -18106,3 +18106,59 @@ Each lane appends its own subsection here (99.2 lane A, 99.3 lane B, 99.4 lane C
 Merge order B, A, C, D (B's base audit first). Then the cross-lane cards, the IR defects the lanes
 list (one mtg-bot batch and one re-export, so the schema changes once), and the 20k fuzz over the
 EoE table.
+
+### 99.4 Lane C: void, warp, spells cast this turn, cost reductions, graveyard / exile / library / hand (branch `eoe-c-void`)
+
+**Void.** Void is the set's ability word for "if a nonland permanent left the battlefield this turn
+or a spell was warped this turn". `Game::void_turn` holds the number of the last turn in which
+either happened (no reset needed: void holds while it equals the turn number,
+`Game::void_active`). It is set in `move_card` when a nonland permanent (its types as it last
+existed on the battlefield) leaves the battlefield (not the "it never entered" move of Containment
+Priest's replacement, `quiet_leave`), and in `cast_done` when a spell becomes cast (CR 601.2i) for
+its warp cost (`AltCost::warp`, CR 702.185a): a warped spell that is countered still made void.
+`Cond::Void` reads it; the lowering maps `TriggeredAbility.requires_void` to an intervening "if"
+(`TrigPred::If(Cond::Void)`, CR 603.4), `ConditionalIfVoid` to a jump (one target described in both
+branches is one target, as `IfConditionElse`), `StatePredicate:VoidActive` to an intervening "if",
+`SacrificeSelfUnlessVoidActive` to "jump unless void, else sacrifice the source", and
+`CostReduction.condition(VoidActiveCondition)` to `Discount::If(Cond::Void, n)`.
+
+**The encoding gate.** Void is public state the layout v5 encoding cannot see (layout v5 is frozen;
+no layout change here). `public_state.rs` classifies `Game.void_turn` public, perturbs it, and lists
+it as the second "next layout" gap (`limits()`); `tests/az.rs::public_state_reaches_the_encoding`
+now expects two gaps (the graveyard's order and void). The gate's view (`Game::view_of`) includes
+it. A network has to infer void from the board until the next layout encodes it.
+
+**Spells cast this turn and cost reductions** (CR 601.2f: the cost is determined before the spell
+becomes cast, 601.2i, so the spells cast so far are the others). `Discount::If(Cond, n)`: "if you've
+cast another spell this turn" (`Cond::SpellsCastAtLeast(1)`), "if your opponents control n or more
+<permanents>" (`Cond::OpponentsControlAtLeast`), "during your turn", "if you control a
+<permanent>", "if you attacked with a <subtype> this turn" (`Cond::AttackedWithSubtype`, the
+attackers declared this turn by their cards' subtypes). `CardDef::casting` (`CastingRules`) holds
+what a permanent does to its controller's spells: `spell_discounts`, "the second spell you cast
+each turn costs {2} less" (`Cond::SpellsCastThisTurn { n: 1 }`) and "spells you cast have affinity
+for artifacts" (`Discount::PerControlled`, CR 702.41a), applied in `Game::cost_with` after the
+spell's own reductions. `Condition:AtLeastNSpellsCastThisTurn` is `Cond::SpellsCastAtLeast(n)` (a
+static's "as long as you've cast two or more spells this turn").
+
+**Effects** (`lower/eoe_c.rs`; the new instructions are `Ext::EoeC(EoeC)`, `engine/src/eoe_c.rs`):
+each opponent discards / mills / discards or loses life (who can't discard has no card in hand),
+exile target creature (as its target spec says), exile target creature with power or toughness n
+or less, exile target creature until the source leaves (a linked exile, CR 610.3), exile all
+graveyards (`EoeC::ExileAllGraveyards`, one instruction), put target card from a graveyard on the
+bottom of its owner's library (`EoeC::GraveyardCardToBottom`, CR 401.4), look at the top n and put
+one into your hand and the rest into your graveyard, Starwinder's "you may draw that many cards"
+(the class is that ability: its Python docstring says the "may" is only simplified away there),
+shuffle your hand and graveyard into your library, draw a card per multicolored permanent
+(`Amount::MulticoloredPermanents`, CR 105.2a), "mills cards equal to your life total"
+(`Amount::ControllerLife`), "return target creature or Spacecraft card" (`or_spacecraft`, a
+Spacecraft is an artifact subtype), and Cosmogoyf's P/T (`PtCda::OwnedInExile`: cards its
+controller owns in exile, face up or down, not tokens).
+
+**IR defects** (docs/ir_defects.md 60-63, `lower::IR_DEFECTS`): All-Fates Stalker ("up to one
+target" dropped), Endless Sands (a linked exile read as "until this leaves", its return an empty
+effect), Gravkill and Archenemy's Charm (the target's "or Spacecraft" / "or planeswalker" dropped),
+Elegy Acolyte ("one or more ... deal combat damage" as once per turn, as entry 16).
+
+**Tests.** `engine/tests/cards_eoe_c.rs` (the cards, and lane C features whose real cards need
+another lane, on custom cards in `engine/tests/eoe_c_util`, the EoE table plus those cards).
+Behaviour digests unchanged (`f6543eb2b1b8752f`); cube support 546 / 546.

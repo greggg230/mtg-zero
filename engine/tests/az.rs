@@ -1239,8 +1239,10 @@ fn public_state_reaches_the_encoding() {
     // order, which the GRAVEYARD action ids are positions in (ENGINE.md 65: the Delver mirror's
     // delve choices). Anything else is a deliberate limit.
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
-    assert_eq!(gaps, ["two graveyard cards swap places"], "the gaps on the allowlist");
-    assert_eq!(next, 1);
+    // Edge of Eternities' void (ENGINE.md 99.4) is the second: state the port added after layout
+    // v5 froze, for the next layout.
+    assert_eq!(gaps, ["two graveyard cards swap places", "void holds (a nonland permanent left the battlefield this turn)"], "the gaps on the allowlist");
+    assert_eq!(next, 2);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

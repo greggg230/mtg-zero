@@ -220,10 +220,19 @@ pub(crate) fn lower_effect_walkers(l: &mut Lowerer, b: &mut Builder, e: &cats::E
             }
         }
         E::MillTargetPlayer(nodes::MillTargetPlayer { amount, use_controller_life }) => {
-            l.deny("MillTargetPlayer.use_controller_life", use_controller_life);
             let n = l.int("MillTargetPlayer.amount", *amount, 1, 60);
             let t = b.target(Filter::Player, 1, 1);
-            b.op(Op::Ext(Ext::Mill { who: Who::TargetPlayer(t), n: Amount::Fixed(n) }));
+            // "Mills cards equal to your life total" (ENGINE.md 99.4; the
+            // amount is then the schema's default).
+            let n = if *use_controller_life {
+                if n != 1 {
+                    l.unsupported("MillTargetPlayer.amount(with use_controller_life)");
+                }
+                Amount::ControllerLife
+            } else {
+                Amount::Fixed(n)
+            };
+            b.op(Op::Ext(Ext::Mill { who: Who::TargetPlayer(t), n }));
         }
         E::ExileTargetPlayersLibraryThenShuffleHandIn(nodes::ExileTargetPlayersLibraryThenShuffleHandIn {}) => {
             // "Exile all cards from target player's library, then that

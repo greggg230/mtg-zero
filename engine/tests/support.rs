@@ -715,6 +715,30 @@ const SUPPORTED_EOE_B: &[&str] = &[
 /// Lane C: void, warp, spells cast this turn, cost reductions, graveyard,
 /// exile, library and hand effects.
 const SUPPORTED_EOE_C: &[&str] = &[
+    "Brightspear Zealot",
+    "Chrome Companion",
+    "Codecracker Hound",
+    "Cosmogoyf",
+    "Decode Transmissions",
+    "Gigastorm Titan",
+    "Hymn of the Faller",
+    "Illvoi Infiltrator",
+    "Insatiable Skittermaw",
+    "Interceptor Mechan",
+    "Kavaron Skywarden",
+    "Lashwhip Predator",
+    "Plasma Bolt",
+    "Sami, Wildcat Captain",
+    "Scavenger Grounds",
+    "Seedship Broodtender",
+    "Space-Time Anomaly",
+    "Starwinder",
+    "Temporal Intervention",
+    "Tragic Trajectory",
+    "Uthros Psionicist",
+    "Virus Beetle",
+    "Voidforged Titan",
+    "Warping Wail",
 ];
 /// Lane D: creatures, combat, removal, damage, life, tokens and pumps.
 const SUPPORTED_EOE_D: &[&str] = &[

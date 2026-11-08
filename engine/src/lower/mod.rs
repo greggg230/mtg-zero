@@ -19,6 +19,7 @@ pub mod effect_tail2;
 pub mod effect_tail3;
 pub mod effect_walkers;
 pub mod effect_m7d;
+pub mod eoe_c;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -229,6 +230,20 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
 
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
+    // "Exile up to one target ...": the class has no target count, one
+    // target is required (docs/ir_defects.md 60).
+    ("All-Fates Stalker", "ir_defect(up to one target dropped, docs/ir_defects.md 60)"),
+    // "Exile target creature you control" read as "until this leaves the
+    // battlefield"; the ability returning the exiled cards is an empty
+    // effect (docs/ir_defects.md 61).
+    ("Endless Sands", "ir_defect(linked exile and its return dropped, docs/ir_defects.md 61)"),
+    // "Exile target creature or Spacecraft / or planeswalker": the target
+    // filter is a creature only (docs/ir_defects.md 62).
+    ("Archenemy's Charm", "ir_defect(target types dropped, docs/ir_defects.md 62)"),
+    ("Gravkill", "ir_defect(target types dropped, docs/ir_defects.md 62)"),
+    // "Whenever one or more creatures you control deal combat damage to a
+    // player" as once each turn (docs/ir_defects.md 63, as 16).
+    ("Elegy Acolyte", "ir_defect(one or more as once per turn, docs/ir_defects.md 63)"),
 
     // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
 ];

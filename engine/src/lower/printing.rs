@@ -1567,6 +1567,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // effect on its controller's spells, CR 601.2f).
     let mut gy_spell_discount = 0u8;
     let mut outside_hand_discount = 0u8;
+    let mut casting = crate::db::CastingRules::default();
     for r in external_cost_reductions {
         let cats::ExternalCostReduction::ExternalCostReduction(nodes::ExternalCostReduction { amount, condition }) = r;
         match &**condition {
@@ -1578,7 +1579,13 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             cats::Condition::SpellCastFromOutsideHand(nodes::SpellCastFromOutsideHand {}) => {
                 outside_hand_discount += l.int("ExternalCostReduction.amount", *amount, 1, 9) as u8;
             }
-            other => l.unsupported(format!("ExternalCostReduction.condition({})", other.tag())),
+            // Lane C's (ENGINE.md 99.4).
+            other => {
+                let n = l.int("ExternalCostReduction.amount", *amount, 1, 9) as u8;
+                if let Some(d) = super::eoe_c::spell_discount(l, other, n) {
+                    casting.spell_discounts.push(d);
+                }
+            }
         }
     }
     // Daybound and nightbound (CR 702.145) are on the two faces of one
@@ -1809,6 +1816,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         ability_discount: repl.ability_discount,
         ascend: cascade_kw_ascend,
         outside_hand_discount,
+        casting,
         chooses_land_type,
         x_life: *additional_cost_pay_x_life,
         sunburst: sunburst_counter,
@@ -1975,7 +1983,8 @@ pub(crate) fn lower_discounts(l: &mut Lowerer, cost_reductions: &[cats::CostRedu
                     discounts.push(crate::db::Discount::PerControlled(f, n));
                 }
             }
-            other => l.unsupported(format!("CostReduction.condition({})", other.tag())),
+            // Lane C's (ENGINE.md 99.4).
+            other => discounts.extend(super::eoe_c::cost_reduction(l, other, n)),
         }
     }
     discounts

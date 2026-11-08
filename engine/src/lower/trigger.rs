@@ -18,7 +18,6 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         room_half,
         functions_in_graveyard,
     }) = t;
-    l.deny("TriggeredAbility.requires_void", requires_void);
     l.deny("TriggeredAbility.tier_threshold", tier_threshold);
     l.deny("TriggeredAbility.room_half", room_half);
 
@@ -41,6 +40,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         if *once_per_turn {
             l.unsupported("TriggeredAbility.once_per_turn(cards exiled)");
         }
+        l.deny("TriggeredAbility.requires_void(cards exiled)", requires_void);
         let uses_event = ability.uses_event();
         return Some(TriggerDef { event: EventKind::ExiledFromLibGy, pred, ability, uses_event });
     }
@@ -58,6 +58,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         if *once_per_turn {
             l.unsupported("TriggeredAbility.once_per_turn(from anywhere)");
         }
+        l.deny("TriggeredAbility.requires_void(from anywhere)", requires_void);
         let ability = lower_ability(l, e);
         let uses_event = ability.uses_event();
         return Some(TriggerDef { event: EventKind::ToGraveyard, pred: TrigPred::IsSelf(Slot::Default), ability, uses_event });
@@ -157,6 +158,13 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     let (event, mut pred) = (ev?, pred?);
     if once {
         pred = TrigPred::And(Box::new(TrigPred::Once), Box::new(pred));
+    }
+    // Void (Edge of Eternities' ability word): "..., if a nonland permanent
+    // left the battlefield this turn or a spell was warped this turn, ...":
+    // an intervening "if" (CR 603.4), checked again as it resolves
+    // (ENGINE.md 99.4).
+    if *requires_void {
+        pred = TrigPred::And(Box::new(pred), Box::new(TrigPred::If(Cond::Void)));
     }
     // "When this creature dies" (CR 700.4): it was a creature as it left;
     // the IR's `dies` event covers any permanent put into a graveyard from
@@ -438,6 +446,8 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
         S::LandsPlayedThisTurnAtLeast(nodes::LandsPlayedThisTurnAtLeast { n }) => {
             (Cond::LandsPlayedAtLeast(l.int("LandsPlayedThisTurnAtLeast.n", *n, 1, 99) as u8), true)
         }
+        // Void: an intervening "if" (CR 603.4; ENGINE.md 99.4).
+        S::VoidActive(nodes::VoidActive {}) => (Cond::Void, true),
         other => {
             l.unsupported(format!("StatePredicate:{}", other.tag()));
             return None;

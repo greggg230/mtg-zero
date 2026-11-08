@@ -273,6 +273,9 @@ pub enum PtCda {
     /// Level up (CR 711): base power and toughness by the number of
     /// counters of this kind, per range (lo, hi or none, p, t).
     Leveler { counter: Counter, ranges: Vec<(u8, Option<u8>, i32, i32)> },
+    /// Power = the cards its controller owns in exile (face up or down;
+    /// not tokens, CR 108.2); toughness = that plus `plus` (Cosmogoyf).
+    OwnedInExile { plus: i32 },
 }
 
 /// A predicate over targets (players and objects). At top level the type
@@ -892,6 +895,16 @@ pub enum Cond {
     /// You played at least n lands this turn (Fastbond: "if it wasn't the
     /// first land you played this turn").
     LandsPlayedAtLeast(u8),
+    /// Void: a nonland permanent left the battlefield this turn or a spell
+    /// was warped this turn (Edge of Eternities' ability word; ENGINE.md
+    /// 99.4).
+    Void,
+    /// Your opponents control at least n permanents matching the filter
+    /// between them ("if your opponents control three or more creatures").
+    OpponentsControlAtLeast(Filter, u8),
+    /// You attacked with a creature of this subtype (its card's printed
+    /// subtypes) this turn ("if you attacked with a Spacecraft this turn").
+    AttackedWithSubtype(u16),
 }
 
 impl Cond {
@@ -925,7 +938,10 @@ impl Cond {
             | Cond::HasInitiative
             | Cond::CompletedDungeon
             | Cond::CityBlessing
-            | Cond::LandsPlayedAtLeast(_) => false,
+            | Cond::LandsPlayedAtLeast(_)
+            | Cond::Void
+            | Cond::OpponentsControlAtLeast(..)
+            | Cond::AttackedWithSubtype(_) => false,
         }
     }
 }
@@ -1607,6 +1623,20 @@ pub struct CardDef {
     /// The card may be revealed from its owner's sideboard before the game
     /// (103.2b) and put into their hand once for {3} (116.2g).
     pub companion: Option<DeckCond>,
+    /// Rules about casting spells this card adds (Edge of Eternities lane
+    /// C, ENGINE.md 99.4).
+    pub casting: CastingRules,
+}
+
+/// Rules about casting spells a card adds while it is on the battlefield
+/// (or, for its own warp, wherever the card is): Edge of Eternities lane C
+/// (ENGINE.md 99.4).
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct CastingRules {
+    /// Reductions of the cost of each spell its controller casts (CR
+    /// 601.2f): "the second spell you cast each turn costs {2} less to
+    /// cast"; "spells you cast have affinity for artifacts" (702.41a).
+    pub spell_discounts: Vec<Discount>,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1638,6 +1668,9 @@ pub enum Discount {
     PerBasicLandType(u8),
     /// n less per permanent you control matching the filter (affinity).
     PerControlled(Filter, u8),
+    /// n less if the condition holds for you as the cost is determined
+    /// (CR 601.2f: "this spell costs {n} less to cast if ...").
+    If(Cond, u8),
 }
 
 impl CardDef {

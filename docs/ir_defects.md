@@ -56,6 +56,10 @@ permission) and a consumer can go wrong with it.
 | 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | fixed (8ea9fcca), supported | confirmed |
 | 19 | Gut, True Soul Zealot | qualifier widened | `SacrificeAPermanent { another: true, permanent_filter: ObjectOr(IsCreature, IsArtifact) }` for "sacrifice another creature or an artifact" | "another" on the creature only (an artifact may be Gut itself) | the "sacrifice another ..." phrase parser (`IfYouDo` / `MayDo`) | worked around (the label read) | confirmed |
 | 20 | Adagia, Windswept Bastion; Evendo, Waking Haven; Kavaron, Memorial World; Susur Secundi, Void Altar; Uthros, Titanic Godcore; The Eternity Elevator (Edge of Eternities, ENGINE.md 99) | ability dropped | the planets: a land with `enters_tapped` and `produces` only; The Eternity Elevator: no `station_threshold` / `stationed_*` | Station (CR 702.184) and each threshold ability ("12+ ..."), as the set's Spacecraft carry them | `cards/parser/land_builder.py` (planets) and the Spacecraft builder (`cards/parser/spacecraft_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 60 | All-Fates Stalker (Edge of Eternities, ENGINE.md 99.4) | target count dropped | `ExileTargetCreatureUntilSourceLeaves { excluded_subtypes: [Assassin] }`, a class with one required target (Hardlight Containment's too) | "up to one target" (a target count, minimum 0) | `effects/generic/exile.py::ExileTargetCreatureUntilSourceLeaves` (`requires_target`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 61 | Endless Sands (Edge of Eternities, ENGINE.md 99.4) | effect misread, ability dropped | `{2},{T}: ExileTargetCreatureUntilSourceLeaves { yours_only }`; `{4},{T}, sac: Sequence { effects: [] }` | a plain linked exile (CR 607.2a), and "return each creature card exiled with this land to the battlefield under its owner's control" | the land-ability parser (`cards/parser/land_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 62 | Gravkill; Archenemy's Charm (Edge of Eternities, ENGINE.md 99.4) | target types dropped | `ExileTargetCreature { targets: [IsCreature] }` for "exile target creature or Spacecraft" / "... or planeswalker"; the Charm's second mode `ReturnUpToNCreaturesFromYourGraveyardToHand { creature }` for "one or two target creature and/or planeswalker cards" | `ObjectOr(IsCreature, HasSubtype(Spacecraft))` / `ObjectOr(IsCreature, IsPlaneswalker)`; the planeswalker cards and the count | the "exile target X" phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 63 | Elegy Acolyte (Edge of Eternities, ENGINE.md 99.4) | "one or more" as once per turn | "whenever one or more creatures you control deal combat damage to a player" with `once_per_turn: true` | one trigger per combat damage step (`OneOrMoreBatch`), no once-each-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to a player" entry) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -381,6 +385,73 @@ Elevator is a Spacecraft with Station.
   Without the entry the five planets lowered as plain taplands and the support report counted them
   supported (98 cards instead of 93): a silent drop the report could not see. Found by checking
   every EoE card whose Oracle text has Station for a `station_threshold` in its IR.
+
+### L. Edge of Eternities lane C (ENGINE.md 99.4)
+
+**60. All-Fates Stalker.** Oracle: "When this creature enters, exile up to one target non-Assassin
+creature until this creature leaves the battlefield. / Warp {1}{W}"
+
+* IR: `TriggeredAbility { event: enters, effect: ExileTargetCreatureUntilSourceLeaves {
+  excluded_subtypes: [Assassin] } }`. The class has no target spec or count; its Python
+  `requires_target` is true and it is also Hardlight Containment's "exile target creature an
+  opponent controls until this Aura leaves the battlefield" (one required target).
+* Should be: up to one target (a `TargetSpec` with `count_min: 0`): the ability can do nothing,
+  and with no other creature on the battlefield it must not target the Stalker itself.
+* Source: `effects/generic/exile.py::ExileTargetCreatureUntilSourceLeaves` (no count field).
+* Fix: export the target spec (`targets: [TargetSpec { filter, count_min: 0 }]`), or a
+  `count_min` field on the class.
+* Engine: the class lowers (one target, `Ext::ExileLinked { until: true }`); the card is
+  blocked, `ir_defect(up to one target dropped, docs/ir_defects.md 60)`.
+
+**61. Endless Sands.** Oracle: "{T}: Add {C}. / {2}, {T}: Exile target creature you control. /
+{4}, {T}, Sacrifice this land: Return each creature card exiled with this land to the battlefield
+under its owner's control."
+
+* IR: the second ability is `ExileTargetCreatureUntilSourceLeaves { yours_only: true }` (the
+  creature would return when the land leaves, so the third ability's sacrifice would return it
+  anyway); the third ability's effect is `Sequence { effects: [] }`, nothing.
+* Should be: a linked exile without a duration (CR 607.2a, "exiled with this land"), and the
+  third ability's "return each creature card exiled with this land to the battlefield under its
+  owner's control" (as the cube's linked-exile returns).
+* Source: the land builder (`cards/parser/land_builder.py`), which matched the exile line to the
+  until-it-leaves class and dropped the return.
+* Fix: a linked exile class for the second ability and a "return each card exiled with this"
+  effect for the third.
+* Engine: blocked, `ir_defect(linked exile and its return dropped, docs/ir_defects.md 61)`
+  (the card is also lane B's: `mana_only_from_produces`).
+
+**62. Gravkill; Archenemy's Charm.** Oracle (Gravkill): "Exile target creature or Spacecraft."
+(Archenemy's Charm): "Choose one - / * Exile target creature or planeswalker. / * Return one or
+two target creature and/or planeswalker cards from your graveyard to your hand. / * Put two
++1/+1 counters on target creature you control. It gains lifelink until end of turn."
+
+* IR: `ExileTargetCreature { targets: [TargetSpec { filter: IsCreature }] }` for both exile
+  modes; the Charm's second mode is `ReturnUpToNCreaturesFromYourGraveyardToHand { creature:
+  true }`.
+* Should be: `ObjectOr(IsCreature, HasSubtype(Spacecraft))` (a Spacecraft that isn't a
+  creature, below its station threshold, is a legal target) and `ObjectOr(IsCreature,
+  IsPlaneswalker)`; the second mode's planeswalker cards and its "one or two" count.
+* Source: the "exile target creature ..." phrase parser keeps the first noun only.
+* Fix: parse "creature or <type>" into an `ObjectOr` target filter.
+* Engine: `ExileTargetCreature` lowers its target spec as written; both cards are blocked,
+  `ir_defect(target types dropped, docs/ir_defects.md 62)`.
+
+**63. Elegy Acolyte.** Oracle: "Lifelink / Whenever one or more creatures you control deal combat
+damage to a player, you draw a card and lose 1 life. / Void - At the beginning of your end step,
+if a nonland permanent left the battlefield this turn or a spell was warped this turn, create a
+2/2 colorless Robot artifact creature token."
+
+* IR: the combat damage trigger is `TriggeredAbility { event: deals_combat_damage, predicate:
+  creature you control -> player, once_per_turn: true }`.
+* Should be: one trigger per combat damage step in which one or more of them deal combat damage
+  to a player (`OneOrMoreBatch`), with no once-each-turn limit: a first-strike step and a regular
+  step, or an extra combat, trigger it again (the shape of entry 16, Forth Eorlingas!).
+* Source: `cards/parser/triggers.py`, the "one or more creatures you control deal combat damage
+  to a player" phrase entry (entry 16's fix covered another phrase).
+* Fix: `OneOrMoreBatch` in the predicate, `once_per_turn: false`.
+* Engine: blocked, `ir_defect(one or more as once per turn, docs/ir_defects.md 63)`; its void
+  trigger lowers (ENGINE.md 99.4).
+
 
 ## Suspected defects (representational)
 

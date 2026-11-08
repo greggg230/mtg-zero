@@ -450,6 +450,11 @@ pub(crate) fn lower_pt_formula(l: &mut Lowerer, f: &cats::PTFormula) -> Option<P
             PtCda::GraveyardTypes { plus: l.int("CardTypesInAllGraveyardsPT.toughness_plus", *toughness_plus, 0, 9) }
         }
         F::DomainPT(nodes::DomainPT {}) => PtCda::Domain,
+        // "Power equal to the number of cards you own in exile and
+        // toughness equal to that number plus 1" (ENGINE.md 99.4).
+        F::CardsYouOwnInExilePT(nodes::CardsYouOwnInExilePT { toughness_plus }) => {
+            PtCda::OwnedInExile { plus: l.int("CardsYouOwnInExilePT.toughness_plus", *toughness_plus, 0, 9) }
+        }
         F::PowerEqualsCount(nodes::PowerEqualsCount { count_filter }) => {
             let Some(p) = count_filter else {
                 l.unsupported("PowerEqualsCount.count_filter(missing)");

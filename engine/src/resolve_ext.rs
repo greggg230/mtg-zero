@@ -1641,6 +1641,7 @@ impl Game {
             | Ext::ReanimateAttach { .. }
             | Ext::SacrificeReanimated => self.exec_tail3(f, op),
             Ext::M7d(x) => self.exec_m7d(f, x),
+            Ext::EoeC(x) => self.exec_eoe_c(f, x),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }
