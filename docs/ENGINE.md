@@ -18986,3 +18986,126 @@ No branch changes the action layout or the encoding: a card that can only be don
 change is left blocked and reported (the maintainer decides). New public state goes in the
 public-state gate's limits as before (a perturbation draws nothing from the shared stream).
 Builds use `CARGO_PROFILE_RELEASE_DEBUG=false` (E: is nearly full; no behaviour change).
+
+#### 99.14 W4: exile, graveyard, copies and control (branch `eoe-w4-exile`)
+
+**Cards.** EoE support 258 -> 266 with W4's eight (`SUPPORTED_EOE_EXILE`): Adagia, Windswept
+Bastion; Alpharael, Stonechosen; Blade of the Swarm; Chorale of the Void; Close Encounter; Scout for
+Survivors; Susur Secundi, Void Altar; The Dominion Bracelet. Left: Sothera, the Supervoid (IR
+defect 180) and Tannuk, Steadfast Second (an alternative cost granted by another permanent: not
+built). Tests: `tests/cards_eoe_w4.rs` (23; the card table `tests/eoe_w4_kit`, the EoE table plus
+`W4 ...` IR test cards, never in the fuzz or digest pools). New Rust in `eoe_w4.rs` (`Ext::EoeW4`)
+and `lower/eoe_w4.rs` (a link in `lower_effect`'s chain); shared files small and additive.
+
+**Controlling another player (CR 722; The Dominion Bracelet).** "You control target opponent during
+their next turn" (`EoeW4::ControlNextTurn`) sets `Game::next_turn_controller[q]` (the last effect
+wins, 722.1a); as q's next turn starts (a skipped turn isn't taken, 722.1b) it becomes
+`Game::turn_controller`, for the whole turn (722.1). Then:
+
+* *Who decides.* A decision keeps its player (the controlled player: its action ids are that
+  player's, their hand, their permanents, their mana, 722.4a); `Game::decider_of` names who makes it
+  (722.4: the controller for the active player during the controlled turn; their own decisions stay
+  theirs, 722.7), and `Game::to_move` (zero-core's) is the decider. `determinize`'s "the viewer's
+  own decision" is the decider's.
+* *What the controller sees* (722.3). At the end of every transition of the controlled turn
+  (`advance`, before the next decision is shown) `sync_controller_view` lets the controller learn,
+  keyed (`KEY_LOOK`, private to it, in definition order), every hidden card the controlled player
+  can see: their hand (so the cards they draw), the face-down permanents they control (708.5), the
+  face-down exiled cards they know, and the hidden cards their pending decision names (a looked-at
+  pile). What they only remember (a library card scried on an earlier turn) is not visible and not
+  shared. So the decider knows everything the controlled player's options depend on: its worlds
+  never resample them (the decider's actions and view are unchanged by `determinize`, which the
+  fuzz checks), and no card the controller can't see is shared. Afterwards the controller still
+  knows the cards it saw, until they are rearranged privately (as after a hand reveal). Limits:
+  docs/shortcuts.md 99.14.2.
+* *The encoding* is the decider's own seat's (its hand; the controlled player's hand as the known
+  cards it is); the action ids are the controlled player's. Layout v5 has no float for a controlled
+  turn or a pending one: two next-layout gaps in the public-state gate ("a player will control the
+  other's next turn", "the active player is controlled this turn"; perturbations draw nothing from
+  the shared stream). The next layout should encode both and the decision's seat, so a network can
+  read whose resources its ids name.
+
+**Activated abilities an Equipment grants** (CR 301.5, 613.1f). `CardDef::grants_equipped`: a face
+of the Equipment holding the granted abilities (the IR's
+`grants_control_opponent_ability_when_equipped`, the Bracelet's whole Oracle text, lowered by
+`lower/eoe_w4.rs::grant_control_ability`). The equipped permanent has them while the Equipment is
+attached and keeps its abilities (`Game::granted_activated`): offered at priority after its own
+(`ACTIVATE` ids past its own, at most four: docs/shortcuts.md 99.14.3), activated from the face with
+the creature as the source (`Game::activated_home`; its stack item names the face, so the cost,
+targets and program are the face's; `Game::activated_of` for the bots). "Exile The Dominion
+Bracelet" (`CardDef::exiles_granter`): the Equipment, noted as the ability is activated, is exiled
+after the mana (CR 601.2h), so "{X} less, where X is this creature's power" (`Discount::SourcePower`)
+reads the power with the Bracelet's +1/+1 as the cost is determined (601.2f).
+
+**Targets in exile** (Blade of the Swarm: "put target exiled card with warp on the bottom of its
+owner's library"). 99.4 and 99.8 left it for a layout change; none is needed. `Filter::InExile`,
+`Filter::HasWarp` (a card with warp, CR 702.185a, whoever owns it and however it was exiled; face-up
+exile only, no copies of cards); exiled cards are target candidates when a filter names exile
+(`target_candidates`, `has_candidates`, `filter_ok`'s `exile_ok`); a target's option is `EXILE` +
+its place among the decision's offered exiled cards in exile order (`Game::name_exile_targets`, run
+by `ask` beside 65.10's graveyard renaming). That is the existing meaning of the `EXILE` range for
+a choice of exiled cards (`ChooseExiled`: "the k-th offered card"): the ids, their count and every
+existing decision's ids are unchanged, so it is no layout change. Naming by definition (the brief's
+suggestion) is not rules-equivalent here: two exiled cards of one definition and owner differ (one
+warped, castable from exile later; another with counters or linked to a permanent), and exile is
+public, so the card itself is named, as a graveyard target is (65.10). The encoding has no field for
+a target in exile (a stack item's target block names players, permanents and stack items): a rare
+next-layout gap, "a stack item targets another exiled card".
+
+**Total mana value of targets** (Scout for Survivors: "up to three target creature cards with total
+mana value 3 or less"). `TargetReq::total_mv`; the targets are chosen one at a time and only a
+candidate keeping the chosen total within the limit is offered (`Game::retain_within_total_mv`; a
+copy's new targets too). This equals CR 601.2c's check of the announced set: every set so built is
+within the total, and every set within it is built by some order (mana values are never negative,
+so each prefix of a legal set is within the total). The targets are graveyard cards, whose mana
+values nothing changes there, so the total still holds as the spell resolves (608.2b checks each
+target alone). `EoeW4::GraveyardTargetsOntoBattlefield` puts them onto the battlefield together,
+then a +1/+1 counter on each (CR 122.1: after they enter, not "enters with").
+
+**Close Encounter** ("As an additional cost to cast this spell, choose a creature you control or a
+warped creature card you own in exile"). `CastingRules::choose_creature_or_warped`: castable only
+with something to choose (`cast_timing_ok`, which every castability check passes through: a cost
+that can't be paid, 601.2h); `Task::ChooseForCost`, before the mana: one choice in two decisions, an
+exiled card first (`ChooseExiled`, `EXILE` + k; `PASS` = a creature instead, offered when there is
+one), then a creature (`ChoosePermanent`); each candidate is reached by exactly one sequence. The
+choice is noted on the spell (not a target: no ward, 702.21a). `Game::is_warped`: in exile by warp's
+delayed ability (its permission from a later turn, for the mana cost). `Amount::ChosenPower`: the
+creature's power now, or as it last existed if it left (608.2h); an exiled card's own power. Which
+object a stack item noted is encoded as a count only: a rare next-layout gap, "a stack item noted
+another object".
+
+**The other cards.** Adagia: copy exceptions gain supertypes (`Except::supers`, CR 707.9b: "except
+it's legendary"); `Game::supertypes_of` reads them for the legend rule (704.5j), static scopes,
+filters and spending restrictions; the descriptor's legendary float is the copiable definition's (a
+next-layout gap, "a copy is legendary by its exception"). Susur Secundi: `Amount::CostPower`, the
+sacrificed creature's power as it last existed (608.2h; the activated item's event object, recorded
+as the cost is paid). Alpharael, Stonechosen: `WardCost::DiscardRandom`,
+`EoeW4::OfferDiscardRandom` (702.21a, 701.9b; a yes/no, asked with an empty hand too, as ward's life
+payment is; the encoding's ward-discard float). Chorale of the Void: the defending player's
+graveyard (the trigger controller's opponent: the Aura enchants a creature its controller
+controls), onto the battlefield under your control tapped and attacking (508.4: during combat,
+never declared as an attacker; `Task::AttackTarget` if there is a planeswalker to attack).
+
+**IR defect** (docs/ir_defects.md 180, `lower::IR_DEFECTS` under W4): Sothera's end-step ability
+returns the creature card before Sothera is sacrificed (the Oracle text sacrifices first); the
+order is observable (the returned creature's enters "if"s and leave triggers). Its classes are not
+lowered yet either (`EachOpponentExilesOwnCreature`, `ReanimateOneExiledWithSourceWithCounters`,
+`SacrificeSelfPreservingExileLink`, `AnyPlayerControlsNoCreatures`).
+
+**Not done: Tannuk, Steadfast Second** ("Artifact cards and red creature cards in your hand have
+warp {2}{R}"). No layout change is needed, but an engine subsystem is: an alternative cost a card
+has from another permanent. `StackItem::alt` indexes the card's own `alt_costs`, and warp's
+consequences read the card's own alternative cost: castability and the `ChooseAltCost` options
+(`alt_payable`, `alt_allowed`), the total cost, void and `Mark::WarpCast` (`cast_done`,
+`put_onto_battlefield_attached`), and the end-step exile, which is the card's own delayed ability
+(`AltCost::dash`). It needs granted alternative costs (an index past the card's own, resolved to
+the granting permanent's face, as 99.14's granted activated abilities are) and a warp delayed
+ability held by that face.
+
+**Public-state gate.** Five new next-layout gaps (eight in all; `tests/az.rs` expects them): a copy
+legendary by its exception, a target in exile, which object a stack item noted, a pending
+player-controlling effect, a controlled turn. Two new public fields (`Game::next_turn_controller`,
+`Game::turn_controller`), in `Game::view_of`.
+
+**Results** (normal release profile, from this subsection's commit): see the commit message of the
+branch's last commit.
