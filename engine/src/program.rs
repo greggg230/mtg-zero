@@ -145,6 +145,19 @@ pub enum EoeD {
     /// there) to the battlefield under their control. Choice:
     /// `ChooseGraveyardCard`.
     ReturnOneDestroyedIfXAtLeast { n: u8 },
+    /// The controller gains control of each object of `on` until end of
+    /// turn (a control-changing effect with a duration, layer 2: CR 613.1b,
+    /// 611.2a; it ends in the cleanup step, 514.2, `Mod::ControlFrom`).
+    GainControlUntilEndOfTurn { on: On },
+    /// The controller chooses odd or even; destroy each creature whose mana
+    /// value has the chosen quality (zero is even; CR 701.8a). Choice:
+    /// `ChooseMode`: `NUMBER` 0 = even, 1 = odd (as "choose odd or even" as a
+    /// permanent enters).
+    DestroyCreaturesOfChosenParity,
+    /// Delayed triggered ability `k` (CR 603.7), about the first legal target
+    /// of requirement `tgt` ("remove ten charge counters from it at the
+    /// beginning of the next end step").
+    DelayAboutTarget { k: u8, when: crate::db::DelayedWhen, tgt: u8 },
 }
 
 impl EoeD {
@@ -159,6 +172,8 @@ impl EoeD {
             EoeD::ReturnEventCardTapped => true,
             EoeD::LifeBecomesHalfStarting { who } => *who == Who::EventPlayer,
             EoeD::LoseHalfLife { who } => *who == Who::EventPlayer,
+            EoeD::GainControlUntilEndOfTurn { on } => matches!(on, On::EventObj),
+            EoeD::DestroyCreaturesOfChosenParity | EoeD::DelayAboutTarget { .. } => false,
             EoeD::PowerDamageByTarget { .. }
             | EoeD::CountControlled { .. }
             | EoeD::SacrificeSourceUnlessTap { .. }

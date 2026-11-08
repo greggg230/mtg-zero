@@ -733,7 +733,9 @@ impl Game {
     /// CR 514.2: "until end of turn" effects end in the cleanup step (copy
     /// effects too, `copies.rs`).
     pub(crate) fn end_turn_effects(&mut self) {
+        let control = self.control_ending_this_turn();
         self.effects.retain(|e| e.until != Until::EndOfTurn);
+        self.return_control(control);
         if !self.marks.is_empty() {
             self.marks.retain(|(_, m)| !matches!(m, crate::game::Mark::DiesTriggerThisTurn { .. }));
         }

@@ -209,6 +209,10 @@ pub enum Mod {
     /// "If it would leave the battlefield, exile it instead of putting it
     /// anywhere else" (CR 614.1a).
     ExileIfLeaves,
+    /// Layer 2: its controller gained control of it from player `.0` until
+    /// end of turn (CR 613.1b); as the effect ends, control returns
+    /// (`Game::end_turn_effects`; EoE lane D). No characteristic changes.
+    ControlFrom(u8),
     /// Combat damage it would deal is prevented (CR 615.1a; "prevent all
     /// combat damage that would be dealt this turn" on every creature, a
     /// rules effect; EoE lane D).

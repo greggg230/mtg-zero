@@ -585,6 +585,36 @@ pub(crate) fn lower_effect_eoe_d(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         E::DefendingPlayerLosesHalfLifeRoundedUp(nodes::DefendingPlayerLosesHalfLifeRoundedUp {}) => {
             eoe(b, EoeD::LoseHalfLife { who: Who::Opponent });
         }
+        // "Gain control of target artifact or creature until end of turn.
+        // Untap that permanent. It gains haste until end of turn. If it's a
+        // Spacecraft, put ten charge counters on it. If you do, remove ten
+        // charge counters from it at the beginning of the next end step"
+        // (Systems Override; CR 613.1b, 701.26b, 603.7).
+        E::SystemsOverrideEffect(nodes::SystemsOverrideEffect {}) => {
+            let t = b.target(Filter::Or(vec![Filter::Type(types::ARTIFACT), creature()]), 1, 1);
+            eoe(b, EoeD::GainControlUntilEndOfTurn { on: On::Target(t) });
+            b.op(Op::Untap { tgt: t });
+            apply(b, On::Target(t), vec![kws(&[Kw::Haste])], Until::EndOfTurn);
+            let spacecraft = Filter::Subtype(l.subtype("Spacecraft"));
+            let charge = super::effect_ext::counter_by_name(l, "charge");
+            let not_ship = b.op(Op::JumpUnlessTarget { tgt: t, filter: spacecraft, to: 0 });
+            b.op(Op::Ext(Ext::PutCounters { on: On::Target(t), counter: charge, n: Amount::Fixed(10) }));
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::RemoveCounters { on: On::EventObj, counter: charge, n: Amount::Fixed(10) }));
+            let k = l.delayed_ability(d.finish());
+            eoe(b, EoeD::DelayAboutTarget { k, when: crate::db::DelayedWhen::NextEndStep, tgt: t });
+            b.patch(not_ship);
+        }
+        // "Choose odd or even. Destroy each creature with mana value of the
+        // chosen quality. Then gain control of all creatures until end of
+        // turn. Untap them. They gain haste until end of turn. (Zero is
+        // even.)" (Mutinous Massacre).
+        E::MutinousMassacreEffect(nodes::MutinousMassacreEffect {}) => {
+            eoe(b, EoeD::DestroyCreaturesOfChosenParity);
+            eoe(b, EoeD::GainControlUntilEndOfTurn { on: On::Each(creature()) });
+            b.op(Op::Ext(Ext::Untap { on: On::Each(creature()) }));
+            apply(b, On::Each(creature()), vec![kws(&[Kw::Haste])], Until::EndOfTurn);
+        }
         _ => return false,
     }
     true

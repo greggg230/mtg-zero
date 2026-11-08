@@ -62,6 +62,9 @@ fn custom_cards() -> Vec<card_ir::Card> {
         vanilla("Test Sky Wall", "{1}", &["Creature"], Some(2), Some(5), json!({"keywords": [{"$t": "Keyword", "kind": "flying"}]})),
         vanilla("Test Ship", "{1}", &["Artifact"], None, None, json!({"subtypes": ["Spacecraft"]})),
         vanilla("Test Sliver", "{1}", &["Creature"], Some(1), Some(1), json!({"subtypes": ["Sliver"]})),
+        vanilla("Test Two Drop", "{2}", &["Creature"], Some(2), Some(2), json!({"mana_cost": {"$t": "ManaCost", "generic": 2}})),
+        vanilla("Test Acolyte", "{1}", &["Creature"], Some(1), Some(1), json!({"triggered_abilities": [{"$t": "TriggeredAbility",
+            "event": "attacks", "predicate": {"$t": "IsSelf"}, "effect": {"$t": "DefendingPlayerLosesHalfLifeRoundedUp"}}]})),
         // Lane D features whose cards need another lane's too, on test cards.
         vanilla("Test Kill Ship", "{1}", &["Creature"], Some(1), Some(1), etb(json!({"$t": "DealDamageToTargetCreature",
             "amount": 10, "optional": true, "targets": [{"$t": "TargetSpec", "count_min": 0, "filter": {"$t": "IsCreature"}}]}))),
@@ -1211,4 +1214,85 @@ fn cr_615_1a_darkness_prevents_all_combat_damage_this_turn() {
     let bear = bf(&g, 0, "Test Bear");
     assert_eq!(g.obj(bear).damage, 0);
     assert_eq!(g.obj(bf(&g, 1, "Test Bulwark")).damage, 0);
+}
+
+// ---- Control until end of turn (CR 613.1b, 514.2): Systems Override and
+// Mutinous Massacre ----------------------------------------------------------
+
+#[test]
+fn cr_613_1b_systems_override_steals_untaps_and_hastes_until_end_of_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain"])
+        .battlefield(1, &["Test Tapper"])
+        .hand(0, &["Systems Override"])
+        .at(Step::Main1, 1)
+        .start();
+    tap_tappers(&mut g, 1, 1);
+    let t = bf(&g, 1, "Test Tapper");
+    next_main(&mut g, 0);
+    assert!(g.obj(t).tapped, "still tapped: its controller's untap step is later");
+    cast(&mut g, "Systems Override");
+    settle(&mut g);
+    assert_eq!(g.obj(t).controller, 0);
+    assert!(!g.obj(t).tapped, "untapped");
+    assert!(g.has_kw(t, Kw::Haste));
+    run(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers), |_| None);
+    g.choose(Choice::Card(t));
+    g.choose(Choice::Pass);
+    run(&mut g, |g| g.turn().step == Step::EndCombat, |_| None);
+    assert_eq!(g.life(1), 20, "it attacked its owner (21 after its own ability)
+{}", log(&g));
+    through_end_step(&mut g, |_| None);
+    run(&mut g, |g| g.turn().active == 1, |_| None);
+    assert_eq!(g.obj(t).controller, 1, "control returned in the cleanup step\n{}", log(&g));
+    assert!(!g.has_kw(t, Kw::Haste));
+}
+
+#[test]
+fn cr_603_7_systems_override_charges_a_spacecraft_until_the_end_step() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain"])
+        .battlefield(1, &["Test Ship"])
+        .hand(0, &["Systems Override"])
+        .at(Step::Main1, 0)
+        .start();
+    let ship = bf(&g, 1, "Test Ship");
+    cast(&mut g, "Systems Override");
+    settle(&mut g);
+    let charge = Counter::Named(db().subtype_id("counter:charge").unwrap());
+    assert_eq!(g.counters_on(ship, charge), 10);
+    assert_eq!(g.obj(ship).controller, 0);
+    run(&mut g, |g| g.turn().step == Step::End && g.stack().is_empty() && at_priority(g), |_| None);
+    assert_eq!(g.counters_on(ship, charge), 0, "removed at the beginning of the next end step\n{}", log(&g));
+    run(&mut g, |g| g.turn().active == 1, |_| None);
+    assert_eq!(g.obj(ship).controller, 1);
+}
+
+#[test]
+fn cr_613_1b_mutinous_massacre_destroys_a_parity_then_takes_all_creatures_for_the_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Mountain", "Mountain", "Mountain", "Mountain", "Test Bear"])
+        .battlefield(1, &["Test Ogre", "Test Two Drop"])
+        .hand(0, &["Mutinous Massacre"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, "Mutinous Massacre");
+    run(&mut g, |g| g.kind() == Some(DecisionKind::ChooseMode), |_| None);
+    g.choose(Choice::Number(0)); // even
+    settle(&mut g);
+    assert_eq!(g.count_in(1, "Test Two Drop", Zone::Graveyard), 1, "mana value 2 is even");
+    let ogre = bf(&g, 1, "Test Ogre");
+    assert_eq!(g.obj(ogre).controller, 0, "all creatures");
+    assert!(g.has_kw(ogre, Kw::Haste) && g.has_kw(bf(&g, 0, "Test Bear"), Kw::Haste));
+    run(&mut g, |g| g.turn().active == 1, |_| None);
+    assert_eq!(g.obj(ogre).controller, 1, "until end of turn");
+    assert_eq!(g.obj(bf(&g, 0, "Test Bear")).controller, 0);
+}
+
+#[test]
+fn cr_107_1a_defending_player_loses_half_their_life_rounded_up() {
+    let mut g = scen().battlefield(0, &["Test Acolyte"]).life(1, 15).at(Step::Main1, 0).start();
+    attack(&mut g, 0, &["Test Acolyte"]);
+    settle(&mut g);
+    assert_eq!(g.life(1), 7, "15 - 8");
 }

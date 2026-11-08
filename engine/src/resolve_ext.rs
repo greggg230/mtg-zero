@@ -71,7 +71,7 @@ impl Game {
     }
 
     /// Create delayed triggered ability `k` of the ability's card (CR 603.7).
-    fn add_delayed(&mut self, f: &Frame, k: u8, when: crate::db::DelayedWhen, ev: crate::triggers::EvCtx) {
+    pub(crate) fn add_delayed(&mut self, f: &Frame, k: u8, when: crate::db::DelayedWhen, ev: crate::triggers::EvCtx) {
         let base = self.db.def(f.source_def).delayed_base;
         self.delayed.push(crate::game::Delayed {
             when,

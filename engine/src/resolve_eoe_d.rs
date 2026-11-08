@@ -5,6 +5,7 @@ use crate::db::{AbilityDef, CardDef, Filter};
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Mark};
+use crate::layers::{Affected, Until};
 use crate::ids::{CardIdx, ObjRef, Target, Zone};
 use crate::program::{EoeD, Ext, Op};
 use crate::resolve::{Flow, Frame};
@@ -183,6 +184,53 @@ impl Game {
                 self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
                 Flow::Suspend
             }
+            EoeD::GainControlUntilEndOfTurn { on } => {
+                let p = f.controller;
+                for c in self.objs_on(f, on) {
+                    let prev = self.objs[c.i()].controller;
+                    if prev == p {
+                        continue;
+                    }
+                    self.change_control(c, p);
+                    if self.objs[c.i()].controller == p {
+                        let r = self.obj_ref(c);
+                        self.add_effect(Affected::Obj(r), crate::db::Mod::ControlFrom(prev), Until::EndOfTurn, p);
+                        self.note(|g| format!("P{p} gains control of {} until end of turn", g.name(c)));
+                    }
+                }
+                Flow::Next
+            }
+            EoeD::DestroyCreaturesOfChosenParity => {
+                let k = match self.answer.take() {
+                    Some(Choice::Number(k)) => k,
+                    Some(other) => unreachable!("parity answer {other:?}"),
+                    None => {
+                        let opts = (0..2u16).map(|k| Opt { action: act::NUMBER + k, choice: Choice::Number(k as u8) }).collect();
+                        self.ask(Task::Run(f.clone()), f.controller, DecisionKind::ChooseMode, opts);
+                        return Flow::Suspend;
+                    }
+                };
+                self.note(|_| format!("chosen: {}", if k == 1 { "odd" } else { "even" }));
+                let all: Vec<CardIdx> = self
+                    .battlefield
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.is_creature(c) && self.mana_value_of(c) % 2 == k)
+                    .collect();
+                self.begin_batch();
+                for c in all {
+                    self.destroy(c);
+                }
+                self.end_batch();
+                Flow::Next
+            }
+            EoeD::DelayAboutTarget { k, when, tgt } => {
+                if let Some(Target::Obj(o)) = self.targets_of(f, *tgt).into_iter().next() {
+                    let ev = crate::triggers::EvCtx { obj: Some(o), ..Default::default() };
+                    self.add_delayed(f, *k, *when, ev);
+                }
+                Flow::Next
+            }
             EoeD::SacrificeSourceUnlessTap { filter } => {
                 let p = f.controller;
                 match self.answer.take() {
@@ -211,6 +259,36 @@ impl Game {
                 opts.sort_by_key(|o| o.action);
                 self.ask(Task::Run(f.clone()), p, DecisionKind::ChoosePermanent, opts);
                 Flow::Suspend
+            }
+        }
+    }
+
+    /// The "until end of turn" control-changing effects about to end
+    /// (`Mod::ControlFrom`), the latest first: (object, its controller by
+    /// the effect, the controller before it).
+    pub(crate) fn control_ending_this_turn(&self) -> Vec<(ObjRef, crate::ids::PlayerId, crate::ids::PlayerId)> {
+        let mut v: Vec<(u32, ObjRef, crate::ids::PlayerId, crate::ids::PlayerId)> = self
+            .effects
+            .iter()
+            .filter(|e| e.until == Until::EndOfTurn)
+            .filter_map(|e| match (&e.on, &e.m) {
+                (Affected::Obj(r), crate::db::Mod::ControlFrom(prev)) => Some((e.ts, *r, e.controller, *prev)),
+                _ => None,
+            })
+            .collect();
+        v.sort_by_key(|x| std::cmp::Reverse(x.0));
+        v.into_iter().map(|(_, r, to, prev)| (r, to, prev)).collect()
+    }
+
+    /// The control-changing effects ended (CR 514.2): each permanent still
+    /// controlled by an effect's player returns to the controller before it
+    /// (the latest effect first: an earlier one then sees what the later one
+    /// left, CR 613.7). A later control change by another effect stays.
+    pub(crate) fn return_control(&mut self, ended: Vec<(ObjRef, crate::ids::PlayerId, crate::ids::PlayerId)>) {
+        for (r, to, prev) in ended {
+            if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield && self.objs[r.idx.i()].controller == to {
+                self.set_control(r.idx, prev);
+                self.note(|g| format!("control of {} returns to P{prev}", g.name(r.idx)));
             }
         }
     }
