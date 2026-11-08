@@ -24,6 +24,7 @@ pub mod eoe_c;
 pub mod eoe_a;
 pub mod effect_eoe_d;
 pub mod eoe_x;
+pub mod eoe_w4;
 pub mod filter;
 pub mod printing;
 pub mod statics;

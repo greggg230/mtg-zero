@@ -573,6 +573,10 @@ impl Game {
         if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
             if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
                 self.stack[pos].ev.amount = self.mana_value_of(c) as u32;
+                // (And the permanent, for its power: `Amount::CostPower`.)
+                if self.stack[pos].ev.obj.is_none() {
+                    self.stack[pos].ev.obj = Some(self.obj_ref(c));
+                }
             }
         }
         self.begin_batch();

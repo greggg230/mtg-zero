@@ -1000,7 +1000,8 @@ impl Game {
                             st[perm::WARD_MANA] = st[perm::WARD_MANA].max(m.total() as f32 / 4.0)
                         }
                         WardCost::Life(n) => st[perm::WARD_LIFE] = st[perm::WARD_LIFE].max(n as f32 / 4.0),
-                        WardCost::Discard => st[perm::WARD_DISCARD] = 1.0,
+                        // (A random discard: the same float, ENGINE.md 99.14.)
+                        WardCost::Discard | WardCost::DiscardRandom => st[perm::WARD_DISCARD] = 1.0,
                     }
                 }
                 st[perm::LOST_ABILITIES] = self.lost_abilities(c) as u8 as f32;

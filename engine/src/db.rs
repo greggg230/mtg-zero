@@ -1730,6 +1730,8 @@ pub enum WardCost {
     Mana(ManaCost),
     Life(u8),
     Discard,
+    /// "Ward—Discard a card at random" (CR 701.9b; Alpharael, Stonechosen).
+    DiscardRandom,
 }
 
 /// A cost reduction of a spell or an activated ability (CR 601.2f, 602.2b),

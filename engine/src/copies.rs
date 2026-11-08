@@ -50,6 +50,9 @@ pub struct Except {
     pub colors: Option<crate::mana::ManaMask>,
     /// It has no mana cost (eternalize; its mana value is 0, 202.3a).
     pub no_cost: bool,
+    /// Supertypes in addition (`supertypes::*` bits: "except it's
+    /// legendary", CR 707.9b; Adagia).
+    pub supers: u8,
 }
 
 impl Except {
@@ -97,6 +100,7 @@ impl Except {
             e.colors = self.colors;
         }
         e.no_cost |= self.no_cost;
+        e.supers |= self.supers;
         e
     }
 }
@@ -169,6 +173,12 @@ impl Game {
     #[inline]
     pub(crate) fn exc(&self, c: CardIdx) -> Option<&Except> {
         self.copy_fx(c).map(|x| &x.vals.exc).filter(|e| !e.is_empty())
+    }
+
+    /// Its supertypes (CR 205.4): its definition's and a copy's "except
+    /// it's legendary" (707.9b).
+    pub fn supertypes_of(&self, c: CardIdx) -> u8 {
+        self.def_of(c).supertypes | self.exc(c).map_or(0, |e| e.supers)
     }
 
     /// Is `c` a slot made as a copy, not a card: a token copy (CR 111.10), a

@@ -182,7 +182,7 @@ impl Game {
             Filter::Any => true,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
             Filter::Subtype(s) => self.has_subtype(c, *s),
-            Filter::Supertype(bits) => self.def_of(c).supertypes & bits != 0,
+            Filter::Supertype(bits) => self.supertypes_of(c) & bits != 0,
             Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::Controller(y) => (self.objs[c.i()].controller == you) == *y,
             Filter::Token => self.is_token(c),

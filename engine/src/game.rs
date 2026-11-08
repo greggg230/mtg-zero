@@ -1235,7 +1235,7 @@ impl Game {
         self.is_type(idx, types::CREATURE)
     }
     pub fn is_legendary(&self, idx: CardIdx) -> bool {
-        self.def_of(idx).supertypes & crate::db::supertypes::LEGENDARY != 0
+        self.supertypes_of(idx) & crate::db::supertypes::LEGENDARY != 0
     }
     /// Summoning sickness (CR 302.6): not continuously controlled since the
     /// start of its controller's most recent turn.

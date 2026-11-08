@@ -215,7 +215,7 @@ impl Game {
         if self.is_type(card, types::ARTIFACT) {
             a |= crate::db::SPEND_ARTIFACT;
         }
-        if self.def_of(card).supertypes & crate::db::supertypes::LEGENDARY != 0 {
+        if self.supertypes_of(card) & crate::db::supertypes::LEGENDARY != 0 {
             a |= crate::db::SPEND_LEGENDARY;
         }
         a
@@ -2756,7 +2756,7 @@ impl Game {
             Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) as i64 + self.toughness(c) as i64 <= *n as i64,
             Filter::Subtype(s) => self.has_subtype(c, *s),
-            Filter::Supertype(bits) => def.supertypes & bits != 0,
+            Filter::Supertype(bits) => self.supertypes_of(c) & bits != 0,
             Filter::ManaValueAtMost(n) => self.mana_value_of(c) <= *n,
             Filter::MvAtMostConverge => self.mana_value_of(c) <= self.converge_of(ctx.source),
             Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n,

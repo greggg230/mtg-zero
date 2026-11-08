@@ -284,8 +284,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
         l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
         l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
-        l.deny("CardPrinting.ward_discard_random", ward_discard_random);
-        // Sunburst (CR 702.44a): counters by the colours of mana spent to
+            // Sunburst (CR 702.44a): counters by the colours of mana spent to
         // cast it (the payment records them, as for converge).
         let sunburst_counter = sunburst.then(|| {
             l.converge = true;
@@ -1099,6 +1098,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     }
     if *ward_discard_chosen {
         wards.push(crate::db::WardCost::Discard);
+    }
+    if *ward_discard_random {
+        wards.push(crate::db::WardCost::DiscardRandom);
     }
     if wards.len() > 1 {
         l.unsupported("CardPrinting.ward(more than one cost)");
