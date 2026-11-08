@@ -65,7 +65,9 @@ pub(crate) enum Task {
     Divide { id: u32 },
     ChooseModes { id: u32 },
     ManaNow { src: Src },
-    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]> },
+    /// (`only`: the mana's spending restriction, kept in the pool, CR
+    /// 106.6; ENGINE.md 99.12.)
+    ManaNowPick { p: PlayerId, prods: Vec<[u8; 6]>, only: u8 },
     /// The rest of a priority mana ability's cost (ENGINE.md 28).
     ManaNowCosts { src: Src, sac: Option<CardIdx>, x: u8 },
     // entering the battlefield (CR 614.12)
@@ -278,7 +280,7 @@ impl Game {
             Task::Divide { id } => self.divide(id),
             Task::ChooseModes { id } => self.choose_modes(id),
             Task::ManaNow { src } => self.mana_now(src),
-            Task::ManaNowPick { p, prods } => self.mana_now_pick(p, prods),
+            Task::ManaNowPick { p, prods, only } => self.mana_now_pick(p, prods, only),
             Task::ManaNowCosts { src, sac, x } => self.mana_now_costs(src, sac, x),
             Task::AsEnters { card } => self.as_enters(card),
             Task::Delve { id } => self.delve(id),
@@ -605,6 +607,7 @@ impl Game {
         for p in &mut self.players {
             p.pool.clear();
         }
+        self.pool_restr.clear();
         let next = match self.turn.step {
             Step::Setup => unreachable!(),
             Step::Untap => Step::Upkeep,

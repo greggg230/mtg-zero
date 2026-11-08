@@ -212,11 +212,12 @@ fn need_of(cost: &ManaCost) -> ManaMask {
 }
 
 /// What the pool holds after a payment (CR 106.4, 601.2h): the amounts,
-/// and the artifact-only {C} and the haste {R} among them.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+/// and the restricted mana (the artifact-only {C} among it; CR 106.6,
+/// `eoe_w2::RKind`, ENGINE.md 99.12) and the haste {R} among them.
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub(crate) struct Rem {
     pub amt: [u8; 6],
-    pub art: u8,
+    pub restr: Vec<crate::eoe_w2::RKind>,
     pub haste: u8,
 }
 
@@ -261,8 +262,9 @@ pub(crate) struct PayMana {
     pub multi: Vec<(Src, [u8; 6])>,
     /// Their mana (spent, or left in the pool at the end).
     pub extra: [u8; 6],
-    /// The part of `extra[C]` that is artifact-only.
-    pub extra_art: u8,
+    /// The part of `extra` with a spending restriction, by kind (the
+    /// Workshop's artifact-only {C} among it; ENGINE.md 99.12).
+    pub extra_restr: Vec<crate::eoe_w2::RKind>,
     /// The part of `extra` made by abilities with a mana cost (`MADE`).
     pub extra_made: [u8; 6],
     /// The part of `extra[R]` that gives haste (Arena of Glory).
@@ -318,7 +320,7 @@ impl PayMana {
             marked: Vec::new(),
             multi: Vec::new(),
             extra: [0; 6],
-            extra_art: 0,
+            extra_restr: Vec::new(),
             extra_made: [0; 6],
             extra_haste: 0,
             chosen: Vec::new(),
@@ -1036,14 +1038,19 @@ impl Game {
         if pool.total() == 0 {
             return;
         }
+        // (Mana with a spending restriction: when this payment meets it,
+        // ENGINE.md 99.12.)
+        let kinds = self.pool_kinds(p);
         for t in 0..6 {
-            let art = if t == crate::mana::C { pool.art } else { 0 };
-            for _ in 0..pool.amt[t] - art {
+            let restr: u8 = kinds.iter().filter(|k| k.0 as usize == t).map(|k| k.2).sum();
+            for _ in 0..pool.amt[t] - restr {
                 c.fixed.push(Unit::free(1 << t));
             }
-            if art > 0 && allow & crate::db::SPEND_ARTIFACT != 0 {
-                for _ in 0..art {
-                    c.fixed.push(Unit::free((1 << t) | RESTRICTED));
+            for &(_, only, n) in kinds.iter().filter(|k| k.0 as usize == t) {
+                if crate::eoe_w2::spendable(only, allow) {
+                    for _ in 0..n {
+                        c.fixed.push(Unit::free((1 << t) | RESTRICTED));
+                    }
                 }
             }
         }
@@ -1051,18 +1058,29 @@ impl Game {
 
     /// The virtual pool of payment `pm` (ENGINE.md 18): the player's pool
     /// and the mana of the several-mana sources picked, as groups (kind,
-    /// count); a kind is a type, + 8 for `MADE`, + 16 for artifact-only
-    /// {C} (`RESTRICTED`: Wizard's Rockets can't turn it into colours,
-    /// ENGINE.md 49).
+    /// count); a kind is a type, + 8 for `MADE`, + 16 for mana with a
+    /// spending restriction the payment meets (`RESTRICTED`: Wizard's
+    /// Rockets can't turn it into colours, ENGINE.md 49; the pool's other
+    /// restricted mana stays, ENGINE.md 99.12).
     fn vgroups(&self, pm: &PayMana) -> SVec<(u8, u8), 12> {
         let pool = &self.players[pm.payer as usize].pool;
-        let art_ok = pm.keep.allow & crate::db::SPEND_ARTIFACT != 0;
+        let kinds = self.pool_kinds(pm.payer);
         let mut g = SVec::new();
         for t in 0..6 {
-            let held = if t == crate::mana::C && !art_ok { pool.art } else { 0 };
+            let (mut held, mut restr) = (0u8, 0u8);
+            for &(_, only, n) in kinds.iter().filter(|k| k.0 as usize == t) {
+                if crate::eoe_w2::spendable(only, pm.keep.allow) {
+                    restr = restr.saturating_add(n);
+                } else {
+                    held += n;
+                }
+            }
+            for k in pm.extra_restr.iter().filter(|k| k.0 as usize == t) {
+                restr = restr.saturating_add(k.2);
+            }
             // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
             let n = (pool.amt[t] - held).saturating_add(pm.extra[t]) - pm.extra_made[t];
-            let art = if t == crate::mana::C && art_ok { pool.art.saturating_add(pm.extra_art).min(n) } else { 0 };
+            let art = restr.min(n);
             if n > art {
                 g.push((t as u8, n - art));
             }
@@ -1361,9 +1379,9 @@ impl Game {
                 let mut groups = base.clone();
                 for t in 0..6 {
                     if prod[t] > 0 {
-                        // (Mishra's Workshop's artifact-only {C}: its own kind.)
-                        let art = t == crate::mana::C && cl.only & crate::db::SPEND_ARTIFACT != 0;
-                        let kind = t as u8 | if cl.need != 0 { 8 } else { 0 } | if art { 16 } else { 0 };
+                        // (Mana with a spending restriction, Mishra's
+                        // Workshop's artifact-only {C}: its own kind.)
+                        let kind = t as u8 | if cl.need != 0 { 8 } else { 0 } | if cl.only != 0 { 16 } else { 0 };
                         match groups.iter_mut().find(|g| g.0 == kind) {
                             Some(g) => g.1 += prod[t],
                             None => groups.push((kind, prod[t])),
@@ -1473,7 +1491,7 @@ impl Game {
         // CR 601.2h: which of the pool's mana pays, the sources picked.
         if let Some(rems) = pm.spend.take() {
             match self.answer.take() {
-                Some(Choice::Number(k)) => self.finish_payment(&pm, rems[k as usize]),
+                Some(Choice::Number(k)) => self.finish_payment(&pm, rems[k as usize].clone()),
                 Some(other) => unreachable!("pool answer {other:?}"),
                 None => self.end_payment(pm, rems),
             }
@@ -1484,7 +1502,7 @@ impl Game {
         // are still to be activated: a cost of no mana, Psychic Frog's,
         // with two Lotus Petals, ENGINE.md 49.)
         if pm.vm == Some(0) && pm.now.is_none() && pm.forced.is_empty() && pm.chosen.len() == pm.need_total() {
-            let rem = self.pool_rems(&pm, &[])[0];
+            let rem = self.pool_rems(&pm, &[]).swap_remove(0);
             self.finish_payment(&pm, rem);
             return;
         }
@@ -1626,7 +1644,7 @@ impl Game {
         };
         let mut opts = Vec::new();
         for (ci, cl) in classes.iter().enumerate().skip(pm.min_class as usize) {
-            if cl.only & !pm.keep.allow != 0 {
+            if !crate::eoe_w2::spendable(cl.only, pm.keep.allow) {
                 continue; // its mana can't be spent on this (CR 106.6)
             }
             let ok_of = |rep: Src| -> bool {
@@ -1717,7 +1735,7 @@ impl Game {
     /// pays (601.2h), asked when the pools it can leave differ (`PayPool`).
     fn end_payment(&mut self, mut pm: Box<PayMana>, rems: Vec<Rem>) {
         if rems.len() == 1 {
-            self.finish_payment(&pm, rems[0]);
+            self.finish_payment(&pm, rems[0].clone());
             return;
         }
         let opts = (0..rems.len()).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
@@ -1728,65 +1746,82 @@ impl Game {
 
     /// The pools payment `pm` can leave, each once (CR 106.4: two mana of
     /// one type and tag are the same): `vm` mana of the virtual pool spent
-    /// with every picked source's. Artifact-only {C} is spent before other
-    /// {C} and haste {R} after other {R} on anything but a creature spell
-    /// (never worse for the player); on a creature spell which {R} pays is
-    /// the player's choice (CR 106.4: the haste goes to this spell or stays
-    /// for another).
+    /// with every picked source's. Mana with a spending restriction (the
+    /// artifact-only {C}) is spent before other mana of its type, and haste
+    /// {R} after other {R} on anything but a creature spell (never worse for
+    /// the player); on a creature spell which {R} pays is the player's
+    /// choice (CR 106.4: the haste goes to this spell or stays for another),
+    /// and so is which of two restrictions neither of which allows all the
+    /// other does stays (ENGINE.md 99.12).
     fn pool_rems(&self, pm: &PayMana, classes: &[Class]) -> Vec<Rem> {
-        use crate::mana::{C, R};
+        use crate::mana::R;
         let pool = self.players[pm.payer as usize].pool;
         let groups = self.vgroups(pm);
         let mut vamt = pool.amt;
         for t in 0..6 {
             vamt[t] = vamt[t].saturating_add(pm.extra[t]);
         }
-        let vart = pool.art.saturating_add(pm.extra_art).min(vamt[C]);
+        let vkinds = self.virtual_kinds(pm);
         let vhaste = pool.haste.saturating_add(pm.extra_haste).min(vamt[R]);
         let vm = pm.vm.expect("the pool's spend is known") as usize;
         if vm == 0 {
-            return vec![Rem { amt: vamt, art: vart, haste: vhaste }];
+            return vec![Rem { amt: vamt, restr: vkinds, haste: vhaste }];
         }
         let creature = pm.keep.spell.is_some_and(|c| self.is_type(c, crate::db::types::CREATURE));
         let chosen: SVec<ManaMask, 16> = pm.chosen.iter().map(|s| chosen_mask(classes, s)).collect();
         let conv = |m: ManaMask| if pm.convert { convert(m) } else { m };
         // The spends that complete the payment: the mana of each type spent,
-        // and the most artifact-only {C} among them (spent before other {C};
-        // its own kind of the virtual pool, which Wizard's Rockets doesn't
-        // turn into colours).
-        let mut spends: Vec<([u8; 6], u8)> = Vec::new();
+        // and the most restricted mana of each type among them (spent before
+        // other mana; its own kind of the virtual pool, which Wizard's
+        // Rockets doesn't turn into colours): the greatest such amounts.
+        let mut spends: Vec<([u8; 6], [u8; 6])> = Vec::new();
+        let covers = |a: &[u8; 6], b: &[u8; 6]| (0..6).all(|t| a[t] >= b[t]);
         each_subset(&groups, vm, &mut SVec::new(), &mut |cnt| {
             let mut ch: SVec<ManaMask, 16> = chosen.iter().map(|&m| conv(m)).collect();
             ch.extend(masks_of(&groups, cnt).iter().map(|&m| conv(m)));
             if !payable_n(&pm.cost, &pm.marked, &ch, &[]) {
                 return false;
             }
-            let (mut spent, mut art) = ([0u8; 6], 0u8);
+            let (mut spent, mut restr) = ([0u8; 6], [0u8; 6]);
             for (g, &n) in groups.iter().zip(cnt.iter()) {
                 spent[(g.0 & 7) as usize] += n;
                 if g.0 & 16 != 0 {
-                    art += n;
+                    restr[(g.0 & 7) as usize] += n;
                 }
             }
-            match spends.iter_mut().find(|s| s.0 == spent) {
-                Some(s) => s.1 = s.1.max(art),
-                None => spends.push((spent, art)),
+            if spends.iter().any(|s| s.0 == spent && covers(&s.1, &restr)) {
+                return false;
+            }
+            match spends.iter().position(|s| s.0 == spent && covers(&restr, &s.1)) {
+                Some(i) => {
+                    spends[i].1 = restr;
+                    let mut j = i + 1;
+                    while j < spends.len() {
+                        if spends[j].0 == spent && covers(&restr, &spends[j].1) {
+                            spends.remove(j);
+                        } else {
+                            j += 1;
+                        }
+                    }
+                }
+                None => spends.push((spent, restr)),
             }
             false
         });
         let mut out: Vec<Rem> = Vec::new();
-        for (spent, art_spent) in spends {
+        for (spent, restr_spent) in spends {
             let mut amt = vamt;
             for t in 0..6 {
                 amt[t] -= spent[t];
             }
-            let art = vart - art_spent.min(vart);
             let lo = spent[R].saturating_sub(vamt[R] - vhaste);
             let hi = if creature { spent[R].min(vhaste) } else { lo };
-            for h in lo..=hi {
-                let r = Rem { amt, art, haste: vhaste - h };
-                if !out.contains(&r) {
-                    out.push(r);
+            for restr in crate::eoe_w2::kinds_left(&vkinds, &restr_spent, &|only| pm_spendable(pm, only)) {
+                for h in lo..=hi {
+                    let r = Rem { amt, restr: restr.clone(), haste: vhaste - h };
+                    if !out.contains(&r) {
+                        out.push(r);
+                    }
                 }
             }
         }
@@ -1795,6 +1830,18 @@ impl Game {
         out.sort_by_key(|r| (std::cmp::Reverse(r.amt.iter().filter(|&&n| n > 0).count()), std::cmp::Reverse(r.amt), std::cmp::Reverse(r.haste)));
         out.truncate(act::NUMBER_N as usize);
         out
+    }
+
+    /// The virtual pool's mana with a spending restriction, by kind: the
+    /// pool's (also what this payment may not spend) and the picked
+    /// several-mana sources' (ENGINE.md 99.12).
+    pub(crate) fn virtual_kinds(&self, pm: &PayMana) -> Vec<crate::eoe_w2::RKind> {
+        let mut v: Vec<crate::eoe_w2::RKind> = self.pool_kinds(pm.payer).iter().copied().collect();
+        v.sort_unstable();
+        for &(t, only, n) in &pm.extra_restr {
+            crate::eoe_w2::add_kind(&mut v, t, only, n);
+        }
+        v
     }
 
     /// A several-mana source picked with production `prod`: its mana joins
@@ -1815,8 +1862,10 @@ impl Game {
         if cl.haste {
             pm.extra_haste = pm.extra_haste.saturating_add(prod[crate::mana::R]);
         }
-        if cl.only & crate::db::SPEND_ARTIFACT != 0 {
-            pm.extra_art = pm.extra_art.saturating_add(prod[crate::mana::C]);
+        if cl.only != 0 {
+            for t in 0..6 {
+                crate::eoe_w2::add_kind(&mut pm.extra_restr, t as u8, cl.only, prod[t]);
+            }
         }
         pm.multi.push((src, prod));
         self.recount(pm, classes);
@@ -1838,11 +1887,13 @@ impl Game {
             // (A creature tapped for convoke spends no mana, CR 702.51a; an
             // artifact tapped for improvise, a unit of no colour, adds none.)
             let mut units: Vec<ManaMask> = pm.chosen.iter().filter(|s| s.slot != IMPROVISE).map(|s| conv(chosen_mask(&classes, s))).collect();
-            // (Artifact-only {C} spent: never turned into colours.)
-            let art_spent = pool.art.saturating_add(pm.extra_art).saturating_sub(rem.art);
+            // (Mana with a spending restriction spent: never turned into
+            // colours.)
+            let vkinds = self.virtual_kinds(pm);
             for t in 0..6 {
                 let made = spent[t].min(pm.extra_made[t]);
-                let art = if t == crate::mana::C { art_spent.min(spent[t] - made) } else { 0 };
+                let of = |v: &[crate::eoe_w2::RKind]| v.iter().filter(|k| k.0 as usize == t).map(|k| k.2 as u32).sum::<u32>();
+                let art = (of(&vkinds).saturating_sub(of(&rem.restr)) as u8).min(spent[t] - made);
                 units.extend(std::iter::repeat_n(conv((1 << t) | MADE), made as usize));
                 units.extend(std::iter::repeat_n(conv((1 << t) | RESTRICTED), art as usize));
                 units.extend(std::iter::repeat_n(conv(1 << t), (spent[t] - made - art) as usize));
@@ -1908,8 +1959,8 @@ impl Game {
         }
         let p = &mut self.players[payer as usize].pool;
         p.amt = rem.amt;
-        p.art = rem.art;
         p.haste = rem.haste;
+        self.set_pool_kinds(payer, &rem.restr);
         // Delve's graveyard cards, then those that were mana sources (CR
         // 601.2h, after 601.2g; ENGINE.md 51).
         self.exile_delved(payer, pm.keep.spell);
@@ -2002,6 +2053,12 @@ impl Game {
     pub(crate) fn add_mana(&mut self, p: PlayerId, mana: &[u8; 6]) {
         self.players[p as usize].pool.add(mana);
     }
+}
+
+/// May payment `pm` spend mana restricted to the purposes `only` (CR
+/// 106.6)?
+fn pm_spendable(pm: &PayMana, only: u8) -> bool {
+    crate::eoe_w2::spendable(only, pm.keep.allow)
 }
 
 /// `cost` with `k` of its Phyrexian pips of colour `col` paid with life and
@@ -2119,8 +2176,8 @@ fn cands(
 ) -> Cands {
     // (Sources whose mana this payment may not spend are left out.)
     let filtered: Vec<Class>;
-    let classes = if classes.iter().any(|cl| cl.only & !allow != 0) {
-        filtered = classes.iter().filter(|cl| cl.only & !allow == 0).cloned().collect();
+    let classes = if classes.iter().any(|cl| !crate::eoe_w2::spendable(cl.only, allow)) {
+        filtered = classes.iter().filter(|cl| crate::eoe_w2::spendable(cl.only, allow)).cloned().collect();
         &filtered[..]
     } else {
         classes

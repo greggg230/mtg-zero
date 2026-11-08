@@ -155,6 +155,7 @@ pub fn fields() -> Vec<Field> {
         lki_copy: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
+        pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",
         spell_lki: Derived "last known information (CR 608.2h)",
         entering_copy: Derived "transient: set and cleared around one move",
         entering_times: Derived "transient: set and cleared around one move",
@@ -787,6 +788,17 @@ pub fn perturbations() -> Vec<Perturbation> {
             let i = r.below(a.g.prepared.len() as u32) as usize;
             a.g.prepared.remove(i);
             Some("removed".into())
+        }),
+        // (Rare: mana in a pool at a sampled decision; draws nothing from
+        // the shared stream: the first player with mana, its first type.)
+        p!(rare "mana in a pool is restricted to activating abilities of lands", "Game.pool_restr", |a, _| {
+            let (p, t) = (0..2u8).find_map(|p| {
+                let pool = &a.g.players[p as usize].pool;
+                let held = |t: usize| a.g.pool_restr.iter().filter(|k| k.0 == p && k.1 as usize == t).map(|k| k.3).sum::<u8>() + if t == 5 { pool.art } else { 0 };
+                (0..6).find(|&t| pool.amt[t] > held(t)).map(|t| (p, t))
+            })?;
+            a.g.pool_restr.push((p, t as u8, crate::db::SPEND_LAND_ABILITY, 1));
+            Some(format!("P{p}: one mana of type {t}"))
         }),
         p!("void holds (a nonland permanent left the battlefield this turn)", "Game.void_turn", |a, _| {
             let t = a.g.turn.number;
@@ -1460,6 +1472,7 @@ pub fn limits() -> Vec<Limit> {
         l("void holds (a nonland permanent left the battlefield this turn)", NextLayout, "void (Edge of Eternities' ability word, ENGINE.md 99.4) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-turn flag beside the turn's facts); until then a network infers it from the public history only through the board"),
         l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
         l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
+        l("mana in a pool is restricted to activating abilities of lands", NextLayout, "a pool's mana with a spending restriction other than Mishra's Workshop's (g5::POOL_ART) is game state the EoE port added after layout v5 froze (Eldrazi Temple, Steelswarm Operator, Sunken Citadel, ...; ENGINE.md 99.12): the pool's amounts are encoded, the restriction is not; the next layout encodes it (per player, the restricted part of each type)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }

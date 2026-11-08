@@ -595,23 +595,38 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             if haste && !matches!(&prod, ManaProd::Fixed(v) if v.iter().enumerate().all(|(i, &n)| (i == crate::mana::R) == (n > 0))) {
                 l.unsupported("AddManaToPool.grants_haste_to_creature_spell(not red mana)");
             }
-            // "Spend this mana only to cast artifact spells" (CR 106.6): what
-            // the pool can hold is colorless artifact-only mana (several
-            // mana, the rest stays), or one mana spent at once.
+            // "Spend this mana only to ..." (CR 106.6): the purposes it may
+            // be spent on (ENGINE.md 28.2, 99.12); what a payment leaves of it
+            // stays in the pool with its restriction (`Game::pool_kinds`).
             only = match spend_restriction {
                 None => 0,
                 Some(enums::SpendRestriction::ArtifactSpell) => crate::db::SPEND_ARTIFACT,
                 Some(enums::SpendRestriction::LegendarySpell) => crate::db::SPEND_LEGENDARY,
+                // "... only to activate abilities of artifact sources."
+                Some(enums::SpendRestriction::ArtifactActivation) => crate::db::SPEND_ARTIFACT_ABILITY,
+                // "... only to cast colorless Eldrazi spells or activate
+                // abilities of colorless Eldrazi."
+                Some(enums::SpendRestriction::ColorlessEldrazi) => crate::db::SPEND_ELDRAZI_SPELL | crate::db::SPEND_ELDRAZI_ABILITY,
+                // "... only to activate abilities of land sources."
+                Some(enums::SpendRestriction::LandActivation) => crate::db::SPEND_LAND_ABILITY,
+                // "... only to cast a spell from anywhere other than your
+                // hand."
+                Some(enums::SpendRestriction::CastFromOutsideHand) => crate::db::SPEND_OUTSIDE_HAND,
                 Some(other) => {
                     l.unsupported(format!("AddManaToPool.spend_restriction({other:?})"));
                     0
                 }
             };
-            match (&prod, only) {
-                (_, 0) => {}
-                (ManaProd::One(_), _) => {}
-                (ManaProd::Fixed(v), crate::db::SPEND_ARTIFACT) if v[..5].iter().all(|&n| n == 0) => {}
-                _ => l.unsupported("AddManaToPool.spend_restriction(several mana the pool can't hold)"),
+            // (X mana turned into colours, Wizard's Rockets: its X is paid by
+            // the mana it converts, never restricted mana; not modelled with
+            // a restriction of its own.)
+            if only != 0 && matches!(prod, ManaProd::ComboX { .. }) {
+                l.unsupported("AddManaToPool.spend_restriction(X mana)");
+            }
+            // (The pool's haste {R} and its restricted kinds are separate
+            // parts: not both on one mana.)
+            if only != 0 && haste {
+                l.unsupported("AddManaToPool.spend_restriction(with haste)");
             }
             uncounterable = *makes_spell_uncounterable;
             if uncounterable && !matches!(prod, ManaProd::One(_)) {

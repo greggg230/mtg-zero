@@ -305,7 +305,7 @@ impl Game {
             // A mana ability activated with priority (ENGINE.md 18, 28): its
             // whole cost, and some mana to make (what a sacrificed land
             // could make is read as it is sacrificed; it may be none).
-            if !self.cost_payable(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad)) {
+            if !self.cost_payable_with(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad), false, self.ability_allow(card)) {
                 return false;
             }
             let prod = &ad.mana().unwrap().prod;
@@ -320,7 +320,7 @@ impl Game {
         };
         // (A non-mana ability: with no mana to pay, a permanent with a mana
         // ability may be tapped for a "tap an untapped <permanent>" cost.)
-        if !self.cost_payable_with(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad), true) {
+        if !self.cost_payable_with(p, card, &ad.cost, &self.act_mana(p, card, ad), classes, Self::mana_exclude(card, ad), true, self.ability_allow(card)) {
             return false;
         }
         let ActEffect::Stack(ab) = &ad.effect else { unreachable!() };
@@ -468,7 +468,7 @@ impl Game {
         classes: &[Class],
         exclude: Option<CardIdx>,
     ) -> bool {
-        self.cost_payable_with(p, card, cost, mana, classes, exclude, false)
+        self.cost_payable_with(p, card, cost, mana, classes, exclude, false, 0)
     }
 
     /// [`cost_payable`](Self::cost_payable); with `zero_mana_taps`, a cost
@@ -487,6 +487,9 @@ impl Game {
         classes: &[Class],
         exclude: Option<CardIdx>,
         zero_mana_taps: bool,
+        // The spending restrictions the payment meets (`Keep::allow`: an
+        // ability's source, ENGINE.md 99.12).
+        allow: u8,
     ) -> bool {
         let pl = &self.players[p as usize];
         if (cost.life as i32) > pl.life {
@@ -561,7 +564,7 @@ impl Game {
         if mana.is_zero() {
             return true;
         }
-        self.can_pay_without(p, mana, classes, &Self::keep_for(card, cost, exclude), exclude)
+        self.can_pay_without(p, mana, classes, &Keep { allow, ..Self::keep_for(card, cost, exclude) }, exclude)
     }
 
     /// Sacrifice the permanents chosen for a cost (together, one batch).
@@ -768,6 +771,8 @@ impl Game {
         }
         let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
+        // (Mana spendable on abilities of its source's kind, CR 106.6.)
+        pm.keep.allow = self.ability_allow(card);
         pm.waterbend = ad.cost.waterbend;
         pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
         self.agenda.push(Task::PayMana(Box::new(pm)));
@@ -1236,7 +1241,7 @@ impl Game {
                 None => {
                     let exclude = Self::mana_exclude(src.card, ad);
                     let classes = self.mana_classes(p, exclude);
-                    let keep = Self::keep_for(src.card, &ad.cost, exclude);
+                    let keep = Keep { allow: self.ability_allow(src.card), ..Self::keep_for(src.card, &ad.cost, exclude) };
                     let mut x = 0u8;
                     while x < (act::NUMBER_N - 1) as u8
                         && self.can_pay_without(p, &self.act_mana_x(p, src.card, ad, x + 1), &classes, &keep, exclude)
@@ -1256,6 +1261,7 @@ impl Game {
         if !mana.is_zero() {
             let mut pm = PayMana::new(p, mana);
             pm.keep = Self::keep_for(src.card, &ad.cost, Self::mana_exclude(src.card, ad));
+            pm.keep.allow = self.ability_allow(src.card);
             self.agenda.push(Task::PayMana(Box::new(pm)));
         }
     }
@@ -1322,7 +1328,7 @@ impl Game {
             // X mana in any combination: one mana, one choice, X times.
             let picks = if matches!(prod, crate::db::ManaProd::ComboX { .. }) { x } else { 1 };
             for _ in 0..picks {
-                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone() });
+                self.agenda.push(Task::ManaNowPick { p, prods: prods.clone(), only: ad.mana().map_or(0, |m| m.only) });
             }
         }
     }
@@ -1342,19 +1348,19 @@ impl Game {
             .fold(0, |m, v| (0..6).filter(|&t| v[t] > 0).fold(m, |m, t| m | (1 << t)))
     }
 
-    pub(crate) fn mana_now_pick(&mut self, p: PlayerId, prods: Vec<[u8; 6]>) {
+    pub(crate) fn mana_now_pick(&mut self, p: PlayerId, prods: Vec<[u8; 6]>, only: u8) {
         match self.answer.take() {
-            Some(Choice::Number(k)) => self.add_mana(p, &prods[k as usize]),
+            Some(Choice::Number(k)) => self.add_restricted_mana(p, &prods[k as usize], only),
             Some(other) => unreachable!("mana answer {other:?}"),
             None => {
                 if prods.len() == 1 {
-                    self.add_mana(p, &prods[0]);
+                    self.add_restricted_mana(p, &prods[0], only);
                     return;
                 }
                 let opts = (0..prods.len())
                     .map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) })
                     .collect();
-                self.ask(Task::ManaNowPick { p, prods }, p, DecisionKind::ChooseMana, opts);
+                self.ask(Task::ManaNowPick { p, prods, only }, p, DecisionKind::ChooseMana, opts);
             }
         }
     }

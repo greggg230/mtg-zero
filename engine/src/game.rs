@@ -679,6 +679,11 @@ pub struct Game {
     /// controller as they last existed (CR 608.2h; kept when
     /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
     pub(crate) lki_toughness: Vec<(ObjRef, i32, PlayerId)>,
+    /// Mana in the pools with a spending restriction other than Mishra's
+    /// Workshop's (`ManaPool::art`): (player, type, purposes, amount), a
+    /// part of that player's `ManaPool::amt` (CR 106.6; ENGINE.md 99.12).
+    /// Empty but in games with such mana; emptied with the pools.
+    pub(crate) pool_restr: Vec<(PlayerId, u8, u8, u8)>,
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it").
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
@@ -1065,6 +1070,7 @@ impl Game {
             lki_copy: Vec::new(),
             lki_damage: Vec::new(),
             lki_toughness: Vec::new(),
+            pool_restr: Vec::new(),
             spell_lki: Vec::new(),
             entering_copy: None,
             entering_times: 0,

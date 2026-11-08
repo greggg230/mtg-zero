@@ -1047,7 +1047,9 @@ pub struct ManaAbility {
     /// Mine), after the mana.
     pub sac_if_no: Option<Counter>,
     /// "Spend this mana only to cast artifact spells" / "... a legendary
-    /// spell" (`SPEND_*` bits; 0 = no restriction, CR 106.6).
+    /// spell" (`SPEND_*` bits; 0 = no restriction, CR 106.6): the purposes
+    /// it may be spent on, any one of them ("to cast artifact spells or
+    /// activate abilities of artifacts": two bits; ENGINE.md 99.12).
     pub only: u8,
     /// "... and that spell can't be countered" (Delighted Halfling).
     pub uncounterable: bool,
@@ -1064,6 +1066,16 @@ pub struct ManaAbility {
 pub const SPEND_ARTIFACT: u8 = 1;
 /// ... only to cast a legendary spell.
 pub const SPEND_LEGENDARY: u8 = 2;
+/// ... only to activate abilities of artifact sources (ENGINE.md 99.12).
+pub const SPEND_ARTIFACT_ABILITY: u8 = 4;
+/// ... only to cast colorless Eldrazi spells.
+pub const SPEND_ELDRAZI_SPELL: u8 = 8;
+/// ... only to activate abilities of colorless Eldrazi.
+pub const SPEND_ELDRAZI_ABILITY: u8 = 16;
+/// ... only to activate abilities of land sources.
+pub const SPEND_LAND_ABILITY: u8 = 32;
+/// ... only to cast a spell from anywhere other than your hand.
+pub const SPEND_OUTSIDE_HAND: u8 = 64;
 
 /// Sacrifice n permanents you control matching the filter (`another`: not
 /// the ability's source).
@@ -1841,6 +1853,12 @@ pub struct CardDb {
     /// game keeps permanents' last-known toughness (`Game::lki_toughness`;
     /// ENGINE.md 99.8).
     pub(crate) watch_toughness: bool,
+    /// The spending restrictions' purposes the table's mana can have
+    /// (`SPEND_*`: the union of its mana abilities' `only`, granted ones
+    /// included); payments work out only these (ENGINE.md 99.12).
+    pub(crate) spend_kinds: u8,
+    /// The interned "Eldrazi" subtype, if any card has it.
+    pub(crate) eldrazi: Option<u16>,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2020,6 +2038,8 @@ impl CardDb {
         db.merged = merged;
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
+        db.spend_kinds = crate::eoe_w2::spend_kinds(&db.defs);
+        db.eldrazi = db.subtype_id("Eldrazi");
         db
     }
 
