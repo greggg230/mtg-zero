@@ -130,6 +130,11 @@ pub(crate) enum Task {
     /// Emerge (CR 702.119): choose the permanent to sacrifice (`sac`: false),
     /// or sacrifice it once the mana is paid (601.2h).
     Emerge { id: u32, sac: bool },
+    /// A unit test's paged choice or big number (`decision::tests`, ENGINE.md
+    /// 100.1): asks through `ask_paged_ranges` or `ask_number` and logs the
+    /// answer. No game asks it.
+    #[cfg(test)]
+    Probe(Box<crate::decision::tests::Probe>),
 }
 
 /// Without a decision for this many tasks, the engine is looping.
@@ -250,7 +255,7 @@ impl Game {
             self.answer = Some(options[0].choice);
             return;
         }
-        self.pending = Some(Decision { player, kind, options });
+        self.pending = Some(Decision { player, kind, options, stage: crate::decision::Stage::One });
     }
 
     fn run_task(&mut self, t: Task) {
@@ -316,6 +321,8 @@ impl Game {
             Task::Special { p, card, sp } => self.special_action(p, card, sp),
             Task::Opening { p, exile } => self.opening_actions(p, exile),
             Task::Emerge { id, sac } => self.emerge(id, sac),
+            #[cfg(test)]
+            Task::Probe(p) => self.run_probe(*p),
         }
     }
 

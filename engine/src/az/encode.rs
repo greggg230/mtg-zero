@@ -70,7 +70,7 @@
 //! the same in every world `determinize(viewer)` can produce (tested).
 
 use crate::db::{types, AbilitySlot, CardDb, Kw, WardCost};
-use crate::decision::{act, Choice, FACE_CAST, FACE_PLAY, OTHER_CAST, OTHER_PLAY};
+use crate::decision::{act, Choice, Stage, FACE_CAST, FACE_PLAY, OTHER_CAST, OTHER_PLAY};
 use crate::flow::Task;
 use crate::game::{Game, Mark, StackKind};
 use crate::ids::{opp, CardIdx, DefId, PlayerId, Target, Zone};
@@ -829,9 +829,27 @@ pub mod ctx {
     /// A `ChooseFace` decision: the front face is cast / played, the other
     /// face is cast / played (ENGINE.md 25).
     pub const FACES: usize = PICKED + 1;
-    pub const END: usize = FACES + 4;
+    /// A choice made in several decisions (ENGINE.md 100.1), the decider's
+    /// only (whether a choice pages can depend on cards hidden from the
+    /// other player, as its option count can): 1 when the decision is a
+    /// page of a paged choice (a paged range's last id is "next page") or a
+    /// big number's first decision (`NUMBER` + 31 = "31 or more"; layout
+    /// v5's spare floats, 55.2, 60.1).
+    pub const PAGED: usize = FACES + 4;
+    /// The page's window / 4 (0 on the first page).
+    pub const PAGE: usize = PAGED + 1;
+    // (248: the Bracelet's frame flag, the faithfulness audit's 5.8.)
+    /// A big number's digit decision: the digits left, this one included,
+    /// / 8 (the digit's place value is 32^(left - 1)).
+    pub const DIGIT: usize = PAGE + 2;
+    /// The digits chosen so far, as a number, / 32 (squashed).
+    pub const PREFIX: usize = DIGIT + 1;
+    pub const END: usize = PREFIX + 1;
 }
 const _: () = assert!(ctx::END <= CONTEXT);
+// The faithfulness audit's assignment (5.1, 5.2, 5.8) of v5's spare context
+// floats 246-255.
+const _: () = assert!(ctx::PAGED == 246 && ctx::PAGE == 247 && ctx::DIGIT == 249 && ctx::PREFIX == 250);
 
 impl Game {
     /// The network input for `viewer` (module docs); `out` has
@@ -1661,6 +1679,17 @@ impl Game {
         x[ctx::PENDING] = 1.0;
         if d.player == me {
             x[ctx::OPTIONS] = d.options.len() as f32 / 32.0;
+            match d.stage {
+                Stage::One => {}
+                Stage::Paged { window } => {
+                    x[ctx::PAGED] = 1.0;
+                    x[ctx::PAGE] = squash(window as f32 / 4.0);
+                }
+                Stage::Digit { left, prefix } => {
+                    x[ctx::DIGIT] = left as f32 / 8.0;
+                    x[ctx::PREFIX] = squash(prefix as f32 / 32.0);
+                }
+            }
         }
         let Some(task) = self.agenda.last() else { return };
         let t = task_code(task);
