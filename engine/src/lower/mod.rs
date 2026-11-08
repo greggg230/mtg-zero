@@ -247,6 +247,8 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // An enchant ability narrowed to "creature" (29, 30).
     ("Tractor Beam", "ir_defect(enchant creature or Spacecraft as creature, docs/ir_defects.md 29)"),
     ("Moonlit Meditation", "ir_defect(enchant artifact or creature as creature, docs/ir_defects.md 30)"),
+    // "Whenever you put ... counters" without its "you put" (31).
+    ("Terrasymbiosis", "ir_defect(who puts the counters dropped, docs/ir_defects.md 31)"),
 
     // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
 

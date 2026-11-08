@@ -66,6 +66,7 @@ permission) and a consumer can go wrong with it.
 | 28 | Meltstrider's Resolve (ENGINE.md 99.2) | keyword substituted | "Enchanted creature ... can't be blocked by more than one creature" as `equipment_bonuses: [0, 2, ["menace"]]` | a "can't be blocked by more than one creature" rule (menace is the opposite: by two or more only, CR 702.111b) | the Aura builder's bonus line (`cards/base.py::make_aura`, as entry 7) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 29 | Tractor Beam (ENGINE.md 99.2) | enchant narrowed | "Enchant creature or Spacecraft" as the default `aura_enchant_type: creature` | creature or Spacecraft (a Spacecraft below its threshold is a noncreature artifact) | the Aura builder's enchant line (`EnchantKind` has no "or Spacecraft") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 30 | Moonlit Meditation (ENGINE.md 99.2) | enchant narrowed | "Enchant artifact or creature you control" as `aura_enchant_type: creature` (the default), `aura_yours_only` | artifact or creature you control | the Aura builder's enchant line (`EnchantKind` has no "artifact or creature") | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 31 | Terrasymbiosis (ENGINE.md 99.2) | subject dropped | "whenever you put one or more +1/+1 counters on a creature you control" as `counters_added` with `Subject(IsCreature) & Controlled` (the creature's controller only) | who puts the counters is the trigger's subject too: you (not an opponent's effect putting them on your creature, Drix Fatemaker's or Rayblade Trooper's) | the trigger phrase table (`cards/parser/triggers.py`) and the Python engine's `fire_counters_added_to_your_creature_triggers` | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -538,6 +539,21 @@ enchanted permanent."
 * Fix: as entry 29.
 * Engine: blocked, `ir_defect(enchant artifact or creature as creature, docs/ir_defects.md 30)` (a
   cross-lane card, lanes A and D).
+
+**31. Terrasymbiosis.** Oracle: "Whenever you put one or more +1/+1 counters on a creature you
+control, you may draw that many cards. Do this only once each turn."
+
+* IR: `event: counters_added`, `predicate: And(Subject(IsCreature), Controlled)`: counters put on a
+  creature you control, by anyone.
+* Should be: counters you put (the controller of the spell or ability that puts them, or you as
+  you pay a cost or as a permanent you control enters with them) on a creature you control. An
+  opponent's "put a +1/+1 counter on target creature" (Drix Fatemaker, Rayblade Trooper, Haliya)
+  aimed at your creature doesn't trigger it.
+* Source: the trigger phrase table (`cards/parser/triggers.py`); the Python engine fires it for any
+  counters added to its controller's creatures.
+* Fix: a subject for the player who puts the counters (and the event's count, "that many").
+* Engine: blocked, `ir_defect(who puts the counters dropped, docs/ir_defects.md 31)`. (The engine's
+  `CountersAdded` event names neither the player nor the count yet; both come with the fix.)
 
 ## Suspected defects (representational)
 
