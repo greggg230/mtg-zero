@@ -180,6 +180,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     // "This ability costs {1} less to activate for each legendary creature
     // you control" (CR 602.2b, 601.2f); a mana ability pays no mana here.
     let discounts = super::printing::lower_discounts(l, cost_reductions);
+    if discounts.iter().any(|d| matches!(d, crate::db::Discount::IfTargets(..))) {
+        l.unsupported("ActivatedAbility.cost_reductions(TargetMatches)");
+    }
     if !discounts.is_empty() && (cost.mana.is_zero() || matches!(effect, ActEffect::Mana(_))) {
         l.unsupported("ActivatedAbility.cost_reductions(no mana cost to reduce)");
     }

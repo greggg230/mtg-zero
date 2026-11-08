@@ -18133,7 +18133,12 @@ becomes cast, 601.2i, so the spells cast so far are the others). `Discount::If(C
 cast another spell this turn" (`Cond::SpellsCastAtLeast(1)`), "if your opponents control n or more
 <permanents>" (`Cond::OpponentsControlAtLeast`), "during your turn", "if you control a
 <permanent>", "if you attacked with a <subtype> this turn" (`Cond::AttackedWithSubtype`, the
-attackers declared this turn by their cards' subtypes). `CardDef::casting` (`CastingRules`) holds
+attackers declared this turn by their cards' subtypes). "This spell costs {1} less to cast if it targets a blocking creature" (Dark Endurance:
+`Discount::IfTargets`, `Filter::Blocking`): the targets are chosen before the cost is determined
+(CR 601.2c, 601.2f), so `cost_with` reads the spell's chosen targets (`Game::target_discount`);
+castability counts the reduced cost when a legal target matches (`target_discount_castable`, with
+the card on the stack), and `choose_targets` offers only the targets with which the cost can still
+be paid (a cast is offered only if it can be completed). `CardDef::casting` (`CastingRules`) holds
 what a permanent does to its controller's spells: `spell_discounts`, "the second spell you cast
 each turn costs {2} less" (`Cond::SpellsCastThisTurn { n: 1 }`) and "spells you cast have affinity
 for artifacts" (`Discount::PerControlled`, CR 702.41a), applied in `Game::cost_with` after the

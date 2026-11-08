@@ -95,6 +95,50 @@ impl Game {
         })
     }
 
+    /// "This spell costs {n} less to cast if it targets <filter>": `card`,
+    /// a spell being cast, has a target matching it (CR 601.2c before
+    /// 601.2f).
+    pub(crate) fn target_discount(&self, card: CardIdx, p: PlayerId, f: &crate::db::Filter, n: u8) -> u8 {
+        let Some(item) = self.stack.iter().find(|s| s.kind == crate::game::StackKind::Spell { card }) else { return 0 };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
+        let hit = item.targets.iter().any(|&(_, t)| {
+            let live = match t {
+                Target::Obj(o) => self.live(o),
+                Target::Player(_) => true,
+                Target::Stack(id) => self.item_index(id).is_some(),
+            };
+            live && self.filter_ok(f, t, &ctx)
+        });
+        if hit {
+            n
+        } else {
+            0
+        }
+    }
+
+    /// Could `p` cast `card` the way `from` says for its cost reduced by a
+    /// "costs {n} less if it targets <filter>" reduction: the reduced cost
+    /// payable and a legal target matching the filter (with the card on the
+    /// stack, CR 601.2a, 601.2c)? (A spell with one target requirement, no
+    /// mode, X or additional cost.)
+    pub(crate) fn target_discount_castable(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom, classes: &[crate::pay::Class]) -> bool {
+        let def = self.def_of(card);
+        let Some(ab) = &def.spell else { return false };
+        if ab.modes.is_some() || ab.targets.len() != 1 || def.x_pips > 0 || !def.additional.is_empty() {
+            return false;
+        }
+        def.discounts.iter().any(|d| {
+            let crate::db::Discount::IfTargets(f, n) = d else { return false };
+            let mut cost = self.route_mana(card, p, from);
+            cost.generic = cost.generic.saturating_sub(*n);
+            self.can_pay_without(p, &cost, classes, &Default::default(), Some(card))
+                && self.as_cast(card, p, |g, r| {
+                    let ctx = crate::cast::Ctx { controller: p, source: Some(r) };
+                    g.target_candidates(&ab.targets[0], &ctx, &[]).iter().any(|&t| g.filter_ok(f, t, &ctx))
+                })
+        })
+    }
+
     pub(crate) fn exec_eoe_c(&mut self, f: &mut Frame, op: &EoeC) -> Flow {
         match op {
             EoeC::ExileAllGraveyards => {

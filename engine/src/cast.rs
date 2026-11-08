@@ -86,7 +86,11 @@ impl Game {
         // Then reductions (CR 601.2f: increases, then reductions; generic
         // mana only, not below zero).
         for d in &self.def_of(card).discounts {
-            cost.generic = cost.generic.saturating_sub(self.discount(d, p));
+            let n = match d {
+                crate::db::Discount::IfTargets(f, n) => self.target_discount(card, p, f, *n),
+                d => self.discount(d, p),
+            };
+            cost.generic = cost.generic.saturating_sub(n);
         }
         // "The second spell you cast each turn costs {2} less", "spells you
         // cast have affinity for artifacts" (ENGINE.md 99.4).
@@ -151,6 +155,8 @@ impl Game {
                     0
                 }
             }
+            // (A spell's own, read with its targets: `cost_with`.)
+            crate::db::Discount::IfTargets(..) => 0,
         }
     }
 
@@ -327,7 +333,7 @@ impl Game {
             if !extras.iter().any(|x| payable(x)) {
                 return false;
             }
-        } else if !payable(&Default::default()) {
+        } else if !payable(&Default::default()) && !self.target_discount_castable(p, c, crate::game::CastFrom::Hand, cls) {
             return false;
         }
         if let Some(ab) = &def.spell {
@@ -751,7 +757,8 @@ impl Game {
         // 99.4).
         let free = self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
         // (From a graveyard by its own warp ability only: its warp cost.)
-        let plain = !self.warp_only(p, card, from) && self.route_payable(p, card, from, classes);
+        let plain = !self.warp_only(p, card, from)
+            && (self.route_payable(p, card, from, classes) || self.target_discount_castable(p, card, from, classes));
         if !(alt_ok || free || plain) {
             return false;
         }
@@ -2325,6 +2332,20 @@ impl Game {
             cands.retain(|&t| self.later_distinct_ok(&reqs, req, t, &chosen, &ctx));
         }
         self.targeting = 0;
+        // "This spell costs {n} less if it targets ...": only targets with
+        // which its cost can still be paid (a cast is offered only if it can
+        // be completed; ENGINE.md 99.4).
+        if let StackKind::Spell { card } = self.stack[pos].kind {
+            if self.def_of(card).discounts.iter().any(|d| matches!(d, crate::db::Discount::IfTargets(..))) {
+                cands.retain(|&t| {
+                    let mut item = self.stack[pos].clone();
+                    item.targets.push((req, t));
+                    let mut g = self.clone();
+                    g.stack[pos] = item.clone();
+                    g.can_pay_spell(card, &item, &g.total_mana(card, &item))
+                });
+            }
+        }
         let mut opts: Vec<Opt> = cands
             .iter()
             .map(|&t| Opt { action: self.target_action(ctx.controller, t), choice: Choice::Target(t) })
@@ -2734,6 +2755,7 @@ impl Game {
             Filter::Token => self.is_token(c),
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,
+            Filter::Blocking => self.objs[c.i()].blocking.is_some(),
             Filter::AttachedTo(inner) => self.objs[c.i()].attached.is_some_and(|h| {
                 self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield && self.card_matches(inner, h.idx, ctx)
             }),

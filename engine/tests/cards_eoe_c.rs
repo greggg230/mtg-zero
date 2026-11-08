@@ -921,3 +921,52 @@ fn timeline_culler_is_cast_from_the_graveyard_for_its_warp_cost_cr702_185a() {
     let c = g.card(0, "Timeline Culler", Zone::Graveyard);
     assert!(!g.pending_decision().unwrap().options.iter().any(|o| matches!(o.choice, Choice::Cast(x) if x == c)), "{:?}", g.options_desc());
 }
+
+/// Dark Endurance: "This spell costs {1} less to cast if it targets a
+/// blocking creature. Target creature gets +2/+0 and gains indestructible
+/// until end of turn." The targets are chosen before the cost is determined
+/// (CR 601.2c, 601.2f): with one Swamp, only a blocking creature can be its
+/// target.
+#[test]
+fn dark_endurance_costs_one_less_targeting_a_blocking_creature_cr601_2f() {
+    let mut g = scen()
+        .battlefield(0, &["Test Giant", "Test Bear", "Swamp"])
+        .battlefield(1, &["Test Bear"])
+        .hand(0, &["Dark Endurance"])
+        .at(Step::Main1, 1)
+        .start();
+    let de = g.card(0, "Dark Endurance", Zone::Hand);
+    // P1 attacks with its Bear; P0's Giant blocks.
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers) || (at_priority(g) && g.pending_decision().unwrap().player == 0));
+    if at_priority(&g) {
+        assert!(!g.has_option(Choice::Cast(de)), "{{1}}{{B}} with one Swamp and no blocker");
+        g.pass();
+        g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareAttackers));
+    }
+    let attacker = g.card(1, "Test Bear", Zone::Battlefield);
+    g.choose(Choice::Card(attacker));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::AttackTarget));
+    g.choose(Choice::Pass);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::DeclareBlockers));
+    let giant = bf(&g, 0, "Test Giant");
+    for _ in 0..4 {
+        if g.kind() != Some(DecisionKind::DeclareBlockers) {
+            break;
+        }
+        // The Giant blocks; the Bear doesn't (blockers decide in order).
+        let c = if g.obj(giant).blocking.is_none() { Choice::Card(attacker) } else { Choice::Pass };
+        g.choose(c);
+    }
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0 && g.turn().step == Step::DeclareBlockers);
+    assert!(g.obj(giant).blocking.is_some(), "{}", log(&g));
+    assert!(g.has_option(Choice::Cast(de)), "{{B}} targeting the blocker: {:?}", g.options_desc());
+    g.choose(Choice::Cast(de));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert_eq!(g.pending_decision().unwrap().options.len(), 1, "only the blocking creature keeps it payable: {:?}", g.options_desc());
+    let t = g.tgt(giant);
+    g.choose(t);
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.power(giant), 8, "{}", log(&g));
+    assert!(g.has_kw(giant, engine::db::Kw::Indestructible));
+}

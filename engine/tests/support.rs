@@ -720,6 +720,7 @@ const SUPPORTED_EOE_C: &[&str] = &[
     "Chrome Companion",
     "Codecracker Hound",
     "Cosmogoyf",
+    "Dark Endurance",
     "Deafening Silence",
     "Decode Transmissions",
     "Gigastorm Titan",

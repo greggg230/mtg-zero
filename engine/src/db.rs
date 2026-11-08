@@ -325,6 +325,8 @@ pub enum Filter {
     Attacking,
     /// A tapped permanent.
     Tapped,
+    /// A blocking creature (CR 509.1g; ENGINE.md 99.4).
+    Blocking,
     /// A player who has drawn exactly n cards this turn.
     DrewThisTurn(u8),
     /// A permanent whose evoke cost was paid (CR 702.74a).
@@ -1680,6 +1682,11 @@ pub enum Discount {
     /// n less if the condition holds for you as the cost is determined
     /// (CR 601.2f: "this spell costs {n} less to cast if ...").
     If(Cond, u8),
+    /// n less if one of the spell's targets matches the filter ("this
+    /// spell costs {1} less to cast if it targets a blocking creature":
+    /// the targets are chosen before the cost is determined, CR 601.2c,
+    /// 601.2f). A spell's own reduction only.
+    IfTargets(Filter, u8),
 }
 
 impl CardDef {

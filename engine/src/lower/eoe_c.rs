@@ -243,6 +243,10 @@ pub(crate) fn cost_reduction(l: &mut Lowerer, c: &cats::Condition, n: u8) -> Opt
         }
         // "During your turn".
         C::DuringYourTurn(nodes::DuringYourTurn {}) => Cond::YourTurn,
+        // "If it targets <filter>" (a spell's: read with its targets).
+        C::TargetMatches(nodes::TargetMatches { filter }) => {
+            return Some(Discount::IfTargets(super::filter::lower_pred(l, filter)?, n));
+        }
         // "If you control a <permanent>".
         C::ControlPermanent(nodes::ControlPermanent { filter }) => Cond::ControlAtLeast(super::filter::lower_pred(l, filter)?, 1),
         // "If you attacked with a <creature> this turn": the attackers
