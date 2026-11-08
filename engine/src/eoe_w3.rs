@@ -420,6 +420,7 @@ impl Game {
             o.blocked = false;
             o.blocking = None;
             o.attacks = None;
+            self.static_count(x, -1);
             self.w3.phased.push(x);
             if i > 0 {
                 self.w3.indirect.push(x);
@@ -427,6 +428,20 @@ impl Game {
             self.note(|g| format!("{} phases out", g.name(x)));
         }
         self.effects_changed();
+    }
+
+    /// The static-ability fast paths count permanent `c` (`d` = 1) or not
+    /// (-1) as it phases in or out (`Game::n_static`, `n_self_types`).
+    fn static_count(&mut self, c: CardIdx, d: i32) {
+        let def = self.def_of(c);
+        if def.statics.is_empty() {
+            return;
+        }
+        let typed = crate::layers::self_typed(def);
+        self.n_static = (self.n_static as i32 + d) as _;
+        if typed {
+            self.n_self_types = (self.n_self_types as i32 + d) as _;
+        }
     }
 
     /// The untap step of `p` (CR 502.1): the permanents that phased out under
@@ -453,6 +468,7 @@ impl Game {
             self.w3.phased.retain(|&y| y != x);
             self.w3.indirect.retain(|&y| y != x);
             self.objs[x.i()].zone = crate::ids::Zone::Battlefield;
+            self.static_count(x, 1);
             let ts = self.objs[x.i()].timestamp;
             let at = self.battlefield.iter().position(|&y| self.objs[y.i()].timestamp > ts).unwrap_or(self.battlefield.len());
             self.battlefield.insert(at, x);

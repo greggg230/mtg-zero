@@ -563,6 +563,13 @@ impl Game {
             v.extend([live_place(r), what]);
         }
         v.push(u64::MAX);
+        // Phased-out permanents (public, CR 702.26; EoE W3): what they are,
+        // and whether each phased out with what it is attached to.
+        for &c in &self.w3.phased {
+            obj(&mut v, c);
+            v.push(self.w3.indirect.contains(&c) as u64);
+        }
+        v.push(u64::MAX);
         v.push(self.monarch.map_or(9, |p| p as u64));
         // The initiative and the dungeons (public, CR 725, 309).
         v.push(self.initiative.map_or(9, |p| p as u64));

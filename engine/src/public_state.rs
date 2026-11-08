@@ -463,6 +463,21 @@ fn counter(g: &mut Game, c: CardIdx, k: Counter) -> Option<String> {
     Some(format!("a {k:?} counter on {}", g.name(c)))
 }
 
+/// A phased-out permanent (CR 702.26b; EoE W3), with the definition and
+/// owner of the first permanent in the encoded slots; `indirect`: it phased
+/// out with what it is attached to (702.26e).
+fn phased_out(g: &mut Game, indirect: bool) -> Option<String> {
+    let c = *slots(g).first()?;
+    let (def, owner) = (g.objs[c.i()].def, g.objs[c.i()].owner);
+    let x = g.add_card(def, owner, Zone::PhasedOut);
+    g.objs[x.i()].zone = Zone::PhasedOut;
+    g.w3.phased.push(x);
+    if indirect {
+        g.w3.indirect.push(x);
+    }
+    Some(format!("a phased-out {}", g.name(x)))
+}
+
 fn mark(g: &mut Game, c: CardIdx, m: crate::game::Mark) -> Option<String> {
     let r = g.obj_ref(c);
     if g.marks.contains(&(r, m)) {
@@ -839,6 +854,18 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = *slot_creatures(&a.g).first()?;
             mark(&mut a.g, c, crate::game::Mark::WarpCast)
         }),
+        // EoE W3 (ENGINE.md 99.13): no draw from the gate's random stream
+        // (the first object in the encoded slots, as the cross-lane pass's).
+        p!("a creature has a regeneration shield", "Game.marks", |a, _r| {
+            let c = *slot_creatures(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::RegenShield)
+        }),
+        p!("the mana spent to cast a permanent", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::ManaSpent(3))
+        }),
+        p!("a permanent is phased out", "W3State.phased", |a, _r| phased_out(&mut a.g, false)),
+        p!("a phased-out permanent phased out indirectly", "W3State.indirect", |a, _r| phased_out(&mut a.g, true)),
         p!("a spell can't be countered", "Game.marks", |a, r| {
             // (Not a spell that already can't be: Abrupt Decay, ENGINE.md 86.5.)
             let spells: Vec<(usize, CardIdx)> = stack_spells(&a.g).into_iter().filter(|&(_, c)| !a.g.spell_uncounterable(c)).collect();
@@ -1473,6 +1500,10 @@ pub fn limits() -> Vec<Limit> {
         l("void holds (a nonland permanent left the battlefield this turn)", NextLayout, "void (Edge of Eternities' ability word, ENGINE.md 99.4) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-turn flag beside the turn's facts); until then a network infers it from the public history only through the board"),
         l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
         l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
+        l("a creature has a regeneration shield", NextLayout, "regeneration shields (CR 701.19a, Mark::RegenShield) are game state EoE workstream W3 added after layout v5 froze (ENGINE.md 99.13), made by one card, Swarmyard: the next layout encodes them (a permanent's count)"),
+        l("the mana spent to cast a permanent", NextLayout, "the amount of mana spent to cast a permanent (CR 601.2h, Mark::ManaSpent) is game state EoE workstream W3 added after layout v5 froze (ENGINE.md 99.13), read by Astelli Reclaimer's enters trigger and Dyadrine's counters (on the battlefield already): the next layout encodes it (a permanent's number)"),
+        l("a permanent is phased out", NextLayout, "phased-out permanents (CR 702.26b, Zone::PhasedOut) are treated as though they don't exist, and layout v5 encodes the battlefield only, so a network can't see that one will phase in at its controller's next untap step (EoE workstream W3, ENGINE.md 99.13: Robe of Stars): the next layout encodes them (a bag per player)"),
+        l("a phased-out permanent phased out indirectly", NextLayout, "which phased-out permanents phase in with the one they are attached to (CR 702.26e, h; EoE workstream W3, ENGINE.md 99.13): with the phased-out permanents themselves, the next layout's"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }
