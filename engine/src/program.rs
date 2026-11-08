@@ -93,6 +93,11 @@ pub enum Amount {
     /// sacrificed creature's power", CR 608.2h; the item's event object,
     /// recorded as the cost is paid).
     CostPower,
+    /// The power of the object chosen for the spell's additional cost
+    /// (`StackItem::noted`, ENGINE.md 99.14): a creature on the battlefield
+    /// now, else as it last existed there; a card in exile, its own (CR
+    /// 608.2h: as it last existed in exile if it left).
+    ChosenPower,
     /// k times the spell's X ("twice X").
     XTimes(u8),
     /// The number of permanents of these card types the controller's

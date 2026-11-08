@@ -1332,6 +1332,17 @@ pub fn perturbations() -> Vec<Perturbation> {
             g.stack[i].targets[k].1 = Target::Obj(g.obj_ref(other));
             Some(g.name(other).to_string())
         }),
+        // EoE W4 (ENGINE.md 99.14): which object a stack item noted (Close
+        // Encounter's chosen creature or card, emerge's permanent, station's
+        // tapped creature): another permanent. (No draw from the gate's
+        // random stream.)
+        p!(rare "a stack item noted another object", "StackItem.noted", |a, _r| {
+            let g = &mut a.g;
+            let i = stack_slots(g).into_iter().find(|&i| !g.stack[i].noted.is_empty())?;
+            let other = g.battlefield.iter().copied().find(|&c| !g.stack[i].noted.iter().any(|n| n.idx == c))?;
+            g.stack[i].noted[0] = g.obj_ref(other);
+            Some(g.name(other).to_string())
+        }),
         p!("another additional cost was chosen", "StackItem.cost_option", |a, r| item(a, r, |s| {
             s.cost_option ^= 1;
             Some(format!("{}", s.cost_option))
@@ -1491,6 +1502,7 @@ pub fn limits() -> Vec<Limit> {
         l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
         l("a copy is legendary by its exception", NextLayout, "a copy effect's \"except it's legendary\" (CR 707.9b: a copiable supertype; Adagia, Windswept Bastion's token copies, EoE W4, ENGINE.md 99.14) is a value the EoE port added after layout v5 froze: a permanent's legendary float (code 47) is its copiable definition's, as its name is; the next layout encodes a permanent's supertypes as they are"),
         l("a stack item targets another exiled card", NextLayout, "a target in exile (Blade of the Swarm's 'target exiled card with warp', EoE W4, ENGINE.md 99.14) is a target layout v5's stack target block has no field for (a player, a permanent's slot or a stack position); exile is bags of identities: the next layout encodes it (the target's identity)"),
+        l("a stack item noted another object", NextLayout, "which object a stack item noted (Close Encounter's chosen creature or warped card, EoE W4, ENGINE.md 99.14; emerge's permanent; station's tapped creature) is encoded only as a count (stack::NOTED): the next layout encodes the objects (as a target's)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }

@@ -99,6 +99,101 @@ impl Game {
         });
     }
 
+    /// Is `c` a warped card: in exile by warp's delayed ability, which may
+    /// be cast from exile on a later turn (CR 702.185a; `Ext::WarpExile`'s
+    /// permission: from a later turn, for its mana cost, cast only)?
+    pub(crate) fn is_warped(&self, c: CardIdx) -> bool {
+        let r = self.obj_ref(c);
+        self.objs[c.i()].zone == Zone::Exile
+            && self.permissions.iter().any(|q| {
+                q.card == r
+                    && q.turn.is_some_and(|t| t & crate::resolve_tail2::PERM_LATER != 0)
+                    && matches!(q.kind, crate::game::PermKind::Play { free: false, cast_only: true, .. })
+            })
+    }
+
+    /// The warped creature cards `p` owns in exile, in exile order.
+    fn warped_creature_cards(&self, p: crate::ids::PlayerId) -> Vec<CardIdx> {
+        self.exile
+            .iter()
+            .copied()
+            .filter(|&c| self.objs[c.i()].owner == p && !self.is_copy_obj(c) && self.is_creature(c) && self.is_warped(c))
+            .collect()
+    }
+
+    /// Can `p` choose "a creature you control or a warped creature card you
+    /// own in exile" (ENGINE.md 99.14)?
+    pub(crate) fn chosen_for_cost_candidates(&self, p: crate::ids::PlayerId) -> bool {
+        self.creatures_of(p).next().is_some() || !self.warped_creature_cards(p).is_empty()
+    }
+
+    /// `Task::ChooseForCost`: "as an additional cost to cast this spell,
+    /// choose a creature you control or a warped creature card you own in
+    /// exile" (CR 601.2h). One choice in two decisions: an exiled card
+    /// (`ChooseExiled`, `EXILE` + k; `PASS` = a creature instead, offered
+    /// when there is one), then a creature (`ChoosePermanent`); a decision
+    /// with nothing of its kind is skipped. Each candidate is reached by
+    /// exactly one sequence. The choice is noted on the spell.
+    pub(crate) fn choose_for_cost(&mut self, id: u32, perm: bool) {
+        let Some(pos) = self.item_index(id) else { return };
+        let p = self.stack[pos].controller;
+        match self.answer.take() {
+            Some(Choice::Card(c)) => {
+                self.note(|g| format!("P{p} chooses {} for the cost", g.name(c)));
+                let r = self.obj_ref(c);
+                self.stack[pos].noted = vec![r];
+                return;
+            }
+            Some(Choice::Pass) => {
+                self.agenda.push(Task::ChooseForCost { id, perm: true });
+                return;
+            }
+            Some(other) => unreachable!("cost choice {other:?}"),
+            None => {}
+        }
+        let creatures: Vec<CardIdx> = self.creatures_of(p).collect();
+        if !perm {
+            let cards = self.warped_creature_cards(p);
+            if !cards.is_empty() {
+                let mut opts: Vec<Opt> = cards
+                    .iter()
+                    .take(act::EXILE_N as usize)
+                    .enumerate()
+                    .map(|(k, &c)| Opt { action: act::EXILE + k as u16, choice: Choice::Card(c) })
+                    .collect();
+                if !creatures.is_empty() {
+                    opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                }
+                self.ask(Task::ChooseForCost { id, perm: false }, p, DecisionKind::ChooseExiled, opts);
+                return;
+            }
+        }
+        let opts: Vec<Opt> = creatures.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
+        if opts.is_empty() {
+            return; // (Castability requires a candidate.)
+        }
+        self.ask(Task::ChooseForCost { id, perm: true }, p, DecisionKind::ChoosePermanent, opts);
+    }
+
+    /// `Amount::ChosenPower` (CR 608.2h).
+    pub(crate) fn chosen_power(&self, f: &Frame) -> i32 {
+        let Some(&r) = f.noted.first() else { return 0 };
+        let o = &self.objs[r.idx.i()];
+        if self.live(r) {
+            return match o.zone {
+                Zone::Battlefield => self.power(r.idx),
+                // A card in exile: its own power (no effect applies there).
+                _ => self.def_of(r.idx).power.unwrap_or(0),
+            };
+        }
+        // Gone: as it last existed where it was (a permanent's last known
+        // power; a card that left exile, its card's printed power).
+        match o.lki_power {
+            Some((inc, p)) if inc == r.inc => p,
+            _ => self.db.def(o.def).power.unwrap_or(0),
+        }
+    }
+
     pub(crate) fn exec_eoe_w4(&mut self, f: &mut Frame, op: &EoeW4) -> Flow {
         match op {
             EoeW4::OfferDiscardRandom { who, if_paid } => {

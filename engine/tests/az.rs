@@ -1242,7 +1242,8 @@ fn public_state_reaches_the_encoding() {
     // Edge of Eternities' void (ENGINE.md 99.4) is the second, and whether a creature was cast
     // for its warp cost (ENGINE.md 99.8) the third: state the port added after layout v5 froze,
     // for the next layout. W4's legendary copy exception (ENGINE.md 99.14) the fourth and a
-    // target in exile the fifth (rare: no gate position has one).
+    // target in exile the fifth (rare: no gate position has one), which object a stack item
+    // noted the sixth (Close Encounter's choice; emerge's and station's too).
     assert_eq!(
         gaps,
         [
@@ -1250,11 +1251,12 @@ fn public_state_reaches_the_encoding() {
             "void holds (a nonland permanent left the battlefield this turn)",
             "a creature was cast for its warp cost",
             "a copy is legendary by its exception",
-            "a stack item targets another exiled card"
+            "a stack item targets another exiled card",
+            "a stack item noted another object"
         ],
         "the gaps on the allowlist"
     );
-    assert_eq!(next, 5);
+    assert_eq!(next, 6);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

@@ -366,6 +366,11 @@ impl Game {
         if self.noncreature_spell_locked(p, card) {
             return false;
         }
+        // An additional cost that chooses (ENGINE.md 99.14): something to
+        // choose (CR 601.2h: a cost that can't be paid).
+        if self.def_of(card).casting.choose_creature_or_warped && !self.chosen_for_cost_candidates(p) {
+            return false;
+        }
         if sorcery_ok {
             return true;
         }
@@ -2143,6 +2148,11 @@ impl Game {
             self.agenda.push(Task::Escalate { id });
         }
         self.agenda.push(Task::CastPay { id });
+        if self.def_of(card).casting.choose_creature_or_warped {
+            // The additional cost's choice, before the mana (CR 601.2h: the
+            // costs in any order; ENGINE.md 99.14).
+            self.agenda.push(Task::ChooseForCost { id, perm: false });
+        }
         if self.def_of(card).delve {
             self.agenda.push(Task::Delve { id }); // CR 702.66a: while paying
         }

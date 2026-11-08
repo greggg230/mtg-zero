@@ -499,3 +499,124 @@ fn cr_115_1_blade_of_the_swarm_targets_an_exiled_card_with_warp() {
     assert_eq!(g.pt(b), (3, 1), "no counters");
     assert_eq!(g.obj(wurm).zone, Zone::Exile);
 }
+
+// ---- Close Encounter ----------------------------------------------------------------
+
+/// Close Encounter: "As an additional cost to cast this spell, choose a
+/// creature you control or a warped creature card you own in exile. Close
+/// Encounter deals damage equal to the power of the chosen creature or card
+/// to target creature." With creatures only: one `ChoosePermanent` among
+/// yours (CR 601.2h; not a target: 115.1); the damage is its power.
+#[test]
+fn cr_601_2h_close_encounter_chooses_a_creature_you_control() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "W4 Giant", "W4 Elf"])
+        .battlefield(1, &["W4 Wurm"])
+        .hand(0, &["Close Encounter"])
+        .at(Step::Main1, 0)
+        .start();
+    let giant = bf(&g, 0, "W4 Giant");
+    let elf = bf(&g, 0, "W4 Elf");
+    let wurm = bf(&g, 1, "W4 Wurm");
+    let c = g.card(0, "Close Encounter", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(wurm));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent) || g.kind() == Some(DecisionKind::PayMana));
+    assert_eq!(g.kind(), Some(DecisionKind::ChoosePermanent), "{}", log(&g));
+    assert!(g.has_option(Choice::Card(giant)) && g.has_option(Choice::Card(elf)));
+    assert!(!g.has_option(Choice::Card(wurm)), "a creature you control");
+    g.choose(Choice::Card(giant));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(wurm).damage, 5, "the Giant's power\n{}", log(&g));
+}
+
+/// Without a creature you control or a warped creature card in exile the
+/// additional cost can't be paid: it can't be cast (CR 601.2h).
+#[test]
+fn close_encounter_needs_something_to_choose() {
+    let g = scen().battlefield(0, &["Forest", "Forest"]).battlefield(1, &["W4 Wurm"]).hand(0, &["Close Encounter"]).at(Step::Main1, 0).start();
+    let c = g.card(0, "Close Encounter", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(c)));
+    // An exiled creature card that wasn't warped doesn't count.
+    let g = scen()
+        .battlefield(0, &["Forest", "Forest"])
+        .battlefield(1, &["W4 Wurm"])
+        .exile(0, &["Germinating Wurm"])
+        .hand(0, &["Close Encounter"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Close Encounter", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(c)), "exiled, not warped");
+}
+
+/// A warped creature card you own in exile (CR 702.185a: exiled by warp's
+/// delayed ability) can be chosen (`ChooseExiled`; `PASS` = a creature you
+/// control instead); its power is the card's.
+#[test]
+fn cr_702_185a_close_encounter_chooses_a_warped_card_in_exile() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest", "W4 Elf"])
+        .battlefield(1, &["W4 Wurm"])
+        .hand(0, &["Germinating Wurm", "Close Encounter"])
+        .at(Step::Main1, 0)
+        .start();
+    let gw = g.card(0, "Germinating Wurm", Zone::Hand);
+    g.choose(Choice::Cast(gw));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(gw).zone, Zone::Battlefield, "warped\n{}", log(&g));
+    next_main(&mut g, 0);
+    assert_eq!(g.obj(gw).zone, Zone::Exile, "exiled at the end step\n{}", log(&g));
+    let wurm = bf(&g, 1, "W4 Wurm");
+    let elf = bf(&g, 0, "W4 Elf");
+    let c = g.card(0, "Close Encounter", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(wurm));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseExiled) || g.kind() == Some(DecisionKind::PayMana));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseExiled), "{}", log(&g));
+    assert!(g.has_option(Choice::Pass), "a creature you control instead");
+    assert!(g.has_option(Choice::Card(g.card(0, "Germinating Wurm", Zone::Exile))));
+    let gw = g.card(0, "Germinating Wurm", Zone::Exile);
+    g.choose(Choice::Card(gw));
+    assert_ne!(g.kind(), Some(DecisionKind::ChoosePermanent), "one choice");
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(wurm).damage, 5, "the warped card's power\n{}", log(&g));
+    assert_eq!(g.obj(gw).zone, Zone::Exile, "only chosen: still in exile");
+    assert_eq!(g.obj(elf).zone, Zone::Battlefield);
+}
+
+/// The chosen creature leaves the battlefield before Close Encounter
+/// resolves: its power as it last existed (CR 608.2h), its pump included.
+#[test]
+fn cr_608_2h_close_encounter_uses_the_chosen_creatures_last_known_power() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest", "W4 Bear"])
+        .battlefield(1, &["W4 Wurm", "Mountain"])
+        .hand(0, &["Close Encounter", "W4 Growth"])
+        .hand(1, &["W4 Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 0, "W4 Bear");
+    let wurm = bf(&g, 1, "W4 Wurm");
+    let tb = g.tgt(bear);
+    cast(&mut g, 0, "W4 Growth", &[tb]);
+    settle(&mut g);
+    let c = g.card(0, "Close Encounter", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(wurm));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+    g.choose(Choice::Card(bear));
+    pay(&mut g);
+    to_opponent_priority(&mut g);
+    cast(&mut g, 1, "W4 Bolt", &[tb]);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard);
+    assert_eq!(g.obj(wurm).damage, 5, "2 + 3 as it last existed\n{}", log(&g));
+}

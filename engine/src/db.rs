@@ -1718,6 +1718,11 @@ pub struct CastingRules {
     /// untapped creatures may each pay for {1} or one mana of that
     /// creature's colour (`PayMana::convoke`; ENGINE.md 99.8).
     pub convoke: bool,
+    /// Its own "As an additional cost to cast this spell, choose a creature
+    /// you control or a warped creature card you own in exile" (CR 601.2b,
+    /// 601.2h; the choice is noted on the spell, `StackItem::noted`;
+    /// ENGINE.md 99.14).
+    pub choose_creature_or_warped: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting

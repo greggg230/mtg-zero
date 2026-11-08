@@ -906,6 +906,7 @@ const SUPPORTED_EOE_EXILE: &[&str] = &[
     "Alpharael, Stonechosen",
     "Blade of the Swarm",
     "Chorale of the Void",
+    "Close Encounter",
     "Scout for Survivors",
     "Susur Secundi, Void Altar",
 ];

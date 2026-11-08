@@ -90,6 +90,11 @@ pub(crate) enum Task {
     ChooseX { id: u32 },
     /// Discard for escalate (CR 702.120a).
     Escalate { id: u32 },
+    /// "As an additional cost, choose a creature you control or a warped
+    /// creature card you own in exile" (CR 601.2h; ENGINE.md 99.14): an
+    /// exiled card (`ChooseExiled`, `PASS` = a creature instead), then, with
+    /// `perm`, a creature (`ChoosePermanent`).
+    ChooseForCost { id: u32, perm: bool },
     /// Which player or planeswalker an attacking creature attacks (CR
     /// 508.1b, 508.4).
     AttackTarget { card: CardIdx },
@@ -289,6 +294,7 @@ impl Game {
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),
+            Task::ChooseForCost { id, perm } => self.choose_for_cost(id, perm),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),

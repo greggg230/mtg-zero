@@ -147,6 +147,13 @@ pub(crate) fn lower_effect_eoe_w4(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
             let tgt = b.target(Filter::InExile(Box::new(Filter::HasWarp)), 1, 1);
             w4(b, EoeW4::ExiledTargetToLibraryBottom { tgt });
         }
+        // "Close Encounter deals damage equal to the power of the chosen
+        // creature or card to target creature" (the choice is its additional
+        // cost, `CastingRules::choose_creature_or_warped`; CR 608.2h).
+        E::CloseEncounterEffect(nodes::CloseEncounterEffect {}) => {
+            let to = b.target(Filter::Type(types::CREATURE), 1, 1);
+            b.op(Op::DealDamage { amount: Amount::ChosenPower, to });
+        }
         _ => return false,
     }
     true

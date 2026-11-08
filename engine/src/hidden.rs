@@ -949,7 +949,7 @@ impl Game {
         use crate::flow::Task;
         self.agenda.iter().rev().find_map(|t| match t {
             Task::PayMana(pm) => Some(pm.payer),
-            Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } => {
+            Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } | Task::ChooseForCost { id, .. } => {
                 self.item_index(*id).map(|i| self.stack[i].controller)
             }
             // "Which face?" of a card being cast (CR 601.2a-b, 712.11b,
