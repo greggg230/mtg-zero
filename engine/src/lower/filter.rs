@@ -250,6 +250,9 @@ pub(crate) fn lower_condition(l: &mut Lowerer, c: &cats::Condition) -> Option<Co
         E::CardTypesAmongExiledWithSourceAtLeast(nodes::CardTypesAmongExiledWithSourceAtLeast { n }) => {
             Some(Cond::LinkedTypesAtLeast(l.int("CardTypesAmongExiledWithSourceAtLeast.n", *n, 1, 8) as u8))
         }
+        // "During your turn" (Memorial Team Leader; EoE lane D, ENGINE.md
+        // 99.5).
+        E::DuringYourTurn(nodes::DuringYourTurn {}) => Some(Cond::YourTurn),
     })
 }
 

@@ -193,6 +193,7 @@ pub fn fields() -> Vec<Field> {
         spells_cast: Public "spells cast this turn (storm, prowess, flurry)",
         noncreature_cast: Public "noncreature spells cast this turn",
         gained_life: Public "gained life this turn",
+        life_gained: Public "how much life gained this turn",
         cant_gain_life: Public "can't gain life for the rest of the game",
         attacked_with: Public "creatures declared as attackers this turn",
         draw_step_draws: Public "cards drawn in their draw step this turn",
@@ -967,6 +968,13 @@ pub fn perturbations() -> Vec<Perturbation> {
             Some(format!("{}", p.noncreature_cast))
         })),
         p!("gained life this turn", "Player.gained_life", |a, r| pl(a, r, |p| flip(&mut p.gained_life))),
+        // (Player 0 always: no draw from the gate's random stream, which the
+        // other perturbations' positions depend on.)
+        p!("more life gained this turn", "Player.life_gained", |a, _r| {
+            let p = &mut a.g.players[0];
+            p.life_gained += 1;
+            Some(format!("P0: {}", p.life_gained))
+        }),
         p!("can't gain life", "Player.cant_gain_life", |a, r| pl(a, r, |p| flip(&mut p.cant_gain_life))),
         p!("a creature attacked this turn", "Player.attacked_with", |a, r| {
             let c = pick(&slot_creatures(&a.g), r)?;
@@ -1441,6 +1449,7 @@ pub fn limits() -> Vec<Limit> {
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
         l("void holds (a nonland permanent left the battlefield this turn)", NextLayout, "void (Edge of Eternities' ability word, ENGINE.md 99.4) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-turn flag beside the turn's facts); until then a network infers it from the public history only through the board"),
+        l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }

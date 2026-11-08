@@ -650,6 +650,7 @@ impl Game {
             v.extend([pl.pool.art as u64, pl.pool.haste as u64, pl.drew_from_empty as u64, pl.lost as u64, pl.turns as u64]);
             v.extend([pl.left_battlefield as u64, pl.drawn as u64, pl.spells_cast as u64, pl.noncreature_cast as u64]);
             v.extend([pl.gained_life as u64, pl.draw_step_draws as u64, pl.spells_game as u64, pl.energy as u64]);
+            v.push(pl.life_gained as u64);
             v.extend([pl.gy_play_turn as u64, pl.gy_exile_turn as u64, pl.city_blessing as u64, pl.prot_until as u64]);
             // The revealed companion: still outside the game or not (its
             // slot's zone once in the game is not observable: a twin in a

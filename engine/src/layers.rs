@@ -72,6 +72,8 @@ pub struct Flags {
     pub exile_if_dies: bool,
     /// "If it would leave the battlefield, exile it instead."
     pub exile_if_leaves: bool,
+    /// Combat damage it would deal is prevented (EoE lane D).
+    pub prevent_combat_damage: bool,
 }
 
 impl Game {
@@ -451,6 +453,7 @@ impl Game {
                 Mod::MustAttack | Mod::Goad | Mod::MustAttackPlayer => f.must_attack = true,
                 Mod::ExileIfDies => f.exile_if_dies = true,
                 Mod::ExileIfLeaves => f.exile_if_leaves = true,
+                Mod::PreventCombatDamage => f.prevent_combat_damage = true,
                 _ => {}
             }
         }
@@ -772,7 +775,12 @@ impl Game {
     /// CR 514.2: "until end of turn" effects end in the cleanup step (copy
     /// effects too, `copies.rs`).
     pub(crate) fn end_turn_effects(&mut self) {
+        let control = self.control_ending_this_turn();
         self.effects.retain(|e| e.until != Until::EndOfTurn);
+        self.return_control(control);
+        if !self.marks.is_empty() {
+            self.marks.retain(|(_, m)| !matches!(m, crate::game::Mark::DiesTriggerThisTurn { .. }));
+        }
         self.effects_changed();
         if !self.copies.is_empty() {
             self.end_copy_effects(Until::EndOfTurn);

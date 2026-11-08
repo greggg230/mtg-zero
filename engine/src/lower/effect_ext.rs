@@ -164,7 +164,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             power_bonus_from_x,
         }) => {
             l.deny("PumpTargetCreatureUntilEOT.granted_keywords_if_warp_cast", granted_keywords_if_warp_cast);
-            l.deny("PumpTargetCreatureUntilEOT.granted_triggered_ability", granted_triggered_ability);
             l.deny("PumpTargetCreatureUntilEOT.power_bonus_from_x", power_bonus_from_x);
             let mut f = creature();
             if *you_control_only {
@@ -188,6 +187,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);
             let t = b.target(f, if *optional { 0 } else { 1 }, 1);
             apply(b, On::Target(t), mods, Until::EndOfTurn);
+            if let Some(ta) = granted_triggered_ability.as_deref() {
+                // "... and gains '<triggered ability>'" (EoE lane D,
+                // ENGINE.md 99.5).
+                super::effect_eoe_d::grant_trigger_this_turn(l, b, On::Target(t), ta);
+            }
             // "If it has a +1/+1 counter on it, draw a card" (ENGINE.md 99.2).
             if *draw_if_target_has_plus_one_counter != 0 {
                 super::eoe_a::draw_if_target_has_counter(l, b, t, *draw_if_target_has_plus_one_counter);
@@ -202,7 +206,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             also_untap_if_not_your_turn,
             tokens_only,
         }) => {
-            l.deny("PumpCreaturesYouControlUntilEOT.also_untap_if_not_your_turn", also_untap_if_not_your_turn);
             let mut f = and(creature(), Filter::Controller(true));
             if *exclude_source {
                 f = and(f, not(Filter::Source));
@@ -214,7 +217,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 f = and(f, Filter::Token);
             }
             let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);
-            apply(b, On::Each(f), mods, Until::EndOfTurn);
+            apply(b, On::Each(f.clone()), mods, Until::EndOfTurn);
+            if *also_untap_if_not_your_turn {
+                super::effect_eoe_d::untap_unless_your_turn(b, f);
+            }
         }
         E::PumpSelfUntilEOT(nodes::PumpSelfUntilEOT { power_bonus, toughness_bonus, granted_keywords }) => {
             let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);

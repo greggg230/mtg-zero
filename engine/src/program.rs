@@ -139,6 +139,92 @@ impl EoeB {
     }
 }
 
+/// The instructions of the Edge of Eternities port's lane D (ENGINE.md
+/// 99.5), inside `Ext::EoeD`. Same rules as `Op`: named after rules actions,
+/// never cards.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum EoeD {
+    /// The first legal target of requirement `by` (a permanent) deals damage
+    /// equal to its power to each legal target of requirement `to`, or to
+    /// itself (`None`); twice that much if it matches `twice_if` (CR 120.1,
+    /// 120.3). An illegal `by` deals none (608.2b).
+    PowerDamageByTarget { by: u8, to: Option<u8>, twice_if: Option<Filter> },
+    /// Remember (`Frame::x`, `Amount::Remembered`) `plus` plus the number of
+    /// permanents the controller controls matching `filter`.
+    CountControlled { filter: Filter, plus: i32 },
+    /// Each object of `on` gets +p*n/+t*n until `until`, n read once as the
+    /// op resolves (CR 608.2h, 611.2c; "double its power", 701.10b).
+    ApplyPtTimes { on: On, p: i8, t: i8, n: Amount, until: Until },
+    /// Each object of `on` gains "When this creature dies, <delayed ability
+    /// `k` of the source's card>" until end of turn (layer 6, CR 613.1f;
+    /// it ends in the cleanup step, 514.2).
+    GrantDiesTriggerThisTurn { on: On, k: u8 },
+    /// The triggered ability's event card (in a graveyard or exile) returns
+    /// to the battlefield tapped under its owner's control ("return it to
+    /// the battlefield tapped": it enters tapped and never "becomes
+    /// tapped").
+    ReturnEventCardTapped,
+    /// `who`'s life total becomes half their starting life total, rounded
+    /// up: they gain or lose the difference (CR 119.5, 107.1a).
+    LifeBecomesHalfStarting { who: Who },
+    /// The controller may tap an untapped permanent they control matching
+    /// `filter`; if they don't, the source is sacrificed ("sacrifice it
+    /// unless you tap ...", CR 118.12, 701.21a). Choice: `ChoosePermanent`,
+    /// `PASS` = don't.
+    SacrificeSourceUnlessTap { filter: Filter },
+    /// Each legal target player of requirement `tgt` mills half their
+    /// library, rounded down (CR 701.17a, 107.1a).
+    MillHalfLibrary { tgt: u8 },
+    /// `who` loses half their life, rounded up (CR 119.3, 107.1a).
+    LoseHalfLife { who: Who },
+    /// Destroy all creatures with toughness X or less, X the spell's (CR
+    /// 701.8a, 107.3); remember (`Frame::picked`) the cards put into a
+    /// graveyard this way.
+    DestroyCreaturesToughnessAtMostX,
+    /// If the spell's X is n or more, the controller returns one of the
+    /// cards `DestroyCreaturesToughnessAtMostX` put into a graveyard (still
+    /// there) to the battlefield under their control. Choice:
+    /// `ChooseGraveyardCard`.
+    ReturnOneDestroyedIfXAtLeast { n: u8 },
+    /// The controller gains control of each object of `on` until end of
+    /// turn (a control-changing effect with a duration, layer 2: CR 613.1b,
+    /// 611.2a; it ends in the cleanup step, 514.2, `Mod::ControlFrom`).
+    GainControlUntilEndOfTurn { on: On },
+    /// The controller chooses odd or even; destroy each creature whose mana
+    /// value has the chosen quality (zero is even; CR 701.8a). Choice:
+    /// `ChooseMode`: `NUMBER` 0 = even, 1 = odd (as "choose odd or even" as a
+    /// permanent enters).
+    DestroyCreaturesOfChosenParity,
+    /// Delayed triggered ability `k` (CR 603.7), about the first legal target
+    /// of requirement `tgt` ("remove ten charge counters from it at the
+    /// beginning of the next end step").
+    DelayAboutTarget { k: u8, when: crate::db::DelayedWhen, tgt: u8 },
+}
+
+impl EoeD {
+    /// Does the op read its triggered ability's event?
+    pub fn uses_event(&self) -> bool {
+        match self {
+            EoeD::ApplyPtTimes { on, n, .. } => {
+                matches!(on, On::EventObj)
+                    || matches!(n, Amount::EventAmount | Amount::EventObjPower | Amount::EventTimes | Amount::EventSpellTimes | Amount::EventSpellMv)
+            }
+            EoeD::GrantDiesTriggerThisTurn { on, .. } => matches!(on, On::EventObj),
+            EoeD::ReturnEventCardTapped => true,
+            EoeD::LifeBecomesHalfStarting { who } => *who == Who::EventPlayer,
+            EoeD::LoseHalfLife { who } => *who == Who::EventPlayer,
+            EoeD::GainControlUntilEndOfTurn { on } => matches!(on, On::EventObj),
+            EoeD::DestroyCreaturesOfChosenParity | EoeD::DelayAboutTarget { .. } => false,
+            EoeD::PowerDamageByTarget { .. }
+            | EoeD::CountControlled { .. }
+            | EoeD::SacrificeSourceUnlessTap { .. }
+            | EoeD::MillHalfLibrary { .. }
+            | EoeD::DestroyCreaturesToughnessAtMostX
+            | EoeD::ReturnOneDestroyedIfXAtLeast { .. } => false,
+        }
+    }
+}
+
 /// The instructions M7d added (ENGINE.md 31), inside `Ext::M7d`. Same rules
 /// as `Op`: named after rules actions, never cards.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -550,6 +636,8 @@ pub enum Ext {
     ExiledWithCounterToHand { counter: Counter },
     /// The M7d instructions (ENGINE.md 31).
     M7d(M7d),
+    /// The EoE lane D instructions (ENGINE.md 99.5).
+    EoeD(EoeD),
     /// The controller sacrifices a permanent matching `filter` (their
     /// choice; nothing if none). When they do (CR 603.12), delayed ability
     /// `k` of the source's card triggers, about the sacrificed object and
@@ -1143,6 +1231,7 @@ impl Op {
             | Op::Ext(Ext::TapOrUntap { on })
             | Op::Ext(Ext::CounterOrDoubleOnSecond { on }) => matches!(on, On::EventObj),
             Op::Ext(Ext::CreateTokensFor { who: w, .. }) | Op::Ext(Ext::GraveyardToBottomRandom { who: w }) => who(w),
+            Op::Ext(Ext::EoeD(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {

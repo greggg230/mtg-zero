@@ -49,6 +49,7 @@ impl Game {
                 n >= *lo as crate::num::Count && hi.is_none_or(|h| n <= h as crate::num::Count)
             }),
             Cond::GainedLifeThisTurn => pl.gained_life,
+            Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as u32,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::OpponentControlsMoreLands => {
                 let lands = |q: PlayerId| self.permanents_of(q).filter(|&x| self.is_type(x, crate::db::types::LAND)).count();

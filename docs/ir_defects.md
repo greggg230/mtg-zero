@@ -87,6 +87,9 @@ permission) and a consumer can go wrong with it.
 | 65 | Pinnacle Starcage (Edge of Eternities, ENGINE.md 99.4) | value resolved late | `CreateNTokensFromLastExileRecall { token_name: "Robot" }` | the 2/2 colorless Robot artifact creature token's `CardPrinting` inline (as entry 3) | `effects/` (the class resolves the token by name) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 66 | Starfield Vocalist (Edge of Eternities, ENGINE.md 99.4) | event subjects dropped | `ReplacementEffect { event_pattern: EventPattern { event: triggered_ability_triggers }, transform: AddInstances { delta: 1 } }`, no subject filters (Strionic Resonator's shape, "triggered abilities trigger an additional time") | the triggering event a permanent entering the battlefield, the ability's source a permanent you control (`subject_filters`) | `cards/parser/creature_builder.py` (~line 627) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 67 | Mirrorpool (Edge of Eternities, ENGINE.md 99.4) | lossy schema, ability dropped | activation costs `mana: { generic: 3 }` for `mana_str: "{2}{C}"` and `{ generic: 5 }` for "{4}{C}"; no `produces`, no mana ability | a colorless pip (`{C}`, CR 107.4b) in each cost; "{T}: Add {C}" | `cards/base.py::parse_mana_cost` (as entry 5), the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 80 | Syr Vondam, Sunstar Exemplar (Edge of Eternities, lane D, ENGINE.md 99.5) | event widened, trigger condition moved | both triggers on `leaves_battlefield` for "dies or is put into exile"; "while its power is 4 or greater" as `ConditionalIfSourcePowerAtLeast` around the effect (read as the ability resolves) | a trigger on dying or being exiled only (not bounced, not put into a library); the power condition part of the trigger event, as the creature left (CR 603.10a, 603.6c) | `cards/parser/triggers.py` (the "dies or is put into exile" phrase-table entries, ~line 718; `_INTERVENING_WHILE_EFFECT_WRAPPERS`, ~line 1645) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 81 | Dawnsire, Sunstar Dreadnought (lane D) | target narrowed | `DealDamageToTargetCreature` with a creature-only target for "up to one target creature or planeswalker" | a creature or planeswalker target | `cards/parser/effects.py` (`_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE`, ~line 390: "or planeswalker" accepted and dropped) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -849,6 +852,59 @@ land: Copy target instant or sorcery spell you control. You may choose new targe
   effects (`CopyTargetInstantOrSorceryYouControl`, `CreateTokenCopyOfTargetCreatureYouControl`)
   are not built (no other card uses them).
 
+### O. Edge of Eternities, lane D (ENGINE.md 99.5)
+
+**80. Syr Vondam, Sunstar Exemplar.** Oracle: "Vigilance, menace / Whenever another creature you
+control dies or is put into exile, put a +1/+1 counter on Syr Vondam and you gain 1 life. / When Syr
+Vondam dies or is put into exile while its power is 4 or greater, destroy up to one target nonland
+permanent."
+
+* IR (mtg-bot main 2cb79f77): both triggered abilities have `event: leaves_battlefield` (the first
+  with `Subject(IsCreature) & Controlled & Not(IsSelf)`, the second with `IsSelf`); the second's
+  effect is `ConditionalIfSourcePowerAtLeast { threshold: 4, effect: DestroyUpToOneTargetNonlandPermanent }`,
+  which the Python engine checks against the source as the ability resolves.
+* Should be: (1) the triggers fire only when the creature dies (CR 700.4) or is put into exile from
+  the battlefield, not when it is returned to a hand or put into a library ("leaves the battlefield"
+  is wider); (2) "while its power is 4 or greater" is part of the trigger condition, read as the
+  creature last existed on the battlefield (CR 603.10a), not an "if" checked on resolution (a
+  leave-the-battlefield ability looks back; the creature is gone by then).
+* Source: `cards/parser/triggers.py`, the phrase-table entries "this creature dies or is put into
+  exile" and "another creature you control dies or is put into exile" (~line 718, both mapped to
+  `Event.LEAVES_BATTLEFIELD` "to match the static registry"), and `_INTERVENING_WHILE_EFFECT_WRAPPERS`
+  (~line 1645) for the power condition.
+* Fix: an event (or a destination predicate) for "dies or is put into exile"; the power condition as
+  a trigger predicate on the leaving object (e.g. `Subject(HasPowerAtLeast(4))` on its last known
+  characteristics).
+* Engine: blocked, `ir_defect(dies-or-exiled widened to leaves the battlefield, docs/ir_defects.md
+  80)` (`lower::IR_DEFECTS`). Without the entry the card would lower (the class
+  `ConditionalIfSourcePowerAtLeast` aside) with triggers on bounces and library moves.
+
+**81. Dawnsire, Sunstar Dreadnought.** Oracle: "10+ | Whenever you attack, Dawnsire deals 100 damage
+to up to one target creature or planeswalker."
+
+* IR: `DealDamageToTargetCreature { amount: 100, optional: true, targets: [TargetSpec { count_min:
+  0, filter: IsCreature }] }`.
+* Should be: the target "creature or planeswalker" (`OneOf(IsCreature, IsPlaneswalker)`).
+* Source: `cards/parser/effects.py`, `_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE` (~line 390): the
+  "(?: or planeswalker)?" tail is accepted and dropped ("planeswalkers aren't modeled by the engine
+  today").
+* Fix: keep the planeswalker in the target spec.
+* Engine: blocked, `ir_defect(planeswalker target dropped, docs/ir_defects.md 81)`. (The card also
+  needs Station, lane A; and its 100 damage is above the lowering's 0..99 range for this class,
+  `DealDamageToTargetCreature.amount(out of range 100)`, an engine limit to widen with the card.)
+
+**82. Entropic Battlecruiser.** Oracle: "1+ | Whenever an opponent discards a card, they lose 3
+life."
+
+* IR: the triggered ability `event: discards_card, predicate: Controlled(by: opponent)` with effect
+  `TargetPlayerLosesLife { amount: 3 }`, a targeted effect ("target player loses 3 life").
+* Should be: the discarding player loses 3 life, not targeted (no target is chosen, so hexproof or
+  shroud on a player doesn't stop it): as the cube's "that player loses N life" triggers,
+  `BindEventPlayer { slot: player, inner: TargetPlayerLosesLife }`.
+* Source: `cards/parser/effects.py`, `_THEY_LOSE_N_LIFE` (~line 1718): the Python engine pre-wires the
+  discarding player as `targets[0]` (`fire_opponent_discards_triggers`).
+* Fix: emit the `BindEventPlayer` wrapper for "they lose N life" on an event with a player subject.
+* Engine: blocked, `ir_defect(the event's player written as a target, docs/ir_defects.md 82)`.
 
 ## Suspected defects (representational)
 

@@ -212,6 +212,14 @@ pub enum Mod {
     /// "If it would leave the battlefield, exile it instead of putting it
     /// anywhere else" (CR 614.1a).
     ExileIfLeaves,
+    /// Layer 2: its controller gained control of it from player `.0` until
+    /// end of turn (CR 613.1b); as the effect ends, control returns
+    /// (`Game::end_turn_effects`; EoE lane D). No characteristic changes.
+    ControlFrom(u8),
+    /// Combat damage it would deal is prevented (CR 615.1a; "prevent all
+    /// combat damage that would be dealt this turn" on every creature, a
+    /// rules effect; EoE lane D).
+    PreventCombatDamage,
     /// "It attacks that player this combat if able" (the effect
     /// controller's opponent, 2 players: never one of their planeswalkers;
     /// Ursine Monstrosity).
@@ -397,6 +405,12 @@ pub enum Filter {
     /// are not abilities). A companion condition (Zirda, the Dawnwaker)
     /// reads it over the cards of a starting deck (`DeckCond`).
     HasActivatedAbility,
+    /// A permanent that was dealt damage this turn (`Mark::DealtDamage`; EoE
+    /// lane D).
+    DealtDamageThisTurn,
+    /// Mana value at most the number of lands the controller controls (EoE
+    /// lane D).
+    MvAtMostLandsYouControl,
 }
 
 /// `Filter::Ability` kinds.
@@ -643,6 +657,9 @@ pub enum DelayedWhen {
     /// the turn it was created in: Kav Landseeker's "on your next turn",
     /// ENGINE.md 99.3).
     YourNextTurnEndStep,
+    /// At the next end of combat ("at end of combat": as the end of combat
+    /// step begins, CR 511.2; EoE lane D, ENGINE.md 99.5).
+    EndOfCombat,
 }
 
 impl EventKind {
@@ -661,7 +678,9 @@ impl EventKind {
                 (&[Slot::Obj], &[])
             }
             E::Attacks | E::AttacksAlone => (&[Slot::Attacker], &[]),
-            E::Blocks => (&[Slot::Blocker], &[]),
+            // (The blocked attacker: "whenever this creature blocks a
+            // creature with flying", CR 509.3b; EoE lane D.)
+            E::Blocks => (&[Slot::Blocker], &[Slot::Attacker]),
             E::Transforms | E::Chapter | E::ClassLevel => (&[Slot::Obj], &[]),
             E::DealsDamage => (&[Slot::Source], &[]),
             E::YouAttack
@@ -879,6 +898,8 @@ pub enum Cond {
     SourceCountersIn(Counter, u8, Option<u8>),
     /// You gained life this turn.
     GainedLifeThisTurn,
+    /// You gained n or more life this turn (EoE lane D).
+    GainedLifeAtLeast(u16),
     /// An opponent has more cards in hand than you.
     OpponentHasMoreCards,
     /// You have cast exactly n spells this turn (noncreature ones only if
@@ -948,6 +969,7 @@ impl Cond {
             | Cond::IsMonarch
             | Cond::SourceCountersIn(..)
             | Cond::GainedLifeThisTurn
+            | Cond::GainedLifeAtLeast(_)
             | Cond::SpellsCastThisTurn { .. }
             | Cond::YourTurn
             | Cond::LifeAtMostHalfStart
@@ -1796,6 +1818,10 @@ pub struct CardDb {
     /// The route is the definition granting escape (Underworld Breach) or
     /// `RETRACE_ROUTE` (granted retrace).
     merged: Vec<(DefId, DefId, u8, Cost)>,
+    /// A card of the table reads "dealt damage this turn"
+    /// (`Filter::DealtDamageThisTurn`): the game records it
+    /// (`Mark::DealtDamage`; EoE lane D, ENGINE.md 99.5).
+    pub(crate) watch_damage: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -1973,6 +1999,7 @@ impl CardDb {
             }
         }
         db.merged = merged;
+        db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db
     }
 
