@@ -378,6 +378,9 @@ impl Game {
             let actor = std::mem::replace(&mut self.w6.actor, Some(f.controller));
             let flow = self.exec(&mut f, op);
             self.w6.actor = actor;
+            if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+                self.w6_sync_control();
+            }
             match flow {
                 Flow::Next => {
                     f.pc += 1;

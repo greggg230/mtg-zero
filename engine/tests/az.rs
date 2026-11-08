@@ -1264,11 +1264,15 @@ fn public_state_reaches_the_encoding() {
             "a player will control the other's next turn",
             "the active player is controlled this turn",
             "a spell's granted alternative cost came from another permanent",
+            "a control effect ends at the end of the turn",
+            "the mana spent to cast a spell",
             "an artifact entered under a player's control this turn"
         ],
         "the gaps on the allowlist"
     );
-    assert_eq!(next, 14);
+    // (EoE W6, ENGINE.md 99.16: the recorded control effects and a spell's
+    // mana spent, 14 -> 16.)
+    assert_eq!(next, 16);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

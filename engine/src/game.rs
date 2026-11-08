@@ -1365,7 +1365,12 @@ impl Game {
     /// leaving the stack loses its stack item. Battlefield entry goes through
     /// [`put_onto_battlefield`](Self::put_onto_battlefield) (controller).
     pub(crate) fn move_card(&mut self, idx: CardIdx, to: Zone, pos: Pos) -> ObjRef {
-        self.move_card_ctl(idx, to, pos, None)
+        let r = self.move_card_ctl(idx, to, pos, None);
+        // (An Aura's control effect may have begun or ended: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_sync_control();
+        }
+        r
     }
 
     pub(crate) fn move_card_to_stack(&mut self, idx: CardIdx, controller: PlayerId) -> ObjRef {
@@ -1557,6 +1562,11 @@ impl Game {
         if let Some(h) = attach {
             self.objs[idx.i()].attached = Some(h);
             self.note(|g| format!("{} enters attached to {}", g.name(idx), g.name(h.idx)));
+        }
+        // (Control effects: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_entered_under(r, controller);
+            self.w6_sync_control();
         }
         if fx_tapped {
             self.objs[idx.i()].tapped = true;
@@ -1853,6 +1863,10 @@ impl Game {
         }
         self.next_ts += 1;
         self.objs[c.i()].timestamp = self.next_ts;
+        // (Its control effect follows the attachment: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 {
+            self.w6_sync_control();
+        }
         if let Some(i) = self.battlefield.iter().position(|&x| x == c) {
             self.battlefield.remove(i);
             self.battlefield.push(c);
@@ -1894,6 +1908,19 @@ impl Game {
     /// exchange of control (CR 701.12), which leaves every player's number of
     /// permanents as it was.
     pub(crate) fn set_control(&mut self, c: CardIdx, p: PlayerId) {
+        // (With an Aura's control effect in the game, control is worked out
+        // from every control effect in timestamp order: EoE W6.)
+        if self.w6.seen & crate::eoe_w6::SEEN_W6_CONTROL != 0 && !self.w6.syncing {
+            self.w6_control_effect(c, p, false);
+            return;
+        }
+        self.apply_control(c, p);
+    }
+
+    /// The permanent's controller becomes `p` (CR 613.1b): it is removed
+    /// from combat (506.4); the controller of a face-down permanent may
+    /// look at it (708.5).
+    pub(crate) fn apply_control(&mut self, c: CardIdx, p: PlayerId) {
         if self.objs[c.i()].zone != Zone::Battlefield || self.objs[c.i()].controller == p {
             return;
         }

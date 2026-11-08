@@ -228,6 +228,12 @@ impl Game {
                 }
             }
         }
+        // ("Triggers an additional time" for permanents entering at the same
+        // time: EoE W6.)
+        let w6_doubling = ev.kind == EventKind::Enters && self.w6.seen & crate::eoe_w6::SEEN_W6_TRIGGERS != 0;
+        if w6_doubling {
+            self.w6_entering_doubler(&ev);
+        }
         if obs.is_empty() && self.temp_triggers.is_empty() && !self.w3.granted {
             return;
         }
@@ -297,6 +303,9 @@ impl Game {
                         slot: i as u8,
                         ev: ctx,
                     });
+                    if w6_doubling {
+                        self.w6_entry_triggered();
+                    }
                     // "This ability triggers only once each turn": not
                     // again this turn (the object's; a new object is new).
                     if has_once(&t.pred) {
@@ -324,6 +333,9 @@ impl Game {
                     && (!has_batch(&t.pred) || self.batch_once(r, slot))
                 {
                     self.waiting.push(PendingTrigger { controller, source: r, source_def: def, slot, ev: ctx });
+                    if w6_doubling {
+                        self.w6_entry_triggered();
+                    }
                 }
             }
         }
@@ -427,6 +439,12 @@ impl Game {
             TrigPred::OrCopy => true,
             TrigPred::Once => true,
             TrigPred::LeftTo(mask) => ev.kind == EventKind::LeavesBattlefield && self.leaving_to & mask != 0,
+            // (The `CountersAdded` event carries who put the counters in a
+            // game with such a trigger: EoE W6.)
+            TrigPred::CountersPutBy(you) => match ev.b {
+                Subj::Player(p) => ev.kind == EventKind::CountersAdded && (p == src.controller) == *you,
+                _ => false,
+            },
             // CR 724, 508.1b: it attacks the player who is the monarch.
             TrigPred::AttacksMonarch => match ev.a {
                 Subj::Obj(r) => {

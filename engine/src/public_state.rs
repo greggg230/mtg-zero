@@ -200,6 +200,9 @@ pub fn fields() -> Vec<Field> {
             seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
             entering: Derived "transient: set and cleared around one permanent's entry",
             actor: Derived "transient: set and restored around one op",
+            control: Public "the control-changing effects behind permanents' controllers (CR 613.1b; EoE W6: games with an Aura's control effect): which ends when",
+            syncing: Derived "transient: set while the controllers are worked out",
+            entry_triggers: Derived "the triggers the current simultaneous entry caused (copies of Game.waiting's, which is public)",
         });
     }
     classify!(v, Player {
@@ -1568,6 +1571,24 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.m.earlier[p][w] |= b;
             Some(format!("P{p}"))
         }),
+        // EoE W6 (ENGINE.md 99.16): no draw from the gate's random stream.
+        // A recorded control-changing effect ("until end of turn") on the
+        // first permanent in the encoded slots, under the control it has (so
+        // nothing else changes now: what changes is who controls it once the
+        // turn ends).
+        p!("a control effect ends at the end of the turn", "W6State.control", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            let r = a.g.obj_ref(c);
+            let to = a.g.objs[c.i()].controller;
+            a.g.w6.control.push(crate::eoe_w6::ControlFx { obj: r, to, ts: u32::MAX, eot: true });
+            Some(a.g.name(c).to_string())
+        }),
+        // The amount of mana spent to cast a spell on the stack (Unravel's
+        // condition; W3's perturbation covers permanents).
+        p!(rare "the mana spent to cast a spell", "Game.marks", |a, _r| {
+            let &(_, c) = stack_spells(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::ManaSpent(1))
+        }),
     ]
 }
 
@@ -1599,6 +1620,8 @@ pub fn limits() -> Vec<Limit> {
         l("the active player is controlled this turn", NextLayout, "who controls the active player this turn (CR 722.1, 722.4; The Dominion Bracelet) is game state layout v5 has no float for: during a controlled turn the controller decides (to_move) the controlled player's decisions, whose action ids stay that player's, while the controller's encoding is its own seat's (its own hand, the controlled player's hand as known cards, CR 722.3); the next layout encodes it (a global, and the decision's seat)"),
         l("a spell's granted alternative cost came from another permanent", NextLayout, "which permanent's static ability gave the alternative cost a spell was cast for (Mark::AltGranted; Tannuk, Steadfast Second's warp, EoE W5, ENGINE.md 99.15) decides whether the spell still has that ability as it resolves (CR 400.7g, 608.3g: warp's exile); the stack item's alternative cost is encoded (stack::ALT, ALT_INDEX: past the card's own), its granter is not: the next layout encodes it (as a noted object's)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
+        l("a control effect ends at the end of the turn", NextLayout, "the control-changing effects behind a permanent's controller (W6State::control: their order and which end at the end of the turn, CR 613.1b, 613.7, 514.2; recorded in games with an Aura that changes control, Tractor Beam, EoE W6, ENGINE.md 99.16) decide who controls it when one ends; layout v5 encodes the controller, not the effects: the next layout encodes them (a permanent's 'controlled until end of turn' and 'by an Aura' flags)"),
+        l("the mana spent to cast a spell", NextLayout, "the amount of mana spent to cast a spell on the stack (Mark::ManaSpent, recorded for every spell in a table with Unravel, EoE W6, ENGINE.md 99.16) decides Unravel's 'if the amount of mana spent to cast that spell was less than its mana value'; layout v5's stack item has no float for it: the next layout encodes it (a stack item's number, as W3's permanent's)"),
         l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),
     ]
 }

@@ -68,6 +68,10 @@ pub(crate) struct Repl {
     /// "If one or more counters would be put on a <filter> you control,
     /// twice that many ... instead" (EoE W6: `W6Def::counter_doubler`).
     pub w6_counter_doubler: Option<Filter>,
+    /// "If a permanent entering the battlefield causes a triggered ability
+    /// of a permanent you control to trigger, that ability triggers an
+    /// additional time" (EoE W6: `W6Def::trigger_doubler`).
+    pub w6_trigger_doubler: bool,
 }
 
 /// A static ability's replacement effect -> `repl`.

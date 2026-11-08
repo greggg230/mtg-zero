@@ -851,6 +851,11 @@ pub enum TrigPred {
     /// `Game::leaving_to` as the event's triggers are matched; ENGINE.md
     /// 99.11).
     LeftTo(u8),
+    /// A `CountersAdded` event whose counters the ability's controller put
+    /// (`true`) or another player put (`false`): "whenever you put one or
+    /// more +1/+1 counters on ..." (CR 122.6, 122.6a; EoE W6: the event
+    /// carries the player, `SEEN_W6_PUTTER`).
+    CountersPutBy(bool),
 }
 
 /// The zone a permanent left the battlefield for (`Game::leaving_to`,

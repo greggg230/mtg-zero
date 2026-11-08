@@ -270,8 +270,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
-        l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
-        l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
         l.deny("CardPrinting.attached_grants_lose_all_abilities", attached_grants_lose_all_abilities);
         l.deny("CardPrinting.attached_grants_subtype", attached_grants_subtype);
@@ -1941,12 +1939,24 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             grants_activated: Vec::new(),
             grants_subtype: Vec::new(),
         },
-        w6: crate::eoe_w6::W6Def { counter_doubler: repl.w6_counter_doubler.clone(), ..Default::default() },
+        w6: crate::eoe_w6::W6Def {
+            counter_doubler: repl.w6_counter_doubler.clone(),
+            // An Aura's "You control enchanted permanent" and "Enchanted
+            // permanent doesn't untap during its controller's untap step"
+            // (EoE W6; checked to be an Aura's below).
+            aura_control: *attached_grants_control,
+            aura_no_untap: *attached_prevents_untap,
+            trigger_doubler: repl.w6_trigger_doubler,
+            ..Default::default()
+        },
     };
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);
     def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     crate::eoe_w6::finish_def(&mut def);
+    if (def.w6.aura_control || def.w6.aura_no_untap) && !(def.subtypes.iter().any(|&s| l.subtypes[s as usize] == "Aura") && def.is(types::ENCHANTMENT)) {
+        l.unsupported("CardPrinting.attached_grants_control/attached_prevents_untap(not an Aura)");
+    }
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
         l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");
     }

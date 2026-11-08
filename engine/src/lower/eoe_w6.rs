@@ -58,6 +58,62 @@ pub(crate) fn lower_replacement_w6(
             }
             true
         }
+        // "If a permanent entering the battlefield causes a triggered
+        // ability of a permanent you control to trigger, that ability
+        // triggers an additional time" (Starfield Vocalist; CR 603.2d): the
+        // ability's source a permanent ("you control" is `affects`), the
+        // trigger caused by a permanent entering.
+        (enums::Event::TriggeredAbilityTriggers, cats::EventTransform::AddInstances(card_ir::nodes::AddInstances { delta })) => {
+            if *delta != 1 {
+                l.unsupported(format!("ReplacementEffect(TriggeredAbilityTriggers, AddInstances {delta})"));
+            }
+            if condition.is_some() || *affects != enums::AffectedPlayers::You {
+                l.unsupported("ReplacementEffect(TriggeredAbilityTriggers, conditional or not yours)");
+            }
+            let permanent = |l: &mut Lowerer, p: &cats::ObjectPredicate| {
+                super::filter::lower_pred(l, p) == Some(crate::db::Filter::Type(crate::db::types::PERMANENT))
+            };
+            let ok = match subject_filters {
+                [(a, pa), (b, pb)] => a == "ability_source" && b == "entering_obj" && permanent(l, pa) && permanent(l, pb),
+                _ => false,
+            };
+            if !ok {
+                l.unsupported("ReplacementEffect(TriggeredAbilityTriggers, not a permanent's ability that a permanent entering causes)");
+            }
+            repl.w6_trigger_doubler = true;
+            true
+        }
         _ => false,
     }
+}
+
+/// Lower a W6 effect class; `false` if the class is not one of these.
+pub(crate) fn lower_effect_eoe_w6(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) -> bool {
+    use card_ir::nodes;
+    use cats::Effect as E;
+    let _ = &l;
+    match e {
+        // "When this Aura enters, tap enchanted permanent." (Tractor Beam.)
+        E::TapEnchantedPermanent(nodes::TapEnchantedPermanent {}) => {
+            b.op(Op::Ext(Ext::EoeW6(W6::TapHost)));
+        }
+        // "You may draw that many cards" (Terrasymbiosis: the number of
+        // +1/+1 counters its trigger's event put, the event's amount; the
+        // class's reading, as Starwinder's combat-damage sibling).
+        E::DrawCardsEqualToResolvingCounterAmount(nodes::DrawCardsEqualToResolvingCounterAmount {}) => {
+            let at = b.op(Op::May { who: crate::program::Who::You, skip: 0 });
+            b.op(Op::Draw { who: crate::program::Who::You, n: crate::program::Amount::EventAmount });
+            b.patch(at);
+        }
+        // "Move a counter from target permanent you control onto a second
+        // target permanent" (Nesting Grounds; CR 122.5): two targets, the
+        // second another (115.3).
+        E::MoveCounterBetweenTargets(nodes::MoveCounterBetweenTargets { targets }) => {
+            if let Some((from, to)) = super::effect_copies::two_targets(l, b, targets, "MoveCounterBetweenTargets") {
+                b.op(Op::Ext(Ext::EoeW6(W6::MoveCounter { from, to })));
+            }
+        }
+        _ => return false,
+    }
+    true
 }

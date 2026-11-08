@@ -227,18 +227,11 @@ impl Lowerer<'_> {
 /// 28-30, 41, 43-45, 47, 49, 50, 61, 62, 65, 67, 80, 100, 101); what is left
 /// below is still wrong in the IR.
 const IR_DEFECTS: &[(&str, &str)] = &[
-    // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
-    // "Move a counter" narrowed to a +1/+1 counter between your permanents
-    // (27).
-    ("Nesting Grounds", "ir_defect(move a counter narrowed, docs/ir_defects.md 27)"),
-    // "Whenever you put ... counters" without its "you put" (31).
-    ("Terrasymbiosis", "ir_defect(who puts the counters dropped, docs/ir_defects.md 31)"),
+    // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39): none left (27 and
+    // 31 fixed by mtg-bot f4f2d663, ENGINE.md 99.16).
 
-    // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
-    // "If a permanent entering the battlefield causes a triggered ability
-    // of a permanent you control to trigger": both restrictions dropped
-    // (docs/ir_defects.md 66).
-    ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
+    // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79): none left (66 fixed
+    // by mtg-bot f4f2d663, ENGINE.md 99.16).
 
     // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169).
 
