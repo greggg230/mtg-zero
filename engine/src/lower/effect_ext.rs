@@ -441,7 +441,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // "Until end of turn, this land becomes a p/t [colours]
             // [subtype] creature with [keywords]. It's still a land." (CR
             // 205.1b: it keeps its land types.)
-            l.deny("BecomeLandCreatureUEOT.granted_activated_abilities", granted_activated_abilities);
             l.deny("BecomeLandCreatureUEOT.granted_triggered_abilities", granted_triggered_abilities);
             if set_colors.is_empty() && l.land_colors != 0 {
                 // A land that makes coloured mana animates into a coloured
@@ -469,6 +468,15 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             mods.extend(keyword_mods(l, granted_keywords));
             if *unblockable {
                 mods.push(Mod::CantBeBlocked);
+            }
+            // '... creature with "<ability>"' (Lavaclaw Reaches, Wandering
+            // Fumarole; ENGINE.md 99.3): latent activated abilities of the
+            // card it has until end of turn (layer 6, as `GainLatent`).
+            for a in granted_activated_abilities {
+                if let Some(ad) = super::activated::lower_activated(l, a, super::activated::From::Battlefield, false) {
+                    l.latent.push(ad);
+                    mods.push(Mod::GainLatent((l.latent.len() - 1) as u8));
+                }
             }
             apply(b, On::Source, mods, Until::EndOfTurn);
         }

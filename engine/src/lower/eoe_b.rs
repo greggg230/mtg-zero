@@ -4,7 +4,7 @@
 
 use super::Lowerer;
 use crate::db::{types, Cond, Filter, ManaProd, PtCda};
-use crate::program::{About, Amount, Builder, EoeB, Ext, Op, SearchDest, Who};
+use crate::program::{About, Amount, Builder, EoeB, Ext, On, Op, SearchDest, Who};
 use card_ir::{cats, nodes};
 
 /// The Lander token (CR 111.10, the predefined tokens: "a colorless artifact
@@ -117,6 +117,19 @@ pub(crate) fn lower_effect_eoe_b(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         // tapped."
         E::PutBasicLandFromHandOntoBattlefieldTapped(nodes::PutBasicLandFromHandOntoBattlefieldTapped {}) => {
             b.op(Op::PutFromHand { who: Who::You, filter: basic_land(), tapped: true, optional: true });
+        }
+        // "This creature gets +X/+0 until end of turn" (Lavaclaw Reaches'
+        // "{X}: ..."; the ability's X, CR 602.2b, locked in as it resolves).
+        E::PumpSelfXPowerUEOT(nodes::PumpSelfXPowerUEOT {}) => {
+            if !l.act_x {
+                l.unsupported("PumpSelfXPowerUEOT(no {X} in the cost)");
+            }
+            b.op(Op::Ext(Ext::ApplyPtX { on: On::Source, p: 1, t: 0 }));
+        }
+        // "Switch this creature's power and toughness until end of turn"
+        // (CR 613.4d, layer 7d).
+        E::SwitchSourcePowerToughnessUEOT(nodes::SwitchSourcePowerToughnessUEOT {}) => {
+            b.op(Op::Ext(Ext::Apply { on: On::Source, mods: vec![crate::db::Mod::SwitchPt], until: crate::layers::Until::EndOfTurn }));
         }
         _ => return false,
     }

@@ -203,6 +203,9 @@ pub enum Mod {
     /// Layer 6: it gains latent activated ability k of its card ("this
     /// Saga gains '<ability>'"; `CardDef::latent`).
     GainLatent(u8),
+    /// Layer 7d: its power and toughness are switched (CR 613.4d; an even
+    /// number of switches cancel). ENGINE.md 99.3.
+    SwitchPt,
     /// Goaded (CR 701.38) by the effect's controller: it attacks each combat
     /// if able, and a player other than the goader if able.
     Goad,

@@ -485,8 +485,10 @@ impl Game {
         // 46.)
         let mut set: Option<(u32, i32, i32)> = None;
         let (mut dp, mut dt) = (0i64, 0i64);
+        let mut switched = false;
         for e in self.effects_on(c) {
             match e.m {
+                Mod::SwitchPt => switched = !switched,
                 Mod::SetPt(a, b) => {
                     if set.is_none_or(|x| e.ts >= x.0) {
                         set = Some((e.ts, a, b));
@@ -545,7 +547,13 @@ impl Game {
                 }
             }
         }
-        (crate::num::amount(p as i64 + dp), crate::num::amount(t as i64 + dt))
+        let (p, t) = (crate::num::amount(p as i64 + dp), crate::num::amount(t as i64 + dt));
+        // 7d: switching (CR 613.4d), after the counters and modifications.
+        if switched {
+            (t, p)
+        } else {
+            (p, t)
+        }
     }
 
     pub fn power(&self, c: CardIdx) -> i32 {

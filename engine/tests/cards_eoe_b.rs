@@ -414,3 +414,48 @@ fn untap_target_land_and_put_a_basic_land_from_hand_tapped() {
     assert!(g.obj(swamp).tapped);
     let _ = (Counter::P1P1, Target::Player(0));
 }
+
+// ---- manlands with granted abilities -----------------------------------------
+
+/// Lavaclaw Reaches: "{1}{B}{R}: Until end of turn, this land becomes a 2/2
+/// black and red Elemental creature with '{X}: This creature gets +X/+0
+/// until end of turn.' It's still a land." The granted ability exists only
+/// while the effect lasts (layer 6).
+#[test]
+fn lavaclaw_reaches_animates_with_an_x_pump() {
+    let mut g = scen().battlefield(0, &["Lavaclaw Reaches", "Swamp", "Mountain", "Mountain", "Mountain", "Mountain", "Mountain"]).at(Step::Main1, 0).start();
+    let l = bf(&g, 0, "Lavaclaw Reaches");
+    let n = g.def_of(l).activated.len() as u8;
+    assert!(!g.has_option(act(l, n - 1)), "no {{X}} ability before it animates");
+    let i = (0..n).find(|&i| g.def_of(l).activated[i as usize].cost.mana == cost("{1}{B}{R}")).unwrap();
+    start_with(&mut g, act(l, i), |_| None);
+    settle(&mut g);
+    assert_eq!(g.pt(l), (2, 2));
+    assert_eq!(g.colors_of(l), (1 << engine::mana::B) | (1 << engine::mana::R));
+    assert!(g.is_type(l, types::LAND) && subtype(&g, l, "Elemental"));
+    start_with(&mut g, act(l, n - 1), |g| pick(g, &[Choice::Number(3)]));
+    settle(&mut g);
+    assert_eq!(g.pt(l), (5, 2), "+X/+0 with X = 3");
+    quiet_until(&mut g, main1_of(1));
+    assert!(!g.is_creature(l));
+}
+
+/// Wandering Fumarole: "... a 1/4 blue and red Elemental creature with '{0}:
+/// Switch this creature's power and toughness until end of turn.'" (CR
+/// 613.4d: layer 7d, after +1/+1 counters; two switches cancel.)
+#[test]
+fn cr_613_4d_wandering_fumarole_switches_its_power_and_toughness() {
+    let mut g = scen().battlefield(0, &["Wandering Fumarole", "Island", "Island", "Mountain", "Mountain"]).at(Step::Main1, 0).start();
+    let w = bf(&g, 0, "Wandering Fumarole");
+    let n = g.def_of(w).activated.len() as u8;
+    let i = (0..n).find(|&i| g.def_of(w).activated[i as usize].cost.mana == cost("{2}{U}{R}")).unwrap();
+    start_with(&mut g, act(w, i), |_| None);
+    settle(&mut g);
+    assert_eq!(g.pt(w), (1, 4));
+    start_with(&mut g, act(w, n - 1), |_| None);
+    settle(&mut g);
+    assert_eq!(g.pt(w), (4, 1));
+    start_with(&mut g, act(w, n - 1), |_| None);
+    settle(&mut g);
+    assert_eq!(g.pt(w), (1, 4), "switched twice");
+}

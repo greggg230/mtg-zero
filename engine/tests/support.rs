@@ -707,6 +707,7 @@ const SUPPORTED_EOE_B: &[&str] = &[
     "Grove of the Burnwillows",
     "Harmonious Grovestrider",
     "Kav Landseeker",
+    "Lavaclaw Reaches",
     "Lotus Field",
     "Meteor Crater",
     "Orbital Plunge",
@@ -714,6 +715,7 @@ const SUPPORTED_EOE_B: &[&str] = &[
     "Reflecting Pool",
     "Tannuk, Memorial Ensign",
     "Territorial Bruntar",
+    "Wandering Fumarole",
 ];
 /// Lane C: void, warp, spells cast this turn, cost reductions, graveyard,
 /// exile, library and hand effects.

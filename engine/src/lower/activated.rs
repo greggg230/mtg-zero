@@ -156,7 +156,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         l.sac_cost = cost.sacrifice.as_ref().is_some_and(|s| s.n == 1);
         let ab = lower_ability(l, effect);
         l.sac_cost = false;
-        if l.act_x && !ab.targets.iter().any(|t| t.max == crate::db::X_TARGETS) {
+        // (Or an effect that reads the X: "+X/+0", ENGINE.md 99.3.)
+        let reads_x = ab.program.iter().any(|op| matches!(op, crate::program::Op::Ext(crate::program::Ext::ApplyPtX { .. })));
+        if l.act_x && !reads_x && !ab.targets.iter().any(|t| t.max == crate::db::X_TARGETS) {
             l.unsupported("ActivationCost.mana.x_pips(X not used by the effect)");
         }
         ActEffect::Stack(ab)
