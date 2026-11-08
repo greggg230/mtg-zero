@@ -19137,7 +19137,7 @@ effect (now by timestamp, with the dependency, 613.7, 613.8a); a permanent that 
 abilities got no granted ones (now by timestamp, 613.7, and Ragost's grant survives Ragost's
 loss, 613.6); Starforge's taps were paid before its mana (now the rules' order, 601.2g-h, the
 payment reserving the artifacts); a fifth activated ability wasn't offered (now the page).
-docs/shortcuts.md has no W3 entry. Seven tests show each (each fails on the first version).
+docs/shortcuts.md has no W3 entry. Eight tests show them (each fails on the first version).
 
 **Verification** (code at 706ad43, the normal release profile). The full engine suite (`cargo
 test --release -p engine`): 1,903 passed, 0 failed, 15 ignored (1,853 at the base; the 50 more
