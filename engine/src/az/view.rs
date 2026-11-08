@@ -371,6 +371,8 @@ impl Game {
             (K::ChooseColor, Choice::Number(n)) => COLORS.get(n as usize).map_or(format!("Colour {n}"), |s| s.to_string()),
             (K::ChooseAltCost, Choice::Number(0)) => "Pay the mana cost".into(),
             (K::ChooseAltCost, Choice::Number(n)) => format!("Alternative cost {n}"),
+            // (One another permanent gives it in hand, ENGINE.md 99.15.)
+            (K::ChooseAltCost, Choice::Card(i)) => format!("The alternative cost {} gives", nm(i)),
             (K::ChooseCost, Choice::Number(n)) => format!("Additional cost {}", n + 1),
             (K::PayPhyrexian, Choice::Number(n)) => format!("Pay {} life ({n} Phyrexian)", 2 * n as u32),
             // A mana ability activated outside a payment (a float, ENGINE.md 86; Lion's Eye

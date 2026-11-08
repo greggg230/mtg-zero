@@ -19151,7 +19151,7 @@ passed (793 s). Faults found on the way, both fixed with a test: fuzz seed 2219 
 payment sacrificing the only creature a counter could be removed from), seeds 56 and 1004 (the
 static fast paths' counts while a permanent is phased out).
 
-**The merge of `eoe-base` (W4 at 3154b0a, W1 at 7cc45b2) into this branch.** Conflicts additive
+**The merges of `eoe-base` (W4 at 3154b0a and W1 at 7cc45b2, then W5 at 8983031) into this branch.** Conflicts additive
 (module lists, the effect dispatch chain, `Ext` variants and their arms, `Filter` variants, the
 public-state perturbations and limits, this file) but one: W4's activated abilities an attached
 Equipment grants (CR 301.5, ENGINE.md 99.14: `Game::granted_activated`, `Game::activated_home`,
@@ -19165,8 +19165,9 @@ turning face up. One rule made exact: W4 gave a permanent that had lost all its 
 granted ability; a grant now goes against the loss by timestamp (613.7; an Equipment's timestamp
 is renewed as it becomes attached, 613.7e). W4's tests pass, The Dominion Bracelet's four ignored
 ones too with the card's blocker lifted locally (left ignored: the card waits on the encoding).
-The public-state gate after the merge: 13 gaps for the next layout (`tests/az.rs`: W3's four, then
-W4's five and W1's one). EoE support 294 / 320 (280 on eoe-base and this branch's 14), cube 546 / 546. Verification: MERGE_RESULTS
+The public-state gate after the merges: 14 gaps for the next layout (`tests/az.rs`: W3's four, then
+W4's five, W5's one and W1's one). EoE support 295 / 320 (281 on eoe-base and this branch's 14),
+cube 546 / 546; W5's merge conflicted only on additive lines (a `Mark` each, the entering hooks). Verification: MERGE_RESULTS
 
 #### 99.14 W4: exile, graveyard, copies and control (branch `eoe-w4-exile`)
 
@@ -19443,3 +19444,113 @@ Checks of the final branch (with Sothera and the fixes above): full engine suite
 (9,967 / 9,994, 39 draws) and 1,000 matches, all four fuzz tests passed. mtg-bot at 7c02e5c9: 50
 failures, 49 of the baseline's and `tests/search/test_shm_nn_eval_server.py::test_concurrent_workers_get_batched_into_one_dispatch`,
 a timing test that passes alone (the machine was running four agents' builds).
+#### 99.15 W5: Tannuk (branch `eoe-w5-tannuk`)
+
+**The card.** Tannuk, Steadfast Second: "Other creatures you control have haste. / Artifact cards and
+red creature cards in your hand have warp {2}{R}." Its haste was supported; its blocker was
+`CardPrinting.hand_ability_grants`: an alternative cost another permanent's static ability gives
+cards in hand (CR 118.9, 604.1, 611.3a, 702.185a). EoE support 265 -> 266 (`SUPPORTED_EOE_W5`).
+New Rust in `eoe_w5.rs` and `lower/eoe_w5.rs`; shared files small and additive.
+
+**The rules, as built.**
+
+* *Which cards* (CR 611.3a, 109.5). A grant (`CastingRules::hand_alt_grants`: a filter and an
+  `AltCost`) applies to each card in the hand of its permanent's controller that matches the filter
+  now (`Game::granted_alts`: the owner's permanents in battlefield order, their grants in order;
+  `abilities()`, so a permanent that lost its abilities grants nothing). The IR's
+  `HandCardFilter` is a disjunction of (card type, optional colour): `Or(Type(artifact),
+  And(Type(creature), Color(R)))`; a multicoloured red card is red (CR 105.2).
+* *Faces* (CR 601.3e). Whether a face can be cast with it is decided by the face's
+  characteristics: the hand's offer copies the game with the face up (`face_castable`), and the
+  cast asks with the face on the stack. A modal double-faced card whose back face is a red
+  creature can be cast as that face for {2}{R}; an adventurer red creature card's Adventure (a
+  sorcery) has no warp (the creature does). This is Henzie "Toolbox" Torre's ruling for granted
+  blitz (a modal back face) and Lier's ruling of 2025-10-02 (alternative characteristics are what
+  is legal to cast).
+* *From hand only* (CR 702.185a: "cast this card from your hand"). `alt_payable` refuses a granted
+  index for any other route (exile, graveyard, miracle: `CastFrom::Hand` only).
+* *One alternative cost* (CR 118.9a, 601.2b). Granted costs join `ChooseAltCost` beside the mana
+  cost (`NUMBER` 0), the card's own (`NUMBER` 1 + k) and Weftwalking's free cast (`NUMBER` 31); the
+  card's own warp and Tannuk's are two choices (Memorial Team Leader: four options). A spell cast
+  for a granted cost isn't overloaded (CR 702.96a: overload is an alternative cost of its own), so
+  the option needs the spell's own targets, as its mana cost does.
+* *Naming a granted cost.* `ChooseAltCost` names a granted cost by its permanent: `Choice::Card(g)`
+  with the permanent's `MY_PERM` id (`perm_action`), so any number of granters stays reachable
+  within the existing ranges (the legend rule keeps one Tannuk a player in this table, but that is
+  a property of the pool, not a rule this code relies on). A printing has at most one grant (the
+  lowering denies more, `hand_ability_grants(more than one ...)`), so the permanent names it. The
+  encoder needs nothing new: a legal `MY_PERM` id sets that permanent token's `OPTION` float, as
+  for any choice of a permanent. Chosen, `StackItem::alt` is one past the card's own alternative
+  costs (encoded as `stack::ALT` / `ALT_INDEX`, public) and the spell carries
+  `Mark::AltGranted { granter, def, grant }`.
+* *The cost* (CR 118.9d, 601.2f). The granted mana with the spell's increases and reductions
+  (`alt_mana_of`, shared with the card's own alternative costs): "noncreature spells cost {1}
+  more" makes an artifact's warp {3}{R}; Uthros Psionicist's "the second spell ... costs {2} less"
+  makes it {R}. Once chosen, everything reads the noted cost (`Game::item_alt`): the total cost is
+  locked in (601.2f) even if the granter is sacrificed for mana while it is paid.
+* *X* (CR 107.3b). A granted cost has no {X} (the lowering denies one), so a spell with {X} in its
+  mana cost cast with it has X = 0: `choose_x` offers 0 only (`cast_for_granted_alt`).
+* *Keeping the ability* (CR 400.7g, 611.3a-b). The spell keeps the granted warp while the granting
+  effect would still apply to it: the same object (`ObjRef`) on the battlefield, controlled by the
+  card's owner ("your hand"), not having lost its abilities, the same definition, the spell
+  matching the filter (`Game::alt_grant_applies`). Only the grant it was cast with continues
+  (400.7g speaks of the ability used; blitz's 702.152b links each instance to its own payment).
+  400.7g carries the effect across the move from the hand, nothing else: the effect applies at
+  each moment to what its text says (611.3a), and "your hand" is its permanent's controller's
+  (109.5), so a granter that changed controllers no longer gives the spell (cast from its owner's
+  hand) the ability, and one that left or lost the ability gives nothing (611.3b).
+* *Warp's exile* (CR 608.3g, 702.185a). The delayed "exile the permanent ... at the beginning of
+  the next end step" is created as the permanent enters, by the spell's warp ability: only if the
+  spell still has it then. `finish_resolve` passes the delayed ability with its home
+  (`Game::entering_dash: Option<(u8, Option<DefId>)>`: the card's own definition, or the granting
+  definition, whose delayed ability `lower/eoe_w5.rs` builds as a card's own warp's,
+  `Ext::WarpExile`). Its source is still the permanent (603.7d); the log and the stack item name
+  the definition holding the program ("trigger of Tannuk"). Tannuk dying in response: the permanent
+  stays. Then "its owner may cast this card after the current turn has ended" (the permission
+  `Ext::WarpExile` gives), for its mana cost: in exile it has no warp.
+* *Cast for its warp cost* (CR 702.185c, 400.7d). Void and `Mark::WarpCast` (Full Bore's "if that
+  creature was cast for its warp cost") hold whenever it was cast for a warp cost, own or granted,
+  whether or not the spell still had the ability as it resolved.
+* *Warped / with warp* (CR 702.185b). A card exiled by a granted warp's delayed ability is a warped
+  card (`is_warped` reads the permission: Close Encounter may choose it); it has no warp in exile
+  (`Filter::HasWarp` adds a granted warp only in hand, or on a spell still having it: Blade of the
+  Swarm can't target it).
+* *Copies* (CR 707.10, 707.2). A copy of a spell cast for a granted cost copies the choice
+  (`alt`) but not the ability (not a copiable value, not a card cast from a hand): `item_alt` finds
+  no `Mark::AltGranted` on the copy, so no exile and no "cast for its warp cost". No IR class
+  copies a creature or artifact spell today, so no test drives it. For the same reason (a copy of
+  a spell isn't cast) `put_onto_battlefield` now sets `Mark::WarpCast` only when the permanent's
+  spell was cast and not a copy (the `Enters` note's "cast" bit's condition); before, a copy of a
+  spell cast for its own warp cost was marked.
+
+**Hidden information.** The granted offer is part of its controller's own options (the encoding's
+legal flags are the decider's only); `tests/cards_eoe_w5.rs` checks that P1's encoding is the same
+whether P0's hand card has Tannuk's warp or not. A spell being cast is public; `ChooseAltCost` is
+asked with the cast in progress (the caster's hand pinned as for any payment).
+
+**Encoding.** No layout or action-id change. `az/encode.rs`'s `Task::Delve` context computed the
+cost floats only for an alternative cost index within the card's own; it now asks `item_alt`, the
+same value for every state reachable before, and the noted granted cost for a delve spell cast for
+one. The public-state gate gains one rare next-layout gap (nine in all; `tests/az.rs`): "a spell's
+granted alternative cost came from another permanent" (which permanent is not encoded; the next
+layout encodes it as a noted object's). `az/view.rs` words the option ("The alternative cost
+Tannuk, Steadfast Second gives").
+
+**Tests.** `tests/cards_eoe_w5.rs` (11; the card table `tests/eoe_w5_kit`, the EoE table plus
+`W5 ...` IR test cards, never in the fuzz or digest pools): which cards have it (611.3a), the
+controller's hand only (109.5), the cast, void, haste, the exile and the later cast (702.185a),
+Tannuk dying in response (608.3g, 400.7g; Full Bore after), the grant ending (611.3b), one
+alternative cost (118.9a), increases and reductions (118.9d), X = 0 (107.3b), faces (601.3e),
+warped without warp (702.185b), and the hidden hand.
+
+**Limits.** None added (no docs/shortcuts.md entry). A printing with more than one hand grant is
+not supported (the lowering says so); no card has one.
+
+**Results** (normal release profile, at 18e9da9; EoE support 266, cube 546 / 546). The full engine
+suite 1,883 passed, 0 failed, 19 ignored; behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 9,037 / 9,041,
+1,922 draws, mean 39.6 turns, 515.0 decisions; 1,483 s); the default `FUZZ_GAMES=20000` passed
+(20,000 games, wins 9,967 / 9,994, 39 draws, as before the branch; 1,000 matches; 455 s). Random
+play reaches the mechanism: 300 random-action games of a Tannuk deck (four Tannuks, red creatures,
+Mountains) cast 301 spells for Tannuk's warp and exiled 273 permanents with it. The public-state
+gate: 135 perturbations encoded, 5 deliberate limits, 9 next-layout gaps.

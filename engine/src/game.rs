@@ -648,7 +648,10 @@ pub struct Game {
     pub(crate) repl_decided: bool,
     /// The route chosen for the cast about to begin (`Task::ChooseRoute`).
     pub(crate) route_choice: Option<crate::cast::Route>,
-    pub(crate) entering_dash: Option<u8>,
+    /// The entering permanent's spell's delayed ability k (dash, warp) and
+    /// the definition holding it: its own (`None`) or the one whose granted
+    /// alternative cost it was cast for (ENGINE.md 99.15).
+    pub(crate) entering_dash: Option<(u8, Option<DefId>)>,
     /// The entering permanent's spell was warped (CR 702.185): `entering_dash`
     /// is warp's delayed ability (no haste).
     pub(crate) entering_warp: bool,
@@ -921,6 +924,10 @@ pub enum Mark {
     /// paid, then on the permanent it becomes ("the amount of mana spent to
     /// cast this creature"; EoE W3, kept for cards that read it).
     ManaSpent(u8),
+    /// This spell was cast for alternative cost `grant` of definition `def`,
+    /// which permanent `granter`'s static ability gave it in its owner's hand
+    /// (`CastingRules::hand_alt_grants`; CR 118.9, 400.7g; ENGINE.md 99.15).
+    AltGranted { granter: ObjRef, def: DefId, grant: u8 },
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -1552,7 +1559,9 @@ impl Game {
             self.add_counters(idx, k, n);
         }
         let warp = std::mem::take(&mut self.entering_warp);
-        if warp && cast {
+        // (A copy of a spell isn't cast, CR 707.10: not "cast for its warp
+        // cost"; ENGINE.md 99.15.)
+        if warp && cast && !self.is_copy_obj(idx) {
             self.marks.push((r, Mark::WarpCast));
         }
         // (The mana spent to cast it: EoE W3.)
@@ -1561,7 +1570,7 @@ impl Game {
                 self.w3_entered_spent(idx, r, n);
             }
         }
-        if let (Some(k), true) = (dash, cast) {
+        if let (Some((k, home)), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand
             // at the beginning of the next end step. (Warp, 702.185a: no
             // haste; exiled at the next end step.)
@@ -1575,7 +1584,9 @@ impl Game {
                     controller,
                 );
             }
-            let def = self.objs[idx.i()].def;
+            // (A granted warp's exile is the granting definition's delayed
+            // ability; its source is still this permanent, CR 603.7d.)
+            let def = home.unwrap_or(self.objs[idx.i()].def);
             self.delayed.push(Delayed {
                 when: crate::db::DelayedWhen::NextEndStep,
                 controller,

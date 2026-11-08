@@ -1245,7 +1245,8 @@ fn public_state_reaches_the_encoding() {
     // mana spent to cast a permanent, phased-out permanents and which phased out indirectly. W4's
     // legendary copy exception (ENGINE.md 99.14) and a target in exile (rare: no gate position has
     // one), which object a stack item noted (Close Encounter's choice; emerge's and station's
-    // too), controlling another player (CR 722: a pending effect, a controlled turn), and whether
+    // too), controlling another player (CR 722: a pending effect, a controlled turn), W5's granter
+    // of a spell's alternative cost (ENGINE.md 99.15; rare: no gate position has one), and whether
     // an artifact entered under a player's control this turn (ENGINE.md 99.11) follow.
     assert_eq!(
         gaps,
@@ -1262,11 +1263,12 @@ fn public_state_reaches_the_encoding() {
             "a stack item noted another object",
             "a player will control the other's next turn",
             "the active player is controlled this turn",
+            "a spell's granted alternative cost came from another permanent",
             "an artifact entered under a player's control this turn"
         ],
         "the gaps on the allowlist"
     );
-    assert_eq!(next, 13);
+    assert_eq!(next, 14);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

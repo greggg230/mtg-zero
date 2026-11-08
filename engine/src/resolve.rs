@@ -263,10 +263,16 @@ impl Game {
                         self.move_card(card, Zone::Graveyard, Pos::Top);
                     } else if self.def_of(card).is_permanent_card() {
                         self.entering_cast = true;
-                        let alt = (item.alt > 0).then(|| &self.def_of(card).alt_costs[item.alt as usize - 1]);
-                        self.entering_evoked = alt.is_some_and(|a| a.evoke);
-                        self.entering_dash = alt.and_then(|a| a.dash);
-                        self.entering_warp = alt.is_some_and(|a| a.warp);
+                        // Its own alternative cost, or one another
+                        // permanent granted it: the delayed ability (dash,
+                        // warp) only if the spell still has that ability
+                        // as it resolves (CR 608.3g, 400.7g; ENGINE.md
+                        // 99.15); "cast for its warp cost" either way.
+                        let alt = self.item_alt(card, &item);
+                        let has = alt.is_some_and(|(_, home)| home.is_none() || self.alt_grant_applies(card));
+                        self.entering_evoked = has && alt.is_some_and(|(a, _)| a.evoke);
+                        self.entering_dash = alt.filter(|_| has).and_then(|(a, home)| a.dash.map(|k| (k, home)));
+                        self.entering_warp = alt.is_some_and(|(a, _)| a.warp);
                         self.entering_escaped = item.from == crate::game::CastFrom::Escape;
                         self.entering_x = item.x;
                         if self.def_of(card).sunburst.is_some() {

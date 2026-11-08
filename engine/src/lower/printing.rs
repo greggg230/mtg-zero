@@ -282,7 +282,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
         l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
         l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
-        l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
             // Sunburst (CR 702.44a): counters by the colours of mana spent to
         // cast it (the payment records them, as for converge).
         let sunburst_counter = sunburst.then(|| {
@@ -948,6 +947,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if warp.is_some() && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.warp_cost(not a permanent card)");
     }
+    // "<Cards> in your hand have warp <cost>": each grant's warp exile is a
+    // delayed ability of this definition (ENGINE.md 99.15).
+    let hand_alt_grants = super::eoe_w5::hand_alt_grants(l, hand_ability_grants);
     // Miracle (CR 702.94): "when you reveal this card this way, you may cast
     // it by paying [cost] rather than its mana cost".
     let miracle = miracle_cost.as_ref().map(|m| {
@@ -1641,6 +1643,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         warp_from_graveyard: *warp_castable_from_graveyard,
         convoke: *has_convoke,
         choose_creature_or_warped: *additional_cost_choose_your_creature,
+        hand_alt_grants,
         ..Default::default()
     };
     for r in external_cost_reductions {
