@@ -811,3 +811,146 @@ fn dyadrine_attack_trigger_removes_two_counters_draws_and_makes_a_robot_cr111_2(
         assert_eq!(g.types_of(robot), engine::db::types::ARTIFACT | engine::db::types::CREATURE);
     }
 }
+
+/// The mana payment keeps a creature to remove the counter from: an Eldrazi
+/// Scion sacrificed for mana would be gone before the cost is paid (CR
+/// 601.2g-h). With one Plains the {2} needs the Scion: not activatable;
+/// with two, the Scion stays and gives up its counter.
+#[test]
+fn sunstar_chaplain_mana_payment_keeps_the_creature_with_the_counter_cr601_2g() {
+    for plains in [1usize, 2] {
+        let mut g = scen()
+            .battlefield(0, &["Sunstar Chaplain", "W3 Scion"])
+            .battlefield(0, &vec!["Plains"; plains])
+            .battlefield(1, &["W3 Trinket"])
+            .counters(0, "W3 Scion", Counter::P1P1, 1)
+            .at(Step::Main1, 0)
+            .start();
+        let (ch, scion, trinket) = (bf(&g, 0, "Sunstar Chaplain"), bf(&g, 0, "W3 Scion"), bf(&g, 1, "W3 Trinket"));
+        if plains == 1 {
+            assert!(!g.has_option(act(ch, 0)), "the {{2}} needs the Scion\n{}", log(&g));
+            continue;
+        }
+        g.choose(act(ch, 0));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+        g.choose(g.tgt(trinket));
+        pay(&mut g);
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+        g.choose(Choice::Card(scion));
+        settle(&mut g);
+        assert_eq!(g.obj(scion).zone, Zone::Battlefield, "{}", log(&g));
+        assert_eq!(g.counters_on(scion, Counter::P1P1), 0);
+        assert!(g.obj(trinket).tapped);
+    }
+}
+
+// ---- Secluded Starforge ("tap X untapped artifacts") --------------------------------
+
+/// Activate Secluded Starforge's pump with X = `x` targeting `t`, tapping
+/// the artifacts `taps` (in slot order), and resolve it.
+fn starforge_pump(g: &mut engine::Game, x: u8, t: engine::CardIdx, taps: &[engine::CardIdx]) {
+    let sf = bf(g, 0, "Secluded Starforge");
+    g.choose(act(sf, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(x));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let c = g.tgt(t);
+    g.choose(c);
+    for &a in taps {
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+        g.choose(Choice::Card(a));
+    }
+    pay(g);
+    settle(g);
+}
+
+/// Secluded Starforge: "{2}, {T}, Tap X untapped artifacts you control:
+/// Target creature gets +X/+0 until end of turn. Activate only as a sorcery"
+/// (CR 107.3a, 601.2b: X announced; the artifacts tapped as the cost is
+/// paid, summoning sickness no matter, 302.6).
+#[test]
+fn secluded_starforge_taps_x_artifacts_for_plus_x_cr601_2b() {
+    let mut g = scen()
+        .battlefield(0, &["Secluded Starforge", "Plains", "Plains", "W3 Trinket", "W3 Monument", "W3 Idol", "W3 Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, trinket, monument, idol) = (bf(&g, 0, "W3 Bear"), bf(&g, 0, "W3 Trinket"), bf(&g, 0, "W3 Monument"), bf(&g, 0, "W3 Idol"));
+    let sf = bf(&g, 0, "Secluded Starforge");
+    g.choose(act(sf, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    let xs: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(xs.last(), Some(&Choice::Number(3)), "three untapped artifacts: X up to 3 {xs:?}");
+    g.choose(Choice::Number(2));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let c = g.tgt(bear);
+    g.choose(c);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+    let first: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(first.len(), 2, "leaving one for the second tap: {first:?}");
+    let mut arts = vec![trinket, monument, idol];
+    arts.sort_by_key(|&a| g.perm_action(0, a));
+    g.choose(Choice::Card(arts[0]));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+    g.choose(Choice::Card(arts[2]));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!((g.power(bear), g.toughness(bear)), (4, 2), "{}", log(&g));
+    assert!(g.obj(arts[0]).tapped && g.obj(arts[2]).tapped && !g.obj(arts[1]).tapped);
+    assert!(g.obj(sf).tapped);
+    assert_eq!(untapped(&g, 0), 0, "{{2}} paid");
+}
+
+/// An artifact that makes mana and is needed for the {2} can't also be
+/// tapped for X (CR 601.2g-h): with a Plains and a mana artifact, X is at
+/// most the other artifacts.
+#[test]
+fn secluded_starforge_x_leaves_the_mana_payable_cr601_2h() {
+    let mut g = scen()
+        .battlefield(0, &["Secluded Starforge", "Plains", "W3 Mox", "W3 Trinket", "W3 Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, trinket) = (bf(&g, 0, "W3 Bear"), bf(&g, 0, "W3 Trinket"));
+    let sf = bf(&g, 0, "Secluded Starforge");
+    g.choose(act(sf, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    let xs: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(xs, vec![Choice::Number(0), Choice::Number(1)], "{xs:?}");
+    g.choose(Choice::Number(1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let c = g.tgt(bear);
+    g.choose(c);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+    let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(opts, vec![Choice::Card(trinket)], "not the Mox: the {{2}} needs it");
+    g.choose(Choice::Card(trinket));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.power(bear), 3, "{}", log(&g));
+}
+
+/// X = 0 taps nothing; "{5}, {T}: Create a 2/2 colorless Robot artifact
+/// creature token"; "{T}: Add {C}"; "activate only as a sorcery" (CR
+/// 602.5d).
+#[test]
+fn secluded_starforge_robot_and_x_zero_cr111_2() {
+    let mut g = scen()
+        .battlefield(0, &["Secluded Starforge", "Plains", "Plains", "W3 Trinket", "W3 Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, trinket) = (bf(&g, 0, "W3 Bear"), bf(&g, 0, "W3 Trinket"));
+    starforge_pump(&mut g, 0, bear, &[]);
+    assert_eq!(g.power(bear), 2);
+    assert!(!g.obj(trinket).tapped);
+    let mut g = scen().battlefield(0, &["Secluded Starforge", "Plains", "Plains", "Plains", "Plains", "Plains"]).at(Step::Main1, 0).start();
+    let sf = bf(&g, 0, "Secluded Starforge");
+    g.choose(act(sf, 2));
+    pay(&mut g);
+    settle(&mut g);
+    let robot = g.permanents_of(0).find(|&c| g.name(c) == "Robot").expect("a Robot");
+    assert_eq!((g.power(robot), g.toughness(robot)), (2, 2));
+    let mut g = scen().battlefield(0, &["Secluded Starforge", "Plains", "Plains", "W3 Bear"]).at(Step::Main1, 1).start();
+    g.pass();
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    let sf = bf(&g, 0, "Secluded Starforge");
+    assert!(!g.has_option(act(sf, 1)), "sorcery speed");
+}

@@ -34,9 +34,6 @@ pub(crate) fn lower_cost_w3(l: &mut Lowerer, cost: &mut Cost, c: CostW3) {
     // "Remove a +1/+1 counter from a creature you control" (CR 118.3,
     // 602.2b).
     if remove_plus_one_counter_from_your_creature {
-        if cost.crew > 0 {
-            l.unsupported("ActivationCost.remove_plus_one_counter_from_your_creature(with crew)");
-        }
         cost.remove_counter_from = Some((Filter::Type(types::CREATURE), Counter::P1P1));
     }
     // "Tap X untapped artifacts you control" (CR 107.3a, 601.2b: X is
@@ -47,6 +44,21 @@ pub(crate) fn lower_cost_w3(l: &mut Lowerer, cost: &mut Cost, c: CostW3) {
         }
         l.act_x = true;
         cost.tap_x = Some(Filter::Type(types::ARTIFACT));
+    }
+}
+
+/// The combinations the workstream's cost atoms can't be paid in, checked
+/// once the whole cost is lowered.
+pub(crate) fn check_cost_w3(l: &mut Lowerer, cost: &Cost) {
+    // (The mana payment reserves one creature to remove a counter from, as
+    // a sacrifice's: one reservation per cost; crew's picks come last.)
+    let reserved = cost.crew > 0 || cost.sacrifice.is_some() || cost.bounce.is_some() || cost.discard > 0 || cost.exile_from_hand.is_some();
+    if cost.remove_counter_from.is_some() && reserved {
+        l.unsupported("ActivationCost.remove_plus_one_counter_from_your_creature(with crew or another reserved part)");
+    }
+    // (The taps of "tap X" are paid before the mana, alone.)
+    if cost.tap_x.is_some() && (reserved || cost.tap_untapped.is_some() || cost.remove_counter_from.is_some() || cost.exile_graveyard > 0 || cost.life > 0) {
+        l.unsupported("ActivationCost.tap_x_untapped_artifacts_you_control(with more than mana and {T})");
     }
 }
 

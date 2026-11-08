@@ -506,6 +506,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
         let fs: Vec<Filter> = requires_control_of_subtype.iter().map(|s| Filter::Subtype(l.subtype(s))).collect();
         only_if.push(Cond::ControlAtLeast(Filter::Or(fs), 1));
     }
+    super::eoe_w3::check_cost_w3(l, &cost);
     cost
 }
 

@@ -855,6 +855,11 @@ impl Game {
                 }
                 self.targeting = 0;
             }
+            // "Tap X untapped artifacts you control" (EoE W3): as many as
+            // can be tapped with the mana still payable.
+            if ad.cost.tap_x.is_some() {
+                most = most.min(self.tap_x_most(p, source.idx, ad));
+            }
             // (Not with the source's own mana when the cost taps it: an
             // artifact Urza could tap for mana, ENGINE.md 31.)
             let exclude = Self::mana_exclude(source.idx, ad);

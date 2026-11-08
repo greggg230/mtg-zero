@@ -96,6 +96,12 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("W3 Rat", "{B}", 1, 1, &["Rat"], none.clone()),
         card("W3 Monument", "{4}", &["Artifact"], &[], none.clone()),
         card("W3 Idol", "{0}", &["Artifact"], &[], none.clone()),
+        // "Sacrifice this creature: Add {C}." (as an Eldrazi Scion)
+        creature("W3 Scion", "{1}", 1, 1, &["Eldrazi", "Scion"], json!({"activated_abilities": [{"$t": "ActivatedAbility",
+            "cost": {"$t": "ActivationCost", "sacrifice_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),
+        // "{T}: Add {C}."
+        card("W3 Mox", "{0}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
+            "cost": {"$t": "ActivationCost", "tap_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),
         // "Destroy target enchantment."
         card("W3 Shatter", "{1}", &["Instant"], &[], json!({"spell_effect": {"$t": "Destroy",
             "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsEnchantment"}}]}})),

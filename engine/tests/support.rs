@@ -907,6 +907,7 @@ const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Raging Ravine",
     "Requiem Monolith",
     "Rust Harvester",
+    "Secluded Starforge",
     "Sunstar Chaplain",
     "Swarmyard",
     "Terminal Velocity",

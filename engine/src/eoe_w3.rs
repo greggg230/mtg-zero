@@ -378,6 +378,16 @@ impl Game {
         cost.exile_graveyard_types == 0 || self.def_of(c).types & cost.exile_graveyard_types != 0
     }
 
+    /// The reservation a "remove a <k> counter from a <permanent> you
+    /// control" cost makes in its mana payment (`Keep::sac`): one such
+    /// permanent stays (a mana ability that sacrifices it is activated before
+    /// the cost is paid, CR 601.2g-h).
+    pub(crate) fn remove_counter_reserve(cost: &Cost) -> Option<crate::db::SacCost> {
+        let (f, k) = cost.remove_counter_from.as_ref()?;
+        let filter = Filter::And(Box::new(f.clone()), Box::new(Filter::HasCounter(*k)));
+        Some(crate::db::SacCost { filter, n: 1, another: false })
+    }
+
     /// The permanents `p` controls from which `card`'s cost "remove a <k>
     /// counter from a <f> you control" may remove one (CR 118.3): those
     /// matching `f` with such a counter (the source itself too).
@@ -388,6 +398,53 @@ impl Game {
 }
 
 impl Game {
+    /// "Tap X untapped <permanents> you control" (CR 601.2h: the taps and
+    /// the mana in any order; mana abilities first, 601.2g, so a permanent
+    /// tapped for the cost can't make mana for it, and one tapped for mana
+    /// can't be tapped for the cost): can `need` more of `rest` (untapped
+    /// candidates) be tapped, besides `tapped`, with `card`'s ability's
+    /// mana still payable by the other sources? The taps are paid before the
+    /// mana (`Game::begin_activate`), as teamwork's are (ENGINE.md 29.6.3).
+    pub(crate) fn tap_x_ok(&self, p: PlayerId, card: CardIdx, ad: &crate::db::ActivatedDef, tapped: &[CardIdx], rest: &[CardIdx], need: usize) -> bool {
+        if rest.len() < need {
+            return false;
+        }
+        let mana = self.act_mana_x(p, card, ad, 0);
+        if mana.is_zero() {
+            return true;
+        }
+        let exclude = Self::mana_exclude(card, ad);
+        let classes = self.mana_classes(p, exclude);
+        let keep = Self::keep_for(card, &ad.cost, exclude);
+        // (Permanents without a mana ability first: they pay nothing.)
+        let (with_mana, plain): (Vec<CardIdx>, Vec<CardIdx>) = rest.iter().copied().partition(|&c| self.has_mana_ability(c));
+        let m = need.saturating_sub(plain.len());
+        let k = with_mana.len().min(12);
+        for mask in 0u32..(1 << k) {
+            if mask.count_ones() as usize != m {
+                continue;
+            }
+            let out: Vec<CardIdx> = tapped.iter().copied().chain((0..k).filter(|i| mask >> i & 1 != 0).map(|i| with_mana[i])).collect();
+            if self.can_pay_with(p, &mana, &self.classes_without(&classes, &out), &keep) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The most X "tap X untapped <permanents> you control" allows for
+    /// `card`'s ability `ad` (CR 107.3a, 601.2b).
+    pub(crate) fn tap_x_most(&self, p: PlayerId, card: CardIdx, ad: &crate::db::ActivatedDef) -> u8 {
+        let Some(f) = &ad.cost.tap_x else { return u8::MAX };
+        let t = crate::db::SacCost { filter: f.clone(), n: 0, another: true };
+        let cands: Vec<CardIdx> = self.tap_candidates(p, card, &t).collect();
+        let mut x = cands.len();
+        while x > 0 && !self.tap_x_ok(p, card, ad, &[], &cands, x) {
+            x -= 1;
+        }
+        x.min(255) as u8
+    }
+
     /// The X of stack item `id` when `cost` says "tap X untapped <permanents>
     /// you control" (the permanents owed), else 0.
     pub(crate) fn tap_x_n(&self, id: u32, cost: &Cost) -> usize {

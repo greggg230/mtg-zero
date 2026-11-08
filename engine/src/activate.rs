@@ -415,8 +415,15 @@ impl Game {
             times: 0,
             spliced: Vec::new(),
         });
-        self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
-        self.agenda.push(Task::ActPay { id });
+        if ad.cost.tap_x.is_some() {
+            // "Tap X untapped artifacts": the taps before the mana (CR
+            // 601.2h, any order; `Game::tap_x_ok`; EoE W3).
+            self.agenda.push(Task::ActPay { id });
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+        } else {
+            self.agenda.push(Task::PayCosts { id, picked: Vec::new() });
+            self.agenda.push(Task::ActPay { id });
+        }
         let ab = self.db.ability(ability);
         if ab.has_targets() {
             self.agenda.push(Task::ChooseTargets { id, req: 0 });
@@ -762,7 +769,9 @@ impl Game {
             // (A permanent to return to its owner's hand, ninjutsu's
             // unblocked attacker, is reserved like one to sacrifice: a mana
             // ability that sacrifices it can't pay the mana first.)
-            sac: cost.sacrifice.clone().or_else(|| cost.bounce.clone()).map(|s| (s, card)),
+            // (So is one to remove a counter from: a mana ability that
+            // sacrifices it can't pay the mana first, CR 601.2g; EoE W3.)
+            sac: cost.sacrifice.clone().or_else(|| cost.bounce.clone()).or_else(|| Self::remove_counter_reserve(cost)).map(|s| (s, card)),
             // (A land-card discard never competes with a mana source in
             // hand: those are not lands.)
             discard: (cost.discard > 0 && cost.discard_filter.is_none()).then_some((cost.discard, card)),
@@ -998,7 +1007,25 @@ impl Game {
                 .collect();
             // (Leaving enough later candidates for the taps still owed.)
             let still = n_tap - picked.len();
-            let opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();
+            let mut opts: Vec<Opt> = cands.iter().enumerate().filter(|(k, _)| cands.len() - k >= still).map(|(_, o)| *o).collect();
+            // "Tap X ...", paid before the mana: each tap leaves the rest
+            // and the mana payable (EoE W3).
+            if cost.tap_x.is_some() {
+                if let Some((_, _, ad)) = self.act_item(id) {
+                    let all: Vec<CardIdx> = cands.iter().filter_map(|o| match o.choice {
+                        Choice::Card(c) => Some(c),
+                        _ => None,
+                    }).collect();
+                    let done: Vec<CardIdx> = picked[n_gy..].to_vec();
+                    opts.retain(|o| {
+                        let Choice::Card(c) = o.choice else { return false };
+                        let k = all.iter().position(|&x| x == c).unwrap();
+                        let mut t = done.clone();
+                        t.push(c);
+                        self.tap_x_ok(p, card, ad, &t, &all[k + 1..], still - 1)
+                    });
+                }
+            }
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
             return;
         }

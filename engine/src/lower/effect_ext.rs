@@ -163,7 +163,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             legendary_only,
             power_bonus_from_x,
         }) => {
-            l.deny("PumpTargetCreatureUntilEOT.power_bonus_from_x", power_bonus_from_x);
             let mut f = creature();
             if *you_control_only {
                 f = and(f, Filter::Controller(true));
@@ -183,9 +182,20 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             if *legendary_only {
                 f = and(f, Filter::Supertype(crate::db::supertypes::LEGENDARY));
             }
-            let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);
+            // "Target creature gets +X/+0" (the X of the ability or spell, CR
+            // 107.3; EoE W3): nothing else may be all it does.
+            let x_only = *power_bonus_from_x && *power_bonus == 0 && *toughness_bonus == 0 && granted_keywords.is_empty();
+            let mods = if x_only { Vec::new() } else { pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords) };
             let t = b.target(f, if *optional { 0 } else { 1 }, 1);
-            apply(b, On::Target(t), mods, Until::EndOfTurn);
+            if !mods.is_empty() {
+                apply(b, On::Target(t), mods, Until::EndOfTurn);
+            }
+            if *power_bonus_from_x {
+                if !(l.act_x || l.spell_x) {
+                    l.unsupported("PumpTargetCreatureUntilEOT.power_bonus_from_x(no X)");
+                }
+                b.op(Op::Ext(Ext::ApplyPtX { on: On::Target(t), p: 1, t: 0 }));
+            }
             if let Some(ta) = granted_triggered_ability.as_deref() {
                 // "... and gains '<triggered ability>'" (EoE lane D,
                 // ENGINE.md 99.5).
