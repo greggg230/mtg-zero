@@ -418,6 +418,9 @@ pub enum Filter {
     /// enchanted creature, CR 303.4e: "any other target" of Pain for All's
     /// enchanted creature is `Not(HostOfSource)`; EoE W3).
     HostOfSource,
+    /// Mana value at most the amount of mana spent to cast the context's
+    /// source (CR 601.2h; `Mark::ManaSpent`; EoE W3).
+    MvAtMostManaSpent,
 }
 
 /// `Filter::Ability` kinds.

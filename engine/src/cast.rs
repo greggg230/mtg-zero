@@ -2764,6 +2764,7 @@ impl Game {
             Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,
             Filter::Controller(you) => (self.objs[c.i()].controller == ctx.controller) == *you,
             Filter::Source => ctx.source.is_some_and(|s| s.idx == c && self.live(s)),
+            Filter::MvAtMostManaSpent => ctx.source.is_some_and(|s| self.mana_value_of(c) <= self.mana_spent_of(s)),
             Filter::HostOfSource => {
                 ctx.source.is_some_and(|s| self.live(s) && self.objs[s.idx.i()].attached.is_some_and(|h| h.idx == c && self.live(h)))
             }

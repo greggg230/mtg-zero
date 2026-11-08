@@ -900,6 +900,8 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
 const SUPPORTED_EOE_MANA: &[&str] = &[
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
+    "Astelli Reclaimer",
+    "Dyadrine, Synthesis Amalgam",
     "Frenzied Baloth",
     "Pain for All",
     "Raging Ravine",

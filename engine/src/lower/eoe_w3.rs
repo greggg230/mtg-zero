@@ -155,6 +155,32 @@ pub(crate) fn lower_effect_w3(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect
         E::PainForAllDamageEchoEffect(nodes::PainForAllDamageEchoEffect {}) => {
             w3(b, W3::EventObjDamagesEachOpponent { amount: Amount::EventAmount });
         }
+        // "When this creature enters, return target noncreature, nonland
+        // permanent card with mana value X or less from your graveyard to the
+        // battlefield, where X is the amount of mana spent to cast this
+        // creature" (Astelli Reclaimer; CR 601.2h: 0 if it wasn't cast).
+        E::AstelliReclaimerETBEffect(nodes::AstelliReclaimerETBEffect {}) => {
+            let not = |f: Filter| Filter::Not(Box::new(f));
+            let and = |a: Filter, b: Filter| Filter::And(Box::new(a), Box::new(b));
+            let card = and(
+                and(Filter::Type(types::PERMANENT), not(Filter::Type(types::CREATURE | types::LAND))),
+                and(Filter::Owner(true), Filter::MvAtMostManaSpent),
+            );
+            let t = b.target(Filter::InGraveyard(Box::new(card)), 1, 1);
+            b.op(Op::Ext(Ext::FromGraveyard { tgt: t, to_battlefield: true, yours: true, tapped: false, counter: None }));
+        }
+        // "Whenever you attack, you may remove a +1/+1 counter from each of
+        // two creatures you control. If you do, draw a card and create a 2/2
+        // colorless Robot artifact creature token" (Dyadrine; CR 111.2).
+        E::DyadrineAttackEffect(nodes::DyadrineAttackEffect {}) => {
+            let yours = Filter::And(Box::new(Filter::Type(types::CREATURE)), Box::new(Filter::Controller(true)));
+            let at = w3(b, W3::RemoveCounterFromEachMay { filter: yours, counter: Counter::P1P1, n: 2, skip: 0 });
+            b.op(Op::Draw { who: Who::You, n: Amount::Fixed(1) });
+            let token = robot_token(l);
+            b.op(Op::CreateToken { token, n: 1, tapped: false });
+            b.op(Op::Ext(Ext::TokensCreated));
+            b.patch(at);
+        }
         _ => return false,
     }
     true
@@ -190,4 +216,16 @@ pub(crate) fn grant_triggered_ability(l: &mut Lowerer, b: &mut Builder, on: On, 
     l.delayed.push(td);
     let k = (l.delayed.len() - 1) as u8;
     w3(b, W3::GrantTrigger { on, k, this_turn });
+}
+
+/// The printing of "a 2/2 colorless Robot artifact creature token" (as the
+/// set's own token printings write it: Secluded Starforge's).
+const ROBOT_TOKEN: &str = r#"{"$t": "CardPrinting", "card_types": ["Artifact", "Creature"], "mana_cost": {"$t": "ManaCost"}, "mana_cost_str": "", "name": "Robot", "power": 2, "subtypes": ["Robot"], "supertypes": ["Token"], "toughness": 2, "type_line": "Token Artifact Creature — Robot"}"#;
+
+/// A 2/2 colorless Robot artifact creature token's definition.
+fn robot_token(l: &mut Lowerer) -> u16 {
+    let p: cats::CardPrinting = serde_json::from_str(ROBOT_TOKEN).expect("Robot token printing");
+    let cats::CardPrinting::CardPrinting(tp) = &p;
+    let def = super::printing::lower_printing(l, tp);
+    l.token(def)
 }

@@ -183,6 +183,7 @@ pub fn fields() -> Vec<Field> {
             granted: Derived "a fast path: some permanent may have a granted triggered ability (Game.marks)",
             seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
             lki_host: Derived "last known information (CR 608.2h): what a gone Aura enchanted",
+            entering_spent: Derived "transient: set and taken around one move",
         });
     }
     classify!(v, Player {

@@ -36,6 +36,14 @@ pub enum W3 {
     /// left, CR 608.2h) deals `amount` damage to each opponent of the
     /// controller (CR 120.3).
     EventObjDamagesEachOpponent { amount: crate::program::Amount },
+    /// "You may remove a <counter> counter from each of `n` <filter>s you
+    /// control. If you do, <what follows>" (CR 122.8 removal, 608.2d): the
+    /// controller chooses `n` different such permanents (a set, increasing
+    /// slot order; `PASS` at the first = don't), then one counter is
+    /// removed from each; not done (or impossible: fewer than `n` with
+    /// such a counter, no question), continue at `skip`. Choice:
+    /// `ChoosePermanent`.
+    RemoveCounterFromEachMay { filter: Filter, counter: Counter, n: u8, skip: u16 },
 }
 
 impl W3 {
@@ -45,6 +53,7 @@ impl W3 {
             W3::Regenerate { on } | W3::GrantTrigger { on, .. } => matches!(on, On::EventObj),
             W3::CantBeRegenerated(_) | W3::DamageEachSourceMv { .. } | W3::HostDamagesPower { .. } => false,
             W3::EventObjDamagesEachOpponent { .. } => true,
+            W3::RemoveCounterFromEachMay { .. } => false,
         }
     }
 
@@ -57,6 +66,7 @@ impl W3 {
             | W3::DamageEachSourceMv { .. }
             | W3::HostDamagesPower { .. }
             | W3::EventObjDamagesEachOpponent { .. } => None,
+            W3::RemoveCounterFromEachMay { skip, .. } => Some(skip),
         }
     }
 }
@@ -77,6 +87,33 @@ pub struct W3State {
     /// the battlefield this turn was attached to (CR 608.2h: "enchanted
     /// creature" of an Aura gone; kept with `SEEN_W3_HOST`).
     pub lki_host: Vec<(crate::ids::ObjRef, crate::ids::ObjRef)>,
+    /// The amount of mana spent to cast the spell becoming a permanent:
+    /// set and taken around one move.
+    pub entering_spent: Option<u8>,
+}
+
+/// The abilities of a definition that go on the stack (its spell, triggered
+/// and activated abilities).
+fn abilities_of(d: &crate::db::CardDef) -> impl Iterator<Item = &crate::db::AbilityDef> {
+    d.triggers.iter().map(|t| &t.ability).chain(d.spell.iter()).chain(d.activated.iter().filter_map(|a| match &a.effect {
+        crate::db::ActEffect::Stack(ab) => Some(ab),
+        crate::db::ActEffect::Mana(_) => None,
+    }))
+}
+
+/// Does a target of the definition read the amount of mana spent to cast
+/// its source (`Filter::MvAtMostManaSpent`)?
+pub(crate) fn reads_mana_spent(d: &crate::db::CardDef) -> bool {
+    fn has(f: &Filter) -> bool {
+        match f {
+            Filter::MvAtMostManaSpent => true,
+            Filter::And(a, b) => has(a) || has(b),
+            Filter::Or(v) => v.iter().any(has),
+            Filter::Not(a) | Filter::InGraveyard(a) | Filter::Spell(a) | Filter::AttachedTo(a) => has(a),
+            _ => false,
+        }
+    }
+    abilities_of(d).any(|ab| ab.targets.iter().any(|t| has(&t.filter)))
 }
 
 /// `W3State::seen`: a card reads its host as it last existed.
@@ -85,17 +122,8 @@ pub(crate) const SEEN_W3_HOST: u8 = 1;
 /// The `SEEN_W3_*` bits of a definition (`W3Def::seen`, set as it is
 /// lowered).
 pub(crate) fn seen_of(d: &crate::db::CardDef) -> u8 {
-    let programs = d
-        .triggers
-        .iter()
-        .map(|t| &t.ability)
-        .chain(d.spell.iter())
-        .chain(d.activated.iter().filter_map(|a| match &a.effect {
-            crate::db::ActEffect::Stack(ab) => Some(ab),
-            crate::db::ActEffect::Mana(_) => None,
-        }));
     let mut bits = 0;
-    for ab in programs {
+    for ab in abilities_of(d) {
         for op in &ab.program {
             if let crate::program::Op::Ext(crate::program::Ext::EoeW3(W3::HostDamagesPower { .. })) = op {
                 bits |= SEEN_W3_HOST;
@@ -152,6 +180,50 @@ impl Game {
                 self.deal_damage(src, crate::ids::Target::Player(opp), n);
                 Flow::Next
             }
+            W3::RemoveCounterFromEachMay { filter, counter, n, skip } => {
+                use crate::decision::{act, Choice, DecisionKind, Opt};
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => f.picked.push(c),
+                    Some(Choice::Pass) => {
+                        f.picked.clear();
+                        return Flow::Jump(*skip);
+                    }
+                    Some(other) => unreachable!("remove-counters answer {other:?}"),
+                    None => {}
+                }
+                let ctx = crate::cast::Ctx { controller: p, source: Some(f.source) };
+                let cands: Vec<CardIdx> =
+                    self.permanents_of(p).filter(|&c| self.counters_on(c, *counter) > 0 && self.card_matches(filter, c, &ctx)).collect();
+                let n = *n as usize;
+                if f.picked.is_empty() && cands.len() < n {
+                    return Flow::Jump(*skip);
+                }
+                if f.picked.len() < n {
+                    let floor = f.picked.last().map(|&c| self.perm_action(p, c));
+                    let rest: Vec<Opt> = cands
+                        .iter()
+                        .filter(|c| !f.picked.contains(c))
+                        .map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                        .filter(|o| floor.is_none_or(|fl| o.action > fl))
+                        .collect();
+                    // (Leaving enough later ones for the picks still owed.)
+                    let still = n - f.picked.len();
+                    let mut opts: Vec<Opt> = rest.iter().enumerate().filter(|(k, _)| rest.len() - k >= still).map(|(_, o)| *o).collect();
+                    if f.picked.is_empty() {
+                        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+                    }
+                    opts.sort_by_key(|o| o.action);
+                    self.ask(crate::flow::Task::Run(f.clone()), p, DecisionKind::ChoosePermanent, opts);
+                    return Flow::Suspend;
+                }
+                for c in std::mem::take(&mut f.picked) {
+                    if self.objs[c.i()].zone == crate::ids::Zone::Battlefield {
+                        self.remove_counters(c, *counter, 1);
+                    }
+                }
+                Flow::Next
+            }
             W3::DamageEachSourceMv { filter } => {
                 let r = f.source;
                 let on_bf = self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield;
@@ -177,6 +249,37 @@ impl Game {
                 }
                 Flow::Next
             }
+        }
+    }
+
+    /// `n` more mana was spent to cast spell `card` (CR 601.2h).
+    pub(crate) fn note_mana_spent(&mut self, card: CardIdx, n: usize) {
+        let r = self.obj_ref(card);
+        match self.marks.iter_mut().find(|(o, m)| *o == r && matches!(m, Mark::ManaSpent(_))) {
+            Some((_, Mark::ManaSpent(k))) => *k = (*k as usize + n).min(255) as u8,
+            _ => self.marks.push((r, Mark::ManaSpent(n.min(255) as u8))),
+        }
+    }
+
+    /// The amount of mana spent to cast object `r` (a spell, or the permanent
+    /// it became; 0 if it wasn't cast, CR 601.2h).
+    pub(crate) fn mana_spent_of(&self, r: crate::ids::ObjRef) -> u8 {
+        self.marks
+            .iter()
+            .find_map(|&(o, m)| match m {
+                Mark::ManaSpent(n) if o == r => Some(n),
+                _ => None,
+            })
+            .unwrap_or(0)
+    }
+
+    /// Spell `idx` became permanent `r`, `n` mana spent to cast it: the
+    /// permanent knows it, and enters with that many +1/+1 counters if it
+    /// says so (CR 122.6, 614.1c).
+    pub(crate) fn w3_entered_spent(&mut self, idx: CardIdx, r: crate::ids::ObjRef, n: u8) {
+        self.marks.push((r, Mark::ManaSpent(n)));
+        if self.def_of(idx).w3.counters_mana_spent && n > 0 {
+            self.add_counters(idx, Counter::P1P1, n as crate::num::Count);
         }
     }
 
@@ -305,6 +408,12 @@ pub struct W3Def {
     pub creature_spells_uncounterable: bool,
     /// Its `SEEN_W3_*` bits ([`seen_of`]).
     pub seen: u8,
+    /// It reads the amount of mana spent to cast it (CR 601.2h): the
+    /// payment records it (`Mark::ManaSpent`).
+    pub mana_spent: bool,
+    /// "This enters with a number of +1/+1 counters on it equal to the
+    /// amount of mana spent to cast it" (CR 122.6, 614.1c).
+    pub counters_mana_spent: bool,
 }
 
 impl Game {

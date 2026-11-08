@@ -298,6 +298,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let enters_x_counters = match enters_with_counters_from_x {
             None => false,
             Some(enums::XCounterMode::X) => true,
+            // "... equal to the amount of mana spent to cast it" (EoE W3:
+            // `W3Def::counters_mana_spent`).
+            Some(enums::XCounterMode::ManaSpent) => false,
             Some(other) => {
                 l.unsupported(format!("CardPrinting.enters_with_counters_from_x({other:?})"));
                 false
@@ -1908,9 +1911,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             combat_unpreventable_all: *combat_damage_cant_be_prevented,
             creature_spells_uncounterable: repl.creature_spells_uncounterable,
             seen: 0,
+            mana_spent: false,
+            counters_mana_spent: *enters_with_counters_from_x == Some(enums::XCounterMode::ManaSpent),
         },
     };
     def.w3.seen = crate::eoe_w3::seen_of(&def);
+    def.w3.mana_spent = def.w3.counters_mana_spent || crate::eoe_w3::reads_mana_spent(&def);
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
         l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");
     }

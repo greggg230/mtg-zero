@@ -94,6 +94,8 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         card("W3 Growth", "{G}", &["Instant"], &[], json!({"spell_effect": {"$t": "PumpTargetCreatureUntilEOT",
             "power_bonus": 3, "toughness_bonus": 3}})),
         creature("W3 Rat", "{B}", 1, 1, &["Rat"], none.clone()),
+        card("W3 Monument", "{4}", &["Artifact"], &[], none.clone()),
+        card("W3 Idol", "{0}", &["Artifact"], &[], none.clone()),
         // "Destroy target enchantment."
         card("W3 Shatter", "{1}", &["Instant"], &[], json!({"spell_effect": {"$t": "Destroy",
             "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsEnchantment"}}]}})),

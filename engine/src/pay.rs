@@ -1849,6 +1849,15 @@ impl Game {
             }
             self.record_converge(pm, &units);
         }
+        // "The amount of mana spent to cast this" (CR 601.2h; EoE W3): the
+        // payment's units (a creature tapped for convoke or an artifact for
+        // improvise spends none, 702.51a, 702.126a).
+        if let Some(card) = pm.keep.spell {
+            if self.def_of(card).w3.mana_spent {
+                let n = pm.chosen.iter().filter(|s| s.slot != IMPROVISE).count() + spent.iter().map(|&x| x as usize).sum::<usize>();
+                self.note_mana_spent(card, n);
+            }
+        }
         // "That spell can't be countered" (Delighted Halfling): its mana
         // was spent on the spell (read before the sources are activated).
         if let Some(card) = pm.keep.spell {

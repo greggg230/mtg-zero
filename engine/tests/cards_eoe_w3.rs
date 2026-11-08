@@ -634,3 +634,180 @@ fn pain_for_all_gone_its_last_enchanted_creature_deals_the_damage_cr608_2h() {
     assert_eq!(g.obj(aura).zone, Zone::Graveyard);
     assert_eq!(g.life(1), 15, "{}", log(&g));
 }
+
+// ---- Astelli Reclaimer (the amount of mana spent to cast it) ----------------------
+
+/// The graveyard cards Astelli Reclaimer's enters trigger may target.
+fn astelli_targets(g: &mut engine::Game) -> Vec<Choice> {
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || (at_priority(g) && g.stack().is_empty()));
+    if g.kind() != Some(DecisionKind::Target) {
+        return Vec::new();
+    }
+    g.pending_decision().unwrap().options.iter().map(|o| o.choice).filter(|c| *c != Choice::Pass).collect()
+}
+
+fn gy_target(g: &engine::Game, name: &str) -> Choice {
+    Choice::Target(engine::Target::Obj(g.obj_ref(g.card(0, name, Zone::Graveyard))))
+}
+
+/// Astelli Reclaimer [5/4, flying]: "When this creature enters, return target
+/// noncreature, nonland permanent card with mana value X or less from your
+/// graveyard to the battlefield, where X is the amount of mana spent to cast
+/// this creature." Cast for {3}{W}{W}: X = 5 (CR 601.2h).
+#[test]
+fn astelli_reclaimer_cast_for_five_returns_mana_value_five_or_less_cr601_2h() {
+    let mut g = scen()
+        .battlefield(0, &["Plains"; 5])
+        .graveyard(0, &["W3 Bear", "Island", "W3 Monument", "W3 Hulk", "W3 Totem"])
+        .graveyard(1, &["W3 Trinket"])
+        .hand(0, &["Astelli Reclaimer"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Astelli Reclaimer", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost) || g.kind() == Some(DecisionKind::PayMana));
+    if g.kind() == Some(DecisionKind::ChooseAltCost) {
+        g.choose(Choice::Number(0));
+    }
+    pay(&mut g);
+    let (monument, hulk, totem) = (gy_target(&g, "W3 Monument"), gy_target(&g, "W3 Hulk"), gy_target(&g, "W3 Totem"));
+    let opts = astelli_targets(&mut g);
+    assert!(opts.contains(&monument) && opts.contains(&hulk) && opts.contains(&totem), "{opts:?}");
+    assert_eq!(opts.len(), 3, "not a creature or land card, nor an opponent's card: {opts:?}");
+    g.choose(monument);
+    settle(&mut g);
+    assert!(g.find_card(0, "W3 Monument", Zone::Battlefield).is_some(), "{}", log(&g));
+    assert!(g.has_kw(c, Kw::Flying));
+    assert_eq!((g.power(c), g.toughness(c)), (5, 4));
+}
+
+/// Cast for its warp cost {2}{W}: X = 3, so a mana value 4 card can't be
+/// targeted (CR 601.2h, 702.185a).
+#[test]
+fn astelli_reclaimer_warped_for_three_cr702_185a() {
+    let mut g = scen()
+        .battlefield(0, &["Plains"; 5])
+        .graveyard(0, &["W3 Monument", "W3 Hulk"])
+        .hand(0, &["Astelli Reclaimer"])
+        .at(Step::Main1, 0)
+        .start();
+    let c = g.card(0, "Astelli Reclaimer", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    let hulk = gy_target(&g, "W3 Hulk");
+    let opts = astelli_targets(&mut g);
+    assert_eq!(opts, vec![hulk], "mana value 3 or less\n{}", log(&g));
+    assert_eq!(untapped(&g, 0), 2);
+}
+
+/// Put onto the battlefield without being cast (Terminal Velocity): no mana
+/// was spent to cast it, X = 0 (CR 601.2h): only a mana value 0 card.
+#[test]
+fn astelli_reclaimer_not_cast_x_is_zero_cr601_2h() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain"; 6])
+        .graveyard(0, &["W3 Trinket", "W3 Idol"])
+        .hand(0, &["Terminal Velocity", "Astelli Reclaimer"])
+        .at(Step::Main1, 0)
+        .start();
+    let a = g.card(0, "Astelli Reclaimer", Zone::Hand);
+    cast(&mut g, 0, "Terminal Velocity", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard));
+    g.choose(Choice::Card(a));
+    let idol = gy_target(&g, "W3 Idol");
+    let opts = astelli_targets(&mut g);
+    assert_eq!(opts, vec![idol], "{}", log(&g));
+}
+
+// ---- Dyadrine, Synthesis Amalgam ----------------------------------------------------
+
+/// Dyadrine [0/1, trample]: "{X}{G}{W} ... enters with a number of +1/+1
+/// counters on it equal to the amount of mana spent to cast it" (CR 122.6,
+/// 614.1c, 601.2h): X = 2 is four mana, four counters.
+#[test]
+fn dyadrine_enters_with_a_counter_per_mana_spent_cr601_2h() {
+    let mut g = scen().battlefield(0, &["Forest", "Forest", "Plains", "Plains"]).hand(0, &["Dyadrine, Synthesis Amalgam"]).at(Step::Main1, 0).start();
+    let c = g.card(0, "Dyadrine, Synthesis Amalgam", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    g.choose(Choice::Number(2));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(c).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.counters_on(c, Counter::P1P1), 4, "{}", log(&g));
+    assert_eq!((g.power(c), g.toughness(c)), (4, 5));
+    assert!(g.has_kw(c, Kw::Trample));
+}
+
+/// Not cast (Terminal Velocity): no mana spent, no counters; a 0/1.
+#[test]
+fn dyadrine_not_cast_enters_without_counters_cr601_2h() {
+    let mut g = scen().battlefield(0, &["Mountain"; 6]).hand(0, &["Terminal Velocity", "Dyadrine, Synthesis Amalgam"]).at(Step::Main1, 0).start();
+    let d = g.card(0, "Dyadrine, Synthesis Amalgam", Zone::Hand);
+    cast(&mut g, 0, "Terminal Velocity", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseHandCard));
+    g.choose(Choice::Card(d));
+    settle(&mut g);
+    assert_eq!(g.obj(d).zone, Zone::Battlefield);
+    assert_eq!(g.counters_on(d, Counter::P1P1), 0);
+    assert_eq!((g.power(d), g.toughness(d)), (0, 1));
+}
+
+/// "Whenever you attack, you may remove a +1/+1 counter from each of two
+/// creatures you control. If you do, draw a card and create a 2/2 colorless
+/// Robot artifact creature token" (CR 608.2d; 111.2). Two different
+/// creatures; declining does nothing; with only one creature with a
+/// counter it can't be done (no question).
+#[test]
+fn dyadrine_attack_trigger_removes_two_counters_draws_and_makes_a_robot_cr111_2() {
+    for case in 0..3 {
+        let mut b = scen()
+            .battlefield(0, &["Dyadrine, Synthesis Amalgam", "W3 Bear"])
+            .counters(0, "Dyadrine, Synthesis Amalgam", Counter::P1P1, 2)
+            .at(Step::Main1, 0)
+            .turn_number(3);
+        if case != 2 {
+            b = b.counters(0, "W3 Bear", Counter::P1P1, 1);
+        }
+        let mut g = b.start();
+        let (d, bear) = (bf(&g, 0, "Dyadrine, Synthesis Amalgam"), bf(&g, 0, "W3 Bear"));
+        let hand = g.player(0).hand.len();
+        attack_with(&mut g, 0, &["W3 Bear"]);
+        for _ in 0..20 {
+            g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent) || at_priority(g));
+            if g.kind() == Some(DecisionKind::ChoosePermanent) || g.stack().is_empty() {
+                break;
+            }
+            g.pass();
+        }
+        if case == 2 {
+            settle(&mut g);
+            assert_eq!(g.player(0).hand.len(), hand, "one creature with a counter: nothing");
+            continue;
+        }
+        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        assert!(opts.contains(&Choice::Pass) && opts.contains(&Choice::Card(d)), "{opts:?} {:?}
+{}", g.options_desc(), log(&g));
+        if case == 1 {
+            g.choose(Choice::Pass);
+            settle(&mut g);
+            assert_eq!(g.player(0).hand.len(), hand);
+            assert_eq!(g.counters_on(d, Counter::P1P1), 2);
+            continue;
+        }
+        g.choose(Choice::Card(d));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChoosePermanent));
+        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        assert_eq!(opts, vec![Choice::Card(bear)], "another creature, no PASS once begun");
+        g.choose(Choice::Card(bear));
+        settle(&mut g);
+        assert_eq!(g.counters_on(d, Counter::P1P1), 1, "{}", log(&g));
+        assert_eq!(g.counters_on(bear, Counter::P1P1), 0);
+        assert_eq!(g.player(0).hand.len(), hand + 1);
+        let robot = g.permanents_of(0).find(|&c| g.name(c) == "Robot").expect("a Robot");
+        assert_eq!((g.power(robot), g.toughness(robot)), (2, 2));
+        assert_eq!(g.types_of(robot), engine::db::types::ARTIFACT | engine::db::types::CREATURE);
+    }
+}

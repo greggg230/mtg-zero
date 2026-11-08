@@ -885,6 +885,10 @@ pub enum Mark {
     /// taps it and it is removed from combat. One mark per shield; they end
     /// in the cleanup step (514.2). EoE W3, ENGINE.md 99.13.
     RegenShield,
+    /// The amount of mana spent to cast it (CR 601.2h): on a spell as it is
+    /// paid, then on the permanent it becomes ("the amount of mana spent to
+    /// cast this creature"; EoE W3, kept for cards that read it).
+    ManaSpent(u8),
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -1505,6 +1509,12 @@ impl Game {
         let warp = std::mem::take(&mut self.entering_warp);
         if warp && cast {
             self.marks.push((r, Mark::WarpCast));
+        }
+        // (The mana spent to cast it: EoE W3.)
+        if let Some(n) = self.w3.entering_spent.take() {
+            if cast {
+                self.w3_entered_spent(idx, r, n);
+            }
         }
         if let (Some(k), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand

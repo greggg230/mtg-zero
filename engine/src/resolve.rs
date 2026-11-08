@@ -272,6 +272,10 @@ impl Game {
                         if self.def_of(card).sunburst.is_some() {
                             self.entering_sunburst = self.converge_of(Some(self.obj_ref(card)));
                         }
+                        // (The mana spent to cast it: EoE W3.)
+                        if self.def_of(card).w3.mana_spent {
+                            self.w3.entering_spent = Some(self.mana_spent_of(self.obj_ref(card)));
+                        }
                         // "A +1/+1 counter for each instant and sorcery card
                         // exiled with it" (CR 607.2q; ENGINE.md 54).
                         if self.def_of(card).counters_per_exiled.is_some() {
