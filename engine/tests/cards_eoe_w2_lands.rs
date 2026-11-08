@@ -336,3 +336,45 @@ fn cr_614_1c_bioengineered_future_counts_only_your_lands_this_turn() {
     settle(&mut g);
     assert_eq!(g.counters_on(bear, Counter::P1P1), 0, "no land entered under P0's control this turn");
 }
+
+/// Gene Pollinator: "{T}, Tap an untapped permanent you control: Add one mana
+/// of any color" (CR 602.2b, 605.3a: both tapped as the cost; another
+/// permanent, not itself).
+#[test]
+fn cr_605_3a_gene_pollinator_taps_another_permanent_for_any_color() {
+    let g = scen().battlefield(0, &["Gene Pollinator"]).at(Step::Main1, 0).start();
+    assert!(!g.can_pay(0, &cost("{G}")), "nothing else to tap");
+    let g = scen().battlefield(0, &["Gene Pollinator", "Island"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{R}")), "the Pollinator and the Island: one mana of any color");
+    assert!(!g.can_pay(0, &cost("{R}{U}")), "the Island is tapped for it");
+    let g = scen().battlefield(0, &["Gene Pollinator", "Island", "Island"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{R}{U}")));
+    assert!(!g.can_pay(0, &cost("{R}{G}")), "one Pollinator, one activation");
+    // Two Pollinators alone: one taps the other (one mana, not two).
+    let g = scen().battlefield(0, &["Gene Pollinator", "Gene Pollinator"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{W}")) && !g.can_pay(0, &cost("{W}{W}")));
+    let g = scen().battlefield(0, &["Gene Pollinator", "Gene Pollinator", "Island", "Island"]).at(Step::Main1, 0).start();
+    assert!(g.can_pay(0, &cost("{W}{B}")), "each taps an Island");
+}
+
+/// In a payment: the permanent tapped is picked (an `ACTIVATE` id after its
+/// own abilities); a Pollinator cast this turn can't activate (summoning
+/// sickness, CR 302.6) but can be tapped for another's ability.
+#[test]
+fn cr_302_6_gene_pollinator_in_a_payment_and_summoning_sickness() {
+    let mut g = scen().battlefield(0, &["Gene Pollinator", "Island"]).hand(0, &["Gene Pollinator"]).at(Step::Main1, 0).start();
+    let pol = bf(&g, 0, "Gene Pollinator");
+    let island = bf(&g, 0, "Island");
+    let new = g.card(0, "Gene Pollinator", Zone::Hand);
+    g.choose(Choice::Cast(new));
+    assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
+    let pick = opts(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == island) && *c != act(island, 0)).expect("the Island as the Pollinator's tapped permanent");
+    g.choose(pick);
+    run_until(&mut g, at_priority, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(new).zone, Zone::Battlefield);
+    assert!(g.obj(pol).tapped && g.obj(island).tapped);
+    // The new one is summoning sick: it can't activate (nothing else is
+    // untapped but it, and it can't tap itself).
+    assert!(!g.can_pay(0, &cost("{G}")));
+}

@@ -40,6 +40,13 @@ pub(crate) const SQ_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 2);
 /// {G}" (the Lumberjack tapped as well: `Class::share`).
 pub(crate) const LJ_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 3);
 
+/// The `Src` slot of a permanent tapped for another permanent's "{T}, Tap
+/// an untapped permanent you control: Add <mana>" (Gene Pollinator): a
+/// source on each permanent it may tap, the activating permanent tapped as
+/// well (`Class::share` of them, `Class::taps` each source takes; ENGINE.md
+/// 99.12). Its id: `ACTIVATE` after the permanent's own abilities.
+pub(crate) const POL_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 4);
+
 /// A source's use of its card (`Class::res`): tapped, sacrificed (or
 /// exiled). Two sources of one card combine when they use different ones.
 pub(crate) const TAP: u8 = 1;
@@ -180,8 +187,13 @@ pub(crate) struct Class {
     /// ability (`SAC_FOR`, `SQ_FOR`, `LJ_FOR`): after the card's own.
     pub slot_id: u8,
     /// Orcish Lumberjack (`LJ_FOR`): how many Lumberjacks can be tapped
-    /// (each activation taps one); 0 otherwise.
+    /// (each activation taps one); 0 otherwise. Gene Pollinator (`POL_FOR`):
+    /// how many Pollinators can activate.
     pub share: u8,
+    /// How much of `share` one use takes (0: 1): 2 for a Pollinator that
+    /// could activate tapped for another's ability, 1 for one tapped for
+    /// improvise or convoke (it can't activate then; ENGINE.md 99.12).
+    pub taps: u8,
 }
 
 impl Class {
@@ -202,6 +214,7 @@ impl Class {
             res: TAP | SAC,
             slot_id: 0,
             share: 0,
+            taps: 0,
         }
     }
 }
@@ -637,6 +650,8 @@ impl Game {
         // the mana and the filter, once per payment (several such abilities
         // make the same mana from the same permanents).
         let mut tap_for: Option<(ManaMask, &Filter)> = None;
+        // (Gene Pollinator's: the permanents whose ability it is.)
+        let mut pol: Vec<(CardIdx, ManaMask, &Filter)> = Vec::new();
         // Mana abilities that sacrifice another permanent (Squandered
         // Resources, Orcish Lumberjack): a source on each permanent they
         // may sacrifice, below.
@@ -661,7 +676,10 @@ impl Game {
                 }
                 if let Some(t) = &ad.cost.tap_untapped {
                     if let ManaProd::One(mask) = m.prod {
-                        if tap_for.is_none() {
+                        if ad.cost.tap {
+                            // (Gene Pollinator: `POL_FOR`, below.)
+                            pol.push((c, mask, &t.filter));
+                        } else if tap_for.is_none() {
                             tap_for = Some((mask, &t.filter));
                         }
                     }
@@ -794,6 +812,10 @@ impl Game {
                 }
             }
         }
+        // The permanents a Pollinator's ability taps (`POL_FOR`).
+        if !pol.is_empty() {
+            self.pol_classes(p, exclude, &pol, &mut out);
+        }
         // Mana abilities of cards in hand (CR 605.3a: activated while
         // paying like any other; a Spirit Guide exiles itself). One mana
         // each (the lowering checks), after the permanents.
@@ -896,6 +918,10 @@ impl Game {
                 }
                 classes.push(cl);
             }
+        }
+        // (A Pollinator tapped for improvise or convoke can't activate.)
+        if classes.iter().any(|cl| cl.members[0].slot == POL_FOR) {
+            self.pol_split(p, &mut classes);
         }
         classes
     }
@@ -1459,7 +1485,7 @@ impl Game {
                 life += u.life as i32;
             }
             let sac = self.reserved(pm.payer, &pm.keep, cl, &s) as i32;
-            let tap = if cl.share > 0 { b.tap.min(cl.share as i32) - 1 } else { b.tap };
+            let tap = if cl.share > 0 { b.tap.min(cl.share as i32) - cl.taps.max(1) as i32 } else { b.tap };
             b = Budget { life: b.life - life, sac: b.sac - sac, tap };
             if b.life < 0 || b.sac < 0 || b.tap < 0 {
                 return None;
@@ -1722,7 +1748,7 @@ impl Game {
                 })
             };
             if let Some(rep) = rep {
-                opts.push(if is_sac_slot(rep.slot) {
+                opts.push(if is_sac_slot(rep.slot) || rep.slot == POL_FOR {
                     // A granted ability or another's sacrificing it: after
                     // its own (`ACTIVATE` + `slot_id`; `sac_classes` checks
                     // there is room).
@@ -1919,7 +1945,7 @@ impl Game {
         // "That spell can't be countered" (Delighted Halfling): its mana
         // was spent on the spell (read before the sources are activated).
         if let Some(card) = pm.keep.spell {
-            let special = |s: &Src| s.slot == IMPROVISE || s.slot == TAP_FOR || is_sac_slot(s.slot);
+            let special = |s: &Src| s.slot == IMPROVISE || s.slot == TAP_FOR || s.slot == POL_FOR || is_sac_slot(s.slot);
             let uncounterable = pm
                 .chosen
                 .iter()
@@ -1940,7 +1966,7 @@ impl Game {
             if s.slot == IMPROVISE {
                 return (true, false, false, false);
             }
-            if s.slot == TAP_FOR {
+            if s.slot == TAP_FOR || s.slot == POL_FOR {
                 return (false, false, false, false);
             }
             if is_sac_slot(s.slot) {
@@ -1951,10 +1977,27 @@ impl Game {
             let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
             (false, ad.cost.sac_self || last, dmg > 0, ad.cost.life == 0)
         });
+        // The Pollinators that activate for the `POL_FOR` picks: the first
+        // ready ones no pick uses (ENGINE.md 99.12).
+        let mut pol_actors: Vec<CardIdx> = if order.iter().any(|s| s.slot == POL_FOR) {
+            let used: Vec<CardIdx> = order.iter().map(|s| s.card).collect();
+            let mut v: Vec<CardIdx> = self.pol_activators(payer).into_iter().filter(|c| !used.contains(c)).collect();
+            v.reverse();
+            v
+        } else {
+            Vec::new()
+        };
         for src in order {
             if src.slot == IMPROVISE {
                 let why = if pm.convoke { "convoke" } else { "improvise" };
                 self.note(|g| format!("P{payer} taps {} for {why}", g.name(src.card)));
+                self.tap(src.card);
+            } else if src.slot == POL_FOR {
+                // "{T}, Tap an untapped permanent you control": a
+                // Pollinator (assigned below) and this permanent.
+                let actor = pol_actors.pop().expect("a Pollinator to activate (the budget counts them)");
+                self.note(|g| format!("P{payer} activates a mana ability of {}, tapping {}", g.name(actor), g.name(src.card)));
+                self.tap(actor);
                 self.tap(src.card);
             } else if src.slot == TAP_FOR {
                 // (A cost of another permanent's mana ability: not "tapped
@@ -2252,12 +2295,14 @@ fn cands(
                 conv_cards.push(s.card);
                 continue;
             }
-            let tap = (cl.share > 0) as i32;
+            let tap = if cl.share > 0 { cl.taps.max(1) as i32 } else { 0 };
             if tap > 0 {
                 out.tap_limit = out.tap_limit.min(cl.share as i32);
             }
             match &cl.yld {
-                Yield::One(u) if alone(s.card) => {
+                // (A source taking a shared tap, Gene Pollinator's, stays a
+                // way: `tap`.)
+                Yield::One(u) if alone(s.card) && tap == 0 => {
                     for _ in 0..n {
                         out.fixed.push(Unit { mask: u.mask | restr, life: (u.life as i32 + extra) as u8, sac: sac > 0 });
                     }

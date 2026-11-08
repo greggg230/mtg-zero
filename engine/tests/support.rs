@@ -903,6 +903,7 @@ const SUPPORTED_EOE_MANA: &[&str] = &[
     "Cascading Cataracts",
     "Crystal Quarry",
     "Eldrazi Temple",
+    "Gene Pollinator",
     "Magus of the Moon",
     "Steelswarm Operator",
     "The Eternity Elevator",

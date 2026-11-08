@@ -120,8 +120,10 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         // "Tap an untapped artifact you control: Add {U}" (Urza): the whole
         // cost, one mana: each such permanent is a source while paying
         // (`pay::TAP_FOR`, ENGINE.md 31).
+        // (With {T} as well: "{T}, Tap an untapped permanent you control"
+        // (Gene Pollinator; `pay::POL_FOR`, ENGINE.md 99.12).)
         let tap_other = cost.tap_untapped.as_ref().is_some_and(|t| t.n == 1)
-            && Cost { tap_untapped: None, ..cost.clone() } == Cost::default()
+            && Cost { tap_untapped: None, tap: false, ..cost.clone() } == Cost::default()
             && matches!(m.prod, ManaProd::One(_))
             && m.damage_to_you == 0
             && m.sac_if_no.is_none();
