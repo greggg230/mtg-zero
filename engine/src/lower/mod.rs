@@ -287,6 +287,12 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // "If it was attacking, create a 1/1 ... Drone ... token": the token's
     // printing resolved by name in Python, not in the IR (101, as 65).
     ("Desculpting Blast", "ir_defect(token printing by name only, docs/ir_defects.md 101)"),
+
+    // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169).
+
+    // W3 combat and abilities (ENGINE.md 99.13; docs/ir_defects.md 170-179).
+
+    // W4 exile, graveyard, control (ENGINE.md 99.14; docs/ir_defects.md 180-189).
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

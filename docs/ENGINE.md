@@ -18969,3 +18969,20 @@ ENGINE.md (99.8 before 99.9). Two unused `mut`s in the cross-lane tests removed.
 complete no further card together. **EoE support 258 / 320**: base 84, A 32, B 14, C 31, D 36,
 cross 24, IR-fix 37; the 62 still blocked are listed by the support report (`SUPPORT_DUMP`), 23 of
 them by an IR defect (`lower::IR_DEFECTS`).
+
+### 99.11-99.14 The rest of the set (user, 2026-11-08: "keep going until EoE is fully implemented, except Paradox Haze; up to 4 agents")
+
+From main 55b9052 (258 / 320), the 62 blocked cards in four branches; every card and every shared
+mechanism has exactly one owner:
+
+| | Branch | Cards | Owns |
+|---|---|---|---|
+| W1 (99.11) | `eoe-w1-ir` + mtg-bot `feature/eoe-ir-fixes` | the 23 cards with an `ir_defect(...)` blocker | the mtg-bot parser, the re-export, `data/cards`, `generated.rs`, `lower::IR_DEFECTS`' existing entries, `SUPPORTED_EOE_IRFIX`; those cards' other engine features, but spend restrictions (W2) |
+| W2 (99.12) | `eoe-w2-mana` | Blast Zone, Bioengineered Future, Cascading Cataracts, Contested War Zone, Crystal Quarry, Echoing Deeps, Eldrazi Temple, Famished Worldsire, Gene Pollinator, Magus of the Moon, Mm'menon the Right Hand, Plaza of Heroes, Steelswarm Operator, The Eternity Elevator, Thespian's Stage | every mana spend restriction (also Sunken Citadel's and Power Depot's, whose IR is W1's), `SUPPORTED_EOE_MANA` |
+| W3 (99.13) | `eoe-w3-combat` | Astelli Reclaimer, Dyadrine, Frenzied Baloth, Pain for All, Possibility Technician, Raging Ravine, Ragost, Requiem Monolith, Robe of Stars, Rust Harvester, Secluded Starforge, Sunstar Chaplain, Swarmyard, Terminal Velocity | phasing, granted triggered abilities, regeneration, `SUPPORTED_EOE_COMBAT` |
+| W4 (99.14) | `eoe-w4-exile` | Adagia, Alpharael Stonechosen, Blade of the Swarm, Chorale of the Void, Close Encounter, Scout for Survivors, Sothera, Susur Secundi, Tannuk Steadfast Second, The Dominion Bracelet | controlling another player (CR 722), targets among exiled cards, `SUPPORTED_EOE_EXILE` |
+
+No branch changes the action layout or the encoding: a card that can only be done with a layout
+change is left blocked and reported (the maintainer decides). New public state goes in the
+public-state gate's limits as before (a perturbation draws nothing from the shared stream).
+Builds use `CARGO_PROFILE_RELEASE_DEBUG=false` (E: is nearly full; no behaviour change).

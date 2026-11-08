@@ -895,8 +895,17 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
     "Uthros, Titanic Godcore",
 ];
 
+/// The last four workstreams (ENGINE.md 99.11-99.14): W1 adds to
+/// `SUPPORTED_EOE_IRFIX`; W2, W3, W4 to their own lists.
+const SUPPORTED_EOE_MANA: &[&str] = &[
+];
+const SUPPORTED_EOE_COMBAT: &[&str] = &[
+];
+const SUPPORTED_EOE_EXILE: &[&str] = &[
+];
+
 fn supported_eoe() -> Vec<String> {
-    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS, SUPPORTED_EOE_IRFIX];
+    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS, SUPPORTED_EOE_IRFIX, SUPPORTED_EOE_MANA, SUPPORTED_EOE_COMBAT, SUPPORTED_EOE_EXILE];
     let mut v: Vec<String> = lists.concat().into_iter().map(String::from).collect();
     let n = v.len();
     v.sort();
