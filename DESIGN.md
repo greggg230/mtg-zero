@@ -737,9 +737,13 @@ this turn (the amount). The IR comes from mtg-bot branch `feature/eoe-ir-fixes` 
 **S2 data (2026-11-08, branch `eoe-s2-data`; docs/sealed_data.md):** the 17lands yardstick
 (`data/sealed/eoe_17lands_sealed.json.gz`, `mtgz.sealed.seventeen_lands`: 9,765 Premier and 903
 Traditional Sealed pools with every build and game; a pool is six Play Boosters' 78 nonbasic cards,
-basics free and never counted) and a seeded reference generator of the EoE Play Booster
-(`mtgz.sealed.collation`: Wizards' published slots and rates, splitmix64 so a Rust port reproduces it).
-Against Arena's pools and packs it matches the rarity mix, sizes and per-card rates; Arena's packs are
-colour-balanced (a print-run collation: half the spread of a pool's colour depth) and open a few more
-Stellar Sights lands, which the generator does not model yet. Whether to model them from 17lands' packs
-is the user's call (docs/sealed_data.md 5); 8% of real pools are fully supported at 9cdda51.
+basics free and never counted; 8% of them fully supported at 9cdda51) and a seeded sealed-pool
+generator with two collations (`mtgz.sealed.collation.generate(seed, collation=...)`, recorded in the
+pool's metadata; splitmix64 so a Rust port reproduces it): `paper`, Wizards' published Play Booster
+(land slot, booster-fun printings, 14% Stellar Sights, optional prerelease promo), and `arena`, MTG
+Arena's boosters (13 cards, no booster-fun weighting, 15.2% Stellar Sights, colour-balanced print
+runs: every colour one or two commons, no repeated card, the uncommons spread), which reproduces
+Arena's pools and packs including their colour depth (paper's spreads 1.5-2x wider). Paradox Haze is
+skipped in both. **Decision (user, 2026-11-08):** inferring how the game generates packs from 17lands'
+data is environment modelling, not human play, and is allowed (the `arena` collation); 17lands stays a
+yardstick for everything humans do.
