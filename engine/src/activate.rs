@@ -161,6 +161,20 @@ impl Game {
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
+            // Activated abilities an attached Equipment grants it (CR 301.5;
+            // ENGINE.md 99.14): ids past its own (at most four a permanent).
+            if !self.lost_abilities(c) {
+                let mut i = d.activated.len();
+                for (_, face) in self.granted_activated(c) {
+                    for ad in &self.db.def(face).activated {
+                        if i < 4 && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                            let slot = AbilitySlot::Activated(i as u8);
+                            out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
+                        }
+                        i += 1;
+                    }
+                }
+            }
             // A special action isn't an ability (CR 116.2b, 708.7): turning a
             // face-down permanent face up survives "loses all abilities".
             if self.lost_abilities(c) {
@@ -223,7 +237,12 @@ impl Game {
             return m;
         }
         for d in &ad.discounts {
-            m.generic = m.generic.saturating_sub(self.discount(d, p));
+            let n = match d {
+                // "Where X is this creature's power" (ENGINE.md 99.14).
+                crate::db::Discount::SourcePower if self.is_creature(card) => self.power(card).clamp(0, 255) as u8,
+                _ => self.discount(d, p),
+            };
+            m.generic = m.generic.saturating_sub(n);
         }
         let ob = &self.objs[card.i()];
         if ob.zone == Zone::Battlefield && ob.controller == p && self.is_type(card, types::ARTIFACT) {
@@ -339,7 +358,8 @@ impl Game {
     /// once (605.3); any other ability goes on the stack first (602.2a),
     /// then targets (601.2c), then the cost (601.2f-h).
     pub(crate) fn begin_activate(&mut self, p: PlayerId, card: CardIdx, slot: AbilitySlot) {
-        let def = self.objs[card.i()].def;
+        // (An ability an Equipment grants: its face, ENGINE.md 99.14.)
+        let (def, slot, granter) = self.activated_home(card, slot);
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
             self.reveal(card); // 602.2a: activated from a hidden zone
@@ -406,7 +426,7 @@ impl Game {
             x: 0,
             division: Vec::new(),
             attack_as: None,
-            noted: Vec::new(),
+            noted: granter.map(|e| vec![self.obj_ref(e)]).unwrap_or_default(),
             flips: self.objs[card.i()].flips,
             origin: Zone::Nowhere,
             times: 0,
@@ -573,6 +593,10 @@ impl Game {
         if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
             if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
                 self.stack[pos].ev.amount = self.mana_value_of(c) as u32;
+                // (And the permanent, for its power: `Amount::CostPower`.)
+                if self.stack[pos].ev.obj.is_none() {
+                    self.stack[pos].ev.obj = Some(self.obj_ref(c));
+                }
             }
         }
         self.begin_batch();
@@ -837,6 +861,7 @@ impl Game {
         // its own.
         if picked.is_empty() && self.answer.is_none() {
             self.new_event();
+            self.pay_exile_granter(id);
         }
         // A permanent to return or sacrifice, its mana ability activated
         // first (ENGINE.md 86.2).

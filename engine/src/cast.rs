@@ -158,6 +158,8 @@ impl Game {
             }
             // (A spell's own, read with its targets: `cost_with`.)
             crate::db::Discount::IfTargets(..) => 0,
+            // (An activated ability's, read with its source: `act_mana_x`.)
+            crate::db::Discount::SourcePower => 0,
         }
     }
 
@@ -215,7 +217,7 @@ impl Game {
         if self.is_type(card, types::ARTIFACT) {
             a |= crate::db::SPEND_ARTIFACT;
         }
-        if self.def_of(card).supertypes & crate::db::supertypes::LEGENDARY != 0 {
+        if self.supertypes_of(card) & crate::db::supertypes::LEGENDARY != 0 {
             a |= crate::db::SPEND_LEGENDARY;
         }
         a
@@ -364,6 +366,11 @@ impl Game {
         // "Each player can't cast more than one noncreature spell each
         // turn" (every cast's check passes here; ENGINE.md 99.4).
         if self.noncreature_spell_locked(p, card) {
+            return false;
+        }
+        // An additional cost that chooses (ENGINE.md 99.14): something to
+        // choose (CR 601.2h: a cost that can't be paid).
+        if self.def_of(card).casting.choose_creature_or_warped && !self.chosen_for_cost_candidates(p) {
             return false;
         }
         if sorcery_ok {
@@ -1847,7 +1854,9 @@ impl Game {
             .flat_map(|q| self.players[q as usize].graveyard.iter().map(|&c| Target::Obj(self.obj_ref(c))))
             // (A card cast from a graveyard is on the stack when it targets.)
             .filter(|&t| Some(t) != ctx.source.map(Target::Obj));
-        players.chain(perms).chain(spells).chain(graves).filter(|&t| ok(t)).nth(n - 1).is_some()
+        let ex = wants_exile(&tr.filter);
+        let exiled = self.exile.iter().filter(move |_| ex).map(|&c| Target::Obj(self.obj_ref(c)));
+        players.chain(perms).chain(spells).chain(graves).chain(exiled).filter(|&t| ok(t)).nth(n - 1).is_some()
     }
 
     // ---- casting (CR 601.2) ------------------------------------------------
@@ -2141,6 +2150,11 @@ impl Game {
             self.agenda.push(Task::Escalate { id });
         }
         self.agenda.push(Task::CastPay { id });
+        if self.def_of(card).casting.choose_creature_or_warped {
+            // The additional cost's choice, before the mana (CR 601.2h: the
+            // costs in any order; ENGINE.md 99.14).
+            self.agenda.push(Task::ChooseForCost { id, perm: false });
+        }
         if self.def_of(card).delve {
             self.agenda.push(Task::Delve { id }); // CR 702.66a: while paying
         }
@@ -2323,6 +2337,10 @@ impl Game {
         // from below it, ENGINE.md 58.1.)
         self.targeting = id;
         let mut cands = self.target_candidates(tr, &ctx, &exclude);
+        if let Some(n) = tr.total_mv {
+            // "With total mana value n or less" (CR 601.2c; ENGINE.md 99.14).
+            self.retain_within_total_mv(n, &already, &mut cands);
+        }
         if tr.pair != 0 {
             // A card of the player whose permanent was chosen.
             let k = tr.pair - 1;
@@ -2589,6 +2607,12 @@ impl Game {
                 }
             }
         }
+        // Cards in exile, in exile order (ENGINE.md 99.14).
+        if wants_exile(&tr.filter) {
+            for &c in &self.exile {
+                consider(Target::Obj(self.obj_ref(c)), &mut out);
+            }
+        }
         out
     }
 
@@ -2699,6 +2723,7 @@ impl Game {
                     Zone::Battlefield => self.perm_ok(f, r.idx, ctx),
                     Zone::Stack => self.spell_ok(f, r.idx, ctx),
                     Zone::Graveyard => self.graveyard_ok(f, r.idx, ctx),
+                    Zone::Exile => self.exile_ok(f, r.idx, ctx),
                     _ => false,
                 }
             }
@@ -2717,7 +2742,8 @@ impl Game {
             | Filter::DrewThisTurn(_)
             | Filter::FirstDrawInDrawStep
             | Filter::OathTarget
-            | Filter::InGraveyard(_) => false,
+            | Filter::InGraveyard(_)
+            | Filter::InExile(_) => false,
             Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
             Filter::Not(x) => !self.perm_ok(x, c, ctx),
@@ -2732,6 +2758,17 @@ impl Game {
             Filter::InGraveyard(inner) => !self.is_token(c) && self.card_matches(inner, c, ctx),
             Filter::And(a, b) => self.graveyard_ok(a, c, ctx) && self.graveyard_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.graveyard_ok(x, c, ctx)),
+            _ => false,
+        }
+    }
+
+    /// A card in exile matches only through `InExile(f)` (face up, a card:
+    /// not a copy of one; ENGINE.md 99.14).
+    fn exile_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
+        match f {
+            Filter::InExile(inner) => !self.is_copy_obj(c) && self.card_matches(inner, c, ctx),
+            Filter::And(a, b) => self.exile_ok(a, c, ctx) && self.exile_ok(b, c, ctx),
+            Filter::Or(v) => v.iter().any(|x| self.exile_ok(x, c, ctx)),
             _ => false,
         }
     }
@@ -2756,7 +2793,7 @@ impl Game {
             Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::TotalPtAtMost(n) => self.is_creature(c) && self.power(c) as i64 + self.toughness(c) as i64 <= *n as i64,
             Filter::Subtype(s) => self.has_subtype(c, *s),
-            Filter::Supertype(bits) => def.supertypes & bits != 0,
+            Filter::Supertype(bits) => self.supertypes_of(c) & bits != 0,
             Filter::ManaValueAtMost(n) => self.mana_value_of(c) <= *n,
             Filter::MvAtMostConverge => self.mana_value_of(c) <= self.converge_of(ctx.source),
             Filter::PowerAtLeast(n) => self.is_creature(c) && self.power(c) >= *n,
@@ -2856,6 +2893,9 @@ impl Game {
             Filter::CastForWarp => {
                 !self.marks.is_empty() && self.marks.contains(&(self.obj_ref(c), crate::game::Mark::WarpCast))
             }
+            // (Exile matches only through `filter_ok`'s `exile_ok`.)
+            Filter::InExile(_) => false,
+            Filter::HasWarp => self.abilities(c).alt_costs.iter().any(|a| a.warp),
             Filter::MvAtMostLandsYouControl => {
                 self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
             }
@@ -2875,6 +2915,16 @@ fn wants_graveyard(f: &Filter) -> bool {
         Filter::InGraveyard(_) => true,
         Filter::And(a, b) => wants_graveyard(a) || wants_graveyard(b),
         Filter::Or(v) => v.iter().any(wants_graveyard),
+        _ => false,
+    }
+}
+
+/// Can a filter match a card in exile (`InExile`)?
+pub(crate) fn wants_exile(f: &Filter) -> bool {
+    match f {
+        Filter::InExile(_) => true,
+        Filter::And(a, b) => wants_exile(a) || wants_exile(b),
+        Filter::Or(v) => v.iter().any(wants_exile),
         _ => false,
     }
 }

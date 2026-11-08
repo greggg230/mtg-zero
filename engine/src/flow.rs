@@ -90,6 +90,11 @@ pub(crate) enum Task {
     ChooseX { id: u32 },
     /// Discard for escalate (CR 702.120a).
     Escalate { id: u32 },
+    /// "As an additional cost, choose a creature you control or a warped
+    /// creature card you own in exile" (CR 601.2h; ENGINE.md 99.14): an
+    /// exiled card (`ChooseExiled`, `PASS` = a creature instead), then, with
+    /// `perm`, a creature (`ChoosePermanent`).
+    ChooseForCost { id: u32, perm: bool },
     /// Which player or planeswalker an attacking creature attacks (CR
     /// 508.1b, 508.4).
     AttackTarget { card: CardIdx },
@@ -134,7 +139,9 @@ impl Game {
 
     /// The player to decide; `None` iff the game is over.
     pub fn to_move(&self) -> Option<PlayerId> {
-        self.pending.as_ref().map(|d| d.player)
+        // (Who decides: the controlling player during a controlled turn,
+        // CR 722.4; the decision's ids stay the controlled player's.)
+        self.pending.as_ref().map(|d| self.decider_of(d.player))
     }
 
     /// Legal action ids, ascending, no duplicates; empty iff the game is over.
@@ -206,6 +213,9 @@ impl Game {
             c.refresh_pending();
             assert_eq!(c.pending, self.pending, "a forced look at a top card changed the pending decision");
         }
+        if self.turn_controller.is_some() {
+            self.sync_controller_view(); // CR 722.3 (ENGINE.md 99.14)
+        }
         self.canon_hand_knowledge();
     }
 
@@ -216,6 +226,7 @@ impl Game {
         // A graveyard card's option outside Priority: its slot in the
         // decision's graveyard list (ENGINE.md 65.10).
         self.name_graveyard_options(player, kind, &mut options);
+        self.name_exile_targets(kind, &mut options);
         options.sort_by_key(|o| o.action);
         assert!(
             options.windows(2).all(|w| w[0].action < w[1].action),
@@ -288,6 +299,7 @@ impl Game {
             Task::ChooseReplacement { card, from, results, void, chooser } => self.choose_replacement(card, from, results, void, chooser),
             Task::ChooseX { id } => self.choose_x(id),
             Task::Escalate { id } => self.escalate(id),
+            Task::ChooseForCost { id, perm } => self.choose_for_cost(id, perm),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
@@ -430,6 +442,9 @@ impl Game {
         let prev_spells = (self.turn.number > 0).then(|| self.players[self.turn.active as usize].spells_cast);
         self.turn.number += 1;
         self.turn.active = next;
+        // CR 722.1: a player-controlling effect applies to the next turn the
+        // player takes, all of it, until the next turn begins.
+        self.turn_controller = self.next_turn_controller[next as usize].take().filter(|&q| q != next);
         self.turn.extra_combats = 0;
         self.turn.step = Step::Untap;
         let n = self.turn.number;

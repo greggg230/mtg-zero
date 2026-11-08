@@ -91,6 +91,7 @@ permission) and a consumer can go wrong with it.
 | 81 | Dawnsire, Sunstar Dreadnought (lane D) | target narrowed | `DealDamageToTargetCreature` with a creature-only target for "up to one target creature or planeswalker" | a creature or planeswalker target | `cards/parser/effects.py` (`_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE`, ~line 390: "or planeswalker" accepted and dropped) | fixed (5362f5ed), supported | confirmed |
 | 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | fixed (5362f5ed), supported | confirmed |
 | 100 | Fell Gravship (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | target invented | "mill three cards, then return a creature or Spacecraft card from your graveyard to your hand" as `Sequence [SelfMill 3, ReturnCreatureFromYourGraveyardToHand { creature, or_spacecraft }]`, a targeted class (its target chosen as the ability triggers, before the mill) | the card chosen as the ability resolves, after the mill, not targeted (a milled card may be returned; the mill happens with no such card in the graveyard) | `cards/parser/effects.py` (`_RETURN_CREATURE_OR_SPACECRAFT_GRAVEYARD_TO_HAND`, ~line 1911) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 180 | Sothera, the Supervoid (Edge of Eternities, W4, ENGINE.md 99.14) | instructions reordered | the end-step ability as `Sequence [ReanimateOneExiledWithSourceWithCounters { counter_amount: 2 }, SacrificeSelfPreservingExileLink]`: the return first, then the sacrifice | "sacrifice Sothera, then put a creature card exiled with it onto the battlefield ...": the sacrifice first (the cards exiled with it stay linked to it, CR 607.2a) | `effects/generic/exile.py::SacrificeSelfPreservingExileLink` (its docstring: "the engine-level fix is to invert the order at composition time"), the Sothera parser line | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 101 | Desculpting Blast (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | value resolved late | `ReturnTargetCreatureToOwnersHand { allow_nonland_permanent, create_drone_if_was_attacking: true }`: the token by a flag, its printing looked up by name in Python (`TOKEN_PRINTINGS["Drone"]`) | the token's `CardPrinting` inline (a 1/1 colorless Drone artifact creature with flying and "This token can block only creatures with flying"), as the set's other Drone makers carry it (as entries 3, 65) | `cards/parser/effects.py` (the Desculpting Blast literal, ~line 4324), `effects/generic/bounce.py` (~line 177) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
@@ -1011,6 +1012,34 @@ block only creatures with flying.\""
 * Engine: blocked, `ir_defect(token printing by name only, docs/ir_defects.md 101)`. The rest of
   the card needs only `allow_nonland_permanent` (its target spec already says "nonland, not a
   player") and an "if it was attacking" check, both left with the card (ENGINE.md 99.8).
+
+### Q. Edge of Eternities, W4: exile, graveyard, copies and control (ENGINE.md 99.14)
+
+**180. Sothera, the Supervoid.** Oracle: "Whenever a creature you control dies, each opponent
+chooses a creature they control and exiles it. / At the beginning of your end step, if a player
+controls no creatures, sacrifice Sothera, then put a creature card exiled with it onto the
+battlefield under your control with two additional +1/+1 counters on it."
+
+* IR: the end-step ability is `Sequence [ReanimateOneExiledWithSourceWithCounters { counter_amount:
+  2 }, SacrificeSelfPreservingExileLink]`: the creature card is put onto the battlefield first,
+  Sothera sacrificed after.
+* Should be: the sacrifice first, then the return (the Oracle text's order; the cards exiled with
+  Sothera stay linked to it after it leaves, CR 607.2a). The order is observable: the returned
+  creature is on the battlefield as Sothera leaves (its "whenever a nonland permanent leaves the
+  battlefield" or "whenever another creature dies"-style abilities see the sacrifice), and its
+  enters abilities' intervening "if"s are checked before Sothera has left (void, CR 603.4: "if a
+  nonland permanent left the battlefield this turn" may be false then and true in the Oracle
+  order).
+* Source: `effects/generic/exile.py::SacrificeSelfPreservingExileLink` (~line 1260; its docstring:
+  a naive `Sequence(SacrificeSelf, recall)` loses the link in the Python engine, whose
+  `_release_exiled_until_leaves` hook returns the cards as Sothera leaves, so "the engine-level fix
+  is to invert the order at composition time") and the parser line that composes Sothera's ability.
+* Fix: `Sequence [SacrificeSelf, ReanimateOneExiledWithSourceWithCounters]`, the link kept by the
+  Python engine for a source that has left (Sothera's exile is not "until this leaves", CR 610.3).
+* Engine: blocked, `ir_defect(sacrifice after the return, docs/ir_defects.md 180)`. Its classes
+  `EachOpponentExilesOwnCreature`, `ReanimateOneExiledWithSourceWithCounters`,
+  `SacrificeSelfPreservingExileLink` and the predicate `AnyPlayerControlsNoCreatures` are not
+  lowered yet either (ENGINE.md 99.14).
 
 ## Suspected defects (representational)
 

@@ -818,7 +818,7 @@ impl Heuristic {
         if used < TURN_CAP {
             for o in &d.options {
                 let Choice::Ability(c, slot) = o.choice else { continue };
-                let ad = g.def_of(c).activated_def(slot);
+                let ad = g.activated_of(c, slot);
                 if self.times(p, c, slot) >= cap(ad) {
                     continue;
                 }

@@ -88,6 +88,16 @@ pub enum Amount {
     /// activated ability's cost ("2 plus the sacrificed permanent's mana
     /// value"; as it last existed, CR 608.2h).
     CostMvPlus(u8),
+    /// The power of the permanent sacrificed to pay the activated ability's
+    /// cost, as it last existed on the battlefield ("draw cards equal to the
+    /// sacrificed creature's power", CR 608.2h; the item's event object,
+    /// recorded as the cost is paid).
+    CostPower,
+    /// The power of the object chosen for the spell's additional cost
+    /// (`StackItem::noted`, ENGINE.md 99.14): a creature on the battlefield
+    /// now, else as it last existed there; a card in exile, its own (CR
+    /// 608.2h: as it last existed in exile if it left).
+    ChosenPower,
     /// k times the spell's X ("twice X").
     XTimes(u8),
     /// The number of permanents of these card types the controller's
@@ -990,6 +1000,8 @@ pub enum Ext {
     EoeA(EoeA),
     /// The Edge of Eternities cross-lane pass (ENGINE.md 99.8).
     EoeX(crate::eoe_x::EoeX),
+    /// W4 of the Edge of Eternities port (ENGINE.md 99.14).
+    EoeW4(crate::eoe_w4::EoeW4),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1235,6 +1247,7 @@ impl Op {
             Op::Ext(Ext::CreateTokensFor { who: w, .. }) | Op::Ext(Ext::GraveyardToBottomRandom { who: w }) => who(w),
             Op::Ext(Ext::EoeD(x)) => x.uses_event(),
             Op::Ext(Ext::EoeX(x)) => x.uses_event(),
+            Op::Ext(Ext::EoeW4(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {
@@ -1267,6 +1280,7 @@ impl Op {
             Op::Ext(Ext::OfferPayOther { if_paid, .. }) => Some(if_paid),
             Op::Ext(Ext::EoeB(x)) => x.jump_target(),
             Op::Ext(Ext::EoeX(x)) => x.jump_target(),
+            Op::Ext(Ext::EoeW4(x)) => x.jump_target(),
             _ => None,
         }
     }
@@ -1290,7 +1304,7 @@ pub struct Builder {
 impl Builder {
     /// Add a target requirement; returns its index.
     pub fn target(&mut self, filter: Filter, min: u8, max: u8) -> u8 {
-        let req = TargetReq { filter, min, max, distinct: 0, pair: 0 };
+        let req = TargetReq { filter, min, max, distinct: 0, pair: 0, total_mv: None };
         if let Some(k) = self.reuse {
             if self.targets.get(k) == Some(&req) {
                 self.reuse = Some(k + 1);

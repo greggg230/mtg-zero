@@ -504,6 +504,14 @@ impl Game {
             Amount::Attacking => self.battlefield.iter().filter(|&&c| self.objs[c.i()].attacking).count() as i32,
             Amount::Experience => crate::num::count_amount(self.players[f.controller as usize].experience),
             Amount::CostMvPlus(n) => crate::num::amount(n as i64 + f.ev.amount as i64),
+            Amount::ChosenPower => self.chosen_power(f),
+            Amount::CostPower => match f.ev.obj {
+                Some(r) => match self.objs[r.idx.i()].lki_power {
+                    Some((inc, p)) if inc == r.inc => p,
+                    _ => 0,
+                },
+                None => 0,
+            },
             Amount::TappedPower => self.tapped_power(f),
             Amount::EventSpellMv => match f.ev.obj {
                 Some(r) if self.live(r) && self.objs[r.idx.i()].zone == Zone::Stack => self.mana_value_of(r.idx) as i32,

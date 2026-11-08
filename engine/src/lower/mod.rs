@@ -24,6 +24,7 @@ pub mod eoe_c;
 pub mod eoe_a;
 pub mod effect_eoe_d;
 pub mod eoe_x;
+pub mod eoe_w4;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -293,6 +294,9 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // W3 combat and abilities (ENGINE.md 99.13; docs/ir_defects.md 170-179).
 
     // W4 exile, graveyard, control (ENGINE.md 99.14; docs/ir_defects.md 180-189).
+    // "Sacrifice Sothera, then put a creature card exiled with it onto the
+    // battlefield": the IR returns the card first (180).
+    ("Sothera, the Supervoid", "ir_defect(sacrifice after the return, docs/ir_defects.md 180)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

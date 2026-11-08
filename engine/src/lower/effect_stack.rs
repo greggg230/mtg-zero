@@ -337,6 +337,7 @@ pub(crate) fn ward_trigger(cost: WardCost, granted: bool) -> TriggerDef {
         WardCost::Mana(m) => b.op(Op::OfferPay { who: Who::EventPlayer, cost: m, if_paid: 0 }),
         WardCost::Life(n) => b.op(Op::Ext(Ext::OfferPayOther { who: Who::EventPlayer, life: n, discard: false, if_paid: 0 })),
         WardCost::Discard => b.op(Op::Ext(Ext::OfferPayOther { who: Who::EventPlayer, life: 0, discard: true, if_paid: 0 })),
+        WardCost::DiscardRandom => b.op(Op::Ext(Ext::EoeW4(crate::eoe_w4::EoeW4::OfferDiscardRandom { who: Who::EventPlayer, if_paid: 0 }))),
     };
     b.op(Op::Ext(Ext::CounterEventItem));
     b.patch(at);

@@ -1241,17 +1241,25 @@ fn public_state_reaches_the_encoding() {
     let gaps: Vec<&str> = lim.iter().filter(|l| l.kind == LimitKind::NextLayout).map(|l| l.name).collect();
     // Edge of Eternities' void (ENGINE.md 99.4) is the second, and whether a creature was cast
     // for its warp cost (ENGINE.md 99.8) the third: state the port added after layout v5 froze,
-    // for the next layout.
+    // for the next layout. W4's legendary copy exception (ENGINE.md 99.14) the fourth and a
+    // target in exile the fifth (rare: no gate position has one), which object a stack item
+    // noted the sixth (Close Encounter's choice; emerge's and station's too), and controlling another
+    // player (CR 722: a pending effect, a controlled turn) the seventh and eighth.
     assert_eq!(
         gaps,
         [
             "two graveyard cards swap places",
             "void holds (a nonland permanent left the battlefield this turn)",
-            "a creature was cast for its warp cost"
+            "a creature was cast for its warp cost",
+            "a copy is legendary by its exception",
+            "a stack item targets another exiled card",
+            "a stack item noted another object",
+            "a player will control the other's next turn",
+            "the active player is controlled this turn"
         ],
         "the gaps on the allowlist"
     );
-    assert_eq!(next, 3);
+    assert_eq!(next, 8);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.

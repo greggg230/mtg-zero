@@ -902,6 +902,13 @@ const SUPPORTED_EOE_MANA: &[&str] = &[
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
 ];
 const SUPPORTED_EOE_EXILE: &[&str] = &[
+    "Adagia, Windswept Bastion",
+    "Alpharael, Stonechosen",
+    "Blade of the Swarm",
+    "Chorale of the Void",
+    "Close Encounter",
+    "Scout for Survivors",
+    "Susur Secundi, Void Altar",
 ];
 
 fn supported_eoe() -> Vec<String> {

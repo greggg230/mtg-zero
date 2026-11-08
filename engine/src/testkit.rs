@@ -574,6 +574,9 @@ impl Game {
         v.push(self.day.map_or(9, |d| d as u64));
         // Void (public; ENGINE.md 99.4).
         v.push(self.void_active() as u64);
+        // Controlling another player (public, CR 722; ENGINE.md 99.14).
+        v.extend(self.next_turn_controller.iter().map(|q| q.map_or(9, |q| q as u64)));
+        v.push(self.turn_controller.map_or(9, |q| q as u64));
         for &(r, k) in &self.done_once {
             v.extend([live_place(r), k as u64]);
         }

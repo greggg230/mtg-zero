@@ -414,6 +414,11 @@ pub enum Filter {
     /// A permanent that entered as a spell cast for its warp cost (CR
     /// 702.185a; `Mark::WarpCast`; ENGINE.md 99.8).
     CastForWarp,
+    /// A card in exile (face up; not a copy of a card) matching the inner
+    /// filter ("target exiled card", CR 115.1, 406; ENGINE.md 99.14).
+    InExile(Box<Filter>),
+    /// A card with warp (CR 702.185a: the keyword among its abilities).
+    HasWarp,
 }
 
 /// `Filter::Ability` kinds.
@@ -468,6 +473,10 @@ pub struct TargetReq {
     /// requirement k ("target artifact card in that player's graveyard",
     /// Goblin Welder); 0 = no such link.
     pub pair: u8,
+    /// The targets of this requirement together have mana value at most
+    /// this ("up to three target creature cards with total mana value 3 or
+    /// less", CR 601.2c: a restriction on the set; ENGINE.md 99.14).
+    pub total_mv: Option<u8>,
 }
 
 /// A spell or ability's effect: its target requirements and program; or,
@@ -1533,6 +1542,15 @@ pub struct CardDef {
     /// A preparation card's prepare spell (CR 722.2a): a face (an instant or
     /// sorcery) that copies of the card in exile have (722.3c).
     pub prepare: Option<DefId>,
+    /// An Equipment's "equipped creature has '<activated ability>'" (CR
+    /// 301.5, 613.1f: layer 6): a face holding the granted abilities
+    /// (`activated`), which the creature has while this is attached to it
+    /// (`Game::granted_activated`; ENGINE.md 99.14).
+    pub grants_equipped: Option<DefId>,
+    /// On such a face: each granted ability's cost includes "Exile <the
+    /// Equipment granting it>" (The Dominion Bracelet; paid after the mana,
+    /// CR 601.2h, the total cost determined first, 601.2f).
+    pub exiles_granter: bool,
     /// "This creature enters prepared" (CR 722.3a).
     pub enters_prepared: bool,
     // ---- M7b part 3b: the stack, ward, the initiative, graveyard
@@ -1709,6 +1727,11 @@ pub struct CastingRules {
     /// untapped creatures may each pay for {1} or one mana of that
     /// creature's colour (`PayMana::convoke`; ENGINE.md 99.8).
     pub convoke: bool,
+    /// Its own "As an additional cost to cast this spell, choose a creature
+    /// you control or a warped creature card you own in exile" (CR 601.2b,
+    /// 601.2h; the choice is noted on the spell, `StackItem::noted`;
+    /// ENGINE.md 99.14).
+    pub choose_creature_or_warped: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1730,6 +1753,8 @@ pub enum WardCost {
     Mana(ManaCost),
     Life(u8),
     Discard,
+    /// "Ward—Discard a card at random" (CR 701.9b; Alpharael, Stonechosen).
+    DiscardRandom,
 }
 
 /// A cost reduction of a spell or an activated ability (CR 601.2f, 602.2b),
@@ -1750,6 +1775,10 @@ pub enum Discount {
     /// the targets are chosen before the cost is determined, CR 601.2c,
     /// 601.2f). A spell's own reduction only.
     IfTargets(Filter, u8),
+    /// "This ability costs {X} less to activate, where X is this creature's
+    /// power" (the source's power as the cost is determined, CR 601.2f;
+    /// ENGINE.md 99.14). An activated ability's only.
+    SourcePower,
 }
 
 impl CardDef {
@@ -1960,6 +1989,7 @@ impl CardDb {
             card.adventure = adventure;
             card.bestow = card.bestow.map(|k| base + k);
             card.prepare = card.prepare.map(|k| base + k);
+            card.grants_equipped = card.grants_equipped.map(|k| base + k);
             card.halves = card.halves.map(|(a, b)| (base + a, base + b));
             for k in card.levels.iter_mut() {
                 *k += base;
