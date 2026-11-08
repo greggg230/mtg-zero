@@ -738,6 +738,7 @@ const SUPPORTED_EOE_C: &[&str] = &[
     "Space-Time Anomaly",
     "Starwinder",
     "Temporal Intervention",
+    "Timeline Culler",
     "Tragic Trajectory",
     "Uthros Psionicist",
     "Virus Beetle",

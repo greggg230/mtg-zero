@@ -264,8 +264,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // printings lowered inside it (tokens, emblems) are cards.
         let face = std::mem::take(&mut l.face);
         let _ = warp_cost_str; // display form of `warp_cost`
-        l.deny("CardPrinting.warp_additional_life_cost", warp_additional_life_cost);
-        l.deny("CardPrinting.warp_castable_from_graveyard", warp_castable_from_graveyard);
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
@@ -901,8 +899,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::WarpExile));
         let k = l.delayed_ability(d.finish());
-        AltCost { mana, dash: Some(k), warp: true, ..AltCost::default() }
+        // "Warp-{B}, Pay 2 life" (CR 119.4; ENGINE.md 99.4).
+        let life = l.int("CardPrinting.warp_additional_life_cost", *warp_additional_life_cost, 0, 20) as u8;
+        let cost = crate::db::Cost { life, ..Default::default() };
+        AltCost { mana, cost, dash: Some(k), warp: true, ..AltCost::default() }
     });
+    if warp.is_none() {
+        l.deny("CardPrinting.warp_additional_life_cost(without warp)", warp_additional_life_cost);
+        l.deny("CardPrinting.warp_castable_from_graveyard(without warp)", warp_castable_from_graveyard);
+    }
     if warp.is_some() && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.warp_cost(not a permanent card)");
     }
@@ -1568,6 +1573,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut casting = crate::db::CastingRules {
         one_noncreature_spell: *restricts_noncreature_spells_to_one_per_turn,
         first_spell_free: *grants_first_spell_each_turn_free,
+        warp_from_graveyard: *warp_castable_from_graveyard,
         ..Default::default()
     };
     for r in external_cost_reductions {

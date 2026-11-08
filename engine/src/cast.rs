@@ -45,6 +45,9 @@ pub(crate) mod route {
     /// A granted flashback (its mana cost) besides the card's printed one
     /// (CR 702.34a: either flashback cost may be paid).
     pub const FLASHBACK_MANA: u8 = 8;
+    /// Its own "you may cast this card from your graveyard using its warp
+    /// ability" (ENGINE.md 99.4): for its warp cost only.
+    pub const WARP: u8 = 9;
 }
 
 /// A way to cast a graveyard card (`route::*`), with the permanent whose
@@ -524,6 +527,11 @@ impl Game {
         if self.mayhem_ok(p, card) {
             out.push(Route { code: route::MAYHEM, granter: None });
         }
+        // (With Yawgmoth's Will's permission, that route allows the warp
+        // cost too: `alt_allowed`.)
+        if def.casting.warp_from_graveyard && !out.iter().any(|x| x.code == route::WILL) {
+            out.push(Route { code: route::WARP, granter: None });
+        }
         // The face that would be cast (a card with another face too: its
         // front, or `face`).
         let fd = face.map_or(def, |f| self.db.def(f));
@@ -742,7 +750,9 @@ impl Game {
         // The first spell of a turn without paying its mana cost (ENGINE.md
         // 99.4).
         let free = self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
-        if !(alt_ok || free || self.route_payable(p, card, from, classes)) {
+        // (From a graveyard by its own warp ability only: its warp cost.)
+        let plain = !self.warp_only(p, card, from) && self.route_payable(p, card, from, classes);
+        if !(alt_ok || free || plain) {
             return false;
         }
         // Overloaded (an alternative cost), no target is needed; otherwise
@@ -1865,7 +1875,7 @@ impl Game {
         if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
             return false;
         }
-        if a.warp && from != crate::game::CastFrom::Hand {
+        if a.warp && from != crate::game::CastFrom::Hand && !self.warp_from_graveyard_ok(card, from) {
             return false;
         }
         if a.bestow && !self.def_of(card).bestowed {
@@ -2058,6 +2068,9 @@ impl Game {
         let exile_after = self.objs[card.i()].zone == Zone::Graveyard
             && !matches!(from, crate::game::CastFrom::Flashback | crate::game::CastFrom::FlashbackMana)
             && self.permissions.iter().any(|pm| pm.card == r && pm.kind == crate::game::PermKind::CastThenExile && self.permission_ok(pm, p));
+        // Cast from a graveyard by its own warp ability: for its warp cost,
+        // no other (no choice; ENGINE.md 99.4).
+        let forced_warp = if self.warp_only(p, card, from) { self.def_of(card).alt_costs.iter().position(|a| a.warp) } else { None };
         self.move_card_to_stack(card, p);
         if exile_after {
             self.gy_exile.push(card);
@@ -2090,7 +2103,7 @@ impl Game {
             cost_option: 0,
             modes: Vec::new(),
             ev: Default::default(),
-            alt: 0,
+            alt: forced_warp.map_or(0, |k| k as u8 + 1),
             from,
             delved: 0,
             delve_floor: 0,
@@ -2157,7 +2170,7 @@ impl Game {
         // CR 118.9a: one alternative cost at most (flashback, escape and
         // "without paying its mana cost" are alternative costs; a
         // permission to cast a card for its costs allows one: `alt_allowed`).
-        if !self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) || self.first_spell_free(p, from) {
+        if forced_warp.is_none() && (!self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) || self.first_spell_free(p, from)) {
             self.agenda.push(Task::CastAlt { id }); // CR 601.2b
         }
     }

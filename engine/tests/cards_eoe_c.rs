@@ -875,3 +875,49 @@ fn whenever_an_opponent_discards_a_card() {
     assert_eq!(g.player(1).hand.len(), 1);
     assert_eq!(g.player(0).life, 22, "{}", log(&g));
 }
+
+/// Timeline Culler: "Haste / You may cast this card from your graveyard
+/// using its warp ability. / Warp-{B}, Pay 2 life." (CR 702.185a, 119.4).
+/// From hand: its mana cost or its warp cost (a choice).
+#[test]
+fn timeline_culler_warps_from_hand_paying_two_life_cr702_185a() {
+    let mut g = scen().battlefield(0, &["Swamp", "Swamp"]).hand(0, &["Timeline Culler"]).at(Step::Main1, 0).start();
+    let c = g.card(0, "Timeline Culler", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    assert_eq!(g.pending_decision().unwrap().options.len(), 2, "{:?}", g.options_desc());
+    g.choose(Choice::Number(1));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(c).zone, Zone::Battlefield);
+    assert_eq!(g.player(0).life, 18);
+    assert_eq!(untapped(&g, 0), 1, "{{B}}");
+    assert!(g.void_active());
+    quiet_until(&mut g, |g| g.turn().number == 4 && at_priority(g));
+    assert_eq!(g.obj(c).zone, Zone::Exile, "warp: exiled at the end step\n{}", log(&g));
+}
+
+/// From its owner's graveyard: for its warp cost only (no choice of its
+/// mana cost there), then exiled at the end step like any warped
+/// permanent.
+#[test]
+fn timeline_culler_is_cast_from_the_graveyard_for_its_warp_cost_cr702_185a() {
+    let mut g = scen().battlefield(0, &["Swamp", "Swamp"]).graveyard(0, &["Timeline Culler"]).at(Step::Main1, 0).start();
+    let c = g.card(0, "Timeline Culler", Zone::Graveyard);
+    let opt = g.pending_decision().unwrap().options.iter().find(|o| matches!(o.choice, Choice::Cast(x) if x == c)).map(|o| o.choice);
+    let cast_it = opt.unwrap_or_else(|| panic!("castable from the graveyard: {:?}", g.options_desc()));
+    g.choose(cast_it);
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(c).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.player(0).life, 18);
+    assert_eq!(untapped(&g, 0), 1, "{{B}}, not {{B}}{{B}}");
+    quiet_until(&mut g, |g| g.turn().number == 4 && at_priority(g));
+    assert_eq!(g.obj(c).zone, Zone::Exile, "{}", log(&g));
+
+    // With 1 life its warp cost can't be paid (CR 119.4), and its mana cost
+    // is no way to cast it from a graveyard.
+    let g = scen().battlefield(0, &["Swamp", "Swamp"]).graveyard(0, &["Timeline Culler"]).life(0, 1).at(Step::Main1, 0).start();
+    let c = g.card(0, "Timeline Culler", Zone::Graveyard);
+    assert!(!g.pending_decision().unwrap().options.iter().any(|o| matches!(o.choice, Choice::Cast(x) if x == c)), "{:?}", g.options_desc());
+}

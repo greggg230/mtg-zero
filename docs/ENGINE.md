@@ -18165,6 +18165,16 @@ allows an alternative cost (118.9a, `alt_allowed`); chosen, the spell's `from` b
 `CastFrom::Permission { free: true }` (cost increases still apply, X is 0), the encoding's existing
 "free" flag. Castability counts it (`hand_castable`, `castable_via`).
 
+**Warp variants** (CR 702.185a). "Warp-{B}, Pay 2 life" (`warp_additional_life_cost`: the warp
+`AltCost` pays life too, CR 119.4). "You may cast this card from your graveyard using its warp
+ability" (`CastingRules::warp_from_graveyard`): a graveyard route (`route::WARP`, unless Yawgmoth's
+Will's route, which allows the warp cost through `alt_allowed`, is there) cast as
+`CastFrom::Permission`; `Game::warp_only` says a cast is that route's (no other permission), and
+then castability needs the warp cost (not the mana cost) and the spell is cast for it with no
+choice (`begin_cast_face` sets its alternative cost); `warp_from_graveyard_ok` lets warp's cost be
+paid from a graveyard (`alt_payable`). The warped permanent is exiled at the next end step and may
+be cast from exile on a later turn, as warp from hand.
+
 **More effects.** "Draw X cards, where X is the number of differently named lands you control"
 (`Amount::DifferentlyNamedLands`, CR 201.2); "exile the top X cards of your library, where X is one
 plus the sacrificed artifact's mana value; you may play them this turn" (`EoeC::ExileTopPlayThisTurn`

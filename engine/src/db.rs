@@ -1643,6 +1643,9 @@ pub struct CastingRules {
     /// be cast without paying its mana cost" (an alternative cost, CR
     /// 118.9).
     pub first_spell_free: bool,
+    /// "You may cast this card from your graveyard using its warp ability"
+    /// (CR 702.185a: warp's alternative cost from a graveyard).
+    pub warp_from_graveyard: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting

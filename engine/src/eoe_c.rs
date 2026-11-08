@@ -64,6 +64,37 @@ impl Game {
             && self.battlefield.iter().any(|&c| self.abilities(c).casting.first_spell_free)
     }
 
+    /// May warp's alternative cost of `card` be paid cast the way `from`
+    /// says from a graveyard ("you may cast this card from your graveyard
+    /// using its warp ability"): the card is in a graveyard, or a spell cast
+    /// from one, cast for its costs (a graveyard route, CR 601.2a)?
+    pub(crate) fn warp_from_graveyard_ok(&self, card: CardIdx, from: crate::game::CastFrom) -> bool {
+        self.def_of(card).casting.warp_from_graveyard
+            && matches!(from, crate::game::CastFrom::Permission { free: false, .. })
+            && match self.objs[card.i()].zone {
+                Zone::Graveyard => true,
+                Zone::Stack => self.stack.iter().any(|s| s.kind == crate::game::StackKind::Spell { card } && s.origin == Zone::Graveyard),
+                _ => false,
+            }
+    }
+
+    /// Is a cast of graveyard card `card` by `p` the way `from` says one only
+    /// its own warp ability allows (no Yawgmoth's Will, no effect's
+    /// permission): for its warp cost, not its mana cost?
+    pub(crate) fn warp_only(&self, p: PlayerId, card: CardIdx, from: crate::game::CastFrom) -> bool {
+        if !self.def_of(card).casting.warp_from_graveyard
+            || from != (crate::game::CastFrom::Permission { free: false, any_mana: false })
+            || self.objs[card.i()].zone != Zone::Graveyard
+            || self.gy_play_now(p)
+        {
+            return false;
+        }
+        let r = self.obj_ref(card);
+        !self.permissions.iter().any(|pm| {
+            pm.card == r && self.permission_ok(pm, p) && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::CastThenExile)
+        })
+    }
+
     pub(crate) fn exec_eoe_c(&mut self, f: &mut Frame, op: &EoeC) -> Flow {
         match op {
             EoeC::ExileAllGraveyards => {
