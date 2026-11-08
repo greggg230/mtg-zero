@@ -467,9 +467,9 @@ impl Game {
                 Some((item.controller, source.idx, &self.db.def(ability.def).activated_def(ability.slot).cost))
             }
             StackKind::Spell { card } => {
-                let def = self.db.def(self.objs[card.i()].def);
+                // (Its own alternative cost or a granted one: ENGINE.md 99.15.)
                 let c = if item.alt > 0 {
-                    self.alt_rest(card, item.from, item.alt as usize - 1).unwrap_or(&def.alt_costs[item.alt as usize - 1].cost)
+                    self.item_alt_rest(card, item)
                 } else {
                     self.route_extra(card, item.from, item.cost_option)?
                 };

@@ -1720,8 +1720,10 @@ impl Game {
                     let item = &self.stack[i];
                     // (An alternative cost the card has: always while casting;
                     // not in a state the public-state gate perturbed by hand.)
+                    // (Or one another permanent granted it, noted on the
+                    // spell: ENGINE.md 99.15.)
                     if let StackKind::Spell { card: c } = item.kind {
-                        if item.alt as usize <= self.def_of(c).alt_costs.len() {
+                        if item.alt == 0 || self.item_alt(c, item).is_some() {
                             cost_floats(x, &self.total_mana(c, item).less_generic(item.delved));
                         }
                     }
