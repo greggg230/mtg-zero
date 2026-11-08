@@ -19234,3 +19234,15 @@ controller's hand only (109.5), the cast, void, haste, the exile and the later c
 Tannuk dying in response (608.3g, 400.7g; Full Bore after), the grant ending (611.3b), one
 alternative cost (118.9a), increases and reductions (118.9d), X = 0 (107.3b), faces (601.3e),
 warped without warp (702.185b), and the hidden hand.
+
+**Limits.** None added (no docs/shortcuts.md entry). A printing with more than one hand grant is
+not supported (the lowering says so); no card has one.
+
+**Results** (normal release profile, at 18e9da9; EoE support 266, cube 546 / 546). The full engine
+suite 1,883 passed, 0 failed, 19 ignored; behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 9,037 / 9,041,
+1,922 draws, mean 39.6 turns, 515.0 decisions; 1,483 s); the default `FUZZ_GAMES=20000` passed
+(20,000 games, wins 9,967 / 9,994, 39 draws, as before the branch; 1,000 matches; 455 s). Random
+play reaches the mechanism: 300 random-action games of a Tannuk deck (four Tannuks, red creatures,
+Mountains) cast 301 spells for Tannuk's warp and exiled 273 permanents with it. The public-state
+gate: 135 perturbations encoded, 5 deliberate limits, 9 next-layout gaps.
