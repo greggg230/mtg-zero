@@ -18209,6 +18209,32 @@ Robot token by name only, as entry 3), Starfield Vocalist (its replacement's two
 dropped: the IR is Strionic Resonator's), Mirrorpool (its {C} activation pips read as generic and
 its mana ability dropped, as entry 5).
 
+**Not done, and why.** Blade of the Swarm ("put target exiled card with warp on the bottom of its
+owner's library"): no action slot names an exiled card as a target (`Game::target_action` has no
+exile range), so it needs a layout change; blocked. Full Bore ("if that creature was cast for its
+warp cost, it also gains trample and haste"): a per-permanent fact layout v5 cannot encode (it
+would be a third next-layout gap beside void); blocked by
+`PumpTargetCreatureUntilEOT.granted_keywords_if_warp_cast`. Tannuk, Steadfast Second ("artifact
+cards and red creature cards in your hand have warp {2}{R}"): an alternative cost a card has from
+another permanent, which the engine has no place for (`StackItem::alt` indexes the card's own
+`alt_costs`, and the warped permanent's end-step exile is the card's own delayed ability); blocked
+by `CardPrinting.hand_ability_grants`. Lane C features of cross-lane cards not built:
+`ReanimateTargetCreatureCardFromDefendersGraveyard` (Chorale of the Void),
+`AlpharaelDreamingAcolyteDiscardEffect`, `CardPrinting.ward_discard_random`,
+`EachOpponentExilesOwnCreature` and `SacrificeSelfPreservingExileLink` (Sothera, whose IR also puts
+the sacrifice after the return), `ReturnUpToNCreaturesFromYourGraveyardToHand` (Archenemy's Charm,
+an IR defect), Mirrorpool's two copy effects and Pinnacle Starcage's exile classes (IR defects).
+
+**Results.** EoE support 93 -> 124: 31 lane C cards (All-Fates Scroll, Brightspear Zealot, Chrome
+Companion, Codecracker Hound, Cosmogoyf, Dark Endurance, Deafening Silence, Decode Transmissions,
+Gigastorm Titan, Hymn of the Faller, Illvoi Infiltrator, Insatiable Skittermaw, Interceptor Mechan,
+Kavaron Skywarden, Lashwhip Predator, Lightstall Inquisitor, Memorial Vault, Plasma Bolt, Sami,
+Wildcat Captain, Scavenger Grounds, Seedship Broodtender, Space-Time Anomaly, Starwinder, Temporal
+Intervention, Timeline Culler, Tragic Trajectory, Uthros Psionicist, Virus Beetle, Voidforged Titan,
+Warping Wail, Weftwalking; `SUPPORTED_EOE_C`).
+
 **Tests.** `engine/tests/cards_eoe_c.rs` (the cards, and lane C features whose real cards need
 another lane, on custom cards in `engine/tests/eoe_c_util`, the EoE table plus those cards).
-Behaviour digests unchanged (`f6543eb2b1b8752f`); cube support 546 / 546.
+Behaviour digests unchanged (`f6543eb2b1b8752f`); cube support 546 / 546. At 7fd4227: the full
+engine suite 1,567 passed, 0 failed (15 ignored); `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000
+games, 433 s); the cube's `FUZZ_GAMES=20000` passed (20,000 games and 1,000 matches, 412 s).
