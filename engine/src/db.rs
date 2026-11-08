@@ -902,6 +902,18 @@ pub struct TriggerDef {
     pub uses_event: bool,
 }
 
+impl TriggerDef {
+    /// May two instances from different source objects resolve differently
+    /// (CR 113.7: "this", the source's power or counters, the damage it
+    /// deals, the targets it can't choose)? Yes unless its targets (none),
+    /// its intervening "if" (none) and every instruction read nothing of
+    /// the source (`Op::may_read_source`): then the instances are
+    /// interchangeable (`put_triggers`).
+    pub fn uses_source(&self) -> bool {
+        !self.ability.targets.is_empty() || !self.pred.intervening().is_empty() || self.ability.program.iter().any(|op| op.may_read_source())
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum AbilitySlot {
     Spell,
@@ -1947,6 +1959,9 @@ pub struct CardDb {
     by_name: BTreeMap<String, DefId>,
     unsupported: BTreeMap<String, Vec<String>>,
     subtypes: Vec<String>,
+    /// The subtypes copy exceptions name, in order: bit k of a copy's
+    /// `Except::subtypes` is the k-th (at most 64, `Lowerer::exc_subtype`).
+    exc_subtypes: Vec<u16>,
     /// The interned "Equipment" subtype, if any card has it.
     equipment: Option<u16>,
     /// The finality counter (CR 122.1i), if any card names it.
@@ -2055,7 +2070,7 @@ impl CardDb {
         let face_tag = crate::lower::effect_ext::TOKEN_FACE;
         for card in cards {
             let t0 = tokens.len();
-            let result = lower::lower_card(card, &mut db.subtypes, &mut tokens);
+            let result = lower::lower_card_in(card, &mut db.subtypes, &mut tokens, &mut db.exc_subtypes);
             for (ti, t) in tokens.iter_mut().enumerate().skip(t0) {
                 if let Some(k) = t.back.filter(|k| k & face_tag != 0) {
                     match result {
@@ -2355,6 +2370,12 @@ impl CardDb {
     }
 
     /// Every interned subtype (and counter name), by id.
+    /// The bit of subtype `s` in a copy's exceptions, if any copy exception
+    /// of the table names it (`Except::subtypes`).
+    pub fn exc_subtype_bit(&self, s: u16) -> Option<u8> {
+        self.exc_subtypes.iter().position(|&x| x == s).map(|k| k as u8)
+    }
+
     pub fn subtype_names(&self) -> &[String] {
         &self.subtypes
     }

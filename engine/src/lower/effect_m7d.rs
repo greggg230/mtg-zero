@@ -61,7 +61,7 @@ pub(crate) fn lower_effect_m7d(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             }
             let p = l.int("ThenTargetBecomesCreatureIfNot.power", *power, 0, 20);
             let t = l.int("ThenTargetBecomesCreatureIfNot.toughness", *toughness, 0, 20);
-            let subtype = l.subtype(subtype);
+            let Some(subtype) = l.given_subtype("ThenTargetBecomesCreatureIfNot.subtype", subtype) else { return true };
             b.op(Op::Ext(Ext::M7d(M7d::BecomeCreatureIfNot { tgt: n as u8, p, t, subtype })));
         }
         // "Reveal the top card of your library. If it's a land card, put it
