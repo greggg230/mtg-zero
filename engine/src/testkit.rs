@@ -727,6 +727,11 @@ impl Game {
             v.extend([d.player as u64, d.kind as u64]);
             if d.player == viewer {
                 v.extend(d.options.iter().map(|o| o.action as u64));
+                // (A page or a digit: the decider's, as the encoding's
+                // context floats, ENGINE.md 100.1.)
+                if d.stage != crate::decision::Stage::One {
+                    v.push(h64(&d.stage));
+                }
             }
         }
         v
