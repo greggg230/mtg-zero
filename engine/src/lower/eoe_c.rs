@@ -105,7 +105,7 @@ pub(crate) fn lower_effect_eoe_c(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         // control] [that isn't a <subtype>] until this leaves the
         // battlefield" (CR 610.3, a linked exile). One target: the class
         // has no target count (docs/ir_defects.md 60).
-        E::ExileTargetCreatureUntilSourceLeaves(nodes::ExileTargetCreatureUntilSourceLeaves { excluded_subtypes, opponents_only, yours_only }) => {
+        E::ExileTargetCreatureUntilSourceLeaves(nodes::ExileTargetCreatureUntilSourceLeaves { excluded_subtypes, opponents_only, yours_only, up_to_one }) => {
             let mut f = Filter::Type(types::CREATURE);
             for s in excluded_subtypes {
                 let k = l.subtype(s);
@@ -120,7 +120,9 @@ pub(crate) fn lower_effect_eoe_c(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             if *yours_only {
                 f = and(f, Filter::Controller(true));
             }
-            let t = b.target(f, 1, 1);
+            // "Exile up to one target ..." (All-Fates Stalker, CR 115.1d):
+            // zero or one target; with none, nothing is exiled.
+            let t = b.target(f, if *up_to_one { 0 } else { 1 }, 1);
             b.op(Op::Ext(Ext::ExileLinked { tgt: t, until: true }));
         }
         // "Exile all graveyards" (every card in every graveyard, at once).

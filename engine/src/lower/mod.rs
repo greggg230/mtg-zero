@@ -216,28 +216,15 @@ impl Lowerer<'_> {
 /// blocked, with this blocker, until the IR is fixed in mtg-bot. The cube's
 /// list is empty since the IR of mtg-bot feature/ir-fixes-mtgzero 8ea9fcca
 /// (docs/ir_defects.md); the entries below are Edge of Eternities cards
-/// (ENGINE.md 99, docs/ir_defects.md 20).
+/// (ENGINE.md 99). mtg-bot feature/eoe-ir-fixes fixed entries 20-23, 26, 40,
+/// 42, 46, 48, 51, 60, 63, 64, 81, 82, Gravkill's 62, Blinkmoth Nexus' and
+/// Inkmoth Nexus' 41, Dockworker Drone's and Blast Zone's 21 (ENGINE.md
+/// 99.9); what is left below is still wrong in the IR.
 const IR_DEFECTS: &[(&str, &str)] = &[
-    // The IR drops the Station keyword ability and its threshold abilities:
-    // the planets are a land with "{T}: Add" only, The Eternity Elevator has
-    // no station at all (docs/ir_defects.md 20).
-    ("Adagia, Windswept Bastion", "ir_defect(station dropped, docs/ir_defects.md 20)"),
-    ("Evendo, Waking Haven", "ir_defect(station dropped, docs/ir_defects.md 20)"),
-    ("Kavaron, Memorial World", "ir_defect(station dropped, docs/ir_defects.md 20)"),
-    ("Susur Secundi, Void Altar", "ir_defect(station dropped, docs/ir_defects.md 20)"),
-    ("The Eternity Elevator", "ir_defect(station dropped, docs/ir_defects.md 20)"),
-    ("Uthros, Titanic Godcore", "ir_defect(station dropped, docs/ir_defects.md 20)"),
-
     // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
-    // "Enters with" counters written as an enters trigger (21).
-    ("Blast Zone", "ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)"),
-    ("Dockworker Drone", "ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)"),
+    // "Enters with" a count of +1/+1 counters per permanent written as an
+    // enters trigger (21; the schema has no such count).
     ("Luxknight Breacher", "ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)"),
-    // "One or more ... deal combat damage" as once per turn (22).
-    ("Haliya, Ascendant Cadet", "ir_defect(one or more as once per turn, docs/ir_defects.md 22)"),
-    // The white Human Soldier token printed colourless (23).
-    ("Honored Knight-Captain", "ir_defect(white token printed colourless, docs/ir_defects.md 23)"),
-    ("Rayblade Trooper", "ir_defect(white token printed colourless, docs/ir_defects.md 23)"),
     // "Can attack as though it didn't have defender" as losing defender (24).
     ("Mechan Shieldmate", "ir_defect(attack permission as losing defender, docs/ir_defects.md 24)"),
     // The counter doubler's recipients dropped (25).
@@ -254,82 +241,27 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Terrasymbiosis", "ir_defect(who puts the counters dropped, docs/ir_defects.md 31)"),
 
     // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
-    // "{T}: Add {C}." dropped: Python's "any land pays one generic" fallback
-    // stands in for it (docs/ir_defects.md 40).
-    ("Blast Zone", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Bonders' Enclave", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Cascading Cataracts", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Cathedral of War", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Contested War Zone", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Crystal Quarry", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Deserted Temple", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Echoing Deeps", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Endless Sands", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Inkmoth Nexus", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Inventors' Fair", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Mirrorpool", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Mutavault", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Mystifying Maze", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Nesting Grounds", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Power Depot", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Swarmyard", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Terrain Generator", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    ("Thespian's Stage", "ir_defect({T}: Add {C} dropped, docs/ir_defects.md 40)"),
-    // An animated land loses the card type or creature types it becomes
-    // (docs/ir_defects.md 41).
-    ("Blinkmoth Nexus", "ir_defect(animated land's types dropped, docs/ir_defects.md 41)"),
-    ("Inkmoth Nexus", "ir_defect(animated land's types dropped, docs/ir_defects.md 41)"),
+    // "A 2/2 creature with all creature types": the IR has no "all creature
+    // types" (docs/ir_defects.md 41).
     ("Mutavault", "ir_defect(animated land's types dropped, docs/ir_defects.md 41)"),
-    // The Lander token's "{2}, {T}, Sacrifice this token" without {T}
-    // (docs/ir_defects.md 42).
-    ("Beamsaw Prospector", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Bioengineered Future", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Biomechan Engineer", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Biotech Specialist", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Dauntless Scrapbot", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Edge Rover", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Galactic Wayfarer", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Glacier Godmaw", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Lithobraking", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Sami's Curiosity", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Scrounge for Eternity", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Seedship Agrarian", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
-    ("Sunstar Expansionist", "ir_defect(Lander token without {T}, docs/ir_defects.md 42)"),
     // Clauses of an effect dropped (docs/ir_defects.md 43-45, 49).
     ("Divert Disaster", "ir_defect(unless-pays and Lander dropped, docs/ir_defects.md 43)"),
     ("Unravel", "ir_defect(draw clause dropped, docs/ir_defects.md 44)"),
     ("Xu-Ifit, Osteoharmonist", "ir_defect(Skeleton and no abilities dropped, docs/ir_defects.md 45)"),
     ("Pull Through the Weft", "ir_defect(lands-to-battlefield clause dropped, docs/ir_defects.md 49)"),
-    // A cost, a choice or a restriction reshaped (docs/ir_defects.md 46-48,
-    // 50).
-    ("High Market", "ir_defect(sacrifice a creature widened, docs/ir_defects.md 46)"),
+    // A restriction or a choice reshaped (docs/ir_defects.md 47, 50).
     ("Power Depot", "ir_defect(modular dropped, spend restriction narrowed, docs/ir_defects.md 47)"),
-    ("Starfield Shepherd", "ir_defect(one search made modal, docs/ir_defects.md 48)"),
     ("Sunken Citadel", "ir_defect(chosen colour dropped, docs/ir_defects.md 50)"),
-    // A token's colour dropped (docs/ir_defects.md 51; entry 12 again).
-    ("Cosmogrand Zenith", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
-    ("Honored Knight-Captain", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
-    ("Knight Luminary", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
-    ("Rayblade Trooper", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
 
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
-    // "Exile up to one target ...": the class has no target count, one
-    // target is required (docs/ir_defects.md 60).
-    ("All-Fates Stalker", "ir_defect(up to one target dropped, docs/ir_defects.md 60)"),
     // "Exile target creature you control" read as "until this leaves the
     // battlefield"; the ability returning the exiled cards is an empty
     // effect (docs/ir_defects.md 61).
     ("Endless Sands", "ir_defect(linked exile and its return dropped, docs/ir_defects.md 61)"),
-    // "Exile target creature or Spacecraft / or planeswalker": the target
-    // filter is a creature only (docs/ir_defects.md 62).
+    // "Exile target creature or planeswalker": the target filter is a
+    // creature only; the second mode's planeswalker cards dropped
+    // (docs/ir_defects.md 62).
     ("Archenemy's Charm", "ir_defect(target types dropped, docs/ir_defects.md 62)"),
-    ("Gravkill", "ir_defect(target types dropped, docs/ir_defects.md 62)"),
-    // "Whenever one or more creatures you control deal combat damage to a
-    // player" as once each turn (docs/ir_defects.md 63, as 16).
-    ("Elegy Acolyte", "ir_defect(one or more as once per turn, docs/ir_defects.md 63)"),
-    // The "from anywhere" replacement without the printing's flag that
-    // says it is watched in a graveyard (docs/ir_defects.md 64).
-    ("Nexus of Fate", "ir_defect(watched_in_graveyard unset, docs/ir_defects.md 64)"),
     // "Create a 2/2 colorless Robot artifact creature token for each ...":
     // the token by name only (docs/ir_defects.md 65, as 3).
     ("Pinnacle Starcage", "ir_defect(token printing by name only, docs/ir_defects.md 65)"),
@@ -337,18 +269,14 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // of a permanent you control to trigger": both restrictions dropped
     // (docs/ir_defects.md 66).
     ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
-    // "{2}{C}" / "{4}{C}" activation costs as generic {3} / {5}, and its
-    // "{T}: Add {C}" dropped (docs/ir_defects.md 67, as 5).
+    // "{2}{C}" / "{4}{C}" activation costs as generic {3} / {5}
+    // (docs/ir_defects.md 67, as 5).
     ("Mirrorpool", "ir_defect(colorless pips as generic, docs/ir_defects.md 67)"),
 
     // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
     // "Dies or is put into exile" widened to "leaves the battlefield", and
     // "while its power is 4 or greater" moved to resolution (80).
     ("Syr Vondam, Sunstar Exemplar", "ir_defect(dies-or-exiled widened to leaves the battlefield, docs/ir_defects.md 80)"),
-    // "Target creature or planeswalker": the planeswalker dropped (81).
-    ("Dawnsire, Sunstar Dreadnought", "ir_defect(planeswalker target dropped, docs/ir_defects.md 81)"),
-    // "They lose 3 life" (the discarding player) written as a target (82).
-    ("Entropic Battlecruiser", "ir_defect(the event's player written as a target, docs/ir_defects.md 82)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

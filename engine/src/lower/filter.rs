@@ -276,12 +276,24 @@ pub(crate) fn lower_card_filter(l: &mut Lowerer, f: &cats::CardFilter) -> Option
     lower_card_filter_node(l, n)
 }
 
-/// A library search's filter: a `CardFilter` or "a card of one of these
-/// types or subtypes".
-pub(crate) fn lower_search_filter(l: &mut Lowerer, f: &cats::CardFilterOrCardTypeOrSubtypeFilter) -> Option<Filter> {
+/// A library search's filter: a `CardFilter`, "a card of one of these
+/// types or subtypes", or "<a ... card> or <a ... card>" (Starfield
+/// Shepherd: one search, a card of either kind, CR 701.19).
+pub(crate) fn lower_search_filter(l: &mut Lowerer, f: &cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter) -> Option<Filter> {
     match f {
-        cats::CardFilterOrCardTypeOrSubtypeFilter::CardFilter(n) => lower_card_filter_node(l, n),
-        cats::CardFilterOrCardTypeOrSubtypeFilter::CardTypeOrSubtypeFilter(nodes::CardTypeOrSubtypeFilter {
+        cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter::CardFilter(n) => lower_card_filter_node(l, n),
+        cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter::CardFilterAnyOf(nodes::CardFilterAnyOf { filters }) => {
+            let mut any = Vec::new();
+            for f in filters {
+                any.push(lower_card_filter(l, f)?);
+            }
+            if any.len() < 2 {
+                l.unsupported("CardFilterAnyOf.filters(fewer than two)");
+                return None;
+            }
+            Some(Filter::Or(any))
+        }
+        cats::CardFilterOrCardFilterAnyOfOrCardTypeOrSubtypeFilter::CardTypeOrSubtypeFilter(nodes::CardTypeOrSubtypeFilter {
             types: tys,
             subtypes,
         }) => {

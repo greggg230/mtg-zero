@@ -125,14 +125,13 @@ fn cr_702_185a_bygone_colossus_warps_in_for_three_and_is_exiled_at_the_end_step(
 /// Exalted Sunborn: "If one or more tokens would be created under your
 /// control, twice that many of those tokens are created instead" (CR
 /// 614.1a); an opponent's Sunborn doesn't apply. (Knight Luminary and
-/// Cosmogrand Zenith make white Human Soldiers the IR leaves colourless:
-/// blocked, docs/ir_defects.md 51.)
+/// Cosmogrand Zenith, whose white Human Soldiers the IR now carries: ENGINE.md
+/// 99.9, `cards_eoe_irfix*.rs`.)
 #[test]
 fn exalted_sunborn_doubles_the_tokens_you_create() {
     let mut g = scen().battlefield(0, &["Exalted Sunborn", "Eusocial Engineering"]).battlefield(1, &["Exalted Sunborn"]).hand(0, &["Forest"]).at(Step::Main1, 0).start();
     play_land(&mut g, 0, "Forest", |_| None);
     assert_eq!(tokens_named(&g, 0, "Robot").len(), 2, "twice that many");
-    assert!(db().id("Knight Luminary").is_none() && db().id("Cosmogrand Zenith").is_none(), "docs/ir_defects.md 51");
 }
 
 /// Germinating Wurm: "When this creature enters, you gain 2 life." Nebula

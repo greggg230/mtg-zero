@@ -504,7 +504,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             }
         }
         E::DealDamage(nodes::DealDamage { amount, targets }) => {
-            let amount = Amount::Fixed(l.int("DealDamage.amount", *amount, 0, 99));
+            // (Up to Dawnsire, Sunstar Dreadnought's 100, the largest
+            // printed amount; damage is a u32, Amount::Fixed an i32.)
+            let amount = Amount::Fixed(l.int("DealDamage.amount", *amount, 0, 100));
             if let Some(to) = lower_targets(l, b, targets, "DealDamage") {
                 b.op(Op::DealDamage { amount, to });
             }

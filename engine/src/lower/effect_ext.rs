@@ -443,6 +443,8 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             granted_keywords,
             unblockable,
             granted_subtype,
+            granted_card_types,
+            granted_subtypes,
             granted_activated_abilities,
             granted_triggered_abilities,
             set_colors,
@@ -458,8 +460,23 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 // Elemental"). An IR defect (ENGINE.md 20).
                 l.unsupported("BecomeLandCreatureUEOT.set_colors(missing for a coloured land)");
             }
-            let subtypes = granted_subtype.iter().map(|s| l.subtype(s)).collect();
-            let mut mods = vec![Mod::Types { add: types::CREATURE, subtypes, replace: false }];
+            // "a 1/1 Phyrexian Blinkmoth artifact creature" (Inkmoth Nexus):
+            // the card types and creature types it gains beside creature.
+            let mut subtypes: Vec<u16> = granted_subtype.iter().map(|s| l.subtype(s)).collect();
+            for s in granted_subtypes {
+                let k = l.subtype(s);
+                if !subtypes.contains(&k) {
+                    subtypes.push(k);
+                }
+            }
+            let mut add = types::CREATURE;
+            for t in granted_card_types {
+                match types::from_name(t) {
+                    Some(b) => add |= b,
+                    None => l.unsupported(format!("BecomeLandCreatureUEOT.granted_card_types({t})")),
+                }
+            }
+            let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
             if !set_colors.is_empty() {
                 let mut m = 0;
                 for c in set_colors {

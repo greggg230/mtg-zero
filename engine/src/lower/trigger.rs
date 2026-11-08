@@ -390,7 +390,11 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
             Some(TrigPred::EnteredXAtLeast(l.int("EnteringWithXAtLeast.n", *n, 1, 99) as u8))
         }
         // "Whenever one or more ..." (one trigger per simultaneous batch).
-        P::OneOrMoreBatch(nodes::OneOrMoreBatch {}) => Some(TrigPred::Batch),
+        // "One or more ... deal combat damage to a player" batches per
+        // damaged player (`per_target_player`, Haliya, Elegy Acolyte): in a
+        // two-player game the only player your creatures can deal combat
+        // damage to is your opponent, so it is the one batch.
+        P::OneOrMoreBatch(nodes::OneOrMoreBatch { per_target_player: _ }) => Some(TrigPred::Batch),
         // A chapter ability (CR 714.2b).
         P::ChapterReached(nodes::ChapterReached { n }) => Some(TrigPred::Chapter(l.int("ChapterReached.n", *n, 1, 20) as u8)),
         // "When this Class becomes level n" (CR 716.2c).

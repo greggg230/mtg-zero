@@ -13,7 +13,8 @@ specified in mtg-bot's `docs/CARD_IR.md`.
 |---|---|
 | `data/cards/powerlsv.ir.json` | The PowerLSV cube (546 printings), IR v1, exported by mtg-bot `feature/legacy-delver-ir` 140eafa9 with the legacy pool (schema `181ba4b8a1e7...`, ENGINE.md 54; the cards byte for byte those of `feature/companion-ir` 62210e89, schema `7100f8436556...`: companion conditions, M8a; before it `feature/ir-fixes-mtgzero` 8ea9fcca, schema `66ba3e33fe5b...`, the IR defects of docs/ir_defects.md 1, 2, 4, 12, 13, 15-18 fixed) |
 | `data/cards/legacy.ir.json` | The legacy cards of constructed play (ENGINE.md 54: Murktide Regent, Prismari Charm; mtg-bot's pool `legacy`), the same export and schema |
-| `data/cards/powerlsv.schema.json` | The schema both documents were encoded with |
+| `data/cards/eoe.ir.json` | The Edge of Eternities sealed cards (ENGINE.md 99.1: mtg-bot's pool `eoe` filtered by `tools/codegen/filter_eoe_ir.py` to the set's 320 cards with IR), the same export and schema; since ENGINE.md 99.9 the export of mtg-bot `feature/eoe-ir-fixes` 5362f5ed |
+| `data/cards/powerlsv.schema.json` | The schema the three documents were encoded with |
 | `tools/codegen/gen_card_ir.py` | Schema -> Rust generator (stdlib Python) |
 | `card_ir/src/generated.rs` | Generated types (do not edit) |
 | `card_ir/src/support.rs` | Hand-written `Count` (int or `"inf"`) and `Never` |
@@ -61,12 +62,14 @@ Any parser or card-primitive change in mtg-bot can change the schema
 
 ```bash
 # 1. In the mtg-bot checkout (a worktree: PYTHONPATH=src, shared venv):
-PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards roundtrip --pool cube legacy
-# (both pools, one schema: powerlsv.ir.json, legacy.ir.json, powerlsv.schema.json; ENGINE.md 54)
+PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards roundtrip --pool cube legacy eoe
+# (three pools, one schema: powerlsv.ir.json, legacy.ir.json, eoe.ir.json, powerlsv.schema.json;
+# ENGINE.md 54, 99.1)
 PYTHONPATH=src ../../mtg-bot/.venv-py313/Scripts/python.exe -m mtg_bot cards export-ir \
-    --pool cube legacy --out "C:/Users/Gregg Keithley/mtg-zero/data/cards"
+    --pool cube legacy eoe --out "C:/Users/Gregg Keithley/mtg-zero/data/cards"
 
 # 2. In mtg-zero:
+python tools/codegen/filter_eoe_ir.py --mtg-bot-data <mtg-bot>/data --ir data/cards/eoe.ir.json
 python tools/codegen/gen_card_ir.py --schema data/cards/powerlsv.schema.json \
     --out card_ir/src/generated.rs
 CARGO_TARGET_DIR=E:/cargo-target/mtg-zero/<branch> cargo test -p card_ir -- --nocapture
@@ -83,7 +86,24 @@ When mtg-bot bumps `ir_version` (a change to the encoding rules, not to
 the card vocabulary), `support.rs`, `lib.rs` and the generator may need
 changes too; see mtg-bot `docs/CARD_IR.md`, "Versioning".
 
-## Current numbers (mtg-bot `feature/legacy-delver-ir` 140eafa9)
+## Current numbers (mtg-bot `feature/eoe-ir-fixes` 5362f5ed)
+
+ENGINE.md 99.9: exported with `cards export-ir --pool cube legacy eoe` from mtg-bot
+`feature/eoe-ir-fixes` 5362f5ed (from main 2cb79f77), then `filter_eoe_ir.py`; schema sha256
+`675cfc50fc4efd23b2fdb07a27ef999e67c06e86be409daee57b1c0d237eb259` (was `70c85fff4b77...`, the EoE
+import of ENGINE.md 99.1 from mtg-bot main 2cb79f77, three pools; before it `181ba4b8a1e7...`).
+707 classes, five more: `CardFilterAnyOf` (a library search's "<a ... card> or <a ... card>"),
+`PowerOfCostPaidObject` (a formula), `DrawCardsEqualTo`, `CreateTokenCopyOfTargetWithExceptions` and
+`CopyExceptions` (with `add_supertypes`); new fields `BecomeLandCreatureUEOT.granted_card_types` /
+`granted_subtypes`, `ExileTargetCreatureUntilSourceLeaves.up_to_one`,
+`OneOrMoreBatch.per_target_player`. The fixed defects are docs/ir_defects.md 20-23, 26, 40-42, 46,
+48, 51, 60, 62-64, 81, 82 (some for part of their cards; each entry's last bullet).
+`powerlsv.ir.json` (546 cards, 402,200 bytes) and `legacy.ir.json` (2 cards) are the previous files
+card for card, `schema_sha256` aside (checked card by card); `eoe.ir.json` holds the same 320 cards,
+53 of them changed (62 of the export's 483: the other 9 are Duskmourn cards the filter drops, whose
+tokens gained their printed colour), 210,970 bytes.
+
+### Before ENGINE.md 99 (mtg-bot `feature/legacy-delver-ir` 140eafa9)
 
 D1 (ENGINE.md 54): exported with `cards export-ir --pool cube legacy`, one schema over both pools
 (sha256 `181ba4b8a1e7b13c1dd77d7529ed4ecd32bbe27ca88d62bf98e6d02c9b5d31b6`): 514 classes (one more,

@@ -18,6 +18,9 @@
   "CardFilter": [
    "CardFilter"
   ],
+  "CardFilterAnyOf": [
+   "CardFilterAnyOf"
+  ],
   "CardPrinting": [
    "CardPrinting"
   ],
@@ -68,6 +71,9 @@
   ],
   "ContinuousModifier": [
    "ContinuousModifier"
+  ],
+  "CopyExceptions": [
+   "CopyExceptions"
   ],
   "CostAtom": [
    "ExileSelfFromGraveyardCost",
@@ -162,6 +168,7 @@
    "CreateTokenCopyOfTargetCreatureYouControl",
    "CreateTokenCopyOfTargetPermanent",
    "CreateTokenCopyOfTargetTokenYouControl",
+   "CreateTokenCopyOfTargetWithExceptions",
    "CreateTokenCopyOfTargetWithKeywordsSacAtEndStep",
    "CreateTokenPerFormula",
    "CreateTokenPerMulticoloredPermanent",
@@ -225,6 +232,7 @@
    "DrawCards",
    "DrawCardsAndLoseLifeEqualToResolvingDamage",
    "DrawCardsByConditionMultiplier",
+   "DrawCardsEqualTo",
    "DrawCardsEqualToResolvingCombatDamage",
    "DrawCardsEqualToResolvingCounterAmount",
    "DrawCardsPerCounterOnSource",
@@ -621,6 +629,7 @@
    "EventSubjectPower",
    "ExperienceCounters",
    "MVOfCostPaidObjectPlus",
+   "PowerOfCostPaidObject",
    "ResolvingDamageAmount",
    "ResolvingX",
    "Scaled"
@@ -2326,6 +2335,32 @@
      "type_source": "annotation"
     },
     {
+     "annotation": "tuple[str, ...]",
+     "default": [],
+     "name": "granted_card_types",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "tuple[str, ...]",
+     "default": [],
+     "name": "granted_subtypes",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
      "annotation": "tuple",
      "default": [],
      "name": "granted_activated_abilities",
@@ -2675,6 +2710,30 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.card_flow",
    "qualname": "CardFilter"
+  },
+  "CardFilterAnyOf": {
+   "category": "CardFilterAnyOf",
+   "fields": [
+    {
+     "annotation": "tuple[CardFilter, ...]",
+     "default": [],
+     "name": "filters",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "CardFilter"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.card_flow",
+   "qualname": "CardFilterAnyOf"
   },
   "CardPrinting": {
    "category": "CardPrinting",
@@ -6560,6 +6619,98 @@
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "CopyEachTokenYouControlEnteredThisTurn"
   },
+  "CopyExceptions": {
+   "category": "CopyExceptions",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "add_types",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "never"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "add_subtypes",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "never"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "add_supertypes",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "'tuple | None'",
+     "default": null,
+     "name": "base_pt",
+     "required": false,
+     "type": {
+      "of": {
+       "of": {
+        "t": "never"
+       },
+       "t": "list"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "'frozenset | None'",
+     "default": null,
+     "name": "colors",
+     "required": false,
+     "type": {
+      "of": {
+       "of": {
+        "t": "never"
+       },
+       "t": "set"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "frozenset[KeywordSpelling]",
+     "default": [],
+     "name": "add_keywords",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "keyword"
+      },
+      "t": "set"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_walkers",
+   "qualname": "CopyExceptions"
+  },
   "CopyTargetInstantOrSorcerySpellYouControl": {
    "category": "Effect",
    "fields": [],
@@ -7312,6 +7463,65 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.artifact_mechanics",
    "qualname": "CreateTokenCopyOfTargetTokenYouControl"
+  },
+  "CreateTokenCopyOfTargetWithExceptions": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple",
+     "default": [],
+     "name": "targets",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "TargetSpec"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "CopyExceptions",
+     "default": {
+      "$t": "CopyExceptions"
+     },
+     "name": "exceptions",
+     "required": false,
+     "type": {
+      "categories": [
+       "CopyExceptions"
+      ],
+      "t": "ref"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "gains_haste",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "exile_at_next_end_step",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_walkers",
+   "qualname": "CreateTokenCopyOfTargetWithExceptions"
   },
   "CreateTokenCopyOfTargetWithKeywordsSacAtEndStep": {
    "category": "Effect",
@@ -9099,6 +9309,30 @@
    "module": "mtg_bot.effects.generic.draw_mill",
    "qualname": "DrawCardsByConditionMultiplier"
   },
+  "DrawCardsEqualTo": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "object",
+     "default": null,
+     "name": "count",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Formula"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.roto_walkers",
+   "qualname": "DrawCardsEqualTo"
+  },
   "DrawCardsEqualToResolvingCombatDamage": {
    "category": "Effect",
    "fields": [],
@@ -10063,6 +10297,16 @@
      "annotation": "bool",
      "default": false,
      "name": "yours_only",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "up_to_one",
      "required": false,
      "type": {
       "t": "bool"
@@ -13490,7 +13734,18 @@
   },
   "OneOrMoreBatch": {
    "category": "TriggerPredicate",
-   "fields": [],
+   "fields": [
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "per_target_player",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "OneOrMoreBatch"
@@ -14095,6 +14350,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_wg",
    "qualname": "PowerEqualsCount"
+  },
+  "PowerOfCostPaidObject": {
+   "category": "Formula",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.formulas",
+   "qualname": "PowerOfCostPaidObject"
   },
   "PowerPlusGreatestManaValueOfOtherArtifactsPT": {
    "category": "PTFormula",
@@ -18723,7 +18985,7 @@
    "category": "Effect",
    "fields": [
     {
-     "annotation": "'CardFilter | CardTypeOrSubtypeFilter'",
+     "annotation": "'CardFilter | CardTypeOrSubtypeFilter | CardFilterAnyOf'",
      "default": {
       "$t": "CardFilter"
      },
@@ -18732,6 +18994,7 @@
      "type": {
       "categories": [
        "CardFilter",
+       "CardFilterAnyOf",
        "CardTypeOrSubtypeFilter"
       ],
       "t": "ref"

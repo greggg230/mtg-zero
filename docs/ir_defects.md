@@ -6,7 +6,7 @@ Status: 2026-10-22, engine at main 7c014ca + the M7b card tests (branch `m7b-tes
 `3073a633` (branch main). Updated 2026-10-23 for M7b part 3 (copies, branch `m7b-copies`, 410 supported): no new
 defect; entry 11 gains two classes, and the copy cards' Python-only switches are listed under "Checked and not
 defects". Updated 2026-10-23 for M7b part 3b (the stack, ward, the initiative, graveyard abilities, branch
-`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
+`m7b-stack`, 438 supported): no new defect; the 28 cards' notes are under "Checked and not defects". Updated 2026-10-23 for M7c tail part 1 (branch `m7c-tail1`, 467 supported): entry 15 (Chromatic Star). Updated 2026-10-24 for M7c tail part 2 (branch `m7c-tail2`, 491 supported): entries 16 (Forth Eorlingas!) and 17 (Green Sun's Zenith); entry 14's second card is now supported; Laelia's placeholder event under "Checked and not defects". Updated 2026-10-24 for M7c tail part 3 (branch `m7c-tail3`, 524 supported): entry 18 (Wizard's Rockets); entries 5, 6, 7, 8 and 10's cards (Sowing Mycospawn, Thieving Skydiver, Wan Shi Tong, Animate Dead, Necromancy, Fastbond, Pest Infestation) supported, the IR read faithfully with consistency checks; the tail's notes under "Checked and not defects". Updated 2026-10-25 (branch `m7d-ir`, 546 supported): the IR now in use is mtg-bot `feature/ir-fixes-mtgzero` 8ea9fcca (schema `66ba3e33fe5b`), which fixes entries 1, 2, 4, 12, 13, 15, 16, 17 and 18 (each entry's last bullet); the lowering reads the fixed forms and `lower::IR_DEFECTS` is empty: every cube card is supported. Updated 2026-11-08 (branch `eoe-irfix`, ENGINE.md 99.9): the IR now in use is mtg-bot `feature/eoe-ir-fixes` 5362f5ed (schema `675cfc50fc4e`), which fixes entries 20-23, 26, 40-42, 46, 48, 51, 60, 62-64, 81 and 82 (for 21, 41 and 62 only some of their cards; each entry's last bullet); the other Edge of Eternities entries stand. The IR is exported by mtg-bot (`mtg_bot.cards.ir`, `python -m mtg_bot
 cards export-ir`) from the card printings its oracle-text parser builds (`src/mtg_bot/cards/parser/`)
 and the effect dataclasses (`src/mtg_bot/effects/`). This file lists where the IR says something
 other than the Oracle text, or leaves out what a consumer needs, with the parser code that produces
@@ -55,41 +55,41 @@ permission) and a consumer can go wrong with it.
 | 17 | Green Sun's Zenith | instruction as a replacement | "Shuffle Green Sun's Zenith into its owner's library" as a self static `ReplacementEffect(would_go_to_graveyard, Replace(library))` (from anywhere) | the last instruction of the spell's effect (only as it resolves) | `cards/parser/spell_builder.py` (`_SELF_SHUFFLE_GSZ_RE`, `_detect_shuffle_self_statics`, ~line 430) | fixed (8ea9fcca), supported | confirmed |
 | 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | fixed (8ea9fcca), supported | confirmed |
 | 19 | Gut, True Soul Zealot | qualifier widened | `SacrificeAPermanent { another: true, permanent_filter: ObjectOr(IsCreature, IsArtifact) }` for "sacrifice another creature or an artifact" | "another" on the creature only (an artifact may be Gut itself) | the "sacrifice another ..." phrase parser (`IfYouDo` / `MayDo`) | worked around (the label read) | confirmed |
-| 20 | Adagia, Windswept Bastion; Evendo, Waking Haven; Kavaron, Memorial World; Susur Secundi, Void Altar; Uthros, Titanic Godcore; The Eternity Elevator (Edge of Eternities, ENGINE.md 99) | ability dropped | the planets: a land with `enters_tapped` and `produces` only; The Eternity Elevator: no `station_threshold` / `stationed_*` | Station (CR 702.184) and each threshold ability ("12+ ..."), as the set's Spacecraft carry them | `cards/parser/land_builder.py` (planets) and the Spacecraft builder (`cards/parser/spacecraft_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 21 | Dockworker Drone, Luxknight Breacher (and Blast Zone) (Edge of Eternities, ENGINE.md 99.2) | replacement as a trigger | "this creature enters with a +1/+1 counter on it [for each ...]" / "this land enters with a charge counter on it" as an `enters` triggered ability (`PutPlusOneCounterOnSelf`, `PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact`, `PutChargeCountersOnSelf`) | it enters with the counters (CR 614.1c, 122.6): `enters_with_named_counters`, and a per-permanent count the schema can't say yet | the creature parser's "enters with" lines (`cards/parser/creature_builder.py`, `cards/parser/effects.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 22 | Haliya, Ascendant Cadet (ENGINE.md 99.2) | "one or more" as once per turn | "whenever one or more creatures you control with +1/+1 counters on them deal combat damage to a player" with `once_per_turn: true` | a trigger per combat damage event ("one or more": `OneOrMoreBatch`), no once-per-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control with +1/+1 counters on them ..." entry, ~line 1015) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 23 | (same defect as entry 51, found independently by lane A) Honored Knight-Captain, Rayblade Trooper; Cosmogrand Zenith, Knight Luminary (base list, lane B) (ENGINE.md 99.2) | colour dropped | the "1/1 white Human Soldier creature token" printing with no `color_indicator` (a colourless token) | `color_indicator: [W]` (as entry 12) | `cards/tokens.py` (`TOKEN_PRINTINGS["Human Soldier"]`, ~line 141) | blocked (`lower::IR_DEFECTS`, lane A's two; the base list's two for lane B) | confirmed |
+| 20 | Adagia, Windswept Bastion; Evendo, Waking Haven; Kavaron, Memorial World; Susur Secundi, Void Altar; Uthros, Titanic Godcore; The Eternity Elevator (Edge of Eternities, ENGINE.md 99) | ability dropped | the planets: a land with `enters_tapped` and `produces` only; The Eternity Elevator: no `station_threshold` / `stationed_*` | Station (CR 702.184) and each threshold ability ("12+ ..."), as the set's Spacecraft carry them | `cards/parser/land_builder.py` (planets) and the Spacecraft builder (`cards/parser/spacecraft_builder.py`) | fixed (5362f5ed); Evendo, Kavaron, Uthros supported, the others blocked by engine features | confirmed |
+| 21 | Dockworker Drone, Luxknight Breacher (and Blast Zone) (Edge of Eternities, ENGINE.md 99.2) | replacement as a trigger | "this creature enters with a +1/+1 counter on it [for each ...]" / "this land enters with a charge counter on it" as an `enters` triggered ability (`PutPlusOneCounterOnSelf`, `PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact`, `PutChargeCountersOnSelf`) | it enters with the counters (CR 614.1c, 122.6): `enters_with_named_counters`, and a per-permanent count the schema can't say yet | the creature parser's "enters with" lines (`cards/parser/creature_builder.py`, `cards/parser/effects.py`) | fixed for Dockworker Drone (supported) and Blast Zone (5362f5ed); Luxknight Breacher blocked | confirmed |
+| 22 | Haliya, Ascendant Cadet (ENGINE.md 99.2) | "one or more" as once per turn | "whenever one or more creatures you control with +1/+1 counters on them deal combat damage to a player" with `once_per_turn: true` | a trigger per combat damage event ("one or more": `OneOrMoreBatch`), no once-per-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control with +1/+1 counters on them ..." entry, ~line 1015) | fixed (5362f5ed), supported | confirmed |
+| 23 | (same defect as entry 51, found independently by lane A) Honored Knight-Captain, Rayblade Trooper; Cosmogrand Zenith, Knight Luminary (base list, lane B) (ENGINE.md 99.2) | colour dropped | the "1/1 white Human Soldier creature token" printing with no `color_indicator` (a colourless token) | `color_indicator: [W]` (as entry 12) | `cards/tokens.py` (`TOKEN_PRINTINGS["Human Soldier"]`, ~line 141) | fixed (5362f5ed), supported | confirmed |
 | 24 | Mechan Shieldmate (ENGINE.md 99.2) | permission as a characteristic | "this creature can attack as though it didn't have defender" as a static `RemoveKeyword(defender)` | a rule that lets it attack while it keeps defender (CR 702.3b) | `cards/parser/creature_builder.py` (~line 672), `cards/parser/printing_keywords.py` (~line 473) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 25 | Loading Zone (ENGINE.md 99.2) | scope dropped | "if one or more counters would be put on a creature, Spacecraft, or Planet you control, twice that many ... instead" as a `scope: self` `ReplacementEffect(would_place_counter, MultiplyCount(2))` with no recipient filter | the recipients: creatures, Spacecraft and Planets you control, every kind of counter | `cards/parser/enchantment_builder.py` (`_COUNTER_DOUBLER_LINE`, ~line 651; the Python engine hard-codes creatures and Spacecraft, +1/+1 counters only) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 26 | The Eternity Elevator (ENGINE.md 99.2) | value made up | `power: 0, toughness: 0` for a card with no power/toughness box | no power or toughness (CR 722.1, 722.2c) | `cards/parser/spacecraft_builder.py` (the missing-P/T fallback, ~line 334) | blocked by entry 20 | confirmed |
+| 26 | The Eternity Elevator (ENGINE.md 99.2) | value made up | `power: 0, toughness: 0` for a card with no power/toughness box | no power or toughness (CR 722.1, 722.2c) | `cards/parser/spacecraft_builder.py` (the missing-P/T fallback, ~line 334) | fixed (5362f5ed); blocked by an engine feature (entry 20) | confirmed |
 | 27 | Nesting Grounds (ENGINE.md 99.2) | effect narrowed | "Move a counter from target permanent you control onto a second target permanent" as `MovePlusOneCounterBetweenPermanentsYouControl {}` (the class moves a +1/+1 counter between two permanents you control) | any kind of counter (the player's choice), and a second target permanent anyone controls | `effects/generic/counters.py::MovePlusOneCounterBetweenPermanentsYouControl` (its docstring: "Simplification") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 28 | Meltstrider's Resolve (ENGINE.md 99.2) | keyword substituted | "Enchanted creature ... can't be blocked by more than one creature" as `equipment_bonuses: [0, 2, ["menace"]]` | a "can't be blocked by more than one creature" rule (menace is the opposite: by two or more only, CR 702.111b) | the Aura builder's bonus line (`cards/base.py::make_aura`, as entry 7) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 29 | Tractor Beam (ENGINE.md 99.2) | enchant narrowed | "Enchant creature or Spacecraft" as the default `aura_enchant_type: creature` | creature or Spacecraft (a Spacecraft below its threshold is a noncreature artifact) | the Aura builder's enchant line (`EnchantKind` has no "or Spacecraft") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 30 | Moonlit Meditation (ENGINE.md 99.2) | enchant narrowed | "Enchant artifact or creature you control" as `aura_enchant_type: creature` (the default), `aura_yours_only` | artifact or creature you control | the Aura builder's enchant line (`EnchantKind` has no "artifact or creature") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 31 | Terrasymbiosis (ENGINE.md 99.2) | subject dropped | "whenever you put one or more +1/+1 counters on a creature you control" as `counters_added` with `Subject(IsCreature) & Controlled` (the creature's controller only) | who puts the counters is the trigger's subject too: you (not an opponent's effect putting them on your creature, Drix Fatemaker's or Rayblade Trooper's) | the trigger phrase table (`cards/parser/triggers.py`) and the Python engine's `fire_counters_added_to_your_creature_triggers` | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 40 | 19 lands of the EoE table: Bonders' Enclave, Cascading Cataracts, Cathedral of War, Crystal Quarry, Deserted Temple, Echoing Deeps, Inkmoth Nexus, Mutavault, Power Depot, Terrain Generator, Thespian's Stage; Blast Zone, Contested War Zone, Endless Sands, Inventors' Fair, Mirrorpool, Mystifying Maze, Nesting Grounds, Swarmyard (ENGINE.md 99.3) | ability dropped | no `{T}: Add {C}` ability, no `produces`, no `mana_only_from_produces` | `produces: [C]` with `mana_only_from_produces` (as Strip Mine since entry 1's fix) | `cards/parser/land_builder.py` (the builders that match `_DROPPED_TAP_FOR_C_LINE`, ~line 1452 on) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 41 | Blinkmoth Nexus, Inkmoth Nexus, Mutavault (ENGINE.md 99.3) | schema can't say it | `BecomeLandCreatureUEOT` with no card type and (Inkmoth, Mutavault) no creature types | "a 1/1 Blinkmoth **artifact** creature"; "Phyrexian Blinkmoth artifact creature"; "a 2/2 creature with all creature types" | `effects/generic/become_type.py::BecomeLandCreatureUEOT` (no card-type field), `cards/parser/land_builder.py::_try_build_manland` | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 42 | the 13 cards that create a Lander token through `CreateToken` (Beamsaw Prospector, Galactic Wayfarer, ...; ENGINE.md 99.3) | cost dropped | the token's ability costs `{2}`, sacrifice this token | "{2}, {T}, Sacrifice this token" (CR 111.10: the predefined Lander token) | the token-phrase parser's Lander printing (`TOKEN_PRINTINGS["Lander"]`) | blocked (`lower::IR_DEFECTS`); the engine's own Lander (CR 111.10) has the {T} | confirmed |
+| 40 | 19 lands of the EoE table: Bonders' Enclave, Cascading Cataracts, Cathedral of War, Crystal Quarry, Deserted Temple, Echoing Deeps, Inkmoth Nexus, Mutavault, Power Depot, Terrain Generator, Thespian's Stage; Blast Zone, Contested War Zone, Endless Sands, Inventors' Fair, Mirrorpool, Mystifying Maze, Nesting Grounds, Swarmyard (ENGINE.md 99.3) | ability dropped | no `{T}: Add {C}` ability, no `produces`, no `mana_only_from_produces` | `produces: [C]` with `mana_only_from_produces` (as Strip Mine since entry 1's fix) | `cards/parser/land_builder.py` (the builders that match `_DROPPED_TAP_FOR_C_LINE`, ~line 1452 on) | fixed (5362f5ed); 7 supported, the rest blocked elsewhere | confirmed |
+| 41 | Blinkmoth Nexus, Inkmoth Nexus, Mutavault (ENGINE.md 99.3) | schema can't say it | `BecomeLandCreatureUEOT` with no card type and (Inkmoth, Mutavault) no creature types | "a 1/1 Blinkmoth **artifact** creature"; "Phyrexian Blinkmoth artifact creature"; "a 2/2 creature with all creature types" | `effects/generic/become_type.py::BecomeLandCreatureUEOT` (no card-type field), `cards/parser/land_builder.py::_try_build_manland` | fixed for Blinkmoth Nexus and Inkmoth Nexus (5362f5ed), supported; Mutavault blocked | confirmed |
+| 42 | the 13 cards that create a Lander token through `CreateToken` (Beamsaw Prospector, Galactic Wayfarer, ...; ENGINE.md 99.3) | cost dropped | the token's ability costs `{2}`, sacrifice this token | "{2}, {T}, Sacrifice this token" (CR 111.10: the predefined Lander token) | the token-phrase parser's Lander printing (`TOKEN_PRINTINGS["Lander"]`) | fixed (5362f5ed); 12 supported | confirmed |
 | 43 | Divert Disaster (ENGINE.md 99.3) | clause dropped | `CounterTargetSpell {}`: a hard counter | "Counter target spell unless its controller pays {2}. If they do, you create a Lander token." | the counterspell phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 44 | Unravel (ENGINE.md 99.3) | clause dropped | `CounterTargetSpell {}` | "... If the amount of mana spent to cast that spell was less than its mana value, you draw a card." | the counterspell phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 45 | Xu-Ifit, Osteoharmonist (ENGINE.md 99.3) | clause dropped | `ReturnCreatureFromYourGraveyardToBattlefield` | "... It's a Skeleton in addition to its other types and has no abilities." | the reanimation phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 46 | High Market (ENGINE.md 99.3) | cost widened | `sacrifice_another_creature_or_artifact: true` | "Sacrifice a creature" | `cards/parser/land_builder.py::_try_build_tap_sac_utility_land` (its docstring: "widens 'a creature' to 'a creature or artifact'") | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 46 | High Market (ENGINE.md 99.3) | cost widened | `sacrifice_another_creature_or_artifact: true` | "Sacrifice a creature" | `cards/parser/land_builder.py::_try_build_tap_sac_utility_land` (its docstring: "widens 'a creature' to 'a creature or artifact'") | fixed (5362f5ed), supported | confirmed |
 | 47 | Power Depot (ENGINE.md 99.3) | ability dropped, restriction narrowed | one mana ability, `spend_restriction: artifact_spell`; no modular | also "{T}: Add {C}" (entry 40) and "Modular 1"; "spend this mana only to cast artifact spells **or activate abilities of artifacts**" | the artifact-land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 48 | Starfield Shepherd (ENGINE.md 99.3) | choice reshaped | `ModalChooseOne [search basic Plains, search creature MV <= 1]` | one search for "a basic Plains card or a creature card with mana value 1 or less" | the library-search phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 48 | Starfield Shepherd (ENGINE.md 99.3) | choice reshaped | `ModalChooseOne [search basic Plains, search creature MV <= 1]` | one search for "a basic Plains card or a creature card with mana value 1 or less" | the library-search phrase parser | fixed (5362f5ed), supported | confirmed |
 | 49 | Pull Through the Weft (ENGINE.md 99.3) | clause dropped | `ReturnUpToNNonlandPermanentCardsFromGraveyardToHand` only | "... then return up to two target land cards from your graveyard to the battlefield tapped" | `effects/generic/bounce.py` (its docstring: "the second ... clause is dropped at parse time") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 50 | Sunken Citadel (ENGINE.md 99.3) | choice dropped | two mana abilities making `any` colour; no "as it enters, choose a color" | one mana / two mana "of the chosen color" | the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 51 | Knight Luminary, Cosmogrand Zenith, Honored Knight-Captain, Rayblade Trooper (ENGINE.md 99.3) | colour dropped | the Human Soldier token printing with no `color_indicator` (colourless) | `color_indicator: [W]` ("a 1/1 white Human Soldier creature token") | the token-phrase parser (`_token_printing`), as entry 12 | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 60 | All-Fates Stalker (Edge of Eternities, ENGINE.md 99.4) | target count dropped | `ExileTargetCreatureUntilSourceLeaves { excluded_subtypes: [Assassin] }`, a class with one required target (Hardlight Containment's too) | "up to one target" (a target count, minimum 0) | `effects/generic/exile.py::ExileTargetCreatureUntilSourceLeaves` (`requires_target`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 51 | Knight Luminary, Cosmogrand Zenith, Honored Knight-Captain, Rayblade Trooper (ENGINE.md 99.3) | colour dropped | the Human Soldier token printing with no `color_indicator` (colourless) | `color_indicator: [W]` ("a 1/1 white Human Soldier creature token") | the token-phrase parser (`_token_printing`), as entry 12 | fixed (5362f5ed), supported | confirmed |
+| 60 | All-Fates Stalker (Edge of Eternities, ENGINE.md 99.4) | target count dropped | `ExileTargetCreatureUntilSourceLeaves { excluded_subtypes: [Assassin] }`, a class with one required target (Hardlight Containment's too) | "up to one target" (a target count, minimum 0) | `effects/generic/exile.py::ExileTargetCreatureUntilSourceLeaves` (`requires_target`) | fixed (5362f5ed), supported | confirmed |
 | 61 | Endless Sands (Edge of Eternities, ENGINE.md 99.4) | effect misread, ability dropped | `{2},{T}: ExileTargetCreatureUntilSourceLeaves { yours_only }`; `{4},{T}, sac: Sequence { effects: [] }` | a plain linked exile (CR 607.2a), and "return each creature card exiled with this land to the battlefield under its owner's control" | the land-ability parser (`cards/parser/land_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 62 | Gravkill; Archenemy's Charm (Edge of Eternities, ENGINE.md 99.4) | target types dropped | `ExileTargetCreature { targets: [IsCreature] }` for "exile target creature or Spacecraft" / "... or planeswalker"; the Charm's second mode `ReturnUpToNCreaturesFromYourGraveyardToHand { creature }` for "one or two target creature and/or planeswalker cards" | `ObjectOr(IsCreature, HasSubtype(Spacecraft))` / `ObjectOr(IsCreature, IsPlaneswalker)`; the planeswalker cards and the count | the "exile target X" phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 63 | Elegy Acolyte (Edge of Eternities, ENGINE.md 99.4) | "one or more" as once per turn | "whenever one or more creatures you control deal combat damage to a player" with `once_per_turn: true` | one trigger per combat damage step (`OneOrMoreBatch`), no once-each-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to a player" entry) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 64 | Nexus of Fate (Edge of Eternities, ENGINE.md 99.4) | flag left unset | the self "would go to graveyard -> library" replacement with `watched_in_graveyard: false` | `watched_in_graveyard: true` (the printing's "put into a graveyard from anywhere" flag, which mtg-bot's move code reads before the replacement) | the instant builder that writes the replacement (`cards/parser/creature_rmc_grammar.py` sets the flag for the creatures only) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 62 | Gravkill; Archenemy's Charm (Edge of Eternities, ENGINE.md 99.4) | target types dropped | `ExileTargetCreature { targets: [IsCreature] }` for "exile target creature or Spacecraft" / "... or planeswalker"; the Charm's second mode `ReturnUpToNCreaturesFromYourGraveyardToHand { creature }` for "one or two target creature and/or planeswalker cards" | `ObjectOr(IsCreature, HasSubtype(Spacecraft))` / `ObjectOr(IsCreature, IsPlaneswalker)`; the planeswalker cards and the count | the "exile target X" phrase parser | fixed for Gravkill (5362f5ed), supported; Archenemy's Charm blocked | confirmed |
+| 63 | Elegy Acolyte (Edge of Eternities, ENGINE.md 99.4) | "one or more" as once per turn | "whenever one or more creatures you control deal combat damage to a player" with `once_per_turn: true` | one trigger per combat damage step (`OneOrMoreBatch`), no once-each-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to a player" entry) | fixed (5362f5ed), supported | confirmed |
+| 64 | Nexus of Fate (Edge of Eternities, ENGINE.md 99.4) | flag left unset | the self "would go to graveyard -> library" replacement with `watched_in_graveyard: false` | `watched_in_graveyard: true` (the printing's "put into a graveyard from anywhere" flag, which mtg-bot's move code reads before the replacement) | the instant builder that writes the replacement (`cards/parser/creature_rmc_grammar.py` sets the flag for the creatures only) | fixed (5362f5ed), supported | confirmed |
 | 65 | Pinnacle Starcage (Edge of Eternities, ENGINE.md 99.4) | value resolved late | `CreateNTokensFromLastExileRecall { token_name: "Robot" }` | the 2/2 colorless Robot artifact creature token's `CardPrinting` inline (as entry 3) | `effects/` (the class resolves the token by name) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 66 | Starfield Vocalist (Edge of Eternities, ENGINE.md 99.4) | event subjects dropped | `ReplacementEffect { event_pattern: EventPattern { event: triggered_ability_triggers }, transform: AddInstances { delta: 1 } }`, no subject filters (Strionic Resonator's shape, "triggered abilities trigger an additional time") | the triggering event a permanent entering the battlefield, the ability's source a permanent you control (`subject_filters`) | `cards/parser/creature_builder.py` (~line 627) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 67 | Mirrorpool (Edge of Eternities, ENGINE.md 99.4) | lossy schema, ability dropped | activation costs `mana: { generic: 3 }` for `mana_str: "{2}{C}"` and `{ generic: 5 }` for "{4}{C}"; no `produces`, no mana ability | a colorless pip (`{C}`, CR 107.4b) in each cost; "{T}: Add {C}" | `cards/base.py::parse_mana_cost` (as entry 5), the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 80 | Syr Vondam, Sunstar Exemplar (Edge of Eternities, lane D, ENGINE.md 99.5) | event widened, trigger condition moved | both triggers on `leaves_battlefield` for "dies or is put into exile"; "while its power is 4 or greater" as `ConditionalIfSourcePowerAtLeast` around the effect (read as the ability resolves) | a trigger on dying or being exiled only (not bounced, not put into a library); the power condition part of the trigger event, as the creature left (CR 603.10a, 603.6c) | `cards/parser/triggers.py` (the "dies or is put into exile" phrase-table entries, ~line 718; `_INTERVENING_WHILE_EFFECT_WRAPPERS`, ~line 1645) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 81 | Dawnsire, Sunstar Dreadnought (lane D) | target narrowed | `DealDamageToTargetCreature` with a creature-only target for "up to one target creature or planeswalker" | a creature or planeswalker target | `cards/parser/effects.py` (`_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE`, ~line 390: "or planeswalker" accepted and dropped) | blocked (`lower::IR_DEFECTS`) | confirmed |
-| 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 81 | Dawnsire, Sunstar Dreadnought (lane D) | target narrowed | `DealDamageToTargetCreature` with a creature-only target for "up to one target creature or planeswalker" | a creature or planeswalker target | `cards/parser/effects.py` (`_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE`, ~line 390: "or planeswalker" accepted and dropped) | fixed (5362f5ed), supported | confirmed |
+| 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | fixed (5362f5ed), supported | confirmed |
 
 ## Confirmed defects
 
@@ -415,6 +415,15 @@ Elevator is a Spacecraft with Station.
   Without the entry the five planets lowered as plain taplands and the support report counted them
   supported (98 cards instead of 93): a silent drop the report could not see. Found by checking
   every EoE card whose Oracle text has Station for a `station_threshold` in its IR.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: the planets carry `station_threshold: 12` (no
+  power/toughness: CR 722.1) and their "12+ |" activated ability with `tier_threshold: 12`; The
+  Eternity Elevator `station_threshold: 20`. New grammar for the striations: a four-piece activation
+  cost (Susur Secundi), "X, then Y and Z" (Kavaron), `DrawCardsEqualTo(PowerOfCostPaidObject)`
+  (Susur Secundi), a token copy "except it's legendary" (`CopyExceptions.add_supertypes`, Adagia).
+  Evendo, Kavaron and Uthros are supported; Adagia (`Effect:CreateTokenCopyOfTargetWithExceptions`:
+  the engine's copy exceptions have no supertype), Susur Secundi (`Effect:DrawCardsEqualTo`: no
+  amount for the sacrificed creature's power) and The Eternity Elevator
+  (`ManaAbility:AddChargeCounterManaOfChosenColor`) are blocked by engine features.
 
 
 ### L. Lane A of the Edge of Eternities port (ENGINE.md 99.2)
@@ -441,6 +450,11 @@ Zone).
   "for each <filter> you control".
 * Engine: blocked, `ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)`
   (`lower::IR_DEFECTS`).
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: Dockworker Drone and Blast Zone carry
+  `enters_with_named_counters` (`[["+1/+1", 1]]`, `[["charge", 1]]`), no enters trigger. Not fixed
+  for Luxknight Breacher: the schema still has no "for each <permanent> you control" count (it stays
+  in `lower::IR_DEFECTS`). Dockworker Drone is supported; Blast Zone is blocked by engine features
+  (`{X}{X}` costs, its sweeper).
 
 **22. Haliya, Ascendant Cadet.** Oracle: "Whenever Haliya enters or attacks, put a +1/+1 counter on
 target creature you control. / Whenever one or more creatures you control with +1/+1 counters on
@@ -455,6 +469,9 @@ them deal combat damage to a player, draw a card."
   `once_per_turn=True` so the aggregated path can distinguish this shape").
 * Fix: export the batch predicate (as entry 16's fix) and no `once_per_turn`.
 * Engine: blocked, `ir_defect(one or more as once per turn, docs/ir_defects.md 22)`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: the predicate is `... & OneOrMoreBatch {
+  per_target_player: true }`, no `once_per_turn` (a trigger per combat damage batch and damaged
+  player; the engine is two-player, so one batch). Supported.
 
 **23. Honored Knight-Captain, Rayblade Trooper (and Cosmogrand Zenith, Knight Luminary).** Oracle:
 "When this creature enters, create a 1/1 white Human Soldier creature token." (Honored
@@ -472,6 +489,7 @@ it dies, create a 1/1 white Human Soldier creature token.")
 * Lane B found the same defect independently (its entry 51, branch `eoe-b-lands`, with the four
   cards in its `IR_DEFECTS` section): at the merge, keep one entry and one `IR_DEFECTS` line per
   card.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: see entry 51 (the same token).
 
 **24. Mechan Shieldmate.** Oracle: "Defender / As long as an artifact entered the battlefield under
 your control this turn, this creature can attack as though it didn't have defender."
@@ -512,6 +530,8 @@ Elevator.").
 * Engine: blocked by entry 20 (`lower::IR_DEFECTS` names a card once). Once entry 20 is fixed this
   one matters: the engine reads a station card's power/toughness as the box of its
   `station_threshold` striation (ENGINE.md 99.2), so a 0/0 would make it a 0/0 creature at 20+.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: The Eternity Elevator has no power or toughness
+  (mtg-bot's `game.is_stationed` is false for a station card without them).
 
 **27. Nesting Grounds.** Oracle: "{T}: Add {C}. / {1}, {T}: Move a counter from target permanent you
 control onto a second target permanent. Activate only as a sorcery."
@@ -609,6 +629,11 @@ another mana ability).
   `CardPrinting.mana_only_from_produces(land without a mana ability)`, which is what lane B's
   feature of that name (18 cards) turned out to be: 16 of the 18 are this defect; the other two,
   Meteor Crater and Reflecting Pool, have a mana ability the engine didn't lower yet.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: every one of the 19 has `produces: ["C"]` and
+  `mana_only_from_produces: true`. Supported now: Bonders' Enclave, Cathedral of War, Deserted
+  Temple, Inventors' Fair, Mystifying Maze, Terrain Generator; Inkmoth Nexus with entry 41. The
+  others are blocked by engine features or other IR defects (each card's blockers in the support
+  report).
 
 **41. An animated land's types dropped.** Oracle: Blinkmoth Nexus "{1}: This land becomes a 1/1
 Blinkmoth artifact creature with flying until end of turn. It's still a land."; Inkmoth Nexus "... a
@@ -627,6 +652,11 @@ with all creature types ...".
 * Engine: blocked (`lower::IR_DEFECTS`). Blinkmoth Nexus was supported at the import (it lowered as
   a non-artifact Blinkmoth creature: wrong for every "artifact" rule of the set) and is removed from
   `SUPPORTED_EOE_BASE`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: `BecomeLandCreatureUEOT` gains `granted_card_types`
+  and `granted_subtypes`: Blinkmoth Nexus `["Artifact"]` (with `granted_subtype: "Blinkmoth"`),
+  Inkmoth Nexus `["Artifact"]`, `["Phyrexian", "Blinkmoth"]`; both supported. Not fixed for
+  Mutavault: "all creature types" (CR 205.3m) has neither an IR field nor an engine feature (it
+  stays in `lower::IR_DEFECTS`).
 
 **42. The Lander token without {T}.** Oracle (reminder text, CR 111.10's predefined token): "It's
 an artifact with '{2}, {T}, Sacrifice this token: Search your library for a basic land card, put it
@@ -643,6 +673,9 @@ onto the battlefield tapped, then shuffle.'"
 * Engine: blocked (`lower::IR_DEFECTS`, the 13 cards). The engine has its own Lander token from CR
   111.10 (`lower/eoe_b.rs`), with the {T}, for the effect classes that create one without a printing
   (Kav Landseeker, Emergency Eject, Orbital Plunge); the IR's printing is not overridden by it.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: the Lander token's cost is `{ mana: {2}, tap_self,
+  sacrifice_self }`. The 12 cards whose only blocker it was are supported; Bioengineered Future is
+  blocked by an engine feature (`grants_etb_counter_per_land_entered_this_turn`).
 
 **43. Divert Disaster.** Oracle: "Counter target spell unless its controller pays {2}. If they do,
 you create a Lander token."
@@ -674,6 +707,8 @@ as a sorcery."
   flag "widens 'a creature' to 'a creature or artifact'".
 * Fix: a "sacrifice a creature" cost.
 * Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: High Market's cost is `sacrifice_a_permanent_type:
+  "creature"`. Supported.
 
 **47. Power Depot.** Oracle: "This land enters tapped. / {T}: Add {C}. / {T}: Add one mana of any
 color. Spend this mana only to cast artifact spells or activate abilities of artifacts. / Modular
@@ -694,6 +729,9 @@ shuffle."
   (a draw or mill in response changes which modes would find something).
 * Should be: one `SearchLibraryForCard` with an `ObjectOr` filter.
 * Engine: blocked (`lower::IR_DEFECTS`); removed from `SUPPORTED_EOE_BASE`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: one `SearchLibrary { card_filter: CardFilterAnyOf
+  [basic Plains, creature with mana value 1 or less], reveal }` (a new card-filter class: a card
+  matching any of its filters; the engine lowers it to `Filter::Or`). Supported.
 
 **49. Pull Through the Weft.** Oracle: "Return up to two target nonland permanent cards from your
 graveyard to your hand, then return up to two target land cards from your graveyard to the
@@ -725,6 +763,10 @@ Human Soldier creature tokens"), Honored Knight-Captain and Rayblade Trooper mak
   the import and are removed from `SUPPORTED_EOE_BASE`; found by a card test
   (`tests/cards_eoe_b_base.rs`) asserting the token's colour, then a scan of every token printing
   of the EoE IR against its Oracle text.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: the registry's Human Soldier carries
+  `color_indicator: ["W"]`, and the token grammar now builds a registry token from its printed
+  characteristics when its printed colour differs (every token colour of the pools checked). The
+  four cards are supported.
 ### N. Edge of Eternities lane C (ENGINE.md 99.4)
 
 **60. All-Fates Stalker.** Oracle: "When this creature enters, exile up to one target non-Assassin
@@ -741,6 +783,8 @@ creature until this creature leaves the battlefield. / Warp {1}{W}"
   `count_min` field on the class.
 * Engine: the class lowers (one target, `Ext::ExileLinked { until: true }`); the card is
   blocked, `ir_defect(up to one target dropped, docs/ir_defects.md 60)`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: `ExileTargetCreatureUntilSourceLeaves.up_to_one:
+  true` (zero or one target; the engine's target has minimum 0). Supported.
 
 **61. Endless Sands.** Oracle: "{T}: Add {C}. / {2}, {T}: Exile target creature you control. /
 {4}, {T}, Sacrifice this land: Return each creature card exiled with this land to the battlefield
@@ -774,6 +818,11 @@ two target creature and/or planeswalker cards from your graveyard to your hand. 
 * Fix: parse "creature or <type>" into an `ObjectOr` target filter.
 * Engine: `ExileTargetCreature` lowers its target spec as written; both cards are blocked,
   `ir_defect(target types dropped, docs/ir_defects.md 62)`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: Gravkill's effect is `RemoveTargetPermanents {
+  action: exile, target_filter: ObjectOr(IsCreature, HasSubtype(Spacecraft)) }` (the precise
+  grammar; "Spacecraft" is a target noun now). Supported. Not fixed for Archenemy's Charm: mtg-bot
+  pins its parse to the lossy legacy grammar for its own cross-engine parity tests
+  (`precise_grammar.RUST_PARITY_PINNED_SPELLS`); it stays in `lower::IR_DEFECTS`.
 
 **63. Elegy Acolyte.** Oracle: "Lifelink / Whenever one or more creatures you control deal combat
 damage to a player, you draw a card and lose 1 life. / Void - At the beginning of your end step,
@@ -790,6 +839,8 @@ if a nonland permanent left the battlefield this turn or a spell was warped this
 * Fix: `OneOrMoreBatch` in the predicate, `once_per_turn: false`.
 * Engine: blocked, `ir_defect(one or more as once per turn, docs/ir_defects.md 63)`; its void
   trigger lowers (ENGINE.md 99.4).
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: as entry 22: `OneOrMoreBatch { per_target_player:
+  true }`, no `once_per_turn`. Supported.
 
 
 **64. Nexus of Fate.** Oracle: "Take an extra turn after this one. / If Nexus of Fate would be put
@@ -808,6 +859,8 @@ instead."
   built.
 * Engine: the lowering checks that the flag and the abilities agree (`printing.rs`, "watched in
   graveyard"); blocked, `ir_defect(watched_in_graveyard unset, docs/ir_defects.md 64)`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: Nexus of Fate has `watched_in_graveyard: true`.
+  Supported.
 
 **65. Pinnacle Starcage.** Oracle: "When this artifact enters, exile all artifacts and creatures
 with mana value 2 or less until this artifact leaves the battlefield. / {6}{W}{W}: Put each card
@@ -892,6 +945,9 @@ to up to one target creature or planeswalker."
 * Engine: blocked, `ir_defect(planeswalker target dropped, docs/ir_defects.md 81)`. (The card also
   needs Station, lane A; and its 100 damage is above the lowering's 0..99 range for this class,
   `DealDamageToTargetCreature.amount(out of range 100)`, an engine limit to widen with the card.)
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: Dawnsire's effect is `DealDamage { amount: 100,
+  targets: [TargetSpec { filter: ObjectOr(IsCreature, IsPlaneswalker), count_min: 0 }] }`; the
+  lowering's bound for `DealDamage.amount` is widened to 100. Supported.
 
 **82. Entropic Battlecruiser.** Oracle: "1+ | Whenever an opponent discards a card, they lose 3
 life."
@@ -905,6 +961,8 @@ life."
   discarding player as `targets[0]` (`fire_opponent_discards_triggers`).
 * Fix: emit the `BindEventPlayer` wrapper for "they lose N life" on an event with a player subject.
 * Engine: blocked, `ir_defect(the event's player written as a target, docs/ir_defects.md 82)`.
+* Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: the effect is `BindEventPlayer { slot: player,
+  inner: TargetPlayerLosesLife { amount: 3 } }`. Supported.
 
 ## Suspected defects (representational)
 
