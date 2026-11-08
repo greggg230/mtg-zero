@@ -825,21 +825,32 @@ const SUPPORTED_EOE_D: &[&str] = &[
 ];
 
 /// Cards that need features of two or more lanes, finished after the
-/// lanes merged (ENGINE.md 99.6; tests in `tests/cards_eoe_cross.rs`).
+/// lanes merged (ENGINE.md 99.6, 99.8; tests in `tests/cards_eoe_cross*.rs`).
 const SUPPORTED_EOE_CROSS: &[&str] = &[
+    "Alpharael, Dreaming Acolyte",
+    "Atomic Microsizer",
     "Broodguard Elite",
     "Embrace Oblivion",
-    "Fell Gravship",
+    "Full Bore",
     "Hardlight Containment",
     "Hylderblade",
+    "Infinite Guideline Station",
+    "Larval Scoutlander",
     "Mental Modulation",
     "Pinnacle Kill-Ship",
     "Reroute Systems",
+    "Roving Actuator",
+    "Seedship Impact",
     "Sledge-Class Seedship",
     "Sliver Overlord",
     "Specimen Freighter",
     "Starport Security",
+    "Survey Mechan",
+    "Tapestry Warden",
+    "Terrapact Intimidator",
     "Thaumaton Torpedo",
+    "The Seriema",
+    "Vote Out",
 ];
 
 /// Cards the mtg-bot IR-fix batch unblocks (ENGINE.md 99.9; their card
@@ -1045,10 +1056,12 @@ fn a_new_ir_field_value_is_a_blocker() {
     let mut cards = engine::db::load_cube_document().cards;
     let bolt = cards.iter_mut().find(|c| c.name == "Lightning Bolt").unwrap();
     let card_ir::cats::CardPrinting::CardPrinting(p) = &mut bolt.printing;
-    p.has_convoke = true;
+    // (Convoke was this test's flag until the EoE cross-lane pass built it,
+    // ENGINE.md 99.8.)
+    p.nonbasic_lands_are_mountains = true;
     let db = CardDb::from_cards(&cards);
     let err = db.expect_id("Lightning Bolt").unwrap_err();
-    assert!(err.contains("CardPrinting.has_convoke"), "{err}");
+    assert!(err.contains("CardPrinting.nonbasic_lands_are_mountains"), "{err}");
 }
 
 #[test]

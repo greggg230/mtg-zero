@@ -154,6 +154,7 @@ pub fn fields() -> Vec<Field> {
         copy_objs: Derived "which slots are copies (the copy flags of permanents and spells)",
         lki_copy: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
+        lki_toughness: Derived "last known information (CR 608.2h)",
         spell_lki: Derived "last known information (CR 608.2h)",
         entering_copy: Derived "transient: set and cleared around one move",
         entering_times: Derived "transient: set and cleared around one move",
@@ -817,6 +818,14 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = pick(&slot_creatures(&a.g), r)?;
             mark(&mut a.g, c, crate::game::Mark::Exerted)
         }),
+        // EoE's "if that creature was cast for its warp cost" (ENGINE.md
+        // 99.8). (No draw from the gate's random stream: a draw would shift
+        // every later perturbation's, as lane D found; the first creature in
+        // the encoded slots.)
+        p!("a creature was cast for its warp cost", "Game.marks", |a, _r| {
+            let c = *slot_creatures(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::WarpCast)
+        }),
         p!("a spell can't be countered", "Game.marks", |a, r| {
             // (Not a spell that already can't be: Abrupt Decay, ENGINE.md 86.5.)
             let spells: Vec<(usize, CardIdx)> = stack_spells(&a.g).into_iter().filter(|&(_, c)| !a.g.spell_uncounterable(c)).collect();
@@ -1450,6 +1459,7 @@ pub fn limits() -> Vec<Limit> {
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
         l("void holds (a nonland permanent left the battlefield this turn)", NextLayout, "void (Edge of Eternities' ability word, ENGINE.md 99.4) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-turn flag beside the turn's facts); until then a network infers it from the public history only through the board"),
         l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
+        l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }

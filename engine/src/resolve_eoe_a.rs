@@ -18,10 +18,11 @@ impl Game {
     pub(crate) fn tapped_power(&self, f: &Frame) -> i32 {
         let Some(&r) = f.noted.first() else { return 0 };
         if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
-            return self.power(r.idx);
+            // (Or its toughness: CR 702.184c, ENGINE.md 99.8.)
+            return self.station_amount(r.idx);
         }
         match self.objs[r.idx.i()].lki_power {
-            Some((inc, p)) if inc == r.inc => p,
+            Some((inc, p)) if inc == r.inc => self.station_amount_lki(r, p),
             _ => 0,
         }
     }

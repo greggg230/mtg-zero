@@ -675,6 +675,10 @@ pub struct Game {
     /// they last existed there (CR 608.2h, 113.7a; kept when
     /// `SEEN_LKI_DAMAGE`).
     pub(crate) lki_damage: Vec<(ObjRef, DamageSource)>,
+    /// Permanents that left the battlefield this turn, their toughness and
+    /// controller as they last existed (CR 608.2h; kept when
+    /// `CardDb::watch_toughness`: stationing by toughness, ENGINE.md 99.8).
+    pub(crate) lki_toughness: Vec<(ObjRef, i32, PlayerId)>,
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it").
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
@@ -865,6 +869,9 @@ pub enum Mark {
     /// It has "When this creature dies, <trigger `slot` of `def`>" until end
     /// of turn (EoE lane D; removed in the cleanup step, CR 514.2).
     DiesTriggerThisTurn { def: DefId, slot: u8 },
+    /// It entered as a spell cast for its warp cost (CR 702.185a: "if that
+    /// creature was cast for its warp cost"; ENGINE.md 99.8).
+    WarpCast,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -1057,6 +1064,7 @@ impl Game {
             copy_objs: Vec::new(),
             lki_copy: Vec::new(),
             lki_damage: Vec::new(),
+            lki_toughness: Vec::new(),
             spell_lki: Vec::new(),
             entering_copy: None,
             entering_times: 0,
@@ -1480,6 +1488,9 @@ impl Game {
             self.add_counters(idx, k, n);
         }
         let warp = std::mem::take(&mut self.entering_warp);
+        if warp && cast {
+            self.marks.push((r, Mark::WarpCast));
+        }
         if let (Some(k), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand
             // at the beginning of the next end step. (Warp, 702.185a: no
@@ -1855,6 +1866,10 @@ impl Game {
             if self.seen & SEEN_LKI_DAMAGE != 0 {
                 let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
+            }
+            if self.db.watch_toughness {
+                let t = self.toughness(idx);
+                self.lki_toughness.push((old, t, self.objs[idx.i()].controller));
             }
         }
         // CR 707.10a, 704.5e: a copy of a spell (or of a card) leaving the

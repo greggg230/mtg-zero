@@ -23,6 +23,7 @@ pub mod eoe_b;
 pub mod eoe_c;
 pub mod eoe_a;
 pub mod effect_eoe_d;
+pub mod eoe_x;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -277,6 +278,15 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // "Dies or is put into exile" widened to "leaves the battlefield", and
     // "while its power is 4 or greater" moved to resolution (80).
     ("Syr Vondam, Sunstar Exemplar", "ir_defect(dies-or-exiled widened to leaves the battlefield, docs/ir_defects.md 80)"),
+
+    // Cross-lane pass (ENGINE.md 99.8; docs/ir_defects.md 100-119).
+    // "Mill three cards, then return a creature or Spacecraft card from your
+    // graveyard to your hand": the card chosen as the ability resolves
+    // (after the mill) written as a target chosen as it triggers (100).
+    ("Fell Gravship", "ir_defect(a card chosen on resolution written as a target, docs/ir_defects.md 100)"),
+    // "If it was attacking, create a 1/1 ... Drone ... token": the token's
+    // printing resolved by name in Python, not in the IR (101, as 65).
+    ("Desculpting Blast", "ir_defect(token printing by name only, docs/ir_defects.md 101)"),
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.

@@ -163,7 +163,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             legendary_only,
             power_bonus_from_x,
         }) => {
-            l.deny("PumpTargetCreatureUntilEOT.granted_keywords_if_warp_cast", granted_keywords_if_warp_cast);
             l.deny("PumpTargetCreatureUntilEOT.power_bonus_from_x", power_bonus_from_x);
             let mut f = creature();
             if *you_control_only {
@@ -195,6 +194,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // "If it has a +1/+1 counter on it, draw a card" (ENGINE.md 99.2).
             if *draw_if_target_has_plus_one_counter != 0 {
                 super::eoe_a::draw_if_target_has_counter(l, b, t, *draw_if_target_has_plus_one_counter);
+            }
+            // "If that creature was cast for its warp cost, it also gains
+            // <keywords> until end of turn" (ENGINE.md 99.8).
+            if !granted_keywords_if_warp_cast.is_empty() {
+                super::eoe_x::keywords_if_cast_for_warp(l, b, t, granted_keywords_if_warp_cast);
             }
         }
         E::PumpCreaturesYouControlUntilEOT(nodes::PumpCreaturesYouControlUntilEOT {

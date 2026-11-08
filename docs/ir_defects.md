@@ -90,6 +90,8 @@ permission) and a consumer can go wrong with it.
 | 80 | Syr Vondam, Sunstar Exemplar (Edge of Eternities, lane D, ENGINE.md 99.5) | event widened, trigger condition moved | both triggers on `leaves_battlefield` for "dies or is put into exile"; "while its power is 4 or greater" as `ConditionalIfSourcePowerAtLeast` around the effect (read as the ability resolves) | a trigger on dying or being exiled only (not bounced, not put into a library); the power condition part of the trigger event, as the creature left (CR 603.10a, 603.6c) | `cards/parser/triggers.py` (the "dies or is put into exile" phrase-table entries, ~line 718; `_INTERVENING_WHILE_EFFECT_WRAPPERS`, ~line 1645) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 81 | Dawnsire, Sunstar Dreadnought (lane D) | target narrowed | `DealDamageToTargetCreature` with a creature-only target for "up to one target creature or planeswalker" | a creature or planeswalker target | `cards/parser/effects.py` (`_DEAL_DAMAGE_UP_TO_ONE_TARGET_CREATURE`, ~line 390: "or planeswalker" accepted and dropped) | fixed (5362f5ed), supported | confirmed |
 | 82 | Entropic Battlecruiser (lane D) | target invented | the 1+ trigger "Whenever an opponent discards a card, they lose 3 life" as `TargetPlayerLosesLife` (a targeted effect) | the discarding player, not targeted (the event's player: `BindEventPlayer`, as the cube's "that player loses" triggers) | `cards/parser/effects.py` (`_THEY_LOSE_N_LIFE`, ~line 1718; the Python engine pre-wires the player as a target) | fixed (5362f5ed), supported | confirmed |
+| 100 | Fell Gravship (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | target invented | "mill three cards, then return a creature or Spacecraft card from your graveyard to your hand" as `Sequence [SelfMill 3, ReturnCreatureFromYourGraveyardToHand { creature, or_spacecraft }]`, a targeted class (its target chosen as the ability triggers, before the mill) | the card chosen as the ability resolves, after the mill, not targeted (a milled card may be returned; the mill happens with no such card in the graveyard) | `cards/parser/effects.py` (`_RETURN_CREATURE_OR_SPACECRAFT_GRAVEYARD_TO_HAND`, ~line 1911) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 101 | Desculpting Blast (Edge of Eternities, cross-lane pass, ENGINE.md 99.8) | value resolved late | `ReturnTargetCreatureToOwnersHand { allow_nonland_permanent, create_drone_if_was_attacking: true }`: the token by a flag, its printing looked up by name in Python (`TOKEN_PRINTINGS["Drone"]`) | the token's `CardPrinting` inline (a 1/1 colorless Drone artifact creature with flying and "This token can block only creatures with flying"), as the set's other Drone makers carry it (as entries 3, 65) | `cards/parser/effects.py` (the Desculpting Blast literal, ~line 4324), `effects/generic/bounce.py` (~line 177) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -963,6 +965,52 @@ life."
 * Engine: blocked, `ir_defect(the event's player written as a target, docs/ir_defects.md 82)`.
 * Fixed in mtg-bot `feature/eoe-ir-fixes` 5362f5ed: the effect is `BindEventPlayer { slot: player,
   inner: TargetPlayerLosesLife { amount: 3 } }`. Supported.
+
+### P. Edge of Eternities, the cross-lane pass (ENGINE.md 99.8)
+
+**100. Fell Gravship.** Oracle: "When this Spacecraft enters, mill three cards, then return a creature
+or Spacecraft card from your graveyard to your hand."
+
+* IR (mtg-bot main 2cb79f77): the enter trigger's effect is `Sequence [SelfMill { amount: 3 },
+  ReturnCreatureFromYourGraveyardToHand { creature: true, or_spacecraft: true }]`. The class is a
+  targeted one (`requires_target` unless `untargeted_all`, `min_n` = `max_n` = 1): the same node as
+  "return target creature card from your graveyard to your hand" (Interceptor Mechan), with nothing
+  that tells the two apart (`target_kind` is the Python target tuple's tag).
+* Should be: "a creature or Spacecraft card" is not a target (CR 115.1d: only "target ..." is): the
+  card is chosen as the ability resolves, after the three cards are milled. Read as a target, the
+  card is chosen as the ability is put on the stack (CR 603.3d), so a card the mill puts into the
+  graveyard can't be returned, and with no creature or Spacecraft card in the graveyard then, the
+  ability has no legal target and is removed from the stack (CR 603.3d), so the three cards aren't
+  milled either.
+* Source: `cards/parser/effects.py`, `_RETURN_CREATURE_OR_SPACECRAFT_GRAVEYARD_TO_HAND` (~line 1911):
+  its comment notes the article "a" ("Scryfall prints the choice as a non-target selection") and
+  keeps the targeted class, relying on the Python engine's resolve-time choice.
+* Fix: a non-targeted form of the class (for example a `chosen_on_resolution` flag, or the
+  `ReturnFromGraveyard` node with a choice instead of targets), as "return a ... card" is elsewhere.
+* Engine: blocked, `ir_defect(a card chosen on resolution written as a target, docs/ir_defects.md
+  100)` (`lower::IR_DEFECTS`). Without the entry the card lowers (lanes A and C give it everything
+  else) with the return targeted. Found by the cross-lane pass reading the card for its tests; it
+  was in `SUPPORTED_EOE_CROSS` since lane A's merge (ENGINE.md 99.7) and is taken off.
+
+**101. Desculpting Blast.** Oracle: "Return target nonland permanent to its owner's hand. If it was
+attacking, create a 1/1 colorless Drone artifact creature token with flying and \"This token can
+block only creatures with flying.\""
+
+* IR: `ReturnTargetCreatureToOwnersHand { allow_nonland_permanent: true, create_drone_if_was_attacking:
+  true, targets: [nonland, not a player] }`: the token is a flag; the Python class creates
+  `TOKEN_PRINTINGS["Drone"]` by name as it resolves.
+* Should be: the token's `CardPrinting` inline (a 1/1 colorless Drone artifact creature token with
+  flying and `can_only_block_creatures_with_flying`), as the set's other Drone makers (Pinnacle
+  Emissary, Station Monitor) carry it in `CreateToken { token_printing }`. A Drone is not one of the
+  rules' predefined tokens (CR 111.10), so the engine has no definition of its own to use (unlike the
+  Lander, ENGINE.md 99.3, or entry 3's Map).
+* Source: `cards/parser/effects.py` (the Desculpting Blast literal, ~line 4324) and
+  `effects/generic/bounce.py::ReturnTargetCreatureToOwnersHand.resolve` (~line 177).
+* Fix: a `token_printing` on the rider (or the rider as its own effect: "if it was attacking,
+  `CreateToken`").
+* Engine: blocked, `ir_defect(token printing by name only, docs/ir_defects.md 101)`. The rest of
+  the card needs only `allow_nonland_permanent` (its target spec already says "nonland, not a
+  player") and an "if it was attacking" check, both left with the card (ENGINE.md 99.8).
 
 ## Suspected defects (representational)
 

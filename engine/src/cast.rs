@@ -286,6 +286,10 @@ impl Game {
         let cls = if def.improvise {
             with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
             &with_artifacts[..]
+        } else if def.casting.convoke {
+            // Convoke (CR 702.51a): the untapped creatures help pay.
+            with_artifacts = [classes, &self.convoke_classes(p, None)[..]].concat();
+            &with_artifacts[..]
         } else {
             classes
         };
@@ -314,7 +318,7 @@ impl Game {
                 let keep = crate::pay::Keep { allow, ..Default::default() };
                 return self.can_pay_without(p, &cost, cls, &keep, Some(c));
             }
-            if self.hand_mana_source(c) || def.improvise || def.delve {
+            if self.hand_mana_source(c) || def.improvise || def.casting.convoke || def.delve {
                 // A card cast from hand is on the stack while its cost is
                 // paid: its own mana ability (a Spirit Guide's) cannot help.
                 self.can_pay_without(p, &cost, cls, &Default::default(), Some(c))
@@ -786,6 +790,10 @@ impl Game {
         let with_artifacts;
         let classes = if def.improvise {
             with_artifacts = [classes, &self.improvise_classes(p, None, types::ARTIFACT)[..]].concat();
+            &with_artifacts[..]
+        } else if def.casting.convoke {
+            // Convoke (CR 702.51a).
+            with_artifacts = [classes, &self.convoke_classes(p, None)[..]].concat();
             &with_artifacts[..]
         } else {
             classes
@@ -2399,6 +2407,7 @@ impl Game {
             };
             let mut pm = PayMana::new(p, cost);
             pm.improvise = def.improvise;
+            pm.convoke = def.casting.convoke;
             let rest = self.alt_rest(card, item.from, k).unwrap_or(&def.alt_costs[k].cost);
             pm.keep = Self::keep_for(card, rest, None);
             pm.keep.allow = self.spend_allow(card);
@@ -2424,6 +2433,7 @@ impl Game {
         }
         let mut pm = PayMana::new(p, cost);
         pm.improvise = def.improvise;
+        pm.convoke = def.casting.convoke;
         // Delve's mana sources (`Mark::DelveLate`), activated first.
         if def.delve && self.marks.iter().any(|(_, m)| *m == crate::game::Mark::DelveLate) {
             let late: Vec<CardIdx> = self.delve_sources(p).into_iter().filter(|&c| self.delve_late(c)).collect();
@@ -2843,6 +2853,9 @@ impl Game {
             // ENGINE.md 35).
             Filter::HasActivatedAbility => self.abilities(c).has_activated_ability(),
             Filter::DealtDamageThisTurn => self.dealt_damage_this_turn(c),
+            Filter::CastForWarp => {
+                !self.marks.is_empty() && self.marks.contains(&(self.obj_ref(c), crate::game::Mark::WarpCast))
+            }
             Filter::MvAtMostLandsYouControl => {
                 self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
             }

@@ -305,6 +305,9 @@ pub(crate) struct PayMana {
     /// tap your untapped artifacts and creatures to help; each one pays for
     /// {1}"): improvise with creatures too.
     pub waterbend: bool,
+    /// The spell has convoke (CR 702.51a): untapped creatures may pay for
+    /// {1} or one mana of their colour each (`Game::convoke_classes`).
+    pub convoke: bool,
 }
 
 impl PayMana {
@@ -332,6 +335,7 @@ impl PayMana {
             now: None,
             improvise: false,
             waterbend: false,
+            convoke: false,
         }
     }
 
@@ -823,10 +827,46 @@ impl Game {
         out
     }
 
+    /// Convoke (CR 702.51a): `p`'s untapped creatures as sources that each
+    /// pay for {1} or one mana of one of the creature's colours (a unit of its
+    /// colours: a pip of one of them, or generic; a colourless creature pays
+    /// generic only), one class per definition and colours. Not a mana
+    /// ability and no mana (702.51a: "rather than pay that mana"): never a
+    /// colour of mana spent (converge skips `IMPROVISE` sources), and
+    /// `RESTRICTED` so Wizard's Rockets never turns it into colours (it
+    /// can't pay the Rockets' {X}). Summoning sickness doesn't matter
+    /// (302.6). ENGINE.md 99.8.
+    pub(crate) fn convoke_classes(&self, p: PlayerId, exclude: Option<CardIdx>) -> Vec<Class> {
+        let mut out: Vec<Class> = Vec::new();
+        for c in self.permanents_of(p) {
+            if Some(c) == exclude || self.objs[c.i()].tapped || !self.is_creature(c) {
+                continue;
+            }
+            let def = self.objs[c.i()].def;
+            let src = Src { card: c, slot: IMPROVISE };
+            let yld = Yield::One(Unit::free((self.colors_of(c) & COLORS) | RESTRICTED));
+            match out.iter_mut().find(|cl| cl.def == def && cl.yld == yld) {
+                Some(cl) => cl.members.push(src),
+                None => out.push(Class { res: TAP, ..Class::of(def, src, yld) }),
+            }
+        }
+        out
+    }
+
     /// The sources of a payment: mana abilities, and with improvise the
-    /// untapped artifacts.
-    pub(crate) fn pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: u16) -> Vec<Class> {
+    /// untapped artifacts, with convoke the untapped creatures.
+    pub(crate) fn pay_classes(&self, p: PlayerId, exclude: Option<CardIdx>, improvise: u16, convoke: bool) -> Vec<Class> {
         let mut classes = self.mana_classes(p, exclude);
+        if convoke {
+            let tapped_for: Vec<CardIdx> =
+                classes.iter().filter(|cl| cl.members[0].slot == TAP_FOR).flat_map(|cl| cl.members.iter().map(|s| s.card)).collect();
+            for mut cl in self.convoke_classes(p, exclude) {
+                cl.members.retain(|s| !tapped_for.contains(&s.card));
+                if !cl.members.is_empty() {
+                    classes.push(cl);
+                }
+            }
+        }
         if improvise != 0 {
             // (A permanent another's mana ability taps for mana isn't also
             // offered for improvise: the same tap, whose mana pays for {1}
@@ -1408,7 +1448,7 @@ impl Game {
                 }
                 Some(other) => unreachable!("Phyrexian answer {other:?}"),
                 None => {
-                    let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
+                    let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types(), pm.convoke);
                     let life = self.players[payer as usize].life;
                     let opts: Vec<Opt> = (0..=pm.cost.phyrexian[col])
                         .filter(|&k| {
@@ -1448,7 +1488,7 @@ impl Game {
             self.finish_payment(&pm, rem);
             return;
         }
-        let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
+        let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types(), pm.convoke);
         if !pm.pooled {
             // The pool pays as much as it can (ENGINE.md 18).
             pm.pooled = true;
@@ -1793,9 +1833,11 @@ impl Game {
             spent[t] = pool.amt[t].saturating_add(pm.extra[t]) - rem.amt[t];
         }
         if self.marks.iter().any(|(_, m)| matches!(m, crate::game::Mark::ConvergePending(_))) {
-            let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types());
+            let classes = self.pay_classes(payer, pm.keep.exclude, pm.improvise_types(), pm.convoke);
             let conv = |m: ManaMask| if pm.convert { convert(m) } else { m };
-            let mut units: Vec<ManaMask> = pm.chosen.iter().map(|s| conv(chosen_mask(&classes, s))).collect();
+            // (A creature tapped for convoke spends no mana, CR 702.51a; an
+            // artifact tapped for improvise, a unit of no colour, adds none.)
+            let mut units: Vec<ManaMask> = pm.chosen.iter().filter(|s| s.slot != IMPROVISE).map(|s| conv(chosen_mask(&classes, s))).collect();
             // (Artifact-only {C} spent: never turned into colours.)
             let art_spent = pool.art.saturating_add(pm.extra_art).saturating_sub(rem.art);
             for t in 0..6 {
@@ -1844,7 +1886,8 @@ impl Game {
         });
         for src in order {
             if src.slot == IMPROVISE {
-                self.note(|g| format!("P{payer} taps {} for improvise", g.name(src.card)));
+                let why = if pm.convoke { "convoke" } else { "improvise" };
+                self.note(|g| format!("P{payer} taps {} for {why}", g.name(src.card)));
                 self.tap(src.card);
             } else if src.slot == TAP_FOR {
                 // (A cost of another permanent's mana ability: not "tapped

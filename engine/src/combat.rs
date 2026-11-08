@@ -352,7 +352,8 @@ impl Game {
             if !self.deals_damage_now(a, first) {
                 continue;
             }
-            let power = self.power(a);
+            // (Its power, or its toughness: ENGINE.md 99.8.)
+            let power = self.combat_damage_amount(a);
             if power <= 0 {
                 continue; // CR 510.1a
             }
@@ -385,7 +386,7 @@ impl Game {
             if !self.deals_damage_now(c, first) || !self.objs[a.i()].attacking {
                 continue;
             }
-            let p = self.power(c);
+            let p = self.combat_damage_amount(c);
             if p > 0 {
                 let ar = self.obj_ref(a);
                 self.combat_dmg.push((c, Target::Obj(ar), crate::num::unsigned(p)));

@@ -988,6 +988,8 @@ pub enum Ext {
     EoeB(EoeB),
     /// Lane A of the Edge of Eternities port (ENGINE.md 99.2).
     EoeA(EoeA),
+    /// The Edge of Eternities cross-lane pass (ENGINE.md 99.8).
+    EoeX(crate::eoe_x::EoeX),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1232,6 +1234,7 @@ impl Op {
             | Op::Ext(Ext::CounterOrDoubleOnSecond { on }) => matches!(on, On::EventObj),
             Op::Ext(Ext::CreateTokensFor { who: w, .. }) | Op::Ext(Ext::GraveyardToBottomRandom { who: w }) => who(w),
             Op::Ext(Ext::EoeD(x)) => x.uses_event(),
+            Op::Ext(Ext::EoeX(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {
@@ -1263,6 +1266,7 @@ impl Op {
             Op::Ext(Ext::OnceMay { skip }) => Some(skip),
             Op::Ext(Ext::OfferPayOther { if_paid, .. }) => Some(if_paid),
             Op::Ext(Ext::EoeB(x)) => x.jump_target(),
+            Op::Ext(Ext::EoeX(x)) => x.jump_target(),
             _ => None,
         }
     }

@@ -18699,6 +18699,147 @@ and the default 20,000 games pass. Two branches follow, each with its own suppor
   docs/ir_defects.md 20-82 fixed in the parser, one re-export, `generated.rs` regenerated once,
   the fixed cards out of `lower::IR_DEFECTS` and into `SUPPORTED_EOE_IRFIX` with card tests.
 
+### 99.8 The cross-lane pass (branch `eoe-cross`, from `eoe-base` 63a3b0b)
+
+**Why.** The lanes' merges completed 13 cross-lane cards (99.7), of which only Thaumaton Torpedo had
+card tests, and left the lane features that no lane started (each lane's "not done" list). This
+branch writes the owed card tests, then finishes more blocked cards, commons and uncommons first,
+skipping every card with an `ir_defect(...)` blocker (99.9's).
+
+**Card tests of the cross-lane cards** (`tests/cards_eoe_cross_cards.rs`, 23 tests; the card table
+`tests/eoe_x_kit`: the EoE table plus custom IR test cards, never in the fuzz or digest pools).
+Broodguard Elite (X counters as it enters, warp {X}{G}, its counters moved as it leaves, X = 0),
+Embrace Oblivion (the sacrifice, "creature or Spacecraft": a noncreature Spacecraft yes, a
+noncreature artifact no), Hardlight Containment (enchant artifact you control, the linked exile and
+its return under the owner's control, CR 610.3 / 610.3c; gone before its trigger resolves, nothing is
+exiled, 610.3b; ward {1} countering an opponent's Mental Modulation), Hylderblade (equip {4}, +3/+1,
+the void end-step attach and no trigger without void), Mental Modulation (both costs, its target
+types, the draw), Pinnacle Kill-Ship ("up to one", station 7: a 7/7 flyer), Reroute Systems (both
+modes), Sledge-Class Seedship (the attack trigger's may: the creature put in isn't attacking, 508.4),
+Sliver Overlord (the Sliver search; control that lasts past the turn), Specimen Freighter (up to two
+non-Spacecraft creatures, station 9, the defending player's mill), Starport Security (another target;
+{2} less with a +1/+1-counter creature of yours only). Every one behaves as its Oracle text says.
+Read and kept: Specimen Freighter's "defending player mills four cards" is `EachOpponentMillsCards`,
+the same player in a two-player game (CR 506.2); a line after an "N+ |" line (The Seriema's "other
+tapped legendary creatures ...", the attack triggers of four Spacecraft, Debris Field Crusher's pump)
+is untiered in the IR, as the Oracle text writes it (CR 722.4: an ability not preceded by a station
+symbol is treated normally).
+
+**Taken off, IR defects** (docs/ir_defects.md 100-101, `lower::IR_DEFECTS` under "Cross-lane pass"):
+
+* 100 **Fell Gravship** (in `SUPPORTED_EOE_CROSS` since lane A's merge): "mill three cards, then
+  return a creature or Spacecraft card from your graveyard to your hand" is a choice made as the
+  ability resolves, after the mill; the IR's `ReturnCreatureFromYourGraveyardToHand` is a targeted
+  class (the card chosen as the trigger goes on the stack, so a milled card can't be returned, and
+  with no target the mill is lost too, CR 603.3d). `SUPPORTED_EOE_CROSS` 13 -> 12.
+* 101 **Desculpting Blast**: the Drone token of "if it was attacking, create a 1/1 ... Drone" is a
+  flag, its printing looked up by name in Python (as entry 65; a Drone is no predefined token, CR
+  111.10).
+
+**Newly supported (12):** Alpharael, Dreaming Acolyte; Atomic Microsizer; Full Bore; Larval
+Scoutlander; Roving Actuator; Seedship Impact; Survey Mechan; Tapestry Warden; Terrapact
+Intimidator; Vote Out (uncommons); Infinite Guideline Station; The Seriema (rares). Their tests:
+`tests/cards_eoe_cross_more.rs` (32).
+
+**How.** New instructions `Ext::EoeX(EoeX)` (`engine/src/eoe_x.rs`), the lowering
+`engine/src/lower/eoe_x.rs` (a link in `lower_effect`'s chain); ops named after rules actions:
+
+* `SearchUpToOntoBattlefield` (Larval Scoutlander's "search for up to two basic land cards, put them
+  onto the battlefield tapped, then shuffle"): one search (CR 701.23a; fewer may be found, 701.23b),
+  the decisions of `Ext::SearchAnyNumber` with a cap, the cards put onto the battlefield together.
+  "You may sacrifice a land or Lander" is the existing `SacrificeThen` (a land or the Lander
+  subtype).
+* `DiscardMatchingOrContinue` (Alpharael's "discard two cards unless you discard an artifact card",
+  CR 701.9a): a `Discard` decision among the matching hand cards or `PASS`; discarded, the two-card
+  discard is skipped; no decision without a matching card.
+* `ExileTargetCastCopyFree` (Roving Actuator: "exile up to one target instant or sorcery card with
+  mana value 2 or less from your graveyard. Copy it. You may cast the copy without paying its mana
+  cost"): the card is exiled, a copy of it is made in exile (CR 707.12; a slot made as a copy, as a
+  prepare spell's copy, 722.3c), and a `YesNo` (`YES` only if it can be cast now) casts it during the
+  resolution (608.2g, `cast_free_now`); declined, it ceases to exist at the next state-based check
+  (704.5e); cast, it ceases to exist as it leaves the stack (707.10a).
+* On existing ops: Survey Mechan (two targets, "any target" and a player, each checked on its own,
+  608.2b; the sacrificed creature deals the damage, 608.2h), Seedship Impact (the target's mana value
+  read before it is destroyed, which destroying doesn't change, then the rules' Lander, lane B's
+  definition), Terrapact Intimidator (`May` asked of the target opponent, 608.2d), Atomic
+  Microsizer (can't be blocked and base 1/1 until end of turn, layer 7b), Infinite Guideline Station
+  (`CreateTokensN` with `Amount::MulticoloredPermanents`).
+* **Full Bore** ("if that creature was cast for its warp cost, it also gains trample and haste"):
+  `Mark::WarpCast` on a permanent that entered as a spell cast for its warp cost (set where warp's
+  entering is handled, `put_onto_battlefield_attached`), `Filter::CastForWarp`, and
+  `PumpTargetCreatureUntilEOT.granted_keywords_if_warp_cast` (a `JumpUnlessTarget`). A new object
+  (the card exiled by warp and cast again from exile for its mana cost) has no mark (CR 400.7). It
+  is public state layout v5 can't see (warp's delayed exile is encoded as a count per player only):
+  `public_state.rs` perturbs it ("a creature was cast for its warp cost": the first creature in the
+  encoded slots, no draw from the gate's random stream) and lists it as the third `NextLayout` gap
+  (void is the second); `tests/az.rs::public_state_reaches_the_encoding` expects three.
+* **The Seriema**: the static scope `OtherTappedLegendaryCreaturesYouControl`
+  (`lower/statics.rs`); `Filter::Tapped` is allowed in static scopes (`layers.rs::scope_matches`,
+  `scope_filter_ok`): being tapped is no characteristic, nothing recurses (as `HasCounter`).
+* **Convoke** (Vote Out; CR 702.51): `CastingRules::convoke` (the card's own, from `has_convoke`;
+  denied on a land or with improvise), `PayMana::convoke`, `Game::convoke_classes` (`pay.rs`): each
+  untapped creature its controller controls is a source of one unit of its colours (a pip of one of
+  them, or generic; a colourless creature generic only; summoning sickness doesn't matter, 302.6),
+  the `IMPROVISE` slot (tapped after the mana abilities, never a mana ability, so "whenever you tap a
+  creature for mana" doesn't see it), `RESTRICTED` so Wizard's Rockets never turns it into colours
+  (it can't pay the Rockets' {X}). No mana is spent by it (702.51a): converge skips `IMPROVISE`
+  sources (improvise's units, of no colour, added none before either). Castability adds the classes
+  where improvise does (`hand_castable`, `route_payable`; `pay_classes` takes the flag).
+  `tests/support.rs::a_new_ir_field_value_is_a_blocker` used `has_convoke` as its unsupported flag:
+  it uses `nonbasic_lands_are_mountains` now (Magus of the Moon's, still unbuilt).
+* **Tapestry Warden** ("each creature you control with toughness greater than its power assigns
+  combat damage equal to its toughness rather than its power" and "... stations permanents using
+  its toughness rather than its power"): `CardDef::{toughness_assigns_damage, toughness_stations}`;
+  `Game::combat_damage_amount` replaces the power read in `combat_damage` (attackers and blockers,
+  CR 510.1a, 510.1c-d; the damage-assignment decisions get that amount), `station_amount` replaces
+  it in `tapped_power` (CR 702.184c), read as the ability resolves; for a tapped creature gone by
+  then, its toughness and controller as it last existed (`Game::lki_toughness`, recorded as a
+  permanent leaves the battlefield and cleared each turn like the other last-known records; 608.2h).
+  All of it only when a card of the table has such a static (`CardDb::watch_toughness`, false for
+  the cube: nothing changes there).
+
+**Shared files touched (small, additive):** `lib.rs`, `program.rs` (`Ext::EoeX`, `uses_event`,
+`jump_target`), `resolve_ext.rs` (dispatch), `db.rs` (`Filter::CastForWarp`,
+`CastingRules::convoke`, the two `CardDef` toughness flags, `CardDb::watch_toughness`), `game.rs`
+(`Mark::WarpCast` and where it is set, `lki_toughness` and where it is kept), `cast.rs` (the filter's
+arm; convoke beside improvise), `pay.rs` (convoke), `layers.rs` and `lower/statics.rs` (the scope),
+`lower/{mod, effect, effect_ext, printing}.rs` (hooks, the convoke and toughness flags,
+`IR_DEFECTS`), `combat.rs` and `resolve_eoe_a.rs` (one call each), `flow.rs` (the record's reset),
+`public_state.rs`, `tests/az.rs`, `tests/support.rs`.
+
+**Left blocked, and why** (no card with an `ir_defect(...)` blocker attempted: 99.9's):
+
+* Declined, a subsystem each (as the lanes said): Robe of Stars (phasing, CR 702.26), The Dominion
+  Bracelet (controlling another player's turn), Blade of the Swarm (an exiled card as a target: no
+  action slot, a layout change).
+* Gene Pollinator (the set's last blocked common without an IR defect): "{T}, Tap an untapped
+  permanent you control: Add one mana of any color". Payment would need a source per other untapped
+  permanent with a Pollinator tapped as well, as Orcish Lumberjack's `LJ_FOR` with `Class::share`;
+  but the permanent tapped may itself be a Pollinator, which a share count can't see (a Lumberjack is
+  never the Forest it sacrifices): new payment work, not started.
+* Close Encounter: an additional cost that chooses (pays nothing) "a creature you control or a warped
+  creature card you own in exile": one choice across the battlefield and exile, noted on the spell;
+  no such cost or decision exists.
+* Scout for Survivors: "total mana value 3 or less" constrains the set of targets (`TargetReq` can't
+  say it). Steelswarm Operator, Eldrazi Temple, Plaza of Heroes: mana restricted to activated
+  abilities or to kinds of spells the payment model's restricted mana doesn't cover (artifact spells
+  only). Magus of the Moon (305.7 layer 4 land types), Raging Ravine (latent triggered abilities).
+* Rares and mythics with a feature of their own, not attempted: Sunstar Chaplain (cost "remove a
+  +1/+1 counter from a creature you control"), Rust Harvester (cost "exile an artifact card from your
+  graveyard": a filtered graveyard exile), Astelli Reclaimer and Dyadrine (the mana spent to cast
+  it), Mm'menon, the Right Hand, Requiem Monolith, Terminal Velocity, Possibility Technician, Chorale
+  of the Void, Pain for All, Frenzied Baloth, Ragost, Secluded Starforge, Sothera, Famished
+  Worldsire, Alpharael, Stonechosen, Tannuk, Steadfast Second (their blockers in the support report).
+
+**Results** (code at 81b150d). EoE support **221 / 320** (base 84, A 32, B 14, C 31, D 36, cross
+24); cube 546 / 546. Behaviour digests unchanged (combined `f6543eb2b1b8752f`). The full engine
+suite (`cargo test --release -p engine`): 1,791 passed, 0 failed, 15 ignored (d476ad1: 1,736; the 55
+more are this branch's card tests). The public-state gate: 135 perturbations encoded, 5 deliberate
+limits, 3 gaps for the next layout. `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 9,668 /
+9,717, 615 draws, mean 34.4 turns, 420.2 decisions), all four fuzz tests passed (730 s). The default
+`FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before the branch) and 1,000 matches,
+passed (397 s). (E: filled to 0 bytes for a while during the runs; the suite was run once it had
+room again.)
 ### 99.9 The IR-fix batch (branch `eoe-irfix`, mtg-bot `feature/eoe-ir-fixes` 5362f5ed)
 
 **Why.** The four lanes found the IR dropping or contradicting the Oracle text of about 45 EoE cards
@@ -18799,3 +18940,14 @@ docs/SEARCH_LIMITATIONS.md).
 
 **Unchanged:** the cube's IR (card for card), support (546 / 546) and behaviour digests (combined
 `f6543eb2b1b8752f`); no layout, encoding, zero-core or Python change.
+
+### 99.10 The follow-ups merged (maintainer, 2026-11-08)
+
+`eoe-irfix` fast-forwarded `eoe-base` (9815f34); then `eoe-cross` (d089ee8) merged: three conflicts,
+all expected: `lower::IR_DEFECTS` (the IR-fix batch removed the fixed entries 81 and 82, the
+cross-lane pass kept them and added its section: the section kept, 81 and 82 gone), the
+docs/ir_defects.md summary rows (81 and 82 with their "fixed" status, plus 100 and 101), and
+ENGINE.md (99.8 before 99.9). Two unused `mut`s in the cross-lane tests removed. The two branches
+complete no further card together. **EoE support 258 / 320**: base 84, A 32, B 14, C 31, D 36,
+cross 24, IR-fix 37; the 62 still blocked are listed by the support report (`SUPPORT_DUMP`), 23 of
+them by an IR defect (`lower::IR_DEFECTS`).
