@@ -18106,3 +18106,130 @@ Each lane appends its own subsection here (99.2 lane A, 99.3 lane B, 99.4 lane C
 Merge order B, A, C, D (B's base audit first). Then the cross-lane cards, the IR defects the lanes
 list (one mtg-bot batch and one re-export, so the schema changes once), and the 20k fuzz over the
 EoE table.
+
+### 99.5 Lane D: creatures, combat, removal, damage, life, tokens, pumps (branch `eoe-d-combat`)
+
+**Result.** 36 of the lane's 44 cards supported (`SUPPORTED_EOE_D`), the EoE table 93 -> 129 of 320
+on this branch alone; 3 IR defects recorded (docs/ir_defects.md 80-82); 14 cross-lane features done
+and tested on custom IR cards. Cube support 546 / 546 and the behaviour digests unchanged
+(`f6543eb2b1b8752f`). Tests: `engine/tests/cards_eoe_d.rs` (53; its card table is `CardDb::eoe()`'s
+cards plus vanilla test cards written as IR in the file: never `tests/common`, whose cards the cube's
+fuzz pool and digests take).
+
+**Supported (36).** Anticausal Vestige, Biosynthic Burst, Comet Crawler, Command Bridge, Cut
+Propulsion, Darkness, Dawnstrike Vanguard, Depressurize, Devastating Onslaught, Diplomatic Relations,
+Exosuit Savior, Faller's Faithful, Flight-Deck Coordinator, Focus Fire, Frontline War-Rager, Genemorph
+Imago, Haliya Guided by Light, Hemosymbic Mite, Kavaron Harrier, Mechanozoa, Memorial Team Leader, Mightform Harmonizer,
+Monoist Circuit-Feeder, Mouth of the Storm, Mutinous Massacre, Nova Hellkite, Perigee Beckoner, Sami
+Ship's Engineer, Singularity Rupture, Skystinger, Swarm Culler, Systems Override, The Endstone,
+Vaultguard Trooper, Zealous Display, Zero Point Ballad.
+
+**How.** The lowering is `engine/src/lower/effect_eoe_d.rs` (a link in `lower_effect`'s chain), the
+new instructions `Ext::EoeD(EoeD)` (`program.rs`) run in `engine/src/resolve_eoe_d.rs`. Most of the
+lane's classes are named after a card and carry no fields (their meaning is the Oracle text and
+mtg-bot's docstring; ir_defects 11): each lowers onto ops named after rules actions, its targets
+re-derived and, where the IR has a target spec, checked against the class's flags (`optional` against
+a minimum of 0, `exclude_self` against `Not(Source)`, `or_spacecraft` against the Spacecraft subtype;
+a disagreement blocks the card).
+
+* **Intervening "if"s written as effect wrappers** (`ConditionalOnTappedCreatures`,
+  `ConditionalIfYouControlAtLeast`): `hoist_intervening_if` (called from `lower/trigger.rs`) moves
+  the condition into the trigger's predicate (`TrigPred::If`, checked as the event happens and again
+  on resolution, CR 603.4). Anywhere but a triggered ability they stay blocked.
+* **Damage.** `PowerDamageByTarget` (a target creature deals damage equal to its power to another
+  target or to itself; it is the source, so its deathtouch and lifelink apply, CR 120.3; twice that
+  if it matches a filter: Cut Propulsion's flying), `CountControlled` + `Amount::Remembered` (Focus
+  Fire's "2 plus the creatures and/or Spacecraft you control"), `Filter::Blocking`.
+* **"Wasn't dealt damage this turn"** (Faller's Faithful): `Mark::DealtDamage(turn)`, kept by
+  `deal_damage` only when the card table reads `Filter::DealtDamageThisTurn` (`CardDb::watch_damage`,
+  false for the cube: no cube game changes). The draw doesn't need the destruction (an indestructible
+  creature's controller draws too).
+* **P/T from a number.** `ApplyPtTimes` (+p*n/+t*n, n read once: the source's power, a remembered
+  power for "double its power" (CR 701.10b), the artifacts you control).
+* **Granted "when this creature dies" until end of turn** (Perigee Beckoner):
+  `Mark::DiesTriggerThisTurn`, fired by `move_card` as `Mark::LeaveTrigger` is and removed by
+  `end_turn_effects` (CR 514.2); `ReturnEventCardTapped` puts the card back tapped (it enters tapped,
+  never "becomes tapped": a Hemosymbic Mite returned this way doesn't trigger).
+* **Control until end of turn** (Systems Override, Mutinous Massacre): `GainControlUntilEndOfTurn`
+  changes control (`change_control`) and records `Mod::ControlFrom(previous)` on the object until end
+  of turn (an effect with no characteristic change); when the "until end of turn" effects end (CR
+  514.2), each permanent still controlled by an effect's player returns to the player before it,
+  latest effect first (CR 613.1b, 613.7).
+* **Life gained this turn** (Haliya, Guided by Light: "draw a card if you've gained 3 or more life
+  this turn", checked as the ability resolves; the "if" ends the sentence, so not an intervening
+  "if"): `Player.life_gained`, `Cond::GainedLifeAtLeast`. The public-state gate (ENGINE.md 58)
+  classifies it Public, with a perturbation made on player 0 without a draw from the gate's random
+  stream (a draw shifts every later perturbation's position and turned up two unrelated gaps: kept
+  out of this branch) and a Design limit: layout v5 encodes whether a player gained life this turn,
+  not how much.
+* **Prevention.** `Mod::PreventCombatDamage` (`Flags::prevent_combat_damage`), a rules effect on every
+  creature until end of turn (`ApplyRules`, so creatures that come later are covered too): combat
+  damage from such a creature is prevented in `deal_damage` (CR 615.1a), unless "can't be prevented"
+  (Questing Beast's `combat_unpreventable`).
+* **Others.** `DelayedWhen::EndOfCombat` (CR 511.2: Kavaron Harrier's token), the Blocks event's
+  attacker slot (CR 509.3b: Skystinger), `DuringYourTurn` -> `Cond::YourTurn`, `each_player` token
+  creation (APNAP), "sacrifice it unless you tap an untapped permanent" (`SacrificeSourceUnlessTap`,
+  `ChoosePermanent` / `PASS`), "your life total becomes half your starting life total, rounded up"
+  (CR 119.5: the difference is gained or lost), "lose half their life, rounded up", "mill half their
+  library, rounded down", "destroy all creatures with toughness X or less" remembering the cards put
+  into a graveyard for "return one of them if X is 6 or more" (`ChooseGraveyardCard`), "choose odd or
+  even" (`ChooseMode`, as Gollum's), `Filter::MvAtMostLandsYouControl`, a delayed trigger about a
+  target. Every choice is a decision: the "may"s (`YesNo`), the sacrifices (`Sacrifice`/`PASS`), the
+  untap-or-sacrifice, the parity, the returned card, the hand card.
+
+**IR defects (docs/ir_defects.md 80-82, `lower::IR_DEFECTS` under `// Lane D`).** 80 Syr Vondam,
+Sunstar Exemplar ("dies or is put into exile" widened to `leaves_battlefield`, and "while its power
+is 4 or greater" moved to resolution); 81 Dawnsire, Sunstar Dreadnought ("creature or planeswalker":
+the planeswalker dropped); 82 Entropic Battlecruiser ("they lose 3 life", the discarding player,
+written as a target).
+
+**Cross-lane features done (tested on custom IR cards; their cards wait for another lane):**
+`DestroyTargetCreature` (Embrace Oblivion: A; Vote Out: B), `ConditionalOnTappedCreatures` (Sunstar
+Chaplain: A), `DuringYourTurn` (Alpharael, Dreaming Acolyte: C), `DealDamageToTargetCreature.optional`
+(Pinnacle Kill-Ship: A), `DealDamageToTargetOpponent` (Biotech Specialist: B),
+`DealDamageToTargetTappedCreature` (Reroute Systems: A), `DealDamageEqualToSourcePowerAnyTarget`
+(Rust Harvester: A), `TapAnotherTargetCreature` (Starport Security: C),
+`ReturnUpToNTargetCreaturesToOwnersHands` (Specimen Freighter: A, C),
+`OptionalPutCreatureFromHandOntoBattlefield` (Sledge-Class Seedship: A),
+`GainControlOfTargetSliverPermanently` (Sliver Overlord: C), `ConditionalIfYouControlAtLeast`
+(Inventors' Fair: B), `CreateToken.each_player` (Edge Rover: B),
+`DefendingPlayerLosesHalfLifeRoundedUp` (Alpharael, Stonechosen: C).
+
+**Left blocked in the lane, and why.**
+* The Dominion Bracelet: controlling another player's turn (CR 722) is a subsystem of its own (who
+  decides for whom, what they see).
+* Seedship Impact, Terrapact Intimidator: the Lander token (lane B's).
+* Astelli Reclaimer: "the amount of mana spent to cast this creature" (lane A's `ManaSpent`, for
+  Dyadrine, is the place to share).
+* Requiem Monolith: a granted triggered ability on any event until end of turn ("whenever this
+  creature is dealt damage"); only the granted "when this creature dies" exists.
+* Terminal Velocity: triggered abilities granted to a permanent for good ("when this permanent leaves
+  the battlefield", "at the beginning of your end step, sacrifice this permanent").
+* Possibility Technician: a play permission that holds while you control a Kavu (a new
+  `PermKind::Play` condition, 26 construction sites).
+* Syr Vondam, Sunstar Exemplar: IR defect 80.
+* Lane features not attempted because every card using them needs another lane too: `x_pips` in an
+  activation's mana cost (Blast Zone), `additional_cost_choose_your_creature` (Close Encounter),
+  `combat_damage_cant_be_prevented` and `StaticAbility(no modification)` (Frenzied Baloth),
+  `grants_toughness_as_damage_for_creatures_you_control` (Tapestry Warden),
+  `replaces_first_tokens_with_copies` (Moonlit Meditation), Atomic Microsizer's, Dyadrine's, Famished
+  Worldsire's, Roving Actuator's, Survey Mechan's and Pain for All's effects,
+  `ChangeControllerToCombatDamageSource` (Contested War Zone), `RegenerateTargetCreature` (Swarmyard:
+  no regeneration in the engine, CR 701.19), `CreateTokenPerMulticoloredPermanent` (Infinite Guideline
+  Station), `IfGainedLifeThisTurnUntapSelf` (Ragost), `create_drone_if_was_attacking` (Desculpting
+  Blast), `power_bonus_from_x` (Secluded Starforge), `AnyPlayerControlsNoCreatures` (Sothera),
+  `OtherTappedLegendaryCreaturesYouControl` (The Seriema).
+
+**Shared files touched (small, additive):** `db.rs` (`DelayedWhen::EndOfCombat`, the Blocks slots, `Cond::GainedLifeAtLeast`,
+`Filter::{Blocking, DealtDamageThisTurn, MvAtMostLandsYouControl}`, `Mod::{ControlFrom,
+PreventCombatDamage}`, `CardDb::watch_damage`), `game.rs` (two `Mark`s, the dies-trigger firing, the
+damage hooks, `Player.life_gained`), `flow.rs` and `activate.rs` (its reset and condition),
+`public_state.rs` and `testkit.rs` (its classification, perturbation, limit and view), `layers.rs` (`Flags::prevent_combat_damage`, `end_turn_effects`), `cast.rs`
+(`card_matches` arms), `triggers.rs` (`fire_delayed`), `program.rs` (`Ext::EoeD`), `resolve_ext.rs`
+(dispatch, `add_delayed` pub(crate)), `lib.rs`, `lower/{mod, effect, effect_ext, filter, trigger}.rs`
+(hooks: the dispatch chain, `CreateToken`'s two flags, `DealDamageToTargetCreature.optional`, the
+pump arms' `also_untap_if_not_your_turn` and `granted_triggered_ability`, `IsBlocking`,
+`DuringYourTurn`, the intervening-if hoist). No layout, encoding, zero-core or Python change.
+
+**Verification.** `cargo test --release -p engine` (full suite), the digests, `FUZZ_POOL=eoe
+FUZZ_GAMES=20000` and the default `FUZZ_GAMES=20000` fuzz: see the branch's last commit message.
