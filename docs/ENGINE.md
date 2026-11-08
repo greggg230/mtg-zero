@@ -19075,3 +19075,10 @@ an artifact entered and left, and the next turn; Mutavault's creature types and 
 Mirrorpool's {C} costs, copy with a new target and token copy without counters; Pinnacle Starcage
 both players' small permanents and the Robots; Meltstrider's Resolve's fight, +0/+2 and one
 blocker).
+
+Full engine suite (normal release profile): 1,880 passed, 0 failed, 15 ignored. `support` 8 passed
+(cube 546 / 546, EoE 272 / 320); behaviour digests unchanged (combined `f6543eb2b1b8752f`);
+`FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 8,984 / 8,901, 2,115 draws, mean 39.8 turns,
+510.6 decisions), the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before)
+and 1,000 matches, all four fuzz tests passed; `cargo test -p card_ir` and `python -m pytest
+tools/codegen` pass.
