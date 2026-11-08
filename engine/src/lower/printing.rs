@@ -1907,8 +1907,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             // "Combat damage can't be prevented" (CR 615.12; Frenzied Baloth).
             combat_unpreventable_all: *combat_damage_cant_be_prevented,
             creature_spells_uncounterable: repl.creature_spells_uncounterable,
+            seen: 0,
         },
     };
+    def.w3.seen = crate::eoe_w3::seen_of(&def);
     if *additional_cost_pay_x_life && (x_pips > 0 || !is_spell_card) {
         l.unsupported("CardPrinting.additional_cost_pay_x_life(with {X} or on a permanent)");
     }

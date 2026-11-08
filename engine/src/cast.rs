@@ -2764,6 +2764,9 @@ impl Game {
             Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,
             Filter::Controller(you) => (self.objs[c.i()].controller == ctx.controller) == *you,
             Filter::Source => ctx.source.is_some_and(|s| s.idx == c && self.live(s)),
+            Filter::HostOfSource => {
+                ctx.source.is_some_and(|s| self.live(s) && self.objs[s.idx.i()].attached.is_some_and(|h| h.idx == c && self.live(h)))
+            }
             Filter::Token => self.is_token(c),
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,

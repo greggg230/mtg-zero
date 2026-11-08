@@ -181,6 +181,8 @@ pub fn fields() -> Vec<Field> {
         classify!(v, W3State {
             no_regen: Derived "transient: set and cleared around one destruction (\"it can't be regenerated\")",
             granted: Derived "a fast path: some permanent may have a granted triggered ability (Game.marks)",
+            seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
+            lki_host: Derived "last known information (CR 608.2h): what a gone Aura enchanted",
         });
     }
     classify!(v, Player {

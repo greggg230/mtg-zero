@@ -1122,6 +1122,7 @@ impl Game {
         let d = self.db.def(def);
         let seen = d.seen_bits() | d.back.map_or(0, |b| self.db.def(b).seen_bits());
         self.seen |= seen;
+        self.w3.seen |= d.w3.seen | d.back.map_or(0, |b| self.db.def(b).w3.seen);
         if d.miracle.is_some() {
             self.seen |= SEEN_MIRACLE_P0 << owner;
         }
@@ -1871,6 +1872,9 @@ impl Game {
             self.event(Event::obj(EventKind::LeavesBattlefield, old));
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
+        if from == Zone::Battlefield && self.w3.seen != 0 {
+            self.w3_leaves(idx, old);
+        }
         let lost_granted = from == Zone::Battlefield && !self.marks.is_empty() && self.lost_abilities(idx);
         // Its copiable values as it last existed on the battlefield (CR
         // 608.2h: "create a token that's a copy of it").

@@ -27,6 +27,15 @@ pub enum W3 {
     /// battlefield (CR 608.2h, 113.7a: its mana value and its qualities as a
     /// source of damage).
     DamageEachSourceMv { filter: Filter },
+    /// The permanent the source is attached to ("enchanted creature"; as the
+    /// source last existed if it left, CR 608.2h) deals damage equal to its
+    /// power to each legal target of requirement `tgt` (CR 120.3: it is the
+    /// source of the damage).
+    HostDamagesPower { tgt: u8 },
+    /// The triggered ability's event object ("it", as it last existed if it
+    /// left, CR 608.2h) deals `amount` damage to each opponent of the
+    /// controller (CR 120.3).
+    EventObjDamagesEachOpponent { amount: crate::program::Amount },
 }
 
 impl W3 {
@@ -34,14 +43,20 @@ impl W3 {
     pub fn uses_event(&self) -> bool {
         match self {
             W3::Regenerate { on } | W3::GrantTrigger { on, .. } => matches!(on, On::EventObj),
-            W3::CantBeRegenerated(_) | W3::DamageEachSourceMv { .. } => false,
+            W3::CantBeRegenerated(_) | W3::DamageEachSourceMv { .. } | W3::HostDamagesPower { .. } => false,
+            W3::EventObjDamagesEachOpponent { .. } => true,
         }
     }
 
     /// The forward jump target of a control-flow op.
     pub fn jump_target(&mut self) -> Option<&mut u16> {
         match self {
-            W3::Regenerate { .. } | W3::CantBeRegenerated(_) | W3::GrantTrigger { .. } | W3::DamageEachSourceMv { .. } => None,
+            W3::Regenerate { .. }
+            | W3::CantBeRegenerated(_)
+            | W3::GrantTrigger { .. }
+            | W3::DamageEachSourceMv { .. }
+            | W3::HostDamagesPower { .. }
+            | W3::EventObjDamagesEachOpponent { .. } => None,
         }
     }
 }
@@ -55,6 +70,39 @@ pub struct W3State {
     /// A fast path: `Game::marks` may hold a `Mark::Granted` (set when one is
     /// made, recomputed as marks are dropped).
     pub granted: bool,
+    /// `SEEN_W3_*` bits: a card of this game needs the rule (as
+    /// `Game::seen`).
+    pub seen: u8,
+    /// Last known information: the permanent each attached object that left
+    /// the battlefield this turn was attached to (CR 608.2h: "enchanted
+    /// creature" of an Aura gone; kept with `SEEN_W3_HOST`).
+    pub lki_host: Vec<(crate::ids::ObjRef, crate::ids::ObjRef)>,
+}
+
+/// `W3State::seen`: a card reads its host as it last existed.
+pub(crate) const SEEN_W3_HOST: u8 = 1;
+
+/// The `SEEN_W3_*` bits of a definition (`W3Def::seen`, set as it is
+/// lowered).
+pub(crate) fn seen_of(d: &crate::db::CardDef) -> u8 {
+    let programs = d
+        .triggers
+        .iter()
+        .map(|t| &t.ability)
+        .chain(d.spell.iter())
+        .chain(d.activated.iter().filter_map(|a| match &a.effect {
+            crate::db::ActEffect::Stack(ab) => Some(ab),
+            crate::db::ActEffect::Mana(_) => None,
+        }));
+    let mut bits = 0;
+    for ab in programs {
+        for op in &ab.program {
+            if let crate::program::Op::Ext(crate::program::Ext::EoeW3(W3::HostDamagesPower { .. })) = op {
+                bits |= SEEN_W3_HOST;
+            }
+        }
+    }
+    bits
 }
 
 impl Game {
@@ -81,6 +129,29 @@ impl Game {
                 }
                 Flow::Next
             }
+            W3::HostDamagesPower { tgt } => {
+                let s = f.source;
+                let host = if self.live(s) && self.objs[s.idx.i()].zone == crate::ids::Zone::Battlefield {
+                    self.objs[s.idx.i()].attached
+                } else {
+                    self.w3.lki_host.iter().rev().find(|x| x.0 == s).map(|x| x.1)
+                };
+                let Some(h) = host else { return Flow::Next };
+                let (src, power) = self.lki_source(h, f.controller);
+                let src = crate::game::DamageSource { controller: src.controller, ..src };
+                for t in self.targets_of(f, *tgt) {
+                    self.deal_damage(src, t, power);
+                }
+                Flow::Next
+            }
+            W3::EventObjDamagesEachOpponent { amount } => {
+                let Some(r) = f.ev.obj else { return Flow::Next };
+                let n = self.amount(f, *amount);
+                let (src, _) = self.lki_source(r, f.controller);
+                let opp = crate::ids::opp(f.controller);
+                self.deal_damage(src, crate::ids::Target::Player(opp), n);
+                Flow::Next
+            }
             W3::DamageEachSourceMv { filter } => {
                 let r = f.source;
                 let on_bf = self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield;
@@ -105,6 +176,35 @@ impl Game {
                     self.deal_damage(src, t, mv as i32);
                 }
                 Flow::Next
+            }
+        }
+    }
+
+    /// Object `r` as a source of damage and its power: now if it is still
+    /// that permanent, else as it last existed on the battlefield (CR
+    /// 608.2h, 113.7a; its controller then: `default_controller` if none was
+    /// recorded).
+    fn lki_source(&self, r: crate::ids::ObjRef, default_controller: PlayerId) -> (crate::game::DamageSource, i32) {
+        if self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield {
+            return (self.damage_source_of(r.idx), self.power(r.idx));
+        }
+        let src = match self.lki_damage.iter().rev().find(|x| x.0 == r) {
+            Some(&(_, d)) => d,
+            None => crate::game::DamageSource { controller: default_controller, ..self.damage_source_of(r.idx) },
+        };
+        let power = match self.objs[r.idx.i()].lki_power {
+            Some((inc, p)) if inc == r.inc => p,
+            _ => 0,
+        };
+        (src, power)
+    }
+
+    /// Permanent `idx` (object `old`) is leaving the battlefield: the last
+    /// known information workstream W3's cards read (`W3State::seen`).
+    pub(crate) fn w3_leaves(&mut self, idx: CardIdx, old: crate::ids::ObjRef) {
+        if self.w3.seen & SEEN_W3_HOST != 0 {
+            if let Some(h) = self.objs[idx.i()].attached {
+                self.w3.lki_host.push((old, h));
             }
         }
     }
@@ -203,6 +303,8 @@ pub struct W3Def {
     pub combat_unpreventable_all: bool,
     /// "Creature spells you control can't be countered" (CR 101.2).
     pub creature_spells_uncounterable: bool,
+    /// Its `SEEN_W3_*` bits ([`seen_of`]).
+    pub seen: u8,
 }
 
 impl Game {

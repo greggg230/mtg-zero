@@ -414,6 +414,10 @@ pub enum Filter {
     /// A permanent that entered as a spell cast for its warp cost (CR
     /// 702.185a; `Mark::WarpCast`; ENGINE.md 99.8).
     CastForWarp,
+    /// The permanent the context's source is attached to (an Aura's
+    /// enchanted creature, CR 303.4e: "any other target" of Pain for All's
+    /// enchanted creature is `Not(HostOfSource)`; EoE W3).
+    HostOfSource,
 }
 
 /// `Filter::Ability` kinds.
@@ -1286,7 +1290,11 @@ impl CardDef {
                     matches!(
                         op,
                         Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })
-                            | Op::Ext(crate::program::Ext::EoeW3(crate::eoe_w3::W3::DamageEachSourceMv { .. }))
+                            | Op::Ext(crate::program::Ext::EoeW3(
+                                crate::eoe_w3::W3::DamageEachSourceMv { .. }
+                                    | crate::eoe_w3::W3::HostDamagesPower { .. }
+                                    | crate::eoe_w3::W3::EventObjDamagesEachOpponent { .. }
+                            ))
                     )
                 })
             }) {

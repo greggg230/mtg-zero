@@ -141,6 +141,20 @@ pub(crate) fn lower_effect_w3(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect
             let sac = d.finish();
             grant_trigger_def(l, b, On::Made, EventKind::BeginningOfEndStep, TrigPred::Controlled(Slot::Player, true), sac, false);
         }
+        // "When this Aura enters, enchanted creature deals damage equal to
+        // its power to any other target" (Pain for All; CR 115.4 "any
+        // target", other than that creature; it is the source, 120.3).
+        E::PainForAllETBEffect(nodes::PainForAllETBEffect {}) => {
+            let any = Filter::Or(vec![Filter::Type(types::CREATURE), Filter::Type(types::PLANESWALKER), Filter::Type(types::BATTLE), Filter::Player]);
+            let t = b.target(Filter::And(Box::new(any), Box::new(Filter::Not(Box::new(Filter::HostOfSource)))), 1, 1);
+            w3(b, W3::HostDamagesPower { tgt: t });
+        }
+        // "Whenever enchanted creature is dealt damage, it deals that much
+        // damage to each opponent" (Pain for All; CR 120.3: that creature is
+        // the source).
+        E::PainForAllDamageEchoEffect(nodes::PainForAllDamageEchoEffect {}) => {
+            w3(b, W3::EventObjDamagesEachOpponent { amount: Amount::EventAmount });
+        }
         _ => return false,
     }
     true

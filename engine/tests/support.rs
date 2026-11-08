@@ -901,6 +901,7 @@ const SUPPORTED_EOE_MANA: &[&str] = &[
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Frenzied Baloth",
+    "Pain for All",
     "Raging Ravine",
     "Requiem Monolith",
     "Rust Harvester",

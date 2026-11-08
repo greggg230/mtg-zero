@@ -552,3 +552,85 @@ fn terminal_velocity_may_put_nothing_cr608_2d() {
     assert_eq!(g.obj(giant).zone, Zone::Hand);
 }
 
+
+// ---- Pain for All -------------------------------------------------------------------
+
+/// Pain for All: "Enchant creature you control / When this Aura enters,
+/// enchanted creature deals damage equal to its power to any other target"
+/// (CR 303.4a; 115.4: any target but that creature; 120.3: the creature is
+/// the source).
+#[test]
+fn pain_for_all_enchanted_creature_deals_its_power_to_any_other_target_cr115_4() {
+    let mut g = scen()
+        .battlefield(0, &["W3 Giant", "Mountain", "Mountain", "Mountain"])
+        .battlefield(1, &["W3 Wall"])
+        .hand(0, &["Pain for All"])
+        .at(Step::Main1, 0)
+        .start();
+    let (giant, wall) = (bf(&g, 0, "W3 Giant"), bf(&g, 1, "W3 Wall"));
+    let c = g.card(0, "Pain for All", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(g.tgt(giant)) && !g.has_option(g.tgt(wall)), "enchant creature you control");
+    g.choose(g.tgt(giant));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(!g.has_option(g.tgt(giant)), "any other target");
+    assert!(g.has_option(g.tgt(wall)) && g.has_option(player(1)) && g.has_option(player(0)));
+    g.choose(player(1));
+    settle(&mut g);
+    assert_eq!(g.obj(c).attached, Some(g.obj_ref(giant)), "{}", log(&g));
+    assert_eq!(g.life(1), 15, "5: its power\n{}", log(&g));
+}
+
+/// "Whenever enchanted creature is dealt damage, it deals that much damage
+/// to each opponent" (CR 120.3): all of it, even past lethal, and the
+/// creature, gone, still deals it (608.2h).
+#[test]
+fn pain_for_all_damage_to_the_creature_is_dealt_to_each_opponent_cr608_2h() {
+    let mut g = scen()
+        .battlefield(0, &["W3 Bear", "Mountain", "Mountain", "Mountain", "Mountain", "Mountain"])
+        .hand(0, &["Pain for All", "W3 Bolt"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 0, "W3 Bear");
+    let tb = g.tgt(bear);
+    cast(&mut g, 0, "Pain for All", &[tb]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    settle(&mut g);
+    assert_eq!(g.life(1), 18, "2: its power");
+    let tb = g.tgt(bear);
+    cast(&mut g, 0, "W3 Bolt", &[tb]);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard);
+    assert_eq!(g.life(1), 8, "10 more: that much damage\n{}", log(&g));
+    assert_eq!(g.life(0), 20, "not its controller");
+}
+
+/// The Aura gone before its enters trigger resolves: "enchanted creature"
+/// is the creature it enchanted as it last existed (CR 608.2h), which still
+/// deals the damage.
+#[test]
+fn pain_for_all_gone_its_last_enchanted_creature_deals_the_damage_cr608_2h() {
+    let mut g = scen()
+        .battlefield(0, &["W3 Giant", "Mountain", "Mountain", "Mountain"])
+        .battlefield(1, &["Island"])
+        .hand(0, &["Pain for All"])
+        .hand(1, &["W3 Shatter"])
+        .at(Step::Main1, 0)
+        .start();
+    let giant = bf(&g, 0, "W3 Giant");
+    let tg = g.tgt(giant);
+    let aura = cast(&mut g, 0, "Pain for All", &[tg]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    g.drive_until(|g| at_priority(g));
+    assert_eq!(g.stack().len(), 1, "the enters trigger waits");
+    to_opponent_priority(&mut g);
+    let t = g.tgt(aura);
+    cast(&mut g, 1, "W3 Shatter", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(aura).zone, Zone::Graveyard);
+    assert_eq!(g.life(1), 15, "{}", log(&g));
+}

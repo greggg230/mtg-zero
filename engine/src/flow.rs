@@ -463,6 +463,7 @@ impl Game {
         self.lki_copy.clear();
         self.lki_damage.clear();
         self.lki_toughness.clear();
+        self.w3.lki_host.clear();
         self.spell_lki.clear();
         self.may_copies = 0;
         self.activations.clear();
