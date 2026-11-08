@@ -31,7 +31,7 @@
 use std::sync::Arc;
 
 use crate::db::CardDb;
-use crate::decision::{act, Choice, Decision, DecisionKind, Opt};
+use crate::decision::{act, Choice, Decision, DecisionKind, Opt, Stage};
 use crate::game::{Game, GameSpec};
 use crate::hidden::{key, key_kind, key_payload, key_player, HIDDEN, KEY_GAME, KEY_REVEAL};
 use crate::ids::{opp, DefId, PlayerId};
@@ -169,7 +169,7 @@ impl Sideboarding {
             last: None,
             asking: None,
             done: [None, None],
-            decision: Decision { player: first, kind: DecisionKind::Sideboard, options: Vec::new() },
+            decision: Decision { player: first, kind: DecisionKind::Sideboard, options: Vec::new(), stage: Stage::One },
         };
         sb.ask(pool);
         sb
@@ -222,7 +222,7 @@ impl Sideboarding {
                     options.push(Opt { action: act::NUMBER + x as u16, choice: Choice::Number(x as u8) });
                 }
             }
-            self.decision = Decision { player: p, kind: DecisionKind::SideboardCount, options };
+            self.decision = Decision { player: p, kind: DecisionKind::SideboardCount, options, stage: Stage::One };
             return;
         }
         let size: usize = counts.iter().map(|&c| c as usize).sum();
@@ -239,7 +239,7 @@ impl Sideboarding {
             }
             before += counts[k] as u32;
         }
-        self.decision = Decision { player: p, kind: DecisionKind::Sideboard, options };
+        self.decision = Decision { player: p, kind: DecisionKind::Sideboard, options, stage: Stage::One };
     }
 }
 

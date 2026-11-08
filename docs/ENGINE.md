@@ -19560,3 +19560,172 @@ suite 1,883 passed, 0 failed, 19 ignored; behaviour digests unchanged (combined
 play reaches the mechanism: 300 random-action games of a Tannuk deck (four Tannuks, red creatures,
 Mountains) cast 301 spells for Tannuk's warp and exiled 273 permanents with it. The public-state
 gate: 135 perturbations encoded, 5 deliberate limits, 9 next-layout gaps.
+
+### 100. Faithfulness (the audit's fixes)
+
+The user's rule (2026-11-08): **"We can't have any approximations. Need fully faithful
+implementation."** `docs/faithfulness_audit.md` classifies every admitted divergence and designs
+the fixes (its section 5) in workstreams (its section 6): a shared commit A0 first, then A (choice
+ranges), B (mana and payment), C (rules timing and characteristics), D (the encoding), and F7
+(numbers and loops). Each lands as a subsection here.
+
+#### 100.1 A0: paged choices and big numbers (branch `eoe-a0-helpers`, from `eoe-base` 9cdda51)
+
+**Why.** The action layout gives each kind of option a fixed range (32 `STACK` slots, 16
+`TRIGGER`, `NUMBER` 0..31, 96 permanents a side, 4 `ACTIVATE` slots a permanent, 32 `EXILE`, 12
+`GY_ABILITY`, 64 list slots), and where a choice had more options than its range the engine cut
+them (the 31 nearest stack items, the first 16 triggers, X clamped to 31, ...). The fix keeps the
+layout and makes every legal option reachable by deciding in steps inside the same ranges (the
+audit's F1 and F2, 5.1-5.2). A0 builds the two helpers and their encoding; it adds no call site
+(workstream A applies them), so no game plays differently.
+
+**`Game::ask_paged`** (`decision.rs`; F1). `ask_paged(task, page, player, kind, base, n, items,
+extra)` is `ask_paged_ranges(task, page, player, kind, &[PagedRange { base, n, items }], extra)`.
+A range's `items` are `(position, Choice)` pairs, positions strictly increasing in the range's
+canonical order: the id an item has when nothing pages is `base + position` (positions may skip,
+as the stack's spells among its abilities or the permanents a filter matches do), so a caller
+keeps its ids exactly. `extra` are the decision's other options (`PASS`, `PLAYER`, ids of ranges
+that never page).
+
+* A range whose positions are all below `n` is offered whole at `base + position`. With no paged
+  range the decision is exactly `ask`'s (asserted by a test, option for option, `Stage::One`).
+* A range with a position `n` or beyond is **paged**: windows of `n - 1` positions. The **first
+  page** offers its window-0 items at `base + position` and `base + n - 1` = "next page"
+  (`Choice::Page(Page { range, window })`), together with the ranges that fit and `extra`. A
+  **range page** (window w >= 1) offers that range's items of window w alone, at `base + position -
+  w (n - 1)`, and "next page" if a later window holds an item. "Next page" goes to the next window
+  that holds one (a window with no item is skipped, so no page but the first can offer only
+  "next"); the last page has no "next".
+* Exactly once: each item lies in one window, the pages are visited in increasing order, and the
+  ranges that fit and `extra` are on the first page only, so every option is reached by exactly
+  one sequence of decisions. Several ranges may page in one decision (a target that is either
+  player's permanent or a spell): each has its own pages, entered from the first page.
+* The page lives in the task: the asking task answers `Choice::Page(p)` by pushing itself with
+  page `p`, and recomputes its items from the game whenever it runs, so a refresh (re-running the
+  asker after `determinize`, ENGINE.md 10; fuzz seed 624's lesson, 99.8) asks the same page. A
+  range page that holds no item any more (another player's decision refreshed in a world where
+  its items differ; never the decider's) shows the first page.
+* `ask` still renames graveyard and exile cards of `Target`, `NewTarget` and
+  `ChooseGraveyardCard` options (65.10, 99.14) after the helper: a paged range of such cards takes
+  its positions from that naming (workstream A's part).
+
+**`Game::ask_number`** (F2). `ask_number(task, step, player, kind, lo, hi)` asks for a number in
+`lo..=hi` (`u64`); the asking task gives the answer `NUMBER + k` to `NumberStep::answer(lo, hi, k)`
+with the same range and gets `NumberAnswer::Value(v)` or `NumberAnswer::Next(step)` (it pushes
+itself with the step and re-asks).
+
+* `hi - lo <= 31`: one decision, `NUMBER + k` = `lo + k`, as numbers are asked now (`Stage::One`).
+* Wider: the first decision offers `NUMBER + k` = `lo + k` for k <= 30 and `NUMBER + 31` = "`lo + 31`
+  or more". The rest `v - lo - 31` is then chosen in base-32 digits, most significant first, as
+  many as the largest rest needs (7 for any `u32` range, 13 for a `u64` one); each digit decision
+  offers exactly the digits with a legal completion (the prefix and the digit, zeros after, still
+  at most `hi`). Every value is reached by exactly one sequence (a value below `lo + 31` by its own
+  id, the others by one fixed-length digit string).
+* The task keeps `NumberStep { left, prefix }` (the digits left, this one included; the digits
+  chosen as a number); `lo` and `hi` are recomputed when it runs, so a refresh asks the same digit.
+  Digits with no legal completion left (another player's decision refreshed where the range
+  differs) restart at the first decision.
+
+**How a task uses them** (the pattern for workstreams A-D):
+
+```rust
+fn choose_thing(&mut self, id: u32, page: Page) {
+    match self.answer.take() {
+        Some(Choice::Page(next)) => self.agenda.push(Task::ChooseThing { id, page: next }),
+        Some(c) => { /* the item c */ }
+        None => {
+            let items: Vec<(u32, Choice)> = /* (position, choice), from the game as it is */;
+            self.ask_paged(Task::ChooseThing { id, page }, page, player, kind, act::STACK, act::STACK_N, &items, extra);
+        }
+    }
+}
+fn choose_amount(&mut self, id: u32, step: NumberStep) {
+    let (lo, hi) = /* from the game as it is */;
+    match self.answer.take() {
+        Some(Choice::Number(k)) => match step.answer(lo, hi, k) {
+            NumberAnswer::Next(s) => self.agenda.push(Task::ChooseAmount { id, step: s }),
+            NumberAnswer::Value(v) => { /* v */ }
+        },
+        None => self.ask_number(Task::ChooseAmount { id, step }, step, player, kind, lo, hi),
+        Some(other) => unreachable!("{other:?}"),
+    }
+}
+```
+
+A new task starts at `Page::FIRST` / `NumberStep::FIRST`; a set picked one item per decision
+(`ChoosePermanent`, attackers) asks each pick from `Page::FIRST`.
+
+**The encoding** (tier "encoding", layout v5 unchanged). `Decision` gains `stage: Stage` (`One`,
+`Paged { window }`, `Digit { left, prefix }`), set by the helpers; the context block writes it in
+v5's spare floats, as the audit assigns them (5.1, 5.2, 5.8):
+
+| Float | `ctx::` | Value |
+|---|---|---|
+| 246 | `PAGED` | 1 on a page of a paged choice (a paged range's last id is "next page"), and on a big number's first decision (`NUMBER` + 31 = "31 or more": its first page) |
+| 247 | `PAGE` | the window / 4 (squashed; 0 on the first page) |
+| 248 | | spare: the Bracelet's frame flag (workstream D, the audit's N3) |
+| 249 | `DIGIT` | a digit decision: the digits left, this one included, / 8 (its place value is 32^(left - 1)) |
+| 250 | `PREFIX` | the digits chosen so far, as a number, / 32 (squashed) |
+
+They were spare: `ctx::END` has been 246 since section 27.10 (layout v3's context block of 256),
+and 246-255 stayed the decision's spare floats through v4 (55.2, 58.8) and v5 (60.1); nothing in
+`az/encode.rs`, `public_state.rs` or the tests wrote them, and no open branch does. A const assert
+pins the four indices. They are the **decider's only** (as `ctx::OPTIONS`): whether a choice pages
+can depend on cards hidden from the other player (a search's distinct definitions), as its option
+count can. They are 0 unless a paged or digit decision is pending, so every encoding of today's
+games is unchanged. `testkit::view_of` (what the hidden-information checks compare across worlds)
+adds the stage to the decider's view. No width, offset, segment, identity or action id changed;
+`layout_v5.json` is as it was.
+
+**The precedents were not moved** (the helpers are not behaviour-identical to them; workstream A
+moves them):
+
+* W3's ability page (`Task::ChooseAbility`, 99.13) indexes `NUMBER` by an ability's place from
+  `from` (as positions), but pages as soon as a live place is at `from + 31`, where `ask_paged`'s
+  rule keeps position 31 on the page when it is the last (n = 32), and it offers "next" alone for
+  31 places with no live ability, a window `ask_paged` skips. The same decisions for a permanent
+  with at most 34 activated abilities, different ones from 35 on.
+* W1's linked-creature choice (99.11) pages the 32 `EXILE` slots with `PASS` as "next page";
+  `ask_paged`'s "next" is `EXILE` + 31.
+
+**Tests** (15, `decision.rs`'s unit tests, driven by a test-only task `Task::Probe` that asks
+through the helpers and logs the answer; `--lib`): `cr_601_2c_a_choice_that_fits_its_range_is_asked_as_before`
+(every range of the layout, dense and skipping positions, with and without other options: the
+decision `ask` makes, one decision each), `cr_601_2c_every_item_is_reached_exactly_once_at_the_page_boundaries`
+(n - 1, n, n + 1, 2(n - 1) .. 2(n - 1) + 2, 3(n - 1), 3(n - 1) + 1 items in all seven ranges, by
+walking every decision sequence), `cr_601_2c_pages_of_n_minus_1_items_then_next_page` (the ids
+page by page, the page in the task), `cr_601_2c_windows_without_an_item_are_skipped`,
+`cr_601_2c_several_paged_ranges_and_other_options_in_one_decision`,
+`paged_choice_is_asked_again_identically_after_determinize` (a refresh and `determinize` for both
+players at window 2), `a_stale_range_page_shows_the_first_page`,
+`cr_107_3_a_number_that_fits_number_is_one_decision` (`u32::MAX` and `u64::MAX` ends included),
+`cr_107_3_every_value_of_a_wide_range_is_reached_exactly_once` (every sequence walked for spans 32
+.. 32,799: rests at the digit boundaries 31/32, 1023/1024, 32767/32768, at `lo` 0, 3, `u32::MAX -
+span`, `u64::MAX - span`; the number of decisions per value), `cr_107_3_each_digit_offers_exactly_the_digits_with_a_legal_completion`
+(along paths to up to 30 values in each of nine ranges, `0..=u32::MAX` and `0..=u64::MAX` among them: the
+offered digits computed independently in `u128`, the completions of the offered digits
+partitioning the decision's, at most 7 digits for `u32`), `cr_107_3_the_u32_extremes`,
+`number_digits_are_asked_again_identically_after_determinize`,
+`a_stale_number_step_restarts_at_the_first_decision`,
+`forced_digits_and_one_item_pages_are_answered_by_the_engine` (`auto_single`: a forced digit keyed
+`KEY_AUTO`, exactly once still), `paged_and_digit_context_floats_are_the_deciders_only`. Mutations
+of the helpers (other options on every page, no prefix feasibility, the page boundary at n - 1,
+empty windows not skipped) each fail some of them.
+
+**Checks** (the normal release profile, on this commit's code). The full engine suite (`cargo test
+--release -p engine`): 1,977 passed, 0 failed, 20 ignored (131 binaries: `eoe-base`'s 1,962 and the
+15 new). Behaviour digests unchanged: full `f6543eb2b1b8752f`, `DIGEST_ENCODING=0`
+`1c61c689e1829386`. `--test az` 41 passed (the public-state gate's `public_state_reaches_the_encoding`,
+`public_state_classification`, `the_public_state_fixes_are_encoded`, and
+`the_v5_facts_encode_no_hidden_information`, `layout_json_is_checked_in`: `layout_v5.json` as it
+was); `--test hidden` 16 passed; `--lib` 28 passed. The default `FUZZ_GAMES=20000`: 20,000 games
+(wins 9,967 / 9,994, 39 draws, as before) and 1,000 matches, passed (547 s). `FUZZ_POOL=eoe
+FUZZ_GAMES=20000`: 20,000 games (wins 8,928 / 9,031, 2,041 draws, mean 40.1 turns, 500.4 decisions:
+the games of 99.13's combination), passed (2,088 s). docs/shortcuts.md: no entry (the helpers add
+no shortcut; workstream A marks the rows it fixes with them).
+
+The gate (`python tools/gate.py encoding --expect-digest f6543eb2b1b8752f --expect-digest0
+1c61c689e1829386 --no-mac --allow-skip checkpoint-load`, on 72a2bff): build, both digests, `--test az`
+(41) and pytest (174 passed) passed; the last line `GATE PASSED WITH SKIPS encoding 72a2bff7a491 in
+757s - skipped: checkpoint-load` (no checkpoint loaded on this build; the encoding's floats are 0 in
+every state a game reaches until workstream A asks paged or digit decisions).
