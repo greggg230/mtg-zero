@@ -1637,6 +1637,12 @@ pub struct CastingRules {
     /// 601.2f): "the second spell you cast each turn costs {2} less to
     /// cast"; "spells you cast have affinity for artifacts" (702.41a).
     pub spell_discounts: Vec<Discount>,
+    /// "Each player can't cast more than one noncreature spell each turn."
+    pub one_noncreature_spell: bool,
+    /// "The first spell each player casts during each of their turns may
+    /// be cast without paying its mana cost" (an alternative cost, CR
+    /// 118.9).
+    pub first_spell_free: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting

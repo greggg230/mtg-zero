@@ -100,6 +100,8 @@ pub enum Amount {
     ControllerLife,
     /// The multicolored permanents the controller controls (CR 105.2a).
     MulticoloredPermanents,
+    /// The differently named lands the controller controls (CR 201.2).
+    DifferentlyNamedLands,
 }
 
 /// The instructions M7d added (ENGINE.md 31), inside `Ext::M7d`. Same rules

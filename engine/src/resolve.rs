@@ -516,6 +516,12 @@ impl Game {
             Amount::MulticoloredPermanents => {
                 self.permanents_of(f.controller).filter(|&c| self.colors_of(c).count_ones() >= 2).count() as i32
             }
+            Amount::DifferentlyNamedLands => {
+                let mut names: Vec<&str> = self.lands_of(f.controller).map(|c| self.name(c)).filter(|n| !n.is_empty()).collect();
+                names.sort_unstable();
+                names.dedup();
+                names.len() as i32
+            }
         }
     }
 

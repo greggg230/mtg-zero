@@ -197,6 +197,9 @@ pub enum PermKind {
     /// Airbent (Aang): its owner may cast it for {n} rather than its mana
     /// cost while it stays exiled.
     Airbent(u8),
+    /// As `Taxed`, and a land played this way enters tapped (Lightstall
+    /// Inquisitor; ENGINE.md 99.4).
+    TaxedLandsTapped(u8),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

@@ -18154,10 +18154,32 @@ shuffle your hand and graveyard into your library, draw a card per multicolored 
 Spacecraft is an artifact subtype), and Cosmogoyf's P/T (`PtCda::OwnedInExile`: cards its
 controller owns in exile, face up or down, not tokens).
 
-**IR defects** (docs/ir_defects.md 60-63, `lower::IR_DEFECTS`): All-Fates Stalker ("up to one
+**Casting rules** (`CastingRules`). "Each player can't cast more than one noncreature spell each
+turn" (Deafening Silence): `Game::noncreature_spell_locked`, checked first in `cast_timing_ok`,
+which every castability check passes through (from hand, from other zones, a face, a cast during a
+resolution), with the face the card would be cast as. "The first spell each player casts during
+each of their turns may be cast without paying its mana cost" (Weftwalking): an alternative cost
+(CR 118.9) offered by `ChooseAltCost` as the last `NUMBER` (`eoe_c::FREE_FIRST_SPELL`; no layout
+change) when the caster is the active player, has cast no spell this turn and casts the way that
+allows an alternative cost (118.9a, `alt_allowed`); chosen, the spell's `from` becomes
+`CastFrom::Permission { free: true }` (cost increases still apply, X is 0), the encoding's existing
+"free" flag. Castability counts it (`hand_castable`, `castable_via`).
+
+**More effects.** "Draw X cards, where X is the number of differently named lands you control"
+(`Amount::DifferentlyNamedLands`, CR 201.2); "exile the top X cards of your library, where X is one
+plus the sacrificed artifact's mana value; you may play them this turn" (`EoeC::ExileTopPlayThisTurn`
+with `Amount::CostMvPlus`); "each opponent exiles a card from their hand and may play it for as long
+as it remains exiled; each spell cast this way costs {1} more; each land played this way enters
+tapped" (`EoeC::ExileFromOwnHandPlayable`, the opponent's choice among their own hand, one option
+per definition; `PermKind::TaxedLandsTapped`, read by `play_land`).
+
+**IR defects** (docs/ir_defects.md 60-66, `lower::IR_DEFECTS`): All-Fates Stalker ("up to one
 target" dropped), Endless Sands (a linked exile read as "until this leaves", its return an empty
 effect), Gravkill and Archenemy's Charm (the target's "or Spacecraft" / "or planeswalker" dropped),
-Elegy Acolyte ("one or more ... deal combat damage" as once per turn, as entry 16).
+Elegy Acolyte ("one or more ... deal combat damage" as once per turn, as entry 16), Nexus of Fate
+(its "from anywhere" replacement without the `watched_in_graveyard` flag), Pinnacle Starcage (the
+Robot token by name only, as entry 3), Starfield Vocalist (its replacement's two event subjects
+dropped: the IR is Strionic Resonator's).
 
 **Tests.** `engine/tests/cards_eoe_c.rs` (the cards, and lane C features whose real cards need
 another lane, on custom cards in `engine/tests/eoe_c_util`, the EoE table plus those cards).

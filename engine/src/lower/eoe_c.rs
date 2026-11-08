@@ -170,6 +170,45 @@ pub(crate) fn lower_effect_eoe_c(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         E::DrawCardPerMulticoloredPermanent(nodes::DrawCardPerMulticoloredPermanent {}) => {
             b.op(Op::Draw { who: Who::You, n: Amount::MulticoloredPermanents });
         }
+        // "Draw X cards, where X is the number of differently named lands you
+        // control" (CR 201.2: names).
+        E::DrawCardsByConditionMultiplier(nodes::DrawCardsByConditionMultiplier { condition, description_fragment }) => {
+            let _ = description_fragment; // display text
+            match &**condition {
+                cats::Condition::PerDifferentlyNamedLand(nodes::PerDifferentlyNamedLand {}) => {
+                    b.op(Op::Draw { who: Who::You, n: Amount::DifferentlyNamedLands });
+                }
+                other => l.unsupported(format!("DrawCardsByConditionMultiplier.condition({})", other.tag())),
+            }
+        }
+        // "Exile the top X cards of your library, where X is one plus the
+        // mana value of the sacrificed artifact. You may play those cards
+        // this turn."
+        E::ExileTopXOfLibraryMayPlayThisTurn(nodes::ExileTopXOfLibraryMayPlayThisTurn { amount }) => {
+            let n = match amount.as_deref() {
+                Some(cats::Formula::MVOfCostPaidObjectPlus(nodes::MVOfCostPaidObjectPlus { constant })) => {
+                    if !l.sac_cost {
+                        l.unsupported("Formula:MVOfCostPaidObjectPlus(no sacrifice cost)");
+                    }
+                    Amount::CostMvPlus(l.int("MVOfCostPaidObjectPlus.constant", *constant, 0, 20) as u8)
+                }
+                Some(other) => {
+                    l.unsupported(format!("Formula:{}", other.tag()));
+                    return true;
+                }
+                None => {
+                    l.unsupported("ExileTopXOfLibraryMayPlayThisTurn.amount(missing)");
+                    return true;
+                }
+            };
+            b.op(Op::Ext(Ext::EoeC(EoeC::ExileTopPlayThisTurn { n })));
+        }
+        // "Each opponent exiles a card from their hand and may play that
+        // card for as long as it remains exiled. Each spell cast this way
+        // costs {1} more to cast. Each land played this way enters tapped."
+        E::EachOpponentExilesCardFromHandWithCastPermission(nodes::EachOpponentExilesCardFromHandWithCastPermission {}) => {
+            b.op(Op::Ext(Ext::EoeC(EoeC::ExileFromOwnHandPlayable { who: Who::Opponent, tax: 1 })));
+        }
         _ => return false,
     }
     true

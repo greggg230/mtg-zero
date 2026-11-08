@@ -644,3 +644,165 @@ fn activated_ability_costs_less_if_you_control_or_attacked_with_cr602_2b() {
     quiet_until(&mut g, |g| g.turn().step == Step::Main2 && at_priority(g));
     assert!(g.has_option(act(bf(&g, 0, "Test Torpedo"), 0)), "{{1}} after attacking with a Giant: {:?}", g.options_desc());
 }
+
+/// All-Fates Scroll: "{7}, {T}, Sacrifice this artifact: Draw X cards, where
+/// X is the number of differently named lands you control" (CR 201.2).
+#[test]
+fn all_fates_scroll_draws_per_differently_named_land_cr201_2() {
+    let mut g = scen()
+        .battlefield(0, &["All-Fates Scroll", "Island", "Island", "Island", "Forest", "Forest", "Mountain", "Mountain", "Plains"])
+        .at(Step::Main1, 0)
+        .start();
+    let s = bf(&g, 0, "All-Fates Scroll");
+    g.choose(act(s, 1));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), 4, "Island, Forest, Mountain, Plains\n{}", log(&g));
+    assert_eq!(g.count_in(0, "All-Fates Scroll", Zone::Graveyard), 1);
+}
+
+/// Memorial Vault: "{T}, Sacrifice another artifact: Exile the top X cards of
+/// your library, where X is one plus the mana value of the sacrificed
+/// artifact. You may play those cards this turn."
+#[test]
+fn memorial_vault_exiles_one_plus_the_sacrificed_mana_value_playable_this_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Memorial Vault", "Test Spacecraft"])
+        .library(0, &["Mountain", "Plasma Bolt", "Island", "Swamp", "Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    let v = bf(&g, 0, "Memorial Vault");
+    g.choose(act(v, 0));
+    g.drive_until(|g| at_priority(g) || g.kind() == Some(DecisionKind::PayMana));
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Test Spacecraft", Zone::Graveyard), 1);
+    assert_eq!(g.player(0).library.len(), 13, "1 + 3 cards exiled\n{}", log(&g));
+    let m = g.card(0, "Mountain", Zone::Exile);
+    assert!(g.has_option(Choice::Play(m)), "play it this turn: {:?}", g.options_desc());
+    g.choose(Choice::Play(m));
+    let bolt = g.card(0, "Plasma Bolt", Zone::Exile);
+    assert!(g.has_option(Choice::Cast(bolt)), "{:?}", g.options_desc());
+    assert_eq!(g.count_in(0, "Forest", Zone::Exile), 0, "the fifth card stays");
+    quiet_until(&mut g, |g| g.turn().number == 5 && g.turn().step == Step::Main1 && at_priority(g));
+    assert!(!g.has_option(Choice::Cast(bolt)), "this turn only");
+}
+
+/// Lightstall Inquisitor: "When this creature enters, each opponent exiles a
+/// card from their hand and may play that card for as long as it remains
+/// exiled. Each spell cast this way costs {1} more to cast. Each land played
+/// this way enters tapped." (The opponent chooses: their own hand.)
+#[test]
+fn lightstall_inquisitor_exiles_an_opponents_card_they_may_play_taxed_cr601_2f() {
+    let mut g = scen()
+        .battlefield(0, &["Plains"])
+        .battlefield(1, &["Forest", "Forest"])
+        .hand(0, &["Lightstall Inquisitor"])
+        .hand(1, &["Test Bear", "Forest"])
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    cast(&mut g, 0, "Lightstall Inquisitor", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseDiscard));
+    assert_eq!(g.pending_decision().unwrap().player, 1, "the opponent chooses\n{}", log(&g));
+    let bear = g.card(1, "Test Bear", Zone::Hand);
+    g.choose(Choice::Card(bear));
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Exile);
+    quiet_until(&mut g, |g| g.turn().number == 4 && g.turn().step == Step::Main1 && at_priority(g));
+    assert!(!g.has_option(Choice::Cast(bear)), "{{1}}{{G}} plus {{1}}: three mana, two Forests");
+    let f = g.card(1, "Forest", Zone::Hand);
+    g.choose(Choice::Play(f));
+    assert!(g.has_option(Choice::Cast(bear)), "{:?}", g.options_desc());
+    g.choose(Choice::Cast(bear));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    assert_eq!(untapped(&g, 1), 0);
+
+    // A land played this way enters tapped.
+    let mut g = scen()
+        .battlefield(0, &["Plains"])
+        .hand(0, &["Lightstall Inquisitor"])
+        .hand(1, &["Forest"])
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    cast(&mut g, 0, "Lightstall Inquisitor", &[]);
+    settle(&mut g);
+    let f = g.card(1, "Forest", Zone::Exile);
+    quiet_until(&mut g, |g| g.turn().number == 4 && g.turn().step == Step::Main1 && at_priority(g));
+    assert!(g.has_option(Choice::Play(f)), "{:?}", g.options_desc());
+    g.choose(Choice::Play(f));
+    assert!(g.obj(f).tapped, "enters tapped\n{}", log(&g));
+}
+
+/// Deafening Silence: "Each player can't cast more than one noncreature
+/// spell each turn." Creature spells are not limited.
+#[test]
+fn deafening_silence_one_noncreature_spell_each_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Forest", "Forest"])
+        .battlefield(1, &["Deafening Silence"])
+        .hand(0, &["Plasma Bolt", "Plasma Bolt", "Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Plasma Bolt", &[Choice::Target(Target::Player(1))]);
+    settle(&mut g);
+    let bolt = g.card(0, "Plasma Bolt", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(bolt)), "a second noncreature spell: {:?}", g.options_desc());
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(bear)), "a creature spell");
+    cast(&mut g, 0, "Test Bear", &[]);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    quiet_until(&mut g, |g| g.turn().number == 5 && g.turn().step == Step::Main1 && at_priority(g));
+    assert!(g.has_option(Choice::Cast(bolt)), "a new turn");
+}
+
+/// Weftwalking: "The first spell each player casts during each of their
+/// turns may be cast without paying its mana cost" (an alternative cost,
+/// CR 118.9: a choice).
+#[test]
+fn weftwalking_the_first_spell_each_turn_may_be_cast_free_cr118_9() {
+    let mut g = scen()
+        .battlefield(0, &["Weftwalking", "Forest", "Forest"])
+        .hand(0, &["Test Giant", "Test Bear", "Test Giant"])
+        .hand(1, &["Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let giant = g.card(0, "Test Giant", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(giant)), "free: {:?}", g.options_desc());
+    g.choose(Choice::Cast(giant));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost) || at_priority(g));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseAltCost), "{}", log(&g));
+    g.choose(Choice::Number((engine::act::NUMBER_N - 1) as u8));
+    settle(&mut g);
+    assert_eq!(g.obj(giant).zone, Zone::Battlefield);
+    assert_eq!(untapped(&g, 0), 2, "without paying its mana cost");
+    let giant2 = g.card(0, "Test Giant", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(giant2)), "the second spell pays");
+    // The first spell may be paid for normally too: a choice.
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(bear)));
+    // Each player, during their own turn.
+    quiet_until(&mut g, |g| g.turn().number == 4 && g.turn().step == Step::Main1 && at_priority(g));
+    let b1 = g.card(1, "Test Bear", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(b1)), "the opponent's first spell in their turn: {:?}", g.options_desc());
+}
+
+/// Weftwalking: "When this enchantment enters, if you cast it, shuffle your
+/// hand and graveyard into your library, then draw seven cards."
+#[test]
+fn weftwalking_shuffles_hand_and_graveyard_then_draws_seven() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Island", "Island", "Island", "Island"])
+        .hand(0, &["Weftwalking", "Test Bear", "Test Bear"])
+        .graveyard(0, &["Test Giant"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Weftwalking", &[]);
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), 7, "{}", log(&g));
+    assert_eq!(g.player(0).graveyard.len(), 0);
+    assert_eq!(g.player(0).library.len(), 12 + 3 - 7);
+}

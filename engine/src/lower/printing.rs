@@ -285,7 +285,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
         l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
         l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
-        l.deny("CardPrinting.grants_first_spell_each_turn_free", grants_first_spell_each_turn_free);
         l.deny("CardPrinting.grants_food_to_your_artifacts", grants_food_to_your_artifacts);
         l.deny("CardPrinting.grants_food_ability_to_your_artifacts", grants_food_ability_to_your_artifacts);
         l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
@@ -321,7 +320,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.deny_ne("CardPrinting.aura_enchant_type", aura_enchant_type, &generated::defaults::d_CardPrinting_aura_enchant_type());
         }
         l.deny("CardPrinting.aura_yours_only", aura_yours_only);
-        l.deny("CardPrinting.restricts_noncreature_spells_to_one_per_turn", restricts_noncreature_spells_to_one_per_turn);
         l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
@@ -1567,7 +1565,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // effect on its controller's spells, CR 601.2f).
     let mut gy_spell_discount = 0u8;
     let mut outside_hand_discount = 0u8;
-    let mut casting = crate::db::CastingRules::default();
+    let mut casting = crate::db::CastingRules {
+        one_noncreature_spell: *restricts_noncreature_spells_to_one_per_turn,
+        first_spell_free: *grants_first_spell_each_turn_free,
+        ..Default::default()
+    };
     for r in external_cost_reductions {
         let cats::ExternalCostReduction::ExternalCostReduction(nodes::ExternalCostReduction { amount, condition }) = r;
         match &**condition {

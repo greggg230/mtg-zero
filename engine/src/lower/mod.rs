@@ -244,6 +244,16 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // "Whenever one or more creatures you control deal combat damage to a
     // player" as once each turn (docs/ir_defects.md 63, as 16).
     ("Elegy Acolyte", "ir_defect(one or more as once per turn, docs/ir_defects.md 63)"),
+    // The "from anywhere" replacement without the printing's flag that
+    // says it is watched in a graveyard (docs/ir_defects.md 64).
+    ("Nexus of Fate", "ir_defect(watched_in_graveyard unset, docs/ir_defects.md 64)"),
+    // "Create a 2/2 colorless Robot artifact creature token for each ...":
+    // the token by name only (docs/ir_defects.md 65, as 3).
+    ("Pinnacle Starcage", "ir_defect(token printing by name only, docs/ir_defects.md 65)"),
+    // "If a permanent entering the battlefield causes a triggered ability
+    // of a permanent you control to trigger": both restrictions dropped
+    // (docs/ir_defects.md 66).
+    ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
 
     // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
 ];

@@ -60,6 +60,9 @@ permission) and a consumer can go wrong with it.
 | 61 | Endless Sands (Edge of Eternities, ENGINE.md 99.4) | effect misread, ability dropped | `{2},{T}: ExileTargetCreatureUntilSourceLeaves { yours_only }`; `{4},{T}, sac: Sequence { effects: [] }` | a plain linked exile (CR 607.2a), and "return each creature card exiled with this land to the battlefield under its owner's control" | the land-ability parser (`cards/parser/land_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 62 | Gravkill; Archenemy's Charm (Edge of Eternities, ENGINE.md 99.4) | target types dropped | `ExileTargetCreature { targets: [IsCreature] }` for "exile target creature or Spacecraft" / "... or planeswalker"; the Charm's second mode `ReturnUpToNCreaturesFromYourGraveyardToHand { creature }` for "one or two target creature and/or planeswalker cards" | `ObjectOr(IsCreature, HasSubtype(Spacecraft))` / `ObjectOr(IsCreature, IsPlaneswalker)`; the planeswalker cards and the count | the "exile target X" phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 63 | Elegy Acolyte (Edge of Eternities, ENGINE.md 99.4) | "one or more" as once per turn | "whenever one or more creatures you control deal combat damage to a player" with `once_per_turn: true` | one trigger per combat damage step (`OneOrMoreBatch`), no once-each-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to a player" entry) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 64 | Nexus of Fate (Edge of Eternities, ENGINE.md 99.4) | flag left unset | the self "would go to graveyard -> library" replacement with `watched_in_graveyard: false` | `watched_in_graveyard: true` (the printing's "put into a graveyard from anywhere" flag, which mtg-bot's move code reads before the replacement) | the instant builder that writes the replacement (`cards/parser/creature_rmc_grammar.py` sets the flag for the creatures only) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 65 | Pinnacle Starcage (Edge of Eternities, ENGINE.md 99.4) | value resolved late | `CreateNTokensFromLastExileRecall { token_name: "Robot" }` | the 2/2 colorless Robot artifact creature token's `CardPrinting` inline (as entry 3) | `effects/` (the class resolves the token by name) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 66 | Starfield Vocalist (Edge of Eternities, ENGINE.md 99.4) | event subjects dropped | `ReplacementEffect { event_pattern: EventPattern { event: triggered_ability_triggers }, transform: AddInstances { delta: 1 } }`, no subject filters (Strionic Resonator's shape, "triggered abilities trigger an additional time") | the triggering event a permanent entering the battlefield, the ability's source a permanent you control (`subject_filters`) | `cards/parser/creature_builder.py` (~line 627) | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -451,6 +454,52 @@ if a nonland permanent left the battlefield this turn or a spell was warped this
 * Fix: `OneOrMoreBatch` in the predicate, `once_per_turn: false`.
 * Engine: blocked, `ir_defect(one or more as once per turn, docs/ir_defects.md 63)`; its void
   trigger lowers (ENGINE.md 99.4).
+
+
+**64. Nexus of Fate.** Oracle: "Take an extra turn after this one. / If Nexus of Fate would be put
+into a graveyard from anywhere, reveal Nexus of Fate and shuffle it into its owner's library
+instead."
+
+* IR: the replacement is there (`StaticAbility { scope: self, replacement_effect: { event:
+  would_go_to_graveyard, transform: Replace(library) } }`) but `watched_in_graveyard` is false. The
+  flag is what mtg-bot's zone-change code checks before applying a graveyard self-replacement
+  (`turn.py`, "Blightsteel"), so as exported the replacement never applies there; the cube's cards
+  with this replacement carry the flag.
+* Should be: `watched_in_graveyard: true`.
+* Source: the printing builder that writes the instant's replacement (the creature grammar sets
+  the flag, `cards/parser/creature_rmc_grammar.py`).
+* Fix: set the flag wherever the "would be put into a graveyard from anywhere" replacement is
+  built.
+* Engine: the lowering checks that the flag and the abilities agree (`printing.rs`, "watched in
+  graveyard"); blocked, `ir_defect(watched_in_graveyard unset, docs/ir_defects.md 64)`.
+
+**65. Pinnacle Starcage.** Oracle: "When this artifact enters, exile all artifacts and creatures
+with mana value 2 or less until this artifact leaves the battlefield. / {6}{W}{W}: Put each card
+exiled with this artifact into its owner's graveyard, then create a 2/2 colorless Robot artifact
+creature token for each card put into a graveyard this way. Sacrifice this artifact."
+
+* IR: `CreateNTokensFromLastExileRecall { token_name: "Robot" }`: the token by name.
+* Should be: the token's `CardPrinting` inline (a 2/2 colorless Robot artifact creature), as the
+  set's other Robot makers carry it (`CreateToken { token_printing }`), entry 3's fix.
+* Fix: export the token printing.
+* Engine: blocked, `ir_defect(token printing by name only, docs/ir_defects.md 65)`; its other
+  two classes (`ExileAllMatchingUntilSourceLeaves`, `MoveEachExiledWithSourceToOwnersGraveyard`)
+  are not built (no other card uses them).
+
+**66. Starfield Vocalist.** Oracle: "If a permanent entering the battlefield causes a triggered
+ability of a permanent you control to trigger, that ability triggers an additional time. / Warp
+{1}{U}"
+
+* IR: `StaticAbility { scope: self, replacement_effect: ReplacementEffect { event_pattern:
+  EventPattern { event: triggered_ability_triggers }, transform: AddInstances { delta: 1 } } }`
+  with no `subject_filters`. mtg-bot's event docstring: the shape models both Strionic Resonator's
+  "your triggered abilities trigger an additional time" and the Vocalist's narrower one, so the IR
+  cannot tell them apart.
+* Should be: subject filters for the event's two subjects (`triggering_obj`: a permanent entering
+  the battlefield; `ability_source`: a permanent you control).
+* Source: `cards/parser/creature_builder.py` (~line 627).
+* Fix: write the two subject filters.
+* Engine: blocked, `ir_defect(event subjects dropped, docs/ir_defects.md 66)`.
 
 
 ## Suspected defects (representational)

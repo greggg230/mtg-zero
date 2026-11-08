@@ -284,6 +284,9 @@ impl Game {
         let delved = self.delve_classes(p, c, cls);
         let cls = &delved[..];
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls, crate::game::CastFrom::Hand));
+        // The first spell of a turn without paying its mana cost (ENGINE.md
+        // 99.4).
+        let free = self.first_spell_free(p, crate::game::CastFrom::Hand) && self.route_payable(p, c, crate::eoe_c::FREE_CAST, cls);
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let extras = self.spree_extras(c, p);
         // `extra`: the mana of additional costs announced (CR 601.2f: added
@@ -314,7 +317,7 @@ impl Game {
                 }
             }
         };
-        if alt_ok {
+        if alt_ok || free {
             // castable for an alternative cost (601.2b); the mana cost
             // may be payable too (asked on casting)
         } else if let Some(extras) = &extras {
@@ -344,6 +347,11 @@ impl Game {
     /// Time Raveler's +1); "each opponent can cast spells only any time they
     /// could cast a sorcery" (his static ability) wins over both.
     pub(crate) fn cast_timing_ok(&self, p: PlayerId, card: CardIdx, sorcery_ok: bool) -> bool {
+        // "Each player can't cast more than one noncreature spell each
+        // turn" (every cast's check passes here; ENGINE.md 99.4).
+        if self.noncreature_spell_locked(p, card) {
+            return false;
+        }
         if sorcery_ok {
             return true;
         }
@@ -398,7 +406,10 @@ impl Game {
             .find(|pm| {
                 pm.card == r
                     && self.permission_ok(pm, p)
-                    && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::Taxed(_) | crate::game::PermKind::Airbent(_))
+                    && matches!(
+                        pm.kind,
+                        crate::game::PermKind::Play { .. } | crate::game::PermKind::Taxed(_) | crate::game::PermKind::Airbent(_) | crate::game::PermKind::TaxedLandsTapped(_)
+                    )
             })
             .or_else(|| {
                 self.permissions.iter().find(|pm| {
@@ -439,7 +450,7 @@ impl Game {
                 crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
                 // CR 715.3d: cast it (not as an Adventure) for its mana cost.
                 crate::game::PermKind::Adventure => Some(CastFrom::Permission { free: false, any_mana: false }),
-                crate::game::PermKind::Taxed(n) => Some(CastFrom::Taxed(n)),
+                crate::game::PermKind::Taxed(n) | crate::game::PermKind::TaxedLandsTapped(n) => Some(CastFrom::Taxed(n)),
                 // CR 722.3c: a copy of a prepare spell, for its mana cost.
                 crate::game::PermKind::Prepared { .. } => Some(CastFrom::Permission { free: false, any_mana: false }),
                 crate::game::PermKind::Airbent(n) => Some(CastFrom::Airbent(n)),
@@ -728,7 +739,10 @@ impl Game {
         let alt_ok = !def.alt_costs.is_empty()
             && Self::alt_allowed(from)
             && (0..def.alt_costs.len()).any(|k| self.alt_payable(p, card, k, classes, from));
-        if !(alt_ok || self.route_payable(p, card, from, classes)) {
+        // The first spell of a turn without paying its mana cost (ENGINE.md
+        // 99.4).
+        let free = self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
+        if !(alt_ok || free || self.route_payable(p, card, from, classes)) {
             return false;
         }
         // Overloaded (an alternative cost), no target is needed; otherwise
@@ -1353,7 +1367,7 @@ impl Game {
             let cast_only = match self.exile_permission(p, c) {
                 Some(crate::game::PermKind::Play { cast_only, .. }) => cast_only,
                 // (Its owner may play it: a land too.)
-                Some(crate::game::PermKind::Taxed(_)) => false,
+                Some(crate::game::PermKind::Taxed(_) | crate::game::PermKind::TaxedLandsTapped(_)) => false,
                 // (Airbent: cast.)
                 Some(crate::game::PermKind::Airbent(_)) => true,
                 // CR 715.3d: an adventurer card on an adventure (a creature
@@ -1941,6 +1955,11 @@ impl Game {
         let StackKind::Spell { card } = item.kind else { return };
         let p = item.controller;
         match self.answer.take() {
+            Some(Choice::Number(crate::eoe_c::FREE_FIRST_SPELL)) => {
+                // Without paying its mana cost (CR 118.9; ENGINE.md 99.4).
+                self.stack[pos].from = crate::eoe_c::FREE_CAST;
+                self.note(|_| "without paying its mana cost".to_string());
+            }
             Some(Choice::Number(k)) => {
                 self.stack[pos].alt = k;
                 self.note(|_| format!("cost {k}"));
@@ -1983,6 +2002,10 @@ impl Game {
                     if self.alt_payable(p, card, k, &classes, from) {
                         opts.push(Opt { action: act::NUMBER + 1 + k as u16, choice: Choice::Number(k as u8 + 1) });
                     }
+                }
+                let free = crate::eoe_c::FREE_FIRST_SPELL;
+                if plain_targets && self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, &classes) {
+                    opts.push(Opt { action: act::NUMBER + free as u16, choice: Choice::Number(free) });
                 }
                 self.ask(Task::CastAlt { id }, p, DecisionKind::ChooseAltCost, opts);
             }
@@ -2134,7 +2157,7 @@ impl Game {
         // CR 118.9a: one alternative cost at most (flashback, escape and
         // "without paying its mana cost" are alternative costs; a
         // permission to cast a card for its costs allows one: `alt_allowed`).
-        if !self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) {
+        if !self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) || self.first_spell_free(p, from) {
             self.agenda.push(Task::CastAlt { id }); // CR 601.2b
         }
     }

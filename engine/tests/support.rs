@@ -715,10 +715,12 @@ const SUPPORTED_EOE_B: &[&str] = &[
 /// Lane C: void, warp, spells cast this turn, cost reductions, graveyard,
 /// exile, library and hand effects.
 const SUPPORTED_EOE_C: &[&str] = &[
+    "All-Fates Scroll",
     "Brightspear Zealot",
     "Chrome Companion",
     "Codecracker Hound",
     "Cosmogoyf",
+    "Deafening Silence",
     "Decode Transmissions",
     "Gigastorm Titan",
     "Hymn of the Faller",
@@ -727,6 +729,8 @@ const SUPPORTED_EOE_C: &[&str] = &[
     "Interceptor Mechan",
     "Kavaron Skywarden",
     "Lashwhip Predator",
+    "Lightstall Inquisitor",
+    "Memorial Vault",
     "Plasma Bolt",
     "Sami, Wildcat Captain",
     "Scavenger Grounds",
@@ -739,6 +743,7 @@ const SUPPORTED_EOE_C: &[&str] = &[
     "Virus Beetle",
     "Voidforged Titan",
     "Warping Wail",
+    "Weftwalking",
 ];
 /// Lane D: creatures, combat, removal, damage, life, tokens and pumps.
 const SUPPORTED_EOE_D: &[&str] = &[
