@@ -19128,5 +19128,8 @@ player-controlling effect, a controlled turn. Two new public fields (`Game::next
 engine suite 1,876 passed, 0 failed, 15 ignored; behaviour digests unchanged (combined
 `f6543eb2b1b8752f`); the default `FUZZ_GAMES=20000` passed (20,000 games, wins 9,967 / 9,994, 39
 draws, as before the branch; 1,000 matches); `FUZZ_POOL=eoe FUZZ_GAMES=20000` failed at seed 12441
-(the encoding, above). With the Bracelet blocked: see the branch's last commit message. The
+(the encoding, above). At 2ac16df (the Bracelet blocked, EoE support 265; cube 546 / 546):
+`support`, `cards_eoe_w4` (19 passed, 4 ignored), `--test az` (41) pass, digests unchanged
+(`f6543eb2b1b8752f`), and `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 9,100 /
+9,009, 1,891 draws, mean 39.6 turns, 515.6 decisions; all four fuzz tests, 1,022 s). The
 public-state gate: 135 perturbations encoded, 5 deliberate limits, 8 next-layout gaps.
