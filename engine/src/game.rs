@@ -869,9 +869,14 @@ pub enum Mark {
     /// this turn"; kept only when a card of the table reads it,
     /// `CardDb::watch_damage`; EoE lane D, ENGINE.md 99.5).
     DealtDamage(u16),
-    /// It has "When this creature dies, <trigger `slot` of `def`>" until end
-    /// of turn (EoE lane D; removed in the cleanup step, CR 514.2).
-    DiesTriggerThisTurn { def: DefId, slot: u8 },
+    /// It has triggered ability `slot` of definition `def`, which an effect
+    /// gave it ("<it> gains '<triggered ability>'", CR 613.1f: layer 6), until
+    /// end of turn (`this_turn`: it ends in the cleanup step, 514.2) or for
+    /// as long as it stays this object (400.7). It is the permanent's own
+    /// ability: its source is the permanent and its controller the
+    /// permanent's (113.7, 113.8). EoE lane D's "when this creature dies"
+    /// (ENGINE.md 99.5), generalised by workstream W3 (99.13).
+    Granted { def: DefId, slot: u8, this_turn: bool },
     /// It entered as a spell cast for its warp cost (CR 702.185a: "if that
     /// creature was cast for its warp cost"; ENGINE.md 99.8).
     WarpCast,
@@ -2082,7 +2087,6 @@ impl Game {
                     Mark::LeaveTrigger { def, slot, exile } if r == old && (to == Zone::Graveyard || exile && to == Zone::Exile) => {
                         Some((def, slot))
                     }
-                    Mark::DiesTriggerThisTurn { def, slot } if r == old && to == Zone::Graveyard => Some((def, slot)),
                     _ => None,
                 })
                 .collect();

@@ -180,6 +180,7 @@ pub fn fields() -> Vec<Field> {
         use crate::eoe_w3::W3State;
         classify!(v, W3State {
             no_regen: Derived "transient: set and cleared around one destruction (\"it can't be regenerated\")",
+            granted: Derived "a fast path: some permanent may have a granted triggered ability (Game.marks)",
         });
     }
     classify!(v, Player {

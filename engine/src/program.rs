@@ -155,10 +155,6 @@ pub enum EoeD {
     /// Each object of `on` gets +p*n/+t*n until `until`, n read once as the
     /// op resolves (CR 608.2h, 611.2c; "double its power", 701.10b).
     ApplyPtTimes { on: On, p: i8, t: i8, n: Amount, until: Until },
-    /// Each object of `on` gains "When this creature dies, <delayed ability
-    /// `k` of the source's card>" until end of turn (layer 6, CR 613.1f;
-    /// it ends in the cleanup step, 514.2).
-    GrantDiesTriggerThisTurn { on: On, k: u8 },
     /// The triggered ability's event card (in a graveyard or exile) returns
     /// to the battlefield tapped under its owner's control ("return it to
     /// the battlefield tapped": it enters tapped and never "becomes
@@ -209,7 +205,6 @@ impl EoeD {
                 matches!(on, On::EventObj)
                     || matches!(n, Amount::EventAmount | Amount::EventObjPower | Amount::EventTimes | Amount::EventSpellTimes | Amount::EventSpellMv)
             }
-            EoeD::GrantDiesTriggerThisTurn { on, .. } => matches!(on, On::EventObj),
             EoeD::ReturnEventCardTapped => true,
             EoeD::LifeBecomesHalfStarting { who } => *who == Who::EventPlayer,
             EoeD::LoseHalfLife { who } => *who == Who::EventPlayer,

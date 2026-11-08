@@ -782,8 +782,8 @@ impl Game {
         self.effects.retain(|e| e.until != Until::EndOfTurn);
         self.return_control(control);
         if !self.marks.is_empty() {
-            self.marks.retain(|(_, m)| !matches!(m, crate::game::Mark::DiesTriggerThisTurn { .. }));
-            // (Regeneration shields: "this turn", EoE W3.)
+            // (Granted triggered abilities until end of turn, regeneration
+            // shields: EoE W3.)
             self.end_turn_w3();
         }
         self.effects_changed();

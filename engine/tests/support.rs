@@ -901,9 +901,12 @@ const SUPPORTED_EOE_MANA: &[&str] = &[
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Frenzied Baloth",
+    "Raging Ravine",
+    "Requiem Monolith",
     "Rust Harvester",
     "Sunstar Chaplain",
     "Swarmyard",
+    "Terminal Velocity",
 ];
 const SUPPORTED_EOE_EXILE: &[&str] = &[
 ];

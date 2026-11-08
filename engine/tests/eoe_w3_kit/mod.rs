@@ -277,3 +277,18 @@ pub fn to_opponent_priority(g: &mut Game) {
     g.pass();
     g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 1);
 }
+
+/// Pay as `pay` does, never with a mana ability of `avoid`.
+pub fn pay_without(g: &mut Game, avoid: CardIdx) {
+    g.drive_until(|g| at_priority(g) || g.kind() != Some(DecisionKind::PayMana));
+    while matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)) {
+        let opts = &g.pending_decision().unwrap().options;
+        let c = opts
+            .iter()
+            .map(|o| o.choice)
+            .find(|ch| !matches!(ch, Choice::Card(x) | Choice::Ability(x, _) if *x == avoid))
+            .unwrap_or(opts[0].choice);
+        g.choose(c);
+        g.drive_until(|g| at_priority(g) || !matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)));
+    }
+}

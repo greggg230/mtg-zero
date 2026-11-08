@@ -1281,7 +1281,15 @@ impl CardDef {
             } else {
                 0
             })
-            | (if self.triggers.iter().any(|t| t.ability.program.iter().any(|op| matches!(op, Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })))) {
+            | (if self.triggers.iter().any(|t| {
+                t.ability.program.iter().any(|op| {
+                    matches!(
+                        op,
+                        Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })
+                            | Op::Ext(crate::program::Ext::EoeW3(crate::eoe_w3::W3::DamageEachSourceMv { .. }))
+                    )
+                })
+            }) {
                 crate::game::SEEN_LKI_DAMAGE
             } else {
                 0

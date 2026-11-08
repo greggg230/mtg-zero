@@ -7,9 +7,9 @@
 //! its targets derived here.
 
 use super::Lowerer;
-use crate::db::{types, Cost, Counter, Filter};
+use crate::db::{types, Cost, Counter, EventKind, Filter, Slot, TrigPred};
 use crate::eoe_w3::W3;
-use crate::program::{Builder, Ext, On, Op};
+use crate::program::{Amount, Builder, Ext, On, Op, Who};
 use card_ir::{cats, nodes};
 
 /// The cost atoms of `ActivationCost` this workstream implements.
@@ -82,7 +82,98 @@ pub(crate) fn lower_effect_w3(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect
             let t = b.target(filter, 1, 1);
             w3(b, W3::Regenerate { on: On::Target(t) });
         }
+        // "Until end of turn, target creature gains '<triggered ability>'"
+        // (CR 613.1f; Requiem Monolith).
+        E::GrantTriggeredAbilityUEOT(nodes::GrantTriggeredAbilityUEOT { ability, you_control_only, opponents_only }) => {
+            let Some(ta) = ability.as_deref() else {
+                l.unsupported("GrantTriggeredAbilityUEOT.ability(missing)");
+                return true;
+            };
+            let mut f = Filter::Type(types::CREATURE);
+            if *you_control_only {
+                f = Filter::And(Box::new(f), Box::new(Filter::Controller(true)));
+            }
+            if *opponents_only {
+                f = Filter::And(Box::new(f), Box::new(Filter::Controller(false)));
+            }
+            let t = b.target(f, 1, 1);
+            grant_triggered_ability(l, b, On::Target(t), ta, true, types::CREATURE);
+        }
+        // "You draw that many cards and lose that much life" (a "whenever
+        // this is dealt damage" ability: the event's amount, CR 120.3;
+        // "you": the ability's controller).
+        E::DrawCardsAndLoseLifeEqualToResolvingDamage(nodes::DrawCardsAndLoseLifeEqualToResolvingDamage {}) => {
+            b.op(Op::Draw { who: Who::You, n: Amount::EventAmount });
+            b.op(Op::LoseLife { who: Who::You, n: Amount::EventAmount });
+        }
+        // "That creature's controller may have <this> deal n damage to it"
+        // (the target of the sentence before, the ability's only one; the
+        // creature's controller chooses, CR 608.2d; the source deals it,
+        // as it last existed if it left, 608.2h).
+        E::MayHaveSourceDealDamageToTarget(nodes::MayHaveSourceDealDamageToTarget { amount }) => {
+            if b.targets.len() != 1 {
+                l.unsupported("MayHaveSourceDealDamageToTarget(not one target before it)");
+                return true;
+            }
+            let n = l.int("MayHaveSourceDealDamageToTarget.amount", *amount, 1, 20);
+            let no = b.op(Op::May { who: Who::ControllerOfTarget(0), skip: 0 });
+            b.op(Op::DealDamage { amount: Amount::Fixed(n), to: 0 });
+            b.patch(no);
+        }
+        // "You may put an artifact or creature card from your hand onto the
+        // battlefield. That permanent gains haste, 'When this permanent leaves
+        // the battlefield, it deals damage equal to its mana value to each
+        // creature,' and 'At the beginning of your end step, sacrifice this
+        // permanent.'" (Terminal Velocity; no duration: for as long as it is
+        // that permanent, CR 611.2a, 400.7.)
+        E::TerminalVelocityEffect(nodes::TerminalVelocityEffect {}) => {
+            let f = Filter::Or(vec![Filter::Type(types::ARTIFACT), Filter::Type(types::CREATURE)]);
+            b.op(Op::PutFromHand { who: Who::You, filter: f, tapped: false, optional: true });
+            let mut haste = crate::db::KwSet::default();
+            haste.insert(crate::db::Kw::Haste);
+            b.op(Op::Ext(Ext::Apply { on: On::Made, mods: vec![crate::db::Mod::Keywords(haste)], until: crate::layers::Until::Forever }));
+            let mut d = Builder::default();
+            w3(&mut d, W3::DamageEachSourceMv { filter: Filter::Type(types::CREATURE) });
+            let leaves = d.finish();
+            grant_trigger_def(l, b, On::Made, EventKind::LeavesBattlefield, TrigPred::IsSelf(Slot::Default), leaves, false);
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::SacrificeSource));
+            let sac = d.finish();
+            grant_trigger_def(l, b, On::Made, EventKind::BeginningOfEndStep, TrigPred::Controlled(Slot::Player, true), sac, false);
+        }
         _ => return false,
     }
     true
+}
+
+/// "<Objects of `on`> gain '<a triggered ability on `event` with `pred`
+/// doing `ability`>'" (CR 613.1f), as [`grant_triggered_ability`] for an
+/// ability the class names in its words.
+fn grant_trigger_def(l: &mut Lowerer, b: &mut Builder, on: On, event: EventKind, pred: TrigPred, ability: crate::db::AbilityDef, this_turn: bool) {
+    let uses_event = ability.uses_event();
+    l.delayed.push(crate::db::TriggerDef { event, pred, ability, uses_event });
+    let k = (l.delayed.len() - 1) as u8;
+    w3(b, W3::GrantTrigger { on, k, this_turn });
+}
+
+/// "<Objects of `on`> gain '<triggered ability `t`>'" (CR 613.1f: layer 6),
+/// until end of turn (`this_turn`) or for good: the ability is a delayed
+/// trigger of the card (it triggers only as granted), its event and
+/// predicate lowered as a printed one's (`card_types`: what the granted
+/// object is, for "when this creature dies"). EoE W3's general mechanism
+/// (ENGINE.md 99.13).
+pub(crate) fn grant_triggered_ability(l: &mut Lowerer, b: &mut Builder, on: On, t: &cats::TriggeredAbility, this_turn: bool, card_types: u16) {
+    let cats::TriggeredAbility::TriggeredAbility(nodes::TriggeredAbility { once_per_turn, functions_in_graveyard, .. }) = t;
+    // (Granted to a permanent; "only once each turn" would share the
+    // object's own abilities' once-a-turn record.)
+    l.deny("granted_triggered_ability.functions_in_graveyard", functions_in_graveyard);
+    l.deny("granted_triggered_ability.once_per_turn", once_per_turn);
+    let Some(td) = super::trigger::lower_trigger(l, t, card_types) else { return };
+    if td.event == crate::db::EventKind::Delayed {
+        l.unsupported("granted_triggered_ability(a delayed event)");
+        return;
+    }
+    l.delayed.push(td);
+    let k = (l.delayed.len() - 1) as u8;
+    w3(b, W3::GrantTrigger { on, k, this_turn });
 }

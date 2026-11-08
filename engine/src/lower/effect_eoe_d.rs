@@ -100,38 +100,12 @@ fn eoe(b: &mut Builder, op: EoeD) {
     b.op(Op::Ext(Ext::EoeD(op)));
 }
 
-/// "Until end of turn, <it> gains 'When this creature dies, <effect>'"
-/// (Perigee Beckoner): the granted ability's effect is a delayed ability of
-/// the card, attached to each object of `on` until end of turn.
+/// "Until end of turn, <it> gains '<triggered ability>'" (Perigee Beckoner's
+/// "When this creature dies, ..."): a granted triggered ability of each
+/// object of `on` until end of turn, EoE W3's general mechanism (ENGINE.md
+/// 99.13).
 pub(crate) fn grant_trigger_this_turn(l: &mut Lowerer, b: &mut Builder, on: On, t: &cats::TriggeredAbility) {
-    let cats::TriggeredAbility::TriggeredAbility(nodes::TriggeredAbility {
-        effect,
-        requires_void,
-        once_per_turn,
-        tier_threshold,
-        event,
-        predicate,
-        room_half,
-        functions_in_graveyard,
-    }) = t;
-    l.deny("granted_triggered_ability.requires_void", requires_void);
-    l.deny("granted_triggered_ability.once_per_turn", once_per_turn);
-    l.deny("granted_triggered_ability.tier_threshold", tier_threshold);
-    l.deny("granted_triggered_ability.room_half", room_half);
-    l.deny("granted_triggered_ability.functions_in_graveyard", functions_in_graveyard);
-    let dies_self = *event == Some(enums::Event::Dies)
-        && matches!(predicate.as_deref(), Some(cats::TriggerPredicate::IsSelf(nodes::IsSelf { subject: None })));
-    if !dies_self {
-        l.unsupported("granted_triggered_ability(not \"when this creature dies\")");
-        return;
-    }
-    let Some(e) = effect else {
-        l.unsupported("granted_triggered_ability.effect(missing)");
-        return;
-    };
-    let ab = super::effect::lower_ability(l, e);
-    let k = l.delayed_ability(ab);
-    eoe(b, EoeD::GrantDiesTriggerThisTurn { on, k });
+    super::eoe_w3::grant_triggered_ability(l, b, on, t, true, crate::db::types::CREATURE);
 }
 
 /// "If it's not your turn, untap those creatures" (Zealous Display): the

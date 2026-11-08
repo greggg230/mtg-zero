@@ -456,7 +456,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // "Until end of turn, this land becomes a p/t [colours]
             // [subtype] creature with [keywords]. It's still a land." (CR
             // 205.1b: it keeps its land types.)
-            l.deny("BecomeLandCreatureUEOT.granted_triggered_abilities", granted_triggered_abilities);
             if set_colors.is_empty() && l.land_colors != 0 {
                 // A land that makes coloured mana animates into a coloured
                 // creature in the cube; the IR lost the colours and the
@@ -509,6 +508,12 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
             }
             apply(b, On::Source, mods, Until::EndOfTurn);
+            // '... creature with "whenever this creature attacks, ..."'
+            // (Raging Ravine): granted triggered abilities until end of turn
+            // (EoE W3, ENGINE.md 99.13).
+            for ta in granted_triggered_abilities {
+                super::eoe_w3::grant_triggered_ability(l, b, On::Source, ta, true, types::CREATURE);
+            }
         }
         E::SourceBecomesIfSubtype(nodes::SourceBecomesIfSubtype { subtypes, base_pt, keywords, requires_subtype }) => {
             // "[If this creature is a <requires>,] it becomes a <subtypes>
