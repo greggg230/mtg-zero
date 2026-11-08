@@ -131,6 +131,20 @@ pub enum EoeD {
     /// unless you tap ...", CR 118.12, 701.21a). Choice: `ChoosePermanent`,
     /// `PASS` = don't.
     SacrificeSourceUnlessTap { filter: Filter },
+    /// Each legal target player of requirement `tgt` mills half their
+    /// library, rounded down (CR 701.17a, 107.1a).
+    MillHalfLibrary { tgt: u8 },
+    /// `who` loses half their life, rounded up (CR 119.3, 107.1a).
+    LoseHalfLife { who: Who },
+    /// Destroy all creatures with toughness X or less, X the spell's (CR
+    /// 701.8a, 107.3); remember (`Frame::picked`) the cards put into a
+    /// graveyard this way.
+    DestroyCreaturesToughnessAtMostX,
+    /// If the spell's X is n or more, the controller returns one of the
+    /// cards `DestroyCreaturesToughnessAtMostX` put into a graveyard (still
+    /// there) to the battlefield under their control. Choice:
+    /// `ChooseGraveyardCard`.
+    ReturnOneDestroyedIfXAtLeast { n: u8 },
 }
 
 impl EoeD {
@@ -144,7 +158,13 @@ impl EoeD {
             EoeD::GrantDiesTriggerThisTurn { on, .. } => matches!(on, On::EventObj),
             EoeD::ReturnEventCardTapped => true,
             EoeD::LifeBecomesHalfStarting { who } => *who == Who::EventPlayer,
-            EoeD::PowerDamageByTarget { .. } | EoeD::CountControlled { .. } | EoeD::SacrificeSourceUnlessTap { .. } => false,
+            EoeD::LoseHalfLife { who } => *who == Who::EventPlayer,
+            EoeD::PowerDamageByTarget { .. }
+            | EoeD::CountControlled { .. }
+            | EoeD::SacrificeSourceUnlessTap { .. }
+            | EoeD::MillHalfLibrary { .. }
+            | EoeD::DestroyCreaturesToughnessAtMostX
+            | EoeD::ReturnOneDestroyedIfXAtLeast { .. } => false,
         }
     }
 }

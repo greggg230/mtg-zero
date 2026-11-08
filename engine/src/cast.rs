@@ -2765,6 +2765,9 @@ impl Game {
             Filter::HasActivatedAbility => self.abilities(c).has_activated_ability(),
             Filter::Blocking => self.objs[c.i()].blocking.is_some(),
             Filter::DealtDamageThisTurn => self.dealt_damage_this_turn(c),
+            Filter::MvAtMostLandsYouControl => {
+                self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
+            }
         }
     }
 }

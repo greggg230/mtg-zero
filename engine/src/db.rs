@@ -209,6 +209,10 @@ pub enum Mod {
     /// "If it would leave the battlefield, exile it instead of putting it
     /// anywhere else" (CR 614.1a).
     ExileIfLeaves,
+    /// Combat damage it would deal is prevented (CR 615.1a; "prevent all
+    /// combat damage that would be dealt this turn" on every creature, a
+    /// rules effect; EoE lane D).
+    PreventCombatDamage,
     /// "It attacks that player this combat if able" (the effect
     /// controller's opponent, 2 players: never one of their planeswalkers;
     /// Ursine Monstrosity).
@@ -387,6 +391,9 @@ pub enum Filter {
     /// A permanent that was dealt damage this turn (`Mark::DealtDamage`; EoE
     /// lane D).
     DealtDamageThisTurn,
+    /// Mana value at most the number of lands the controller controls (EoE
+    /// lane D).
+    MvAtMostLandsYouControl,
 }
 
 /// `Filter::Ability` kinds.

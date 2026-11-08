@@ -1044,3 +1044,171 @@ fn cr_701_8a_destroy_target_creature_or_spacecraft() {
     settle(&mut g);
     assert_eq!(g.count_in(1, "Test Ogre", Zone::Graveyard), 1);
 }
+
+/// Cast `name` from P0's hand announcing X (CR 107.3, 601.2b), choosing
+/// `tgt` for its target if it asks, and pay with the first sources.
+fn cast_x(g: &mut Game, name: &str, x: u8, tgt: Option<CardIdx>) {
+    let c = g.card(0, name, Zone::Hand);
+    g.choose(Choice::Cast(c));
+    for _ in 0..100 {
+        match g.kind() {
+            Some(DecisionKind::ChooseMode) => {
+                g.choose(Choice::Number(x));
+            }
+            Some(DecisionKind::Target) => {
+                let t = g.tgt(tgt.expect("a target"));
+                g.choose(t);
+            }
+            Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana) => {
+                let c = g.pending_decision().unwrap().options[0].choice;
+                g.choose(c);
+            }
+            _ => return,
+        }
+    }
+    panic!("cast_x: no progress\n{}", log(g));
+}
+
+// ---- Anticausal Vestige: leaves the battlefield, draw, then a permanent card
+// with mana value at most your lands --------------------------------------
+
+#[test]
+fn cr_603_10a_anticausal_vestige_draws_then_puts_a_cheap_permanent_onto_the_battlefield_tapped() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Anticausal Vestige"])
+        .hand(0, &["Cut Propulsion", "Test Ogre", "Bygone Colossus"])
+        .at(Step::Main1, 0)
+        .start();
+    let vestige = bf(&g, 0, "Anticausal Vestige");
+    cast(&mut g, "Cut Propulsion");
+    target(&mut g, vestige);
+    run(&mut g, |g| g.kind() == Some(DecisionKind::ChooseHandCard), |_| None);
+    assert_eq!(g.count_in(0, "Plains", Zone::Hand), 1, "drew first");
+    let opts = options(&g);
+    assert!(opts.contains(&Choice::Pass), "may");
+    assert!(!opts.contains(&Choice::Card(g.card(0, "Bygone Colossus", Zone::Hand))), "mana value 9 > 3 lands");
+    assert!(opts.contains(&Choice::Card(g.card(0, "Plains", Zone::Hand))), "a land is a permanent card (mana value 0)");
+    g.choose(Choice::Card(g.card(0, "Test Ogre", Zone::Hand)));
+    settle(&mut g);
+    assert!(g.obj(bf(&g, 0, "Test Ogre")).tapped, "tapped");
+}
+
+// ---- Singularity Rupture ---------------------------------------------------
+
+#[test]
+fn cr_701_17a_singularity_rupture_destroys_all_creatures_then_targets_mill_half_rounded_down() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Swamp", "Swamp", "Swamp", "Swamp", "Swamp", "Test Bear"])
+        .battlefield(1, &["Test Ogre"])
+        .library(1, &["Plains"; 1])
+        .hand(0, &["Singularity Rupture"])
+        .at(Step::Main1, 0)
+        .start();
+    // P1's library: 10 + 1 = 11 cards: mills 5.
+    assert_eq!(g.player(1).library.len(), 11);
+    let c = g.card(0, "Singularity Rupture", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    run(&mut g, |g| g.kind() == Some(DecisionKind::Target), |_| None);
+    assert!(options(&g).contains(&Choice::Pass), "any number (zero too)");
+    g.choose(Choice::Target(engine::Target::Player(1)));
+    run(&mut g, |g| g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana), |_| None);
+    if g.kind() == Some(DecisionKind::Target) {
+        g.choose(Choice::Pass);
+    }
+    while matches!(g.kind(), Some(DecisionKind::PayMana) | Some(DecisionKind::ChooseMana)) {
+        let c = g.pending_decision().unwrap().options[0].choice;
+        g.choose(c);
+    }
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Graveyard) + g.count_in(1, "Test Ogre", Zone::Graveyard), 2);
+    assert_eq!(g.player(1).library.len(), 6, "half of 11, rounded down, milled");
+    assert_eq!(g.player(0).library.len(), 10, "not a target");
+}
+
+// ---- Devastating Onslaught: X token copies with haste, sacrificed at the
+// next end step (CR 707.2, 603.7) -----------------------------------------
+
+#[test]
+fn cr_707_2_devastating_onslaught_makes_x_hasty_copies_sacrificed_at_end_step() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Mountain", "Mountain", "Test Ogre"])
+        .battlefield(1, &["Test Bear"])
+        .hand(0, &["Devastating Onslaught"])
+        .at(Step::Main1, 0)
+        .start();
+    let ogre = bf(&g, 0, "Test Ogre");
+    cast_x(&mut g, "Devastating Onslaught", 2, Some(ogre));
+    settle(&mut g);
+    let copies: Vec<CardIdx> = all_bf(&g, 0, "Test Ogre").into_iter().filter(|&c| c != ogre).collect();
+    assert_eq!(copies.len(), 2, "{}", log(&g));
+    for &c in &copies {
+        assert!(g.has_kw(c, Kw::Haste));
+        assert_eq!(g.power(c), 4);
+    }
+    through_end_step(&mut g, |_| None);
+    assert_eq!(all_bf(&g, 0, "Test Ogre"), vec![ogre], "the copies were sacrificed");
+}
+
+// ---- Zero Point Ballad -----------------------------------------------------
+
+#[test]
+fn cr_107_3_zero_point_ballad_destroys_toughness_x_or_less_and_returns_one_at_six() {
+    // X = 6: everything dies, P0 loses 6, then returns one of them (an
+    // opponent's card too) under P0's control.
+    let mut g = scen()
+        .battlefield(0, &["Swamp"; 7])
+        .battlefield(0, &["Test Bear"])
+        .battlefield(1, &["Test Ogre", "Test Bulwark"])
+        .hand(0, &["Zero Point Ballad"])
+        .at(Step::Main1, 0)
+        .start();
+    cast_x(&mut g, "Zero Point Ballad", 6, None);
+    run(&mut g, |g| g.kind() == Some(DecisionKind::ChooseGraveyardCard), |_| None);
+    assert_eq!(g.life(0), 14);
+    assert_eq!(options(&g).len(), 3, "a creature card put into a graveyard this way");
+    let ogre = g.card(1, "Test Ogre", Zone::Graveyard);
+    g.choose(Choice::Card(ogre));
+    settle(&mut g);
+    assert_eq!(g.obj(ogre).zone, Zone::Battlefield);
+    assert_eq!(g.obj(ogre).controller, 0, "under your control");
+    // X = 2: the 2/2 dies, the 4/4 and the 2/5 stay; no return.
+    let mut g = scen()
+        .battlefield(0, &["Swamp"; 3])
+        .battlefield(0, &["Test Bear"])
+        .battlefield(1, &["Test Ogre", "Test Bulwark"])
+        .hand(0, &["Zero Point Ballad"])
+        .at(Step::Main1, 0)
+        .start();
+    cast_x(&mut g, "Zero Point Ballad", 2, None);
+    settle(&mut g);
+    assert_eq!(g.life(0), 18);
+    assert_eq!(g.count_in(0, "Test Bear", Zone::Graveyard), 1);
+    assert_eq!(g.count_in(1, "Test Ogre", Zone::Battlefield) + g.count_in(1, "Test Bulwark", Zone::Battlefield), 2);
+}
+
+// ---- Darkness: prevent all combat damage this turn (CR 615.1a) ------------
+
+#[test]
+fn cr_615_1a_darkness_prevents_all_combat_damage_this_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Test Bear"])
+        .battlefield(1, &["Test Ogre", "Test Bulwark"])
+        .hand(0, &["Darkness"])
+        .at(Step::Main1, 1)
+        .start();
+    attack(&mut g, 1, &["Test Ogre", "Test Bulwark"]);
+    // P0 casts Darkness in the declare attackers step.
+    run(&mut g, |g| g.to_move() == Some(0) && at_priority(g), |_| None);
+    cast(&mut g, "Darkness");
+    settle(&mut g);
+    run(&mut g, |g| g.kind() == Some(DecisionKind::DeclareBlockers), |_| None);
+    g.choose(Choice::Card(bf(&g, 1, "Test Bulwark")));
+    if g.kind() == Some(DecisionKind::DeclareBlockers) {
+        g.choose(Choice::Pass);
+    }
+    run(&mut g, |g| g.turn().step == Step::EndCombat, |_| None);
+    assert_eq!(g.life(0), 20, "{}", log(&g));
+    let bear = bf(&g, 0, "Test Bear");
+    assert_eq!(g.obj(bear).damage, 0);
+    assert_eq!(g.obj(bf(&g, 1, "Test Bulwark")).damage, 0);
+}

@@ -124,6 +124,65 @@ impl Game {
                 }
                 Flow::Next
             }
+            EoeD::MillHalfLibrary { tgt } => {
+                for t in self.targets_of(f, *tgt) {
+                    if let Target::Player(p) = t {
+                        let n = self.players[p as usize].library.len() / 2;
+                        self.mill(p, n, false);
+                    }
+                }
+                Flow::Next
+            }
+            EoeD::LoseHalfLife { who } => {
+                if let Some(p) = self.who(f, *who) {
+                    let life = self.players[p as usize].life.max(0) as i64;
+                    self.lose_life(p, crate::num::amount((life + 1) / 2));
+                }
+                Flow::Next
+            }
+            EoeD::DestroyCreaturesToughnessAtMostX => {
+                let x = f.spell_x as i32;
+                let all: Vec<CardIdx> =
+                    self.battlefield.iter().copied().filter(|&c| self.is_creature(c) && self.toughness(c) <= x).collect();
+                self.begin_batch();
+                for &c in &all {
+                    self.destroy(c);
+                }
+                self.end_batch();
+                // (A token ceases to exist there, CR 111.7: not a card.)
+                f.picked = all.into_iter().filter(|&c| self.objs[c.i()].zone == Zone::Graveyard && !self.is_token(c)).collect();
+                Flow::Next
+            }
+            EoeD::ReturnOneDestroyedIfXAtLeast { n } => {
+                let p = f.controller;
+                match self.answer.take() {
+                    Some(Choice::Card(c)) => {
+                        if self.objs[c.i()].zone == Zone::Graveyard {
+                            self.put_onto_battlefield(c, p);
+                        }
+                        return Flow::Next;
+                    }
+                    Some(other) => unreachable!("graveyard choice {other:?}"),
+                    None => {}
+                }
+                if (f.spell_x) < *n {
+                    return Flow::Next;
+                }
+                let opts: Vec<Opt> = f
+                    .picked
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.objs[c.i()].zone == Zone::Graveyard)
+                    .map(|c| Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
+                    .collect();
+                if opts.is_empty() {
+                    return Flow::Next;
+                }
+                let mut opts = opts;
+                opts.sort_by_key(|o| o.action);
+                self.ask(Task::Run(f.clone()), p, DecisionKind::ChooseGraveyardCard, opts);
+                Flow::Suspend
+            }
             EoeD::SacrificeSourceUnlessTap { filter } => {
                 let p = f.controller;
                 match self.answer.take() {
@@ -154,6 +213,18 @@ impl Game {
                 Flow::Suspend
             }
         }
+    }
+
+    /// Combat damage from `src` is prevented ("prevent all combat damage
+    /// that would be dealt this turn", `Mod::PreventCombatDamage`, CR
+    /// 615.1a) unless it can't be ("can't be prevented": Questing
+    /// Beast's `combat_unpreventable`).
+    pub(crate) fn combat_damage_prevented(&self, src: &crate::game::DamageSource) -> bool {
+        let Some(o) = src.obj else { return false };
+        self.live(o)
+            && self.objs[o.idx.i()].zone == Zone::Battlefield
+            && self.flags_of(o.idx).prevent_combat_damage
+            && !self.combat_unpreventable(src.controller)
     }
 
     /// Sacrifice the resolving ability's source if it is still that

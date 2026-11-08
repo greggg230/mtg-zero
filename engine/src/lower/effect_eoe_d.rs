@@ -527,6 +527,64 @@ pub(crate) fn lower_effect_eoe_d(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             let _ = (threshold, predicate, inner);
             l.unsupported("ConditionalIfYouControlAtLeast(not a triggered ability's intervening if)");
         }
+        // "When this creature leaves the battlefield, draw a card, then you
+        // may put a permanent card with mana value less than or equal to the
+        // number of lands you control from your hand onto the battlefield
+        // tapped" (Anticausal Vestige; the lands counted as it is put).
+        E::AnticausalVestigeLeavesEffect(nodes::AnticausalVestigeLeavesEffect {}) => {
+            b.op(Op::Draw { who: Who::You, n: Amount::Fixed(1) });
+            let filter = and(Filter::Type(types::PERMANENT), Filter::MvAtMostLandsYouControl);
+            b.op(Op::PutFromHand { who: Who::You, filter, tapped: true, optional: true });
+        }
+        // "Destroy all creatures, then any number of target players each mill
+        // half their library, rounded down" (Singularity Rupture).
+        E::SingularityRuptureEffect(nodes::SingularityRuptureEffect {}) => {
+            let t = b.target(Filter::Player, 0, 2);
+            b.op(Op::DestroyAll { filter: creature() });
+            eoe(b, EoeD::MillHalfLibrary { tgt: t });
+        }
+        // "Create X tokens that are copies of target artifact or creature you
+        // control. Those tokens gain haste until end of turn. Sacrifice them
+        // at the beginning of the next end step" (Devastating Onslaught; CR
+        // 707.2, 111.2, 603.7).
+        E::CreateXTokensOfTargetPermanentWithHasteEndStepSac(nodes::CreateXTokensOfTargetPermanentWithHasteEndStepSac {}) => {
+            if !l.spell_x {
+                l.unsupported("CreateXTokensOfTargetPermanentWithHasteEndStepSac(no X)");
+            }
+            let t = b.target(and(Filter::Or(vec![Filter::Type(types::ARTIFACT), creature()]), Filter::Controller(true)), 1, 1);
+            let of = crate::program::CopyOf::Target { i: t, lki: false };
+            b.op(Op::Ext(Ext::CreateTokenCopy { of, who: Who::You, n: Amount::X, exc: crate::copies::Except::default() }));
+            apply(b, On::MadeAll, vec![kws(&[Kw::Haste])], Until::EndOfTurn);
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::SacrificeEventObj));
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::Delay { k, when: crate::db::DelayedWhen::NextEndStep, about: crate::program::About::EachMade }));
+            b.op(Op::Ext(Ext::TokensCreated));
+        }
+        // "Destroy all creatures with toughness X or less. You lose X life. If
+        // X is 6 or more, return a creature card put into a graveyard this
+        // way to the battlefield under your control" (Zero Point Ballad).
+        E::ZeroPointBalladEffect(nodes::ZeroPointBalladEffect {}) => {
+            if !l.spell_x {
+                l.unsupported("ZeroPointBalladEffect(no X)");
+            }
+            eoe(b, EoeD::DestroyCreaturesToughnessAtMostX);
+            b.op(Op::LoseLife { who: Who::You, n: Amount::X });
+            eoe(b, EoeD::ReturnOneDestroyedIfXAtLeast { n: 6 });
+        }
+        // "Prevent all combat damage that would be dealt this turn"
+        // (Darkness; CR 615.1a): a rules effect on every creature, those
+        // that come later this turn too (combat damage is dealt by
+        // creatures only, CR 510.1).
+        E::PreventAllCombatDamageThisTurn(nodes::PreventAllCombatDamageThisTurn {}) => {
+            b.op(Op::Ext(Ext::ApplyRules { filter: creature(), who: Who::You, m: Mod::PreventCombatDamage, until: Until::EndOfTurn }));
+        }
+        // "Defending player loses half their life, rounded up" (Alpharael,
+        // Stonechosen's attack trigger; the defending player is the
+        // opponent, two players).
+        E::DefendingPlayerLosesHalfLifeRoundedUp(nodes::DefendingPlayerLosesHalfLifeRoundedUp {}) => {
+            eoe(b, EoeD::LoseHalfLife { who: Who::Opponent });
+        }
         _ => return false,
     }
     true

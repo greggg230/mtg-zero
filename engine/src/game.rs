@@ -2484,6 +2484,9 @@ impl Game {
         if amount <= 0 {
             return 0;
         }
+        if self.combat_damage_now && !self.effects.is_empty() && self.combat_damage_prevented(&src) {
+            return 0;
+        }
         match t {
             // (An ability can't be dealt damage.)
             Target::Stack(_) => return 0,

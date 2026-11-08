@@ -72,6 +72,8 @@ pub struct Flags {
     pub exile_if_dies: bool,
     /// "If it would leave the battlefield, exile it instead."
     pub exile_if_leaves: bool,
+    /// Combat damage it would deal is prevented (EoE lane D).
+    pub prevent_combat_damage: bool,
 }
 
 impl Game {
@@ -442,6 +444,7 @@ impl Game {
                 Mod::MustAttack | Mod::Goad | Mod::MustAttackPlayer => f.must_attack = true,
                 Mod::ExileIfDies => f.exile_if_dies = true,
                 Mod::ExileIfLeaves => f.exile_if_leaves = true,
+                Mod::PreventCombatDamage => f.prevent_combat_damage = true,
                 _ => {}
             }
         }

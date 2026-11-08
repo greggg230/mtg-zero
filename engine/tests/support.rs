@@ -718,12 +718,15 @@ const SUPPORTED_EOE_C: &[&str] = &[
 ];
 /// Lane D: creatures, combat, removal, damage, life, tokens and pumps.
 const SUPPORTED_EOE_D: &[&str] = &[
+    "Anticausal Vestige",
     "Biosynthic Burst",
     "Comet Crawler",
     "Command Bridge",
     "Cut Propulsion",
+    "Darkness",
     "Dawnstrike Vanguard",
     "Depressurize",
+    "Devastating Onslaught",
     "Diplomatic Relations",
     "Exosuit Savior",
     "Faller's Faithful",
@@ -741,11 +744,13 @@ const SUPPORTED_EOE_D: &[&str] = &[
     "Nova Hellkite",
     "Perigee Beckoner",
     "Sami, Ship's Engineer",
+    "Singularity Rupture",
     "Skystinger",
     "Swarm Culler",
     "The Endstone",
     "Vaultguard Trooper",
     "Zealous Display",
+    "Zero Point Ballad",
 ];
 
 fn supported_eoe() -> Vec<String> {
