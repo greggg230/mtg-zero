@@ -441,6 +441,7 @@ impl Game {
             pl.spells_cast = 0;
             pl.noncreature_cast = 0;
             pl.gained_life = false;
+            pl.life_gained = 0;
             pl.lost_life = false;
         }
         // "Until your next turn" ends as that turn begins (CR 611.2b).

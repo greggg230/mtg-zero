@@ -1296,3 +1296,43 @@ fn cr_107_1a_defending_player_loses_half_their_life_rounded_up() {
     settle(&mut g);
     assert_eq!(g.life(1), 7, "15 - 8");
 }
+
+// ---- Haliya, Guided by Light: "draw a card if you've gained 3 or more life
+// this turn" (checked as the ability resolves: not an intervening "if", CR
+// 603.4) ---------------------------------------------------------------------
+
+#[test]
+fn cr_603_4_haliya_draws_if_three_or_more_life_was_gained_this_turn() {
+    for (gains, draws) in [(3usize, 1usize), (2, 0)] {
+        let mut g = scen()
+            .battlefield(0, &["Haliya, Guided by Light", "Test Tapper", "Test Tapper", "Test Tapper"])
+            .at(Step::Main1, 0)
+            .start();
+        tap_tappers(&mut g, 0, gains);
+        assert_eq!(g.player(0).life_gained, gains as u32);
+        let hand = g.player(0).hand.len();
+        run(&mut g, |g| g.turn().step == Step::End && g.stack().is_empty() && at_priority(g), |_| None);
+        assert_eq!(g.player(0).hand.len(), hand + draws, "{gains} life gained\n{}", log(&g));
+        assert!(log(&g).contains("trigger of Haliya"), "it triggers either way");
+    }
+}
+
+#[test]
+fn cr_119_10_haliya_gains_one_life_as_it_or_another_creature_or_artifact_enters() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains", "Plains", "Plains"])
+        .hand(0, &["Haliya, Guided by Light", "Test Relic", "Swamp"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, "Haliya, Guided by Light");
+    settle(&mut g);
+    assert_eq!(g.life(0), 21, "Haliya itself");
+    cast(&mut g, "Test Relic");
+    settle(&mut g);
+    assert_eq!(g.life(0), 22, "an artifact");
+    let s = g.card(0, "Swamp", Zone::Hand);
+    g.choose(Choice::Play(s));
+    settle(&mut g);
+    assert_eq!(g.life(0), 22, "not a land");
+    assert_eq!(g.player(0).life_gained, 2);
+}

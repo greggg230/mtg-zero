@@ -734,6 +734,7 @@ const SUPPORTED_EOE_D: &[&str] = &[
     "Focus Fire",
     "Frontline War-Rager",
     "Genemorph Imago",
+    "Haliya, Guided by Light",
     "Hemosymbic Mite",
     "Kavaron Harrier",
     "Mechanozoa",

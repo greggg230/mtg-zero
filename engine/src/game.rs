@@ -230,6 +230,9 @@ pub struct Player {
     pub noncreature_cast: u8,
     /// Gained life this turn.
     pub gained_life: bool,
+    /// The life gained this turn ("if you've gained 3 or more life this
+    /// turn"; EoE lane D, ENGINE.md 99.5).
+    pub life_gained: u32,
     /// Can't gain life for the rest of the game (Screaming Nemesis).
     pub cant_gain_life: bool,
     /// Creatures declared as attackers this turn ("during any turn you
@@ -939,6 +942,7 @@ impl Game {
             spells_cast: 0,
             noncreature_cast: 0,
             gained_life: false,
+            life_gained: 0,
             cant_gain_life: false,
             attacked_with: Vec::new(),
             draw_step_draws: 0,
@@ -2473,6 +2477,8 @@ impl Game {
         if n > 0 && !self.players[p as usize].cant_gain_life {
             self.sub_life(p, -n);
             self.players[p as usize].gained_life = true;
+            let pl = &mut self.players[p as usize];
+            pl.life_gained = pl.life_gained.saturating_add(n as u32);
         }
     }
 

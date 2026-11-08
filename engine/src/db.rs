@@ -881,6 +881,8 @@ pub enum Cond {
     SourceCountersIn(Counter, u8, Option<u8>),
     /// You gained life this turn.
     GainedLifeThisTurn,
+    /// You gained n or more life this turn (EoE lane D).
+    GainedLifeAtLeast(u16),
     /// An opponent has more cards in hand than you.
     OpponentHasMoreCards,
     /// You have cast exactly n spells this turn (noncreature ones only if
@@ -938,6 +940,7 @@ impl Cond {
             | Cond::IsMonarch
             | Cond::SourceCountersIn(..)
             | Cond::GainedLifeThisTurn
+            | Cond::GainedLifeAtLeast(_)
             | Cond::SpellsCastThisTurn { .. }
             | Cond::YourTurn
             | Cond::LifeAtMostHalfStart

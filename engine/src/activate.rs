@@ -43,6 +43,7 @@ impl Game {
             // (Only a static ability's own condition; read in layers.rs.)
             Cond::SourceCountersIn(..) => false,
             Cond::GainedLifeThisTurn => pl.gained_life,
+            Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as u32,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::SpellsCastThisTurn { n, noncreature } => {
                 (if *noncreature { pl.noncreature_cast } else { pl.spells_cast }) == *n

@@ -615,6 +615,15 @@ pub(crate) fn lower_effect_eoe_d(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             b.op(Op::Ext(Ext::Untap { on: On::Each(creature()) }));
             apply(b, On::Each(creature()), vec![kws(&[Kw::Haste])], Until::EndOfTurn);
         }
+        // "Draw a card if you've gained 3 or more life this turn" (Haliya,
+        // Guided by Light: the "if" ends the sentence, so it is checked as
+        // the ability resolves, not an intervening "if", CR 603.4).
+        E::ConditionalIfYouGainedLifeAtLeast(nodes::ConditionalIfYouGainedLifeAtLeast { threshold, inner }) => {
+            let n = l.int("ConditionalIfYouGainedLifeAtLeast.threshold", *threshold, 1, 999) as u16;
+            let at = b.op(Op::JumpUnless { cond: Cond::GainedLifeAtLeast(n), to: 0 });
+            lower_effect(l, b, inner);
+            b.patch(at);
+        }
         _ => return false,
     }
     true
