@@ -198,6 +198,8 @@ pub fn fields() -> Vec<Field> {
         use crate::eoe_w6::W6State;
         classify!(v, W6State {
             seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
+            entering: Derived "transient: set and cleared around one permanent's entry",
+            actor: Derived "transient: set and restored around one op",
         });
     }
     classify!(v, Player {

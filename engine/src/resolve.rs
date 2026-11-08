@@ -374,7 +374,11 @@ impl Game {
         while (f.pc as usize) < prog.len() {
             let op = &prog[f.pc as usize];
             let queued = self.agenda.len();
-            match self.exec(&mut f, op) {
+            // (Who carries out the instruction: EoE W6, `W6State::actor`.)
+            let actor = std::mem::replace(&mut self.w6.actor, Some(f.controller));
+            let flow = self.exec(&mut f, op);
+            self.w6.actor = actor;
+            match flow {
                 Flow::Next => {
                     f.pc += 1;
                     f.i = 0;

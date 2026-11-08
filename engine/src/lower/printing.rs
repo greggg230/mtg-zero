@@ -1941,7 +1941,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             grants_activated: Vec::new(),
             grants_subtype: Vec::new(),
         },
-        w6: Default::default(),
+        w6: crate::eoe_w6::W6Def { counter_doubler: repl.w6_counter_doubler.clone(), ..Default::default() },
     };
     super::eoe_w3::printing_w3(l, &mut def, *grants_food_to_your_artifacts, *grants_food_ability_to_your_artifacts);
     def.w3.seen = crate::eoe_w3::seen_of(&def);

@@ -946,6 +946,7 @@ const SUPPORTED_EOE_W5: &[&str] = &[
 
 /// EoE W6, the remaining cards (ENGINE.md 99.16).
 const SUPPORTED_EOE_W6: &[&str] = &[
+    "Loading Zone",
     "Unravel",
 ];
 

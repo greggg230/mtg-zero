@@ -691,7 +691,10 @@ impl Game {
         }
         let r = self.obj_ref(card);
         let tapped = self.enters_tapped(card, p);
+        // (Its "enters with" counters: EoE W6, `W6State::entering`.)
+        let entering_before = self.w6.entering.replace((card, since));
         self.entering(card, tapped, 0);
+        self.w6.entering = entering_before;
         self.note_entered(card);
         self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
     }

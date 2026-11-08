@@ -16,6 +16,11 @@ pub struct W6Def {
     /// less than its mana value"): every spell's payment is recorded
     /// (`Mark::ManaSpent`) in a table with such a card.
     pub reads_spells_mana_spent: bool,
+    /// "If one or more counters would be put on a <filter> you control,
+    /// twice that many of each of those kinds of counters are put on it
+    /// instead" (CR 614.1a, 122.6): the recipients (the static ability's
+    /// controller controls them).
+    pub counter_doubler: Option<crate::db::Filter>,
 }
 
 /// The table facts W6 adds (`CardDb::w6`).
@@ -38,7 +43,24 @@ pub struct W6State {
     /// `SEEN_W6_*` bits: a card of this game needs the rule (as
     /// `Game::seen`).
     pub seen: u16,
+    /// The permanent being put onto the battlefield whose "enters with"
+    /// counters are being put on it (CR 122.6, 614.1c), with the first
+    /// timestamp of the entries of its event (what entered at the same time:
+    /// `Game::group_ts`): set and cleared around its entry.
+    pub entering: Option<(crate::ids::CardIdx, u32)>,
+    /// The controller of the spell or ability whose instruction is being
+    /// carried out (`Game::run_frame`): the player who puts counters its
+    /// effect puts (CR 122.6, 608.2): set and restored around each op.
+    pub actor: Option<crate::ids::PlayerId>,
 }
+
+/// `W6State::seen`: a replacement effect multiplies counters put on
+/// permanents (`W6Def::counter_doubler`).
+pub(crate) const SEEN_W6_COUNTERS: u16 = 1;
+/// `W6State::seen`: a triggered ability reads who put +1/+1 counters and
+/// how many (`TrigPred::CountersPutBy`): the `CountersAdded` event carries
+/// them.
+pub(crate) const SEEN_W6_PUTTER: u16 = 2;
 
 /// The abilities of a definition that go on the stack (its spell, triggered
 /// and activated abilities).
@@ -66,8 +88,11 @@ pub(crate) fn finish_def(d: &mut crate::db::CardDef) {
 
 /// The `SEEN_W6_*` bits of a definition.
 pub(crate) fn seen_of(d: &crate::db::CardDef) -> u16 {
-    let _ = d;
-    0
+    let mut bits = 0;
+    if d.w6.counter_doubler.is_some() {
+        bits |= SEEN_W6_COUNTERS;
+    }
+    bits
 }
 
 /// W6's instructions (`Ext::EoeW6`).
@@ -99,6 +124,47 @@ impl W6 {
 }
 
 impl Game {
+    /// `n` counters of a kind are about to be put on permanent `c` (CR
+    /// 122.6): how many are put once the replacement effects that multiply
+    /// them apply (CR 614.1a; Loading Zone). Each such effect of a
+    /// permanent whose controller controls `c` and whose recipients match
+    /// `c` doubles them: two give four times as many, and so on (its
+    /// ruling of 2025-07-25). The affected object's controller would order
+    /// them (616.1), but doublings commute, and the lowering refuses any
+    /// other counter-modifying replacement: no order to choose. Counters a
+    /// permanent enters with (122.6) get only the effects that already
+    /// exist (614.12): not those of permanents entering at the same time.
+    pub(crate) fn w6_counters_put(&self, c: crate::ids::CardIdx, n: crate::num::Count) -> crate::num::Count {
+        if self.objs[c.i()].zone != Zone::Battlefield {
+            return n;
+        }
+        let entering = self.w6.entering.filter(|e| e.0 == c).map(|e| e.1);
+        let ctl = self.objs[c.i()].controller;
+        let mut n = n;
+        for &d in &self.battlefield {
+            let Some(f) = &self.abilities(d).w6.counter_doubler else { continue };
+            if self.objs[d.i()].controller != ctl || entering.is_some_and(|since| self.objs[d.i()].timestamp >= since) {
+                continue;
+            }
+            let ctx = crate::cast::Ctx { controller: ctl, source: Some(self.obj_ref(d)) };
+            if self.card_matches(f, c, &ctx) {
+                n = n.saturating_mul(2);
+            }
+        }
+        n
+    }
+
+    /// The player who puts counters on permanent `c` now (CR 122.6): for
+    /// counters it enters with, its controller (122.6a: no effect of the
+    /// table names another player); else the controller of the spell or
+    /// ability whose instruction puts them (608.2).
+    pub(crate) fn w6_putter(&self, c: crate::ids::CardIdx) -> crate::ids::PlayerId {
+        if self.w6.entering.is_some_and(|e| e.0 == c) {
+            return self.objs[c.i()].controller;
+        }
+        self.w6.actor.unwrap_or_else(|| panic!("counters put on {} outside a spell or ability (EoE W6: who puts them?)", self.name(c)))
+    }
+
     pub(crate) fn exec_eoe_w6(&mut self, f: &mut Frame, op: &W6) -> Flow {
         match op {
             W6::JumpUnlessSpentBelowMv { tgt, to } => {

@@ -65,6 +65,9 @@ pub(crate) struct Repl {
     /// times each turn'" (Nadu, Winged Wisdom): the granted triggered
     /// ability is this card's (as granted ward's, ENGINE.md 27.3).
     pub grants_target_trigger: Option<(crate::db::AbilityDef, u8)>,
+    /// "If one or more counters would be put on a <filter> you control,
+    /// twice that many ... instead" (EoE W6: `W6Def::counter_doubler`).
+    pub w6_counter_doubler: Option<Filter>,
 }
 
 /// A static ability's replacement effect -> `repl`.
@@ -97,6 +100,9 @@ fn lower_replacement(l: &mut Lowerer, r: &cats::ReplacementEffect, repl: &mut Re
             }
             other => l.unsupported(format!("InsteadForSourceController.effect({})", other.tag())),
         }
+        return;
+    }
+    if super::eoe_w6::lower_replacement_w6(l, event, transform, subject_filters, affects, condition, repl) {
         return;
     }
     l.deny("EventPattern.subject_filters", subject_filters);

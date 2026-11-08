@@ -1552,6 +1552,8 @@ impl Game {
         // tapped", "enters with counters", CR 614.1c, 122.6.)
         self.defer_enters = true;
         let r = self.move_card_ctl(idx, Zone::Battlefield, Pos::Top, Some(controller));
+        // (Its "enters with" counters: EoE W6, `W6State::entering`.)
+        let entering_before = self.w6.entering.replace((idx, self.group_ts.1));
         if let Some(h) = attach {
             self.objs[idx.i()].attached = Some(h);
             self.note(|g| format!("{} enters attached to {}", g.name(idx), g.name(h.idx)));
@@ -1606,6 +1608,7 @@ impl Game {
                 self.marks.push((r, Mark::PriestPending));
             }
             self.agenda.push(Task::EnterAsCopy { card: idx, note, since: self.group_ts.1 });
+            self.w6.entering = entering_before;
             return r;
         }
         self.entering_own(idx, tapped, x, own);
@@ -1619,6 +1622,7 @@ impl Game {
                 self.marks.push((r, Mark::KickerX(x)));
             }
         }
+        self.w6.entering = entering_before;
         if self.objs[idx.i()].zone == Zone::Battlefield && self.objs[idx.i()].inc == r.inc {
             self.note_entered(idx);
             self.event(Event { kind: EventKind::Enters, a: crate::triggers::Subj::Obj(r), b: crate::triggers::Subj::None, amount: note as u32 });
