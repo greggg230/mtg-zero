@@ -19723,3 +19723,9 @@ was); `--test hidden` 16 passed; `--lib` 28 passed. The default `FUZZ_GAMES=2000
 FUZZ_GAMES=20000`: 20,000 games (wins 8,928 / 9,031, 2,041 draws, mean 40.1 turns, 500.4 decisions:
 the games of 99.13's combination), passed (2,088 s). docs/shortcuts.md: no entry (the helpers add
 no shortcut; workstream A marks the rows it fixes with them).
+
+The gate (`python tools/gate.py encoding --expect-digest f6543eb2b1b8752f --expect-digest0
+1c61c689e1829386 --no-mac --allow-skip checkpoint-load`, on 72a2bff): build, both digests, `--test az`
+(41) and pytest (174 passed) passed; the last line `GATE PASSED WITH SKIPS encoding 72a2bff7a491 in
+757s - skipped: checkpoint-load` (no checkpoint loaded on this build; the encoding's floats are 0 in
+every state a game reaches until workstream A asks paged or digit decisions).
