@@ -733,3 +733,13 @@ lanes, the cross-lane pass, the mtg-bot IR-fix batch); 62 blocked: 23 by IR defe
 another player's turn, targets among exiled cards), the rest by single-card features, mostly rares.
 Encoding gaps the EoE network's layout must close (S3): void, "cast for its warp cost", life gained
 this turn (the amount). The IR comes from mtg-bot branch `feature/eoe-ir-fixes` (unmerged there).
+
+**S2 data (2026-11-08, branch `eoe-s2-data`; docs/sealed_data.md):** the 17lands yardstick
+(`data/sealed/eoe_17lands_sealed.json.gz`, `mtgz.sealed.seventeen_lands`: 9,765 Premier and 903
+Traditional Sealed pools with every build and game; a pool is six Play Boosters' 78 nonbasic cards,
+basics free and never counted) and a seeded reference generator of the EoE Play Booster
+(`mtgz.sealed.collation`: Wizards' published slots and rates, splitmix64 so a Rust port reproduces it).
+Against Arena's pools and packs it matches the rarity mix, sizes and per-card rates; Arena's packs are
+colour-balanced (a print-run collation: half the spread of a pool's colour depth) and open a few more
+Stellar Sights lands, which the generator does not model yet. Whether to model them from 17lands' packs
+is the user's call (docs/sealed_data.md 5); 8% of real pools are fully supported at 9cdda51.
