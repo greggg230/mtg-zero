@@ -718,6 +718,23 @@ const SUPPORTED_EOE_C: &[&str] = &[
 ];
 /// Lane D: creatures, combat, removal, damage, life, tokens and pumps.
 const SUPPORTED_EOE_D: &[&str] = &[
+    "Biosynthic Burst",
+    "Comet Crawler",
+    "Dawnstrike Vanguard",
+    "Depressurize",
+    "Exosuit Savior",
+    "Flight-Deck Coordinator",
+    "Frontline War-Rager",
+    "Genemorph Imago",
+    "Kavaron Harrier",
+    "Mechanozoa",
+    "Memorial Team Leader",
+    "Nova Hellkite",
+    "Sami, Ship's Engineer",
+    "Skystinger",
+    "Swarm Culler",
+    "Vaultguard Trooper",
+    "Zealous Display",
 ];
 
 fn supported_eoe() -> Vec<String> {

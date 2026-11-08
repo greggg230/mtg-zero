@@ -587,6 +587,7 @@ impl Game {
             W::NextCleanup => step == crate::game::Step::Cleanup,
             W::NextUpkeep => step == crate::game::Step::Upkeep,
             W::YourNextMainPhase => step.is_main() && ap == d.controller,
+            W::EndOfCombat => step == crate::game::Step::EndCombat,
         };
         let (now, later): (Vec<_>, Vec<_>) = self.delayed.iter().copied().partition(|d| fires(d));
         self.delayed = later;

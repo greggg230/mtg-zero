@@ -199,7 +199,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             also_untap_if_not_your_turn,
             tokens_only,
         }) => {
-            l.deny("PumpCreaturesYouControlUntilEOT.also_untap_if_not_your_turn", also_untap_if_not_your_turn);
             let mut f = and(creature(), Filter::Controller(true));
             if *exclude_source {
                 f = and(f, not(Filter::Source));
@@ -211,7 +210,10 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 f = and(f, Filter::Token);
             }
             let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);
-            apply(b, On::Each(f), mods, Until::EndOfTurn);
+            apply(b, On::Each(f.clone()), mods, Until::EndOfTurn);
+            if *also_untap_if_not_your_turn {
+                super::effect_eoe_d::untap_unless_your_turn(b, f);
+            }
         }
         E::PumpSelfUntilEOT(nodes::PumpSelfUntilEOT { power_bonus, toughness_bonus, granted_keywords }) => {
             let mods = pump_mods(l, *power_bonus, *toughness_bonus, granted_keywords);

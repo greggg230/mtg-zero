@@ -624,6 +624,9 @@ pub enum DelayedWhen {
     NextUpkeep,
     /// At the beginning of its controller's next main phase.
     YourNextMainPhase,
+    /// At the next end of combat ("at end of combat": as the end of combat
+    /// step begins, CR 511.2; EoE lane D, ENGINE.md 99.5).
+    EndOfCombat,
 }
 
 impl EventKind {
@@ -642,7 +645,9 @@ impl EventKind {
                 (&[Slot::Obj], &[])
             }
             E::Attacks | E::AttacksAlone => (&[Slot::Attacker], &[]),
-            E::Blocks => (&[Slot::Blocker], &[]),
+            // (The blocked attacker: "whenever this creature blocks a
+            // creature with flying", CR 509.3b; EoE lane D.)
+            E::Blocks => (&[Slot::Blocker], &[Slot::Attacker]),
             E::Transforms | E::Chapter | E::ClassLevel => (&[Slot::Obj], &[]),
             E::DealsDamage => (&[Slot::Source], &[]),
             E::YouAttack

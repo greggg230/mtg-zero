@@ -19,6 +19,7 @@ pub mod effect_tail2;
 pub mod effect_tail3;
 pub mod effect_walkers;
 pub mod effect_m7d;
+pub mod effect_eoe_d;
 pub mod filter;
 pub mod printing;
 pub mod statics;

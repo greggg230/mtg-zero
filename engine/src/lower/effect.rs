@@ -829,8 +829,6 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
         }) => {
             // "Create N <token>" (CR 111.2): the token's definition is
             // lowered like a card's and interned.
-            l.deny("CreateToken.each_player", each_player);
-            l.deny("CreateToken.schedule_end_of_combat_sacrifice", schedule_end_of_combat_sacrifice);
             let n = l.int("CreateToken.count", *count, 1, 20) as u8;
             let cats::CardPrinting::CardPrinting(tp) = &**token_printing;
             let def = super::printing::lower_printing(l, tp);
@@ -838,10 +836,20 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 l.unsupported("CreateToken.token_printing(not a token)");
             }
             let token = l.token(def);
+            if *each_player {
+                // "Each player creates ..." (EoE lane D, ENGINE.md 99.5).
+                super::effect_eoe_d::each_player_creates(l, b, token, n, *tapped, *attacking || *schedule_end_of_combat_sacrifice);
+                return;
+            }
             if *attacking {
                 b.op(Op::Ext(crate::program::Ext::CreateTokensAttacking { token, n, tapped: *tapped }));
             } else {
                 b.op(Op::CreateToken { token, n, tapped: *tapped });
+            }
+            if *schedule_end_of_combat_sacrifice {
+                // "Sacrifice that token at end of combat" (EoE lane D,
+                // ENGINE.md 99.5).
+                super::effect_eoe_d::sacrifice_made_at_end_of_combat(l, b);
             }
             b.op(Op::Ext(crate::program::Ext::TokensCreated));
         }
@@ -922,6 +930,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::effect_tail2::lower_effect_tail2(l, b, other)
                 && !super::effect_tail3::lower_effect_tail3(l, b, other)
                 && !super::effect_m7d::lower_effect_m7d(l, b, other)
+                && !super::effect_eoe_d::lower_effect_eoe_d(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }
