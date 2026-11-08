@@ -19135,3 +19135,131 @@ draws, as before the branch; 1,000 matches); `FUZZ_POOL=eoe FUZZ_GAMES=20000` fa
 (`f6543eb2b1b8752f`), and `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000 games, wins 9,100 /
 9,009, 1,891 draws, mean 39.6 turns, 515.6 decisions; all four fuzz tests, 1,022 s). The
 public-state gate: 135 perturbations encoded, 5 deliberate limits, 8 next-layout gaps.
+
+#### 99.11 W1: the cards blocked by card-IR defects (branch `eoe-w1-ir`, mtg-bot `feature/eoe-ir-fixes` 20bea9f4)
+
+**Why.** 23 of the 62 blocked cards had an `ir_defect(...)` blocker: mtg-bot's parser exported a
+printing that contradicts the Oracle text (docs/ir_defects.md 21-101). W1 owns the parser, the
+re-export, `generated.rs`, `lower::IR_DEFECTS` and `SUPPORTED_EOE_IRFIX`, and those cards' other
+engine features (but mana spend restrictions, W2's).
+
+**The parser fixes** (mtg-bot `feature/eoe-ir-fixes` 20bea9f4, the second batch, on 7af12b20; 9c6e8795
+adds its unit tests and one Python-engine fix): 20 of the 23 printings follow their Oracle text
+now; each fixed entry's last bullet in docs/ir_defects.md says what the IR holds:
+Divert Disaster and Unravel (`CounterSpell.if_paid`, `if_mana_spent_below_mv`; both counterspells
+left mtg-bot's lossy parity pin, as did Archenemy's Charm), Archenemy's Charm and Pull Through the
+Weft (`ReturnTargetCardsFromYourGraveyard`: target groups), Fell Gravship (a card chosen as it
+resolves, not a target), Xu-Ifit, Endless Sands, Desculpting Blast (the Drone token inline),
+Luxknight Breacher (`enters_with_plus_one_counters_per`), Syr Vondam (`LeftBattlefieldTo`, the power
+gate a trigger predicate), Mutavault (`all_creature_types`), Mechan Shieldmate
+(`CanAttackAsThoughNoDefender`), Mirrorpool ({C} pips), Pinnacle Starcage (the Robot inline), Power
+Depot (modular 1, its restriction), Sunken Citadel (the chosen colour), Tractor Beam and Moonlit
+Meditation (two `EnchantKind`s), Meltstrider's Resolve (no more menace), Loading Zone (the
+recipients). Not fixed: Nesting Grounds (27), Terrasymbiosis (31), Starfield Vocalist (66): each
+needs an engine feature W1 didn't build (a choice of counter kind; who put counters and how many;
+a trigger-doubling replacement), so their IR fixes were left for the batch that builds them (they
+stay in `lower::IR_DEFECTS`). No new IR defect was found (140-159 unused).
+
+mtg-bot's checks: `cards roundtrip --pool cube legacy eoe` passes; the cube's and the legacy IR are
+the previous files card for card (`schema_sha256` aside, checked card by card); the full suite
+(`pytest -n 8 --no-cov`) has 48 failures, all among the 51 of the baseline (three now pass); 108
+tests that pinned the lossy printings follow the new ones (42) or are strict xfails (66: the
+cross-engine parity probes and bridge admit sets, whose compiled Rust engine models the old
+printings; mtg-bot docs/SEARCH_LIMITATIONS.md, "EoE fidelity shapes (feature/eoe-ir-fixes,
+second batch)"); `tests/test_eoe_fidelity.py` (51 tests) covers the new classes.
+
+**The import** (docs/card_ir.md, "Current numbers"): schema `663b44095dbe...` (was
+`675cfc50fc4e...`), 708 classes (6 new, 5 unused now); 20 of `eoe.ir.json`'s 320 cards changed
+(exactly those). `card_ir` and `python -m pytest tools/codegen` pass. `lower::IR_DEFECTS` lost the
+20 cards' lines (it keeps 3).
+
+**The engine** (new code in `eoe_w1.rs` and `lower/eoe_w1.rs`; small additive edits elsewhere):
+* Graveyard returns with target groups (`Ext::FromGraveyard` per group, CR 601.2c); Xu-Ifit's
+  return through `FromGraveyardAs`, whose effects apply as the permanent enters: when they include
+  "has no abilities", the card's own entering abilities (enters tapped, with counters, as a copy,
+  "as it enters" choices) don't apply (`Game::entering_own`, `enters_tapped_own`; CR 614.12,
+  Xu-Ifit's ruling of 2025-07-25). Gated on that effect only: nothing else changes.
+* `EoeW1::LinkedToBattlefieldOwnersMatching` (Endless Sands' "each creature card exiled with
+  this", CR 607.2a), `ExileEachUntilSourceLeaves` (610.3, 610.3c), `LinkedToGraveyardsCounted`
+  (Pinnacle Starcage, then `CreateTokensN` of `Amount::Remembered`), `HostFights` (an Aura's
+  "enchanted creature fights", 701.14).
+* `CounterSpell.if_paid` (after `OfferPay`), Desculpting Blast's "if it was attacking" (read just
+  before the bounce, 608.2h), Mirrorpool's copy and token copy (707.10, 707.2), the {C} pips
+  (`pips[C]`, 107.4b).
+* `TrigPred::LeftTo` ("dies or is put into exile"): the zone the permanent goes to, in the
+  transient `Game::leaving_to` set around its `LeavesBattlefield` event (a first try put it in the
+  event's amount, which reaches the stack item's event context: 44 of the 2,500 digest games
+  differed; the transient field leaves them unchanged).
+* `CardDef::enters_counters_per` (Luxknight Breacher: the permanents already there, not those
+  entering at the same time, `group_ts`; its ruling), `attached_max_one_blocker` (Meltstrider's
+  Resolve, CR 509.1b; with menace too, it can't be blocked at all), `Mod::AttackDespiteDefender`
+  with `Cond::ArtifactEnteredThisTurn` (Mechan Shieldmate, 702.3b), `Mod::AllCreatureTypes`
+  (Mutavault, 205.3m: the creature types of the rule's list, `eoe_w1::CREATURE_TYPES`, from
+  Scryfall's creature-type catalog; counted with the layer-4 subtype effects of the encoding's
+  effect counts), the enchant kinds "creature or Spacecraft" and "artifact or creature" (lane A's
+  `aura_enchant`).
+* New public state: `Player::artifact_entered` ("an artifact entered the battlefield under your
+  control this turn"), a public-state gate field with a perturbation (player 0 always: nothing from
+  the gate's random stream) and a next-layout limit (`tests/az.rs`: four gaps now).
+
+**Cards.** EoE support 258 -> 272 of 320: 14 cards in `SUPPORTED_EOE_IRFIX`, each checked against
+its Oracle text and the official rulings: Archenemy's Charm, Desculpting Blast, Divert Disaster,
+Endless Sands, Fell Gravship, Luxknight Breacher, Mechan Shieldmate, Meltstrider's Resolve,
+Mirrorpool, Mutavault, Pinnacle Starcage, Pull Through the Weft, Syr Vondam, Sunstar Exemplar,
+Xu-Ifit, Osteoharmonist. Still blocked (their IR fixed): Loading Zone (no counter-multiplying
+replacement), Unravel (the mana spent to cast a spell isn't recorded), Tractor Beam (an Aura's
+control, "doesn't untap", tapping the enchanted permanent), Moonlit Meditation (its token
+replacement), Power Depot and Sunken Citadel (W2's spend restrictions, and modular / mana of the
+chosen colour). Their IR not fixed: Nesting Grounds, Terrasymbiosis, Starfield Vocalist (above).
+No card needed an action-layout or encoding change.
+
+**Tests.** `tests/cards_eoe_w1.rs` (27 tests): every ability of each card's Oracle text and the
+rulings' edge cases (Divert Disaster paid, declined, unpayable; Archenemy's Charm's planeswalker
+targets and "one or two"; Pull Through the Weft's two requirements and no targets; Fell Gravship
+returning a milled Spacecraft card and milling with nothing to return; Desculpting Blast's Drone
+only for an attacker; Endless Sands' link to the land that exiled; Xu-Ifit's Skeleton without
+abilities, its enters trigger and "enters with" counter lost; Syr Vondam dying, exiled, bounced,
+at power 3 and 4; Luxknight Breacher counting an artifact creature once; Mechan Shieldmate after
+an artifact entered and left, and the next turn; Mutavault's creature types and not Spacecraft;
+Mirrorpool's {C} costs, copy with a new target and token copy without counters; Pinnacle Starcage
+both players' small permanents and the Robots; Meltstrider's Resolve's fight, +0/+2 and one
+blocker).
+
+Full engine suite (normal release profile): 1,880 passed, 0 failed, 15 ignored. `support` 8 passed
+(cube 546 / 546, EoE 272 / 320); behaviour digests unchanged (combined `f6543eb2b1b8752f`);
+`FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 8,984 / 8,901, 2,115 draws, mean 39.8 turns,
+510.6 decisions), the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before)
+and 1,000 matches, all four fuzz tests passed; `cargo test -p card_ir` and `python -m pytest
+tools/codegen` pass.
+
+**Sothera, the Supervoid** (added to W1 by the coordinator: W4's docs/ir_defects.md entry 180 on
+`eoe-w4-exile`, the end-step ability returning the creature before sacrificing Sothera). mtg-bot
+`feature/eoe-ir-fixes` 7c02e5c9 puts the sacrifice first (`Sequence [SacrificeSelfPreservingExileLink,
+ReanimateOneExiledWithSourceWithCounters]`; schema unchanged, the cube's and the legacy IR card for
+card unchanged, only Sothera's printing in `eoe.ir.json`). The engine: `EoeW1::ChooseOwnExileLinked`
+("each opponent chooses a creature they control and exiles it", the card exiled with Sothera, CR
+607.2a), `LinkedCreatureToBattlefieldWith` (a linked creature card enters under your control with
+two +1/+1 counters, 614.1c), `Cond::APlayerControlsNoCreatures` (an intervening "if", 603.4), the
+sacrifice as `SacrificeSource` (the link survives it). Supported: EoE 272 -> 273; two card tests.
+
+**No approximations** (the user's rule, given during the work): every choice W1 added keeps every
+legal option reachable: the linked-creature choice pages through the 32 exile slots (31 cards and
+`PASS` for the next page) instead of truncating; Meltstrider's Resolve's "enchanted creature" is the
+Aura's last known attachment if the Aura left before its trigger resolved (CR 608.2h,
+`Game::lki_attached`); "an artifact entered the battlefield under your control" is noted as the
+permanent's `Enters` event happens (what it entered as, a copy of an artifact too, CR 707.5). One
+divergence is left, reported here rather than claimed equivalent: when a dying or exiled
+permanent's destination is chosen among replacement effects (`Dest::Choose`: the library or exile),
+its `LeavesBattlefield` event is matched while it is "exiled for now", so `TrigPred::LeftTo` reads
+exile even if the library is chosen next (Syr Vondam would trigger for a permanent shuffled into a
+library). No card of the EoE table puts a permanent into a library instead of a graveyard, so no
+EoE game reaches it; making the match wait for the choice needs the leave event re-timed for every
+card (left for the maintainer). No docs/shortcuts.md entry was added by W1.
+
+Checks of the final branch (with Sothera and the fixes above): full engine suite 1,882 passed, 0 failed,
+15 ignored; `support` (cube 546 / 546, EoE 273 / 320); behaviour digests unchanged (combined
+`f6543eb2b1b8752f`); `tests/az.rs` passes; `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 8,916 /
+8,874, 2,210 draws, mean 40.1 turns, 513.4 decisions) and the default `FUZZ_GAMES=20000`: 20,000 games
+(9,967 / 9,994, 39 draws) and 1,000 matches, all four fuzz tests passed. mtg-bot at 7c02e5c9: 50
+failures, 49 of the baseline's and `tests/search/test_shm_nn_eval_server.py::test_concurrent_workers_get_batched_into_one_dispatch`,
+a timing test that passes alone (the machine was running four agents' builds).

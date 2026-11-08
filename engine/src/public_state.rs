@@ -134,6 +134,7 @@ pub fn fields() -> Vec<Field> {
         entering_sunburst: Derived "transient: set and cleared around one move",
         entering_exiled: Derived "transient: set and cleared around one move",
         entering_mods: Derived "transient: set and cleared around one move",
+        leaving_to: Derived "transient: set and cleared around one leave event",
         entering_counters: Derived "transient: set and cleared around one move",
         entering_tapped: Derived "transient: set and cleared around one move",
         discard_entered: Derived "transient: Mox Diamond's answer, consumed by its entering",
@@ -155,6 +156,7 @@ pub fn fields() -> Vec<Field> {
         turn_controller: Public "who controls the active player during this turn (CR 722.1; ENGINE.md 99.14)",
         copy_objs: Derived "which slots are copies (the copy flags of permanents and spells)",
         lki_copy: Derived "last known information (CR 608.2h)",
+        lki_attached: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
         spell_lki: Derived "last known information (CR 608.2h)",
@@ -197,6 +199,7 @@ pub fn fields() -> Vec<Field> {
         noncreature_cast: Public "noncreature spells cast this turn",
         gained_life: Public "gained life this turn",
         life_gained: Public "how much life gained this turn",
+        artifact_entered: Public "an artifact entered the battlefield under their control this turn (ENGINE.md 99.11)",
         cant_gain_life: Public "can't gain life for the rest of the game",
         attacked_with: Public "creatures declared as attackers this turn",
         draw_step_draws: Public "cards drawn in their draw step this turn",
@@ -1016,6 +1019,12 @@ pub fn perturbations() -> Vec<Perturbation> {
             Some(format!("P0: {}", p.life_gained))
         }),
         p!("can't gain life", "Player.cant_gain_life", |a, r| pl(a, r, |p| flip(&mut p.cant_gain_life))),
+        // (Player 0 always: no draw from the gate's random stream, which the
+        // other perturbations' positions depend on.)
+        p!("an artifact entered under a player's control this turn", "Player.artifact_entered", |a, _r| {
+            let p = &mut a.g.players[0];
+            flip(&mut p.artifact_entered).map(|s| format!("P0: {s}"))
+        }),
         p!("a creature attacked this turn", "Player.attacked_with", |a, r| {
             let c = pick(&slot_creatures(&a.g), r)?;
             let p = a.g.objs[c.i()].controller as usize;
@@ -1521,6 +1530,7 @@ pub fn limits() -> Vec<Limit> {
         l("a player will control the other's next turn", NextLayout, "a pending player-controlling effect (CR 722.1; The Dominion Bracelet, EoE W4, ENGINE.md 99.14) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-player flag)"),
         l("the active player is controlled this turn", NextLayout, "who controls the active player this turn (CR 722.1, 722.4; The Dominion Bracelet) is game state layout v5 has no float for: during a controlled turn the controller decides (to_move) the controlled player's decisions, whose action ids stay that player's, while the controller's encoding is its own seat's (its own hand, the controlled player's hand as known cards, CR 722.3); the next layout encodes it (a global, and the decision's seat)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
+        l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),
     ]
 }
 

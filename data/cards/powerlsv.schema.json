@@ -138,7 +138,6 @@
    "ChooseOpponentsExiledCardWithCounterMayPlayFree",
    "CloseEncounterEffect",
    "ConditionalIfCastFromHand",
-   "ConditionalIfSourcePowerAtLeast",
    "ConditionalIfVoid",
    "ConditionalIfYouControlAtLeast",
    "ConditionalIfYouControlSubtype",
@@ -441,7 +440,6 @@
    "PutPlusOneCounterOnTargetCreature",
    "PutPlusOneCountersAndGrantKeywordsUEOTOnTargetCreatureYouControl",
    "PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower",
-   "PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact",
    "PutPlusOneCountersOnTargetThenGrantKeywordsUEOT",
    "PutPoisonCountersOnTargetPlayer",
    "PutSourceOnTopOfOwnersLibrary",
@@ -467,6 +465,7 @@
    "ReturnAllCreaturesFromYourGraveyardToBattlefield",
    "ReturnAllPermanentsToOwnersHands",
    "ReturnCardFromGraveyardToBattlefield",
+   "ReturnCardsExiledWithSourceToBattlefield",
    "ReturnCardsExiledWithSourceToOwnersHand",
    "ReturnChosenGraveyardCardToHand",
    "ReturnCreatureFromYourGraveyardToBattlefield",
@@ -474,7 +473,9 @@
    "ReturnExiledWithSourceToGraveyardThenToken",
    "ReturnFromGraveyard",
    "ReturnTargetArtifactCardFromYourGraveyardToHand",
+   "ReturnTargetCardFromYourGraveyardToBattlefieldAs",
    "ReturnTargetCardFromYourGraveyardToHand",
+   "ReturnTargetCardsFromYourGraveyard",
    "ReturnTargetCreatureToOwnersHand",
    "ReturnTargetGraveyardCardToHand",
    "ReturnTargetLandFromGraveyardToHand",
@@ -483,8 +484,6 @@
    "ReturnTargetSpellToOwnersHand",
    "ReturnThisCardFromGraveyardThenAttachToThatCreature",
    "ReturnThisCardFromGraveyardToBattlefield",
-   "ReturnUpToNCreaturesFromYourGraveyardToHand",
-   "ReturnUpToNNonlandPermanentCardsFromGraveyardToHand",
    "ReturnUpToNSmallCreaturesFromGraveyardWithCounters",
    "ReturnUpToNTargetCreaturesToOwnersHands",
    "RevealHandMayExileCardOrChosenCreatureUntilSourceLeaves",
@@ -637,6 +636,9 @@
   "GraveyardExileInstead": [
    "GraveyardExileInstead"
   ],
+  "GraveyardReturnGroup": [
+   "GraveyardReturnGroup"
+  ],
   "HandAbilityGrant": [
    "HandAbilityGrant"
   ],
@@ -647,10 +649,10 @@
    "Keyword"
   ],
   "LayerPayload": [
+   "CanAttackAsThoughNoDefender",
    "CantBeBlocked",
    "GrantKeyword",
-   "PowerToughnessBonus",
-   "RemoveKeyword"
+   "PowerToughnessBonus"
   ],
   "ManaCost": [
    "ManaCost"
@@ -773,6 +775,7 @@
    "IsHost",
    "IsSelf",
    "IsThisSpell",
+   "LeftBattlefieldTo",
    "Not",
    "NthCardDrawnThisTurn",
    "OneOrMoreBatch",
@@ -2361,6 +2364,16 @@
      "type_source": "annotation"
     },
     {
+     "annotation": "bool",
+     "default": false,
+     "name": "all_creature_types",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
      "annotation": "tuple",
      "default": [],
      "name": "granted_activated_abilities",
@@ -2604,6 +2617,13 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.bounce",
    "qualname": "Bounce"
+  },
+  "CanAttackAsThoughNoDefender": {
+   "category": "LayerPayload",
+   "fields": [],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.modifiers",
+   "qualname": "CanAttackAsThoughNoDefender"
   },
   "CantBeBlocked": {
    "category": "LayerPayload",
@@ -3188,6 +3208,16 @@
      "type_source": "annotation"
     },
     {
+     "annotation": "bool",
+     "default": false,
+     "name": "attached_cant_be_blocked_by_more_than_one",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    },
+    {
      "annotation": "'str | None'",
      "default": null,
      "name": "attached_grants_subtype",
@@ -3682,6 +3712,22 @@
        "t": "tuple"
       },
       "t": "list"
+     },
+     "type_source": "annotation+observed"
+    },
+    {
+     "annotation": "'object | None'",
+     "default": null,
+     "name": "enters_with_plus_one_counters_per",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "ObjectPredicate"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
      },
      "type_source": "annotation+observed"
     },
@@ -6133,36 +6179,6 @@
    "module": "mtg_bot.effects.combinators",
    "qualname": "ConditionalIfCastFromHand"
   },
-  "ConditionalIfSourcePowerAtLeast": {
-   "category": "Effect",
-   "fields": [
-    {
-     "annotation": "Effect",
-     "name": "effect",
-     "required": true,
-     "type": {
-      "categories": [
-       "Effect"
-      ],
-      "t": "ref"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 4,
-     "name": "threshold",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    }
-   ],
-   "kind": "dataclass",
-   "module": "mtg_bot.effects.combinators",
-   "qualname": "ConditionalIfSourcePowerAtLeast"
-  },
   "ConditionalIfVoid": {
    "category": "Effect",
    "fields": [
@@ -6877,6 +6893,38 @@
       "t": "str"
      },
      "type_source": "annotation"
+    },
+    {
+     "annotation": "'Effect | None'",
+     "default": null,
+     "name": "if_paid",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "'Effect | None'",
+     "default": null,
+     "name": "if_mana_spent_below_mv",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation"
     }
    ],
    "kind": "dataclass",
@@ -7163,6 +7211,22 @@
       "t": "str"
      },
      "type_source": "annotation"
+    },
+    {
+     "annotation": "'object | None'",
+     "default": null,
+     "name": "token_printing",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "CardPrinting"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "annotation+observed"
     }
    ],
    "kind": "dataclass",
@@ -11464,6 +11528,71 @@
    "module": "mtg_bot.effects.generic.roto_zones",
    "qualname": "GraveyardExileInstead"
   },
+  "GraveyardReturnGroup": {
+   "category": "GraveyardReturnGroup",
+   "fields": [
+    {
+     "annotation": "object",
+     "default": null,
+     "name": "card_filter",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "CardFilter"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "min_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "int",
+     "default": 1,
+     "name": "max_n",
+     "required": false,
+     "type": {
+      "t": "int"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "GraveyardReturnDestination",
+     "default": "hand",
+     "name": "destination",
+     "required": false,
+     "type": {
+      "enum": "GraveyardReturnDestination",
+      "t": "enum"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "tapped",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.eoe_fidelity",
+   "qualname": "GraveyardReturnGroup"
+  },
   "HandAbilityGrant": {
    "category": "HandAbilityGrant",
    "fields": [
@@ -12350,6 +12479,28 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.pt_formulas",
    "qualname": "LandsYouControlPT"
+  },
+  "LeftBattlefieldTo": {
+   "category": "TriggerPredicate",
+   "fields": [
+    {
+     "annotation": "tuple[ZoneName, ...]",
+     "default": [],
+     "name": "zones",
+     "required": false,
+     "type": {
+      "of": {
+       "enum": "ZoneName",
+       "t": "enum"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.eoe_fidelity",
+   "qualname": "LeftBattlefieldTo"
   },
   "LevelCountersInRange": {
    "category": "Condition",
@@ -15682,13 +15833,6 @@
    "module": "mtg_bot.effects.generic.counters",
    "qualname": "PutPlusOneCountersOnEachCreatureYouControlEqualToSourcePower"
   },
-  "PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact": {
-   "category": "Effect",
-   "fields": [],
-   "kind": "dataclass",
-   "module": "mtg_bot.effects.generic.counters",
-   "qualname": "PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact"
-  },
   "PutPlusOneCountersOnTargetThenGrantKeywordsUEOT": {
    "category": "Effect",
    "fields": [
@@ -16128,23 +16272,6 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "RemoveCountersFromSelfCost"
-  },
-  "RemoveKeyword": {
-   "category": "LayerPayload",
-   "fields": [
-    {
-     "annotation": "KeywordSpelling",
-     "name": "keyword",
-     "required": true,
-     "type": {
-      "t": "keyword"
-     },
-     "type_source": "annotation"
-    }
-   ],
-   "kind": "dataclass",
-   "module": "mtg_bot.effects.modifiers",
-   "qualname": "RemoveKeyword"
   },
   "RemoveNamedCounterFromSelfOrSacrifice": {
    "category": "Effect",
@@ -16670,6 +16797,30 @@
    "module": "mtg_bot.effects.generic.reanimation",
    "qualname": "ReturnCardFromGraveyardToBattlefield"
   },
+  "ReturnCardsExiledWithSourceToBattlefield": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "object",
+     "default": null,
+     "name": "card_filter",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "CardFilter"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.eoe_fidelity",
+   "qualname": "ReturnCardsExiledWithSourceToBattlefield"
+  },
   "ReturnCardsExiledWithSourceToOwnersHand": {
    "category": "Effect",
    "fields": [],
@@ -16688,7 +16839,8 @@
      "type": {
       "of": {
        "categories": [
-        "CardFilter"
+        "CardFilter",
+        "CardFilterAnyOf"
        ],
        "t": "ref"
       },
@@ -17409,6 +17561,53 @@
    "module": "mtg_bot.effects.generic.bounce",
    "qualname": "ReturnTargetArtifactCardFromYourGraveyardToHand"
   },
+  "ReturnTargetCardFromYourGraveyardToBattlefieldAs": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "object",
+     "default": null,
+     "name": "card_filter",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "CardFilter"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
+     },
+     "type_source": "observed"
+    },
+    {
+     "annotation": "tuple[str, ...]",
+     "default": [],
+     "name": "added_subtypes",
+     "required": false,
+     "type": {
+      "of": {
+       "t": "str"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    },
+    {
+     "annotation": "bool",
+     "default": false,
+     "name": "loses_all_abilities",
+     "required": false,
+     "type": {
+      "t": "bool"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.eoe_fidelity",
+   "qualname": "ReturnTargetCardFromYourGraveyardToBattlefieldAs"
+  },
   "ReturnTargetCardFromYourGraveyardToHand": {
    "category": "Effect",
    "fields": [
@@ -17461,6 +17660,30 @@
    "module": "mtg_bot.effects.generic.layout_face_effects",
    "qualname": "ReturnTargetCardFromYourGraveyardToHand"
   },
+  "ReturnTargetCardsFromYourGraveyard": {
+   "category": "Effect",
+   "fields": [
+    {
+     "annotation": "tuple[GraveyardReturnGroup, ...]",
+     "default": [],
+     "name": "groups",
+     "required": false,
+     "type": {
+      "of": {
+       "categories": [
+        "GraveyardReturnGroup"
+       ],
+       "t": "ref"
+      },
+      "t": "list"
+     },
+     "type_source": "annotation"
+    }
+   ],
+   "kind": "dataclass",
+   "module": "mtg_bot.effects.generic.eoe_fidelity",
+   "qualname": "ReturnTargetCardsFromYourGraveyard"
+  },
   "ReturnTargetCreatureToOwnersHand": {
    "category": "Effect",
    "fields": [
@@ -17491,12 +17714,18 @@
      "type_source": "annotation"
     },
     {
-     "annotation": "bool",
-     "default": false,
-     "name": "create_drone_if_was_attacking",
+     "annotation": "'Effect | None'",
+     "default": null,
+     "name": "if_was_attacking",
      "required": false,
      "type": {
-      "t": "bool"
+      "of": {
+       "categories": [
+        "Effect"
+       ],
+       "t": "ref"
+      },
+      "t": "opt"
      },
      "type_source": "annotation"
     },
@@ -17811,344 +18040,6 @@
    "kind": "dataclass",
    "module": "mtg_bot.effects.generic.cube_creatures_rmc",
    "qualname": "ReturnThisCardFromGraveyardToBattlefield"
-  },
-  "ReturnUpToNCreaturesFromYourGraveyardToHand": {
-   "category": "Effect",
-   "fields": [
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "creature",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "artifact",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "land",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "nonland_permanent",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "or_enchantment",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "or_spacecraft",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "or_artifact",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 0,
-     "name": "max_mv",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 1,
-     "name": "min_n",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 2,
-     "name": "max_n",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 0,
-     "name": "max_total_mv",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "GraveyardReturnDestination",
-     "default": "hand",
-     "name": "destination",
-     "required": false,
-     "type": {
-      "enum": "GraveyardReturnDestination",
-      "t": "enum"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "plus_one_counter",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "str",
-     "default": "",
-     "name": "log_suffix",
-     "required": false,
-     "type": {
-      "t": "str"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "untargeted_all",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "str",
-     "default": "graveyard_creature",
-     "name": "target_kind",
-     "required": false,
-     "type": {
-      "t": "str"
-     },
-     "type_source": "annotation"
-    }
-   ],
-   "kind": "dataclass",
-   "module": "mtg_bot.effects.generic.bounce",
-   "qualname": "ReturnUpToNCreaturesFromYourGraveyardToHand"
-  },
-  "ReturnUpToNNonlandPermanentCardsFromGraveyardToHand": {
-   "category": "Effect",
-   "fields": [
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "creature",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "artifact",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "land",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "nonland_permanent",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "or_enchantment",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "or_spacecraft",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "or_artifact",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 0,
-     "name": "max_mv",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 0,
-     "name": "min_n",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 2,
-     "name": "max_n",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "int",
-     "default": 0,
-     "name": "max_total_mv",
-     "required": false,
-     "type": {
-      "t": "int"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "GraveyardReturnDestination",
-     "default": "hand",
-     "name": "destination",
-     "required": false,
-     "type": {
-      "enum": "GraveyardReturnDestination",
-      "t": "enum"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "plus_one_counter",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "str",
-     "default": "",
-     "name": "log_suffix",
-     "required": false,
-     "type": {
-      "t": "str"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "bool",
-     "default": false,
-     "name": "untargeted_all",
-     "required": false,
-     "type": {
-      "t": "bool"
-     },
-     "type_source": "annotation"
-    },
-    {
-     "annotation": "str",
-     "default": "graveyard_creature",
-     "name": "target_kind",
-     "required": false,
-     "type": {
-      "t": "str"
-     },
-     "type_source": "annotation"
-    }
-   ],
-   "kind": "dataclass",
-   "module": "mtg_bot.effects.generic.bounce",
-   "qualname": "ReturnUpToNNonlandPermanentCardsFromGraveyardToHand"
   },
   "ReturnUpToNSmallCreaturesFromGraveyardWithCounters": {
    "category": "Effect",
@@ -21999,6 +21890,14 @@
     {
      "name": "CREATURE_CARD_IN_GRAVEYARD",
      "value": "creature_card_in_graveyard"
+    },
+    {
+     "name": "CREATURE_OR_SPACECRAFT",
+     "value": "creature_or_spacecraft"
+    },
+    {
+     "name": "ARTIFACT_OR_CREATURE",
+     "value": "artifact_or_creature"
     }
    ],
    "module": "mtg_bot.effects.vocab",
@@ -22491,6 +22390,10 @@
      "value": "toxic"
     },
     {
+     "name": "MODULAR",
+     "value": "modular"
+    },
+    {
      "name": "PROTECTION_FROM",
      "value": "protection from"
     },
@@ -22839,6 +22742,10 @@
     {
      "name": "COLORED_ONLY",
      "value": "colored_only"
+    },
+    {
+     "name": "ARTIFACT_SPELL_OR_ACTIVATION",
+     "value": "artifact_spell_or_activation"
     }
    ],
    "module": "mtg_bot.effects.vocab",

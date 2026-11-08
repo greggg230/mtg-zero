@@ -456,6 +456,7 @@ impl Game {
             pl.spells_cast = 0;
             pl.noncreature_cast = 0;
             pl.gained_life = false;
+            pl.artifact_entered = false;
             pl.life_gained = 0;
             pl.lost_life = false;
         }
@@ -476,6 +477,7 @@ impl Game {
         self.discarded.clear();
         self.lki_counters.clear();
         self.lki_copy.clear();
+        self.lki_attached.clear();
         self.lki_damage.clear();
         self.lki_toughness.clear();
         self.spell_lki.clear();

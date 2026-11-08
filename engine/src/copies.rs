@@ -692,6 +692,7 @@ impl Game {
         let r = self.obj_ref(card);
         let tapped = self.enters_tapped(card, p);
         self.entering(card, tapped, 0);
+        self.note_entered(card);
         self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
     }
 }

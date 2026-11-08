@@ -53,6 +53,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             attached_grants_control,
             attached_sets_base_pt,
             attached_grants_lose_all_abilities,
+            attached_cant_be_blocked_by_more_than_one,
             attached_grants_subtype,
             attached_grants_card_types,
             attached_prevents_turning_face_up,
@@ -93,6 +94,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             enters_choosing_basic_land_type,
             is_chosen_basic_land_type,
             enters_with_named_counters,
+            enters_with_plus_one_counters_per,
             additional_cost_sacrifice_creature_or_artifact,
             additional_cost_sacrifice_creature_or_enchantment,
             additional_cost_choose_your_creature,
@@ -302,6 +304,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         };
         l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
+        // ENGINE.md 99.11 (W1).
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
         // "Enchant creature card in a graveyard" (Animate Dead): an Aura
         // spell's target; an Aura's other enchant types (on the battlefield)
@@ -1759,8 +1762,26 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             }
         }
     };
+    // "Enters with a +1/+1 counter on it for each <filter> you control"
+    // (Luxknight Breacher; ENGINE.md 99.11).
+    let enters_counters_per = match enters_with_plus_one_counters_per.as_deref() {
+        None => None,
+        Some(x) => {
+            if ty & types::PERMANENT == 0 {
+                l.unsupported("CardPrinting.enters_with_plus_one_counters_per(not a permanent)");
+            }
+            super::filter::lower_pred(l, x)
+        }
+    };
+    // "Enchanted creature can't be blocked by more than one creature"
+    // (Meltstrider's Resolve; ENGINE.md 99.11): an Aura's.
+    if *attached_cant_be_blocked_by_more_than_one && !subtypes.iter().any(|s| s == "Aura") {
+        l.unsupported("CardPrinting.attached_cant_be_blocked_by_more_than_one(not an Aura)");
+    }
     let mut def = CardDef {
         counters_per_exiled,
+        enters_counters_per,
+        attached_max_one_blocker: *attached_cant_be_blocked_by_more_than_one,
         companion,
         look_top: *grants_look_at_top_of_library,
         play_top_life: *grants_play_from_top_paying_life,

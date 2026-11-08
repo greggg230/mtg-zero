@@ -49,6 +49,8 @@ impl Game {
                 n >= *lo as crate::num::Count && hi.is_none_or(|h| n <= h as crate::num::Count)
             }),
             Cond::GainedLifeThisTurn => pl.gained_life,
+            Cond::ArtifactEnteredThisTurn => pl.artifact_entered,
+            Cond::APlayerControlsNoCreatures => (0..2u8).any(|q| self.creatures_of(q).next().is_none()),
             Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as u32,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::OpponentControlsMoreLands => {
@@ -1508,6 +1510,12 @@ impl Game {
     /// 614.1c)? Checked before it moves, so "other lands" are the lands
     /// already there.
     pub(crate) fn enters_tapped(&self, card: CardIdx, p: PlayerId) -> bool {
+        self.enters_tapped_own(card, p, true)
+    }
+
+    /// [`enters_tapped`](Self::enters_tapped); without `own`, its own "enters
+    /// tapped" doesn't apply (it enters with no abilities, CR 614.12).
+    pub(crate) fn enters_tapped_own(&self, card: CardIdx, p: PlayerId, own: bool) -> bool {
         // "<Types> / nonbasic lands your opponents control enter tapped."
         let d = self.def_of(card);
         let q = crate::ids::opp(p);
@@ -1520,6 +1528,9 @@ impl Game {
         });
         if forced {
             return true;
+        }
+        if !own {
+            return false;
         }
         match &self.def_of(card).enters_tapped {
             crate::db::EntersTapped::No => false,
