@@ -414,6 +414,11 @@ pub enum Filter {
     /// A permanent that entered as a spell cast for its warp cost (CR
     /// 702.185a; `Mark::WarpCast`; ENGINE.md 99.8).
     CastForWarp,
+    /// A card in exile (face up; not a copy of a card) matching the inner
+    /// filter ("target exiled card", CR 115.1, 406; ENGINE.md 99.14).
+    InExile(Box<Filter>),
+    /// A card with warp (CR 702.185a: the keyword among its abilities).
+    HasWarp,
 }
 
 /// `Filter::Ability` kinds.

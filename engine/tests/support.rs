@@ -904,6 +904,8 @@ const SUPPORTED_EOE_COMBAT: &[&str] = &[
 const SUPPORTED_EOE_EXILE: &[&str] = &[
     "Adagia, Windswept Bastion",
     "Alpharael, Stonechosen",
+    "Blade of the Swarm",
+    "Chorale of the Void",
     "Scout for Survivors",
     "Susur Secundi, Void Altar",
 ];

@@ -216,6 +216,7 @@ impl Game {
         // A graveyard card's option outside Priority: its slot in the
         // decision's graveyard list (ENGINE.md 65.10).
         self.name_graveyard_options(player, kind, &mut options);
+        self.name_exile_targets(kind, &mut options);
         options.sort_by_key(|o| o.action);
         assert!(
             options.windows(2).all(|w| w[0].action < w[1].action),

@@ -124,7 +124,28 @@ pub(crate) fn lower_effect_eoe_w4(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
                     Some(l.int("ReturnUpToNSmallCreaturesFromGraveyardWithCounters.max_total_mv", *max_total_mv, 0, 30) as u8);
             }
             let counter = plus_one_counter.then_some(Counter::P1P1);
-            w4(b, EoeW4::GraveyardTargetsOntoBattlefield { tgt, counter });
+            w4(b, EoeW4::GraveyardTargetsOntoBattlefield { tgt, counter, tapped: false, attacking: false });
+        }
+        // "Put target creature card from defending player's graveyard onto
+        // the battlefield under your control tapped and attacking" (Chorale
+        // of the Void's "whenever enchanted creature attacks"; CR 508.4).
+        // The defending player is the attacking creature's controller's
+        // opponent (506.2); the Aura enchants a creature its controller
+        // controls (an illegal attachment is put into the graveyard first,
+        // 704.5m), so it is the trigger controller's opponent.
+        E::ReanimateTargetCreatureCardFromDefendersGraveyard(nodes::ReanimateTargetCreatureCardFromDefendersGraveyard {}) => {
+            let f = and(Filter::Type(types::CREATURE), Filter::Owner(false));
+            let tgt = b.target(Filter::InGraveyard(Box::new(f)), 1, 1);
+            w4(b, EoeW4::GraveyardTargetsOntoBattlefield { tgt, counter: None, tapped: true, attacking: true });
+        }
+        // "Put target exiled card with warp on the bottom of its owner's
+        // library" (Blade of the Swarm's second mode): any card in exile that
+        // has warp (CR 702.185a), whoever owns it and however it was exiled
+        // (mtg-bot's Python reads "a warped card"; the class has no target
+        // specification, docs/ir_defects.md 11: the Oracle text's).
+        E::OwnerPutsTargetWarpedExileCardOnBottomOfLibrary(nodes::OwnerPutsTargetWarpedExileCardOnBottomOfLibrary {}) => {
+            let tgt = b.target(Filter::InExile(Box::new(Filter::HasWarp)), 1, 1);
+            w4(b, EoeW4::ExiledTargetToLibraryBottom { tgt });
         }
         _ => return false,
     }

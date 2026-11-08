@@ -357,3 +357,145 @@ fn cr_608_2b_scout_for_survivors_returns_the_targets_still_there() {
     assert_eq!(g.pt(elf), (2, 2));
     assert_eq!(g.obj(bear).zone, Zone::Exile);
 }
+
+// ---- Chorale of the Void ------------------------------------------------------------
+
+/// Chorale of the Void: "Enchant creature you control / Whenever enchanted
+/// creature attacks, put target creature card from defending player's
+/// graveyard onto the battlefield under your control tapped and attacking."
+/// (CR 303.4a, 508.4: put onto the battlefield attacking, never declared as
+/// an attacker.) Only the defending player's graveyard; the creature stays
+/// under your control.
+#[test]
+fn cr_508_4_chorale_of_the_void_reanimates_from_the_defenders_graveyard_attacking() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp", "W4 Bear"])
+        .battlefield(1, &["W4 Elf"])
+        .graveyard(0, &["W4 Ogre"])
+        .graveyard(1, &["W4 Giant"])
+        .hand(0, &["Chorale of the Void"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = bf(&g, 0, "W4 Bear");
+    let elf = bf(&g, 1, "W4 Elf");
+    let giant = g.card(1, "W4 Giant", Zone::Graveyard);
+    let ogre = g.card(0, "W4 Ogre", Zone::Graveyard);
+    let c = g.card(0, "Chorale of the Void", Zone::Hand);
+    g.choose(Choice::Cast(c));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(g.tgt(bear)), "a creature you control");
+    assert!(!g.has_option(g.tgt(elf)), "enchant creature you control");
+    g.choose(g.tgt(bear));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(c).zone, Zone::Battlefield);
+    attack_with(&mut g, 0, &["W4 Bear"]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(g.tgt(giant)), "the defending player's graveyard");
+    assert!(!g.has_option(g.tgt(ogre)), "not your own graveyard");
+    g.choose(g.tgt(giant));
+    settle(&mut g);
+    assert_eq!(g.obj(giant).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.obj(giant).controller, 0, "under your control");
+    assert!(g.obj(giant).tapped && g.obj(giant).attacking, "tapped and attacking");
+    quiet_until(&mut g, |g| g.turn().step == Step::End);
+    assert_eq!(g.life(1), 13, "2 + 5 combat damage (the Elf didn't block)\n{}", log(&g));
+    next_main(&mut g, 1);
+    assert_eq!(g.obj(giant).controller, 0, "for good");
+}
+
+/// "Void — At the beginning of your end step, sacrifice this Aura unless a
+/// nonland permanent left the battlefield this turn or a spell was warped
+/// this turn." (CR 603.4.) Without void it is sacrificed; with void it stays.
+#[test]
+fn cr_603_4_chorale_of_the_void_is_sacrificed_without_void() {
+    for void in [false, true] {
+        let mut g = scen()
+            .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp", "Mountain", "W4 Bear"])
+            .battlefield(1, &["W4 Elf"])
+            .hand(0, &["Chorale of the Void", "W4 Bolt"])
+            .at(Step::Main1, 0)
+            .start();
+        let bear = bf(&g, 0, "W4 Bear");
+        let tb = g.tgt(bear);
+        let c = cast(&mut g, 0, "Chorale of the Void", &[tb]);
+        settle(&mut g);
+        if void {
+            let te = g.tgt(bf(&g, 1, "W4 Elf"));
+            cast(&mut g, 0, "W4 Bolt", &[te]);
+            settle(&mut g);
+        }
+        quiet_until(&mut g, |g| g.turn().active == 1);
+        assert_eq!(g.obj(c).zone == Zone::Battlefield, void, "void {void}\n{}", log(&g));
+    }
+}
+
+// ---- Blade of the Swarm -------------------------------------------------------------
+
+/// Cast Blade of the Swarm from P0's hand and resolve it, stopping at its
+/// enters trigger's mode choice.
+fn blade_enters(g: &mut Game) -> CardIdx {
+    let b = cast(g, 0, "Blade of the Swarm", &[]);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode) || (at_priority(g) && g.stack().is_empty()));
+    while g.kind() != Some(DecisionKind::ChooseMode) {
+        assert!(!g.stack().is_empty(), "the trigger's modes are chosen\n{}", log(g));
+        g.pass();
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode) || at_priority(g));
+    }
+    b
+}
+
+/// Blade of the Swarm: "When this creature enters, choose one — Put two
+/// +1/+1 counters on this creature." (CR 700.2.) With no exiled card with
+/// warp, the second mode can't be chosen (700.2a, 115.1: no legal target).
+#[test]
+fn cr_700_2_blade_of_the_swarm_puts_two_counters() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp"])
+        .exile(1, &["W4 Bear"])
+        .hand(0, &["Blade of the Swarm"])
+        .at(Step::Main1, 0)
+        .start();
+    let b = blade_enters(&mut g);
+    assert_eq!(g.options_desc().len(), 1, "only the counters mode: {:?}", g.options_desc());
+    let c = g.pending_decision().unwrap().options[0].choice;
+    g.choose(c);
+    settle(&mut g);
+    assert_eq!(g.pt(b), (5, 3), "3/1 with two +1/+1 counters\n{}", log(&g));
+}
+
+/// "Put target exiled card with warp on the bottom of its owner's library."
+/// An exiled card is a legal target (CR 115.1; its option is an `EXILE`
+/// id, the k-th exiled card offered); only one with warp (702.185a),
+/// whoever owns it; it goes to the bottom of its owner's library (401.4),
+/// known to both players there.
+#[test]
+fn cr_115_1_blade_of_the_swarm_targets_an_exiled_card_with_warp() {
+    let mut g = scen()
+        .battlefield(0, &["Swamp", "Swamp", "Swamp", "Swamp"])
+        .exile(1, &["W4 Bear", "Codecracker Hound"])
+        .exile(0, &["Germinating Wurm"])
+        .hand(0, &["Blade of the Swarm"])
+        .at(Step::Main1, 0)
+        .start();
+    let hound = g.card(1, "Codecracker Hound", Zone::Exile);
+    let wurm = g.card(0, "Germinating Wurm", Zone::Exile);
+    let bear = g.card(1, "W4 Bear", Zone::Exile);
+    let b = blade_enters(&mut g);
+    assert_eq!(g.options_desc().len(), 2, "both modes: {:?}", g.options_desc());
+    let second = g.pending_decision().unwrap().options[1].choice;
+    g.choose(second);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || at_priority(g));
+    assert_eq!(g.kind(), Some(DecisionKind::Target), "{}", log(&g));
+    assert!(g.has_option(g.tgt(hound)) && g.has_option(g.tgt(wurm)), "exiled cards with warp, either owner");
+    assert!(!g.has_option(g.tgt(bear)), "not a card without warp");
+    let ids: Vec<u16> = g.pending_decision().unwrap().options.iter().map(|o| o.action).collect();
+    assert!(ids.iter().all(|&a| (engine::decision::act::EXILE..engine::decision::act::EXILE + 32).contains(&a)), "EXILE ids: {ids:?}");
+    g.choose(g.tgt(hound));
+    settle(&mut g);
+    assert_eq!(g.obj(hound).zone, Zone::Library, "{}", log(&g));
+    assert_eq!(g.player(1).library.first(), Some(&hound), "the bottom of its owner's library");
+    assert!(g.knows(0, hound) && g.knows(1, hound), "public before: known to both there");
+    assert_eq!(g.pt(b), (3, 1), "no counters");
+    assert_eq!(g.obj(wurm).zone, Zone::Exile);
+}

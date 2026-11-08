@@ -1847,7 +1847,9 @@ impl Game {
             .flat_map(|q| self.players[q as usize].graveyard.iter().map(|&c| Target::Obj(self.obj_ref(c))))
             // (A card cast from a graveyard is on the stack when it targets.)
             .filter(|&t| Some(t) != ctx.source.map(Target::Obj));
-        players.chain(perms).chain(spells).chain(graves).filter(|&t| ok(t)).nth(n - 1).is_some()
+        let ex = wants_exile(&tr.filter);
+        let exiled = self.exile.iter().filter(move |_| ex).map(|&c| Target::Obj(self.obj_ref(c)));
+        players.chain(perms).chain(spells).chain(graves).chain(exiled).filter(|&t| ok(t)).nth(n - 1).is_some()
     }
 
     // ---- casting (CR 601.2) ------------------------------------------------
@@ -2593,6 +2595,12 @@ impl Game {
                 }
             }
         }
+        // Cards in exile, in exile order (ENGINE.md 99.14).
+        if wants_exile(&tr.filter) {
+            for &c in &self.exile {
+                consider(Target::Obj(self.obj_ref(c)), &mut out);
+            }
+        }
         out
     }
 
@@ -2703,6 +2711,7 @@ impl Game {
                     Zone::Battlefield => self.perm_ok(f, r.idx, ctx),
                     Zone::Stack => self.spell_ok(f, r.idx, ctx),
                     Zone::Graveyard => self.graveyard_ok(f, r.idx, ctx),
+                    Zone::Exile => self.exile_ok(f, r.idx, ctx),
                     _ => false,
                 }
             }
@@ -2721,7 +2730,8 @@ impl Game {
             | Filter::DrewThisTurn(_)
             | Filter::FirstDrawInDrawStep
             | Filter::OathTarget
-            | Filter::InGraveyard(_) => false,
+            | Filter::InGraveyard(_)
+            | Filter::InExile(_) => false,
             Filter::And(a, b) => self.perm_ok(a, c, ctx) && self.perm_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.perm_ok(x, c, ctx)),
             Filter::Not(x) => !self.perm_ok(x, c, ctx),
@@ -2736,6 +2746,17 @@ impl Game {
             Filter::InGraveyard(inner) => !self.is_token(c) && self.card_matches(inner, c, ctx),
             Filter::And(a, b) => self.graveyard_ok(a, c, ctx) && self.graveyard_ok(b, c, ctx),
             Filter::Or(v) => v.iter().any(|x| self.graveyard_ok(x, c, ctx)),
+            _ => false,
+        }
+    }
+
+    /// A card in exile matches only through `InExile(f)` (face up, a card:
+    /// not a copy of one; ENGINE.md 99.14).
+    fn exile_ok(&self, f: &Filter, c: CardIdx, ctx: &Ctx) -> bool {
+        match f {
+            Filter::InExile(inner) => !self.is_copy_obj(c) && self.card_matches(inner, c, ctx),
+            Filter::And(a, b) => self.exile_ok(a, c, ctx) && self.exile_ok(b, c, ctx),
+            Filter::Or(v) => v.iter().any(|x| self.exile_ok(x, c, ctx)),
             _ => false,
         }
     }
@@ -2860,6 +2881,9 @@ impl Game {
             Filter::CastForWarp => {
                 !self.marks.is_empty() && self.marks.contains(&(self.obj_ref(c), crate::game::Mark::WarpCast))
             }
+            // (Exile matches only through `filter_ok`'s `exile_ok`.)
+            Filter::InExile(_) => false,
+            Filter::HasWarp => self.abilities(c).alt_costs.iter().any(|a| a.warp),
             Filter::MvAtMostLandsYouControl => {
                 self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
             }
@@ -2879,6 +2903,16 @@ fn wants_graveyard(f: &Filter) -> bool {
         Filter::InGraveyard(_) => true,
         Filter::And(a, b) => wants_graveyard(a) || wants_graveyard(b),
         Filter::Or(v) => v.iter().any(wants_graveyard),
+        _ => false,
+    }
+}
+
+/// Can a filter match a card in exile (`InExile`)?
+pub(crate) fn wants_exile(f: &Filter) -> bool {
+    match f {
+        Filter::InExile(_) => true,
+        Filter::And(a, b) => wants_exile(a) || wants_exile(b),
+        Filter::Or(v) => v.iter().any(wants_exile),
         _ => false,
     }
 }

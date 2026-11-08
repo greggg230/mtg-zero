@@ -1319,6 +1319,19 @@ pub fn perturbations() -> Vec<Perturbation> {
             }
             Some(format!("{:?}", t.1))
         })),
+        // EoE W4 (ENGINE.md 99.14): a target in exile (Blade of the Swarm's
+        // trigger), another exiled card. (No draw from the gate's random
+        // stream: the first encoded item with an exiled target.)
+        p!(rare "a stack item targets another exiled card", "StackItem.targets", |a, _r| {
+            let g = &mut a.g;
+            let exiled = |g: &Game, t: Target| matches!(t, Target::Obj(o) if g.live(o) && g.objs[o.idx.i()].zone == Zone::Exile);
+            let i = stack_slots(g).into_iter().find(|&i| g.stack[i].targets.iter().any(|&(_, t)| exiled(g, t)))?;
+            let k = g.stack[i].targets.iter().position(|&(_, t)| exiled(g, t))?;
+            let Target::Obj(cur) = g.stack[i].targets[k].1 else { return None };
+            let other = g.exile.iter().copied().find(|&c| c != cur.idx)?;
+            g.stack[i].targets[k].1 = Target::Obj(g.obj_ref(other));
+            Some(g.name(other).to_string())
+        }),
         p!("another additional cost was chosen", "StackItem.cost_option", |a, r| item(a, r, |s| {
             s.cost_option ^= 1;
             Some(format!("{}", s.cost_option))
@@ -1477,6 +1490,7 @@ pub fn limits() -> Vec<Limit> {
         l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
         l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
         l("a copy is legendary by its exception", NextLayout, "a copy effect's \"except it's legendary\" (CR 707.9b: a copiable supertype; Adagia, Windswept Bastion's token copies, EoE W4, ENGINE.md 99.14) is a value the EoE port added after layout v5 froze: a permanent's legendary float (code 47) is its copiable definition's, as its name is; the next layout encodes a permanent's supertypes as they are"),
+        l("a stack item targets another exiled card", NextLayout, "a target in exile (Blade of the Swarm's 'target exiled card with warp', EoE W4, ENGINE.md 99.14) is a target layout v5's stack target block has no field for (a player, a permanent's slot or a stack position); exile is bags of identities: the next layout encodes it (the target's identity)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }
