@@ -258,7 +258,7 @@ fn a_stationed_spacecraft_attacks_by_how_long_it_was_controlled_cr302_6() {
     let mut g = scen()
         .battlefield(0, &["Wurmwall Sweeper", "Lane A Giant", "Lane A Bear", "Mountain", "Mountain", "Mountain", "Mountain", "Mountain", "Mountain"])
         .counters(0, "Wurmwall Sweeper", charge(), 4)
-        .hand(0, &["Galvanizing Sawship", "Lane A Tier Ship"])
+        .hand(0, &["Galvanizing Sawship"])
         .at(Step::Main1, 0)
         .start();
     let old = bf(&g, 0, "Wurmwall Sweeper");
@@ -268,8 +268,7 @@ fn a_stationed_spacecraft_attacks_by_how_long_it_was_controlled_cr302_6() {
     let giant = bf(&g, 0, "Lane A Giant");
     station(&mut g, saw, giant);
     assert!(creature(&g, saw) && g.has_kw(saw, Kw::Haste));
-    // The tier ship can't be cast too (no mana left): use a second test
-    // for it; here, attack.
+    // Attack: the Sweeper (stationed earlier) and the hasty Sawship may.
     quiet_until(&mut g, |g| g.kind() == Some(DecisionKind::DeclareAttackers));
     assert!(g.has_option(Choice::Card(old)), "under control since the turn began");
     assert!(g.has_option(Choice::Card(saw)), "haste");

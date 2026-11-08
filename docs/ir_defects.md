@@ -446,6 +446,9 @@ it dies, create a 1/1 white Human Soldier creature token.")
 * Engine: Honored Knight-Captain and Rayblade Trooper blocked, `ir_defect(white token printed
   colourless, docs/ir_defects.md 23)`. Cosmogrand Zenith and Knight Luminary have the same token and
   are in `SUPPORTED_EOE_BASE` (lane B audits that list; lane A does not edit it).
+* Lane B found the same defect independently (its entry 51, branch `eoe-b-lands`, with the four
+  cards in its `IR_DEFECTS` section): at the merge, keep one entry and one `IR_DEFECTS` line per
+  card.
 
 **24. Mechan Shieldmate.** Oracle: "Defender / As long as an artifact entered the battlefield under
 your control this turn, this creature can attack as though it didn't have defender."

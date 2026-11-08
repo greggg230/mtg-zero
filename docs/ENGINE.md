@@ -18106,3 +18106,143 @@ Each lane appends its own subsection here (99.2 lane A, 99.3 lane B, 99.4 lane C
 Merge order B, A, C, D (B's base audit first). Then the cross-lane cards, the IR defects the lanes
 list (one mtg-bot batch and one re-export, so the schema changes once), and the 20k fuzz over the
 EoE table.
+
+### 99.2 Lane A: Station, Spacecraft, counters, artifacts, Equipment, Auras (branch `eoe-a-station`)
+
+**Why.** Lane A of the port (99.2-99.5): the set's headline mechanic, station (CR 702.184, 722:
+21 Spacecraft and the five planets), and the counter, artifact, Equipment and Aura cards. Lane A
+owned 66 blocking features and 47 cards whose blockers were all its own (docs/eoe_lanes.md).
+
+**Station** (`lower/eoe_a.rs::station`, from `station_threshold` / `stationed_keywords`):
+
+* The station ability (702.184a): an activated ability, "tap another untapped creature you
+  control" (`Cost::tap_untapped`, so summoning sickness doesn't matter, 302.6), sorcery speed,
+  putting charge counters equal to the tapped creature's power on the source
+  (`Ext::PutCounters { on: Source, n: Amount::TappedPower }`). The cost notes the tapped creature
+  on the stack item (`StackItem::noted`); `Amount::TappedPower` reads its power as the ability
+  resolves, or as it last existed (608.2h), both per the set's rulings; negative power puts
+  nothing (107.1b). A station card has it at all times (722.4), appended after its printed
+  activated abilities.
+* The striation of `station_threshold` (722.2a-b): a static ability of the permanent itself,
+  "as long as it has N or more charge counters", with the stationed keywords and, when the card
+  has a power/toughness box, "is a creature with base power and toughness P/T in addition to its
+  other types" (`Mod::Types` + `Mod::SetPt`, Kaito's machinery: layer 4 through `own_type_mods`,
+  layer 7b with the permanent's timestamp). The card's definition has no power or toughness
+  (722.2c: none in any other zone, nor below the threshold); a later "becomes a 2/2" effect wins
+  layer 7b by timestamp (the ruling on station and Synthesizer Labship).
+* The "N+ |" abilities (`tier_threshold`; `lower_trigger_tiered`, `lower_static_tiered`,
+  `lower_activated_tiered`): the permanent has them while it has N charge counters. A triggered
+  one triggers only then (`TrigPred::State(Cond::SourceCountersIn)`, checked as the event happens,
+  not on resolution, 113.7a); a static one carries the condition (`Cond::All` with its own); an
+  activated one (a mana ability too) is an "activate only if" that reads the source
+  (`Cond::SourceCountersIn` now evaluates from an ability's source in `cond_holds_from`; it was a
+  static's own condition only).
+* A land with station (the planets: no power/toughness box, CR 722.1) works the same; tested with
+  a custom IR planet (a 3+ activated ability and a 5+ mana ability that pays a spell). The planets
+  stay blocked by docs/ir_defects.md 20 until the IR carries their station.
+* Engine fixes found on the way: a non-mana ability's "tap an untapped <permanent>" cost with no
+  mana may tap a creature with a mana ability (`cost_payable_with`; the mana-ability path keeps the
+  old count, so Urza's activation offers don't change: applied there too, it changed 12 of the
+  2,500 digest games, Urza's "tap an untapped artifact you control: add {U}" offered at priority
+  with only mana artifacts untapped, which the rules allow; left for the maintainer, since this
+  lane must not change the cube); and layers' own-type pass read the
+  condition of every self-static, so a "this gets +1/+1 as long as you control an artifact" static
+  (its condition counts permanents by type, asking for its own types again) recursed forever once a
+  Spacecraft on the battlefield made the pass run (the EoE fuzz's stack overflow): only the
+  conditions of statics that change types are read now.
+
+**Auras that enchant a permanent** (`aura_enchant_type` creature / artifact, `aura_yours_only`;
+`lower/eoe_a.rs::aura_enchant`, `resolve_eoe_a.rs::{aura_enchants, bad_aura}`): the Aura spell
+targets what it may enchant (303.4a) and enters attached (608.3c, the existing `aura_spell` path);
+704.5m puts it into its owner's graveyard when it is attached to nothing, to an object it can't
+enchant (its enchant filter with its controller as "you", protection, 702.16c), or is a creature
+(303.4d); put onto the battlefield without being cast (Rescue Skiff), its controller chooses a
+permanent to enchant as it enters (a `ChoosePermanent`), or it stays where it is (303.4f-g;
+Animate Dead's graveyard choice unchanged). "Enchanted creature gets ..." is the IR's
+`equipment_bonuses` on an Aura (Scope::Equipped: the attached host); `TriggerPredicate:IsHost`;
+"enchanted permanent has ward {n}" (a granted ward trigger, only for an Aura enchanting a permanent
+you control, whose controller then controls the ability, 303.4e).
+
+**Effects and predicates** (`lower/eoe_a.rs::lower_effect_eoe_a`; new instructions in
+`program::EoeA`, run by `resolve_eoe_a.rs`): exile all creatures and Spacecraft / all artifacts with
+mana value n or less (`ExileAll`); search for an Equipment to the battlefield (may fail, 701.19b);
+3 damage or 5 with a Spacecraft (checked as it resolves); damage equal to your artifacts; n charge
+counters on a Spacecraft or Planet you control; the owner's choice of top or bottom of the library
+(`EoeA::OwnerPutsTopOrBottom`, the owner decides); destroy an artifact or tapped creature / an
+artifact, enchantment or flyer; return an artifact card; poison counters for the event's player;
+an artifact becoming a 2/2 artifact creature with flying until end of turn (205.1b keeps its
+types); an Equipment attaching to target creature you control as it enters, the creature gaining a
+keyword until end of turn; surveil X by artifacts (`LookTopN`); "if it has a +1/+1 counter, draw";
+`ObjectPredicate:HasCounter`; the "creatures you control with a +1/+1 counter" static scope
+(`Filter::HasCounter` in static scopes: counters are no characteristic, nothing recurses);
+"gets +X/+0, X the greatest mana value among other artifacts you control" (`Mod::PowerPlusGreatestMv`,
+a layer 7c static, not a CDA); "you may sacrifice an artifact. When you do" (603.12,
+`SacrificeThenReflexive`); look at five, may reveal a Spacecraft, else a +1/+1 counter
+(`EoeA::MarkPile` / `CounterOnSourceUnlessPileShrank`); "destroy it" of an enchanted creature's
+trigger (`EoeA::DestroyEventObj`).
+
+**For the cross-lane cards** (99.6), lane A's features they use, each tested on a custom IR card
+(`tests/eoe_a_kit`): tap target artifact or creature; pump target artifact or creature; +1/+1
+counters and a keyword on target creature you control; "sacrifice an artifact or creature" as an
+additional cost; "put its counters on target creature you control" (`EoeA::PutSourceCountersOnTarget`,
+last-known counters); the tier abilities and station of the cross-lane Spacecraft (Dawnsire,
+Entropic Battlecruiser, Fell Gravship, Infinite Guideline Station, Larval Scoutlander, Pinnacle
+Kill-Ship, Sledge-Class Seedship, Specimen Freighter, The Seriema); Auras and `IsHost` (Chorale of the
+Void, Pain for All, Hardlight Containment, Atomic Microsizer). After lane A each of those needs only
+other lanes' features.
+
+**IR defects** (docs/ir_defects.md 21-30, `lower::IR_DEFECTS` under "Lane A"): 21 "enters with"
+counters as an enters trigger (Dockworker Drone, Luxknight Breacher, Blast Zone); 22 Haliya's "one
+or more" as once per turn; 23 the white Human Soldier token printed colourless (Honored
+Knight-Captain, Rayblade Trooper; Cosmogrand Zenith and Knight Luminary in `SUPPORTED_EOE_BASE` have
+it too; lane B's entry 51 is the same defect, found independently: keep one at the merge); 24 Mechan Shieldmate's attack permission as losing defender; 25 Loading
+Zone's recipients dropped; 26 The Eternity Elevator's 0/0 (behind entry 20); 27 Nesting Grounds'
+"move a counter" narrowed; 28 Meltstrider's Resolve's menace for "can't be blocked by more than one";
+29 Tractor Beam's "enchant creature or Spacecraft" and 30 Moonlit Meditation's "enchant artifact or
+creature" narrowed to creature.
+
+**Tests.** `tests/cards_eoe_a.rs` (station and the station symbols: CR 702.184a, 722.2a-c, 722.4,
+302.6, 608.2h; a land with station), `cards_eoe_a_ships.rs` (the Spacecraft against their Oracle
+text), `cards_eoe_a_cards.rs` (the counter, artifact and Equipment cards), `cards_eoe_a_more.rs`
+(more cards and the cross-lane effects), `cards_eoe_a_auras.rs` (Auras, Cryoshatter, granted ward),
+and their card table `tests/eoe_a_kit` (the EoE table plus lane A's custom cards: never in the fuzz
+or digest pools, which `tests/common` feeds).
+
+**Measurements.** EoE support 93 -> 125 of 320 (32 lane A cards; 11 more of lane A's are blocked by
+IR defects 20-31). Cube unchanged: 546 / 546, behaviour digests f6543eb2b1b8752f unchanged. Lane A's
+56 tests pass; the full engine suite 1,577 passed, 15 ignored, 0 failed. `FUZZ_POOL=eoe
+FUZZ_GAMES=20000`: 20,000 games (wins 9,443 / 9,441, 1,116 draws, mean 34.7 turns, 224.0
+decisions), and the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws) and 1,000
+matches, all four fuzz tests passed. (The EoE fuzz found the own-type recursion above.)
+
+**Left in lane A, and why.** Of the 47 cards whose blockers were all lane A's, 32 are supported (Atmospheric Greenhouse, Beyond the
+Quiet, Cerebral Download, Cryoshatter, Debris Field Crusher, Drill Too Deep, Drix Fatemaker, Dual-Sun
+Technique, Emissary Escort, Extinguisher Battleship, Galvanizing Sawship, Illvoi Light Jammer, Invasive
+Maneuvers, Lost in Space, Lumen-Class Frigate, Meltstrider Eulogist, Meltstrider's Gear, Pulsar
+Squadron Ace, Radiant Strike, Rescue Skiff, Ruinous Rampage, Scour for Scrap, Selfcraft Mechan,
+Shattered Wings, Squire's Lightblade, Susurian Dirgecraft, Synthesizer Labship, Uthros Scanship,
+Virulent Silencer, Warmaker Gunship, Wedgelight Rammer, Wurmwall Sweeper). Eleven are blocked by IR
+defects (21-31 above; The Eternity Elevator by 20 and 26). Four need features not built:
+
+* Robe of Stars (`PhaseOutEquippedCreature`): phasing (CR 702.26), a subsystem of its own (phased-out
+  permanents treated as though they don't exist, phasing in during the untap step).
+* Mm'menon, the Right Hand: casting artifact spells from the top of the library (a `CastFrom` beside
+  Bolas's Citadel's, paying mana), a granted mana ability, and a new spending restriction ("only to
+  cast a spell from anywhere other than your hand").
+* Steelswarm Operator (`spend_restriction(ArtifactActivation)`): mana spendable only on activated
+  abilities of artifact sources: the pool's restricted mana covers spells only (`pay.rs`); lane B
+  has the same kind of restriction for lands, best built once after the merge.
+* Scout for Survivors (`ReturnUpToNSmallCreaturesFromGraveyardWithCounters`): "up to three target
+  creature cards with total mana value 3 or less" is a constraint on the set of targets, which
+  `TargetReq` can't say (a new field on every requirement).
+
+Lane A features left on cross-lane cards (99.6): Bioengineered Future's
+`grants_etb_counter_per_land_entered_this_turn`, `CloseEncounterEffect`, Dyadrine's
+`enters_with_counters_from_x(ManaSpent)` (the mana spent to cast it), Frenzied Baloth's
+`grants_creature_spells_uncounterable`, Ragost's Food grants and `sacrifice_food`, the costs
+`exile_artifact_from_graveyard` (Rust Harvester), `tap_x_untapped_artifacts_you_control` (Secluded
+Starforge) and `remove_plus_one_counter_from_your_creature` (Sunstar Chaplain), Sothera's
+`ReanimateOneExiledWithSourceWithCounters`, Tapestry Warden's "stations using its toughness" (702.184c:
+needs the tapped creature's last-known toughness, which the engine doesn't keep), The Eternity
+Elevator's `AddChargeCounterManaOfChosenColor` (a mana production by the source's counters, behind
+IR defect 20), and Blast Zone's two (behind defect 21).
