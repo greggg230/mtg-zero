@@ -18698,3 +18698,104 @@ and the default 20,000 games pass. Two branches follow, each with its own suppor
 * **99.9, branch `eoe-irfix`**: the mtg-bot IR-fix batch (mtg-bot branch `feature/eoe-ir-fixes`):
   docs/ir_defects.md 20-82 fixed in the parser, one re-export, `generated.rs` regenerated once,
   the fixed cards out of `lower::IR_DEFECTS` and into `SUPPORTED_EOE_IRFIX` with card tests.
+
+### 99.9 The IR-fix batch (branch `eoe-irfix`, mtg-bot `feature/eoe-ir-fixes` 5362f5ed)
+
+**Why.** The four lanes found the IR dropping or contradicting the Oracle text of about 45 EoE cards
+(docs/ir_defects.md 20-82); the engine blocked them through `lower::IR_DEFECTS`. One batch of
+parser fixes in mtg-bot, one re-export, `generated.rs` regenerated once.
+
+**The parser fixes** (mtg-bot `feature/eoe-ir-fixes` 5362f5ed, from main 2cb79f77; each fixed entry's
+last bullet in docs/ir_defects.md says what the IR now holds):
+
+* Station (20, 26): the five planets carry `station_threshold: 12` and their "12+ |" activated
+  ability (`tier_threshold: 12`), The Eternity Elevator `station_threshold: 20`; none has a power
+  or toughness (CR 722.1). The engine's station (99.2) reads them as they are: a planet is a land
+  with station that never becomes a creature.
+* "{T}: Add {C}." (40): the 19 lands have `produces: ["C"]` and `mana_only_from_produces`.
+* The Lander token (42): "{2}, {T}, Sacrifice this token" (CR 111.10), in every `CreateToken`.
+* The white Human Soldier (23 = 51), and the printed colour of every registry token.
+* "One or more creatures you control ... deal combat damage to a player" (22, 63):
+  `OneOrMoreBatch { per_target_player: true }`, no once-per-turn. The field batches per damaged
+  player (mtg-bot's engine plays three players); this engine is two-player, where your creatures
+  deal combat damage to your opponent only, so it lowers to the one batch of the combat damage
+  step (`TrigPred::Batch`, `lower/trigger.rs`): a first-strike step and the regular step trigger
+  twice.
+* "Enters with" counters (21): Dockworker Drone and Blast Zone as `enters_with_named_counters`.
+* Up to one target (60): `ExileTargetCreatureUntilSourceLeaves.up_to_one` (the target's minimum
+  is 0, `lower/eoe_c.rs`).
+* Target types (62, 81): Gravkill's "creature or Spacecraft" (`RemoveTargetPermanents`,
+  `ObjectOr(IsCreature, HasSubtype(Spacecraft))`), Dawnsire's "creature or planeswalker"
+  (`DealDamage`; the lowering's bound for `DealDamage.amount` rises from 99 to 100, its printed
+  amount, `lower/effect.rs`).
+* The animated Nexus lands (41): `BecomeLandCreatureUEOT.granted_card_types` /
+  `granted_subtypes` ("a 1/1 Phyrexian Blinkmoth artifact creature"), lowered into the
+  animation's `Mod::Types` (`lower/effect_ext.rs`).
+* Starfield Shepherd (48): one search for "a basic Plains card or a creature card with mana value
+  1 or less" (`CardFilterAnyOf`, lowered to `Filter::Or` in `lower/filter.rs`), not a mode chosen
+  before the search.
+* High Market's "sacrifice a creature" (46), Entropic Battlecruiser's event player (82), Nexus of
+  Fate's `watched_in_graveyard` (64).
+
+**Not fixed, and why** (still in `lower::IR_DEFECTS`, with their entries): each needs a new IR shape
+and its semantics in both engines, and most of the cards have other blockers as well; Archenemy's
+Charm and Divert Disaster are pinned to mtg-bot's lossy legacy grammar for mtg-bot's own
+cross-engine parity tests (`precise_grammar.RUST_PARITY_PINNED_SPELLS`). Entries 24, 25, 27, 28,
+29, 30, 31, 43, 44, 45, 47, 49, 50, 61, 65, 66, 67, 80, and part of 21 (Luxknight Breacher's
+per-permanent count), 41 (Mutavault's "all creature types", CR 205.3m: no IR field, no engine
+feature) and 62 (Archenemy's Charm). No new IR defect was found (120-139 unused).
+
+**The import** (docs/card_ir.md, "Current numbers"): `cards export-ir --pool cube legacy eoe`,
+`filter_eoe_ir.py`, `gen_card_ir.py`; schema `675cfc50fc4e...` (was `70c85fff4b77...`), 707 classes
+(5 more) and 4 new fields. `powerlsv.ir.json` and `legacy.ir.json` are the previous files card for
+card (`schema_sha256` aside, checked card by card); 53 of `eoe.ir.json`'s 320 cards changed. The
+lowering gained the three new shapes above (`granted_card_types` / `granted_subtypes`,
+`up_to_one`, `CardFilterAnyOf`; `per_target_player` as noted); `lower::IR_DEFECTS` lost the fixed
+cards' 57 lines (it keeps 21 cards). `tests/cards_eoe_b_base.rs` no longer asserts that Knight
+Luminary and Cosmogrand Zenith are blocked.
+
+**Cards.** EoE support 210 -> 247 of 320: 37 cards in `SUPPORTED_EOE_IRFIX`, each checked against
+its Oracle text. The 12 Lander makers (Beamsaw Prospector, Biomechan Engineer, Biotech Specialist,
+Dauntless Scrapbot, Edge Rover, Galactic Wayfarer, Glacier Godmaw, Lithobraking, Sami's Curiosity,
+Scrounge for Eternity, Seedship Agrarian, Sunstar Expansionist); the Human Soldier makers
+(Cosmogrand Zenith, Honored Knight-Captain, Knight Luminary, Rayblade Trooper); the lands (Bonders'
+Enclave, Cathedral of War, Deserted Temple, Inventors' Fair, Mystifying Maze, Terrain Generator,
+High Market, Blinkmoth Nexus, Inkmoth Nexus) and planets (Evendo, Waking Haven; Kavaron, Memorial
+World; Uthros, Titanic Godcore); All-Fates Stalker, Dawnsire, Sunstar Dreadnought, Dockworker
+Drone, Elegy Acolyte, Entropic Battlecruiser, Gravkill, Haliya, Ascendant Cadet, Nexus of Fate,
+Starfield Shepherd. Of the cards whose IR is fixed, still blocked by engine features: Adagia
+(`CreateTokenCopyOfTargetWithExceptions`: the copy exceptions have no supertype), Susur Secundi
+(`DrawCardsEqualTo`: no amount for the sacrificed creature's power), The Eternity Elevator
+(`AddChargeCounterManaOfChosenColor`), Bioengineered Future, Blast Zone, Cascading Cataracts,
+Crystal Quarry, Contested War Zone, Echoing Deeps, Swarmyard, Thespian's Stage (each blocker in the
+support report).
+
+**Tests.** `tests/cards_eoe_irfix.rs` (43 tests: the Lander makers, the Human Soldier makers, the creatures
+and spells) and `tests/cards_eoe_irfix_lands.rs` (18: the lands, the Nexus lands, the planets'
+station and "12+ |" abilities): every ability of each card's Oracle text, and the edge cases of the
+fixes (a tapped Lander can't be activated, CR 602.5a; Haliya and Elegy Acolyte trigger in a
+first-strike and a regular combat damage step, 510.4; All-Fates Stalker with no target, 115.1d;
+Gravkill on a Spacecraft below its threshold; Dawnsire's 100 damage to a planeswalker; Nexus of Fate
+discarded, surveilled or countered goes to the library, 614.1a; Starfield Shepherd finding either
+kind; High Market can't sacrifice a noncreature artifact; Dockworker Drone is never on the
+battlefield without its counter, 614.1c; the planets' mana abilities only at 12 counters). No card
+disagreed with its Oracle text. Nexus of Fate's countered case uses a local table with a custom
+counterspell (the set has none for an instant); the engine can't give a player hexproof, so
+Entropic Battlecruiser's test checks that no target is chosen.
+
+Full engine suite: 1,797 passed, 0 failed, 15 ignored (1,736 before, plus the 61). `support` 8
+passed (cube 546 / 546, EoE 247 / 320); behaviour digests unchanged (combined `f6543eb2b1b8752f`);
+`FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games (wins 9,159 / 9,105, 1,736 draws, mean 38.7 turns,
+497.2 decisions), the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws, as before)
+and 1,000 matches, all four fuzz tests passed; `cargo test -p card_ir` and `python -m pytest
+tools/codegen` pass. (The E: drive filled up during the work: the full suite and the card tests ran
+in a target dir of this worktree's own on C:.)
+
+mtg-bot (`feature/eoe-ir-fixes` 5362f5ed; 7af12b20 adds a test module): `cards roundtrip --pool
+cube legacy eoe` passes; its full suite (`pytest -n 8 --no-cov`) has the 51 failures of untouched
+main 2cb79f77 and no other; the cross-engine parity probes of the changed EoE printings are strict
+xfails (mtg-bot's compiled Rust engine models the old printings; an entry in its
+docs/SEARCH_LIMITATIONS.md).
+
+**Unchanged:** the cube's IR (card for card), support (546 / 546) and behaviour digests (combined
+`f6543eb2b1b8752f`); no layout, encoding, zero-core or Python change.
