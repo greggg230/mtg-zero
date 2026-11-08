@@ -1732,6 +1732,23 @@ pub struct CastingRules {
     /// 601.2h; the choice is noted on the spell, `StackItem::noted`;
     /// ENGINE.md 99.14).
     pub choose_creature_or_warped: bool,
+    /// Alternative costs it gives cards in its controller's hand (CR 604.1,
+    /// 611.3a, 118.9): "Artifact cards and red creature cards in your hand
+    /// have warp {2}{R}" (ENGINE.md 99.15).
+    pub hand_alt_grants: Vec<HandAltGrant>,
+}
+
+/// An alternative cost a permanent's static ability gives each card in its
+/// controller's hand matching `filter` (CR 604.1, 611.3a, 118.9; ENGINE.md
+/// 99.15). The card has it while the ability applies to it, and the spell
+/// cast with it keeps it while the ability would still apply to it (CR
+/// 400.7g). `alt.dash` indexes the granting definition's delayed abilities
+/// (warp's exile, CR 702.185a: created as the permanent enters only if the
+/// spell still has the ability, 608.3g).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct HandAltGrant {
+    pub filter: Filter,
+    pub alt: AltCost,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1870,6 +1887,10 @@ pub struct CardDb {
     /// game keeps permanents' last-known toughness (`Game::lki_toughness`;
     /// ENGINE.md 99.8).
     pub(crate) watch_toughness: bool,
+    /// A card of the table gives cards in hand an alternative cost
+    /// (`CastingRules::hand_alt_grants`): castability looks for granters
+    /// (ENGINE.md 99.15).
+    pub(crate) hand_alt_grants: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2050,6 +2071,7 @@ impl CardDb {
         db.merged = merged;
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
+        db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
         db
     }
 

@@ -300,6 +300,8 @@ impl Game {
         let delved = self.delve_classes(p, c, cls);
         let cls = &delved[..];
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls, crate::game::CastFrom::Hand));
+        // One another permanent gives it in hand (ENGINE.md 99.15).
+        let granted_ok = self.granted_alt_castable(p, c, cls);
         // The first spell of a turn without paying its mana cost (ENGINE.md
         // 99.4).
         let free = self.first_spell_free(p, crate::game::CastFrom::Hand) && self.route_payable(p, c, crate::eoe_c::FREE_CAST, cls);
@@ -333,7 +335,7 @@ impl Game {
                 }
             }
         };
-        if alt_ok || free {
+        if alt_ok || granted_ok || free {
             // castable for an alternative cost (601.2b); the mana cost
             // may be payable too (asked on casting)
         } else if let Some(extras) = &extras {
@@ -887,7 +889,10 @@ impl Game {
             None => {}
         }
         let item = &self.stack[pos];
-        let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. } | crate::game::CastFrom::LibraryTop);
+        // (Cast for a granted alternative cost, which has no {X}: X is 0 too,
+        // CR 107.3b; ENGINE.md 99.15.)
+        let free = matches!(item.from, crate::game::CastFrom::Permission { free: true, .. } | crate::game::CastFrom::LibraryTop)
+            || self.cast_for_granted_alt(card, item);
         if self.def_of(card).times_cost.as_ref().is_some_and(|t| t.x) {
             // Kicker {X} (CR 601.2b): announced only if kicked, at least
             // `x_min`; as much as can be paid.
@@ -1762,7 +1767,11 @@ impl Game {
         let extra = self.extra_costs(item).plus(more);
         match item.alt {
             0 => self.route_mana_plus(card, p, item.from, &extra),
-            k => self.alt_mana_via(card, p, item.from, k as usize - 1, &extra),
+            // (Its own, or the granted one noted on it: ENGINE.md 99.15.)
+            _ => {
+                let (a, _) = self.item_alt(card, item).expect("the alternative cost it is cast for");
+                self.alt_mana_of(card, p, item.from, a, &extra)
+            }
         }
     }
 
@@ -1897,7 +1906,12 @@ impl Game {
     /// `from` says (its condition, its mana plus taxes, and the rest of it;
     /// with retrace, its land discard too)? Warp only from hand.
     pub(crate) fn alt_payable(&self, p: PlayerId, card: CardIdx, k: usize, classes: &[crate::pay::Class], from: crate::game::CastFrom) -> bool {
-        let a = &self.def_of(card).alt_costs[k];
+        // (Past its own: one another permanent gives it in its owner's hand,
+        // cast from there; ENGINE.md 99.15.)
+        if k >= self.def_of(card).alt_costs.len() && from != crate::game::CastFrom::Hand {
+            return false;
+        }
+        let Some((a, _)) = self.alt_at(card, k) else { return false };
         if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
             return false;
         }
@@ -1937,11 +1951,10 @@ impl Game {
     /// (`CardDb::merged_cost`; `None`: the two can't be one cost).
     pub(crate) fn alt_rest(&self, card: CardIdx, from: crate::game::CastFrom, k: usize) -> Option<&'static crate::db::Cost> {
         let db: &'static crate::db::CardDb = self.db;
-        let def = db.def(self.objs[card.i()].def);
         if from == crate::game::CastFrom::Retrace {
             db.merged_cost(self.objs[card.i()].def, crate::db::RETRACE_ROUTE, crate::db::ALT_OPTION + k as u8)
         } else {
-            Some(&def.alt_costs[k].cost)
+            self.alt_at(card, k).map(|(a, _)| &a.cost)
         }
     }
 
@@ -1957,7 +1970,22 @@ impl Game {
         k: usize,
         extra: &crate::mana::ManaCost,
     ) -> crate::mana::ManaCost {
-        let mut base = self.def_of(card).alt_costs[k].mana.plus(extra);
+        let (a, _) = self.alt_at(card, k).expect("an alternative cost of the card");
+        self.alt_mana_of(card, p, from, a, extra)
+    }
+
+    /// [`alt_mana_via`](Self::alt_mana_via) for alternative cost `a` (its
+    /// own or a granted one: CR 118.9d, the increases and reductions apply to
+    /// either).
+    pub(crate) fn alt_mana_of(
+        &self,
+        card: CardIdx,
+        p: PlayerId,
+        from: crate::game::CastFrom,
+        a: &crate::db::AltCost,
+        extra: &crate::mana::ManaCost,
+    ) -> crate::mana::ManaCost {
+        let mut base = a.mana.plus(extra);
         if let crate::game::CastFrom::Taxed(n) = from {
             base = base.plus(&crate::mana::ManaCost { generic: n, ..Default::default() });
         }
@@ -1995,6 +2023,13 @@ impl Game {
                 // Without paying its mana cost (CR 118.9; ENGINE.md 99.4).
                 self.stack[pos].from = crate::eoe_c::FREE_CAST;
                 self.note(|_| "without paying its mana cost".to_string());
+            }
+            Some(Choice::Card(g)) => {
+                // The alternative cost permanent `g` gives it in hand (CR
+                // 118.9, 601.2b; ENGINE.md 99.15): past its own.
+                self.stack[pos].alt = self.def_of(card).alt_costs.len() as u8 + 1;
+                self.note_granted_alt(card, g);
+                self.note(|gm| format!("the alternative cost {} gives", gm.name(g)));
             }
             Some(Choice::Number(k)) => {
                 self.stack[pos].alt = k;
@@ -2037,6 +2072,16 @@ impl Game {
                 for k in 0..self.def_of(card).alt_costs.len() {
                     if self.alt_payable(p, card, k, &classes, from) {
                         opts.push(Opt { action: act::NUMBER + 1 + k as u16, choice: Choice::Number(k as u8 + 1) });
+                    }
+                }
+                // The ones other permanents give it in hand, each named by
+                // its permanent (ENGINE.md 99.15: any number of granters,
+                // each reachable; one grant a printing). Not overloaded: its
+                // own target is needed, as for its mana cost.
+                let own = self.def_of(card).alt_costs.len();
+                for (j, &(g, _)) in self.granted_alts(card).iter().enumerate() {
+                    if plain_targets && self.alt_payable(p, card, own + j, &classes, from) {
+                        opts.push(Opt { action: self.perm_action(p, g), choice: Choice::Card(g) });
                     }
                 }
                 let free = crate::eoe_c::FREE_FIRST_SPELL;
@@ -2201,7 +2246,12 @@ impl Game {
         // CR 118.9a: one alternative cost at most (flashback, escape and
         // "without paying its mana cost" are alternative costs; a
         // permission to cast a card for its costs allows one: `alt_allowed`).
-        if forced_warp.is_none() && (!self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) || self.first_spell_free(p, from)) {
+        // (Or one another permanent gives it in hand: ENGINE.md 99.15.)
+        if forced_warp.is_none()
+            && (!self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from)
+                || self.first_spell_free(p, from)
+                || from == crate::game::CastFrom::Hand && !self.granted_alts(card).is_empty())
+        {
             self.agenda.push(Task::CastAlt { id }); // CR 601.2b
         }
     }
@@ -2415,10 +2465,12 @@ impl Game {
         let Some(pos) = self.item_index(id) else { return };
         let item = &self.stack[pos];
         if item.alt > 0 {
-            let k = item.alt as usize - 1;
+            // (Its own alternative cost, or the granted one noted on it:
+            // ENGINE.md 99.15.)
+            let (a, _) = self.item_alt(card, item).expect("the alternative cost it is cast for");
             // Emerge: reduced by the chosen permanent's mana value; its mana
             // abilities that sacrifice it can't pay (it is sacrificed next).
-            let emerge = def.alt_costs[k].emerge.as_ref().and(item.noted.first().copied()).filter(|r| self.live(*r));
+            let emerge = a.emerge.as_ref().and(item.noted.first().copied()).filter(|r| self.live(*r));
             let cost = match emerge {
                 Some(r) => cost.less_generic(self.mana_value_of(r.idx)),
                 None => cost,
@@ -2426,7 +2478,7 @@ impl Game {
             let mut pm = PayMana::new(p, cost);
             pm.improvise = def.improvise;
             pm.convoke = def.casting.convoke;
-            let rest = self.alt_rest(card, item.from, k).unwrap_or(&def.alt_costs[k].cost);
+            let rest = self.item_alt_rest(card, item);
             pm.keep = Self::keep_for(card, rest, None);
             pm.keep.allow = self.spend_allow(card);
             pm.keep.spell = Some(card);
@@ -2505,7 +2557,8 @@ impl Game {
         let p = item.controller;
         // Void: a spell was warped this turn (cast for its warp cost, CR
         // 702.185a; ENGINE.md 99.4).
-        if item.alt > 0 && self.def_of(card).alt_costs.get(item.alt as usize - 1).is_some_and(|a| a.warp) {
+        // (Its own warp or one another permanent gave it: ENGINE.md 99.15.)
+        if self.item_alt(card, item).is_some_and(|(a, _)| a.warp) {
             self.void_turn = self.turn.number;
         }
         let pl = &mut self.players[p as usize];
@@ -2895,7 +2948,8 @@ impl Game {
             }
             // (Exile matches only through `filter_ok`'s `exile_ok`.)
             Filter::InExile(_) => false,
-            Filter::HasWarp => self.abilities(c).alt_costs.iter().any(|a| a.warp),
+            // (Or warp another permanent gives it: ENGINE.md 99.15.)
+            Filter::HasWarp => self.abilities(c).alt_costs.iter().any(|a| a.warp) || self.has_granted_warp(c),
             Filter::MvAtMostLandsYouControl => {
                 self.mana_value_of(c) as u32 <= self.count_controlled(ctx.controller, &Filter::Type(crate::db::types::LAND))
             }

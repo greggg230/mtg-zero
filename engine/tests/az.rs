@@ -1244,7 +1244,9 @@ fn public_state_reaches_the_encoding() {
     // for the next layout. W4's legendary copy exception (ENGINE.md 99.14) the fourth and a
     // target in exile the fifth (rare: no gate position has one), which object a stack item
     // noted the sixth (Close Encounter's choice; emerge's and station's too), and controlling another
-    // player (CR 722: a pending effect, a controlled turn) the seventh and eighth.
+    // player (CR 722: a pending effect, a controlled turn) the seventh and eighth. W5's
+    // granter of a spell's alternative cost (ENGINE.md 99.15) the ninth (rare: no gate
+    // position has one).
     assert_eq!(
         gaps,
         [
@@ -1255,11 +1257,12 @@ fn public_state_reaches_the_encoding() {
             "a stack item targets another exiled card",
             "a stack item noted another object",
             "a player will control the other's next turn",
-            "the active player is controlled this turn"
+            "the active player is controlled this turn",
+            "a spell's granted alternative cost came from another permanent"
         ],
         "the gaps on the allowlist"
     );
-    assert_eq!(next, 8);
+    assert_eq!(next, 9);
 }
 
 /// The gate's classification (ENGINE.md 58.7), as a table.
