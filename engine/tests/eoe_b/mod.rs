@@ -78,6 +78,16 @@ pub fn lane_b_cards() -> Vec<card_ir::Card> {
             "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost",
                 "mana": {"$t": "ManaCost", "generic": 2}, "mana_str": "{2}", "tap_self": true},
                 "effect": {"$t": "PutBasicLandFromHandOntoBattlefieldTapped"}}]})),
+        // "{6}, {T}, Sacrifice this artifact: Destroy target nonland
+        // permanent." (Thaumaton Torpedo's ability, without its cost
+        // reduction: lane C's.)
+        card("Test Torpedo", json!({"card_types": ["Artifact"],
+            "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}",
+            "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost",
+                "mana": {"$t": "ManaCost", "generic": 6}, "mana_str": "{6}", "sacrifice_self": true, "tap_self": true},
+                "effect": {"$t": "DestroyTargetNonlandPermanent", "targets": [{"$t": "TargetSpec", "filter": {"$t": "ObjectAnd",
+                    "left": {"$t": "ObjectNot", "inner": {"$t": "IsLand"}},
+                    "right": {"$t": "ObjectNot", "inner": {"$t": "IsPlayer"}}}}]}}]})),
     ];
     v.into_iter().map(|v| serde_json::from_value(v).expect("lane B test card IR")).collect()
 }

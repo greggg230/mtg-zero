@@ -108,6 +108,24 @@ pub(crate) fn lower_effect_eoe_b(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         E::TerritorialBruntarLandfallEffect(nodes::TerritorialBruntarLandfallEffect {}) => {
             b.op(Op::Ext(Ext::EoeB(EoeB::ExileUntilNonlandMayCastThisTurn)));
         }
+        // "Destroy target nonland permanent" (Thaumaton Torpedo; CR 701.8a).
+        E::DestroyTargetNonlandPermanent(nodes::DestroyTargetNonlandPermanent { targets }) => {
+            let nonland = Filter::And(Box::new(Filter::Type(types::PERMANENT)), Box::new(Filter::Not(Box::new(Filter::Type(types::LAND)))));
+            let tgt = if targets.is_empty() {
+                b.target(nonland, 1, 1)
+            } else {
+                let Some(t) = super::effect::lower_targets(l, b, targets, "DestroyTargetNonlandPermanent") else { return true };
+                let req = &b.targets[t as usize];
+                if (req.min, req.max) != (1, 1) {
+                    l.unsupported("DestroyTargetNonlandPermanent.targets(not one target)");
+                }
+                // The IR writes "not a land and not a player"; on the
+                // battlefield that is a nonland permanent.
+                b.targets[t as usize].filter = nonland;
+                t
+            };
+            b.op(Op::Destroy { tgt });
+        }
         // "Untap target land."
         E::UntapTargetLand(nodes::UntapTargetLand {}) => {
             let tgt = b.target(Filter::Type(types::LAND), 1, 1);

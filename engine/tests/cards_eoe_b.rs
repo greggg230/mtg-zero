@@ -459,3 +459,22 @@ fn cr_613_4d_wandering_fumarole_switches_its_power_and_toughness() {
     settle(&mut g);
     assert_eq!(g.pt(w), (1, 4), "switched twice");
 }
+
+/// "Destroy target nonland permanent" (Thaumaton Torpedo's ability on a
+/// custom card): a creature, an artifact or an enchantment, not a land or a
+/// player.
+#[test]
+fn cr_701_8a_destroy_target_nonland_permanent() {
+    let mut g = scen().battlefield(0, &["Test Torpedo"]).battlefield(0, &["Island"; 6]).battlefield(1, &["Seam Rip", "Forest", "Test Bear"]).at(Step::Main1, 0).start();
+    let t = bf(&g, 0, "Test Torpedo");
+    let (rip, forest) = (bf(&g, 1, "Seam Rip"), bf(&g, 1, "Forest"));
+    g.choose(act(t, 0));
+    assert_eq!(g.kind(), Some(DecisionKind::Target));
+    assert!(!g.has_option(g.tgt(forest)) && !g.has_option(Choice::Target(Target::Player(1))));
+    assert!(g.has_option(g.tgt(bf(&g, 1, "Test Bear"))) && g.has_option(g.tgt(t)));
+    let tr = g.tgt(rip);
+    g.choose(tr);
+    run_until(&mut g, at_priority, |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(rip).zone, Zone::Graveyard);
+}
