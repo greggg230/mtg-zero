@@ -726,3 +726,10 @@ builder.
 four parallel lanes, then the cross-lane cards and one IR-fix batch); S2 sealed pools (collation),
 a heuristic builder, a best-of-one sealed preset, the 17lands yardstick pools; S3 the play
 network; S4 the deck evaluator and the builder; S5 the comparison with human builds.
+
+**S1 status (2026-11-08, main ab364a8):** 258 of the set's 320 cards supported (ENGINE.md 99: four
+lanes, the cross-lane pass, the mtg-bot IR-fix batch); 62 blocked: 23 by IR defects still open
+(docs/ir_defects.md; `lower::IR_DEFECTS`), a few by declined subsystems (phasing, controlling
+another player's turn, targets among exiled cards), the rest by single-card features, mostly rares.
+Encoding gaps the EoE network's layout must close (S3): void, "cast for its warp cost", life gained
+this turn (the amount). The IR comes from mtg-bot branch `feature/eoe-ir-fixes` (unmerged there).
