@@ -349,7 +349,7 @@ impl Game {
     /// (`pay::Src`): its own, or a Mountain's abilities while it is one
     /// (`mountain_def`; ENGINE.md 99.12).
     pub(crate) fn source_def(&self, c: CardIdx) -> &'static CardDef {
-        if self.db.moon && self.moon_on(c) {
+        if self.moon_game && self.moon_on(c) {
             mountain_def()
         } else {
             self.def_of(c)

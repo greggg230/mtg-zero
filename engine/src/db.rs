@@ -1205,6 +1205,9 @@ pub struct EntersAsCopy {
     /// "When you do, exile that card" (603.11, 707.9g): its delayed
     /// ability k (`delayed_base + k`), about the card copied.
     pub exile_k: Option<u8>,
+    /// "You may have this land enter tapped as a copy of ...": copying, it
+    /// enters tapped (Echoing Deeps; ENGINE.md 99.12).
+    pub tapped: bool,
 }
 
 /// What an activated ability does.

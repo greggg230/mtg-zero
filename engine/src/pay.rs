@@ -2206,6 +2206,12 @@ pub(crate) struct Cands {
     converted: bool,
     /// How many Lumberjacks there are to tap (`Budget::tap`).
     tap_limit: i32,
+    /// Units of sources that take one of the shared taps and whose cards
+    /// have no other way (Gene Pollinator tapping a permanent without a
+    /// mana ability): as many as the taps left allow are fixed units
+    /// (they are worth as much as any other such source, and cost its card
+    /// nothing: no branching on them; ENGINE.md 99.12).
+    free_shared: Units,
 }
 
 /// Candidate units, inline up to 32 (ENGINE.md 17).
@@ -2269,9 +2275,53 @@ fn cands(
             }
         }
     }
+    // Gene Pollinator's sources (`POL_FOR`): with as many permanents
+    // without another way as Pollinators can activate, a source on a
+    // permanent with another way (or on a Pollinator, two taps) is never
+    // better than one of those: left out, so the permanent stays one unit
+    // (no branching on every land; ENGINE.md 99.12).
+    if classes.iter().any(|cl| cl.members[0].slot == POL_FOR) {
+        let k = classes.iter().filter(|cl| cl.share > 0).map(|cl| cl.share as usize).min().unwrap_or(0);
+        let mut other: SVec<(CardIdx, u8), 32> = SVec::new();
+        let mut i = 0;
+        for cl in classes {
+            for s in cl.members.iter() {
+                if lefts[i] > 0 && cl.members[0].slot != POL_FOR {
+                    match other.iter_mut().find(|(c, _)| *c == s.card) {
+                        Some((_, n)) => *n += 1,
+                        None => other.push((s.card, 1)),
+                    }
+                }
+                i += 1;
+            }
+        }
+        let free_member = |cl: &Class, s: &Src| cl.taps <= 1 && !other.iter().any(|&(c, n)| c == s.card && n > 0);
+        let mut free = 0;
+        i = 0;
+        for cl in classes {
+            for s in cl.members.iter() {
+                free += (lefts[i] > 0 && cl.members[0].slot == POL_FOR && free_member(cl, s)) as usize;
+                i += 1;
+            }
+        }
+        if free >= k {
+            i = 0;
+            for cl in classes {
+                for s in cl.members.iter() {
+                    if lefts[i] > 0 && cl.members[0].slot == POL_FOR && !free_member(cl, s) {
+                        lefts[i] = 0;
+                        if let Some((_, n)) = count.iter_mut().find(|(c, _)| *c == s.card) {
+                            *n -= 1;
+                        }
+                    }
+                    i += 1;
+                }
+            }
+        }
+    }
     let mut li = 0;
     let alone = |c: CardIdx| count.iter().any(|&(x, n)| x == c && n == 1);
-    let mut out = Cands { fixed: Units::new(), alts: Vec::new(), convert: Vec::new(), converted: false, tap_limit: i32::MAX };
+    let mut out = Cands { fixed: Units::new(), alts: Vec::new(), convert: Vec::new(), converted: false, tap_limit: i32::MAX, free_shared: Units::new() };
     let mut per_card: Vec<(CardIdx, Vec<(Way, u8)>)> = Vec::new();
     // The converters' cards, in `out.convert`'s order.
     let mut conv_cards: SVec<CardIdx, 2> = SVec::new();
@@ -2298,6 +2348,12 @@ fn cands(
             let tap = if cl.share > 0 { cl.taps.max(1) as i32 } else { 0 };
             if tap > 0 {
                 out.tap_limit = out.tap_limit.min(cl.share as i32);
+            }
+            if let Yield::One(u) = &cl.yld {
+                if tap == 1 && n == 1 && alone(s.card) && sac == 0 && extra == 0 && u.life == 0 {
+                    out.free_shared.push(Unit::free(u.mask | restr));
+                    continue;
+                }
             }
             match &cl.yld {
                 // (A source taking a shared tap, Gene Pollinator's, stays a
@@ -2429,6 +2485,24 @@ fn cands_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c: &
 /// [`cands_payable`], Wizard's Rockets' colours only with `convert`.
 fn cands_payable_c(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], c: &Cands, budget: Budget, convert: bool) -> bool {
     let budget = Budget { tap: budget.tap.min(c.tap_limit), ..budget };
+    // (The shared taps' free units first: `Cands::free_shared`.)
+    let with_free;
+    let (c, budget) = if c.free_shared.is_empty() {
+        (c, budget)
+    } else {
+        let k = c.free_shared.len().min(budget.tap.max(0) as usize);
+        let mut fixed = c.fixed.clone();
+        fixed.extend(c.free_shared.iter().take(k).copied());
+        with_free = Cands {
+            fixed,
+            alts: c.alts.clone(),
+            convert: c.convert.clone(),
+            converted: c.converted,
+            tap_limit: c.tap_limit,
+            free_shared: Units::new(),
+        };
+        (&with_free, Budget { tap: budget.tap - k as i32, ..budget })
+    };
     if c.converted {
         return payable_converted(cost, marked, chosen, c, budget, None);
     }

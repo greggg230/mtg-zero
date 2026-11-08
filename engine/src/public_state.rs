@@ -156,6 +156,7 @@ pub fn fields() -> Vec<Field> {
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
         pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",
+        moon_game: Derived "fast path: a card of the game says nonbasic lands are Mountains",
         lands_entered: Public "the lands that entered the battlefield under each player's control this turn (Bioengineered Future; ENGINE.md 99.12)",
         spell_lki: Derived "last known information (CR 608.2h)",
         entering_copy: Derived "transient: set and cleared around one move",

@@ -426,3 +426,32 @@ fn cr_702_82a_famished_worldsire_devours_lands_and_puts_lands_back() {
     assert_eq!(g.lands_of(0).filter(|&c| g.name(c) == "Island" && g.obj(c).tapped).count(), 4, "tapped");
     assert_eq!(g.power(ws), 6);
 }
+
+/// Echoing Deeps: "You may have this land enter tapped as a copy of any land
+/// card in a graveyard, except it's a Cave in addition to its other types"
+/// (CR 707.5, 707.9b; either graveyard; declined, it enters untapped as
+/// itself).
+#[test]
+fn cr_707_5_echoing_deeps_enters_tapped_as_a_copy_of_a_land_card_in_a_graveyard() {
+    let mut g = scen().hand(0, &["Echoing Deeps"]).graveyard(1, &["Mana Confluence"]).at(Step::Main1, 0).start();
+    let deeps = g.card(0, "Echoing Deeps", Zone::Hand);
+    let conf = g.card(1, "Mana Confluence", Zone::Graveyard);
+    g.choose(Choice::Play(deeps));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseGraveyardCard), "{:?}", g.options_desc());
+    assert!(g.has_option(Choice::Card(conf)) && g.has_option(Choice::Pass));
+    g.choose(Choice::Card(conf));
+    settle(&mut g);
+    assert_eq!(g.name(deeps), "Mana Confluence");
+    assert!(subtype(&g, deeps, "Cave"), "a Cave in addition");
+    assert!(g.obj(deeps).tapped, "it enters tapped");
+    g.set_tapped(deeps, false);
+    assert!(g.can_pay(0, &cost("{B}")), "the copied ability");
+    // Declined: itself, untapped.
+    let mut g = scen().hand(0, &["Echoing Deeps"]).graveyard(1, &["Mana Confluence"]).at(Step::Main1, 0).start();
+    let deeps = g.card(0, "Echoing Deeps", Zone::Hand);
+    g.choose(Choice::Play(deeps));
+    g.choose(Choice::Pass);
+    settle(&mut g);
+    assert_eq!(g.name(deeps), "Echoing Deeps");
+    assert!(!g.obj(deeps).tapped && g.can_pay(0, &cost("{1}")) && !g.can_pay(0, &cost("{B}")));
+}

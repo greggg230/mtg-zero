@@ -688,6 +688,10 @@ pub struct Game {
     /// during turn `.0` (kept when `CardDb::watch_lands_entered`; ENGINE.md
     /// 99.12).
     pub(crate) lands_entered: (u32, [u8; 2]),
+    /// A card of this game says "nonbasic lands are Mountains" (its faces
+    /// included; a copy copies a card of the game): the layers look
+    /// (`Game::moon_on`; ENGINE.md 99.12).
+    pub(crate) moon_game: bool,
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it").
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
@@ -1076,6 +1080,7 @@ impl Game {
             lki_toughness: Vec::new(),
             pool_restr: Vec::new(),
             lands_entered: (0, [0; 2]),
+            moon_game: false,
             spell_lki: Vec::new(),
             entering_copy: None,
             entering_times: 0,
@@ -1121,6 +1126,9 @@ impl Game {
         self.seen |= seen;
         if d.miracle.is_some() {
             self.seen |= SEEN_MIRACLE_P0 << owner;
+        }
+        if d.nonbasic_lands_are_mountains || d.back.is_some_and(|b| self.db.def(b).nonbasic_lands_are_mountains) {
+            self.moon_game = true;
         }
         self.objs.push(Obj {
             def,
@@ -1467,7 +1475,7 @@ impl Game {
         }
         // "You may have this enter as a copy of ..." (CR 707.5): the choice
         // comes first (`Task::EnterAsCopy`), then what it entered as enters.
-        let copy_choice = self.def_of(idx).enters_as_copy.is_some() && !(self.db.moon && self.moon_entering(idx));
+        let copy_choice = self.def_of(idx).enters_as_copy.is_some() && !(self.moon_game && self.moon_entering(idx));
         let fx_tapped = std::mem::take(&mut self.entering_tapped);
         let fx_counters = std::mem::take(&mut self.entering_counters);
         let tapped = !copy_choice && self.enters_tapped(idx, controller);
@@ -1622,7 +1630,7 @@ impl Game {
         // (A nonbasic land entering as a Mountain has none of its own
         // abilities, these replacement effects among them: CR 305.7, 614.12;
         // ENGINE.md 99.12.)
-        let own = !(self.db.moon && self.moon_entering(idx));
+        let own = !(self.moon_game && self.moon_entering(idx));
         // CR 122.6: "enters with counters".
         for &(k, n) in self.def_of(idx).enters_counters.iter().filter(|_| own) {
             self.add_counters(idx, k, n as crate::num::Count);
@@ -1838,7 +1846,7 @@ impl Game {
         }
         // A nonbasic land that is a Mountain (CR 305.7: its rules text's
         // abilities replaced by "{T}: Add {R}"; ENGINE.md 99.12).
-        if self.db.moon && self.moon_on(c) {
+        if self.moon_game && self.moon_on(c) {
             return crate::eoe_w2::mountain_def();
         }
         self.db.def(self.objs[c.i()].def)

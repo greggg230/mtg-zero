@@ -96,7 +96,7 @@ impl Game {
         let (bf, cmd) = if active { (self.battlefield.len(), self.command.len()) } else { (0, 0) };
         // (Indices over both lists and the loss flag read once: this is the
         // hottest loop of the engine.)
-        let loss = self.any_loss || (self.db.moon && self.moon_source());
+        let loss = self.any_loss || (self.moon_game && self.moon_source());
         (0..bf + cmd)
             .map(move |i| if i < bf { self.battlefield[i] } else { self.command[i - bf] })
             .flat_map(move |s| {
@@ -266,7 +266,7 @@ impl Game {
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
         // A nonbasic land that is a Mountain: its land type is Mountain only
         // (CR 305.7; ENGINE.md 99.12).
-        if self.db.moon && self.db.land_subtypes.contains(&s) && self.moon_on(c) {
+        if self.moon_game && self.db.land_subtypes.contains(&s) && self.moon_on(c) {
             return Some(s) == self.db.mountain;
         }
         let d = self.def_of(c);
@@ -362,7 +362,7 @@ impl Game {
             k.0 |= e.kws.0;
         }
         // (A nonbasic land that is a Mountain has none of its own, CR 305.7.)
-        if self.db.moon && self.moon_on(c) {
+        if self.moon_game && self.moon_on(c) {
             k = KwSet::default();
         }
         if self.printed_only(c) {

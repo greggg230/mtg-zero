@@ -291,7 +291,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             super::effect_ext::counter_by_name(l, "charge")
         });
         l.deny("CardPrinting.enters_tapped_unless_any_player_life_at_most", enters_tapped_unless_any_player_life_at_most);
-        l.deny("CardPrinting.optional_copy_land_from_graveyard", optional_copy_land_from_graveyard);
         l.deny("CardPrinting.additional_cost_sacrifice_creature_or_enchantment", additional_cost_sacrifice_creature_or_enchantment);
         l.deny("CardPrinting.additional_cost_choose_your_creature", additional_cost_choose_your_creature);
         let enters_x_counters = match enters_with_counters_from_x {
@@ -985,6 +984,19 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         },
         ty,
     );
+    // "You may have this land enter tapped as a copy of any land card in a
+    // graveyard, except it's a Cave in addition to its other types" (the
+    // flag's meaning, Echoing Deeps; CR 707.5, 707.9b; ENGINE.md 99.12).
+    let enters_as_copy = if *optional_copy_land_from_graveyard {
+        if enters_as_copy.is_some() || ty & types::LAND == 0 {
+            l.unsupported("CardPrinting.optional_copy_land_from_graveyard(not a land, or with another copy)");
+        }
+        let mut exc = crate::copies::Except::default();
+        exc.add_subtype(l.subtype("Cave"));
+        Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(types::LAND), from_graveyard: true, exc, keep_name: false, exile_k: None, tapped: true }))
+    } else {
+        enters_as_copy
+    };
     // Additional costs paid a number of times (CR 601.2b): squad
     // (702.157a, creatures), offspring (702.175a, once), replicate
     // (702.56a, instants and sorceries: its "when you cast this spell, copy
@@ -2033,7 +2045,7 @@ fn lower_enters_as_copy(l: &mut Lowerer, x: EnterCopyFields, card_types: u16) ->
     } else {
         None
     };
-    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k }))
+    Some(Box::new(crate::db::EntersAsCopy { filter: Filter::Type(bits), from_graveyard, exc, keep_name: x.keep_name, exile_k, tapped: false }))
 }
 
 /// Replicate's triggered ability (CR 702.56a): "When you cast this spell,

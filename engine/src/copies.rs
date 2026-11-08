@@ -616,8 +616,11 @@ impl Game {
         let own = self.own_def(card);
         let Some(eac) = self.db.def(own).enters_as_copy.as_deref() else { return };
         let p = self.objs[card.i()].controller;
+        // ("Enter tapped as a copy": copying, ENGINE.md 99.12.)
+        let mut copied_tapped = false;
         match self.answer.take() {
             Some(Choice::Card(x)) => {
+                copied_tapped = eac.tapped;
                 let base = if eac.from_graveyard {
                     CopyVals { def: self.objs[x.i()].def, exc: Except::default() }
                 } else {
@@ -674,7 +677,7 @@ impl Game {
             }
         }
         let r = self.obj_ref(card);
-        let tapped = self.enters_tapped(card, p);
+        let tapped = copied_tapped || self.enters_tapped(card, p);
         self.entering(card, tapped, 0);
         self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
     }

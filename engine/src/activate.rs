@@ -1504,7 +1504,7 @@ impl Game {
         }
         // (A nonbasic land entering as a Mountain: not its own, CR 305.7,
         // 614.12; ENGINE.md 99.12.)
-        if self.db.moon && self.moon_entering(card) {
+        if self.moon_game && self.moon_entering(card) {
             return false;
         }
         match &self.def_of(card).enters_tapped {

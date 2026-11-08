@@ -902,6 +902,7 @@ const SUPPORTED_EOE_MANA: &[&str] = &[
     "Blast Zone",
     "Cascading Cataracts",
     "Crystal Quarry",
+    "Echoing Deeps",
     "Eldrazi Temple",
     "Famished Worldsire",
     "Gene Pollinator",
