@@ -755,10 +755,11 @@ impl Game {
             && (0..def.alt_costs.len()).any(|k| self.alt_payable(p, card, k, classes, from));
         // The first spell of a turn without paying its mana cost (ENGINE.md
         // 99.4).
-        let free = self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
-        // (From a graveyard by its own warp ability only: its warp cost.)
-        let plain = !self.warp_only(p, card, from)
-            && (self.route_payable(p, card, from, classes) || self.target_discount_castable(p, card, from, classes));
+        // (From a graveyard by its own warp ability only: its warp cost, no
+        // other cost, CR 118.9a.)
+        let warp_only = self.warp_only(p, card, from);
+        let free = !warp_only && self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
+        let plain = !warp_only && (self.route_payable(p, card, from, classes) || self.target_discount_castable(p, card, from, classes));
         if !(alt_ok || free || plain) {
             return false;
         }

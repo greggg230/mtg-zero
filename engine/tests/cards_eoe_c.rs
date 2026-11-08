@@ -970,3 +970,13 @@ fn dark_endurance_costs_one_less_targeting_a_blocking_creature_cr601_2f() {
     assert_eq!(g.power(giant), 8, "{}", log(&g));
     assert!(g.has_kw(giant, engine::db::Kw::Indestructible));
 }
+
+/// Cast from a graveyard "using its warp ability", Timeline Culler is cast
+/// for its warp cost: Weftwalking's "without paying its mana cost" is another
+/// alternative cost, and only one applies (CR 118.9a).
+#[test]
+fn timeline_culler_from_the_graveyard_is_never_free_cr118_9a() {
+    let g = scen().battlefield(0, &["Weftwalking"]).graveyard(0, &["Timeline Culler"]).at(Step::Main1, 0).start();
+    let c = g.card(0, "Timeline Culler", Zone::Graveyard);
+    assert!(!g.pending_decision().unwrap().options.iter().any(|o| matches!(o.choice, Choice::Cast(x) if x == c)), "{:?}", g.options_desc());
+}
