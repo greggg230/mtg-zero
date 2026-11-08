@@ -1014,3 +1014,101 @@ fn possibility_technician_another_kavu_you_control_triggers_it_cr603_2() {
     settle(&mut g);
     assert_eq!(g.player(0).library.len(), lib, "not a Kavu you control\n{}", log(&g));
 }
+
+// ---- Robe of Stars (phasing) --------------------------------------------------------
+
+/// Equip Robe of Stars to `c` and resolve it.
+fn equip_robe(g: &mut engine::Game, c: engine::CardIdx) {
+    let robe = bf(g, 0, "Robe of Stars");
+    g.choose(act(robe, 1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let t = g.tgt(c);
+    g.choose(t);
+    pay(g);
+    settle(g);
+}
+
+/// Robe of Stars: "Equipped creature gets +0/+3. Astral Projection — {1}{W}:
+/// Equipped creature phases out. Equip {1}" (CR 702.26b: treated as though
+/// it doesn't exist; 702.26e: the Robe attached to it phases out with it;
+/// 502.1, 702.26h: both phase in during its controller's next untap step,
+/// still attached, the same objects, 702.26d).
+#[test]
+fn robe_of_stars_phases_the_creature_out_until_its_controllers_next_untap_cr702_26() {
+    let mut g = scen()
+        .battlefield(0, &["Robe of Stars", "W3 Bear", "Plains", "Plains", "Plains"])
+        .battlefield(1, &["Swamp"])
+        .hand(1, &["W3 Murder"])
+        .counters(0, "W3 Bear", Counter::P1P1, 1)
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    let (robe, bear) = (bf(&g, 0, "Robe of Stars"), bf(&g, 0, "W3 Bear"));
+    let r = g.obj_ref(bear);
+    equip_robe(&mut g, bear);
+    assert_eq!((g.power(bear), g.toughness(bear)), (3, 6), "+0/+3 and its counter");
+    g.choose(act(robe, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::PhasedOut, "{}", log(&g));
+    assert_eq!(g.obj(robe).zone, Zone::PhasedOut, "the Robe phases out with it");
+    assert!(g.permanents_of(0).all(|c| c != bear && c != robe));
+    // The opponent's turn: it doesn't exist; no target for Murder.
+    next_main(&mut g, 1);
+    let murder = g.card(1, "W3 Murder", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(murder)), "no creature to target");
+    assert_eq!(g.obj(bear).zone, Zone::PhasedOut, "not the opponent's untap step");
+    // Its controller's untap step: back, attached, the same object.
+    next_main(&mut g, 0);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.obj_ref(bear), r, "the same object (CR 702.26d)");
+    assert_eq!(g.obj(robe).zone, Zone::Battlefield);
+    assert_eq!(g.obj(robe).attached, Some(r), "still attached");
+    assert_eq!((g.power(bear), g.toughness(bear)), (3, 6), "its counter stays");
+    assert!(!log(&g).contains("Battlefield -> "), "no zone change");
+}
+
+/// A creature that phases out leaves combat (CR 506.4): an attacker deals
+/// no combat damage; phasing in triggers no enters ability (702.26d).
+#[test]
+fn robe_of_stars_a_phased_out_attacker_leaves_combat_cr506_4() {
+    let mut g = scen()
+        .battlefield(0, &["Robe of Stars", "W3 Bear", "Plains", "Plains", "Plains"])
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    let (robe, bear) = (bf(&g, 0, "Robe of Stars"), bf(&g, 0, "W3 Bear"));
+    equip_robe(&mut g, bear);
+    attack_with(&mut g, 0, &["W3 Bear"]);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 0);
+    g.choose(act(robe, 0));
+    pay(&mut g);
+    settle(&mut g);
+    assert!(!g.obj(bear).attacking);
+    quiet_until(&mut g, |g| g.turn().step == Step::Main2);
+    assert_eq!(g.life(1), 20, "{}", log(&g));
+}
+
+/// "Until end of turn" effects on it end while it is phased out (CR
+/// 702.26d, 514.2); damage marked on it is removed in the cleanup step too.
+#[test]
+fn robe_of_stars_until_end_of_turn_effects_end_while_phased_out_cr702_26d() {
+    let mut g = scen()
+        .battlefield(0, &["Robe of Stars", "W3 Bear", "Plains", "Plains", "Plains", "Forest", "Mountain"])
+        .hand(0, &["W3 Growth"])
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    let (robe, bear) = (bf(&g, 0, "Robe of Stars"), bf(&g, 0, "W3 Bear"));
+    equip_robe(&mut g, bear);
+    let t = g.tgt(bear);
+    cast(&mut g, 0, "W3 Growth", &[t]);
+    settle(&mut g);
+    assert_eq!(g.power(bear), 5);
+    g.choose(act(robe, 0));
+    pay(&mut g);
+    settle(&mut g);
+    next_main(&mut g, 0);
+    assert_eq!(g.obj(bear).zone, Zone::Battlefield);
+    assert_eq!((g.power(bear), g.toughness(bear)), (2, 5), "the +3/+3 ended; the Robe's +0/+3 applies\n{}", log(&g));
+}

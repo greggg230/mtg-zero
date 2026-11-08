@@ -506,6 +506,10 @@ impl Game {
         match self.turn.step {
             Step::Setup => unreachable!("setup is not a step"),
             Step::Untap => {
+                // CR 502.1: first, phasing (EoE W3).
+                if !self.w3.phased.is_empty() {
+                    self.phase_in_untap(ap);
+                }
                 // CR 502.3; no player gets priority (502.4). "Doesn't untap
                 // during your untap step"; a stun counter is removed instead
                 // of untapping (122.1d).

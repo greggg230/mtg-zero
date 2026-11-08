@@ -184,6 +184,8 @@ pub fn fields() -> Vec<Field> {
             seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
             lki_host: Derived "last known information (CR 608.2h): what a gone Aura enchanted",
             entering_spent: Derived "transient: set and taken around one move",
+            phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
+            indirect: Public "which phased-out permanents phased out with what they are attached to (CR 702.26e)",
         });
     }
     classify!(v, Player {

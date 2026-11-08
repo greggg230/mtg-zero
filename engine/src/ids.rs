@@ -43,6 +43,11 @@ pub enum Zone {
     /// is hidden like a library card's (known to the players whose `known`
     /// bit is set: its owner, who saw it go there; ENGINE.md 10, 30).
     FaceDown,
+    /// On the battlefield, phased out (CR 702.26b): treated as though it
+    /// doesn't exist; it hasn't changed zones (702.26d: the same object, its
+    /// counters and its continuous effects kept). `Game::w3`'s list. EoE
+    /// W3, ENGINE.md 99.13.
+    PhasedOut,
 }
 
 impl Zone {

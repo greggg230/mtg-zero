@@ -1319,6 +1319,7 @@ impl Game {
             Zone::Exile => Some(&mut self.exile),
             Zone::FaceDown => Some(&mut self.face_down),
             Zone::Command => Some(&mut self.command),
+            Zone::PhasedOut => Some(&mut self.w3.phased),
             Zone::Stack | Zone::Nowhere => None,
         }
     }

@@ -907,6 +907,7 @@ const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Possibility Technician",
     "Raging Ravine",
     "Requiem Monolith",
+    "Robe of Stars",
     "Rust Harvester",
     "Secluded Starforge",
     "Sunstar Chaplain",

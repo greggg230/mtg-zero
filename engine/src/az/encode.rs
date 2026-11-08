@@ -1144,7 +1144,7 @@ impl Game {
                 Zone::Graveyard => Some(0),
                 Zone::Exile | Zone::FaceDown => Some(1),
                 Zone::Library => Some(2),
-                Zone::Battlefield | Zone::Stack | Zone::Command => Some(3),
+                Zone::Battlefield | Zone::Stack | Zone::Command | Zone::PhasedOut => Some(3),
             };
             if let Some(k) = origin {
                 st[stack::ORIGIN + k] = 1.0;

@@ -781,9 +781,9 @@ impl Game {
         let control = self.control_ending_this_turn();
         self.effects.retain(|e| e.until != Until::EndOfTurn);
         self.return_control(control);
-        if !self.marks.is_empty() {
-            // (Granted triggered abilities until end of turn, regeneration
-            // shields: EoE W3.)
+        // (Granted triggered abilities until end of turn, regeneration
+        // shields, phased-out permanents' damage: EoE W3.)
+        if !self.marks.is_empty() || !self.w3.phased.is_empty() {
             self.end_turn_w3();
         }
         self.effects_changed();

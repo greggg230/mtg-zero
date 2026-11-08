@@ -44,6 +44,9 @@ pub enum W3 {
     /// such a counter, no question), continue at `skip`. Choice:
     /// `ChoosePermanent`.
     RemoveCounterFromEachMay { filter: Filter, counter: Counter, n: u8, skip: u16 },
+    /// Each object of `on` phases out (CR 702.26b, k), and with it what is
+    /// attached to it (indirectly, 702.26e).
+    PhaseOut { on: On },
 }
 
 impl W3 {
@@ -54,6 +57,7 @@ impl W3 {
             W3::CantBeRegenerated(_) | W3::DamageEachSourceMv { .. } | W3::HostDamagesPower { .. } => false,
             W3::EventObjDamagesEachOpponent { .. } => true,
             W3::RemoveCounterFromEachMay { .. } => false,
+            W3::PhaseOut { on } => matches!(on, On::EventObj),
         }
     }
 
@@ -65,7 +69,8 @@ impl W3 {
             | W3::GrantTrigger { .. }
             | W3::DamageEachSourceMv { .. }
             | W3::HostDamagesPower { .. }
-            | W3::EventObjDamagesEachOpponent { .. } => None,
+            | W3::EventObjDamagesEachOpponent { .. }
+            | W3::PhaseOut { .. } => None,
             W3::RemoveCounterFromEachMay { skip, .. } => Some(skip),
         }
     }
@@ -90,6 +95,12 @@ pub struct W3State {
     /// The amount of mana spent to cast the spell becoming a permanent:
     /// set and taken around one move.
     pub entering_spent: Option<u8>,
+    /// The phased-out permanents (zone `PhasedOut`, CR 702.26b), in the order
+    /// they phased out.
+    pub phased: Vec<CardIdx>,
+    /// Those of them that phased out indirectly (CR 702.26e): they phase in
+    /// with the permanent they are attached to (702.26h).
+    pub indirect: Vec<CardIdx>,
 }
 
 /// The abilities of a definition that go on the stack (its spell, triggered
@@ -220,6 +231,14 @@ impl Game {
                 for c in std::mem::take(&mut f.picked) {
                     if self.objs[c.i()].zone == crate::ids::Zone::Battlefield {
                         self.remove_counters(c, *counter, 1);
+                    }
+                }
+                Flow::Next
+            }
+            W3::PhaseOut { on } => {
+                for c in self.objs_on(f, on) {
+                    if self.objs[c.i()].zone == crate::ids::Zone::Battlefield {
+                        self.phase_out(c);
                     }
                 }
                 Flow::Next
@@ -362,10 +381,84 @@ impl Game {
     }
 
     /// The "this turn" facts of workstream W3 end in the cleanup step (CR
-    /// 514.2): regeneration shields.
+    /// 514.2): regeneration shields, granted triggered abilities until end
+    /// of turn; damage is removed from phased-out permanents too.
     pub(crate) fn end_turn_w3(&mut self) {
-        self.marks.retain(|&(_, m)| !matches!(m, Mark::RegenShield | Mark::Granted { this_turn: true, .. }));
-        self.w3.granted = self.marks.iter().any(|&(_, m)| matches!(m, Mark::Granted { .. }));
+        if !self.marks.is_empty() {
+            self.marks.retain(|&(_, m)| !matches!(m, Mark::RegenShield | Mark::Granted { this_turn: true, .. }));
+            self.w3.granted = self.marks.iter().any(|&(_, m)| matches!(m, Mark::Granted { .. }));
+        }
+        for i in 0..self.w3.phased.len() {
+            let c = self.w3.phased[i];
+            let o = &mut self.objs[c.i()];
+            o.damage = 0;
+            o.deathtouched = false;
+        }
+    }
+
+    /// Permanent `c` phases out (CR 702.26b, k): it and what is attached to
+    /// it (indirectly, 702.26e; recursively) are treated as though they
+    /// don't exist, without changing zones (702.26d: no leave or enter
+    /// triggers, the same objects). A creature leaves combat (506.4).
+    pub(crate) fn phase_out(&mut self, c: CardIdx) {
+        let mut all = vec![c];
+        let mut k = 0;
+        while k < all.len() {
+            let host = self.obj_ref(all[k]);
+            for &x in &self.battlefield {
+                if self.objs[x.i()].attached == Some(host) && !all.contains(&x) {
+                    all.push(x);
+                }
+            }
+            k += 1;
+        }
+        for (i, &x) in all.iter().enumerate() {
+            self.battlefield.retain(|&y| y != x);
+            let o = &mut self.objs[x.i()];
+            o.zone = crate::ids::Zone::PhasedOut;
+            o.attacking = false;
+            o.blocked = false;
+            o.blocking = None;
+            o.attacks = None;
+            self.w3.phased.push(x);
+            if i > 0 {
+                self.w3.indirect.push(x);
+            }
+            self.note(|g| format!("{} phases out", g.name(x)));
+        }
+        self.effects_changed();
+    }
+
+    /// The untap step of `p` (CR 502.1): the permanents that phased out under
+    /// `p`'s control directly phase in, each with what phased out with it
+    /// (702.26h), attached again; the same objects (702.26d), in their
+    /// timestamp order among the battlefield's.
+    pub(crate) fn phase_in_untap(&mut self, p: PlayerId) {
+        let mut back: Vec<CardIdx> =
+            self.w3.phased.iter().copied().filter(|&c| self.objs[c.i()].controller == p && !self.w3.indirect.contains(&c)).collect();
+        let mut k = 0;
+        while k < back.len() {
+            let host = self.obj_ref(back[k]);
+            for &x in &self.w3.phased {
+                if self.w3.indirect.contains(&x) && self.objs[x.i()].attached == Some(host) && !back.contains(&x) {
+                    back.push(x);
+                }
+            }
+            k += 1;
+        }
+        if back.is_empty() {
+            return;
+        }
+        for &x in &back {
+            self.w3.phased.retain(|&y| y != x);
+            self.w3.indirect.retain(|&y| y != x);
+            self.objs[x.i()].zone = crate::ids::Zone::Battlefield;
+            let ts = self.objs[x.i()].timestamp;
+            let at = self.battlefield.iter().position(|&y| self.objs[y.i()].timestamp > ts).unwrap_or(self.battlefield.len());
+            self.battlefield.insert(at, x);
+            self.note(|g| format!("{} phases in", g.name(x)));
+        }
+        self.effects_changed();
     }
 }
 

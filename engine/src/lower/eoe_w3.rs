@@ -201,6 +201,11 @@ pub(crate) fn lower_effect_w3(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect
             let kind = crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, only_if };
             b.op(Op::Ext(Ext::ExileTopWithPermission { who: Who::You, n: 1, kind, this_turn: false }));
         }
+        // "Equipped creature phases out" (Robe of Stars; CR 702.26b: and
+        // anything attached to it, this Equipment too, 702.26e).
+        E::PhaseOutEquippedCreature(nodes::PhaseOutEquippedCreature {}) => {
+            w3(b, W3::PhaseOut { on: On::Each(Filter::HostOfSource) });
+        }
         _ => return false,
     }
     true

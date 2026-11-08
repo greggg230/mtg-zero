@@ -206,6 +206,7 @@ impl Game {
         // leaving the stack ceases to exist at once, `move_card`.)
         let z = self.objs[c.i()].zone;
         z != Zone::Battlefield
+            && z != Zone::PhasedOut
             && z != Zone::Nowhere
             && z != Zone::Stack
             && self.is_token(c)

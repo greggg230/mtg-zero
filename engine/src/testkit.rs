@@ -824,6 +824,9 @@ impl Game {
         for &c in &self.command {
             mark(c, Zone::Command, None)?;
         }
+        for &c in &self.w3.phased {
+            mark(c, Zone::PhasedOut, None)?;
+        }
         for s in &self.stack {
             if let crate::game::StackKind::Spell { card } = s.kind {
                 mark(card, Zone::Stack, None)?;
@@ -853,7 +856,7 @@ impl Game {
             // (A copy of a prepare spell in exile has its characteristics,
             // CR 722.3c.)
             if self.db.is_face(self.objs[i].def)
-                && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack)
+                && !matches!(self.objs[i].zone, Zone::Battlefield | Zone::Stack | Zone::PhasedOut)
                 && !(self.objs[i].zone == Zone::Exile && self.is_copy_obj(CardIdx(i as u16)))
             {
                 return Err(format!("card {i} ({}) has a face up in {:?}", self.name(CardIdx(i as u16)), self.objs[i].zone));
