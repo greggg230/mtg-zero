@@ -223,6 +223,14 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Susur Secundi, Void Altar", "ir_defect(station dropped, docs/ir_defects.md 20)"),
     ("The Eternity Elevator", "ir_defect(station dropped, docs/ir_defects.md 20)"),
     ("Uthros, Titanic Godcore", "ir_defect(station dropped, docs/ir_defects.md 20)"),
+
+    // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
+
+    // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
+
+    // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
+
+    // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
 ];
 
 /// Lower one card. `Err` carries every blocking feature, sorted and unique.
