@@ -24,6 +24,7 @@ pub mod eoe_c;
 pub mod eoe_a;
 pub mod effect_eoe_d;
 pub mod eoe_x;
+pub mod eoe_w2;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -108,6 +109,8 @@ pub struct Lowerer<'a> {
     pub cascade: bool,
     /// The activated ability being lowered has {X} in its mana cost.
     pub act_x: bool,
+    /// How many {X} the activation cost has (`Cost::x_times`).
+    pub act_x_times: u8,
     /// The printing being lowered has an X its spell announces (its mana
     /// cost's {X}, or "pay X life").
     pub spell_x: bool,
@@ -289,6 +292,12 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Desculpting Blast", "ir_defect(token printing by name only, docs/ir_defects.md 101)"),
 
     // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169).
+    // "{T}: Add one mana of any color among legendary permanents you
+    // control" written as any colour with a spending restriction (160).
+    ("Plaza of Heroes", "ir_defect(a mana ability's colours written as a spending restriction, docs/ir_defects.md 160)"),
+    // "Whenever a creature deals combat damage to you": the damaged
+    // "you" widened to anything you control (161).
+    ("Contested War Zone", "ir_defect(combat damage to you widened to your permanents, docs/ir_defects.md 161)"),
 
     // W3 combat and abilities (ENGINE.md 99.13; docs/ir_defects.md 170-179).
 
@@ -322,6 +331,7 @@ pub fn lower_card(
         watches_exile: false,
         cascade: false,
         act_x: false,
+        act_x_times: 0,
         spell_x: false,
         reanimates: false,
     };

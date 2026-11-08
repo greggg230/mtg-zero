@@ -66,6 +66,24 @@ pub fn w2_cards() -> Vec<card_ir::Card> {
             "mana_cost": {"$t": "ManaCost", "generic": 1}, "mana_cost_str": "{1}"})),
         card("Test Eldrazi Seer", json!({"card_types": ["Creature"], "subtypes": ["Eldrazi"], "power": 1, "toughness": 1,
             "mana_cost": {"$t": "ManaCost", "generic": 2}, "mana_cost_str": "{2}", "activated_abilities": [pay_draw(1)]})),
+        // Contested War Zone with the trigger the Oracle text says
+        // (docs/ir_defects.md 161: "deals combat damage to you", a player).
+        card("Test War Zone", json!({"card_types": ["Land"], "produces": ["C"], "mana_only_from_produces": true,
+            "activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": {"$t": "ManaCost", "generic": 1}, "mana_str": "{1}", "tap_self": true},
+                "effect": {"$t": "PumpCreaturesYouControlUntilEOT", "attacking_only": true, "power_bonus": 1}}],
+            "triggered_abilities": [{"$t": "TriggeredAbility", "effect": {"$t": "ChangeControllerToCombatDamageSource"}, "event": "deals_combat_damage",
+                "predicate": {"$t": "And", "left": {"$t": "Subject", "inner": {"$t": "IsCreature"}, "slot": "source"},
+                    "right": {"$t": "And", "left": {"$t": "Subject", "inner": {"$t": "IsPlayer"}, "slot": "target"}, "right": {"$t": "Controlled", "subject": "target"}}}}]})),
+        // Plaza of Heroes with its third ability as the Oracle text says
+        // (docs/ir_defects.md 160): "{T}: Add one mana of any color among
+        // legendary permanents you control."
+        card("Test Plaza", json!({"card_types": ["Land"], "activated_abilities": [
+            tap_mana(json!([["C", 1]]), None),
+            tap_mana(json!([["any", 1]]), Some("legendary_spell")),
+            {"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "tap_self": true}, "is_mana_ability": true,
+                "effect": {"$t": "AddOneManaOfColorAmongControlled", "card_types": [], "legendary": true, "group_description": "legendary permanents"}},
+            {"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "exile_self": true, "mana": {"$t": "ManaCost", "generic": 3}, "mana_str": "{3}", "tap_self": true},
+                "effect": {"$t": "PumpTargetCreatureUntilEOT", "granted_keywords": [{"$t": "Keyword", "kind": "hexproof"}, {"$t": "Keyword", "kind": "indestructible"}], "legendary_only": true}}]})),
         // A blue Eldrazi ({U}): not colorless.
         card("Test Blue Eldrazi", json!({"card_types": ["Creature"], "subtypes": ["Eldrazi"], "power": 1, "toughness": 1,
             "mana_cost": {"$t": "ManaCost", "colored": [["U", 1]]}, "mana_cost_str": "{U}"})),

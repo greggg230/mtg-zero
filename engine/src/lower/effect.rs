@@ -949,6 +949,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::eoe_a::lower_effect_eoe_a(l, b, other)
                 && !super::effect_eoe_d::lower_effect_eoe_d(l, b, other)
                 && !super::eoe_x::lower_effect_eoe_x(l, b, other)
+                && !super::eoe_w2::lower_effect_eoe_w2(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

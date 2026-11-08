@@ -159,6 +159,9 @@ pub(crate) struct Class {
     /// Its mana is `MADE` (it never pays such a cost: nothing pays for
     /// itself).
     pub need: ManaMask,
+    /// How many such needs its cost is: 1, or n for {n} (Cascading
+    /// Cataracts' {5}; ENGINE.md 99.12).
+    pub need_n: u8,
     /// How many times a member may be activated in one payment (Pentad
     /// Prism: once per charge counter; 1 otherwise).
     pub reuse: u8,
@@ -192,6 +195,7 @@ impl Class {
             sac_self: false,
             only: 0,
             need: 0,
+            need_n: 0,
             reuse: 1,
             convert: false,
             haste: false,
@@ -202,13 +206,14 @@ impl Class {
     }
 }
 
-/// The one-mana cost of a mana ability as a `NOT_MADE` need (0: none;
-/// {1}: any type).
-fn need_of(cost: &ManaCost) -> ManaMask {
+/// The mana cost of a mana ability as `NOT_MADE` needs: one mana, or {n}
+/// (n needs of any type; the lowering checks): (mask, how many; 0: none).
+fn need_of(cost: &ManaCost) -> (ManaMask, u8) {
     let pip = (0..6).find(|&t| cost.pips[t] > 0).map(|t| 1u8 << t);
     let hyb = (0..10).find(|&i| cost.hybrid[i] > 0).map(crate::mana::pair_mask);
     let generic = (cost.generic > 0).then_some(TYPES);
-    pip.or(hyb).or(generic).map_or(0, |m| m | crate::mana::NOT_MADE)
+    let n = if pip.or(hyb).is_some() { 1 } else { cost.generic };
+    (pip.or(hyb).or(generic).map_or(0, |m| m | crate::mana::NOT_MADE), n)
 }
 
 /// What the pool holds after a payment (CR 106.4, 601.2h): the amounts,
@@ -417,6 +422,11 @@ pub(crate) fn productions(g: &Game, p: PlayerId, prod: &ManaProd, src: Option<Ca
         ManaProd::Fixed(v) => vec![*v],
         ManaProd::IfElse { cond, then, els } => vec![if g.cond_holds(cond, p) { *then } else { *els }],
         ManaProd::SameType { mask, n } => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, *n)).collect(),
+        // (Saturating: at most 255 of a type, shortcuts.md 46.3.)
+        ManaProd::SameTypeCounters { mask, counter } => match src.map_or(0, |c| g.counters_on(c, *counter)).min(255) as u8 {
+            0 => Vec::new(),
+            n => (0..6).filter(|&t| mask & (1 << t) != 0).map(|t| one(t, n)).collect(),
+        },
         ManaProd::Combo { mask, n } => {
             let ts: Vec<usize> = (0..6).filter(|&t| mask & (1 << t) != 0).collect();
             let mut out = Vec::new();
@@ -700,14 +710,15 @@ impl Game {
                 let same = |cl: &&mut Class| {
                     cl.def == def && cl.members[0].slot == src.slot && cl.sac_self == sac_self && (!bonuses || extra_of(cl.members[0].card) == extra)
                 };
-                let per_source = matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::IfCounter { .. }) || reuse > 1;
+                let per_source =
+                    matches!(m.prod, ManaProd::Linked | ManaProd::Chosen | ManaProd::IfCounter { .. } | ManaProd::SameTypeCounters { .. }) || reuse > 1;
                 if let Some(cl) = out.iter_mut().find(same).filter(|_| !per_source) {
                     cl.members.push(src);
                     continue;
                 }
                 // ("{X}: add X mana in any combination of colors": the
                 // payment's mana may become any colours, `Class::convert`.)
-                let need = if ad.cost.mana.is_zero() { 0 } else { need_of(&ad.cost.mana) };
+                let (need, need_n) = if ad.cost.mana.is_zero() { (0, 0) } else { need_of(&ad.cost.mana) };
                 let yld = if ad.x {
                     Yield::Multi { prods: vec![[0; 6]], units: Some(Vec::new()) }
                 } else {
@@ -733,6 +744,7 @@ impl Game {
                     sac_self,
                     only: m.only,
                     need,
+                    need_n,
                     reuse,
                     convert: ad.x,
                     haste: m.haste,
@@ -958,7 +970,7 @@ impl Game {
                     return None;
                 }
                 let units = match prod {
-                    ManaProd::SameType { mask, .. } if mask.count_ones() > 1 => None,
+                    ManaProd::SameType { mask, .. } | ManaProd::SameTypeCounters { mask, .. } if mask.count_ones() > 1 => None,
                     ManaProd::OneOf(_) => None,
                     ManaProd::Combo { mask, n } => Some(vec![Unit::free(*mask); *n as usize]),
                     _ => Some(units_of(&prods[0]).collect()),
@@ -1370,7 +1382,7 @@ impl Game {
         let base = self.vgroups(pm);
         let mut marked = pm.marked.clone();
         if cl.need != 0 {
-            marked.push(cl.need);
+            marked.extend(std::iter::repeat_n(cl.need, cl.need_n as usize));
         }
         prods
             .iter()
@@ -1857,7 +1869,7 @@ impl Game {
             }
         }
         if cl.need != 0 {
-            pm.marked.push(cl.need);
+            pm.marked.extend(std::iter::repeat_n(cl.need, cl.need_n as usize));
         }
         if cl.haste {
             pm.extra_haste = pm.extra_haste.saturating_add(prod[crate::mana::R]);
@@ -2157,8 +2169,10 @@ struct Way {
     units: SVec<Unit, 4>,
     life: i32,
     sac: i32,
-    /// The ability's own mana cost (`Class::need`), 0 for none.
+    /// The ability's own mana cost (`Class::need`), 0 for none, and how
+    /// many such needs (`Class::need_n`).
     need: ManaMask,
+    need_n: u8,
     /// It taps a Lumberjack (`Budget::tap`).
     tap: i32,
 }
@@ -2230,7 +2244,7 @@ fn cands(
             if cl.convert {
                 // (Its card's other ways are kept apart, below: activating
                 // it taps and sacrifices the card, so they are out then.)
-                out.convert.push((Way { units: SVec::new(), life: extra, sac, need: 0, tap: 0 }, None));
+                out.convert.push((Way { units: SVec::new(), life: extra, sac, need: 0, need_n: 0, tap: 0 }, None));
                 conv_cards.push(s.card);
                 continue;
             }
@@ -2251,11 +2265,11 @@ fn cands(
                 }
                 _ => {}
             }
-            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac, need: cl.need, tap };
+            let multi = |units: SVec<Unit, 4>| Way { units, life: extra, sac, need: cl.need, need_n: cl.need_n, tap };
             let ways: Vec<Way> = match &cl.yld {
                 Yield::One(u) => {
                     let units = std::iter::repeat_n(Unit::free(u.mask | restr), n as usize).collect();
-                    vec![Way { units, life: u.life as i32 + extra, sac, need: 0, tap }]
+                    vec![Way { units, life: u.life as i32 + extra, sac, need: 0, need_n: 0, tap }]
                 }
                 Yield::Multi { units: Some(us), .. } => {
                     vec![multi(us.iter().map(|u| Unit::free(u.mask | made | restr)).collect())]
@@ -2285,7 +2299,14 @@ fn cands(
                 }
                 let mut units = t.units.clone();
                 units.extend(s.units.iter().copied());
-                ways.push(Way { units, life: t.life + s.life, sac: t.sac + s.sac, need: t.need | s.need, tap: t.tap + s.tap });
+                ways.push(Way {
+                    units,
+                    life: t.life + s.life,
+                    sac: t.sac + s.sac,
+                    need: t.need | s.need,
+                    need_n: t.need_n.max(s.need_n),
+                    tap: t.tap + s.tap,
+                });
             }
         }
         // A converter's card (Wizard's Rockets with Urza's "tap an untapped
@@ -2307,7 +2328,7 @@ fn cands(
             }
         }
         let ways = std::mem::take(&mut ways);
-        let same_use = |a: &Way, b: &Way| (a.life, a.sac, a.need) == (b.life, b.sac, b.need);
+        let same_use = |a: &Way, b: &Way| (a.life, a.sac, a.need, a.need_n) == (b.life, b.sac, b.need, b.need_n);
         if ways.iter().all(|w| w.units.len() == 1 && w.need == 0 && w.tap == 0 && same_use(w, &ways[0])) {
             let mask = ways.iter().fold(0, |m, w| m | w.units[0].mask);
             out.fixed.push(Unit { mask, ..as_unit(&ways[0]) });
@@ -2412,7 +2433,7 @@ fn ways_payable(cost: &ManaCost, marked: &[ManaMask], chosen: &[ManaMask], fixed
             let (len, nl) = (units.len(), needs.len());
             units.extend(w.units.iter().copied());
             if w.need != 0 {
-                needs.push(w.need);
+                needs.extend(std::iter::repeat_n(w.need, w.need_n as usize));
             }
             let ok = go(cost, needs, chosen, units, rest, left, nodes);
             units.truncate(len);
@@ -2475,7 +2496,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "a feasibility search visited")]
     fn an_exhausted_feasibility_search_panics_with_its_inputs() {
-        let way = |m: ManaMask| Way { units: std::iter::once(Unit::free(m)).collect(), life: 0, sac: 0, need: 0, tap: 0 };
+        let way = |m: ManaMask| Way { units: std::iter::once(Unit::free(m)).collect(), life: 0, sac: 0, need: 0, need_n: 0, tap: 0 };
         let alts: Vec<Vec<Way>> = (0..21).map(|_| vec![way(1 << 5), way(1 << 3)]).collect();
         let cost = ManaCost::parse("{W}").unwrap();
         ways_payable(&cost, &[], &[], &Units::new(), &alts, Budget::FREE);

@@ -232,3 +232,54 @@ impl Game {
         self.pool_kinds(p).iter().copied().collect()
     }
 }
+
+/// The instructions W2 added (ENGINE.md 99.12), inside `Ext::EoeW2`. Same
+/// rules as `Op`: named after rules actions, never cards.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum EoeW2 {
+    /// The controller of the triggered ability's event object gains control
+    /// of the source (CR 613.1b, an effect without a duration; "that
+    /// creature's controller gains control of this land").
+    EventObjControllerGainsSource,
+}
+
+impl EoeW2 {
+    /// Does the op read its triggered ability's event?
+    pub fn uses_event(&self) -> bool {
+        match self {
+            EoeW2::EventObjControllerGainsSource => true,
+        }
+    }
+}
+
+impl Game {
+    /// The number of counters of kind `k` on object `s`: now, or as it last
+    /// existed on the battlefield if it left (CR 608.2h).
+    pub(crate) fn source_counters(&self, s: crate::ids::ObjRef, k: crate::db::Counter) -> i64 {
+        if self.live(s) && self.objs[s.idx.i()].zone == crate::ids::Zone::Battlefield {
+            self.counters_on(s.idx, k) as i64
+        } else {
+            self.lki_counters.iter().filter(|x| x.0 == s && x.1 == k).map(|x| x.2 as i64).sum()
+        }
+    }
+
+    pub(crate) fn exec_eoe_w2(&mut self, f: &mut crate::resolve::Frame, op: &EoeW2) -> crate::resolve::Flow {
+        match op {
+            EoeW2::EventObjControllerGainsSource => {
+                // "That creature's controller": now if it is still on the
+                // battlefield, else as it last existed there (CR 608.2h): a
+                // creature that dealt combat damage to a player was
+                // attacking (CR 510.1a), so it was the active player's
+                // (506.4: a creature whose control changes leaves combat).
+                if let Some(r) = f.ev.obj {
+                    let live = self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield;
+                    let p = if live { self.objs[r.idx.i()].controller } else { self.turn.active };
+                    if self.live(f.source) {
+                        self.change_control(f.source.idx, p);
+                    }
+                }
+                crate::resolve::Flow::Next
+            }
+        }
+    }
+}

@@ -990,6 +990,8 @@ pub enum Ext {
     EoeA(EoeA),
     /// The Edge of Eternities cross-lane pass (ENGINE.md 99.8).
     EoeX(crate::eoe_x::EoeX),
+    /// Edge of Eternities W2, mana and lands (ENGINE.md 99.12).
+    EoeW2(crate::eoe_w2::EoeW2),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1235,6 +1237,7 @@ impl Op {
             Op::Ext(Ext::CreateTokensFor { who: w, .. }) | Op::Ext(Ext::GraveyardToBottomRandom { who: w }) => who(w),
             Op::Ext(Ext::EoeD(x)) => x.uses_event(),
             Op::Ext(Ext::EoeX(x)) => x.uses_event(),
+            Op::Ext(Ext::EoeW2(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {

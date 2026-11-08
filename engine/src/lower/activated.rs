@@ -42,7 +42,12 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     l.deny("ActivatedAbility.activate_only_once", activate_only_once);
     let mut only_if = Vec::new();
     let mut loyalty_paid = (0i64, false);
-    let cost = lower_cost(l, cost, from, &mut only_if, &mut loyalty_paid);
+    let mut cost = lower_cost(l, cost, from, &mut only_if, &mut loyalty_paid);
+    // ("{X}{X}": more than one {X}, ENGINE.md 99.12.)
+    let x_times = std::mem::take(&mut l.act_x_times);
+    if x_times > 1 {
+        cost.x_times = x_times;
+    }
     let loyalty = if walker && from == From::Battlefield {
         // CR 606.3: loyalty abilities are activated at sorcery speed (the
         // IR marks them so); 605.1a: never mana abilities.
@@ -79,7 +84,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
             l.unsupported("ManaAbility.cost.sacrifice(with more)");
         }
         let pips = cost.mana.pips.iter().sum::<u8>() + cost.mana.hybrid.iter().sum::<u8>();
-        if !cost.mana.is_zero() && !(pips + cost.mana.generic == 1 && !cost.mana.has_phyrexian()) {
+        // (One mana, or {n}: n generic needs of the payment, Cascading
+        // Cataracts' {5}; ENGINE.md 99.12.)
+        if !cost.mana.is_zero() && !((pips + cost.mana.generic == 1 || pips == 0) && !cost.mana.has_phyrexian()) {
             l.unsupported("ManaAbility.cost.mana(more than one mana)");
         }
         if (!cost.mana.is_zero() || l.act_x) && (cost.life > 0 || m.damage_to_you > 0 || m.only != 0) {
@@ -157,7 +164,13 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
         let ab = lower_ability(l, effect);
         l.sac_cost = false;
         // (Or an effect that reads the X: "+X/+0", ENGINE.md 99.3.)
-        let reads_x = ab.program.iter().any(|op| matches!(op, crate::program::Op::Ext(crate::program::Ext::ApplyPtX { .. })));
+        let reads_x = ab.program.iter().any(|op| {
+            matches!(
+                op,
+                crate::program::Op::Ext(crate::program::Ext::ApplyPtX { .. })
+                    | crate::program::Op::Ext(crate::program::Ext::PutCounters { n: crate::program::Amount::X, .. })
+            )
+        });
         if l.act_x && !reads_x && !ab.targets.iter().any(|t| t.max == crate::db::X_TARGETS) {
             l.unsupported("ActivationCost.mana.x_pips(X not used by the effect)");
         }
@@ -267,8 +280,11 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     // "{X}" (CR 107.3, 602.2b): announced as the ability is activated; the
     // effect must use it (`X_TARGETS`).
     let x_mana = match mana.as_deref() {
-        Some(cats::ManaCost::ManaCost(n)) if n.x_pips == 1 && from == From::Battlefield => {
+        // ("{X}{X}": the X paid twice, `Cost::x_times`; Blast Zone,
+        // ENGINE.md 99.12.)
+        Some(cats::ManaCost::ManaCost(n)) if (1..=3).contains(&n.x_pips) && from == From::Battlefield => {
             l.act_x = true;
+            l.act_x_times = n.x_pips as u8;
             Some(cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..n.clone() }))
         }
         _ => None,
@@ -279,6 +295,7 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
             (None, Some(m)) => lower_mana_cost(l, "ActivationCost.mana", m),
             (None, None) => Default::default(),
         },
+        x_times: 0,
         tap: *tap_self,
         life: l.int("ActivationCost.pay_life", *pay_life, 0, 99) as u8,
         sac_self: *sacrifice_self,
@@ -634,6 +651,11 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
             }
             prod
         }
+        // "Add X mana of any one color, where X is the number of charge
+        // counters on <this>" (The Eternity Elevator; ENGINE.md 99.12).
+        E::AddChargeCounterManaOfChosenColor(nodes::AddChargeCounterManaOfChosenColor {}) => {
+            ManaProd::SameTypeCounters { mask: COLORS, counter: super::eoe_a::charge(l) }
+        }
         E::AddNManaOfChosenColor(nodes::AddNManaOfChosenColor { amount, options }) => {
             let n = l.int("AddNManaOfChosenColor.amount", *amount, 1, 20) as u8;
             let mask = mask_of(l, "AddNManaOfChosenColor.options", options);
@@ -813,7 +835,11 @@ fn lower_mana_ability(l: &mut Lowerer, e: &cats::Effect) -> Option<ManaAbility> 
 /// The types a production can make (which `produces` colours it covers).
 pub(crate) fn prod_mask(p: &ManaProd) -> ManaMask {
     match p {
-        ManaProd::One(m) | ManaProd::SameType { mask: m, .. } | ManaProd::Combo { mask: m, .. } | ManaProd::ComboX { mask: m } => *m,
+        ManaProd::One(m)
+        | ManaProd::SameType { mask: m, .. }
+        | ManaProd::SameTypeCounters { mask: m, .. }
+        | ManaProd::Combo { mask: m, .. }
+        | ManaProd::ComboX { mask: m } => *m,
         ManaProd::Fixed(v) => (0..6).filter(|&i| v[i] > 0).fold(0, |m, i| m | (1 << i)),
         ManaProd::PerPermanent { ty, .. } => 1 << ty,
         ManaProd::ColorAmong(_) => COLORS,

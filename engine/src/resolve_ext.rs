@@ -1647,6 +1647,7 @@ impl Game {
             Ext::EoeA(x) => self.exec_eoe_a(f, x),
             Ext::EoeD(x) => self.exec_eoe_d(f, x),
             Ext::EoeX(x) => self.exec_eoe_x(f, x),
+            Ext::EoeW2(x) => self.exec_eoe_w2(f, x),
             Ext::CreateTokenCopy { .. }
             | Ext::BecomeCopy { .. }
             | Ext::CopySpell { .. }

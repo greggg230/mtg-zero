@@ -212,7 +212,7 @@ impl Game {
     /// of the cost before reductions).
     pub(crate) fn act_mana_x(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, x: u8) -> crate::mana::ManaCost {
         let mut m = ad.cost.mana;
-        m.generic = m.generic.saturating_add(x);
+        m.generic = m.generic.saturating_add(x.saturating_mul(ad.cost.x_times.max(1)));
         // "Activated abilities of sources with the chosen name cost {2} more
         // to activate unless they're mana abilities" (Anointed Peacekeeper;
         // CR 602.2b, 601.2f: increases first).

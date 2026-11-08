@@ -898,8 +898,12 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
 /// The last four workstreams (ENGINE.md 99.11-99.14): W1 adds to
 /// `SUPPORTED_EOE_IRFIX`; W2, W3, W4 to their own lists.
 const SUPPORTED_EOE_MANA: &[&str] = &[
+    "Blast Zone",
+    "Cascading Cataracts",
+    "Crystal Quarry",
     "Eldrazi Temple",
     "Steelswarm Operator",
+    "The Eternity Elevator",
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
 ];

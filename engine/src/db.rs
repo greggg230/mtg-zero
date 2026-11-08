@@ -414,6 +414,10 @@ pub enum Filter {
     /// A permanent that entered as a spell cast for its warp cost (CR
     /// 702.185a; `Mark::WarpCast`; ENGINE.md 99.8).
     CastForWarp,
+    /// Mana value equal to the number of counters of this kind on the
+    /// context's source (as it last existed if it left, CR 608.2h; Blast
+    /// Zone, ENGINE.md 99.12).
+    MvIsSourceCounters(Counter),
 }
 
 /// `Filter::Ability` kinds.
@@ -1035,6 +1039,10 @@ pub enum ManaProd {
     /// those lands make, other abilities of this kind making none of their
     /// own.
     LandsCouldProduce,
+    /// X mana of one type chosen from the mask, X the number of counters of
+    /// this kind on the source (The Eternity Elevator; ENGINE.md 99.12):
+    /// none without such counters.
+    SameTypeCounters { mask: ManaMask, counter: Counter },
 }
 
 /// A mana ability's effect: the mana, plus damage its source deals to its
@@ -1092,6 +1100,9 @@ pub struct SacCost {
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Cost {
     pub mana: ManaCost,
+    /// An activation cost's {X} counted this many times ("{X}{X}": 2; 0 or
+    /// 1: once; `ActivatedDef::x`; ENGINE.md 99.12).
+    pub x_times: u8,
     /// `{T}` (CR 107.5): the source must be untapped and, if it is a
     /// creature, free of summoning sickness (302.6).
     pub tap: bool,
@@ -1887,6 +1898,7 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
     };
     let c = Cost {
         mana: a.mana.plus(&b.mana),
+        x_times: a.x_times.max(b.x_times),
         tap: a.tap || b.tap,
         life: a.life.checked_add(b.life)?,
         sac_self: a.sac_self || b.sac_self,
