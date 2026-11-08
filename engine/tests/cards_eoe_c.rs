@@ -980,3 +980,23 @@ fn timeline_culler_from_the_graveyard_is_never_free_cr118_9a() {
     let c = g.card(0, "Timeline Culler", Zone::Graveyard);
     assert!(!g.pending_decision().unwrap().options.iter().any(|o| matches!(o.choice, Choice::Cast(x) if x == c)), "{:?}", g.options_desc());
 }
+
+/// Broodguard Elite's "Warp {X}{G}" on an {X}{G}{G} card: X is announced as
+/// it is cast (CR 107.3, 601.2b) and adds to the warp cost.
+#[test]
+fn warp_with_x_cr107_3() {
+    let mut g = scen().battlefield(0, &["Forest", "Forest", "Forest"]).hand(0, &["Test Warp Hydra"]).at(Step::Main1, 0).start();
+    let h = g.card(0, "Test Warp Hydra", Zone::Hand);
+    g.choose(Choice::Cast(h));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseAltCost));
+    g.choose(Choice::Number(1));
+    g.drive_until(|g| g.pending_decision().unwrap().options.iter().any(|o| o.choice == Choice::Number(2)) || g.kind() == Some(DecisionKind::PayMana));
+    assert!(!g.has_option(Choice::Number(3)), "X at most 2 with three Forests: {:?}", g.options_desc());
+    g.choose(Choice::Number(2));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(h).zone, Zone::Battlefield, "{}", log(&g));
+    assert_eq!(g.counters_on(h, Counter::P1P1), 2);
+    assert_eq!(untapped(&g, 0), 0, "{{2}}{{G}}");
+    assert!(g.void_active(), "warped");
+}

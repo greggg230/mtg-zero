@@ -895,7 +895,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // exiled at the beginning of the next end step, and its owner may cast
     // it from exile on a later turn.
     let warp = warp_cost.as_ref().map(|m| {
-        let mana = lower_mana_cost(l, "CardPrinting.warp_cost", m);
+        // "Warp {X}{G}" on an {X} card: the X announced as it is cast
+        // (CR 107.3, 601.2b) adds to the warp cost as to its mana cost
+        // (`total_mana`), so the warp cost's {X} must be the card's.
+        let cats::ManaCost::ManaCost(n) = &**m;
+        if n.x_pips != x_pips as i64 {
+            l.unsupported("CardPrinting.warp_cost.x_pips(not the mana cost's)");
+        }
+        let plain = cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..n.clone() });
+        let mana = lower_mana_cost(l, "CardPrinting.warp_cost", &plain);
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::WarpExile));
         let k = l.delayed_ability(d.finish());

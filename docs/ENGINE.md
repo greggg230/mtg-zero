@@ -18178,7 +18178,10 @@ Will's route, which allows the warp cost through `alt_allowed`, is there) cast a
 then castability needs the warp cost (not the mana cost) and the spell is cast for it with no
 choice (`begin_cast_face` sets its alternative cost); `warp_from_graveyard_ok` lets warp's cost be
 paid from a graveyard (`alt_payable`). The warped permanent is exiled at the next end step and may
-be cast from exile on a later turn, as warp from hand.
+be cast from exile on a later turn, as warp from hand. "Warp {X}{G}" on an {X} card (Broodguard
+Elite, on a custom card): the warp cost's {X} must be the mana cost's, since the X announced adds
+to any cost of the spell (`total_mana`). A graveyard warp cast is never "without paying its mana
+cost" too (CR 118.9a: one alternative cost; found by the EoE fuzz, seed 752).
 
 **More effects.** "Draw X cards, where X is the number of differently named lands you control"
 (`Amount::DifferentlyNamedLands`, CR 201.2); "exile the top X cards of your library, where X is one
@@ -18203,7 +18206,8 @@ effect), Gravkill and Archenemy's Charm (the target's "or Spacecraft" / "or plan
 Elegy Acolyte ("one or more ... deal combat damage" as once per turn, as entry 16), Nexus of Fate
 (its "from anywhere" replacement without the `watched_in_graveyard` flag), Pinnacle Starcage (the
 Robot token by name only, as entry 3), Starfield Vocalist (its replacement's two event subjects
-dropped: the IR is Strionic Resonator's).
+dropped: the IR is Strionic Resonator's), Mirrorpool (its {C} activation pips read as generic and
+its mana ability dropped, as entry 5).
 
 **Tests.** `engine/tests/cards_eoe_c.rs` (the cards, and lane C features whose real cards need
 another lane, on custom cards in `engine/tests/eoe_c_util`, the EoE table plus those cards).

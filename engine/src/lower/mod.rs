@@ -254,6 +254,9 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     // of a permanent you control to trigger": both restrictions dropped
     // (docs/ir_defects.md 66).
     ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
+    // "{2}{C}" / "{4}{C}" activation costs as generic {3} / {5}, and its
+    // "{T}: Add {C}" dropped (docs/ir_defects.md 67, as 5).
+    ("Mirrorpool", "ir_defect(colorless pips as generic, docs/ir_defects.md 67)"),
 
     // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
 ];

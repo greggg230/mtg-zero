@@ -63,6 +63,7 @@ permission) and a consumer can go wrong with it.
 | 64 | Nexus of Fate (Edge of Eternities, ENGINE.md 99.4) | flag left unset | the self "would go to graveyard -> library" replacement with `watched_in_graveyard: false` | `watched_in_graveyard: true` (the printing's "put into a graveyard from anywhere" flag, which mtg-bot's move code reads before the replacement) | the instant builder that writes the replacement (`cards/parser/creature_rmc_grammar.py` sets the flag for the creatures only) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 65 | Pinnacle Starcage (Edge of Eternities, ENGINE.md 99.4) | value resolved late | `CreateNTokensFromLastExileRecall { token_name: "Robot" }` | the 2/2 colorless Robot artifact creature token's `CardPrinting` inline (as entry 3) | `effects/` (the class resolves the token by name) | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 66 | Starfield Vocalist (Edge of Eternities, ENGINE.md 99.4) | event subjects dropped | `ReplacementEffect { event_pattern: EventPattern { event: triggered_ability_triggers }, transform: AddInstances { delta: 1 } }`, no subject filters (Strionic Resonator's shape, "triggered abilities trigger an additional time") | the triggering event a permanent entering the battlefield, the ability's source a permanent you control (`subject_filters`) | `cards/parser/creature_builder.py` (~line 627) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 67 | Mirrorpool (Edge of Eternities, ENGINE.md 99.4) | lossy schema, ability dropped | activation costs `mana: { generic: 3 }` for `mana_str: "{2}{C}"` and `{ generic: 5 }` for "{4}{C}"; no `produces`, no mana ability | a colorless pip (`{C}`, CR 107.4b) in each cost; "{T}: Add {C}" | `cards/base.py::parse_mana_cost` (as entry 5), the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -500,6 +501,21 @@ ability of a permanent you control to trigger, that ability triggers an addition
 * Source: `cards/parser/creature_builder.py` (~line 627).
 * Fix: write the two subject filters.
 * Engine: blocked, `ir_defect(event subjects dropped, docs/ir_defects.md 66)`.
+
+
+**67. Mirrorpool.** Oracle: "This land enters tapped. / {T}: Add {C}. / {2}{C}, {T}, Sacrifice this
+land: Copy target instant or sorcery spell you control. You may choose new targets for the copy. /
+{4}{C}, {T}, Sacrifice this land: Create a token that's a copy of target creature you control."
+
+* IR: the two activated abilities' `mana` are `{ generic: 3 }` and `{ generic: 5 }` beside
+  `mana_str` "{2}{C}" and "{4}{C}": the colorless pip (CR 107.4b, payable only with colorless mana)
+  became generic, entry 5's lossy parse. The printing has no `produces` and no mana ability: "{T}:
+  Add {C}" is dropped.
+* Should be: a colorless pip in each cost; the mana ability (or `produces: [C]`).
+* Source: `cards/base.py::parse_mana_cost` (entry 5) and the land builder.
+* Engine: blocked, `ir_defect(colorless pips as generic, docs/ir_defects.md 67)`; its copy
+  effects (`CopyTargetInstantOrSorceryYouControl`, `CreateTokenCopyOfTargetCreatureYouControl`)
+  are not built (no other card uses them).
 
 
 ## Suspected defects (representational)

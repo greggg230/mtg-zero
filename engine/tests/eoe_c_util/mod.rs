@@ -114,6 +114,13 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
             "cost": {"$t": "ActivationCost", "mana": cost("{1}"), "mana_str": "{1}"},
             "effect": {"$t": "SearchLibraryForCard", "filter_name": "sliver"}}]})),
         creature("Test Sliver", "{1}{G}", 1, 1, &["Sliver"], json!({})),
+        // Broodguard Elite's "enters with X +1/+1 counters" and "Warp {X}{G}".
+        {
+            let mut v = creature("Test Warp Hydra", "{X}{G}{G}", 0, 0, &["Hydra"], json!({"enters_with_counters_from_x": "x",
+                "warp_cost": {"$t": "ManaCost", "colored": [["G", 1]], "x_pips": 1}, "warp_cost_str": "{X}{G}"}));
+            v["printing"]["mana_cost"] = json!({"$t": "ManaCost", "colored": [["G", 2]], "x_pips": 1});
+            v
+        },
         // Entropic Battlecruiser's "Whenever an opponent discards a card".
         card("Test Discard Watcher", "{1}", &["Artifact"], &[], json!({"triggered_abilities": [{"$t": "TriggeredAbility",
             "event": "discards_card", "predicate": {"$t": "Controlled", "by": "opponent"}, "effect": {"$t": "GainLife", "amount": 2}}]})),
