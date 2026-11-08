@@ -6,8 +6,18 @@
 //! targets derived here.
 
 use super::Lowerer;
+use crate::db::{types, Counter, Filter};
+use crate::eoe_w4::EoeW4;
 use crate::program::{Amount, Builder, CopyOf, Ext, Op, Who};
-use card_ir::{cats, nodes};
+use card_ir::{cats, enums, nodes};
+
+fn and(a: Filter, b: Filter) -> Filter {
+    Filter::And(Box::new(a), Box::new(b))
+}
+
+fn w4(b: &mut Builder, op: EoeW4) -> usize {
+    b.op(Op::Ext(Ext::EoeW4(op)))
+}
 
 /// Lower an effect class of W4; `false` if the class is not one of these.
 pub(crate) fn lower_effect_eoe_w4(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) -> bool {
@@ -71,6 +81,50 @@ pub(crate) fn lower_effect_eoe_w4(l: &mut Lowerer, b: &mut Builder, e: &cats::Ef
             let Some(t) = super::effect::lower_targets(l, b, targets, "CreateTokenCopyOfTargetWithExceptions") else { return true };
             b.op(Op::Ext(Ext::CreateTokenCopy { of: CopyOf::Target { i: t, lki: false }, who: Who::You, n: Amount::Fixed(1), exc }));
             b.op(Op::Ext(Ext::TokensCreated));
+        }
+        // "Return up to three target creature cards with total mana value 3
+        // or less from your graveyard to the battlefield. Put a +1/+1 counter
+        // on each of them" (Scout for Survivors; CR 601.2c: the total is a
+        // restriction on the set of targets, `TargetReq::total_mv`).
+        E::ReturnUpToNSmallCreaturesFromGraveyardWithCounters(nodes::ReturnUpToNSmallCreaturesFromGraveyardWithCounters {
+            creature,
+            artifact,
+            land,
+            nonland_permanent,
+            or_enchantment,
+            or_spacecraft,
+            or_artifact,
+            max_mv,
+            min_n,
+            max_n,
+            max_total_mv,
+            destination,
+            plus_one_counter,
+            log_suffix,
+            untargeted_all,
+            target_kind,
+        }) => {
+            let _ = (log_suffix, target_kind); // display, Python dispatch
+            if !*creature || *artifact || *land || *nonland_permanent || *or_enchantment || *or_spacecraft || *or_artifact {
+                l.unsupported("ReturnUpToNSmallCreaturesFromGraveyardWithCounters(not creature cards)");
+            }
+            l.deny("ReturnUpToNSmallCreaturesFromGraveyardWithCounters.untargeted_all", untargeted_all);
+            if *destination != enums::GraveyardReturnDestination::Battlefield {
+                l.unsupported("ReturnUpToNSmallCreaturesFromGraveyardWithCounters.destination(not the battlefield)");
+            }
+            let mut f = and(Filter::Type(types::CREATURE), Filter::Owner(true));
+            if *max_mv > 0 {
+                f = and(f, Filter::ManaValueAtMost(l.int("ReturnUpToNSmallCreaturesFromGraveyardWithCounters.max_mv", *max_mv, 0, 30) as u8));
+            }
+            let lo = l.int("ReturnUpToNSmallCreaturesFromGraveyardWithCounters.min_n", *min_n, 0, 8) as u8;
+            let hi = l.int("ReturnUpToNSmallCreaturesFromGraveyardWithCounters.max_n", *max_n, 1, 8) as u8;
+            let tgt = b.target(Filter::InGraveyard(Box::new(f)), lo, hi);
+            if *max_total_mv > 0 {
+                b.targets[tgt as usize].total_mv =
+                    Some(l.int("ReturnUpToNSmallCreaturesFromGraveyardWithCounters.max_total_mv", *max_total_mv, 0, 30) as u8);
+            }
+            let counter = plus_one_counter.then_some(Counter::P1P1);
+            w4(b, EoeW4::GraveyardTargetsOntoBattlefield { tgt, counter });
         }
         _ => return false,
     }

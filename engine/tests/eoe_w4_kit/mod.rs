@@ -74,6 +74,8 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         // "W4 Bolt deals 10 damage to target creature."
         card("W4 Bolt", "{R}", &["Instant"], &[], json!({"spell_effect": {"$t": "DealDamageToTargetCreature", "amount": 10,
             "targets": [{"$t": "TargetSpec", "filter": {"$t": "IsCreature"}}]}})),
+        // "Exile target card from a graveyard."
+        card("W4 Purge", "{B}", &["Instant"], &[], json!({"spell_effect": {"$t": "ExileTargetCardFromGraveyard"}})),
         // "Target creature gets +3/+3 until end of turn."
         card("W4 Growth", "{G}", &["Instant"], &[], json!({"spell_effect": {"$t": "PumpTargetCreatureUntilEOT",
             "power_bonus": 3, "toughness_bonus": 3}})),

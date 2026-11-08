@@ -596,8 +596,14 @@ impl Game {
         // from below it, ENGINE.md 58.1; a deeper current target is kept by
         // `PASS`.)
         self.targeting = id;
-        let cands = self.target_candidates(tr, &ctx, &exclude);
+        let mut cands = self.target_candidates(tr, &ctx, &exclude);
         self.targeting = 0;
+        if let Some(n) = tr.total_mv {
+            // The new set within the total too (CR 601.2c, 707.10c).
+            let others: Vec<Target> =
+                item.targets.iter().enumerate().filter(|&(j, &(r, _))| j != k as usize && r == req).map(|(_, &(_, t))| t).collect();
+            self.retain_within_total_mv(n, &others, &mut cands);
+        }
         for t in cands {
             if t != cur {
                 opts.push(Opt { action: self.target_action(p, t), choice: Choice::Target(t) });

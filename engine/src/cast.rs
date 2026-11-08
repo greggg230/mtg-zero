@@ -2323,6 +2323,10 @@ impl Game {
         // from below it, ENGINE.md 58.1.)
         self.targeting = id;
         let mut cands = self.target_candidates(tr, &ctx, &exclude);
+        if let Some(n) = tr.total_mv {
+            // "With total mana value n or less" (CR 601.2c; ENGINE.md 99.14).
+            self.retain_within_total_mv(n, &already, &mut cands);
+        }
         if tr.pair != 0 {
             // A card of the player whose permanent was chosen.
             let k = tr.pair - 1;

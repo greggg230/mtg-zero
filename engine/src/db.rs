@@ -468,6 +468,10 @@ pub struct TargetReq {
     /// requirement k ("target artifact card in that player's graveyard",
     /// Goblin Welder); 0 = no such link.
     pub pair: u8,
+    /// The targets of this requirement together have mana value at most
+    /// this ("up to three target creature cards with total mana value 3 or
+    /// less", CR 601.2c: a restriction on the set; ENGINE.md 99.14).
+    pub total_mv: Option<u8>,
 }
 
 /// A spell or ability's effect: its target requirements and program; or,

@@ -1299,7 +1299,7 @@ pub struct Builder {
 impl Builder {
     /// Add a target requirement; returns its index.
     pub fn target(&mut self, filter: Filter, min: u8, max: u8) -> u8 {
-        let req = TargetReq { filter, min, max, distinct: 0, pair: 0 };
+        let req = TargetReq { filter, min, max, distinct: 0, pair: 0, total_mv: None };
         if let Some(k) = self.reuse {
             if self.targets.get(k) == Some(&req) {
                 self.reuse = Some(k + 1);

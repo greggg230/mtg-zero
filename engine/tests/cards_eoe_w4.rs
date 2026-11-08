@@ -243,3 +243,117 @@ fn cr_603_4_alpharael_halves_the_defenders_life_with_void() {
     quiet_until(&mut g, |g| g.turn().step == Step::End);
     assert_eq!(g.life(1), 4);
 }
+
+// ---- Scout for Survivors ------------------------------------------------------------
+
+/// Scout for Survivors: "Return up to three target creature cards with total
+/// mana value 3 or less from your graveyard to the battlefield. Put a +1/+1
+/// counter on each of them." The targets are chosen one at a time, each
+/// offered only if the total stays within 3 (CR 601.2c: the announced set's
+/// restriction); cards in the opponent's graveyard are not targets.
+#[test]
+fn cr_601_2c_scout_for_survivors_offers_only_targets_within_the_total() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .graveyard(0, &["W4 Elf", "W4 Bear", "W4 Ogre", "W4 Giant"])
+        .graveyard(1, &["W4 Elf"])
+        .hand(0, &["Scout for Survivors"])
+        .at(Step::Main1, 0)
+        .start();
+    let gy = |g: &Game, p, n| g.card(p, n, Zone::Graveyard);
+    let (elf, bear, ogre, giant, theirs) = (gy(&g, 0, "W4 Elf"), gy(&g, 0, "W4 Bear"), gy(&g, 0, "W4 Ogre"), gy(&g, 0, "W4 Giant"), gy(&g, 1, "W4 Elf"));
+    let s = g.card(0, "Scout for Survivors", Zone::Hand);
+    g.choose(Choice::Cast(s));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    for (c, ok) in [(elf, true), (bear, true), (ogre, true), (giant, false), (theirs, false)] {
+        assert_eq!(g.has_option(g.tgt(c)), ok, "{} {:?}", g.name(c), g.options_desc());
+    }
+    assert!(g.has_option(Choice::Pass), "up to three");
+    g.choose(g.tgt(elf));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    assert!(g.has_option(g.tgt(bear)), "1 + 2 = 3");
+    assert!(!g.has_option(g.tgt(ogre)), "1 + 3 = 4: over the total");
+    g.choose(g.tgt(bear));
+    // Nothing is left within the total (1 + 2 = 3): no third target, only
+    // "no more" (a single option, which `auto_single` answers in play).
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target) || g.kind() == Some(DecisionKind::PayMana));
+    if g.kind() == Some(DecisionKind::Target) {
+        assert_eq!(g.options_desc().len(), 1, "no candidate within the total: {:?}", g.options_desc());
+        g.choose(Choice::Pass);
+    }
+    pay(&mut g);
+    settle(&mut g);
+    for (c, pt) in [(elf, (2, 2)), (bear, (3, 3))] {
+        assert_eq!(g.obj(c).zone, Zone::Battlefield, "{}\n{}", g.name(c), log(&g));
+        assert_eq!(g.obj(c).controller, 0);
+        assert_eq!(g.pt(c), pt, "a +1/+1 counter on each (CR 122.1)");
+    }
+    assert_eq!(g.obj(ogre).zone, Zone::Graveyard);
+}
+
+/// A mana value 3 card alone fills the total; with no target at all the
+/// spell does nothing (up to three, CR 601.2c: zero is allowed).
+#[test]
+fn scout_for_survivors_one_three_drop_or_nothing() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .graveyard(0, &["W4 Elf", "W4 Ogre"])
+        .hand(0, &["Scout for Survivors"])
+        .at(Step::Main1, 0)
+        .start();
+    let ogre = g.card(0, "W4 Ogre", Zone::Graveyard);
+    let elf = g.card(0, "W4 Elf", Zone::Graveyard);
+    let s = g.card(0, "Scout for Survivors", Zone::Hand);
+    g.choose(Choice::Cast(s));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(ogre));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Target) || g.has_option(g.tgt(elf)));
+    assert!(!g.has_option(g.tgt(elf)), "3 + 1 = 4");
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(ogre).zone, Zone::Battlefield);
+    assert_eq!(g.pt(ogre), (4, 4));
+    assert_eq!(g.obj(elf).zone, Zone::Graveyard);
+    // No target: castable, does nothing.
+    let mut g = scen().battlefield(0, &["Plains", "Plains", "Plains"]).hand(0, &["Scout for Survivors"]).at(Step::Main1, 0).start();
+    let s = g.card(0, "Scout for Survivors", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(s)), "up to three: zero targets");
+    g.choose(Choice::Cast(s));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Target));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(s).zone, Zone::Graveyard);
+}
+
+/// The returned creatures enter together, then get their counters: one
+/// that left the graveyard before the spell resolves is not returned, the
+/// other still is (CR 608.2b).
+#[test]
+fn cr_608_2b_scout_for_survivors_returns_the_targets_still_there() {
+    let mut g = scen()
+        .battlefield(0, &["Plains", "Plains", "Plains"])
+        .graveyard(0, &["W4 Elf", "W4 Bear"])
+        .hand(0, &["Scout for Survivors"])
+        .battlefield(1, &["Swamp"])
+        .hand(1, &["W4 Purge"])
+        .at(Step::Main1, 0)
+        .start();
+    let elf = g.card(0, "W4 Elf", Zone::Graveyard);
+    let bear = g.card(0, "W4 Bear", Zone::Graveyard);
+    let s = g.card(0, "Scout for Survivors", Zone::Hand);
+    g.choose(Choice::Cast(s));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(elf));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(g.tgt(bear));
+    g.drive_until(|g| g.kind() != Some(DecisionKind::Target));
+    pay(&mut g);
+    // The opponent exiles the Bear in response.
+    to_opponent_priority(&mut g);
+    let tb = g.tgt(bear);
+    cast(&mut g, 1, "W4 Purge", &[tb]);
+    settle(&mut g);
+    assert_eq!(g.obj(elf).zone, Zone::Battlefield);
+    assert_eq!(g.pt(elf), (2, 2));
+    assert_eq!(g.obj(bear).zone, Zone::Exile);
+}
