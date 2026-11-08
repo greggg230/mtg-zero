@@ -860,6 +860,11 @@ impl Game {
                 None => out.push(Class { res: TAP, ..Class::of(def, src, Yield::One(Unit::free(0))) }),
             }
         }
+        // (A Pollinator tapped for improvise can't activate: castability and
+        // the payment both, ENGINE.md 99.12.)
+        if self.db.pollinator {
+            self.pol_split(p, &mut out);
+        }
         out
     }
 
@@ -885,6 +890,10 @@ impl Game {
                 Some(cl) => cl.members.push(src),
                 None => out.push(Class { res: TAP, ..Class::of(def, src, yld) }),
             }
+        }
+        // (A Pollinator tapped for convoke can't activate.)
+        if self.db.pollinator {
+            self.pol_split(p, &mut out);
         }
         out
     }
@@ -918,10 +927,6 @@ impl Game {
                 }
                 classes.push(cl);
             }
-        }
-        // (A Pollinator tapped for improvise or convoke can't activate.)
-        if classes.iter().any(|cl| cl.members[0].slot == POL_FOR) {
-            self.pol_split(p, &mut classes);
         }
         classes
     }

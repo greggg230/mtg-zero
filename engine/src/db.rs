@@ -1894,6 +1894,10 @@ pub struct CardDb {
     /// control this turn (`CardDef::etb_counter_per_land_entered`): the game
     /// keeps the count (`Game::lands_entered`).
     pub(crate) watch_lands_entered: bool,
+    /// A card of the table has "{T}, Tap an untapped permanent you control:
+    /// Add <mana>" (Gene Pollinator, `pay::POL_FOR`): improvise and convoke
+    /// sources look for it (`Game::pol_split`).
+    pub(crate) pollinator: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2080,6 +2084,7 @@ impl CardDb {
         db.land_subtypes = crate::eoe_w2::LAND_TYPES.iter().filter_map(|n| db.subtype_id(n)).collect();
         db.mountain = db.subtype_id("Mountain");
         db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
+        db.pollinator = db.defs.iter().any(|d| d.activated.iter().any(|a| a.mana().is_some() && a.cost.tap && a.cost.tap_untapped.is_some()));
         db
     }
 

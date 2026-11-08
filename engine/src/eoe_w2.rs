@@ -460,9 +460,12 @@ impl Game {
     /// can't activate any more: those members take one of the Pollinators'
     /// `share` (ENGINE.md 99.12).
     pub(crate) fn pol_split(&self, p: PlayerId, classes: &mut Vec<crate::pay::Class>) {
-        use crate::pay::{Members, IMPROVISE, POL_FOR};
+        use crate::pay::{Members, IMPROVISE};
         let actors = self.pol_activators(p);
-        let k = classes.iter().find(|cl| cl.members[0].slot == POL_FOR).map_or(0, |cl| cl.share);
+        let k = actors.len().min(u8::MAX as usize) as u8;
+        if k == 0 {
+            return;
+        }
         let mut split = Vec::new();
         for cl in classes.iter_mut().filter(|cl| cl.members[0].slot == IMPROVISE) {
             let (mut a, mut rest) = (Members::new(), Members::new());

@@ -455,3 +455,26 @@ fn cr_707_5_echoing_deeps_enters_tapped_as_a_copy_of_a_land_card_in_a_graveyard(
     assert_eq!(g.name(deeps), "Echoing Deeps");
     assert!(!g.obj(deeps).tapped && g.can_pay(0, &cost("{1}")) && !g.can_pay(0, &cost("{B}")));
 }
+
+/// A Pollinator tapped for convoke can't activate (CR 702.51a, 602.2b):
+/// castability counts it once, as the payment does (ENGINE.md 49, 99.12;
+/// EoE fuzz seed 6224). Vote Out ({3}{B}, convoke) with Eldrazi Temple's
+/// {C}, the Pollinator's mana (tapping the Microsizer) and a black creature
+/// convoking: three, not four.
+#[test]
+fn cr_702_51a_a_pollinator_convoking_does_not_also_activate() {
+    let g = scen()
+        .battlefield(0, &["Eldrazi Temple", "Gene Pollinator", "Test Deathtouch", "Atomic Microsizer"])
+        .hand(0, &["Vote Out"])
+        .at(Step::Main1, 0)
+        .start();
+    let vote = g.card(0, "Vote Out", Zone::Hand);
+    assert!(!g.has_option(Choice::Cast(vote)), "three mana and convokes, not four");
+    let g = scen()
+        .battlefield(0, &["Eldrazi Temple", "Gene Pollinator", "Test Deathtouch", "Atomic Microsizer", "Island"])
+        .hand(0, &["Vote Out"])
+        .at(Step::Main1, 0)
+        .start();
+    let vote = g.card(0, "Vote Out", Zone::Hand);
+    assert!(g.has_option(Choice::Cast(vote)), "with an Island, four");
+}
