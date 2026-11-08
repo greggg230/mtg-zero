@@ -30,6 +30,9 @@ pub enum EoeC {
     /// exiled, a spell cast this way costing {tax} more (CR 601.2f) and a
     /// land played this way entering tapped (`PermKind::TaxedLandsTapped`).
     ExileFromOwnHandPlayable { who: Who, tax: u8 },
+    /// A delayed trigger's card (exiled) returns to the battlefield tapped
+    /// under its owner's control.
+    ReturnEventCardTapped,
 }
 
 /// `ChooseAltCost`'s answer for "without paying its mana cost" by a
@@ -137,6 +140,17 @@ impl Game {
                         Flow::Suspend
                     }
                 }
+            }
+            EoeC::ReturnEventCardTapped => {
+                if let Some(r) = f.ev.obj {
+                    if self.live(r) && self.objs[r.idx.i()].zone == Zone::Exile {
+                        let owner = self.objs[r.idx.i()].owner;
+                        self.entering_tapped = true;
+                        self.put_onto_battlefield(r.idx, owner);
+                        self.entering_tapped = false;
+                    }
+                }
+                Flow::Next
             }
             EoeC::LoseLifeIfHandEmpty { who, n } => {
                 if let Some(p) = self.who(f, *who) {

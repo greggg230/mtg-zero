@@ -209,6 +209,17 @@ pub(crate) fn lower_effect_eoe_c(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         E::EachOpponentExilesCardFromHandWithCastPermission(nodes::EachOpponentExilesCardFromHandWithCastPermission {}) => {
             b.op(Op::Ext(Ext::EoeC(EoeC::ExileFromOwnHandPlayable { who: Who::Opponent, tax: 1 })));
         }
+        // "Exile target attacking creature an opponent controls. At the
+        // beginning of the next end step, return it to the battlefield
+        // tapped under its owner's control" (CR 603.7, a delayed trigger).
+        E::ExileTargetAttackingCreatureUntilEndStep(nodes::ExileTargetAttackingCreatureUntilEndStep {}) => {
+            let f = and(and(Filter::Type(types::CREATURE), Filter::Attacking), Filter::Controller(false));
+            let t = b.target(f, 1, 1);
+            let mut d = Builder::default();
+            d.op(Op::Ext(Ext::EoeC(EoeC::ReturnEventCardTapped)));
+            let k = l.delayed_ability(d.finish());
+            b.op(Op::Ext(Ext::ExileThenDelay { tgt: t, k, when: crate::db::DelayedWhen::NextEndStep }));
+        }
         _ => return false,
     }
     true

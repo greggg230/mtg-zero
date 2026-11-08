@@ -330,7 +330,8 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     }
     match from {
         From::Battlefield => {
-            l.deny("ActivationCost.exile_self(on the battlefield)", exile_self);
+            // "Exile this <permanent>" (CR 602.2b; paid as sacrificing it
+            // is, ENGINE.md 99.4).
             l.deny("ActivationCost.discard_self(on the battlefield)", discard_self);
         }
         From::Hand => {

@@ -18173,6 +18173,15 @@ as it remains exiled; each spell cast this way costs {1} more; each land played 
 tapped" (`EoeC::ExileFromOwnHandPlayable`, the opponent's choice among their own hand, one option
 per definition; `PermKind::TaxedLandsTapped`, read by `play_land`).
 
+**Lane C features of cross-lane cards** (tested on custom cards; the cards wait for the other
+lanes): "exile target attacking creature an opponent controls; at the beginning of the next end
+step, return it to the battlefield tapped under its owner's control" (Mystifying Maze:
+`Ext::ExileThenDelay` with `EoeC::ReturnEventCardTapped`); an "exile this permanent" activation
+cost on the battlefield (Plaza of Heroes: the existing exile-self payment, now allowed there);
+"search your library for a Sliver card" (Sliver Overlord); "whenever an opponent discards a card"
+(Entropic Battlecruiser: the IR's `discards_card` event has one subject, the discarding player, so
+its default subject is the engine event's player slot).
+
 **IR defects** (docs/ir_defects.md 60-66, `lower::IR_DEFECTS`): All-Fates Stalker ("up to one
 target" dropped), Endless Sands (a linked exile read as "until this leaves", its return an empty
 effect), Gravkill and Archenemy's Charm (the target's "or Spacecraft" / "or planeswalker" dropped),

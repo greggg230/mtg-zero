@@ -123,6 +123,10 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
             None
         }
     };
+    // "Whenever <a player> discards a card": the IR's `discards_card` event
+    // has one subject, the discarding player (its default); the engine's
+    // event names the card too (ENGINE.md 99.4).
+    let pred = if *event == Some(E::DiscardsCard) { pred.map(|p| default_slot_to(p, Slot::Player)) } else { pred };
     // "When this enters, if you cast it, <effect>" (The One Ring; the IR's
     // `ConditionalIfCastFromHand` stands for "if you cast it", its
     // docstring's reading): an intervening "if" on how it entered (CR 603.4;
@@ -212,6 +216,24 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     }
     let uses_event = ability.uses_event();
     Some(TriggerDef { event, pred, ability, uses_event })
+}
+
+/// A predicate's default subject slot named `to` (an IR event with one
+/// subject that the engine's event kind gives two).
+fn default_slot_to(p: TrigPred, to: Slot) -> TrigPred {
+    let s = |x: Slot| if x == Slot::Default { to } else { x };
+    match p {
+        TrigPred::IsSelf(x) => TrigPred::IsSelf(s(x)),
+        TrigPred::Subject(x, f) => TrigPred::Subject(s(x), f),
+        TrigPred::Controlled(x, you) => TrigPred::Controlled(s(x), you),
+        TrigPred::FormerHost(x) => TrigPred::FormerHost(s(x)),
+        TrigPred::Granted(x) => TrigPred::Granted(s(x)),
+        TrigPred::IsHost(x) => TrigPred::IsHost(s(x)),
+        TrigPred::And(a, b) => TrigPred::And(Box::new(default_slot_to(*a, to)), Box::new(default_slot_to(*b, to))),
+        TrigPred::Or(a, b) => TrigPred::Or(Box::new(default_slot_to(*a, to)), Box::new(default_slot_to(*b, to))),
+        TrigPred::Not(a) => TrigPred::Not(Box::new(default_slot_to(*a, to))),
+        other => other,
+    }
 }
 
 /// `EnteredPaid` -> `SpellPaid` (a cast trigger's "if it was kicked").

@@ -101,6 +101,22 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
             "effect": {"$t": "DrawCards", "amount": 1}}]})),
         // A Spacecraft card (an artifact, not a creature).
         card("Test Spacecraft", "{3}", &["Artifact"], &["Spacecraft"], json!({})),
+        // Mystifying Maze's ability (on an artifact).
+        card("Test Maze", "{1}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
+            "cost": {"$t": "ActivationCost", "mana": cost("{1}"), "mana_str": "{1}", "tap_self": true},
+            "effect": {"$t": "ExileTargetAttackingCreatureUntilEndStep"}}]})),
+        // Plaza of Heroes' "{3}, {T}, Exile this land:" cost (on an artifact).
+        card("Test Escape Pod", "{1}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
+            "cost": {"$t": "ActivationCost", "mana": cost("{1}"), "mana_str": "{1}", "tap_self": true, "exile_self": true},
+            "effect": {"$t": "DrawCards", "amount": 1}}]})),
+        // Sliver Overlord's search.
+        card("Test Hive Seeker", "{1}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
+            "cost": {"$t": "ActivationCost", "mana": cost("{1}"), "mana_str": "{1}"},
+            "effect": {"$t": "SearchLibraryForCard", "filter_name": "sliver"}}]})),
+        creature("Test Sliver", "{1}{G}", 1, 1, &["Sliver"], json!({})),
+        // Entropic Battlecruiser's "Whenever an opponent discards a card".
+        card("Test Discard Watcher", "{1}", &["Artifact"], &[], json!({"triggered_abilities": [{"$t": "TriggeredAbility",
+            "event": "discards_card", "predicate": {"$t": "Controlled", "by": "opponent"}, "effect": {"$t": "GainLife", "amount": 2}}]})),
     ];
     cards.into_iter().map(|v| serde_json::from_value(v).expect("custom card IR")).collect()
 }

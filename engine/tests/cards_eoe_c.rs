@@ -806,3 +806,72 @@ fn weftwalking_shuffles_hand_and_graveyard_then_draws_seven() {
     assert_eq!(g.player(0).graveyard.len(), 0);
     assert_eq!(g.player(0).library.len(), 12 + 3 - 7);
 }
+
+/// Mystifying Maze's "Exile target attacking creature an opponent controls.
+/// At the beginning of the next end step, return it to the battlefield
+/// tapped under its owner's control" (CR 603.7).
+#[test]
+fn exile_an_attacking_creature_until_the_next_end_step_cr603_7() {
+    let mut g = scen().battlefield(0, &["Test Giant"]).battlefield(1, &["Test Maze", "Island"]).at(Step::Main1, 0).start();
+    attack_with(&mut g, &["Test Giant"]);
+    g.drive_until(|g| at_priority(g) && g.pending_decision().unwrap().player == 1);
+    let maze = bf(&g, 1, "Test Maze");
+    let giant = bf(&g, 0, "Test Giant");
+    g.choose(act(maze, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let t = g.tgt(giant);
+    g.choose(t);
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(giant).zone, Zone::Exile, "{}", log(&g));
+    quiet_until(&mut g, |g| g.turn().step == Step::Cleanup || g.turn().number > 3);
+    let giant = g.card(0, "Test Giant", Zone::Battlefield);
+    assert!(g.obj(giant).tapped, "returned tapped\n{}", log(&g));
+    assert_eq!(g.player(1).life, 20);
+}
+
+/// Plaza of Heroes' "{3}, {T}, Exile this land: ..." (an exile-this cost of a
+/// permanent, CR 602.2b, 118.3).
+#[test]
+fn exile_this_permanent_as_a_cost_cr118_3() {
+    let mut g = scen().battlefield(0, &["Test Escape Pod", "Island"]).at(Step::Main1, 0).start();
+    let pod = bf(&g, 0, "Test Escape Pod");
+    g.choose(act(pod, 0));
+    pay(&mut g);
+    assert_eq!(g.obj(pod).zone, Zone::Exile, "paid before the ability resolves");
+    settle(&mut g);
+    assert_eq!(g.player(0).hand.len(), 1);
+}
+
+/// Sliver Overlord's "{3}: Search your library for a Sliver card, reveal
+/// that card, put it into your hand, then shuffle."
+#[test]
+fn search_for_a_sliver_card_cr701_19() {
+    let mut g = scen().battlefield(0, &["Test Hive Seeker", "Island"]).library(0, &["Test Sliver", "Test Bear"]).at(Step::Main1, 0).start();
+    let s = bf(&g, 0, "Test Hive Seeker");
+    g.choose(act(s, 0));
+    pay(&mut g);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::SearchLibrary));
+    let opts = g.options_desc();
+    assert!(opts.iter().any(|o| o.contains("Test Sliver")) && !opts.iter().any(|o| o.contains("Test Bear")), "{opts:?}");
+    let pick = g.pending_decision().unwrap().options.iter().find(|o| o.choice != Choice::Pass).unwrap().choice;
+    g.choose(pick);
+    settle(&mut g);
+    assert_eq!(g.count_in(0, "Test Sliver", Zone::Hand), 1);
+}
+
+/// Entropic Battlecruiser's "Whenever an opponent discards a card, ..." (the
+/// IR's `discards_card` event: its one subject is the discarding player).
+#[test]
+fn whenever_an_opponent_discards_a_card() {
+    let mut g = scen()
+        .battlefield(0, &["Test Discard Watcher", "Swamp", "Swamp"])
+        .hand(0, &["Virus Beetle"])
+        .hand(1, &["Forest", "Forest"])
+        .at(Step::Main1, 0)
+        .start();
+    cast(&mut g, 0, "Virus Beetle", &[]);
+    settle(&mut g);
+    assert_eq!(g.player(1).hand.len(), 1);
+    assert_eq!(g.player(0).life, 22, "{}", log(&g));
+}

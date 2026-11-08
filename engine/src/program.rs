@@ -1094,6 +1094,7 @@ impl Op {
             Op::Ext(Ext::CopySpell { of, n, who: w, .. }) => *of == SpellOf::EventSpell || who(w) || amt(n),
             Op::Ext(Ext::ExileEventCard) => true,
             Op::Ext(Ext::CounterEventItem) => true,
+            Op::Ext(Ext::EoeC(crate::eoe_c::EoeC::ReturnEventCardTapped)) => true,
             Op::Ext(Ext::EventControllerBecomesMonarch) => true,
             Op::Ext(Ext::OfferPayOther { who: w, .. }) => who(w),
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
