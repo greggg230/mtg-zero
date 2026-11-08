@@ -50,6 +50,9 @@ pub struct Except {
     pub colors: Option<crate::mana::ManaMask>,
     /// It has no mana cost (eternalize; its mana value is 0, 202.3a).
     pub no_cost: bool,
+    /// Supertypes in addition (`supertypes::*` bits: "except it's
+    /// legendary", CR 707.9b; Adagia).
+    pub supers: u8,
 }
 
 impl Except {
@@ -97,6 +100,7 @@ impl Except {
             e.colors = self.colors;
         }
         e.no_cost |= self.no_cost;
+        e.supers |= self.supers;
         e
     }
 }
@@ -169,6 +173,12 @@ impl Game {
     #[inline]
     pub(crate) fn exc(&self, c: CardIdx) -> Option<&Except> {
         self.copy_fx(c).map(|x| &x.vals.exc).filter(|e| !e.is_empty())
+    }
+
+    /// Its supertypes (CR 205.4): its definition's and a copy's "except
+    /// it's legendary" (707.9b).
+    pub fn supertypes_of(&self, c: CardIdx) -> u8 {
+        self.def_of(c).supertypes | self.exc(c).map_or(0, |e| e.supers)
     }
 
     /// Is `c` a slot made as a copy, not a card: a token copy (CR 111.10), a
@@ -586,8 +596,14 @@ impl Game {
         // from below it, ENGINE.md 58.1; a deeper current target is kept by
         // `PASS`.)
         self.targeting = id;
-        let cands = self.target_candidates(tr, &ctx, &exclude);
+        let mut cands = self.target_candidates(tr, &ctx, &exclude);
         self.targeting = 0;
+        if let Some(n) = tr.total_mv {
+            // The new set within the total too (CR 601.2c, 707.10c).
+            let others: Vec<Target> =
+                item.targets.iter().enumerate().filter(|&(j, &(r, _))| j != k as usize && r == req).map(|(_, &(_, t))| t).collect();
+            self.retain_within_total_mv(n, &others, &mut cands);
+        }
         for t in cands {
             if t != cur {
                 opts.push(Opt { action: self.target_action(p, t), choice: Choice::Target(t) });
@@ -676,6 +692,7 @@ impl Game {
         let r = self.obj_ref(card);
         let tapped = self.enters_tapped(card, p);
         self.entering(card, tapped, 0);
+        self.note_entered(card);
         self.event(Event { kind: crate::db::EventKind::Enters, a: Subj::Obj(r), b: Subj::None, amount: note as u32 });
     }
 }

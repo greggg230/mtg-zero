@@ -53,6 +53,8 @@ impl Game {
                 n >= *lo as crate::num::Count && hi.is_none_or(|h| n <= h as crate::num::Count)
             }),
             Cond::GainedLifeThisTurn => pl.gained_life,
+            Cond::ArtifactEnteredThisTurn => pl.artifact_entered,
+            Cond::APlayerControlsNoCreatures => (0..2u8).any(|q| self.creatures_of(q).next().is_none()),
             Cond::GainedLifeAtLeast(n) => pl.life_gained >= *n as u32,
             Cond::OpponentHasMoreCards => self.players[crate::ids::opp(p) as usize].hand.len() > pl.hand.len(),
             Cond::OpponentControlsMoreLands => {
@@ -224,20 +226,19 @@ impl Game {
                 }
             }
         }
-        // Activated abilities other permanents grant it ("artifacts you
-        // control have '<ability>'", CR 613.1f; EoE W3), after its card's own
-        // places whether or not it has them now.
-        if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
-            let own = self.db.def(self.objs[c.i()].def).activated.len();
-            for (j, (gdef, k)) in self.granted_activated(c).into_iter().enumerate() {
-                let i = own + j;
-                let ad = self.db.def(gdef).activated_def(AbilitySlot::Activated(k));
-                if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
-                    continue;
-                }
-                if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
-                    live.push(i as u8);
-                }
+        // Activated abilities other permanents grant it (an attached
+        // Equipment's "equipped creature has", CR 301.5, ENGINE.md 99.14; "artifacts
+        // you control have", 99.13; 613.1f), after its card's own places
+        // whether or not it has them now.
+        let own = self.db.def(self.objs[c.i()].def).activated.len();
+        for (j, g) in self.granted_activated(c).into_iter().enumerate() {
+            let i = own + j;
+            let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
+            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+                continue;
+            }
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                live.push(i as u8);
             }
         }
         live
@@ -270,7 +271,12 @@ impl Game {
             return m;
         }
         for d in &ad.discounts {
-            m.generic = m.generic.saturating_sub(self.discount(d, p));
+            let n = match d {
+                // "Where X is this creature's power" (ENGINE.md 99.14).
+                crate::db::Discount::SourcePower if self.is_creature(card) => self.power(card).clamp(0, 255) as u8,
+                _ => self.discount(d, p),
+            };
+            m.generic = m.generic.saturating_sub(n);
         }
         let ob = &self.objs[card.i()];
         if ob.zone == Zone::Battlefield && ob.controller == p && self.is_type(card, types::ARTIFACT) {
@@ -386,8 +392,10 @@ impl Game {
     /// once (605.3); any other ability goes on the stack first (602.2a),
     /// then targets (601.2c), then the cost (601.2f-h).
     pub(crate) fn begin_activate(&mut self, p: PlayerId, card: CardIdx, slot: AbilitySlot) {
-        // (A granted ability is the granting card's definition's: EoE W3.)
-        let (def, aslot) = self.activated_ref(card, slot);
+        // (A granted ability is its granting definition's: an Equipment's
+        // face, ENGINE.md 99.14, or a static ability's card, 99.13; `slot`
+        // stays the permanent's place for its records.)
+        let (def, aslot, granter) = self.activated_home(card, slot);
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
             self.reveal(card); // 602.2a: activated from a hidden zone
@@ -454,7 +462,7 @@ impl Game {
             x: 0,
             division: Vec::new(),
             attack_as: None,
-            noted: Vec::new(),
+            noted: granter.map(|e| vec![self.obj_ref(e)]).unwrap_or_default(),
             flips: self.objs[card.i()].flips,
             origin: Zone::Nowhere,
             times: 0,
@@ -627,6 +635,10 @@ impl Game {
         if let (Some(&c), Some(pos)) = (sacs.first(), self.item_index(id)) {
             if matches!(self.stack[pos].kind, StackKind::Ability { .. }) {
                 self.stack[pos].ev.amount = self.mana_value_of(c) as u32;
+                // (And the permanent, for its power: `Amount::CostPower`.)
+                if self.stack[pos].ev.obj.is_none() {
+                    self.stack[pos].ev.obj = Some(self.obj_ref(c));
+                }
             }
         }
         self.begin_batch();
@@ -908,6 +920,7 @@ impl Game {
         // its own.
         if picked.is_empty() && self.answer.is_none() {
             self.new_event();
+            self.pay_exile_granter(id);
         }
         // A permanent to return or sacrifice, its mana ability activated
         // first (ENGINE.md 86.2).
@@ -1578,6 +1591,12 @@ impl Game {
     /// 614.1c)? Checked before it moves, so "other lands" are the lands
     /// already there.
     pub(crate) fn enters_tapped(&self, card: CardIdx, p: PlayerId) -> bool {
+        self.enters_tapped_own(card, p, true)
+    }
+
+    /// [`enters_tapped`](Self::enters_tapped); without `own`, its own "enters
+    /// tapped" doesn't apply (it enters with no abilities, CR 614.12).
+    pub(crate) fn enters_tapped_own(&self, card: CardIdx, p: PlayerId, own: bool) -> bool {
         // "<Types> / nonbasic lands your opponents control enter tapped."
         let d = self.def_of(card);
         let q = crate::ids::opp(p);
@@ -1590,6 +1609,9 @@ impl Game {
         });
         if forced {
             return true;
+        }
+        if !own {
+            return false;
         }
         match &self.def_of(card).enters_tapped {
             crate::db::EntersTapped::No => false,

@@ -401,6 +401,9 @@ impl Game {
                     self.stack_action(id)
                 }
                 Zone::Graveyard => self.graveyard_action(viewer, r.idx),
+                // An exiled card: `EXILE` + its place among the decision's
+                // offered exiled cards, given by `ask` (`name_exile_targets`).
+                Zone::Exile => act::EXILE,
                 z => panic!("no target slot for an object in {z:?}"),
             },
             // An ability on the stack: its `STACK` slot (ENGINE.md 27.1).

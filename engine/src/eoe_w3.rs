@@ -76,6 +76,16 @@ impl W3 {
     }
 }
 
+/// An activated ability another permanent grants a permanent
+/// (`Game::granted_activated`): ability `slot` of definition `def`, with the
+/// Equipment granting it if it is an Equipment's.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Grant {
+    pub def: crate::ids::DefId,
+    pub slot: u8,
+    pub equipment: Option<CardIdx>,
+}
+
 /// Workstream W3's game state (`Game::w3`).
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
 pub struct W3State {
@@ -523,34 +533,76 @@ impl Game {
         Some(crate::db::SacCost { filter, n: 1, another: false })
     }
 
-    /// The activated abilities other permanents grant permanent `c` ("artifacts
-    /// you control have '<ability>'", CR 613.1f): (granting definition, its
-    /// activated slot), the granters in battlefield order; they follow the
-    /// slots of its card's own abilities. A grant has its granter's timestamp
-    /// (613.7a): a "loses all abilities" effect on `c` with a later one
-    /// removes it, one with an earlier one doesn't (613.7). The grant is part
-    /// of an ability that applied in layer 4 already (the Food type), so it
-    /// applies in layer 6 even if the granter loses its abilities (613.6):
-    /// read from the granter's definition.
-    pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<(crate::ids::DefId, u8)> {
+    /// The activated abilities other permanents grant permanent `c` (CR
+    /// 613.1f), the granters in battlefield (timestamp) order, each one's
+    /// abilities in its order; they follow the places of `c`'s card's own
+    /// abilities. Two kinds:
+    ///
+    /// * An attached Equipment's "equipped creature has '<ability>'" (CR
+    ///   301.5; `CardDef::grants_equipped`, a face holding the abilities,
+    ///   ENGINE.md 99.14): none if the Equipment lost its abilities (the
+    ///   grant exists only while its static ability does, 613.8a); its
+    ///   timestamp is the Equipment's, renewed as it became attached
+    ///   (613.7e).
+    /// * "Artifacts you control have '<ability>'" (`W3Def::grants_activated`,
+    ///   Ragost, ENGINE.md 99.13): the ability applied in layer 4 already (the
+    ///   Food type), so it applies in layer 6 even if the granter loses its
+    ///   abilities (613.6), read from its definition; its timestamp is the
+    ///   granter's (613.7a).
+    ///
+    /// A "loses all abilities" effect on `c` with a later timestamp than a
+    /// grant removes it, one with an earlier timestamp doesn't (613.7).
+    pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<Grant> {
         let mut out = Vec::new();
-        if self.w3.seen & SEEN_W3_GRANT_ACT == 0 || self.objs[c.i()].zone != crate::ids::Zone::Battlefield {
+        if self.objs[c.i()].zone != crate::ids::Zone::Battlefield {
             return out;
         }
+        let r = self.obj_ref(c);
         let loss = self.loss_ts(c);
+        let statics = self.w3.seen & SEEN_W3_GRANT_ACT != 0;
         for &g in &self.battlefield {
-            let d = self.db.def(self.objs[g.i()].def);
-            if d.w3.grants_activated.is_empty() || loss.is_some_and(|l| self.objs[g.i()].timestamp < l) {
+            let ts = self.objs[g.i()].timestamp;
+            if loss.is_some_and(|l| ts < l) {
                 continue;
             }
-            let ctx = crate::cast::Ctx { controller: self.objs[g.i()].controller, source: Some(self.obj_ref(g)) };
-            for (f, k) in &d.w3.grants_activated {
-                if self.card_matches(f, c, &ctx) {
-                    out.push((self.objs[g.i()].def, *k));
+            if self.objs[g.i()].attached == Some(r) {
+                if let Some(face) = self.abilities(g).grants_equipped {
+                    for k in 0..self.db.def(face).activated.len() {
+                        out.push(Grant { def: face, slot: k as u8, equipment: Some(g) });
+                    }
+                }
+            }
+            if statics {
+                let d = self.db.def(self.objs[g.i()].def);
+                if d.w3.grants_activated.is_empty() {
+                    continue;
+                }
+                let ctx = crate::cast::Ctx { controller: self.objs[g.i()].controller, source: Some(self.obj_ref(g)) };
+                for (f, k) in &d.w3.grants_activated {
+                    if self.card_matches(f, c, &ctx) {
+                        out.push(Grant { def: self.objs[g.i()].def, slot: *k, equipment: None });
+                    }
                 }
             }
         }
         out
+    }
+
+    /// Where activated ability `slot` of permanent `c` is defined: its own
+    /// definition, or (a place past its own abilities) a granted ability's
+    /// (`granted_activated`), with the Equipment that grants it if one does
+    /// (its "exile <the Equipment>" cost, ENGINE.md 99.14).
+    pub(crate) fn activated_home(&self, c: CardIdx, slot: crate::db::AbilitySlot) -> (crate::ids::DefId, crate::db::AbilitySlot, Option<CardIdx>) {
+        let def = self.objs[c.i()].def;
+        if let crate::db::AbilitySlot::Activated(i) = slot {
+            let own = self.db.def(def).activated.len();
+            if i as usize >= own {
+                if let Some(g) = self.granted_activated(c).get(i as usize - own) {
+                    return (g.def, crate::db::AbilitySlot::Activated(g.slot), g.equipment);
+                }
+            }
+        }
+        (def, slot, None)
     }
 
     /// The timestamps (CR 613.7a: its source's) of the static abilities on
@@ -630,11 +682,7 @@ impl Game {
     /// The places of permanent `c`'s activated abilities: its card's own,
     /// then those other permanents grant it.
     pub(crate) fn ability_slots_total(&self, c: CardIdx) -> usize {
-        let own = self.db.def(self.objs[c.i()].def).activated.len();
-        if self.w3.seen & SEEN_W3_GRANT_ACT == 0 {
-            return own;
-        }
-        own + self.granted_activated(c).len()
+        self.db.def(self.objs[c.i()].def).activated.len() + self.granted_activated(c).len()
     }
 
     /// Is `slot` of permanent `c` the page of its abilities past its slots
@@ -680,21 +728,6 @@ impl Game {
             }
         }
         self.ask(crate::flow::Task::ChooseAbility { p, card, from }, p, DecisionKind::ChooseMode, opts);
-    }
-
-    /// The definition and slot of activated ability `slot` of `card`: its own,
-    /// or past them one another permanent grants it (`granted_activated`).
-    pub(crate) fn activated_ref(&self, card: CardIdx, slot: crate::db::AbilitySlot) -> (crate::ids::DefId, crate::db::AbilitySlot) {
-        let def = self.objs[card.i()].def;
-        if let crate::db::AbilitySlot::Activated(i) = slot {
-            let own = self.db.def(def).activated.len();
-            if i as usize >= own && self.w3.seen & SEEN_W3_GRANT_ACT != 0 {
-                if let Some(&(g, k)) = self.granted_activated(card).get(i as usize - own) {
-                    return (g, crate::db::AbilitySlot::Activated(k));
-                }
-            }
-        }
-        (def, slot)
     }
 
     /// The permanents `p` controls from which `card`'s cost "remove a <k>

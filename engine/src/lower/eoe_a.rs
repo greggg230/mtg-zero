@@ -459,6 +459,11 @@ pub(crate) fn aura_enchant(
     let base = match kind {
         K::Creature => Filter::Type(types::CREATURE),
         K::Artifact => Filter::Type(types::ARTIFACT),
+        // "Enchant creature or Spacecraft" (a Spacecraft below its
+        // threshold is a noncreature artifact, CR 722.2b); "Enchant artifact
+        // or creature" (ENGINE.md 99.11).
+        K::CreatureOrSpacecraft => Filter::Or(vec![Filter::Type(types::CREATURE), Filter::Subtype(l.subtype("Spacecraft"))]),
+        K::ArtifactOrCreature => Filter::Type(types::ARTIFACT | types::CREATURE),
         K::Land | K::CreatureCardInGraveyard => {
             l.unsupported(format!("CardPrinting.aura_enchant_type({kind:?})"));
             return None;

@@ -638,7 +638,7 @@ impl Game {
         // decider names its definition, not its slot; the decider's hand is
         // never resampled for them). Only another player's decision needs
         // recomputing. Debug builds check the rule exactly.
-        if self.pending.as_ref().is_some_and(|d| d.player != viewer) {
+        if self.pending.as_ref().is_some_and(|d| self.decider_of(d.player) != viewer) {
             self.refresh_pending();
         } else if cfg!(debug_assertions) && self.pending.is_some() {
             let mut c = self.clone();
@@ -949,7 +949,7 @@ impl Game {
         use crate::flow::Task;
         self.agenda.iter().rev().find_map(|t| match t {
             Task::PayMana(pm) => Some(pm.payer),
-            Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } => {
+            Task::CastPay { id } | Task::ActPay { id } | Task::PayCosts { id, .. } | Task::CastDone { id } | Task::ChooseForCost { id, .. } => {
                 self.item_index(*id).map(|i| self.stack[i].controller)
             }
             // "Which face?" of a card being cast (CR 601.2a-b, 712.11b,

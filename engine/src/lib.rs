@@ -41,6 +41,8 @@ pub mod dungeon;
 pub mod eoe_c;
 pub mod eoe_x;
 pub mod eoe_w3;
+pub mod eoe_w4;
+pub mod eoe_w1;
 pub mod public_state;
 pub mod testkit;
 pub mod layers;

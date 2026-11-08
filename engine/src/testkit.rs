@@ -581,6 +581,9 @@ impl Game {
         v.push(self.day.map_or(9, |d| d as u64));
         // Void (public; ENGINE.md 99.4).
         v.push(self.void_active() as u64);
+        // Controlling another player (public, CR 722; ENGINE.md 99.14).
+        v.extend(self.next_turn_controller.iter().map(|q| q.map_or(9, |q| q as u64)));
+        v.push(self.turn_controller.map_or(9, |q| q as u64));
         for &(r, k) in &self.done_once {
             v.extend([live_place(r), k as u64]);
         }
@@ -658,6 +661,7 @@ impl Game {
             v.extend([pl.left_battlefield as u64, pl.drawn as u64, pl.spells_cast as u64, pl.noncreature_cast as u64]);
             v.extend([pl.gained_life as u64, pl.draw_step_draws as u64, pl.spells_game as u64, pl.energy as u64]);
             v.push(pl.life_gained as u64);
+            v.push(pl.artifact_entered as u64);
             v.extend([pl.gy_play_turn as u64, pl.gy_exile_turn as u64, pl.city_blessing as u64, pl.prot_until as u64]);
             // The revealed companion: still outside the game or not (its
             // slot's zone once in the game is not observable: a twin in a

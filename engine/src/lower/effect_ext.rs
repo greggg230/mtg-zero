@@ -462,6 +462,7 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             granted_activated_abilities,
             granted_triggered_abilities,
             set_colors,
+            all_creature_types,
         }) => {
             // "Until end of turn, this land becomes a p/t [colours]
             // [subtype] creature with [keywords]. It's still a land." (CR
@@ -490,6 +491,11 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 }
             }
             let mut mods = vec![Mod::Types { add, subtypes, replace: false }];
+            // "A 2/2 creature with all creature types" (Mutavault; CR 205.3m,
+            // ENGINE.md 99.11).
+            if *all_creature_types {
+                mods.push(Mod::AllCreatureTypes);
+            }
             if !set_colors.is_empty() {
                 let mut m = 0;
                 for c in set_colors {

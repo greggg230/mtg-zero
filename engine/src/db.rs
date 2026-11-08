@@ -196,6 +196,12 @@ pub enum Mod {
     GainSacMana(ManaMask),
     /// Layer 6: it loses all abilities (CR 613.1f).
     LoseAllAbilities,
+    /// "Can attack as though it didn't have defender" (CR 702.3b: it keeps
+    /// defender; Mechan Shieldmate, ENGINE.md 99.11).
+    AttackDespiteDefender,
+    /// It has all creature types (CR 205.3m; layer 4: Mutavault's "a 2/2
+    /// creature with all creature types", ENGINE.md 99.11).
+    AllCreatureTypes,
     /// Layer 4: its card types become exactly `types` and its creature
     /// types exactly `subtypes` (CR 205.1a: "becomes a [subtype] creature";
     /// supertypes are kept).
@@ -421,6 +427,11 @@ pub enum Filter {
     /// Mana value at most the amount of mana spent to cast the context's
     /// source (CR 601.2h; `Mark::ManaSpent`; EoE W3).
     MvAtMostManaSpent,
+    /// A card in exile (face up; not a copy of a card) matching the inner
+    /// filter ("target exiled card", CR 115.1, 406; ENGINE.md 99.14).
+    InExile(Box<Filter>),
+    /// A card with warp (CR 702.185a: the keyword among its abilities).
+    HasWarp,
 }
 
 /// `Filter::Ability` kinds.
@@ -475,6 +486,10 @@ pub struct TargetReq {
     /// requirement k ("target artifact card in that player's graveyard",
     /// Goblin Welder); 0 = no such link.
     pub pair: u8,
+    /// The targets of this requirement together have mana value at most
+    /// this ("up to three target creature cards with total mana value 3 or
+    /// less", CR 601.2c: a restriction on the set; ENGINE.md 99.14).
+    pub total_mv: Option<u8>,
 }
 
 /// A spell or ability's effect: its target requirements and program; or,
@@ -831,6 +846,33 @@ pub enum TrigPred {
     /// The attacker attacks the monarch (the player, not a planeswalker;
     /// CR 724, 508.1b).
     AttacksMonarch,
+    /// A `LeavesBattlefield` event of an object that went to one of these
+    /// zones (`left_to` bits; "dies or is put into exile", CR 700.4:
+    /// `Game::leaving_to` as the event's triggers are matched; ENGINE.md
+    /// 99.11).
+    LeftTo(u8),
+}
+
+/// The zone a permanent left the battlefield for (`Game::leaving_to`,
+/// `TrigPred::LeftTo`).
+pub mod left_to {
+    use crate::ids::Zone;
+    pub const GRAVEYARD: u8 = 1;
+    pub const EXILE: u8 = 2;
+    pub const HAND: u8 = 4;
+    pub const LIBRARY: u8 = 8;
+    /// Anywhere else (a token or a copy ceasing to exist, CR 111.7).
+    pub const OTHER: u8 = 16;
+
+    pub fn bit(z: Zone) -> u8 {
+        match z {
+            Zone::Graveyard => GRAVEYARD,
+            Zone::Exile => EXILE,
+            Zone::Hand => HAND,
+            Zone::Library => LIBRARY,
+            _ => OTHER,
+        }
+    }
 }
 
 impl TrigPred {
@@ -908,6 +950,13 @@ pub enum Cond {
     SourceCountersIn(Counter, u8, Option<u8>),
     /// You gained life this turn.
     GainedLifeThisTurn,
+    /// An artifact entered the battlefield under your control this turn
+    /// (Mechan Shieldmate; whether it stayed doesn't matter, its ruling of
+    /// 2025-07-25; ENGINE.md 99.11).
+    ArtifactEnteredThisTurn,
+    /// A player controls no creatures (Sothera, the Supervoid; ENGINE.md
+    /// 99.11).
+    APlayerControlsNoCreatures,
     /// You gained n or more life this turn (EoE lane D).
     GainedLifeAtLeast(u16),
     /// An opponent has more cards in hand than you.
@@ -979,6 +1028,8 @@ impl Cond {
             | Cond::IsMonarch
             | Cond::SourceCountersIn(..)
             | Cond::GainedLifeThisTurn
+            | Cond::ArtifactEnteredThisTurn
+            | Cond::APlayerControlsNoCreatures
             | Cond::GainedLifeAtLeast(_)
             | Cond::SpellsCastThisTurn { .. }
             | Cond::YourTurn
@@ -1383,6 +1434,9 @@ pub struct CardDef {
     /// "Can't be blocked except by n or more creatures" (CR 509.1b; 0 = no
     /// such ability; menace is the keyword).
     pub min_blockers: u8,
+    /// An Aura's "enchanted creature can't be blocked by more than one
+    /// creature" (CR 509.1b; Meltstrider's Resolve, ENGINE.md 99.11).
+    pub attached_max_one_blocker: bool,
     /// "Can block only creatures with flying."
     pub blocks_only_flyers: bool,
     /// "Can't be blocked by" creatures matching this filter.
@@ -1447,6 +1501,12 @@ pub struct CardDef {
     /// 607.2q; `Mark::ExiledToPay`), as they are in exile (a card's own
     /// characteristics, `CardDb::def_matches`); 614.1c.
     pub counters_per_exiled: Option<Filter>,
+    /// "This creature enters with a +1/+1 counter on it for each other
+    /// creature and/or artifact you control" (Luxknight Breacher; CR
+    /// 614.1c, 122.6): the permanents its controller controls that match,
+    /// counted as it enters, not those entering at the same time (the card's
+    /// ruling of 2025-07-25; ENGINE.md 99.11).
+    pub enters_counters_per: Option<Filter>,
     /// "You may play n additional lands on each of your turns" (`ANY_LANDS`:
     /// any number).
     pub extra_lands: u8,
@@ -1563,6 +1623,15 @@ pub struct CardDef {
     /// A preparation card's prepare spell (CR 722.2a): a face (an instant or
     /// sorcery) that copies of the card in exile have (722.3c).
     pub prepare: Option<DefId>,
+    /// An Equipment's "equipped creature has '<activated ability>'" (CR
+    /// 301.5, 613.1f: layer 6): a face holding the granted abilities
+    /// (`activated`), which the creature has while this is attached to it
+    /// (`Game::granted_activated`; ENGINE.md 99.14).
+    pub grants_equipped: Option<DefId>,
+    /// On such a face: each granted ability's cost includes "Exile <the
+    /// Equipment granting it>" (The Dominion Bracelet; paid after the mana,
+    /// CR 601.2h, the total cost determined first, 601.2f).
+    pub exiles_granter: bool,
     /// "This creature enters prepared" (CR 722.3a).
     pub enters_prepared: bool,
     // ---- M7b part 3b: the stack, ward, the initiative, graveyard
@@ -1741,6 +1810,11 @@ pub struct CastingRules {
     /// untapped creatures may each pay for {1} or one mana of that
     /// creature's colour (`PayMana::convoke`; ENGINE.md 99.8).
     pub convoke: bool,
+    /// Its own "As an additional cost to cast this spell, choose a creature
+    /// you control or a warped creature card you own in exile" (CR 601.2b,
+    /// 601.2h; the choice is noted on the spell, `StackItem::noted`;
+    /// ENGINE.md 99.14).
+    pub choose_creature_or_warped: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1762,6 +1836,8 @@ pub enum WardCost {
     Mana(ManaCost),
     Life(u8),
     Discard,
+    /// "Ward—Discard a card at random" (CR 701.9b; Alpharael, Stonechosen).
+    DiscardRandom,
 }
 
 /// A cost reduction of a spell or an activated ability (CR 601.2f, 602.2b),
@@ -1782,6 +1858,10 @@ pub enum Discount {
     /// the targets are chosen before the cost is determined, CR 601.2c,
     /// 601.2f). A spell's own reduction only.
     IfTargets(Filter, u8),
+    /// "This ability costs {X} less to activate, where X is this creature's
+    /// power" (the source's power as the cost is determined, CR 601.2f;
+    /// ENGINE.md 99.14). An activated ability's only.
+    SourcePower,
 }
 
 impl CardDef {
@@ -1998,6 +2078,7 @@ impl CardDb {
             card.adventure = adventure;
             card.bestow = card.bestow.map(|k| base + k);
             card.prepare = card.prepare.map(|k| base + k);
+            card.grants_equipped = card.grants_equipped.map(|k| base + k);
             card.halves = card.halves.map(|(a, b)| (base + a, base + b));
             for k in card.levels.iter_mut() {
                 *k += base;

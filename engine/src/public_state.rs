@@ -134,6 +134,7 @@ pub fn fields() -> Vec<Field> {
         entering_sunburst: Derived "transient: set and cleared around one move",
         entering_exiled: Derived "transient: set and cleared around one move",
         entering_mods: Derived "transient: set and cleared around one move",
+        leaving_to: Derived "transient: set and cleared around one leave event",
         entering_counters: Derived "transient: set and cleared around one move",
         entering_tapped: Derived "transient: set and cleared around one move",
         discard_entered: Derived "transient: Mox Diamond's answer, consumed by its entering",
@@ -151,8 +152,11 @@ pub fn fields() -> Vec<Field> {
         temp_triggers: Public "triggered abilities a player has until their next turn",
         gy_exile: Public "spells that are exiled instead of being put into a graveyard",
         copies: Public "copy effects on permanents (CR 707)",
+        next_turn_controller: Public "who will control each player during their next turn (CR 722.1; ENGINE.md 99.14)",
+        turn_controller: Public "who controls the active player during this turn (CR 722.1; ENGINE.md 99.14)",
         copy_objs: Derived "which slots are copies (the copy flags of permanents and spells)",
         lki_copy: Derived "last known information (CR 608.2h)",
+        lki_attached: Derived "last known information (CR 608.2h)",
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
         spell_lki: Derived "last known information (CR 608.2h)",
@@ -209,6 +213,7 @@ pub fn fields() -> Vec<Field> {
         noncreature_cast: Public "noncreature spells cast this turn",
         gained_life: Public "gained life this turn",
         life_gained: Public "how much life gained this turn",
+        artifact_entered: Public "an artifact entered the battlefield under their control this turn (ENGINE.md 99.11)",
         cant_gain_life: Public "can't gain life for the rest of the game",
         attacked_with: Public "creatures declared as attackers this turn",
         draw_step_draws: Public "cards drawn in their draw step this turn",
@@ -817,6 +822,19 @@ pub fn perturbations() -> Vec<Perturbation> {
             a.g.prepared.remove(i);
             Some("removed".into())
         }),
+        // EoE W4 (ENGINE.md 99.14): controlling another player (CR 722). (No
+        // draw from the gate's random stream.)
+        p!("a player will control the other's next turn", "Game.next_turn_controller", |a, _r| {
+            let q = opp(a.g.turn.active);
+            let x = &mut a.g.next_turn_controller[q as usize];
+            *x = if x.is_some() { None } else { Some(a.g.turn.active) };
+            Some(format!("P{q}: {:?}", a.g.next_turn_controller[q as usize]))
+        }),
+        p!("the active player is controlled this turn", "Game.turn_controller", |a, _r| {
+            let q = opp(a.g.turn.active);
+            a.g.turn_controller = if a.g.turn_controller.is_some() { None } else { Some(q) };
+            Some(format!("{:?}", a.g.turn_controller))
+        }),
         p!("void holds (a nonland permanent left the battlefield this turn)", "Game.void_turn", |a, _| {
             let t = a.g.turn.number;
             a.g.void_turn = if a.g.void_turn == t { 0 } else { t };
@@ -867,6 +885,22 @@ pub fn perturbations() -> Vec<Perturbation> {
         }),
         p!("a permanent is phased out", "W3State.phased", |a, _r| phased_out(&mut a.g, false)),
         p!("a phased-out permanent phased out indirectly", "W3State.indirect", |a, _r| phased_out(&mut a.g, true)),
+        // EoE W4 (ENGINE.md 99.14): a copy's "except it's legendary" (CR
+        // 707.9b; Adagia's token copies). On a copy effect that is already
+        // there (adding one would set the encoded copy flag too); no draw
+        // from the gate's random stream.
+        p!("a copy is legendary by its exception", "Game.copies", |a, _r| {
+            let ss = slots(&a.g);
+            let db = a.g.db;
+            let legendary = crate::db::supertypes::LEGENDARY;
+            let fx = a
+                .g
+                .copies
+                .iter_mut()
+                .find(|x| ss.contains(&x.obj.idx) && (x.vals.exc.supers | db.def(x.vals.def).supertypes) & legendary == 0)?;
+            fx.vals.exc.supers |= legendary;
+            Some(db.def(fx.vals.def).name.clone())
+        }),
         p!("a spell can't be countered", "Game.marks", |a, r| {
             // (Not a spell that already can't be: Abrupt Decay, ENGINE.md 86.5.)
             let spells: Vec<(usize, CardIdx)> = stack_spells(&a.g).into_iter().filter(|&(_, c)| !a.g.spell_uncounterable(c)).collect();
@@ -1026,6 +1060,12 @@ pub fn perturbations() -> Vec<Perturbation> {
             Some(format!("P0: {}", p.life_gained))
         }),
         p!("can't gain life", "Player.cant_gain_life", |a, r| pl(a, r, |p| flip(&mut p.cant_gain_life))),
+        // (Player 0 always: no draw from the gate's random stream, which the
+        // other perturbations' positions depend on.)
+        p!("an artifact entered under a player's control this turn", "Player.artifact_entered", |a, _r| {
+            let p = &mut a.g.players[0];
+            flip(&mut p.artifact_entered).map(|s| format!("P0: {s}"))
+        }),
         p!("a creature attacked this turn", "Player.attacked_with", |a, r| {
             let c = pick(&slot_creatures(&a.g), r)?;
             let p = a.g.objs[c.i()].controller as usize;
@@ -1344,6 +1384,30 @@ pub fn perturbations() -> Vec<Perturbation> {
             }
             Some(format!("{:?}", t.1))
         })),
+        // EoE W4 (ENGINE.md 99.14): a target in exile (Blade of the Swarm's
+        // trigger), another exiled card. (No draw from the gate's random
+        // stream: the first encoded item with an exiled target.)
+        p!(rare "a stack item targets another exiled card", "StackItem.targets", |a, _r| {
+            let g = &mut a.g;
+            let exiled = |g: &Game, t: Target| matches!(t, Target::Obj(o) if g.live(o) && g.objs[o.idx.i()].zone == Zone::Exile);
+            let i = stack_slots(g).into_iter().find(|&i| g.stack[i].targets.iter().any(|&(_, t)| exiled(g, t)))?;
+            let k = g.stack[i].targets.iter().position(|&(_, t)| exiled(g, t))?;
+            let Target::Obj(cur) = g.stack[i].targets[k].1 else { return None };
+            let other = g.exile.iter().copied().find(|&c| c != cur.idx)?;
+            g.stack[i].targets[k].1 = Target::Obj(g.obj_ref(other));
+            Some(g.name(other).to_string())
+        }),
+        // EoE W4 (ENGINE.md 99.14): which object a stack item noted (Close
+        // Encounter's chosen creature or card, emerge's permanent, station's
+        // tapped creature): another permanent. (No draw from the gate's
+        // random stream.)
+        p!(rare "a stack item noted another object", "StackItem.noted", |a, _r| {
+            let g = &mut a.g;
+            let i = stack_slots(g).into_iter().find(|&i| !g.stack[i].noted.is_empty())?;
+            let other = g.battlefield.iter().copied().find(|&c| !g.stack[i].noted.iter().any(|n| n.idx == c))?;
+            g.stack[i].noted[0] = g.obj_ref(other);
+            Some(g.name(other).to_string())
+        }),
         p!("another additional cost was chosen", "StackItem.cost_option", |a, r| item(a, r, |s| {
             s.cost_option ^= 1;
             Some(format!("{}", s.cost_option))
@@ -1505,7 +1569,13 @@ pub fn limits() -> Vec<Limit> {
         l("the mana spent to cast a permanent", NextLayout, "the amount of mana spent to cast a permanent (CR 601.2h, Mark::ManaSpent) is game state EoE workstream W3 added after layout v5 froze (ENGINE.md 99.13), read by Astelli Reclaimer's enters trigger and Dyadrine's counters (on the battlefield already): the next layout encodes it (a permanent's number)"),
         l("a permanent is phased out", NextLayout, "phased-out permanents (CR 702.26b, Zone::PhasedOut) are treated as though they don't exist, and layout v5 encodes the battlefield only, so a network can't see that one will phase in at its controller's next untap step (EoE workstream W3, ENGINE.md 99.13: Robe of Stars): the next layout encodes them (a bag per player)"),
         l("a phased-out permanent phased out indirectly", NextLayout, "which phased-out permanents phase in with the one they are attached to (CR 702.26e, h; EoE workstream W3, ENGINE.md 99.13): with the phased-out permanents themselves, the next layout's"),
+        l("a copy is legendary by its exception", NextLayout, "a copy effect's \"except it's legendary\" (CR 707.9b: a copiable supertype; Adagia, Windswept Bastion's token copies, EoE W4, ENGINE.md 99.14) is a value the EoE port added after layout v5 froze: a permanent's legendary float (code 47) is its copiable definition's, as its name is; the next layout encodes a permanent's supertypes as they are"),
+        l("a stack item targets another exiled card", NextLayout, "a target in exile (Blade of the Swarm's 'target exiled card with warp', EoE W4, ENGINE.md 99.14) is a target layout v5's stack target block has no field for (a player, a permanent's slot or a stack position); exile is bags of identities: the next layout encodes it (the target's identity)"),
+        l("a stack item noted another object", NextLayout, "which object a stack item noted (Close Encounter's chosen creature or warped card, EoE W4, ENGINE.md 99.14; emerge's permanent; station's tapped creature) is encoded only as a count (stack::NOTED): the next layout encodes the objects (as a target's)"),
+        l("a player will control the other's next turn", NextLayout, "a pending player-controlling effect (CR 722.1; The Dominion Bracelet, EoE W4, ENGINE.md 99.14) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-player flag)"),
+        l("the active player is controlled this turn", NextLayout, "who controls the active player this turn (CR 722.1, 722.4; The Dominion Bracelet) is game state layout v5 has no float for: during a controlled turn the controller decides (to_move) the controlled player's decisions, whose action ids stay that player's, while the controller's encoding is its own seat's (its own hand, the controlled player's hand as known cards, CR 722.3); the next layout encodes it (a global, and the decision's seat)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
+        l("an artifact entered under a player's control this turn", NextLayout, "whether an artifact entered the battlefield under a player's control this turn (Player::artifact_entered) is game state the EoE port's W1 added after layout v5 froze (ENGINE.md 99.11), read by one card, Mechan Shieldmate (its attack permission); the next layout encodes it (a per-turn flag beside the turn's facts)"),
     ]
 }
 

@@ -125,6 +125,13 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
                 .collect();
             card("W3 Gadget", "{0}", &["Artifact"], &[], json!({ "activated_abilities": abilities }))
         },
+        // A 2/2 creature with the same four abilities.
+        {
+            let abilities: Vec<Value> = (1..=4)
+                .map(|n| json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost"}, "effect": {"$t": "GainLife", "amount": n}}))
+                .collect();
+            creature("W3 Quad", "{2}", 2, 2, &["Golem"], json!({ "activated_abilities": abilities }))
+        },
         // "Sacrifice this artifact: Add {C}." (No {T}.)
         card("W3 Nugget", "{0}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
             "cost": {"$t": "ActivationCost", "sacrifice_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),

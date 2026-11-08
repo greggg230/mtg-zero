@@ -426,6 +426,7 @@ impl Game {
             },
             TrigPred::OrCopy => true,
             TrigPred::Once => true,
+            TrigPred::LeftTo(mask) => ev.kind == EventKind::LeavesBattlefield && self.leaving_to & mask != 0,
             // CR 724, 508.1b: it attacks the player who is the monarch.
             TrigPred::AttacksMonarch => match ev.a {
                 Subj::Obj(r) => {

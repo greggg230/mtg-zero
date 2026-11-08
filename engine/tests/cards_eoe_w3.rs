@@ -1425,3 +1425,37 @@ fn every_activated_ability_is_reachable_past_the_fourth_slot_cr602_2() {
     settle(&mut g);
     assert_eq!(g.life(0), 24);
 }
+
+/// An ability an attached Equipment grants goes through the same places as
+/// the others (CR 301.5, 602.2): a creature with four abilities of its own
+/// equipped with The Dominion Bracelet has five, the Bracelet's behind the
+/// fourth slot's choice (ENGINE.md 99.13, 99.14).
+#[test]
+#[ignore = "The Dominion Bracelet is blocked on the encoding (ENGINE.md 99.14): run with --ignored once unblocked"]
+fn an_equipments_granted_ability_is_reachable_past_the_fourth_slot_cr301_5() {
+    let mut g = scen()
+        .battlefield(0, &["The Dominion Bracelet", "W3 Quad"])
+        .battlefield(0, &["Island"; 16])
+        .at(Step::Main1, 0)
+        .turn_number(3)
+        .start();
+    let (br, quad) = (bf(&g, 0, "The Dominion Bracelet"), bf(&g, 0, "W3 Quad"));
+    g.choose(act(br, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    let t = g.tgt(quad);
+    g.choose(t);
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(br).attached.map(|r| r.idx), Some(quad), "equipped\n{}", log(&g));
+    g.choose(act(quad, 3));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+    let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+    assert_eq!(opts, vec![Choice::Number(0), Choice::Number(1)], "its fourth ability and the Bracelet's");
+    g.choose(Choice::Number(1));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(player(1)), "the Bracelet's ability: target opponent");
+    g.choose(player(1));
+    pay(&mut g);
+    settle(&mut g);
+    assert_eq!(g.obj(br).zone, Zone::Exile, "exiled as its cost\n{}", log(&g));
+}

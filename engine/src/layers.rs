@@ -74,6 +74,8 @@ pub struct Flags {
     pub exile_if_leaves: bool,
     /// Combat damage it would deal is prevented (EoE lane D).
     pub prevent_combat_damage: bool,
+    /// It can attack as though it didn't have defender (CR 702.3b).
+    pub attack_despite_defender: bool,
 }
 
 impl Game {
@@ -182,7 +184,7 @@ impl Game {
             Filter::Any => true,
             Filter::Type(bits) => self.types_of(c) & bits != 0,
             Filter::Subtype(s) => self.has_subtype(c, *s),
-            Filter::Supertype(bits) => self.def_of(c).supertypes & bits != 0,
+            Filter::Supertype(bits) => self.supertypes_of(c) & bits != 0,
             Filter::Color(m) => self.colors_of(c) & m != 0,
             Filter::Controller(y) => (self.objs[c.i()].controller == you) == *y,
             Filter::Token => self.is_token(c),
@@ -307,6 +309,12 @@ impl Game {
                 // CR 205.1a: a creature with only these creature types (its
                 // other card types, and their subtypes, are gone).
                 Mod::BecomeTypes { subtypes, .. } => has = subtypes.contains(&s),
+                // CR 205.3m: every creature type (ENGINE.md 99.11).
+                Mod::AllCreatureTypes => {
+                    if self.db.subtype_names().get(s as usize).is_some_and(|n| crate::eoe_w1::is_creature_type(n)) {
+                        has = true;
+                    }
+                }
                 _ => {}
             }
         }
@@ -445,6 +453,7 @@ impl Game {
                 Mod::MustAttack | Mod::MustAttackPlayer => n.0 += 1,
                 Mod::ExileIfDies => n.1 += 1,
                 Mod::Types { subtypes, replace, .. } if *replace || !subtypes.is_empty() => n.2 += 1,
+                Mod::AllCreatureTypes => n.2 += 1,
                 Mod::BecomeTypes { .. } => n.2 += 1,
                 _ => {}
             }
@@ -466,6 +475,7 @@ impl Game {
                 Mod::ExileIfDies => f.exile_if_dies = true,
                 Mod::ExileIfLeaves => f.exile_if_leaves = true,
                 Mod::PreventCombatDamage => f.prevent_combat_damage = true,
+                Mod::AttackDespiteDefender => f.attack_despite_defender = true,
                 _ => {}
             }
         }

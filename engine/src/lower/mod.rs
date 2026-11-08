@@ -25,6 +25,8 @@ pub mod eoe_a;
 pub mod effect_eoe_d;
 pub mod eoe_x;
 pub mod eoe_w3;
+pub mod eoe_w4;
+pub mod eoe_w1;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -218,76 +220,23 @@ impl Lowerer<'_> {
 /// blocked, with this blocker, until the IR is fixed in mtg-bot. The cube's
 /// list is empty since the IR of mtg-bot feature/ir-fixes-mtgzero 8ea9fcca
 /// (docs/ir_defects.md); the entries below are Edge of Eternities cards
-/// (ENGINE.md 99). mtg-bot feature/eoe-ir-fixes fixed entries 20-23, 26, 40,
-/// 42, 46, 48, 51, 60, 63, 64, 81, 82, Gravkill's 62, Blinkmoth Nexus' and
-/// Inkmoth Nexus' 41, Dockworker Drone's and Blast Zone's 21 (ENGINE.md
-/// 99.9); what is left below is still wrong in the IR.
+/// (ENGINE.md 99). mtg-bot feature/eoe-ir-fixes fixed most of them: 5362f5ed
+/// (ENGINE.md 99.9) and 20bea9f4 (ENGINE.md 99.11, entries 21, 24, 25,
+/// 28-30, 41, 43-45, 47, 49, 50, 61, 62, 65, 67, 80, 100, 101); what is left
+/// below is still wrong in the IR.
 const IR_DEFECTS: &[(&str, &str)] = &[
     // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
-    // "Enters with" a count of +1/+1 counters per permanent written as an
-    // enters trigger (21; the schema has no such count).
-    ("Luxknight Breacher", "ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)"),
-    // "Can attack as though it didn't have defender" as losing defender (24).
-    ("Mechan Shieldmate", "ir_defect(attack permission as losing defender, docs/ir_defects.md 24)"),
-    // The counter doubler's recipients dropped (25).
-    ("Loading Zone", "ir_defect(counter doubler without its recipients, docs/ir_defects.md 25)"),
     // "Move a counter" narrowed to a +1/+1 counter between your permanents
     // (27).
     ("Nesting Grounds", "ir_defect(move a counter narrowed, docs/ir_defects.md 27)"),
-    // Menace for "can't be blocked by more than one creature" (28).
-    ("Meltstrider's Resolve", "ir_defect(menace for \"by more than one\", docs/ir_defects.md 28)"),
-    // An enchant ability narrowed to "creature" (29, 30).
-    ("Tractor Beam", "ir_defect(enchant creature or Spacecraft as creature, docs/ir_defects.md 29)"),
-    ("Moonlit Meditation", "ir_defect(enchant artifact or creature as creature, docs/ir_defects.md 30)"),
     // "Whenever you put ... counters" without its "you put" (31).
     ("Terrasymbiosis", "ir_defect(who puts the counters dropped, docs/ir_defects.md 31)"),
 
-    // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
-    // "A 2/2 creature with all creature types": the IR has no "all creature
-    // types" (docs/ir_defects.md 41).
-    ("Mutavault", "ir_defect(animated land's types dropped, docs/ir_defects.md 41)"),
-    // Clauses of an effect dropped (docs/ir_defects.md 43-45, 49).
-    ("Divert Disaster", "ir_defect(unless-pays and Lander dropped, docs/ir_defects.md 43)"),
-    ("Unravel", "ir_defect(draw clause dropped, docs/ir_defects.md 44)"),
-    ("Xu-Ifit, Osteoharmonist", "ir_defect(Skeleton and no abilities dropped, docs/ir_defects.md 45)"),
-    ("Pull Through the Weft", "ir_defect(lands-to-battlefield clause dropped, docs/ir_defects.md 49)"),
-    // A restriction or a choice reshaped (docs/ir_defects.md 47, 50).
-    ("Power Depot", "ir_defect(modular dropped, spend restriction narrowed, docs/ir_defects.md 47)"),
-    ("Sunken Citadel", "ir_defect(chosen colour dropped, docs/ir_defects.md 50)"),
-
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
-    // "Exile target creature you control" read as "until this leaves the
-    // battlefield"; the ability returning the exiled cards is an empty
-    // effect (docs/ir_defects.md 61).
-    ("Endless Sands", "ir_defect(linked exile and its return dropped, docs/ir_defects.md 61)"),
-    // "Exile target creature or planeswalker": the target filter is a
-    // creature only; the second mode's planeswalker cards dropped
-    // (docs/ir_defects.md 62).
-    ("Archenemy's Charm", "ir_defect(target types dropped, docs/ir_defects.md 62)"),
-    // "Create a 2/2 colorless Robot artifact creature token for each ...":
-    // the token by name only (docs/ir_defects.md 65, as 3).
-    ("Pinnacle Starcage", "ir_defect(token printing by name only, docs/ir_defects.md 65)"),
     // "If a permanent entering the battlefield causes a triggered ability
     // of a permanent you control to trigger": both restrictions dropped
     // (docs/ir_defects.md 66).
     ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
-    // "{2}{C}" / "{4}{C}" activation costs as generic {3} / {5}
-    // (docs/ir_defects.md 67, as 5).
-    ("Mirrorpool", "ir_defect(colorless pips as generic, docs/ir_defects.md 67)"),
-
-    // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
-    // "Dies or is put into exile" widened to "leaves the battlefield", and
-    // "while its power is 4 or greater" moved to resolution (80).
-    ("Syr Vondam, Sunstar Exemplar", "ir_defect(dies-or-exiled widened to leaves the battlefield, docs/ir_defects.md 80)"),
-
-    // Cross-lane pass (ENGINE.md 99.8; docs/ir_defects.md 100-119).
-    // "Mill three cards, then return a creature or Spacecraft card from your
-    // graveyard to your hand": the card chosen as the ability resolves
-    // (after the mill) written as a target chosen as it triggers (100).
-    ("Fell Gravship", "ir_defect(a card chosen on resolution written as a target, docs/ir_defects.md 100)"),
-    // "If it was attacking, create a 1/1 ... Drone ... token": the token's
-    // printing resolved by name in Python, not in the IR (101, as 65).
-    ("Desculpting Blast", "ir_defect(token printing by name only, docs/ir_defects.md 101)"),
 
     // W2 mana and lands (ENGINE.md 99.12; docs/ir_defects.md 160-169).
 
