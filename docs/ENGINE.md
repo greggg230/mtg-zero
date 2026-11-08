@@ -18078,6 +18078,9 @@ step is every card an EoE play booster can hold, in the Rust engine.
 * **IR defect 20** (docs/ir_defects.md): the parser drops Station from the five planets and The
   Eternity Elevator. The planets then lowered as plain taplands, "supported": they are blocked
   through `lower::IR_DEFECTS` (98 -> 93). Lane B audits the other base cards.
+* **`FUZZ_POOL=eoe`** (`engine/tests/fuzz.rs`): random 40-card decks (17 lands, 23 spells) of the
+  EoE table's supported cards; games only (sealed matches come with milestone S2). 2,000 games
+  passed on the 93 base cards. Each lane runs it over its own cards.
 * **Unchanged:** the cube's IR, support (546 / 546) and behaviour digests; no layout, encoding,
   zero-core or Python change.
 

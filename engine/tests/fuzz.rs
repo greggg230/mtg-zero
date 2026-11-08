@@ -52,6 +52,9 @@
 //! Prismari Charm with the cube's cards); every check of the default mode,
 //! and with 200 games or more Murktide Regent must have been cast and its
 //! leave-the-graveyard trigger resolved. Games only (best-of-one).
+//! `FUZZ_POOL=eoe` (ENGINE.md 99): Edge of Eternities sealed, the set's own
+//! card table (`CardDb::eoe`): random 40-card decks of its supported cards
+//! (17 lands, 23 spells; games only, no matches).
 //! An unknown `FUZZ_POOL` value fails. Unset: the default mode, unchanged.
 //!
 //! `FUZZ_BELIEF=t` (ENGINE.md 69): at every checkpoint also the belief-weighted deal
@@ -246,6 +249,7 @@ enum PoolMode {
     Exponential,
     Drafted,
     Delver,
+    Eoe,
 }
 
 fn pool_mode() -> PoolMode {
@@ -255,7 +259,8 @@ fn pool_mode() -> PoolMode {
         Ok("exponential") => PoolMode::Exponential,
         Ok("drafted") => PoolMode::Drafted,
         Ok("delver") => PoolMode::Delver,
-        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\" or \"delver\")"),
+        Ok("eoe") => PoolMode::Eoe,
+        Ok(other) => panic!("FUZZ_POOL={other}: unknown (unset, \"interactions\", \"exponential\", \"drafted\", \"delver\" or \"eoe\")"),
     }
 }
 
@@ -269,6 +274,38 @@ fn exponential_mode() -> bool {
 
 fn delver_mode() -> bool {
     pool_mode() == PoolMode::Delver
+}
+
+fn eoe_mode() -> bool {
+    pool_mode() == PoolMode::Eoe
+}
+
+/// The supported cards of the Edge of Eternities table (`FUZZ_POOL=eoe`):
+/// its lands (the basics among them) and its other cards.
+fn eoe_pool() -> &'static (Vec<u16>, Vec<u16>) {
+    static POOL: std::sync::OnceLock<(Vec<u16>, Vec<u16>)> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        let db = CardDb::eoe();
+        let (mut lands, mut spells) = (Vec::new(), Vec::new());
+        for name in db.supported() {
+            let id = db.id(name).unwrap();
+            if db.def(id).is(engine::db::types::LAND) {
+                lands.push(id);
+            } else {
+                spells.push(id);
+            }
+        }
+        assert!(!lands.is_empty() && !spells.is_empty(), "FUZZ_POOL=eoe: no supported cards");
+        (lands, spells)
+    })
+}
+
+/// A random Edge of Eternities deck (`FUZZ_POOL=eoe`): 17 lands, 23 spells.
+fn eoe_deck(rng: &mut Rng) -> Vec<u16> {
+    let (lands, spells) = eoe_pool();
+    let mut d: Vec<u16> = (0..17).map(|_| lands[rng.below(lands.len() as u32) as usize]).collect();
+    d.extend((0..23).map(|_| spells[rng.below(spells.len() as u32) as usize]));
+    d
 }
 
 /// The clone/determinize checkpoint's sampling denominator (module docs; `check_clone`,
@@ -543,6 +580,8 @@ fn check_forced_chance(g: &Game, seed: u64, step: usize) {
 fn game_db() -> &'static CardDb {
     if delver_mode() {
         CardDb::constructed()
+    } else if eoe_mode() {
+        CardDb::eoe()
     } else {
         common::db()
     }
@@ -880,6 +919,9 @@ fn decks(seed: u64) -> [(Vec<u16>, Vec<u16>); 2] {
     }
     if delver_mode() {
         return [(delver_deck(), Vec::new()), (delver_deck(), Vec::new())];
+    }
+    if eoe_mode() {
+        return [(eoe_deck(&mut rng), Vec::new()), (eoe_deck(&mut rng), Vec::new())];
     }
     if seed % 4 == 3 {
         let gen = engine::az::decks::DeckGen::default();
@@ -1631,6 +1673,10 @@ fn fuzz_random_matches() {
         println!("FUZZ_POOL=delver: games only (constructed best-of-three isn't built)");
         return;
     }
+    if eoe_mode() {
+        println!("FUZZ_POOL=eoe: games only (sealed matches come with milestone S2)");
+        return;
+    }
     let games: u64 = std::env::var("FUZZ_GAMES").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
     let n: u64 = std::env::var("FUZZ_MATCHES").ok().and_then(|s| s.parse().ok()).unwrap_or((games / 20).max(20));
     let first: u64 = std::env::var("FUZZ_FIRST").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -1669,7 +1715,7 @@ fn fuzz_random_matches() {
 fn same_seed_and_actions_replay_matches_identically() {
     use engine::az::MtgAz;
     use zero_search::game::SearchGame;
-    if delver_mode() {
+    if delver_mode() || eoe_mode() {
         return;
     }
     for seed in 2000..2012 {
