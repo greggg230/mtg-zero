@@ -1660,6 +1660,11 @@ impl Game {
         if !own {
             return;
         }
+        // Devour land n (CR 702.82a): which lands are sacrificed, then its
+        // counters (`Task::Devour`; ENGINE.md 99.12).
+        if self.def_of(idx).devour_land > 0 {
+            self.agenda.push(Task::Devour { card: idx, picked: Vec::new() });
+        }
         if self.def_of(idx).shock_life > 0
             || self.def_of(idx).chooses_player
             || self.def_of(idx).paints

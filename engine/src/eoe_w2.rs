@@ -482,3 +482,54 @@ impl Game {
         classes.extend(split);
     }
 }
+
+impl Game {
+    /// Devour land n (CR 702.82a): as `card` enters, its controller chooses
+    /// lands to sacrifice, one decision each (`Sacrifice`: a land after the
+    /// last one chosen, in battlefield order, so each set once; `PASS`
+    /// stops). Nothing happens until the choice ends (re-entrant: ENGINE.md
+    /// 99.8): then they are sacrificed together, and it gets n +1/+1
+    /// counters for each.
+    pub(crate) fn devour(&mut self, card: CardIdx, mut picked: Vec<CardIdx>) {
+        use crate::decision::{act, Choice, DecisionKind, Opt};
+        let p = self.objs[card.i()].controller;
+        match self.answer.take() {
+            Some(Choice::Card(c)) => picked.push(c),
+            Some(Choice::Pass) => return self.devour_done(card, &picked),
+            Some(other) => unreachable!("devour answer {other:?}"),
+            None => {}
+        }
+        let after = picked.last().and_then(|l| self.battlefield.iter().position(|x| x == l));
+        let cands: Vec<CardIdx> = self
+            .battlefield
+            .iter()
+            .enumerate()
+            .filter(|&(i, &c)| after.is_none_or(|a| i > a) && c != card && self.objs[c.i()].controller == p && self.is_type(c, types::LAND))
+            .map(|(_, &c)| c)
+            .collect();
+        if cands.is_empty() || self.objs[card.i()].zone != crate::ids::Zone::Battlefield {
+            return self.devour_done(card, &picked);
+        }
+        let mut opts: Vec<Opt> = cands.iter().map(|&c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) }).collect();
+        opts.push(Opt { action: act::PASS, choice: Choice::Pass });
+        self.ask(crate::flow::Task::Devour { card, picked }, p, DecisionKind::Sacrifice, opts);
+    }
+
+    fn devour_done(&mut self, card: CardIdx, picked: &[CardIdx]) {
+        if picked.is_empty() {
+            return;
+        }
+        let n = self.def_of(card).devour_land as usize * picked.len();
+        self.note(|g| format!("{} devours {} land(s)", g.name(card), picked.len()));
+        self.begin_batch();
+        for &c in picked {
+            if self.objs[c.i()].zone == crate::ids::Zone::Battlefield {
+                self.sacrifice(c);
+            }
+        }
+        self.end_batch();
+        if self.objs[card.i()].zone == crate::ids::Zone::Battlefield {
+            self.add_counters(card, crate::db::Counter::P1P1, n.min(u16::MAX as usize) as crate::num::Count);
+        }
+    }
+}

@@ -833,7 +833,7 @@ impl Game {
             }
             Op::PileTo { who, dest, ref filter, min, max, rest, reveal } => {
                 let Some(p) = self.who(f, who) else { return Flow::Next };
-                let set = matches!(dest, PileDest::Graveyard | PileDest::Hand);
+                let set = matches!(dest, PileDest::Graveyard | PileDest::Hand | PileDest::BattlefieldTapped);
                 match self.answer.take() {
                     Some(Choice::Card(c)) => {
                         f.pile.retain(|&x| x != c);
@@ -909,7 +909,8 @@ impl Game {
                     PileDest::Bottom => DecisionKind::PutOnBottom,
                     PileDest::Graveyard => DecisionKind::PutInGraveyard,
                     // (Hideaway's "exile one face down": a card taken.)
-                    PileDest::Hand | PileDest::FaceDown => DecisionKind::PutInHand,
+                    // (Onto the battlefield: a card taken, as to a hand.)
+                    PileDest::Hand | PileDest::FaceDown | PileDest::BattlefieldTapped => DecisionKind::PutInHand,
                 };
                 self.ask(Task::Run(f.clone()), p, kind, opts);
                 Flow::Suspend
@@ -1142,6 +1143,10 @@ impl Game {
             PileDest::Graveyard => self.move_card(c, Zone::Graveyard, Pos::Top),
             PileDest::Hand => self.move_card(c, Zone::Hand, Pos::Top),
             PileDest::FaceDown => self.move_card(c, Zone::FaceDown, Pos::Top),
+            PileDest::BattlefieldTapped => {
+                self.entering_tapped = true;
+                self.put_onto_battlefield(c, p)
+            }
         };
         // (Not a card a replacement shuffled into the library instead:
         // Blightsteel Colossus.)

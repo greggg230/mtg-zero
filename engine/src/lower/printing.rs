@@ -267,7 +267,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
-        l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
         l.deny("CardPrinting.attached_grants_control", attached_grants_control);
         l.deny("CardPrinting.attached_sets_base_pt", attached_sets_base_pt);
@@ -1722,6 +1721,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if *nonbasic_lands_are_mountains && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.nonbasic_lands_are_mountains(not a permanent)");
     }
+    // Devour land n (CR 702.82a): a creature's.
+    let devour_land = if *devour_land_multiplier != 0 {
+        if ty & types::CREATURE == 0 {
+            l.unsupported("CardPrinting.devour_land_multiplier(not a creature)");
+        }
+        l.int("CardPrinting.devour_land_multiplier", *devour_land_multiplier, 1, 9) as u8
+    } else {
+        0
+    };
     if *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.grants_etb_counter_per_land_entered_this_turn(not a permanent)");
     }
@@ -1767,6 +1775,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut def = CardDef {
         nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
         etb_counter_per_land_entered: *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT != 0,
+        devour_land,
         counters_per_exiled,
         companion,
         look_top: *grants_look_at_top_of_library,

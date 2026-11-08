@@ -1715,6 +1715,10 @@ pub struct CardDef {
     /// it for each land that entered the battlefield under your control this
     /// turn" (CR 614.1c; Bioengineered Future, ENGINE.md 99.12).
     pub etb_counter_per_land_entered: bool,
+    /// Devour land n (CR 702.82a: "As this creature enters, you may
+    /// sacrifice any number of lands. It enters with n times that many
+    /// +1/+1 counters"; Famished Worldsire, ENGINE.md 99.12): n, 0 = none.
+    pub devour_land: u8,
 }
 
 /// Rules about casting spells a card adds while it is on the battlefield

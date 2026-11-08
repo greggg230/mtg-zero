@@ -378,3 +378,51 @@ fn cr_302_6_gene_pollinator_in_a_payment_and_summoning_sickness() {
     // untapped but it, and it can't tap itself).
     assert!(!g.can_pay(0, &cost("{G}")));
 }
+
+/// Famished Worldsire: devour land 3 (CR 702.82a: as it enters, sacrifice
+/// any number of lands; three +1/+1 counters for each) and "When this
+/// creature enters, look at the top X cards of your library, where X is
+/// this creature's power. Put any number of land cards from among them onto
+/// the battlefield tapped, then shuffle."
+#[test]
+fn cr_702_82a_famished_worldsire_devours_lands_and_puts_lands_back() {
+    let mut g = scen()
+        .battlefield(0, &["Forest", "Forest", "Forest", "Forest", "Forest", "Forest", "Forest", "Forest"])
+        .hand(0, &["Famished Worldsire"])
+        .library(0, &["Test Bear", "Island", "Island", "Test Bear", "Island", "Island", "Island", "Island", "Island", "Island"])
+        .at(Step::Main1, 0)
+        .start();
+    let ws = g.card(0, "Famished Worldsire", Zone::Hand);
+    g.choose(Choice::Cast(ws));
+    run_until(&mut g, |g| g.kind() == Some(DecisionKind::Sacrifice), |_| None);
+    // Two Forests (each a pick, then stop).
+    let forests: Vec<_> = opts(&g).into_iter().filter(|c| matches!(c, Choice::Card(_))).collect();
+    assert_eq!(forests.len(), 8, "any of the lands");
+    g.choose(forests[0]);
+    assert_eq!(g.kind(), Some(DecisionKind::Sacrifice));
+    let next = opts(&g).into_iter().find(|c| matches!(c, Choice::Card(_))).unwrap();
+    g.choose(next);
+    g.choose(Choice::Pass);
+    assert_eq!(g.counters_on(ws, Counter::P1P1), 6, "devour land 3, two lands");
+    assert_eq!(g.lands_of(0).count(), 6);
+    // Its trigger: the top six (power 6); take every land.
+    run_until(&mut g, |g| g.kind() == Some(DecisionKind::PutInHand) || (at_priority(g) && g.stack().is_empty()), |_| None);
+    let mut took = 0;
+    while g.kind() == Some(DecisionKind::PutInHand) {
+        let c = opts(&g).into_iter().find(|c| matches!(c, Choice::Card(_)));
+        match c {
+            Some(c) => {
+                g.choose(c);
+                took += 1;
+            }
+            None => {
+                g.choose(Choice::Pass);
+            }
+        }
+    }
+    settle(&mut g);
+    assert_eq!(took, 4, "the four Islands among the top six");
+    assert_eq!(g.lands_of(0).count(), 10);
+    assert_eq!(g.lands_of(0).filter(|&c| g.name(c) == "Island" && g.obj(c).tapped).count(), 4, "tapped");
+    assert_eq!(g.power(ws), 6);
+}

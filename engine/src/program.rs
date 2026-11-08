@@ -1076,6 +1076,9 @@ pub enum PileDest {
     Bottom,
     Graveyard,
     Hand,
+    /// Onto the battlefield tapped under the controller's control
+    /// (Famished Worldsire; ENGINE.md 99.12).
+    BattlefieldTapped,
 }
 
 /// `PileTo.max`: any number of the cards.
