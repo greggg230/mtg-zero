@@ -175,9 +175,9 @@ pub struct Permission {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PermKind {
     /// Play it (a land too unless `cast_only`), [without paying its mana
-    /// cost], [spending mana as though of any colour], [only during a turn
-    /// you attacked with a creature of this subtype].
-    Play { free: bool, cast_only: bool, any_mana: bool, attacked_subtype: Option<u16> },
+    /// cost], [spending mana as though of any colour], [only while `only_if`
+    /// holds].
+    Play { free: bool, cast_only: bool, any_mana: bool, only_if: PlayIf },
     /// It has flashback; the flashback cost is its mana cost (Snapcaster
     /// Mage).
     Flashback,
@@ -200,6 +200,19 @@ pub enum PermKind {
     /// As `Taxed`, and a land played this way enters tapped (Lightstall
     /// Inquisitor; ENGINE.md 99.4).
     TaxedLandsTapped(u8),
+}
+
+/// When a `PermKind::Play` permission lets its player play the card (CR
+/// 601.2a, 305.1: checked as the card would be played).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PlayIf {
+    /// Whenever it could otherwise be played.
+    Always,
+    /// "During any turn you attacked with a <subtype>" (ENGINE.md 99.4).
+    AttackedWith(u16),
+    /// "If you control a <subtype>" (Possibility Technician; EoE W3,
+    /// ENGINE.md 99.13).
+    ControlSubtype(u16),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]

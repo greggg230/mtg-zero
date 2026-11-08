@@ -727,7 +727,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = pick(&cs, r)?;
             let card = a.g.obj_ref(c);
             let player = a.g.objs[c.i()].owner;
-            let kind = crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, attacked_subtype: None };
+            let kind = crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, only_if: crate::game::PlayIf::Always };
             a.g.permissions.push(crate::game::Permission { card, player, turn: Some(a.g.turn.number), kind });
             Some(format!("{} by P{player}", a.g.name(c)))
         }),

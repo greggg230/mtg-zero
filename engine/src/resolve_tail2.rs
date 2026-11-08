@@ -84,7 +84,7 @@ impl Game {
                         card,
                         player: p,
                         turn: Some(PERM_UNTIL_TURNS | until),
-                        kind: crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, attacked_subtype: None },
+                        kind: crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, only_if: crate::game::PlayIf::Always },
                     });
                 }
                 Flow::Next
@@ -173,7 +173,7 @@ impl Game {
                             card,
                             player: owner,
                             turn: Some(PERM_LATER | self.turn.number),
-                            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None },
+                            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always },
                         });
                     }
                 }
@@ -314,7 +314,7 @@ impl Game {
                         back.picked.push(c);
                         self.agenda.push(Task::Run(back));
                         let r = self.obj_ref(c);
-                        let kind = crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None };
+                        let kind = crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always };
                         self.permissions.push(crate::game::Permission { card: r, player: p, turn: Some(self.turn.number), kind });
                         // A spell, not a card: an adventurer card may be
                         // cast as its Adventure (an instant or sorcery

@@ -954,3 +954,63 @@ fn secluded_starforge_robot_and_x_zero_cr111_2() {
     let sf = bf(&g, 0, "Secluded Starforge");
     assert!(!g.has_option(act(sf, 1)), "sorcery speed");
 }
+
+// ---- Possibility Technician ("you may play it if you control a Kavu") -------------
+
+/// Possibility Technician [3/3 Kavu Artificer]: "Whenever this creature or
+/// another Kavu you control enters, exile the top card of your library. For
+/// as long as that card remains exiled, you may play it if you control a
+/// Kavu" (CR 601.2a, 305.1: the condition is checked as the card would be
+/// played).
+#[test]
+fn possibility_technician_exiles_the_top_card_playable_while_you_control_a_kavu_cr601_2a() {
+    let mut g = scen()
+        .battlefield(0, &["Mountain", "Mountain", "Mountain", "Forest", "Forest"])
+        .battlefield(1, &["Swamp"])
+        .library(0, &["W3 Bear"])
+        .hand(0, &["Possibility Technician"])
+        .hand(1, &["W3 Murder"])
+        .at(Step::Main1, 0)
+        .start();
+    let bear = g.card(0, "W3 Bear", Zone::Library);
+    let pt = cast(&mut g, 0, "Possibility Technician", &[]);
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Exile, "{}", log(&g));
+    assert!(g.has_option(Choice::Cast(bear)), "a Kavu: it may be cast {:?}", g.options_desc());
+    // Without a Kavu, it can't be played; the permission lasts.
+    to_opponent_priority(&mut g);
+    let t = g.tgt(pt);
+    cast(&mut g, 1, "W3 Murder", &[t]);
+    settle(&mut g);
+    assert_eq!(g.obj(pt).zone, Zone::Graveyard);
+    assert!(!g.has_option(Choice::Cast(bear)), "no Kavu: {:?}", g.options_desc());
+}
+
+/// "Or another Kavu you control enters": a second card; an opponent's Kavu
+/// doesn't trigger it. A land exiled this way may be played as the land drop.
+#[test]
+fn possibility_technician_another_kavu_you_control_triggers_it_cr603_2() {
+    let mut g = scen()
+        .battlefield(0, &["Possibility Technician", "Mountain", "Mountain"])
+        .battlefield(1, &["Swamp", "Swamp"])
+        .library(0, &["Mountain", "W3 Bear"])
+        .hand(0, &["W3 Kavu"])
+        .hand(1, &["W3 Kavu"])
+        .at(Step::Main1, 0)
+        .start();
+    let (bear, mtn) = (g.card(0, "W3 Bear", Zone::Library), g.card(0, "Mountain", Zone::Library));
+    let _ = bear;
+    cast(&mut g, 0, "W3 Kavu", &[]);
+    settle(&mut g);
+    assert_eq!(g.obj(mtn).zone, Zone::Exile, "{}", log(&g));
+    assert!(g.has_option(Choice::Play(mtn)), "a land: played as the land drop {:?}", g.options_desc());
+    g.choose(Choice::Play(mtn));
+    settle(&mut g);
+    assert_eq!(g.obj(mtn).zone, Zone::Battlefield);
+    // The opponent's Kavu: nothing.
+    next_main(&mut g, 1);
+    let lib = g.player(0).library.len();
+    cast(&mut g, 1, "W3 Kavu", &[]);
+    settle(&mut g);
+    assert_eq!(g.player(0).library.len(), lib, "not a Kavu you control\n{}", log(&g));
+}

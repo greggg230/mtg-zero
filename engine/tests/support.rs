@@ -904,6 +904,7 @@ const SUPPORTED_EOE_COMBAT: &[&str] = &[
     "Dyadrine, Synthesis Amalgam",
     "Frenzied Baloth",
     "Pain for All",
+    "Possibility Technician",
     "Raging Ravine",
     "Requiem Monolith",
     "Rust Harvester",

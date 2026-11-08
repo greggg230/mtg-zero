@@ -395,7 +395,11 @@ impl Game {
             return false;
         }
         match pm.kind {
-            crate::game::PermKind::Play { attacked_subtype: Some(s), .. } => {
+            // "If you control a <subtype>" (EoE W3).
+            crate::game::PermKind::Play { only_if: crate::game::PlayIf::ControlSubtype(s), .. } => {
+                self.permanents_of(p).any(|c| self.has_subtype(c, s))
+            }
+            crate::game::PermKind::Play { only_if: crate::game::PlayIf::AttackedWith(s), .. } => {
                 // "During any turn you attacked with a <subtype>": the
                 // attackers as they are now, or as they last were.
                 self.players[p as usize].attacked_with.iter().any(|&r| {

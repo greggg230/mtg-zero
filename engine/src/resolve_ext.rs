@@ -1225,7 +1225,7 @@ impl Game {
                         card,
                         player: f.controller,
                         turn: Some(self.turn.number),
-                        kind: crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, attacked_subtype: None },
+                        kind: crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, only_if: crate::game::PlayIf::Always },
                     });
                 }
                 Flow::Next
@@ -1463,7 +1463,7 @@ impl Game {
                             card: o,
                             player: f.controller,
                             turn: Some(self.turn.number),
-                            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, attacked_subtype: None },
+                            kind: crate::game::PermKind::Play { free: false, cast_only: true, any_mana: false, only_if: crate::game::PlayIf::Always },
                         });
                     }
                 }

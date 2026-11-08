@@ -1389,21 +1389,24 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 enums::ImpulseLibraryOwner::ThatPlayer => Who::EventPlayer,
                 enums::ImpulseLibraryOwner::DefendingPlayer => Who::Opponent,
             };
-            let attacked_subtype =
-                (!requires_attacked_with_subtype.is_empty()).then(|| l.subtype(requires_attacked_with_subtype));
+            let only_if = if requires_attacked_with_subtype.is_empty() {
+                crate::game::PlayIf::Always
+            } else {
+                crate::game::PlayIf::AttackedWith(l.subtype(requires_attacked_with_subtype))
+            };
             // "During any turn you attacked with a Rogue": while it stays
             // exiled (`while_exiled`), not this turn only.
             let this_turn = match duration {
                 enums::ExilePlayDuration::ThisTurn => {
-                    if attacked_subtype.is_some() {
+                    if only_if != crate::game::PlayIf::Always {
                         l.unsupported("ExileTopCardsWithPlayPermission.duration(this_turn with requires_attacked_with_subtype)");
                     }
                     true
                 }
                 enums::ExilePlayDuration::WhileExiled => false,
                 // "You may play that card until your next end step" (Inti).
-                enums::ExilePlayDuration::UntilYourNextEndStep if free_if.is_none() && attacked_subtype.is_none() => {
-                    let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+                enums::ExilePlayDuration::UntilYourNextEndStep if free_if.is_none() && only_if == crate::game::PlayIf::Always => {
+                    let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, only_if };
                     b.op(Op::Ext(Ext::ExileTopUntilEndStep { who, n, kind }));
                     return true;
                 }
@@ -1412,14 +1415,14 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                     true
                 }
             };
-            let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+            let kind = crate::game::PermKind::Play { free: *free, cast_only: *cast_only, any_mana: *any_color_mana, only_if };
             match free_if {
                 None => {
                     b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind, this_turn }));
                 }
                 Some(cond) => {
                     let j = b.op(Op::JumpUnless { cond, to: 0 });
-                    let free_kind = crate::game::PermKind::Play { free: true, cast_only: *cast_only, any_mana: *any_color_mana, attacked_subtype };
+                    let free_kind = crate::game::PermKind::Play { free: true, cast_only: *cast_only, any_mana: *any_color_mana, only_if };
                     b.op(Op::Ext(Ext::ExileTopWithPermission { who, n, kind: free_kind, this_turn }));
                     let end = b.op(Op::Jump { to: 0 });
                     b.patch(j);

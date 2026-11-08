@@ -193,6 +193,14 @@ pub(crate) fn lower_effect_w3(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect
             b.op(Op::Ext(Ext::TokensCreated));
             b.patch(at);
         }
+        // "Exile the top card of your library. For as long as that card
+        // remains exiled, you may play it if you control a Kavu" (Possibility
+        // Technician; CR 601.2a, 305.1: checked as it would be played).
+        E::PossibilityTechnicianETBEffect(nodes::PossibilityTechnicianETBEffect {}) => {
+            let only_if = crate::game::PlayIf::ControlSubtype(l.subtype("Kavu"));
+            let kind = crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, only_if };
+            b.op(Op::Ext(Ext::ExileTopWithPermission { who: Who::You, n: 1, kind, this_turn: false }));
+        }
         _ => return false,
     }
     true
