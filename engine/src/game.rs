@@ -197,6 +197,9 @@ pub enum PermKind {
     /// Airbent (Aang): its owner may cast it for {n} rather than its mana
     /// cost while it stays exiled.
     Airbent(u8),
+    /// As `Taxed`, and a land played this way enters tapped (Lightstall
+    /// Inquisitor; ENGINE.md 99.4).
+    TaxedLandsTapped(u8),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -642,6 +645,11 @@ pub struct Game {
     /// Cards discarded this turn, as the objects they became in a graveyard
     /// (mayhem, CR 702.187b).
     pub(crate) discarded: Vec<ObjRef>,
+    /// Void (Edge of Eternities' ability word: "if a nonland permanent left
+    /// the battlefield this turn or a spell was warped this turn"): the
+    /// number of the last turn in which either happened (0: none), so void
+    /// holds while it is the current turn's number (ENGINE.md 99.4).
+    pub(crate) void_turn: u32,
     /// Triggered abilities a player has until their next turn ("until your
     /// next turn, whenever ..."; `Ext::TriggerUntilYourNextTurn`).
     pub(crate) temp_triggers: Vec<TempTrigger>,
@@ -1029,6 +1037,7 @@ impl Game {
             day: None,
             done_once: Vec::new(),
             discarded: Vec::new(),
+            void_turn: 0,
             temp_triggers: Vec::new(),
             gy_exile: Vec::new(),
             copies: Vec::new(),
@@ -1128,6 +1137,12 @@ impl Game {
     pub fn is_over(&self) -> bool {
         self.outcome.is_some()
     }
+    /// Void holds: a nonland permanent left the battlefield this turn or a
+    /// spell was warped this turn (ENGINE.md 99.4).
+    pub fn void_active(&self) -> bool {
+        self.void_turn != 0 && self.void_turn == self.turn.number
+    }
+
     pub fn turn(&self) -> &Turn {
         &self.turn
     }
@@ -1797,6 +1812,11 @@ impl Game {
         // Leave-the-battlefield abilities look back in time (CR 603.10a):
         // the events are recorded before the object moves.
         if from == Zone::Battlefield && !self.quiet_leave {
+            // Void: a nonland permanent (as it last existed on the
+            // battlefield) left it this turn (ENGINE.md 99.4).
+            if !self.is_type(idx, crate::db::types::LAND) {
+                self.void_turn = self.turn.number;
+            }
             if to == Zone::Graveyard {
                 self.event(Event::obj(EventKind::Dies, old));
             }

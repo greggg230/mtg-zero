@@ -96,6 +96,12 @@ pub enum Amount {
     /// k times [`CountTypes`](Amount::CountTypes) ("twice the number of
     /// lands you control").
     CountTypesTimes(u16, u8),
+    /// The controller's life total ("cards equal to your life total").
+    ControllerLife,
+    /// The multicolored permanents the controller controls (CR 105.2a).
+    MulticoloredPermanents,
+    /// The differently named lands the controller controls (CR 201.2).
+    DifferentlyNamedLands,
 }
 
 /// The instructions Edge of Eternities lane B added (ENGINE.md 99.3), inside
@@ -800,6 +806,8 @@ pub enum Ext {
     /// "After this phase, there is an additional combat phase" (CR 500.8;
     /// during a combat phase).
     ExtraCombat,
+    /// Edge of Eternities lane C's instructions (ENGINE.md 99.4).
+    EoeC(crate::eoe_c::EoeC),
     /// Warp's delayed ability (CR 702.185a): exile the event's permanent;
     /// its owner may cast it from exile on a later turn.
     WarpExile,
@@ -1116,6 +1124,7 @@ impl Op {
             Op::Ext(Ext::CopySpell { of, n, who: w, .. }) => *of == SpellOf::EventSpell || who(w) || amt(n),
             Op::Ext(Ext::ExileEventCard) => true,
             Op::Ext(Ext::CounterEventItem) => true,
+            Op::Ext(Ext::EoeC(crate::eoe_c::EoeC::ReturnEventCardTapped)) => true,
             Op::Ext(Ext::EventControllerBecomesMonarch) => true,
             Op::Ext(Ext::OfferPayOther { who: w, .. }) => who(w),
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),

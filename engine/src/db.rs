@@ -278,6 +278,9 @@ pub enum PtCda {
     Leveler { counter: Counter, ranges: Vec<(u8, Option<u8>, i32, i32)> },
     /// Power and toughness = the lands you control (ENGINE.md 99.3).
     LandsYouControl,
+    /// Power = the cards its controller owns in exile (face up or down;
+    /// not tokens, CR 108.2); toughness = that plus `plus` (Cosmogoyf).
+    OwnedInExile { plus: i32 },
 }
 
 /// A predicate over targets (players and objects). At top level the type
@@ -327,6 +330,8 @@ pub enum Filter {
     Attacking,
     /// A tapped permanent.
     Tapped,
+    /// A blocking creature (CR 509.1g; ENGINE.md 99.4).
+    Blocking,
     /// A player who has drawn exactly n cards this turn.
     DrewThisTurn(u8),
     /// A permanent whose evoke cost was paid (CR 702.74a).
@@ -903,6 +908,16 @@ pub enum Cond {
     LandsPlayedAtLeast(u8),
     /// An opponent controls more lands than you (ENGINE.md 99.3).
     OpponentControlsMoreLands,
+    /// Void: a nonland permanent left the battlefield this turn or a spell
+    /// was warped this turn (Edge of Eternities' ability word; ENGINE.md
+    /// 99.4).
+    Void,
+    /// Your opponents control at least n permanents matching the filter
+    /// between them ("if your opponents control three or more creatures").
+    OpponentsControlAtLeast(Filter, u8),
+    /// You attacked with a creature of this subtype (its card's printed
+    /// subtypes) this turn ("if you attacked with a Spacecraft this turn").
+    AttackedWithSubtype(u16),
 }
 
 impl Cond {
@@ -937,7 +952,10 @@ impl Cond {
             | Cond::CompletedDungeon
             | Cond::CityBlessing
             | Cond::LandsPlayedAtLeast(_)
-            | Cond::OpponentControlsMoreLands => false,
+            | Cond::OpponentControlsMoreLands
+            | Cond::Void
+            | Cond::OpponentsControlAtLeast(..)
+            | Cond::AttackedWithSubtype(_) => false,
         }
     }
 }
@@ -1627,6 +1645,29 @@ pub struct CardDef {
     /// The card may be revealed from its owner's sideboard before the game
     /// (103.2b) and put into their hand once for {3} (116.2g).
     pub companion: Option<DeckCond>,
+    /// Rules about casting spells this card adds (Edge of Eternities lane
+    /// C, ENGINE.md 99.4).
+    pub casting: CastingRules,
+}
+
+/// Rules about casting spells a card adds while it is on the battlefield
+/// (or, for its own warp, wherever the card is): Edge of Eternities lane C
+/// (ENGINE.md 99.4).
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Default)]
+pub struct CastingRules {
+    /// Reductions of the cost of each spell its controller casts (CR
+    /// 601.2f): "the second spell you cast each turn costs {2} less to
+    /// cast"; "spells you cast have affinity for artifacts" (702.41a).
+    pub spell_discounts: Vec<Discount>,
+    /// "Each player can't cast more than one noncreature spell each turn."
+    pub one_noncreature_spell: bool,
+    /// "The first spell each player casts during each of their turns may
+    /// be cast without paying its mana cost" (an alternative cost, CR
+    /// 118.9).
+    pub first_spell_free: bool,
+    /// "You may cast this card from your graveyard using its warp ability"
+    /// (CR 702.185a: warp's alternative cost from a graveyard).
+    pub warp_from_graveyard: bool,
 }
 
 /// "If this card is in your opening hand [and you're not the starting
@@ -1660,6 +1701,14 @@ pub enum Discount {
     PerControlled(Filter, u8),
     /// n less per differently named land you control (ENGINE.md 99.3).
     PerDifferentlyNamedLand(u8),
+    /// n less if the condition holds for you as the cost is determined
+    /// (CR 601.2f: "this spell costs {n} less to cast if ...").
+    If(Cond, u8),
+    /// n less if one of the spell's targets matches the filter ("this
+    /// spell costs {1} less to cast if it targets a blocking creature":
+    /// the targets are chosen before the cost is determined, CR 601.2c,
+    /// 601.2f). A spell's own reduction only.
+    IfTargets(Filter, u8),
 }
 
 impl CardDef {

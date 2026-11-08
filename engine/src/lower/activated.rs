@@ -182,6 +182,9 @@ pub(crate) fn lower_activated(l: &mut Lowerer, a: &cats::ActivatedAbility, from:
     // "This ability costs {1} less to activate for each legendary creature
     // you control" (CR 602.2b, 601.2f); a mana ability pays no mana here.
     let discounts = super::printing::lower_discounts(l, cost_reductions);
+    if discounts.iter().any(|d| matches!(d, crate::db::Discount::IfTargets(..))) {
+        l.unsupported("ActivatedAbility.cost_reductions(TargetMatches)");
+    }
     if !discounts.is_empty() && (cost.mana.is_zero() || matches!(effect, ActEffect::Mana(_))) {
         l.unsupported("ActivatedAbility.cost_reductions(no mana cost to reduce)");
     }
@@ -332,7 +335,8 @@ fn lower_cost(l: &mut Lowerer, c: &cats::ActivationCost, from: From, only_if: &m
     }
     match from {
         From::Battlefield => {
-            l.deny("ActivationCost.exile_self(on the battlefield)", exile_self);
+            // "Exile this <permanent>" (CR 602.2b; paid as sacrificing it
+            // is, ENGINE.md 99.4).
             l.deny("ActivationCost.discard_self(on the battlefield)", discard_self);
         }
         From::Hand => {

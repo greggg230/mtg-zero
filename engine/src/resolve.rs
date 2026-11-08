@@ -513,6 +513,16 @@ impl Game {
                     .map_or(0, |x| self.db.def(x.1).mana_value() as i32 + x.2.x as i32 * self.db.def(x.1).x_pips as i32),
                 None => 0,
             },
+            Amount::ControllerLife => self.players[f.controller as usize].life.max(0),
+            Amount::MulticoloredPermanents => {
+                self.permanents_of(f.controller).filter(|&c| self.colors_of(c).count_ones() >= 2).count() as i32
+            }
+            Amount::DifferentlyNamedLands => {
+                let mut names: Vec<&str> = self.lands_of(f.controller).map(|c| self.name(c)).filter(|n| !n.is_empty()).collect();
+                names.sort_unstable();
+                names.dedup();
+                names.len() as i32
+            }
         }
     }
 

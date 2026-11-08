@@ -599,6 +599,16 @@ impl Game {
                 let n = self.permanents_of(ctl).filter(|&x| self.is_type(x, crate::db::types::LAND)).count() as i32;
                 (n, n)
             }
+            PtCda::OwnedInExile { plus } => {
+                let you = self.objs[c.i()].controller;
+                let n = self
+                    .exile
+                    .iter()
+                    .chain(self.face_down.iter())
+                    .filter(|&&x| self.objs[x.i()].owner == you && !self.is_token(x))
+                    .count() as i32;
+                (n, n + plus)
+            }
         }
     }
 

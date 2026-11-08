@@ -147,6 +147,7 @@ pub fn fields() -> Vec<Field> {
         day: Public "day or night (CR 731)",
         done_once: Public "optional \"only once each turn\" actions done this turn",
         discarded: Public "cards discarded this turn (mayhem, CR 702.187b)",
+        void_turn: Public "void: a nonland permanent left the battlefield or a spell was warped this turn (ENGINE.md 99.4)",
         temp_triggers: Public "triggered abilities a player has until their next turn",
         gy_exile: Public "spells that are exiled instead of being put into a graveyard",
         copies: Public "copy effects on permanents (CR 707)",
@@ -784,6 +785,11 @@ pub fn perturbations() -> Vec<Perturbation> {
             let i = r.below(a.g.prepared.len() as u32) as usize;
             a.g.prepared.remove(i);
             Some("removed".into())
+        }),
+        p!("void holds (a nonland permanent left the battlefield this turn)", "Game.void_turn", |a, _| {
+            let t = a.g.turn.number;
+            a.g.void_turn = if a.g.void_turn == t { 0 } else { t };
+            Some(format!("void turn {}", a.g.void_turn))
         }),
         p!("a player takes the initiative", "Game.initiative", |a, r| {
             let p = player(r);
@@ -1434,6 +1440,7 @@ pub fn limits() -> Vec<Limit> {
         l("an exiled card is turned face down", Design, "the owner's view: a card of the viewer's exiled face down is in its exile bag by identity like a face-up one (it knows it); that the opponent doesn't is not encoded (what the opponent knows of the viewer's cards is encoded for the hand only, hand st[4])"),
         l("an identity revealed in an earlier game", Design, "the revealing viewer's view: OPP_REVEALED is the opponent's reveals; what the opponent knows of the viewer's own pool is not encoded (as for a card the viewer exiled face down)"),
         l("the owner learns a library card below the top three", Design, "who knows a library card is encoded for the top three (g5::TOP_OWNER / TOP_OTHER, ENGINE.md 72) and, below them, as the viewer's own knowledge (the MY_LIBRARY_KNOWN / OPP_LIBRARY_KNOWN bags); that the other player knows one deeper is not: a mulligan's bottom cards (their number is the mulligans', encoded) or a card put under others, never the next draws; the last two spare floats are kept"),
+        l("void holds (a nonland permanent left the battlefield this turn)", NextLayout, "void (Edge of Eternities' ability word, ENGINE.md 99.4) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-turn flag beside the turn's facts); until then a network infers it from the public history only through the board"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }

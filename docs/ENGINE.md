@@ -18103,7 +18103,7 @@ Each lane appends its own subsection here (99.2 lane A, 99.3 lane B, 99.4 lane C
 
 ### 99.6 After the lanes (maintainer)
 
-Merge order B, A, C, D (B's base audit first). Then the cross-lane cards, the IR defects the lanes
+Merge order B, A, C, D (B's base audit first; C finished before A and merged second). Then the cross-lane cards, the IR defects the lanes
 list (one mtg-bot batch and one re-export, so the schema changes once), and the 20k fuzz over the
 EoE table.
 
@@ -18257,3 +18257,148 @@ Plunge's excess, the lands and mana, landfall, the custom cards), `cards_eoe_b_b
 
 **Digests:** unchanged (cube behaviour untouched; `DelayedWhen::YourNextTurnEndStep`'s turn enters
 the state vector only for that timing).
+### 99.4 Lane C: void, warp, spells cast this turn, cost reductions, graveyard / exile / library / hand (branch `eoe-c-void`)
+
+**Void.** Void is the set's ability word for "if a nonland permanent left the battlefield this turn
+or a spell was warped this turn". `Game::void_turn` holds the number of the last turn in which
+either happened (no reset needed: void holds while it equals the turn number,
+`Game::void_active`). It is set in `move_card` when a nonland permanent (its types as it last
+existed on the battlefield) leaves the battlefield (not the "it never entered" move of Containment
+Priest's replacement, `quiet_leave`), and in `cast_done` when a spell becomes cast (CR 601.2i) for
+its warp cost (`AltCost::warp`, CR 702.185a): a warped spell that is countered still made void.
+`Cond::Void` reads it; the lowering maps `TriggeredAbility.requires_void` to an intervening "if"
+(`TrigPred::If(Cond::Void)`, CR 603.4), `ConditionalIfVoid` to a jump (one target described in both
+branches is one target, as `IfConditionElse`), `StatePredicate:VoidActive` to an intervening "if",
+`SacrificeSelfUnlessVoidActive` to "jump unless void, else sacrifice the source", and
+`CostReduction.condition(VoidActiveCondition)` to `Discount::If(Cond::Void, n)`.
+
+**The encoding gate.** Void is public state the layout v5 encoding cannot see (layout v5 is frozen;
+no layout change here). `public_state.rs` classifies `Game.void_turn` public, perturbs it, and lists
+it as the second "next layout" gap (`limits()`); `tests/az.rs::public_state_reaches_the_encoding`
+now expects two gaps (the graveyard's order and void). The gate's view (`Game::view_of`) includes
+it. A network has to infer void from the board until the next layout encodes it.
+
+**Spells cast this turn and cost reductions** (CR 601.2f: the cost is determined before the spell
+becomes cast, 601.2i, so the spells cast so far are the others). `Discount::If(Cond, n)`: "if you've
+cast another spell this turn" (`Cond::SpellsCastAtLeast(1)`), "if your opponents control n or more
+<permanents>" (`Cond::OpponentsControlAtLeast`), "during your turn", "if you control a
+<permanent>", "if you attacked with a <subtype> this turn" (`Cond::AttackedWithSubtype`, the
+attackers declared this turn by their cards' subtypes). "This spell costs {1} less to cast if it targets a blocking creature" (Dark Endurance:
+`Discount::IfTargets`, `Filter::Blocking`): the targets are chosen before the cost is determined
+(CR 601.2c, 601.2f), so `cost_with` reads the spell's chosen targets (`Game::target_discount`);
+castability counts the reduced cost when a legal target matches (`target_discount_castable`, with
+the card on the stack), and `choose_targets` offers only the targets with which the cost can still
+be paid (a cast is offered only if it can be completed). `CardDef::casting` (`CastingRules`) holds
+what a permanent does to its controller's spells: `spell_discounts`, "the second spell you cast
+each turn costs {2} less" (`Cond::SpellsCastThisTurn { n: 1 }`) and "spells you cast have affinity
+for artifacts" (`Discount::PerControlled`, CR 702.41a), applied in `Game::cost_with` after the
+spell's own reductions. `Condition:AtLeastNSpellsCastThisTurn` is `Cond::SpellsCastAtLeast(n)` (a
+static's "as long as you've cast two or more spells this turn").
+
+**Effects** (`lower/eoe_c.rs`; the new instructions are `Ext::EoeC(EoeC)`, `engine/src/eoe_c.rs`):
+each opponent discards / mills / discards or loses life (who can't discard has no card in hand),
+exile target creature (as its target spec says), exile target creature with power or toughness n
+or less, exile target creature until the source leaves (a linked exile, CR 610.3), exile all
+graveyards (`EoeC::ExileAllGraveyards`, one instruction), put target card from a graveyard on the
+bottom of its owner's library (`EoeC::GraveyardCardToBottom`, CR 401.4), look at the top n and put
+one into your hand and the rest into your graveyard, Starwinder's "you may draw that many cards"
+(the class is that ability: its Python docstring says the "may" is only simplified away there),
+shuffle your hand and graveyard into your library, draw a card per multicolored permanent
+(`Amount::MulticoloredPermanents`, CR 105.2a), "mills cards equal to your life total"
+(`Amount::ControllerLife`), "return target creature or Spacecraft card" (`or_spacecraft`, a
+Spacecraft is an artifact subtype), and Cosmogoyf's P/T (`PtCda::OwnedInExile`: cards its
+controller owns in exile, face up or down, not tokens).
+
+**Casting rules** (`CastingRules`). "Each player can't cast more than one noncreature spell each
+turn" (Deafening Silence): `Game::noncreature_spell_locked`, checked first in `cast_timing_ok`,
+which every castability check passes through (from hand, from other zones, a face, a cast during a
+resolution), with the face the card would be cast as. "The first spell each player casts during
+each of their turns may be cast without paying its mana cost" (Weftwalking): an alternative cost
+(CR 118.9) offered by `ChooseAltCost` as the last `NUMBER` (`eoe_c::FREE_FIRST_SPELL`; no layout
+change) when the caster is the active player, has cast no spell this turn and casts the way that
+allows an alternative cost (118.9a, `alt_allowed`); chosen, the spell's `from` becomes
+`CastFrom::Permission { free: true }` (cost increases still apply, X is 0), the encoding's existing
+"free" flag. Castability counts it (`hand_castable`, `castable_via`).
+
+**Warp variants** (CR 702.185a). "Warp-{B}, Pay 2 life" (`warp_additional_life_cost`: the warp
+`AltCost` pays life too, CR 119.4). "You may cast this card from your graveyard using its warp
+ability" (`CastingRules::warp_from_graveyard`): a graveyard route (`route::WARP`, unless Yawgmoth's
+Will's route, which allows the warp cost through `alt_allowed`, is there) cast as
+`CastFrom::Permission`; `Game::warp_only` says a cast is that route's (no other permission), and
+then castability needs the warp cost (not the mana cost) and the spell is cast for it with no
+choice (`begin_cast_face` sets its alternative cost); `warp_from_graveyard_ok` lets warp's cost be
+paid from a graveyard (`alt_payable`). The warped permanent is exiled at the next end step and may
+be cast from exile on a later turn, as warp from hand. "Warp {X}{G}" on an {X} card (Broodguard
+Elite, on a custom card): the warp cost's {X} must be the mana cost's, since the X announced adds
+to any cost of the spell (`total_mana`). A graveyard warp cast is never "without paying its mana
+cost" too (CR 118.9a: one alternative cost; found by the EoE fuzz, seed 752).
+
+**More effects.** "Draw X cards, where X is the number of differently named lands you control"
+(`Amount::DifferentlyNamedLands`, CR 201.2); "exile the top X cards of your library, where X is one
+plus the sacrificed artifact's mana value; you may play them this turn" (`EoeC::ExileTopPlayThisTurn`
+with `Amount::CostMvPlus`); "each opponent exiles a card from their hand and may play it for as long
+as it remains exiled; each spell cast this way costs {1} more; each land played this way enters
+tapped" (`EoeC::ExileFromOwnHandPlayable`, the opponent's choice among their own hand, one option
+per definition; `PermKind::TaxedLandsTapped`, read by `play_land`).
+
+**Lane C features of cross-lane cards** (tested on custom cards; the cards wait for the other
+lanes): "exile target attacking creature an opponent controls; at the beginning of the next end
+step, return it to the battlefield tapped under its owner's control" (Mystifying Maze:
+`Ext::ExileThenDelay` with `EoeC::ReturnEventCardTapped`); an "exile this permanent" activation
+cost on the battlefield (Plaza of Heroes: the existing exile-self payment, now allowed there);
+"search your library for a Sliver card" (Sliver Overlord); "whenever an opponent discards a card"
+(Entropic Battlecruiser: the IR's `discards_card` event has one subject, the discarding player, so
+its default subject is the engine event's player slot).
+
+**IR defects** (docs/ir_defects.md 60-66, `lower::IR_DEFECTS`): All-Fates Stalker ("up to one
+target" dropped), Endless Sands (a linked exile read as "until this leaves", its return an empty
+effect), Gravkill and Archenemy's Charm (the target's "or Spacecraft" / "or planeswalker" dropped),
+Elegy Acolyte ("one or more ... deal combat damage" as once per turn, as entry 16), Nexus of Fate
+(its "from anywhere" replacement without the `watched_in_graveyard` flag), Pinnacle Starcage (the
+Robot token by name only, as entry 3), Starfield Vocalist (its replacement's two event subjects
+dropped: the IR is Strionic Resonator's), Mirrorpool (its {C} activation pips read as generic and
+its mana ability dropped, as entry 5).
+
+**Not done, and why.** Blade of the Swarm ("put target exiled card with warp on the bottom of its
+owner's library"): no action slot names an exiled card as a target (`Game::target_action` has no
+exile range), so it needs a layout change; blocked. Full Bore ("if that creature was cast for its
+warp cost, it also gains trample and haste"): a per-permanent fact layout v5 cannot encode (it
+would be a third next-layout gap beside void); blocked by
+`PumpTargetCreatureUntilEOT.granted_keywords_if_warp_cast`. Tannuk, Steadfast Second ("artifact
+cards and red creature cards in your hand have warp {2}{R}"): an alternative cost a card has from
+another permanent, which the engine has no place for (`StackItem::alt` indexes the card's own
+`alt_costs`, and the warped permanent's end-step exile is the card's own delayed ability); blocked
+by `CardPrinting.hand_ability_grants`. Lane C features of cross-lane cards not built:
+`ReanimateTargetCreatureCardFromDefendersGraveyard` (Chorale of the Void),
+`AlpharaelDreamingAcolyteDiscardEffect`, `CardPrinting.ward_discard_random`,
+`EachOpponentExilesOwnCreature` and `SacrificeSelfPreservingExileLink` (Sothera, whose IR also puts
+the sacrifice after the return), `ReturnUpToNCreaturesFromYourGraveyardToHand` (Archenemy's Charm,
+an IR defect), Mirrorpool's two copy effects and Pinnacle Starcage's exile classes (IR defects).
+
+**Results.** EoE support 93 -> 124: 31 lane C cards (All-Fates Scroll, Brightspear Zealot, Chrome
+Companion, Codecracker Hound, Cosmogoyf, Dark Endurance, Deafening Silence, Decode Transmissions,
+Gigastorm Titan, Hymn of the Faller, Illvoi Infiltrator, Insatiable Skittermaw, Interceptor Mechan,
+Kavaron Skywarden, Lashwhip Predator, Lightstall Inquisitor, Memorial Vault, Plasma Bolt, Sami,
+Wildcat Captain, Scavenger Grounds, Seedship Broodtender, Space-Time Anomaly, Starwinder, Temporal
+Intervention, Timeline Culler, Tragic Trajectory, Uthros Psionicist, Virus Beetle, Voidforged Titan,
+Warping Wail, Weftwalking; `SUPPORTED_EOE_C`).
+
+**Tests.** `engine/tests/cards_eoe_c.rs` (the cards, and lane C features whose real cards need
+another lane, on custom cards in `engine/tests/eoe_c_util`, the EoE table plus those cards).
+Behaviour digests unchanged (`f6543eb2b1b8752f`); cube support 546 / 546. At 7fd4227: the full
+engine suite 1,567 passed, 0 failed (15 ignored); `FUZZ_POOL=eoe FUZZ_GAMES=20000` passed (20,000
+games, 433 s); the cube's `FUZZ_GAMES=20000` passed (20,000 games and 1,000 matches, 412 s).
+
+### 99.7 Merges into `eoe-base` (maintainer)
+
+* **Lane B** (2026-11-08): fast-forward to `eoe-b-lands` 13f2295.
+* **Lane C** (2026-11-08): merge of `eoe-c-void` fb3f66c. Ten files conflicted, every conflict
+  additive (both lanes appended enum variants, match arms, a `pub mod`, docs). Two catch-alls both
+  lanes had taken over were chained: `lower/printing.rs`'s cost-reduction conditions
+  (`PerDifferentlyNamedLand` to lane B's `lower_discount_eoe_b`, every other condition to lane C's
+  `cost_reduction`, which records the blocker) and `lower/trigger.rs`'s state predicates (lane C's
+  `VoidActive` arm, then lane B's catch-all). The combination completes one cross-lane card,
+  **Thaumaton Torpedo** (lane B's "destroy target nonland permanent" + lane C's "if you attacked
+  with a <subtype>" reduction): `SUPPORTED_EOE_CROSS`, `tests/cards_eoe_cross.rs` (the real card,
+  with a custom artifact-creature Spacecraft to attack with; Station is lane A's). EoE support
+  **130 / 320** (base 84, B 14, C 31, cross 1).

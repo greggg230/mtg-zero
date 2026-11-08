@@ -538,7 +538,15 @@ impl Game {
         } else {
             None
         };
+        // "Each land played this way enters tapped" (an exile permission,
+        // ENGINE.md 99.4).
+        let tapped = matches!(self.objs[c.i()].zone, Zone::Exile | Zone::FaceDown)
+            && matches!(self.exile_permission(p, c), Some(crate::game::PermKind::TaxedLandsTapped(_)));
+        self.entering_tapped |= tapped;
         let r = self.put_onto_battlefield(c, p);
+        if tapped {
+            self.entering_tapped = false;
+        }
         if let Some((def, slot)) = paragon {
             if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
                 self.marks.push((r, crate::game::Mark::LeaveTrigger { def, slot, exile: false }));

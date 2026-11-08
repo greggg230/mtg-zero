@@ -65,6 +65,17 @@ impl Game {
             Cond::CityBlessing => pl.city_blessing || self.ascends(p),
             Cond::LandsPlayedAtLeast(n) => pl.lands_played >= *n,
             Cond::SourceAttached => source.is_some_and(|s| self.live(s) && self.objs[s.idx.i()].attached.is_some()),
+            Cond::Void => self.void_active(),
+            Cond::OpponentsControlAtLeast(f, n) => {
+                let ctx = crate::cast::Ctx { controller: p, source };
+                let count = self
+                    .battlefield
+                    .iter()
+                    .filter(|&&c| self.objs[c.i()].controller != p && self.card_matches(f, c, &ctx))
+                    .count();
+                count >= *n as usize
+            }
+            Cond::AttackedWithSubtype(k) => pl.attacked_with.iter().any(|r| self.db.def(self.objs[r.idx.i()].def).subtypes.contains(k)),
         }
     }
 

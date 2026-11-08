@@ -17,6 +17,8 @@ macro_rules! lower_object_predicate {
             E::IsEnchantment(nodes::IsEnchantment {}) => Some(Filter::Type(types::ENCHANTMENT)),
             E::IsLand(nodes::IsLand {}) => Some(Filter::Type(types::LAND)),
             E::IsAttacking(nodes::IsAttacking {}) => Some(Filter::Attacking),
+            // "A blocking creature" (ENGINE.md 99.4).
+            E::IsBlocking(nodes::IsBlocking {}) => Some(Filter::Blocking),
             E::CubeWalkersIsPermanent(nodes::CubeWalkersIsPermanent {})
             | E::ValuePredicatesIsPermanent(nodes::ValuePredicatesIsPermanent {}) => {
                 Some(Filter::Type(types::PERMANENT))
@@ -206,6 +208,11 @@ macro_rules! lower_condition {
                 Some(Cond::Delirium($l.int("DeliriumActive.min_card_types", *min_card_types, 1, 9) as u8))
             }
             E::PermanentLeftYourControlThisTurn(nodes::PermanentLeftYourControlThisTurn {}) => Some(Cond::Revolt),
+            // "As long as you've cast n or more spells this turn" (ENGINE.md
+            // 99.4).
+            E::AtLeastNSpellsCastThisTurn(nodes::AtLeastNSpellsCastThisTurn { n }) => {
+                Some(Cond::SpellsCastAtLeast($l.int("AtLeastNSpellsCastThisTurn.n", *n, 1, 99) as u8))
+            }
             E::YourTurnOfGameAtMost(nodes::YourTurnOfGameAtMost { n }) => {
                 Some(Cond::YourTurnAtMost($l.int("YourTurnOfGameAtMost.n", *n, 0, 99) as u8))
             }

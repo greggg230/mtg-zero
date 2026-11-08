@@ -45,6 +45,9 @@ pub(crate) mod route {
     /// A granted flashback (its mana cost) besides the card's printed one
     /// (CR 702.34a: either flashback cost may be paid).
     pub const FLASHBACK_MANA: u8 = 8;
+    /// Its own "you may cast this card from your graveyard using its warp
+    /// ability" (ENGINE.md 99.4): for its warp cost only.
+    pub const WARP: u8 = 9;
 }
 
 /// A way to cast a graveyard card (`route::*`), with the permanent whose
@@ -83,7 +86,18 @@ impl Game {
         // Then reductions (CR 601.2f: increases, then reductions; generic
         // mana only, not below zero).
         for d in &self.def_of(card).discounts {
-            cost.generic = cost.generic.saturating_sub(self.discount(d, p));
+            let n = match d {
+                crate::db::Discount::IfTargets(f, n) => self.target_discount(card, p, f, *n),
+                d => self.discount(d, p),
+            };
+            cost.generic = cost.generic.saturating_sub(n);
+        }
+        // "The second spell you cast each turn costs {2} less", "spells you
+        // cast have affinity for artifacts" (ENGINE.md 99.4).
+        for c in self.permanents_of(p) {
+            for d in &self.abilities(c).casting.spell_discounts {
+                cost.generic = cost.generic.saturating_sub(self.discount(d, p));
+            }
         }
         // "Spells you cast from your graveyard cost {n} less" (Green
         // Goblin): the card is in its owner's graveyard (castability) or a
@@ -135,6 +149,15 @@ impl Game {
                 (self.permanents_of(p).filter(|&c| self.card_matches(f, c, &ctx)).count() as u8).saturating_mul(*n)
             }
             crate::db::Discount::PerDifferentlyNamedLand(n) => self.differently_named_lands(p).saturating_mul(*n),
+            crate::db::Discount::If(c, n) => {
+                if self.cond_holds(c, p) {
+                    *n
+                } else {
+                    0
+                }
+            }
+            // (A spell's own, read with its targets: `cost_with`.)
+            crate::db::Discount::IfTargets(..) => 0,
         }
     }
 
@@ -271,6 +294,9 @@ impl Game {
         let delved = self.delve_classes(p, c, cls);
         let cls = &delved[..];
         let alt_ok = (0..def.alt_costs.len()).any(|k| self.alt_payable(p, c, k, cls, crate::game::CastFrom::Hand));
+        // The first spell of a turn without paying its mana cost (ENGINE.md
+        // 99.4).
+        let free = self.first_spell_free(p, crate::game::CastFrom::Hand) && self.route_payable(p, c, crate::eoe_c::FREE_CAST, cls);
         // Spree (CR 702.172a): at least one mode's additional cost is paid.
         let extras = self.spree_extras(c, p);
         // `extra`: the mana of additional costs announced (CR 601.2f: added
@@ -301,14 +327,14 @@ impl Game {
                 }
             }
         };
-        if alt_ok {
+        if alt_ok || free {
             // castable for an alternative cost (601.2b); the mana cost
             // may be payable too (asked on casting)
         } else if let Some(extras) = &extras {
             if !extras.iter().any(|x| payable(x)) {
                 return false;
             }
-        } else if !payable(&Default::default()) {
+        } else if !payable(&Default::default()) && !self.target_discount_castable(p, c, crate::game::CastFrom::Hand, cls) {
             return false;
         }
         if let Some(ab) = &def.spell {
@@ -331,6 +357,11 @@ impl Game {
     /// Time Raveler's +1); "each opponent can cast spells only any time they
     /// could cast a sorcery" (his static ability) wins over both.
     pub(crate) fn cast_timing_ok(&self, p: PlayerId, card: CardIdx, sorcery_ok: bool) -> bool {
+        // "Each player can't cast more than one noncreature spell each
+        // turn" (every cast's check passes here; ENGINE.md 99.4).
+        if self.noncreature_spell_locked(p, card) {
+            return false;
+        }
         if sorcery_ok {
             return true;
         }
@@ -385,7 +416,10 @@ impl Game {
             .find(|pm| {
                 pm.card == r
                     && self.permission_ok(pm, p)
-                    && matches!(pm.kind, crate::game::PermKind::Play { .. } | crate::game::PermKind::Taxed(_) | crate::game::PermKind::Airbent(_))
+                    && matches!(
+                        pm.kind,
+                        crate::game::PermKind::Play { .. } | crate::game::PermKind::Taxed(_) | crate::game::PermKind::Airbent(_) | crate::game::PermKind::TaxedLandsTapped(_)
+                    )
             })
             .or_else(|| {
                 self.permissions.iter().find(|pm| {
@@ -426,7 +460,7 @@ impl Game {
                 crate::game::PermKind::Play { free, any_mana, .. } => Some(CastFrom::Permission { free, any_mana }),
                 // CR 715.3d: cast it (not as an Adventure) for its mana cost.
                 crate::game::PermKind::Adventure => Some(CastFrom::Permission { free: false, any_mana: false }),
-                crate::game::PermKind::Taxed(n) => Some(CastFrom::Taxed(n)),
+                crate::game::PermKind::Taxed(n) | crate::game::PermKind::TaxedLandsTapped(n) => Some(CastFrom::Taxed(n)),
                 // CR 722.3c: a copy of a prepare spell, for its mana cost.
                 crate::game::PermKind::Prepared { .. } => Some(CastFrom::Permission { free: false, any_mana: false }),
                 crate::game::PermKind::Airbent(n) => Some(CastFrom::Airbent(n)),
@@ -499,6 +533,11 @@ impl Game {
         }
         if self.mayhem_ok(p, card) {
             out.push(Route { code: route::MAYHEM, granter: None });
+        }
+        // (With Yawgmoth's Will's permission, that route allows the warp
+        // cost too: `alt_allowed`.)
+        if def.casting.warp_from_graveyard && !out.iter().any(|x| x.code == route::WILL) {
+            out.push(Route { code: route::WARP, granter: None });
         }
         // The face that would be cast (a card with another face too: its
         // front, or `face`).
@@ -715,7 +754,14 @@ impl Game {
         let alt_ok = !def.alt_costs.is_empty()
             && Self::alt_allowed(from)
             && (0..def.alt_costs.len()).any(|k| self.alt_payable(p, card, k, classes, from));
-        if !(alt_ok || self.route_payable(p, card, from, classes)) {
+        // The first spell of a turn without paying its mana cost (ENGINE.md
+        // 99.4).
+        // (From a graveyard by its own warp ability only: its warp cost, no
+        // other cost, CR 118.9a.)
+        let warp_only = self.warp_only(p, card, from);
+        let free = !warp_only && self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, classes);
+        let plain = !warp_only && (self.route_payable(p, card, from, classes) || self.target_discount_castable(p, card, from, classes));
+        if !(alt_ok || free || plain) {
             return false;
         }
         // Overloaded (an alternative cost), no target is needed; otherwise
@@ -1340,7 +1386,7 @@ impl Game {
             let cast_only = match self.exile_permission(p, c) {
                 Some(crate::game::PermKind::Play { cast_only, .. }) => cast_only,
                 // (Its owner may play it: a land too.)
-                Some(crate::game::PermKind::Taxed(_)) => false,
+                Some(crate::game::PermKind::Taxed(_) | crate::game::PermKind::TaxedLandsTapped(_)) => false,
                 // (Airbent: cast.)
                 Some(crate::game::PermKind::Airbent(_)) => true,
                 // CR 715.3d: an adventurer card on an adventure (a creature
@@ -1838,7 +1884,7 @@ impl Game {
         if a.turn.is_some_and(|yours| (self.turn.active == p) != yours) {
             return false;
         }
-        if a.warp && from != crate::game::CastFrom::Hand {
+        if a.warp && from != crate::game::CastFrom::Hand && !self.warp_from_graveyard_ok(card, from) {
             return false;
         }
         if a.bestow && !self.def_of(card).bestowed {
@@ -1928,6 +1974,11 @@ impl Game {
         let StackKind::Spell { card } = item.kind else { return };
         let p = item.controller;
         match self.answer.take() {
+            Some(Choice::Number(crate::eoe_c::FREE_FIRST_SPELL)) => {
+                // Without paying its mana cost (CR 118.9; ENGINE.md 99.4).
+                self.stack[pos].from = crate::eoe_c::FREE_CAST;
+                self.note(|_| "without paying its mana cost".to_string());
+            }
             Some(Choice::Number(k)) => {
                 self.stack[pos].alt = k;
                 self.note(|_| format!("cost {k}"));
@@ -1970,6 +2021,10 @@ impl Game {
                     if self.alt_payable(p, card, k, &classes, from) {
                         opts.push(Opt { action: act::NUMBER + 1 + k as u16, choice: Choice::Number(k as u8 + 1) });
                     }
+                }
+                let free = crate::eoe_c::FREE_FIRST_SPELL;
+                if plain_targets && self.first_spell_free(p, from) && self.route_payable(p, card, crate::eoe_c::FREE_CAST, &classes) {
+                    opts.push(Opt { action: act::NUMBER + free as u16, choice: Choice::Number(free) });
                 }
                 self.ask(Task::CastAlt { id }, p, DecisionKind::ChooseAltCost, opts);
             }
@@ -2022,6 +2077,9 @@ impl Game {
         let exile_after = self.objs[card.i()].zone == Zone::Graveyard
             && !matches!(from, crate::game::CastFrom::Flashback | crate::game::CastFrom::FlashbackMana)
             && self.permissions.iter().any(|pm| pm.card == r && pm.kind == crate::game::PermKind::CastThenExile && self.permission_ok(pm, p));
+        // Cast from a graveyard by its own warp ability: for its warp cost,
+        // no other (no choice; ENGINE.md 99.4).
+        let forced_warp = if self.warp_only(p, card, from) { self.def_of(card).alt_costs.iter().position(|a| a.warp) } else { None };
         self.move_card_to_stack(card, p);
         if exile_after {
             self.gy_exile.push(card);
@@ -2054,7 +2112,7 @@ impl Game {
             cost_option: 0,
             modes: Vec::new(),
             ev: Default::default(),
-            alt: 0,
+            alt: forced_warp.map_or(0, |k| k as u8 + 1),
             from,
             delved: 0,
             delve_floor: 0,
@@ -2121,7 +2179,7 @@ impl Game {
         // CR 118.9a: one alternative cost at most (flashback, escape and
         // "without paying its mana cost" are alternative costs; a
         // permission to cast a card for its costs allows one: `alt_allowed`).
-        if !self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) {
+        if forced_warp.is_none() && (!self.def_of(card).alt_costs.is_empty() && Self::alt_allowed(from) || self.first_spell_free(p, from)) {
             self.agenda.push(Task::CastAlt { id }); // CR 601.2b
         }
     }
@@ -2276,6 +2334,20 @@ impl Game {
             cands.retain(|&t| self.later_distinct_ok(&reqs, req, t, &chosen, &ctx));
         }
         self.targeting = 0;
+        // "This spell costs {n} less if it targets ...": only targets with
+        // which its cost can still be paid (a cast is offered only if it can
+        // be completed; ENGINE.md 99.4).
+        if let StackKind::Spell { card } = self.stack[pos].kind {
+            if self.def_of(card).discounts.iter().any(|d| matches!(d, crate::db::Discount::IfTargets(..))) {
+                cands.retain(|&t| {
+                    let mut item = self.stack[pos].clone();
+                    item.targets.push((req, t));
+                    let mut g = self.clone();
+                    g.stack[pos] = item.clone();
+                    g.can_pay_spell(card, &item, &g.total_mana(card, &item))
+                });
+            }
+        }
         let mut opts: Vec<Opt> = cands
             .iter()
             .map(|&t| Opt { action: self.target_action(ctx.controller, t), choice: Choice::Target(t) })
@@ -2403,6 +2475,11 @@ impl Game {
         let item = &self.stack[pos];
         let StackKind::Spell { card } = item.kind else { return };
         let p = item.controller;
+        // Void: a spell was warped this turn (cast for its warp cost, CR
+        // 702.185a; ENGINE.md 99.4).
+        if item.alt > 0 && self.def_of(card).alt_costs.get(item.alt as usize - 1).is_some_and(|a| a.warp) {
+            self.void_turn = self.turn.number;
+        }
         let pl = &mut self.players[p as usize];
         pl.spells_cast = pl.spells_cast.saturating_add(1);
         pl.spells_game = pl.spells_game.saturating_add(1);
@@ -2680,6 +2757,7 @@ impl Game {
             Filter::Token => self.is_token(c),
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,
+            Filter::Blocking => self.objs[c.i()].blocking.is_some(),
             Filter::AttachedTo(inner) => self.objs[c.i()].attached.is_some_and(|h| {
                 self.live(h) && self.objs[h.idx.i()].zone == Zone::Battlefield && self.card_matches(inner, h.idx, ctx)
             }),

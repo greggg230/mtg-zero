@@ -264,8 +264,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // printings lowered inside it (tokens, emblems) are cards.
         let face = std::mem::take(&mut l.face);
         let _ = warp_cost_str; // display form of `warp_cost`
-        l.deny("CardPrinting.warp_additional_life_cost", warp_additional_life_cost);
-        l.deny("CardPrinting.warp_castable_from_graveyard", warp_castable_from_graveyard);
         l.deny("CardPrinting.impending_cost", impending_cost);
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
@@ -285,7 +283,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_as_copy_of_creature", enters_as_copy_of_creature);
         l.deny("CardPrinting.replaces_first_tokens_with_copies", replaces_first_tokens_with_copies);
         l.deny("CardPrinting.grants_cast_artifact_from_top_of_library", grants_cast_artifact_from_top_of_library);
-        l.deny("CardPrinting.grants_first_spell_each_turn_free", grants_first_spell_each_turn_free);
         l.deny("CardPrinting.grants_food_to_your_artifacts", grants_food_to_your_artifacts);
         l.deny("CardPrinting.grants_food_ability_to_your_artifacts", grants_food_ability_to_your_artifacts);
         l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
@@ -321,7 +318,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             l.deny_ne("CardPrinting.aura_enchant_type", aura_enchant_type, &generated::defaults::d_CardPrinting_aura_enchant_type());
         }
         l.deny("CardPrinting.aura_yours_only", aura_yours_only);
-        l.deny("CardPrinting.restricts_noncreature_spells_to_one_per_turn", restricts_noncreature_spells_to_one_per_turn);
         l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
@@ -899,12 +895,27 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // exiled at the beginning of the next end step, and its owner may cast
     // it from exile on a later turn.
     let warp = warp_cost.as_ref().map(|m| {
-        let mana = lower_mana_cost(l, "CardPrinting.warp_cost", m);
+        // "Warp {X}{G}" on an {X} card: the X announced as it is cast
+        // (CR 107.3, 601.2b) adds to the warp cost as to its mana cost
+        // (`total_mana`), so the warp cost's {X} must be the card's.
+        let cats::ManaCost::ManaCost(n) = &**m;
+        if n.x_pips != x_pips as i64 {
+            l.unsupported("CardPrinting.warp_cost.x_pips(not the mana cost's)");
+        }
+        let plain = cats::ManaCost::ManaCost(nodes::ManaCost { x_pips: 0, ..n.clone() });
+        let mana = lower_mana_cost(l, "CardPrinting.warp_cost", &plain);
         let mut d = crate::program::Builder::default();
         d.op(crate::program::Op::Ext(crate::program::Ext::WarpExile));
         let k = l.delayed_ability(d.finish());
-        AltCost { mana, dash: Some(k), warp: true, ..AltCost::default() }
+        // "Warp-{B}, Pay 2 life" (CR 119.4; ENGINE.md 99.4).
+        let life = l.int("CardPrinting.warp_additional_life_cost", *warp_additional_life_cost, 0, 20) as u8;
+        let cost = crate::db::Cost { life, ..Default::default() };
+        AltCost { mana, cost, dash: Some(k), warp: true, ..AltCost::default() }
     });
+    if warp.is_none() {
+        l.deny("CardPrinting.warp_additional_life_cost(without warp)", warp_additional_life_cost);
+        l.deny("CardPrinting.warp_castable_from_graveyard(without warp)", warp_castable_from_graveyard);
+    }
     if warp.is_some() && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.warp_cost(not a permanent card)");
     }
@@ -1567,6 +1578,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     // effect on its controller's spells, CR 601.2f).
     let mut gy_spell_discount = 0u8;
     let mut outside_hand_discount = 0u8;
+    let mut casting = crate::db::CastingRules {
+        one_noncreature_spell: *restricts_noncreature_spells_to_one_per_turn,
+        first_spell_free: *grants_first_spell_each_turn_free,
+        warp_from_graveyard: *warp_castable_from_graveyard,
+        ..Default::default()
+    };
     for r in external_cost_reductions {
         let cats::ExternalCostReduction::ExternalCostReduction(nodes::ExternalCostReduction { amount, condition }) = r;
         match &**condition {
@@ -1578,7 +1595,13 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             cats::Condition::SpellCastFromOutsideHand(nodes::SpellCastFromOutsideHand {}) => {
                 outside_hand_discount += l.int("ExternalCostReduction.amount", *amount, 1, 9) as u8;
             }
-            other => l.unsupported(format!("ExternalCostReduction.condition({})", other.tag())),
+            // Lane C's (ENGINE.md 99.4).
+            other => {
+                let n = l.int("ExternalCostReduction.amount", *amount, 1, 9) as u8;
+                if let Some(d) = super::eoe_c::spell_discount(l, other, n) {
+                    casting.spell_discounts.push(d);
+                }
+            }
         }
     }
     // Daybound and nightbound (CR 702.145) are on the two faces of one
@@ -1809,6 +1832,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         ability_discount: repl.ability_discount,
         ascend: cascade_kw_ascend,
         outside_hand_discount,
+        casting,
         chooses_land_type,
         x_life: *additional_cost_pay_x_life,
         sunburst: sunburst_counter,
@@ -1976,7 +2000,9 @@ pub(crate) fn lower_discounts(l: &mut Lowerer, cost_reductions: &[cats::CostRedu
                 }
             }
             // (Edge of Eternities lane B's conditions, ENGINE.md 99.3.)
-            other => discounts.extend(super::eoe_b::lower_discount_eoe_b(l, n, other)),
+            c @ cats::Condition::PerDifferentlyNamedLand(_) => discounts.extend(super::eoe_b::lower_discount_eoe_b(l, n, c)),
+            // Lane C's (ENGINE.md 99.4).
+            other => discounts.extend(super::eoe_c::cost_reduction(l, other, n)),
         }
     }
     discounts

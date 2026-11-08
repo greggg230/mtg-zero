@@ -646,6 +646,8 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                     Filter::Or(subtypes.iter().map(|s| Filter::Subtype(l.subtype(s))).collect())
                 }
                 K::BasicLand => basic_land(),
+                // "A Sliver card" (ENGINE.md 99.4).
+                K::Sliver => Filter::Subtype(l.subtype("Sliver")),
                 K::Creature => Filter::Type(types::CREATURE),
                 K::Artifact => Filter::Type(types::ARTIFACT),
                 K::LegendaryCreature => {
@@ -923,6 +925,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::effect_tail3::lower_effect_tail3(l, b, other)
                 && !super::effect_m7d::lower_effect_m7d(l, b, other)
                 && !super::eoe_b::lower_effect_eoe_b(l, b, other)
+                && !super::eoe_c::lower_effect_eoe_c(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

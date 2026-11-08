@@ -68,6 +68,14 @@ permission) and a consumer can go wrong with it.
 | 49 | Pull Through the Weft (ENGINE.md 99.3) | clause dropped | `ReturnUpToNNonlandPermanentCardsFromGraveyardToHand` only | "... then return up to two target land cards from your graveyard to the battlefield tapped" | `effects/generic/bounce.py` (its docstring: "the second ... clause is dropped at parse time") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 50 | Sunken Citadel (ENGINE.md 99.3) | choice dropped | two mana abilities making `any` colour; no "as it enters, choose a color" | one mana / two mana "of the chosen color" | the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 51 | Knight Luminary, Cosmogrand Zenith, Honored Knight-Captain, Rayblade Trooper (ENGINE.md 99.3) | colour dropped | the Human Soldier token printing with no `color_indicator` (colourless) | `color_indicator: [W]` ("a 1/1 white Human Soldier creature token") | the token-phrase parser (`_token_printing`), as entry 12 | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 60 | All-Fates Stalker (Edge of Eternities, ENGINE.md 99.4) | target count dropped | `ExileTargetCreatureUntilSourceLeaves { excluded_subtypes: [Assassin] }`, a class with one required target (Hardlight Containment's too) | "up to one target" (a target count, minimum 0) | `effects/generic/exile.py::ExileTargetCreatureUntilSourceLeaves` (`requires_target`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 61 | Endless Sands (Edge of Eternities, ENGINE.md 99.4) | effect misread, ability dropped | `{2},{T}: ExileTargetCreatureUntilSourceLeaves { yours_only }`; `{4},{T}, sac: Sequence { effects: [] }` | a plain linked exile (CR 607.2a), and "return each creature card exiled with this land to the battlefield under its owner's control" | the land-ability parser (`cards/parser/land_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 62 | Gravkill; Archenemy's Charm (Edge of Eternities, ENGINE.md 99.4) | target types dropped | `ExileTargetCreature { targets: [IsCreature] }` for "exile target creature or Spacecraft" / "... or planeswalker"; the Charm's second mode `ReturnUpToNCreaturesFromYourGraveyardToHand { creature }` for "one or two target creature and/or planeswalker cards" | `ObjectOr(IsCreature, HasSubtype(Spacecraft))` / `ObjectOr(IsCreature, IsPlaneswalker)`; the planeswalker cards and the count | the "exile target X" phrase parser | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 63 | Elegy Acolyte (Edge of Eternities, ENGINE.md 99.4) | "one or more" as once per turn | "whenever one or more creatures you control deal combat damage to a player" with `once_per_turn: true` | one trigger per combat damage step (`OneOrMoreBatch`), no once-each-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control deal combat damage to a player" entry) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 64 | Nexus of Fate (Edge of Eternities, ENGINE.md 99.4) | flag left unset | the self "would go to graveyard -> library" replacement with `watched_in_graveyard: false` | `watched_in_graveyard: true` (the printing's "put into a graveyard from anywhere" flag, which mtg-bot's move code reads before the replacement) | the instant builder that writes the replacement (`cards/parser/creature_rmc_grammar.py` sets the flag for the creatures only) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 65 | Pinnacle Starcage (Edge of Eternities, ENGINE.md 99.4) | value resolved late | `CreateNTokensFromLastExileRecall { token_name: "Robot" }` | the 2/2 colorless Robot artifact creature token's `CardPrinting` inline (as entry 3) | `effects/` (the class resolves the token by name) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 66 | Starfield Vocalist (Edge of Eternities, ENGINE.md 99.4) | event subjects dropped | `ReplacementEffect { event_pattern: EventPattern { event: triggered_ability_triggers }, transform: AddInstances { delta: 1 } }`, no subject filters (Strionic Resonator's shape, "triggered abilities trigger an additional time") | the triggering event a permanent entering the battlefield, the ability's source a permanent you control (`subject_filters`) | `cards/parser/creature_builder.py` (~line 627) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 67 | Mirrorpool (Edge of Eternities, ENGINE.md 99.4) | lossy schema, ability dropped | activation costs `mana: { generic: 3 }` for `mana_str: "{2}{C}"` and `{ generic: 5 }` for "{4}{C}"; no `produces`, no mana ability | a colorless pip (`{C}`, CR 107.4b) in each cost; "{T}: Add {C}" | `cards/base.py::parse_mana_cost` (as entry 5), the land builder | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -539,6 +547,133 @@ Human Soldier creature tokens"), Honored Knight-Captain and Rayblade Trooper mak
   the import and are removed from `SUPPORTED_EOE_BASE`; found by a card test
   (`tests/cards_eoe_b_base.rs`) asserting the token's colour, then a scan of every token printing
   of the EoE IR against its Oracle text.
+### L. Edge of Eternities lane C (ENGINE.md 99.4)
+
+**60. All-Fates Stalker.** Oracle: "When this creature enters, exile up to one target non-Assassin
+creature until this creature leaves the battlefield. / Warp {1}{W}"
+
+* IR: `TriggeredAbility { event: enters, effect: ExileTargetCreatureUntilSourceLeaves {
+  excluded_subtypes: [Assassin] } }`. The class has no target spec or count; its Python
+  `requires_target` is true and it is also Hardlight Containment's "exile target creature an
+  opponent controls until this Aura leaves the battlefield" (one required target).
+* Should be: up to one target (a `TargetSpec` with `count_min: 0`): the ability can do nothing,
+  and with no other creature on the battlefield it must not target the Stalker itself.
+* Source: `effects/generic/exile.py::ExileTargetCreatureUntilSourceLeaves` (no count field).
+* Fix: export the target spec (`targets: [TargetSpec { filter, count_min: 0 }]`), or a
+  `count_min` field on the class.
+* Engine: the class lowers (one target, `Ext::ExileLinked { until: true }`); the card is
+  blocked, `ir_defect(up to one target dropped, docs/ir_defects.md 60)`.
+
+**61. Endless Sands.** Oracle: "{T}: Add {C}. / {2}, {T}: Exile target creature you control. /
+{4}, {T}, Sacrifice this land: Return each creature card exiled with this land to the battlefield
+under its owner's control."
+
+* IR: the second ability is `ExileTargetCreatureUntilSourceLeaves { yours_only: true }` (the
+  creature would return when the land leaves, so the third ability's sacrifice would return it
+  anyway); the third ability's effect is `Sequence { effects: [] }`, nothing.
+* Should be: a linked exile without a duration (CR 607.2a, "exiled with this land"), and the
+  third ability's "return each creature card exiled with this land to the battlefield under its
+  owner's control" (as the cube's linked-exile returns).
+* Source: the land builder (`cards/parser/land_builder.py`), which matched the exile line to the
+  until-it-leaves class and dropped the return.
+* Fix: a linked exile class for the second ability and a "return each card exiled with this"
+  effect for the third.
+* Engine: blocked, `ir_defect(linked exile and its return dropped, docs/ir_defects.md 61)`
+  (the card is also lane B's: `mana_only_from_produces`).
+
+**62. Gravkill; Archenemy's Charm.** Oracle (Gravkill): "Exile target creature or Spacecraft."
+(Archenemy's Charm): "Choose one - / * Exile target creature or planeswalker. / * Return one or
+two target creature and/or planeswalker cards from your graveyard to your hand. / * Put two
++1/+1 counters on target creature you control. It gains lifelink until end of turn."
+
+* IR: `ExileTargetCreature { targets: [TargetSpec { filter: IsCreature }] }` for both exile
+  modes; the Charm's second mode is `ReturnUpToNCreaturesFromYourGraveyardToHand { creature:
+  true }`.
+* Should be: `ObjectOr(IsCreature, HasSubtype(Spacecraft))` (a Spacecraft that isn't a
+  creature, below its station threshold, is a legal target) and `ObjectOr(IsCreature,
+  IsPlaneswalker)`; the second mode's planeswalker cards and its "one or two" count.
+* Source: the "exile target creature ..." phrase parser keeps the first noun only.
+* Fix: parse "creature or <type>" into an `ObjectOr` target filter.
+* Engine: `ExileTargetCreature` lowers its target spec as written; both cards are blocked,
+  `ir_defect(target types dropped, docs/ir_defects.md 62)`.
+
+**63. Elegy Acolyte.** Oracle: "Lifelink / Whenever one or more creatures you control deal combat
+damage to a player, you draw a card and lose 1 life. / Void - At the beginning of your end step,
+if a nonland permanent left the battlefield this turn or a spell was warped this turn, create a
+2/2 colorless Robot artifact creature token."
+
+* IR: the combat damage trigger is `TriggeredAbility { event: deals_combat_damage, predicate:
+  creature you control -> player, once_per_turn: true }`.
+* Should be: one trigger per combat damage step in which one or more of them deal combat damage
+  to a player (`OneOrMoreBatch`), with no once-each-turn limit: a first-strike step and a regular
+  step, or an extra combat, trigger it again (the shape of entry 16, Forth Eorlingas!).
+* Source: `cards/parser/triggers.py`, the "one or more creatures you control deal combat damage
+  to a player" phrase entry (entry 16's fix covered another phrase).
+* Fix: `OneOrMoreBatch` in the predicate, `once_per_turn: false`.
+* Engine: blocked, `ir_defect(one or more as once per turn, docs/ir_defects.md 63)`; its void
+  trigger lowers (ENGINE.md 99.4).
+
+
+**64. Nexus of Fate.** Oracle: "Take an extra turn after this one. / If Nexus of Fate would be put
+into a graveyard from anywhere, reveal Nexus of Fate and shuffle it into its owner's library
+instead."
+
+* IR: the replacement is there (`StaticAbility { scope: self, replacement_effect: { event:
+  would_go_to_graveyard, transform: Replace(library) } }`) but `watched_in_graveyard` is false. The
+  flag is what mtg-bot's zone-change code checks before applying a graveyard self-replacement
+  (`turn.py`, "Blightsteel"), so as exported the replacement never applies there; the cube's cards
+  with this replacement carry the flag.
+* Should be: `watched_in_graveyard: true`.
+* Source: the printing builder that writes the instant's replacement (the creature grammar sets
+  the flag, `cards/parser/creature_rmc_grammar.py`).
+* Fix: set the flag wherever the "would be put into a graveyard from anywhere" replacement is
+  built.
+* Engine: the lowering checks that the flag and the abilities agree (`printing.rs`, "watched in
+  graveyard"); blocked, `ir_defect(watched_in_graveyard unset, docs/ir_defects.md 64)`.
+
+**65. Pinnacle Starcage.** Oracle: "When this artifact enters, exile all artifacts and creatures
+with mana value 2 or less until this artifact leaves the battlefield. / {6}{W}{W}: Put each card
+exiled with this artifact into its owner's graveyard, then create a 2/2 colorless Robot artifact
+creature token for each card put into a graveyard this way. Sacrifice this artifact."
+
+* IR: `CreateNTokensFromLastExileRecall { token_name: "Robot" }`: the token by name.
+* Should be: the token's `CardPrinting` inline (a 2/2 colorless Robot artifact creature), as the
+  set's other Robot makers carry it (`CreateToken { token_printing }`), entry 3's fix.
+* Fix: export the token printing.
+* Engine: blocked, `ir_defect(token printing by name only, docs/ir_defects.md 65)`; its other
+  two classes (`ExileAllMatchingUntilSourceLeaves`, `MoveEachExiledWithSourceToOwnersGraveyard`)
+  are not built (no other card uses them).
+
+**66. Starfield Vocalist.** Oracle: "If a permanent entering the battlefield causes a triggered
+ability of a permanent you control to trigger, that ability triggers an additional time. / Warp
+{1}{U}"
+
+* IR: `StaticAbility { scope: self, replacement_effect: ReplacementEffect { event_pattern:
+  EventPattern { event: triggered_ability_triggers }, transform: AddInstances { delta: 1 } } }`
+  with no `subject_filters`. mtg-bot's event docstring: the shape models both Strionic Resonator's
+  "your triggered abilities trigger an additional time" and the Vocalist's narrower one, so the IR
+  cannot tell them apart.
+* Should be: subject filters for the event's two subjects (`triggering_obj`: a permanent entering
+  the battlefield; `ability_source`: a permanent you control).
+* Source: `cards/parser/creature_builder.py` (~line 627).
+* Fix: write the two subject filters.
+* Engine: blocked, `ir_defect(event subjects dropped, docs/ir_defects.md 66)`.
+
+
+**67. Mirrorpool.** Oracle: "This land enters tapped. / {T}: Add {C}. / {2}{C}, {T}, Sacrifice this
+land: Copy target instant or sorcery spell you control. You may choose new targets for the copy. /
+{4}{C}, {T}, Sacrifice this land: Create a token that's a copy of target creature you control."
+
+* IR: the two activated abilities' `mana` are `{ generic: 3 }` and `{ generic: 5 }` beside
+  `mana_str` "{2}{C}" and "{4}{C}": the colorless pip (CR 107.4b, payable only with colorless mana)
+  became generic, entry 5's lossy parse. The printing has no `produces` and no mana ability: "{T}:
+  Add {C}" is dropped.
+* Should be: a colorless pip in each cost; the mana ability (or `produces: [C]`).
+* Source: `cards/base.py::parse_mana_cost` (entry 5) and the land builder.
+* Engine: blocked, `ir_defect(colorless pips as generic, docs/ir_defects.md 67)`; its copy
+  effects (`CopyTargetInstantOrSorceryYouControl`, `CreateTokenCopyOfTargetCreatureYouControl`)
+  are not built (no other card uses them).
+
 
 ## Suspected defects (representational)
 

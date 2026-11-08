@@ -572,6 +572,8 @@ impl Game {
         // Day and night (public, CR 731); optional actions done once this
         // turn (public), by the source's place.
         v.push(self.day.map_or(9, |d| d as u64));
+        // Void (public; ENGINE.md 99.4).
+        v.push(self.void_active() as u64);
         for &(r, k) in &self.done_once {
             v.extend([live_place(r), k as u64]);
         }

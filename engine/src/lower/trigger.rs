@@ -18,7 +18,6 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         room_half,
         functions_in_graveyard,
     }) = t;
-    l.deny("TriggeredAbility.requires_void", requires_void);
     l.deny("TriggeredAbility.tier_threshold", tier_threshold);
     l.deny("TriggeredAbility.room_half", room_half);
 
@@ -41,6 +40,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         if *once_per_turn {
             l.unsupported("TriggeredAbility.once_per_turn(cards exiled)");
         }
+        l.deny("TriggeredAbility.requires_void(cards exiled)", requires_void);
         let uses_event = ability.uses_event();
         return Some(TriggerDef { event: EventKind::ExiledFromLibGy, pred, ability, uses_event });
     }
@@ -58,6 +58,7 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
         if *once_per_turn {
             l.unsupported("TriggeredAbility.once_per_turn(from anywhere)");
         }
+        l.deny("TriggeredAbility.requires_void(from anywhere)", requires_void);
         let ability = lower_ability(l, e);
         let uses_event = ability.uses_event();
         return Some(TriggerDef { event: EventKind::ToGraveyard, pred: TrigPred::IsSelf(Slot::Default), ability, uses_event });
@@ -122,6 +123,10 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
             None
         }
     };
+    // "Whenever <a player> discards a card": the IR's `discards_card` event
+    // has one subject, the discarding player (its default); the engine's
+    // event names the card too (ENGINE.md 99.4).
+    let pred = if *event == Some(E::DiscardsCard) { pred.map(|p| default_slot_to(p, Slot::Player)) } else { pred };
     // "When this enters, if you cast it, <effect>" (The One Ring; the IR's
     // `ConditionalIfCastFromHand` stands for "if you cast it", its
     // docstring's reading): an intervening "if" on how it entered (CR 603.4;
@@ -157,6 +162,13 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     let (event, mut pred) = (ev?, pred?);
     if once {
         pred = TrigPred::And(Box::new(TrigPred::Once), Box::new(pred));
+    }
+    // Void (Edge of Eternities' ability word): "..., if a nonland permanent
+    // left the battlefield this turn or a spell was warped this turn, ...":
+    // an intervening "if" (CR 603.4), checked again as it resolves
+    // (ENGINE.md 99.4).
+    if *requires_void {
+        pred = TrigPred::And(Box::new(pred), Box::new(TrigPred::If(Cond::Void)));
     }
     // "When this creature dies" (CR 700.4): it was a creature as it left;
     // the IR's `dies` event covers any permanent put into a graveyard from
@@ -204,6 +216,24 @@ pub(crate) fn lower_trigger(l: &mut Lowerer, t: &cats::TriggeredAbility, card_ty
     }
     let uses_event = ability.uses_event();
     Some(TriggerDef { event, pred, ability, uses_event })
+}
+
+/// A predicate's default subject slot named `to` (an IR event with one
+/// subject that the engine's event kind gives two).
+fn default_slot_to(p: TrigPred, to: Slot) -> TrigPred {
+    let s = |x: Slot| if x == Slot::Default { to } else { x };
+    match p {
+        TrigPred::IsSelf(x) => TrigPred::IsSelf(s(x)),
+        TrigPred::Subject(x, f) => TrigPred::Subject(s(x), f),
+        TrigPred::Controlled(x, you) => TrigPred::Controlled(s(x), you),
+        TrigPred::FormerHost(x) => TrigPred::FormerHost(s(x)),
+        TrigPred::Granted(x) => TrigPred::Granted(s(x)),
+        TrigPred::IsHost(x) => TrigPred::IsHost(s(x)),
+        TrigPred::And(a, b) => TrigPred::And(Box::new(default_slot_to(*a, to)), Box::new(default_slot_to(*b, to))),
+        TrigPred::Or(a, b) => TrigPred::Or(Box::new(default_slot_to(*a, to)), Box::new(default_slot_to(*b, to))),
+        TrigPred::Not(a) => TrigPred::Not(Box::new(default_slot_to(*a, to))),
+        other => other,
+    }
 }
 
 /// `EnteredPaid` -> `SpellPaid` (a cast trigger's "if it was kicked").
@@ -438,6 +468,8 @@ pub(crate) fn lower_state_pred(l: &mut Lowerer, p: &cats::StatePredicate) -> Opt
         S::LandsPlayedThisTurnAtLeast(nodes::LandsPlayedThisTurnAtLeast { n }) => {
             (Cond::LandsPlayedAtLeast(l.int("LandsPlayedThisTurnAtLeast.n", *n, 1, 99) as u8), true)
         }
+        // Void: an intervening "if" (CR 603.4; ENGINE.md 99.4).
+        S::VoidActive(nodes::VoidActive {}) => (Cond::Void, true),
         // (Edge of Eternities lane B's predicates, ENGINE.md 99.3.)
         other => return super::eoe_b::lower_state_pred_eoe_b(l, other),
     })

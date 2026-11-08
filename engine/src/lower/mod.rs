@@ -20,6 +20,7 @@ pub mod effect_tail3;
 pub mod effect_walkers;
 pub mod effect_m7d;
 pub mod eoe_b;
+pub mod eoe_c;
 pub mod filter;
 pub mod printing;
 pub mod statics;
@@ -287,6 +288,33 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Rayblade Trooper", "ir_defect(Human Soldier token's white dropped, docs/ir_defects.md 51)"),
 
     // Lane C (ENGINE.md 99.4; docs/ir_defects.md 60-79).
+    // "Exile up to one target ...": the class has no target count, one
+    // target is required (docs/ir_defects.md 60).
+    ("All-Fates Stalker", "ir_defect(up to one target dropped, docs/ir_defects.md 60)"),
+    // "Exile target creature you control" read as "until this leaves the
+    // battlefield"; the ability returning the exiled cards is an empty
+    // effect (docs/ir_defects.md 61).
+    ("Endless Sands", "ir_defect(linked exile and its return dropped, docs/ir_defects.md 61)"),
+    // "Exile target creature or Spacecraft / or planeswalker": the target
+    // filter is a creature only (docs/ir_defects.md 62).
+    ("Archenemy's Charm", "ir_defect(target types dropped, docs/ir_defects.md 62)"),
+    ("Gravkill", "ir_defect(target types dropped, docs/ir_defects.md 62)"),
+    // "Whenever one or more creatures you control deal combat damage to a
+    // player" as once each turn (docs/ir_defects.md 63, as 16).
+    ("Elegy Acolyte", "ir_defect(one or more as once per turn, docs/ir_defects.md 63)"),
+    // The "from anywhere" replacement without the printing's flag that
+    // says it is watched in a graveyard (docs/ir_defects.md 64).
+    ("Nexus of Fate", "ir_defect(watched_in_graveyard unset, docs/ir_defects.md 64)"),
+    // "Create a 2/2 colorless Robot artifact creature token for each ...":
+    // the token by name only (docs/ir_defects.md 65, as 3).
+    ("Pinnacle Starcage", "ir_defect(token printing by name only, docs/ir_defects.md 65)"),
+    // "If a permanent entering the battlefield causes a triggered ability
+    // of a permanent you control to trigger": both restrictions dropped
+    // (docs/ir_defects.md 66).
+    ("Starfield Vocalist", "ir_defect(event subjects dropped, docs/ir_defects.md 66)"),
+    // "{2}{C}" / "{4}{C}" activation costs as generic {3} / {5}, and its
+    // "{T}: Add {C}" dropped (docs/ir_defects.md 67, as 5).
+    ("Mirrorpool", "ir_defect(colorless pips as generic, docs/ir_defects.md 67)"),
 
     // Lane D (ENGINE.md 99.5; docs/ir_defects.md 80-99).
 ];

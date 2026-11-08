@@ -852,7 +852,6 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
             // "Return [up to n] target <type> card[s] [with mana value n or
             // less] from your graveyard to your hand / the battlefield."
             let _ = (log_suffix, target_kind); // display, Python dispatch
-            l.deny("ReturnFromGraveyard.or_spacecraft", or_spacecraft);
             l.deny("ReturnFromGraveyard.max_total_mv", max_total_mv);
             l.deny("ReturnFromGraveyard.plus_one_counter", plus_one_counter);
             l.deny("ReturnFromGraveyard.untargeted_all", untargeted_all);
@@ -878,9 +877,12 @@ pub(crate) fn lower_effect_ext(l: &mut Lowerer, b: &mut Builder, e: &cats::Effec
                 l.unsupported("ReturnFromGraveyard(no card type)");
                 return true;
             };
-            if !*creature && (*or_enchantment || *or_artifact) {
+            if !*creature && (*or_enchantment || *or_artifact || *or_spacecraft) {
                 l.unsupported("ReturnFromGraveyard.or_*(without creature)");
             }
+            // "Creature or Spacecraft card" (a Spacecraft is an artifact
+            // subtype, CR 205.3g; ENGINE.md 99.4).
+            let primary = if *or_spacecraft { Filter::Or(vec![primary, Filter::Subtype(l.subtype("Spacecraft"))]) } else { primary };
             let mut f = and(primary, Filter::Owner(true));
             if *max_mv > 0 {
                 f = and(f, Filter::ManaValueAtMost(l.int("ReturnFromGraveyard.max_mv", *max_mv, 0, 30) as u8));

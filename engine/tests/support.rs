@@ -720,13 +720,50 @@ const SUPPORTED_EOE_B: &[&str] = &[
 /// Lane C: void, warp, spells cast this turn, cost reductions, graveyard,
 /// exile, library and hand effects.
 const SUPPORTED_EOE_C: &[&str] = &[
+    "All-Fates Scroll",
+    "Brightspear Zealot",
+    "Chrome Companion",
+    "Codecracker Hound",
+    "Cosmogoyf",
+    "Dark Endurance",
+    "Deafening Silence",
+    "Decode Transmissions",
+    "Gigastorm Titan",
+    "Hymn of the Faller",
+    "Illvoi Infiltrator",
+    "Insatiable Skittermaw",
+    "Interceptor Mechan",
+    "Kavaron Skywarden",
+    "Lashwhip Predator",
+    "Lightstall Inquisitor",
+    "Memorial Vault",
+    "Plasma Bolt",
+    "Sami, Wildcat Captain",
+    "Scavenger Grounds",
+    "Seedship Broodtender",
+    "Space-Time Anomaly",
+    "Starwinder",
+    "Temporal Intervention",
+    "Timeline Culler",
+    "Tragic Trajectory",
+    "Uthros Psionicist",
+    "Virus Beetle",
+    "Voidforged Titan",
+    "Warping Wail",
+    "Weftwalking",
 ];
 /// Lane D: creatures, combat, removal, damage, life, tokens and pumps.
 const SUPPORTED_EOE_D: &[&str] = &[
 ];
 
+/// Cards that need features of two or more lanes, finished after the
+/// lanes merged (ENGINE.md 99.6; tests in `tests/cards_eoe_cross.rs`).
+const SUPPORTED_EOE_CROSS: &[&str] = &[
+    "Thaumaton Torpedo",
+];
+
 fn supported_eoe() -> Vec<String> {
-    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D];
+    let lists = [SUPPORTED_EOE_BASE, SUPPORTED_EOE_A, SUPPORTED_EOE_B, SUPPORTED_EOE_C, SUPPORTED_EOE_D, SUPPORTED_EOE_CROSS];
     let mut v: Vec<String> = lists.concat().into_iter().map(String::from).collect();
     let n = v.len();
     v.sort();
