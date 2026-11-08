@@ -283,7 +283,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.grants_food_ability_to_your_artifacts", grants_food_ability_to_your_artifacts);
         l.deny("CardPrinting.grants_blue_mana_ability_to_your_artifacts", grants_blue_mana_ability_to_your_artifacts);
         l.deny("CardPrinting.hand_ability_grants", hand_ability_grants);
-        l.deny("CardPrinting.grants_control_opponent_ability_when_equipped", grants_control_opponent_ability_when_equipped);
             // Sunburst (CR 702.44a): counters by the colours of mana spent to
         // cast it (the payment records them, as for converge).
         let sunburst_counter = sunburst.then(|| {
@@ -1871,6 +1870,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         bestow: None,
         bestowed: false,
         prepare,
+        grants_equipped: None,
+        exiles_granter: false,
         enters_prepared: *enters_prepared,
         spells_uncounterable: repl.spells_uncounterable,
         ward,
@@ -1934,6 +1935,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         f.bestowed = true;
         l.faces.push(f);
         def.bestow = Some((l.faces.len() - 1) as u16);
+    }
+    if *grants_control_opponent_ability_when_equipped {
+        super::eoe_w4::grant_control_ability(l, &mut def);
     }
     def
 }

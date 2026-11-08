@@ -665,6 +665,12 @@ pub struct Game {
     // ---- copies (M7b part 3, `copies.rs`; ENGINE.md 26) ----
     /// Copy effects on permanents (CR 707, layer 1), in timestamp order.
     pub(crate) copies: Vec<crate::copies::CopyFx>,
+    /// Who will control each player during that player's next turn (CR
+    /// 722.1; the last effect created wins, 722.1a; ENGINE.md 99.14).
+    pub(crate) next_turn_controller: [Option<PlayerId>; 2],
+    /// The player controlling the active player during this turn (CR
+    /// 722.1: from its beginning until the next turn begins).
+    pub(crate) turn_controller: Option<PlayerId>,
     /// Slots made as copies, not cards (token copies, copies of spells and
     /// of cards), in increasing order.
     pub(crate) copy_objs: Vec<CardIdx>,
@@ -1061,6 +1067,8 @@ impl Game {
             temp_triggers: Vec::new(),
             gy_exile: Vec::new(),
             copies: Vec::new(),
+            next_turn_controller: [None; 2],
+            turn_controller: None,
             copy_objs: Vec::new(),
             lki_copy: Vec::new(),
             lki_damage: Vec::new(),

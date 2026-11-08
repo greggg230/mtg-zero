@@ -620,3 +620,144 @@ fn cr_608_2h_close_encounter_uses_the_chosen_creatures_last_known_power() {
     assert_eq!(g.obj(bear).zone, Zone::Graveyard);
     assert_eq!(g.obj(wurm).damage, 5, "2 + 3 as it last existed\n{}", log(&g));
 }
+
+// ---- The Dominion Bracelet ----------------------------------------------------------
+
+/// The Dominion Bracelet on P0's W4 Wurm (6/6) with nine Islands: equipped
+/// (equip {1}), at P0's main phase with the stack empty.
+fn bracelet_on_wurm(p1_hand: &[&str]) -> (Game, CardIdx, CardIdx) {
+    let mut g = scen()
+        .battlefield(0, &["The Dominion Bracelet", "W4 Wurm"])
+        .battlefield(0, &["Island"; 9])
+        .battlefield(1, &["Mountain", "W4 Bear"])
+        .hand(1, p1_hand)
+        .at(Step::Main1, 0)
+        .start();
+    let br = bf(&g, 0, "The Dominion Bracelet");
+    let wurm = bf(&g, 0, "W4 Wurm");
+    let tw = g.tgt(wurm);
+    activate(&mut g, br, 0, &[tw]);
+    settle(&mut g);
+    assert_eq!(g.obj(br).attached.map(|r| r.idx), Some(wurm), "equipped\n{}", log(&g));
+    (g, br, wurm)
+}
+
+/// "Equipped creature gets +1/+1 and has '{15}, Exile The Dominion Bracelet:
+/// You control target opponent during their next turn. This ability costs
+/// {X} less to activate, where X is this creature's power. Activate only as
+/// a sorcery.'" The creature has the ability (CR 301.5, 613.1f); its cost is
+/// {15} less its power as the cost is determined (7: {8}, CR 601.2f), and
+/// the Bracelet is exiled as part of the cost (601.2h).
+#[test]
+fn cr_601_2f_the_dominion_bracelet_grants_the_ability_costing_15_less_power() {
+    let (mut g, br, wurm) = bracelet_on_wurm(&[]);
+    assert_eq!(g.pt(wurm), (7, 7), "+1/+1");
+    let a = act(wurm, 0);
+    assert!(g.has_option(a), "the equipped creature has the ability: {:?}", g.options_desc());
+    assert_eq!(untapped(&g, 0), 8);
+    g.choose(a);
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    assert!(g.has_option(player(1)) && !g.has_option(player(0)), "target opponent");
+    g.choose(player(1));
+    pay(&mut g);
+    assert_eq!(untapped(&g, 0), 0, "{{15}} less 7: {{8}}\n{}", log(&g));
+    assert_eq!(g.obj(br).zone, Zone::Exile, "exiled as a cost");
+    assert_eq!(g.pt(wurm), (6, 6));
+    settle(&mut g);
+    assert_eq!(g.next_turn_controller(1), Some(0), "{}", log(&g));
+    assert_eq!(g.turn_controller(), None, "not this turn");
+}
+
+/// Not with less than the reduced cost, not on another creature, and only
+/// as a sorcery (CR 602.5d).
+#[test]
+fn cr_602_5d_the_dominion_bracelet_ability_only_as_a_sorcery() {
+    let (mut g, _br, wurm) = bracelet_on_wurm(&[]);
+    to_opponent_priority(&mut g);
+    assert!(!g.has_option(act(wurm, 0)), "not with something on the stack or in another's turn");
+    let g = scen().battlefield(0, &["The Dominion Bracelet", "W4 Wurm"]).battlefield(0, &["Island"; 9]).at(Step::Main1, 0).start();
+    let wurm = bf(&g, 0, "W4 Wurm");
+    assert!(!g.has_option(act(wurm, 0)), "not equipped: no ability");
+}
+
+/// "You control target opponent during their next turn" (CR 722.1, 722.4):
+/// in that turn every decision of theirs is made by P0 (`to_move`), with
+/// their resources (722.4a: the ids are theirs: their hand, their mana);
+/// P0 sees what they see (722.3): their hand, and the card they draw. The
+/// turn after, each player decides for themselves again (722.1).
+#[test]
+fn cr_722_4_the_controller_makes_the_controlled_players_decisions() {
+    let (mut g, _br, wurm) = bracelet_on_wurm(&["W4 Bolt", "W4 Giant"]);
+    let p1_hand: Vec<CardIdx> = g.player(1).hand.clone();
+    assert!(p1_hand.iter().all(|&c| !g.knows(0, c)), "hidden before");
+    g.choose(act(wurm, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    pay(&mut g);
+    settle(&mut g);
+    // To P1's turn: its first decision is decided by P0.
+    quiet_until(&mut g, |g| g.turn().active == 1 && at_priority(g));
+    assert_eq!(g.turn_controller(), Some(0));
+    assert_eq!(g.pending_decision().unwrap().player, 1, "P1's decision");
+    assert_eq!(g.to_move(), Some(0), "made by P0 (CR 722.4)");
+    for &c in &g.player(1).hand {
+        assert!(g.knows(0, c), "P0 sees P1's hand (CR 722.3): {}", g.name(c));
+    }
+    // P1's main phase: P0 casts P1's Bolt at P1's own Bear.
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.to_move(), Some(0));
+    for &c in &g.player(1).hand {
+        assert!(g.knows(0, c), "and what P1 drew: {}", g.name(c));
+    }
+    let bear = bf(&g, 1, "W4 Bear");
+    let tb = g.tgt(bear);
+    cast(&mut g, 1, "W4 Bolt", &[tb]);
+    assert_eq!(g.to_move(), Some(0), "P0 still decides (P1's priority)");
+    settle(&mut g);
+    assert_eq!(g.obj(bear).zone, Zone::Graveyard, "{}", log(&g));
+    // P0's own decisions in P1's turn stay P0's (CR 722.7); the next turn is
+    // P0's own, and P1's turn after that is P1's.
+    quiet_until(&mut g, |g| g.turn().active == 0 && at_priority(g));
+    assert_eq!(g.turn_controller(), None);
+    assert_eq!(g.to_move(), Some(0));
+    quiet_until(&mut g, |g| g.turn().active == 1 && at_priority(g));
+    assert_eq!(g.turn_controller(), None, "only the next turn");
+    assert_eq!(g.to_move(), Some(1));
+}
+
+/// Hidden information in a controlled turn: `determinize` for the decider
+/// (P0) keeps its view and its actions (P1's hand is known to it, CR 722.3,
+/// so never resampled); for P1 too. P1's library stays hidden from P0.
+#[test]
+fn cr_722_3_a_controlled_turn_survives_determinize() {
+    let (mut g, _br, wurm) = bracelet_on_wurm(&["W4 Bolt", "W4 Giant", "W4 Elf"]);
+    g.choose(act(wurm, 0));
+    g.drive_until(|g| g.kind() == Some(DecisionKind::Target));
+    g.choose(player(1));
+    pay(&mut g);
+    settle(&mut g);
+    quiet_until(&mut g, |g| g.turn().active == 1 && g.turn().step == Step::Main1 && at_priority(g));
+    assert_eq!(g.to_move(), Some(0));
+    assert!(g.player(1).library.iter().all(|&c| !g.knows(0, c)), "P1's library stays hidden");
+    let mut rng = engine::rng::Rng::new(722);
+    for viewer in [0u8, 1] {
+        for _ in 0..4 {
+            let mut d = g.clone();
+            d.determinize(viewer, &mut rng);
+            assert_eq!(d.to_move(), Some(0), "viewer P{viewer}");
+            assert_eq!(g.view_of(viewer), d.view_of(viewer), "viewer P{viewer}: the view");
+            let (mut a, mut b) = (Vec::new(), Vec::new());
+            g.legal_actions(&mut a);
+            d.legal_actions(&mut b);
+            assert_eq!(a, b, "viewer P{viewer}: the decider's actions");
+            if viewer == 0 {
+                let names = |g: &Game| {
+                    let mut v: Vec<&str> = g.player(1).hand.iter().map(|&c| g.name(c)).collect();
+                    v.sort();
+                    v
+                };
+                assert_eq!(names(&g), names(&d), "P1's hand, known to P0, is never resampled");
+            }
+        }
+    }
+}

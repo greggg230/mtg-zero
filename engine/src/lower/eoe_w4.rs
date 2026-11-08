@@ -19,6 +19,40 @@ fn w4(b: &mut Builder, op: EoeW4) -> usize {
     b.op(Op::Ext(Ext::EoeW4(op)))
 }
 
+/// The Dominion Bracelet's "Equipped creature ... has '{15}, Exile The
+/// Dominion Bracelet: You control target opponent during their next turn.
+/// This ability costs {X} less to activate, where X is this creature's
+/// power. Activate only as a sorcery.'" (the IR's
+/// `grants_control_opponent_ability_when_equipped`, its whole Oracle text):
+/// the granted ability on a face of its own (`CardDef::grants_equipped`;
+/// CR 722, controlling another player).
+pub(crate) fn grant_control_ability(l: &mut Lowerer, def: &mut crate::db::CardDef) {
+    if !def.subtypes.contains(&l.subtype("Equipment")) {
+        l.unsupported("CardPrinting.grants_control_opponent_ability_when_equipped(not an Equipment)");
+        return;
+    }
+    let mut b = Builder::default();
+    let tgt = b.target(and(Filter::Player, Filter::Opponent), 1, 1);
+    w4(&mut b, EoeW4::ControlNextTurn { tgt });
+    let ability = crate::db::ActivatedDef {
+        cost: crate::db::Cost { mana: crate::mana::ManaCost { generic: 15, ..Default::default() }, ..Default::default() },
+        effect: crate::db::ActEffect::Stack(b.finish()),
+        sorcery: true,
+        instant_only: false,
+        exhaust: false,
+        only_if: None,
+        your_turn: false,
+        loyalty: None,
+        discounts: vec![crate::db::Discount::SourcePower],
+        boast: false,
+        x: false,
+        special: None,
+    };
+    let face = crate::db::CardDef { name: def.name.clone(), activated: vec![ability], exiles_granter: true, ..Default::default() };
+    l.faces.push(face);
+    def.grants_equipped = Some((l.faces.len() - 1) as u16);
+}
+
 /// Lower an effect class of W4; `false` if the class is not one of these.
 pub(crate) fn lower_effect_eoe_w4(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) -> bool {
     use cats::Effect as E;

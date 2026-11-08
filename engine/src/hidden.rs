@@ -638,7 +638,7 @@ impl Game {
         // decider names its definition, not its slot; the decider's hand is
         // never resampled for them). Only another player's decision needs
         // recomputing. Debug builds check the rule exactly.
-        if self.pending.as_ref().is_some_and(|d| d.player != viewer) {
+        if self.pending.as_ref().is_some_and(|d| self.decider_of(d.player) != viewer) {
             self.refresh_pending();
         } else if cfg!(debug_assertions) && self.pending.is_some() {
             let mut c = self.clone();

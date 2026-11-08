@@ -909,6 +909,7 @@ const SUPPORTED_EOE_EXILE: &[&str] = &[
     "Close Encounter",
     "Scout for Survivors",
     "Susur Secundi, Void Altar",
+    "The Dominion Bracelet",
 ];
 
 fn supported_eoe() -> Vec<String> {

@@ -158,6 +158,8 @@ impl Game {
             }
             // (A spell's own, read with its targets: `cost_with`.)
             crate::db::Discount::IfTargets(..) => 0,
+            // (An activated ability's, read with its source: `act_mana_x`.)
+            crate::db::Discount::SourcePower => 0,
         }
     }
 

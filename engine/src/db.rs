@@ -1542,6 +1542,15 @@ pub struct CardDef {
     /// A preparation card's prepare spell (CR 722.2a): a face (an instant or
     /// sorcery) that copies of the card in exile have (722.3c).
     pub prepare: Option<DefId>,
+    /// An Equipment's "equipped creature has '<activated ability>'" (CR
+    /// 301.5, 613.1f: layer 6): a face holding the granted abilities
+    /// (`activated`), which the creature has while this is attached to it
+    /// (`Game::granted_activated`; ENGINE.md 99.14).
+    pub grants_equipped: Option<DefId>,
+    /// On such a face: each granted ability's cost includes "Exile <the
+    /// Equipment granting it>" (The Dominion Bracelet; paid after the mana,
+    /// CR 601.2h, the total cost determined first, 601.2f).
+    pub exiles_granter: bool,
     /// "This creature enters prepared" (CR 722.3a).
     pub enters_prepared: bool,
     // ---- M7b part 3b: the stack, ward, the initiative, graveyard
@@ -1766,6 +1775,10 @@ pub enum Discount {
     /// the targets are chosen before the cost is determined, CR 601.2c,
     /// 601.2f). A spell's own reduction only.
     IfTargets(Filter, u8),
+    /// "This ability costs {X} less to activate, where X is this creature's
+    /// power" (the source's power as the cost is determined, CR 601.2f;
+    /// ENGINE.md 99.14). An activated ability's only.
+    SourcePower,
 }
 
 impl CardDef {
@@ -1976,6 +1989,7 @@ impl CardDb {
             card.adventure = adventure;
             card.bestow = card.bestow.map(|k| base + k);
             card.prepare = card.prepare.map(|k| base + k);
+            card.grants_equipped = card.grants_equipped.map(|k| base + k);
             card.halves = card.halves.map(|(a, b)| (base + a, base + b));
             for k in card.levels.iter_mut() {
                 *k += base;

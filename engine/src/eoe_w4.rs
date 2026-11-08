@@ -2,11 +2,11 @@
 //! control. The ops W4's cards add, named after the rules actions, each
 //! citing its rule; never after a card.
 
-use crate::db::Counter;
+use crate::db::{AbilitySlot, Counter};
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::Game;
-use crate::ids::{CardIdx, Target, Zone};
+use crate::ids::{CardIdx, PlayerId, Target, Zone};
 use crate::program::Who;
 use crate::resolve::{Flow, Frame};
 
@@ -32,6 +32,11 @@ pub enum EoeW4 {
     /// Each legal target of `tgt` (a card in exile) is put on the bottom of
     /// its owner's library (CR 401.4; public, so known to all there).
     ExiledTargetToLibraryBottom { tgt: u8 },
+    /// "You control target opponent during their next turn" (CR 722.1):
+    /// the controller will control the first legal target of `tgt` during
+    /// the next turn that player takes (a later effect replaces an earlier
+    /// one, 722.1a; a skipped turn isn't taken, 722.1b).
+    ControlNextTurn { tgt: u8 },
 }
 
 impl EoeW4 {
@@ -39,7 +44,7 @@ impl EoeW4 {
     pub fn uses_event(&self) -> bool {
         match self {
             EoeW4::OfferDiscardRandom { who, .. } => matches!(who, Who::EventPlayer),
-            EoeW4::GraveyardTargetsOntoBattlefield { .. } | EoeW4::ExiledTargetToLibraryBottom { .. } => false,
+            EoeW4::GraveyardTargetsOntoBattlefield { .. } | EoeW4::ExiledTargetToLibraryBottom { .. } | EoeW4::ControlNextTurn { .. } => false,
         }
     }
 
@@ -47,12 +52,136 @@ impl EoeW4 {
     pub fn jump_target(&mut self) -> Option<&mut u16> {
         match self {
             EoeW4::OfferDiscardRandom { if_paid, .. } => Some(if_paid),
-            EoeW4::GraveyardTargetsOntoBattlefield { .. } | EoeW4::ExiledTargetToLibraryBottom { .. } => None,
+            EoeW4::GraveyardTargetsOntoBattlefield { .. } | EoeW4::ExiledTargetToLibraryBottom { .. } | EoeW4::ControlNextTurn { .. } => None,
         }
     }
 }
 
 impl Game {
+    // ---- controlling another player (CR 722) --------------------------------
+
+    /// Who makes the decisions of player `p` (CR 722.4): the player
+    /// controlling them during this turn of theirs (the active player,
+    /// 722.2; `turn_controller`), else `p` (722.7: a controller still makes
+    /// their own decisions).
+    #[inline]
+    pub fn decider_of(&self, p: PlayerId) -> PlayerId {
+        match self.turn_controller {
+            Some(q) if p == self.turn.active => q,
+            _ => p,
+        }
+    }
+
+    /// The player controlling the active player this turn, if any (CR
+    /// 722.1).
+    pub fn turn_controller(&self) -> Option<PlayerId> {
+        self.turn_controller
+    }
+
+    /// Who will control player `p` during their next turn (CR 722.1).
+    pub fn next_turn_controller(&self, p: PlayerId) -> Option<PlayerId> {
+        self.next_turn_controller[p as usize]
+    }
+
+    /// CR 722.3: information visible to the controlled player is visible to
+    /// the player controlling them. Run at the end of every transition of a
+    /// controlled turn (`advance`), before the next decision is shown: the
+    /// controller learns, keyed (`KEY_LOOK`, private, in definition order),
+    /// every hidden card the controlled player can see now: their hand, the
+    /// face-down permanents they control (708.5), the cards they exiled face
+    /// down and know, and the hidden cards their pending decision names (a
+    /// looked-at pile). What the controlled player merely remembers (a
+    /// library card seen on an earlier turn) is not visible, and is not
+    /// shared (ENGINE.md 99.14).
+    pub(crate) fn sync_controller_view(&mut self) {
+        let Some(q) = self.turn_controller else { return };
+        let p = self.turn.active;
+        if q == p || self.outcome.is_some() {
+            return;
+        }
+        let mut seen: Vec<CardIdx> = self.players[p as usize].hand.clone();
+        seen.extend(self.face_down_ids.iter().map(|x| x.0).filter(|&c| self.objs[c.i()].controller == p));
+        seen.extend(self.face_down.iter().copied().filter(|&c| self.objs[c.i()].owner == p && self.knows(p, c)));
+        if let Some(d) = self.pending.as_ref().filter(|d| d.player == p) {
+            seen.extend(d.options.iter().filter_map(|o| match o.choice {
+                Choice::Card(c) if self.hidden_obj(c) && self.knows(p, c) => Some(c),
+                _ => None,
+            }));
+        }
+        let mut learned: Vec<crate::ids::DefId> = Vec::new();
+        for c in seen {
+            if !self.knows(q, c) {
+                self.learn(q, c);
+                learned.push(self.ident(c));
+            }
+        }
+        learned.sort_unstable();
+        for d in learned {
+            self.emit_private(crate::hidden::KEY_LOOK, q, d as u64);
+        }
+    }
+
+    // ---- activated abilities an Equipment grants (CR 301.5, 613.1f) --------
+
+    /// The faces of granted activated abilities permanent `c` has: those of
+    /// the Equipment attached to it that grant some
+    /// (`CardDef::grants_equipped`; none if the Equipment lost its
+    /// abilities), with the Equipment, in timestamp order.
+    pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<(CardIdx, crate::ids::DefId)> {
+        let r = self.obj_ref(c);
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&e| self.objs[e.i()].attached == Some(r))
+            .filter_map(|e| self.abilities(e).grants_equipped.map(|face| (e, face)))
+            .collect()
+    }
+
+    /// Where activated ability `slot` of permanent `c` is defined: its own
+    /// definition, or (an index past its own abilities) the face of an
+    /// ability an attached Equipment grants it, with that Equipment.
+    pub(crate) fn activated_home(&self, c: CardIdx, slot: AbilitySlot) -> (crate::ids::DefId, AbilitySlot, Option<CardIdx>) {
+        let def = self.objs[c.i()].def;
+        if let AbilitySlot::Activated(i) = slot {
+            let own = self.db.def(def).activated.len();
+            if i as usize >= own {
+                let mut k = i as usize - own;
+                for (e, face) in self.granted_activated(c) {
+                    let n = self.db.def(face).activated.len();
+                    if k < n {
+                        return (face, AbilitySlot::Activated(k as u8), Some(e));
+                    }
+                    k -= n;
+                }
+            }
+        }
+        (def, slot, None)
+    }
+
+    /// The activated ability `slot` of permanent `c` (its own or granted).
+    pub fn activated_of(&self, c: CardIdx, slot: AbilitySlot) -> &'static crate::db::ActivatedDef {
+        let (def, slot, _) = self.activated_home(c, slot);
+        self.db.def(def).activated_def(slot)
+    }
+
+    /// "Exile <the Equipment granting this ability>" as a cost
+    /// (`CardDef::exiles_granter`), after the mana (CR 601.2h): the
+    /// Equipment noted at activation.
+    pub(crate) fn pay_exile_granter(&mut self, id: u32) {
+        let Some(pos) = self.item_index(id) else { return };
+        let crate::game::StackKind::Ability { ability, .. } = self.stack[pos].kind else { return };
+        if !self.db.def(ability.def).exiles_granter {
+            return;
+        }
+        if let Some(&r) = self.stack[pos].noted.first() {
+            if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
+                let p = self.stack[pos].controller;
+                self.note(|g| format!("P{p} exiles {} to pay", g.name(r.idx)));
+                self.move_card(r.idx, Zone::Exile, crate::game::Pos::Top);
+            }
+        }
+    }
+
     /// The mana value of a target object (0 for a player or an ability).
     fn target_mv(&self, t: Target) -> u32 {
         match t {
@@ -113,7 +242,7 @@ impl Game {
     }
 
     /// The warped creature cards `p` owns in exile, in exile order.
-    fn warped_creature_cards(&self, p: crate::ids::PlayerId) -> Vec<CardIdx> {
+    fn warped_creature_cards(&self, p: PlayerId) -> Vec<CardIdx> {
         self.exile
             .iter()
             .copied()
@@ -123,7 +252,7 @@ impl Game {
 
     /// Can `p` choose "a creature you control or a warped creature card you
     /// own in exile" (ENGINE.md 99.14)?
-    pub(crate) fn chosen_for_cost_candidates(&self, p: crate::ids::PlayerId) -> bool {
+    pub(crate) fn chosen_for_cost_candidates(&self, p: PlayerId) -> bool {
         self.creatures_of(p).next().is_some() || !self.warped_creature_cards(p).is_empty()
     }
 
@@ -260,6 +389,14 @@ impl Game {
                     for &c in asks.iter().rev() {
                         self.agenda.push(Task::AttackTarget { card: c });
                     }
+                }
+                Flow::Next
+            }
+            EoeW4::ControlNextTurn { tgt } => {
+                if let Some(Target::Player(q)) = self.targets_of(f, *tgt).into_iter().next() {
+                    let p = f.controller;
+                    self.note(|_| format!("P{p} will control P{q} during P{q}'s next turn"));
+                    self.next_turn_controller[q as usize] = Some(p);
                 }
                 Flow::Next
             }
