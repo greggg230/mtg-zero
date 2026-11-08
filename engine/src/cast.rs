@@ -404,7 +404,11 @@ impl Game {
             return false;
         }
         match pm.kind {
-            crate::game::PermKind::Play { attacked_subtype: Some(s), .. } => {
+            // "If you control a <subtype>" (EoE W3).
+            crate::game::PermKind::Play { only_if: crate::game::PlayIf::ControlSubtype(s), .. } => {
+                self.permanents_of(p).any(|c| self.has_subtype(c, s))
+            }
+            crate::game::PermKind::Play { only_if: crate::game::PlayIf::AttackedWith(s), .. } => {
                 // "During any turn you attacked with a <subtype>": the
                 // attackers as they are now, or as they last were.
                 self.players[p as usize].attacked_with.iter().any(|&r| {
@@ -863,6 +867,11 @@ impl Game {
                     most = most.min(self.target_candidates(tr, &ctx, &[Target::Stack(id)]).len().min(255) as u8);
                 }
                 self.targeting = 0;
+            }
+            // "Tap X untapped artifacts you control" (EoE W3): as many as
+            // can be tapped with the mana still payable.
+            if ad.cost.tap_x.is_some() {
+                most = most.min(self.tap_x_most(p, source.idx, ad));
             }
             // (Not with the source's own mana when the cost taps it: an
             // artifact Urza could tap for mana, ENGINE.md 31.)
@@ -2854,6 +2863,10 @@ impl Game {
             Filter::ToughnessAtMost(n) => self.is_creature(c) && self.toughness(c) <= *n,
             Filter::Controller(you) => (self.objs[c.i()].controller == ctx.controller) == *you,
             Filter::Source => ctx.source.is_some_and(|s| s.idx == c && self.live(s)),
+            Filter::MvAtMostManaSpent => ctx.source.is_some_and(|s| self.mana_value_of(c) <= self.mana_spent_of(s)),
+            Filter::HostOfSource => {
+                ctx.source.is_some_and(|s| self.live(s) && self.objs[s.idx.i()].attached.is_some_and(|h| h.idx == c && self.live(h)))
+            }
             Filter::Token => self.is_token(c),
             Filter::Attacking => self.objs[c.i()].attacking,
             Filter::Tapped => self.objs[c.i()].tapped,

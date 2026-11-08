@@ -136,7 +136,7 @@ impl Game {
     /// The type-changing mods of `c`'s own "this permanent" static
     /// abilities whose condition holds ("during your turn, he's a 3/4
     /// Ninja creature"): layer 4 without scopes, so nothing recurses.
-    fn own_type_mods(&self, c: CardIdx) -> impl Iterator<Item = &'static Mod> + '_ {
+    pub(crate) fn own_type_mods(&self, c: CardIdx) -> impl Iterator<Item = &'static Mod> + '_ {
         let active = self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield;
         let d: &'static crate::db::CardDef = if active { self.abilities(c) } else { crate::game::blank_def() };
         let ctl = self.objs[c.i()].controller;
@@ -273,6 +273,15 @@ impl Game {
         // one reconfigure card, Lion Sash (Equipment Cat), keeps Equipment.
         if printed && d.reconfigure && self.objs[c.i()].attached.is_some() {
             printed = self.db.equipment_subtype() == Some(s);
+        }
+        // "Artifacts you control are Foods in addition to their other types"
+        // (EoE W3): in layer 4 with the other type-changing effects, by
+        // timestamp (`Game::subtype_with_grants`).
+        if self.w3.seen & crate::eoe_w3::SEEN_W3_SUBTYPE != 0 && self.objs[c.i()].zone == Zone::Battlefield {
+            let grants = self.granted_subtype_ts(c, s);
+            if !grants.is_empty() {
+                return self.subtype_with_grants(c, s, printed, &grants);
+            }
         }
         if self.n_self_types > 0 && self.objs[c.i()].zone == Zone::Battlefield {
             for m in self.own_type_mods(c) {
@@ -791,8 +800,10 @@ impl Game {
         let control = self.control_ending_this_turn();
         self.effects.retain(|e| e.until != Until::EndOfTurn);
         self.return_control(control);
-        if !self.marks.is_empty() {
-            self.marks.retain(|(_, m)| !matches!(m, crate::game::Mark::DiesTriggerThisTurn { .. }));
+        // (Granted triggered abilities until end of turn, regeneration
+        // shields, phased-out permanents' damage: EoE W3.)
+        if !self.marks.is_empty() || !self.w3.phased.is_empty() {
+            self.end_turn_w3();
         }
         self.effects_changed();
         if !self.copies.is_empty() {

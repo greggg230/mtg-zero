@@ -420,6 +420,13 @@ pub enum Filter {
     /// A permanent that entered as a spell cast for its warp cost (CR
     /// 702.185a; `Mark::WarpCast`; ENGINE.md 99.8).
     CastForWarp,
+    /// The permanent the context's source is attached to (an Aura's
+    /// enchanted creature, CR 303.4e: "any other target" of Pain for All's
+    /// enchanted creature is `Not(HostOfSource)`; EoE W3).
+    HostOfSource,
+    /// Mana value at most the amount of mana spent to cast the context's
+    /// source (CR 601.2h; `Mark::ManaSpent`; EoE W3).
+    MvAtMostManaSpent,
     /// A card in exile (face up; not a copy of a card) matching the inner
     /// filter ("target exiled card", CR 115.1, 406; ENGINE.md 99.14).
     InExile(Box<Filter>),
@@ -1172,6 +1179,17 @@ pub struct Cost {
     /// Exert this permanent (CR 701.39: it won't untap during its
     /// controller's next untap step; `Mark::Exerted`).
     pub exert: bool,
+    /// The card types (any of them) the cards `exile_graveyard` takes must
+    /// have, printed (0: any card): "exile an artifact card from your
+    /// graveyard" (EoE W3, ENGINE.md 99.13).
+    pub exile_graveyard_types: u16,
+    /// "Remove a <counter> counter from a <filter> you control" (CR 118.3,
+    /// 602.2b: one permanent, chosen as the cost is paid; EoE W3).
+    pub remove_counter_from: Option<(Filter, Counter)>,
+    /// "Tap X untapped <filter> you control" (CR 107.3a, 601.2b: X announced
+    /// as the ability is activated, the activation's X; not {T}: summoning
+    /// sickness doesn't matter, 302.6; EoE W3).
+    pub tap_x: Option<Filter>,
 }
 
 /// An alternative cost (CR 118.9): paid instead of the mana cost.
@@ -1321,7 +1339,19 @@ impl CardDef {
             } else {
                 0
             })
-            | (if self.triggers.iter().any(|t| t.ability.program.iter().any(|op| matches!(op, Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })))) {
+            | (if self.triggers.iter().any(|t| {
+                t.ability.program.iter().any(|op| {
+                    matches!(
+                        op,
+                        Op::Ext(crate::program::Ext::DamageFrom { event_obj: true, .. })
+                            | Op::Ext(crate::program::Ext::EoeW3(
+                                crate::eoe_w3::W3::DamageEachSourceMv { .. }
+                                    | crate::eoe_w3::W3::HostDamagesPower { .. }
+                                    | crate::eoe_w3::W3::EventObjDamagesEachOpponent { .. }
+                            ))
+                    )
+                })
+            }) {
                 crate::game::SEEN_LKI_DAMAGE
             } else {
                 0
@@ -1754,6 +1784,8 @@ pub struct CardDef {
     /// "... stations permanents using its toughness rather than its power"
     /// (CR 702.184c; ENGINE.md 99.8).
     pub toughness_stations: bool,
+    /// The printing facts EoE workstream W3 adds (ENGINE.md 99.13).
+    pub w3: crate::eoe_w3::W3Def,
 }
 
 /// Rules about casting spells a card adds while it is on the battlefield
@@ -1988,6 +2020,12 @@ pub(crate) fn merge_costs(a: &Cost, b: &Cost) -> Option<Cost> {
         tap_untapped: one(&a.tap_untapped, &b.tap_untapped)?,
         waterbend: a.waterbend || b.waterbend,
         exert: a.exert || b.exert,
+        exile_graveyard_types: match (a.exile_graveyard_types, b.exile_graveyard_types) {
+            (0, t) | (t, 0) => t,
+            _ => return None,
+        },
+        remove_counter_from: one(&a.remove_counter_from, &b.remove_counter_from)?,
+        tap_x: one(&a.tap_x, &b.tap_x)?,
     };
     let reservations = [c.sacrifice.is_some() || c.bounce.is_some(), c.discard > 0, c.exile_from_hand.is_some()];
     if reservations.iter().filter(|&&x| x).count() > 1 || c.sacrifice.is_some() && c.bounce.is_some() {

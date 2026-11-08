@@ -915,6 +915,20 @@ const SUPPORTED_EOE_IRFIX: &[&str] = &[
 const SUPPORTED_EOE_MANA: &[&str] = &[
 ];
 const SUPPORTED_EOE_COMBAT: &[&str] = &[
+    "Astelli Reclaimer",
+    "Dyadrine, Synthesis Amalgam",
+    "Frenzied Baloth",
+    "Pain for All",
+    "Possibility Technician",
+    "Raging Ravine",
+    "Ragost, Deft Gastronaut",
+    "Requiem Monolith",
+    "Robe of Stars",
+    "Rust Harvester",
+    "Secluded Starforge",
+    "Sunstar Chaplain",
+    "Swarmyard",
+    "Terminal Velocity",
 ];
 const SUPPORTED_EOE_EXILE: &[&str] = &[
     "Adagia, Windswept Bastion",

@@ -150,7 +150,7 @@ pub(crate) fn lower_effect_stack(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
         // play.)
         E::TargetPlayerExilesTopNYouMayPlayThem(nodes::TargetPlayerExilesTopNYouMayPlayThem { amount, free }) => {
             let n = l.int("TargetPlayerExilesTopNYouMayPlayThem.amount", *amount, 1, 10) as u8;
-            let kind = crate::game::PermKind::Play { free: *free, cast_only: false, any_mana: false, attacked_subtype: None };
+            let kind = crate::game::PermKind::Play { free: *free, cast_only: false, any_mana: false, only_if: crate::game::PlayIf::Always };
             b.op(Op::Ext(Ext::ExileTopWithPermission { who: Who::EventPlayer, n, kind, this_turn: true }));
         }
         // "Tap up to one target creature." (The Wondrous Wasp.)

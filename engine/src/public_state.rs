@@ -176,9 +176,23 @@ pub fn fields() -> Vec<Field> {
         choosing_for: Derived "transient: the item whose modes are chosen (0 between tasks)",
         targeting: Derived "transient: the item whose targets are chosen (0 between tasks; ENGINE.md 58.1)",
         marks: Public "rare per-object facts (exhausted, a chosen colour, exerted, can't be countered, ...)",
+        w3: Derived "EoE workstream W3's state: its fields are classified under W3State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",
         log: Derived "the human-readable log (tests and the viewer)",
     });
+    {
+        use crate::eoe_w3::W3State;
+        classify!(v, W3State {
+            no_regen: Derived "transient: set and cleared around one destruction (\"it can't be regenerated\")",
+            granted: Derived "a fast path: some permanent may have a granted triggered ability (Game.marks)",
+            seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
+            lki_host: Derived "last known information (CR 608.2h): what a gone Aura enchanted",
+            lki_loss: Derived "last known information (CR 603.10a): when a gone permanent lost its abilities",
+            entering_spent: Derived "transient: set and taken around one move",
+            phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
+            indirect: Public "which phased-out permanents phased out with what they are attached to (CR 702.26e)",
+        });
+    }
     classify!(v, Player {
         life: Public "CR 119",
         library: Public "its size is public (its cards and order hidden: leak-tested)",
@@ -455,6 +469,21 @@ fn counter(g: &mut Game, c: CardIdx, k: Counter) -> Option<String> {
     Some(format!("a {k:?} counter on {}", g.name(c)))
 }
 
+/// A phased-out permanent (CR 702.26b; EoE W3), with the definition and
+/// owner of the first permanent in the encoded slots; `indirect`: it phased
+/// out with what it is attached to (702.26e).
+fn phased_out(g: &mut Game, indirect: bool) -> Option<String> {
+    let c = *slots(g).first()?;
+    let (def, owner) = (g.objs[c.i()].def, g.objs[c.i()].owner);
+    let x = g.add_card(def, owner, Zone::PhasedOut);
+    g.objs[x.i()].zone = Zone::PhasedOut;
+    g.w3.phased.push(x);
+    if indirect {
+        g.w3.indirect.push(x);
+    }
+    Some(format!("a phased-out {}", g.name(x)))
+}
+
 fn mark(g: &mut Game, c: CardIdx, m: crate::game::Mark) -> Option<String> {
     let r = g.obj_ref(c);
     if g.marks.contains(&(r, m)) {
@@ -721,7 +750,7 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = pick(&cs, r)?;
             let card = a.g.obj_ref(c);
             let player = a.g.objs[c.i()].owner;
-            let kind = crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, attacked_subtype: None };
+            let kind = crate::game::PermKind::Play { free: false, cast_only: false, any_mana: false, only_if: crate::game::PlayIf::Always };
             a.g.permissions.push(crate::game::Permission { card, player, turn: Some(a.g.turn.number), kind });
             Some(format!("{} by P{player}", a.g.name(c)))
         }),
@@ -844,6 +873,18 @@ pub fn perturbations() -> Vec<Perturbation> {
             let c = *slot_creatures(&a.g).first()?;
             mark(&mut a.g, c, crate::game::Mark::WarpCast)
         }),
+        // EoE W3 (ENGINE.md 99.13): no draw from the gate's random stream
+        // (the first object in the encoded slots, as the cross-lane pass's).
+        p!("a creature has a regeneration shield", "Game.marks", |a, _r| {
+            let c = *slot_creatures(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::RegenShield)
+        }),
+        p!("the mana spent to cast a permanent", "Game.marks", |a, _r| {
+            let c = *slots(&a.g).first()?;
+            mark(&mut a.g, c, crate::game::Mark::ManaSpent(3))
+        }),
+        p!("a permanent is phased out", "W3State.phased", |a, _r| phased_out(&mut a.g, false)),
+        p!("a phased-out permanent phased out indirectly", "W3State.indirect", |a, _r| phased_out(&mut a.g, true)),
         // EoE W4 (ENGINE.md 99.14): a copy's "except it's legendary" (CR
         // 707.9b; Adagia's token copies). On a copy effect that is already
         // there (adding one would set the encoded copy flag too); no draw
@@ -1538,6 +1579,10 @@ pub fn limits() -> Vec<Limit> {
         l("void holds (a nonland permanent left the battlefield this turn)", NextLayout, "void (Edge of Eternities' ability word, ENGINE.md 99.4) is game state the EoE port added after layout v5 froze: the next layout encodes it (a per-turn flag beside the turn's facts); until then a network infers it from the public history only through the board"),
         l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
         l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
+        l("a creature has a regeneration shield", NextLayout, "regeneration shields (CR 701.19a, Mark::RegenShield) are game state EoE workstream W3 added after layout v5 froze (ENGINE.md 99.13), made by one card, Swarmyard: the next layout encodes them (a permanent's count)"),
+        l("the mana spent to cast a permanent", NextLayout, "the amount of mana spent to cast a permanent (CR 601.2h, Mark::ManaSpent) is game state EoE workstream W3 added after layout v5 froze (ENGINE.md 99.13), read by Astelli Reclaimer's enters trigger and Dyadrine's counters (on the battlefield already): the next layout encodes it (a permanent's number)"),
+        l("a permanent is phased out", NextLayout, "phased-out permanents (CR 702.26b, Zone::PhasedOut) are treated as though they don't exist, and layout v5 encodes the battlefield only, so a network can't see that one will phase in at its controller's next untap step (EoE workstream W3, ENGINE.md 99.13: Robe of Stars): the next layout encodes them (a bag per player)"),
+        l("a phased-out permanent phased out indirectly", NextLayout, "which phased-out permanents phase in with the one they are attached to (CR 702.26e, h; EoE workstream W3, ENGINE.md 99.13): with the phased-out permanents themselves, the next layout's"),
         l("a copy is legendary by its exception", NextLayout, "a copy effect's \"except it's legendary\" (CR 707.9b: a copiable supertype; Adagia, Windswept Bastion's token copies, EoE W4, ENGINE.md 99.14) is a value the EoE port added after layout v5 froze: a permanent's legendary float (code 47) is its copiable definition's, as its name is; the next layout encodes a permanent's supertypes as they are"),
         l("a stack item targets another exiled card", NextLayout, "a target in exile (Blade of the Swarm's 'target exiled card with warp', EoE W4, ENGINE.md 99.14) is a target layout v5's stack target block has no field for (a player, a permanent's slot or a stack position); exile is bags of identities: the next layout encodes it (the target's identity)"),
         l("a stack item noted another object", NextLayout, "which object a stack item noted (Close Encounter's chosen creature or warped card, EoE W4, ENGINE.md 99.14; emerge's permanent; station's tapped creature) is encoded only as a count (stack::NOTED): the next layout encodes the objects (as a target's)"),

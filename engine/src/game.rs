@@ -175,9 +175,9 @@ pub struct Permission {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PermKind {
     /// Play it (a land too unless `cast_only`), [without paying its mana
-    /// cost], [spending mana as though of any colour], [only during a turn
-    /// you attacked with a creature of this subtype].
-    Play { free: bool, cast_only: bool, any_mana: bool, attacked_subtype: Option<u16> },
+    /// cost], [spending mana as though of any colour], [only while `only_if`
+    /// holds].
+    Play { free: bool, cast_only: bool, any_mana: bool, only_if: PlayIf },
     /// It has flashback; the flashback cost is its mana cost (Snapcaster
     /// Mage).
     Flashback,
@@ -200,6 +200,19 @@ pub enum PermKind {
     /// As `Taxed`, and a land played this way enters tapped (Lightstall
     /// Inquisitor; ENGINE.md 99.4).
     TaxedLandsTapped(u8),
+}
+
+/// When a `PermKind::Play` permission lets its player play the card (CR
+/// 601.2a, 305.1: checked as the card would be played).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PlayIf {
+    /// Whenever it could otherwise be played.
+    Always,
+    /// "During any turn you attacked with a <subtype>" (ENGINE.md 99.4).
+    AttackedWith(u16),
+    /// "If you control a <subtype>" (Possibility Technician; EoE W3,
+    /// ENGINE.md 99.13).
+    ControlSubtype(u16),
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -758,6 +771,9 @@ pub struct Game {
     /// in the common case): exhaust abilities activated, colours chosen
     /// as a permanent entered, ...
     pub(crate) marks: Vec<(ObjRef, Mark)>,
+    /// EoE workstream W3's state (ENGINE.md 99.13): phasing, granted
+    /// triggered abilities, regeneration.
+    pub(crate) w3: crate::eoe_w3::W3State,
     /// With hidden decks (`GameSpec::hidden_decks`, ENGINE.md 36.11): per
     /// player, the card names of their pool the other player knows (the pool
     /// but the first picks not seen in earlier games, and the basic lands),
@@ -886,12 +902,28 @@ pub enum Mark {
     /// this turn"; kept only when a card of the table reads it,
     /// `CardDb::watch_damage`; EoE lane D, ENGINE.md 99.5).
     DealtDamage(u16),
-    /// It has "When this creature dies, <trigger `slot` of `def`>" until end
-    /// of turn (EoE lane D; removed in the cleanup step, CR 514.2).
-    DiesTriggerThisTurn { def: DefId, slot: u8 },
+    /// It has triggered ability `slot` of definition `def`, which an effect
+    /// gave it ("<it> gains '<triggered ability>'", CR 613.1f: layer 6), until
+    /// end of turn (`this_turn`: it ends in the cleanup step, 514.2) or for
+    /// as long as it stays this object (400.7). It is the permanent's own
+    /// ability: its source is the permanent and its controller the
+    /// permanent's (113.7, 113.8). `ts`: its timestamp (613.7a): a layer-6
+    /// "loses all abilities" effect with a later one removes it, one with an
+    /// earlier one doesn't (613.1f, 613.7). EoE lane D's "when this creature
+    /// dies" (ENGINE.md 99.5), generalised by workstream W3 (99.13).
+    Granted { def: DefId, slot: u8, this_turn: bool, ts: u32 },
     /// It entered as a spell cast for its warp cost (CR 702.185a: "if that
     /// creature was cast for its warp cost"; ENGINE.md 99.8).
     WarpCast,
+    /// A regeneration shield (CR 701.19a): the next time it would be
+    /// destroyed this turn, instead its damage is removed, its controller
+    /// taps it and it is removed from combat. One mark per shield; they end
+    /// in the cleanup step (514.2). EoE W3, ENGINE.md 99.13.
+    RegenShield,
+    /// The amount of mana spent to cast it (CR 601.2h): on a spell as it is
+    /// paid, then on the permanent it becomes ("the amount of mana spent to
+    /// cast this creature"; EoE W3, kept for cards that read it).
+    ManaSpent(u8),
     /// This spell was cast for alternative cost `grant` of definition `def`,
     /// which permanent `granter`'s static ability gave it in its owner's hand
     /// (`CastingRules::hand_alt_grants`; CR 118.9, 400.7g; ENGINE.md 99.15).
@@ -1111,6 +1143,7 @@ impl Game {
             choosing_for: 0,
             targeting: 0,
             marks: Vec::new(),
+            w3: Default::default(),
             known_pools: [None, None],
             batching: false,
             ev_seq: 0,
@@ -1137,6 +1170,7 @@ impl Game {
         let d = self.db.def(def);
         let seen = d.seen_bits() | d.back.map_or(0, |b| self.db.def(b).seen_bits());
         self.seen |= seen;
+        self.w3.seen |= d.w3.seen | d.back.map_or(0, |b| self.db.def(b).w3.seen);
         if d.miracle.is_some() {
             self.seen |= SEEN_MIRACLE_P0 << owner;
         }
@@ -1316,6 +1350,7 @@ impl Game {
             Zone::Exile => Some(&mut self.exile),
             Zone::FaceDown => Some(&mut self.face_down),
             Zone::Command => Some(&mut self.command),
+            Zone::PhasedOut => Some(&mut self.w3.phased),
             Zone::Stack | Zone::Nowhere => None,
         }
     }
@@ -1528,6 +1563,12 @@ impl Game {
         // cost"; ENGINE.md 99.15.)
         if warp && cast && !self.is_copy_obj(idx) {
             self.marks.push((r, Mark::WarpCast));
+        }
+        // (The mana spent to cast it: EoE W3.)
+        if let Some(n) = self.w3.entering_spent.take() {
+            if cast {
+                self.w3_entered_spent(idx, r, n);
+            }
         }
         if let (Some((k, home)), true) = (dash, cast) {
             // CR 702.109a: it gains haste, and returns to its owner's hand
@@ -1936,6 +1977,9 @@ impl Game {
             self.leaving_to = 0;
         }
         let lki_power = (from == Zone::Battlefield).then(|| (old.inc, self.power(idx)));
+        if from == Zone::Battlefield && (self.w3.seen != 0 || self.w3.granted) {
+            self.w3_leaves(idx, old);
+        }
         let lost_granted = from == Zone::Battlefield && !self.marks.is_empty() && self.lost_abilities(idx);
         // Its copiable values as it last existed on the battlefield (CR
         // 608.2h: "create a token that's a copy of it").
@@ -2156,7 +2200,6 @@ impl Game {
                     Mark::LeaveTrigger { def, slot, exile } if r == old && (to == Zone::Graveyard || exile && to == Zone::Exile) => {
                         Some((def, slot))
                     }
-                    Mark::DiesTriggerThisTurn { def, slot } if r == old && to == Zone::Graveyard => Some((def, slot)),
                     _ => None,
                 })
                 .collect();
@@ -2742,7 +2785,7 @@ impl Game {
     /// "Combat damage that would be dealt by creatures you control can't be
     /// prevented" (Questing Beast) for `p`.
     pub(crate) fn combat_unpreventable(&self, p: PlayerId) -> bool {
-        self.permanents_of(p).any(|c| self.abilities(c).combat_unpreventable)
+        self.permanents_of(p).any(|c| self.abilities(c).combat_unpreventable) || self.all_combat_unpreventable()
     }
 
     /// Does permanent `c` have protection from a source with these

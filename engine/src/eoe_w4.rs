@@ -122,41 +122,9 @@ impl Game {
     }
 
     // ---- activated abilities an Equipment grants (CR 301.5, 613.1f) --------
-
-    /// The faces of granted activated abilities permanent `c` has: those of
-    /// the Equipment attached to it that grant some
-    /// (`CardDef::grants_equipped`; none if the Equipment lost its
-    /// abilities), with the Equipment, in timestamp order.
-    pub(crate) fn granted_activated(&self, c: CardIdx) -> Vec<(CardIdx, crate::ids::DefId)> {
-        let r = self.obj_ref(c);
-        self.battlefield
-            .iter()
-            .copied()
-            .filter(|&e| self.objs[e.i()].attached == Some(r))
-            .filter_map(|e| self.abilities(e).grants_equipped.map(|face| (e, face)))
-            .collect()
-    }
-
-    /// Where activated ability `slot` of permanent `c` is defined: its own
-    /// definition, or (an index past its own abilities) the face of an
-    /// ability an attached Equipment grants it, with that Equipment.
-    pub(crate) fn activated_home(&self, c: CardIdx, slot: AbilitySlot) -> (crate::ids::DefId, AbilitySlot, Option<CardIdx>) {
-        let def = self.objs[c.i()].def;
-        if let AbilitySlot::Activated(i) = slot {
-            let own = self.db.def(def).activated.len();
-            if i as usize >= own {
-                let mut k = i as usize - own;
-                for (e, face) in self.granted_activated(c) {
-                    let n = self.db.def(face).activated.len();
-                    if k < n {
-                        return (face, AbilitySlot::Activated(k as u8), Some(e));
-                    }
-                    k -= n;
-                }
-            }
-        }
-        (def, slot, None)
-    }
+    // (One mechanism with every granted activated ability since the merge
+    // with EoE W3: `Game::granted_activated`, `Game::activated_home` in
+    // `eoe_w3.rs`; ENGINE.md 99.13.)
 
     /// The activated ability `slot` of permanent `c` (its own or granted).
     pub fn activated_of(&self, c: CardIdx, slot: AbilitySlot) -> &'static crate::db::ActivatedDef {

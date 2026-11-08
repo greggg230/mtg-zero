@@ -278,6 +278,10 @@ impl Game {
                         if self.def_of(card).sunburst.is_some() {
                             self.entering_sunburst = self.converge_of(Some(self.obj_ref(card)));
                         }
+                        // (The mana spent to cast it: EoE W3.)
+                        if self.def_of(card).w3.mana_spent {
+                            self.w3.entering_spent = Some(self.mana_spent_of(self.obj_ref(card)));
+                        }
                         // "A +1/+1 counter for each instant and sorcery card
                         // exiled with it" (CR 607.2q; ENGINE.md 54).
                         if self.def_of(card).counters_per_exiled.is_some() {
@@ -1276,7 +1280,12 @@ impl Game {
             }
         }
         let p = self.objs[card.i()].controller;
-        self.permanents_of(p).any(|c| self.abilities(c).spells_uncounterable)
+        // ("Creature spells you control can't be countered": EoE W3.)
+        let creature = self.is_creature(card);
+        self.permanents_of(p).any(|c| {
+            let d = self.abilities(c);
+            d.spells_uncounterable || creature && d.w3.creature_spells_uncounterable
+        })
     }
 
     /// Destroy a permanent (CR 701.7): to its owner's graveyard
@@ -1284,6 +1293,9 @@ impl Game {
     pub(crate) fn destroy(&mut self, c: crate::ids::CardIdx) {
         if self.indestructible(c) {
             return; // CR 702.12b
+        }
+        if !self.marks.is_empty() && self.regenerated(c) {
+            return; // CR 701.19a
         }
         self.move_card(c, Zone::Graveyard, Pos::Top);
     }

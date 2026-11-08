@@ -165,10 +165,6 @@ pub enum EoeD {
     /// Each object of `on` gets +p*n/+t*n until `until`, n read once as the
     /// op resolves (CR 608.2h, 611.2c; "double its power", 701.10b).
     ApplyPtTimes { on: On, p: i8, t: i8, n: Amount, until: Until },
-    /// Each object of `on` gains "When this creature dies, <delayed ability
-    /// `k` of the source's card>" until end of turn (layer 6, CR 613.1f;
-    /// it ends in the cleanup step, 514.2).
-    GrantDiesTriggerThisTurn { on: On, k: u8 },
     /// The triggered ability's event card (in a graveyard or exile) returns
     /// to the battlefield tapped under its owner's control ("return it to
     /// the battlefield tapped": it enters tapped and never "becomes
@@ -219,7 +215,6 @@ impl EoeD {
                 matches!(on, On::EventObj)
                     || matches!(n, Amount::EventAmount | Amount::EventObjPower | Amount::EventTimes | Amount::EventSpellTimes | Amount::EventSpellMv)
             }
-            EoeD::GrantDiesTriggerThisTurn { on, .. } => matches!(on, On::EventObj),
             EoeD::ReturnEventCardTapped => true,
             EoeD::LifeBecomesHalfStarting { who } => *who == Who::EventPlayer,
             EoeD::LoseHalfLife { who } => *who == Who::EventPlayer,
@@ -1000,6 +995,8 @@ pub enum Ext {
     EoeA(EoeA),
     /// The Edge of Eternities cross-lane pass (ENGINE.md 99.8).
     EoeX(crate::eoe_x::EoeX),
+    /// Edge of Eternities workstream W3 (ENGINE.md 99.13).
+    EoeW3(crate::eoe_w3::W3),
     /// W4 of the Edge of Eternities port (ENGINE.md 99.14).
     EoeW4(crate::eoe_w4::EoeW4),
     /// Edge of Eternities W1, the IR-fixed cards (ENGINE.md 99.11).
@@ -1249,6 +1246,7 @@ impl Op {
             Op::Ext(Ext::CreateTokensFor { who: w, .. }) | Op::Ext(Ext::GraveyardToBottomRandom { who: w }) => who(w),
             Op::Ext(Ext::EoeD(x)) => x.uses_event(),
             Op::Ext(Ext::EoeX(x)) => x.uses_event(),
+            Op::Ext(Ext::EoeW3(x)) => x.uses_event(),
             Op::Ext(Ext::EoeW4(x)) => x.uses_event(),
             Op::Ext(Ext::EoeW1(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
@@ -1283,6 +1281,7 @@ impl Op {
             Op::Ext(Ext::OfferPayOther { if_paid, .. }) => Some(if_paid),
             Op::Ext(Ext::EoeB(x)) => x.jump_target(),
             Op::Ext(Ext::EoeX(x)) => x.jump_target(),
+            Op::Ext(Ext::EoeW3(x)) => x.jump_target(),
             Op::Ext(Ext::EoeW4(x)) => x.jump_target(),
             Op::Ext(Ext::EoeW1(x)) => x.jump_target(),
             _ => None,

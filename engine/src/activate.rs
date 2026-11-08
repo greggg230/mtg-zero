@@ -13,6 +13,10 @@ use crate::pay::{productions, Class, Keep, PayMana, Src};
 /// (a loop of optional actions, CR 732.2a; as `copies::MAY_COPY_CAP`).
 pub(crate) const ACTIVATION_CAP: u8 = 31;
 
+/// The `ACTIVATE` action slots of one permanent (`decision::act::ACTIVATE`:
+/// slot * 4 + i).
+pub(crate) const ACTIVATE_SLOTS: usize = 4;
+
 impl Game {
     /// Does condition `c` hold for player `p`?
     pub(crate) fn cond_holds(&self, c: &Cond, p: PlayerId) -> bool {
@@ -144,48 +148,22 @@ impl Game {
         // (The battlefield's activation locks, read once.)
         let locks = self.activation_locks();
         for c in self.permanents_of(p) {
-            let d = self.abilities(c);
-            for (i, ad) in d.activated.iter().enumerate() {
-                if ad.mana().is_some() && !self.mana_at_priority(c, ad) {
-                    continue; // paid with while paying a cost (ENGINE.md 18)
-                }
-                if d.latent > 0 && !self.has_activated(c, i) {
-                    continue; // a latent ability it hasn't gained
-                }
-                if ad.exhaust && self.exhausted(c, i as u8) {
-                    continue; // CR 702.177a: only once
-                }
-                if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
-                    continue; // a loop of optional actions (ENGINE.md 29)
-                }
-                let slot = AbilitySlot::Activated(i as u8);
-                if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+            let live = self.permanent_activations(p, c, classes, sorcery_ok, locks);
+            // A permanent with more activated abilities than its four
+            // `ACTIVATE` slots (its card's own and those other permanents
+            // grant it, EoE W3): the fourth slot opens a choice among the
+            // fourth and later ones (`Task::ChooseAbility`), so every one
+            // stays reachable.
+            let paged = self.ability_slots_total(c) > ACTIVATE_SLOTS;
+            for &i in &live {
+                if !paged || (i as usize) < ACTIVATE_SLOTS - 1 {
+                    let slot = AbilitySlot::Activated(i);
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
-            // Activated abilities an attached Equipment grants it (CR 301.5;
-            // ENGINE.md 99.14): ids past its own (at most four a permanent).
-            if !self.lost_abilities(c) {
-                let mut i = d.activated.len();
-                for (_, face) in self.granted_activated(c) {
-                    for ad in &self.db.def(face).activated {
-                        if i < 4 && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
-                            let slot = AbilitySlot::Activated(i as u8);
-                            out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
-                        }
-                        i += 1;
-                    }
-                }
-            }
-            // A special action isn't an ability (CR 116.2b, 708.7): turning a
-            // face-down permanent face up survives "loses all abilities".
-            if self.lost_abilities(c) {
-                for (i, ad) in self.db.def(self.objs[c.i()].def).activated.iter().enumerate() {
-                    let slot = AbilitySlot::Activated(i as u8);
-                    if ad.special.is_some() && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
-                        out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
-                    }
-                }
+            if paged && live.iter().any(|&i| i as usize >= ACTIVATE_SLOTS - 1) {
+                let slot = AbilitySlot::Activated((ACTIVATE_SLOTS - 1) as u8);
+                out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
             }
         }
         for &(a, c) in slots {
@@ -215,6 +193,57 @@ impl Game {
         }
     }
 
+    /// The activated abilities of permanent `c` that `p` may activate with
+    /// priority now (CR 602.2, 117.1b), by their place among its card's own
+    /// abilities and then those other permanents grant it (EoE W3; ascending):
+    /// mana abilities only where `mana_at_priority` says; a special action
+    /// (CR 116.2b, 708.7: turning a face-down permanent face up) survives
+    /// "loses all abilities".
+    pub(crate) fn permanent_activations(&self, p: PlayerId, c: CardIdx, classes: &[Class], sorcery_ok: bool, locks: u16) -> Vec<u8> {
+        let mut live = Vec::new();
+        let d = self.abilities(c);
+        for (i, ad) in d.activated.iter().enumerate() {
+            if ad.mana().is_some() && !self.mana_at_priority(c, ad) {
+                continue; // paid with while paying a cost (ENGINE.md 18)
+            }
+            if d.latent > 0 && !self.has_activated(c, i) {
+                continue; // a latent ability it hasn't gained
+            }
+            if ad.exhaust && self.exhausted(c, i as u8) {
+                continue; // CR 702.177a: only once
+            }
+            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+                continue; // a loop of optional actions (ENGINE.md 29)
+            }
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                live.push(i as u8);
+            }
+        }
+        if self.lost_abilities(c) {
+            for (i, ad) in self.db.def(self.objs[c.i()].def).activated.iter().enumerate() {
+                if ad.special.is_some() && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                    live.push(i as u8);
+                }
+            }
+        }
+        // Activated abilities other permanents grant it (an attached
+        // Equipment's "equipped creature has", CR 301.5, ENGINE.md 99.14; "artifacts
+        // you control have", 99.13; 613.1f), after its card's own places
+        // whether or not it has them now.
+        let own = self.db.def(self.objs[c.i()].def).activated.len();
+        for (j, g) in self.granted_activated(c).into_iter().enumerate() {
+            let i = own + j;
+            let ad = self.db.def(g.def).activated_def(AbilitySlot::Activated(g.slot));
+            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+                continue;
+            }
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                live.push(i as u8);
+            }
+        }
+        live
+    }
+
     /// The mana `p` pays to activate `ad` of `card` (CR 602.2b, 601.2f):
     /// its mana cost less its own reductions ("costs {1} less for each
     /// legendary creature you control"), and, for an artifact `p` controls,
@@ -228,7 +257,10 @@ impl Game {
     /// of the cost before reductions).
     pub(crate) fn act_mana_x(&self, p: PlayerId, card: CardIdx, ad: &ActivatedDef, x: u8) -> crate::mana::ManaCost {
         let mut m = ad.cost.mana;
-        m.generic = m.generic.saturating_add(x);
+        // (An X that taps artifacts is no mana: EoE W3.)
+        if ad.cost.tap_x.is_none() {
+            m.generic = m.generic.saturating_add(x);
+        }
         // "Activated abilities of sources with the chosen name cost {2} more
         // to activate unless they're mana abilities" (Anointed Peacekeeper;
         // CR 602.2b, 601.2f: increases first).
@@ -360,13 +392,15 @@ impl Game {
     /// once (605.3); any other ability goes on the stack first (602.2a),
     /// then targets (601.2c), then the cost (601.2f-h).
     pub(crate) fn begin_activate(&mut self, p: PlayerId, card: CardIdx, slot: AbilitySlot) {
-        // (An ability an Equipment grants: its face, ENGINE.md 99.14.)
-        let (def, slot, granter) = self.activated_home(card, slot);
+        // (A granted ability is its granting definition's: an Equipment's
+        // face, ENGINE.md 99.14, or a static ability's card, 99.13; `slot`
+        // stays the permanent's place for its records.)
+        let (def, aslot, granter) = self.activated_home(card, slot);
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
             self.reveal(card); // 602.2a: activated from a hidden zone
         }
-        let ad = self.db.def(def).activated_def(slot);
+        let ad = self.db.def(def).activated_def(aslot);
         if ad.exhaust {
             if let AbilitySlot::Activated(i) = slot {
                 let r = self.obj_ref(card);
@@ -411,7 +445,7 @@ impl Game {
             self.note_loyalty_activation(card);
         }
         let id = self.new_stack_id();
-        let ability = AbilityRef { def, slot, mode: None };
+        let ability = AbilityRef { def, slot: aslot, mode: None };
         self.stack.push(StackItem {
             id,
             kind: StackKind::Ability { ability, source: self.obj_ref(card) },
@@ -545,6 +579,11 @@ impl Game {
                 return false;
             }
         }
+        if let Some((f, k)) = &cost.remove_counter_from {
+            if self.remove_counter_candidates(p, card, f, *k).is_empty() {
+                return false;
+            }
+        }
         if cost.crew > 0 {
             if self.is_spell_card(card) {
                 // Teamwork: the taps (paid first) and the mana compete.
@@ -575,7 +614,8 @@ impl Game {
         // before the graveyard's cards are chosen, 601.2h; ruling bea302d9.)
         let short = self.exile_short(p, card, cost);
         if short > 0 {
-            let d: Vec<CardIdx> = self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude).collect();
+            let d: Vec<CardIdx> =
+                self.delve_sources(p).into_iter().filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c)).collect();
             if short > d.len() + self.cost_feeds_graveyard(p, card, cost, &d) {
                 return false;
             }
@@ -638,7 +678,7 @@ impl Game {
             let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(card)) };
             self.card_matches(f, c, &ctx)
         });
-        ok && matches!(self.replaced_dest(c, Zone::Hand, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
+        ok && self.gy_cost_card(cost, c) && matches!(self.replaced_dest(c, Zone::Hand, Zone::Graveyard), crate::game::Dest::To(Zone::Graveyard))
     }
 
     /// The cards `cost` itself puts into `p`'s graveyard before its
@@ -647,7 +687,12 @@ impl Game {
     /// besides the mana sources `d` counted already (each card once).
     pub(crate) fn cost_feeds_graveyard(&self, p: PlayerId, card: CardIdx, cost: &Cost, d: &[CardIdx]) -> usize {
         let sacs = cost.sacrifice.as_ref().map_or(0, |s| {
-            (s.n as usize).min(self.sacrifice_candidates(p, card, s).into_iter().filter(|&c| !d.contains(&c) && self.feeds_graveyard(p, c)).count())
+            (s.n as usize).min(
+                self.sacrifice_candidates(p, card, s)
+                    .into_iter()
+                    .filter(|&c| !d.contains(&c) && self.feeds_graveyard(p, c) && self.gy_cost_card(cost, c))
+                    .count(),
+            )
         });
         self.discards_feed(p, card, cost) + sacs
     }
@@ -774,13 +819,16 @@ impl Game {
             // (A permanent to return to its owner's hand, ninjutsu's
             // unblocked attacker, is reserved like one to sacrifice: a mana
             // ability that sacrifices it can't pay the mana first.)
-            sac: cost.sacrifice.clone().or_else(|| cost.bounce.clone()).map(|s| (s, card)),
+            // (So is one to remove a counter from: a mana ability that
+            // sacrifices it can't pay the mana first, CR 601.2g; EoE W3.)
+            sac: cost.sacrifice.clone().or_else(|| cost.bounce.clone()).or_else(|| Self::remove_counter_reserve(cost)).map(|s| (s, card)),
             // (A land-card discard never competes with a mana source in
             // hand: those are not lands.)
             discard: (cost.discard > 0 && cost.discard_filter.is_none()).then_some((cost.discard, card)),
             exile: cost.exile_from_hand.clone().map(|f| (f, card)),
             allow: 0,
             spell: None,
+            sac_taps: false,
         }
     }
 
@@ -794,6 +842,11 @@ impl Game {
         }
         let mut pm = PayMana::new(p, mana);
         pm.keep = Self::keep_for(card, &ad.cost, Self::mana_exclude(card, ad));
+        // "Tap X untapped artifacts": X of them stay for the cost (EoE W3).
+        if let Some(r) = Self::tap_x_reserve(&ad.cost, x) {
+            pm.keep.sac = Some((r, card));
+            pm.keep.sac_taps = true;
+        }
         pm.waterbend = ad.cost.waterbend;
         pm.forced = self.exile_sources(p, card, &ad.cost, Self::mana_exclude(card, ad));
         self.agenda.push(Task::PayMana(Box::new(pm)));
@@ -807,7 +860,8 @@ impl Game {
         }
         // (Not the cards the delve of the spell being cast exiles first,
         // `Mark::DelveExile`: ENGINE.md 51.)
-        (cost.exile_graveyard as usize).saturating_sub(self.graveyard_cards(p).filter(|&c| c != card && !self.delve_exiling(c)).count())
+        (cost.exile_graveyard as usize)
+            .saturating_sub(self.graveyard_cards(p).filter(|&c| c != card && !self.delve_exiling(c) && self.gy_cost_card(cost, c)).count())
     }
 
     /// The mana sources a payment activates first so that they are in the
@@ -823,7 +877,7 @@ impl Game {
         let classes = self.mana_classes(p, exclude);
         self.delve_sources(p)
             .into_iter()
-            .filter(|&c| c != card && Some(c) != exclude)
+            .filter(|&c| c != card && Some(c) != exclude && self.gy_cost_card(cost, c))
             .take(short)
             .filter_map(|c| classes.iter().find_map(|cl| cl.members.iter().find(|s| s.card == c && cl.sac_self).copied()))
             .map(|s| (s, false))
@@ -857,7 +911,10 @@ impl Game {
         let n_exile = n_disc + cost.exile_from_hand.is_some() as usize;
         let n_bounce = n_exile + cost.bounce.as_ref().map_or(0, |b| b.n) as usize;
         let n_gy = n_bounce + cost.exile_graveyard as usize;
-        let n_tap = n_gy + cost.tap_untapped.as_ref().map_or(0, |t| t.n) as usize;
+        let n_tap = n_gy + cost.tap_untapped.as_ref().map_or(0, |t| t.n) as usize + self.tap_x_n(id, cost);
+        // "Remove a counter from a <permanent> you control": one choice
+        // (never with crew, whose picks come last: lowering).
+        let n_rc = n_tap + cost.remove_counter_from.is_some() as usize;
         let mut crew_done = false;
         // The cost is one event (CR 603.2c; its discards, exiles): a group of
         // its own.
@@ -914,7 +971,8 @@ impl Game {
             // would be short by as many cards as sacrifices are left, only
             // a card that will be there helps (ruling bea302d9).
             let need = if cost.exile_graveyard > 0 {
-                let fed = picked.iter().filter(|&&c| self.feeds_graveyard(p, c)).count() + self.discards_feed(p, card, cost);
+                let fed = picked.iter().filter(|&&c| self.feeds_graveyard(p, c) && self.gy_cost_card(cost, c)).count()
+                    + self.discards_feed(p, card, cost);
                 self.exile_short(p, card, cost).saturating_sub(fed)
             } else {
                 0
@@ -923,7 +981,7 @@ impl Game {
             let cands: Vec<CardIdx> = self
                 .sacrifice_candidates(p, card, s)
                 .into_iter()
-                .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(p, *c)))
+                .filter(|c| !picked.contains(c) && (!only_cards || self.feeds_graveyard(p, *c) && self.gy_cost_card(cost, *c)))
                 .collect();
             let opts = self.cost_pick_options(p, &cands, cost.life);
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::Sacrifice, opts);
@@ -941,7 +999,7 @@ impl Game {
             // only a card that goes there helps (not Blightsteel Colossus;
             // ENGINE.md 49, as the sacrifices above).
             if cost.exile_graveyard > 0 {
-                let fed = picked[..n_sac].iter().filter(|&&c| self.feeds_graveyard(p, c)).count();
+                let fed = picked[..n_sac].iter().filter(|&&c| self.feeds_graveyard(p, c) && self.gy_cost_card(cost, c)).count();
                 let need = self.exile_short(p, card, cost).saturating_sub(fed);
                 if need > 0 && need >= n_disc - picked.len() {
                     opts.retain(|o| matches!(o.choice, Choice::Card(c) if self.discard_feeds(p, card, cost, c)));
@@ -973,7 +1031,7 @@ impl Game {
             // Graveyard cards to exile, a set: picked in increasing
             // position, leaving enough later ones.
             // (Cards only: not the source, not a token, CR 108.2.)
-            let gy: Vec<CardIdx> = self.graveyard_cards(p).filter(|&c| c != card).collect();
+            let gy: Vec<CardIdx> = self.graveyard_cards(p).filter(|&c| c != card && self.gy_cost_card(cost, c)).collect();
             let after = picked[n_bounce..].last().map(|c| gy.iter().position(|x| x == c).unwrap() + 1).unwrap_or(0);
             let still = n_gy - picked.len();
             let opts: Vec<Opt> = gy
@@ -986,9 +1044,17 @@ impl Game {
             return;
         }
         if picked.len() < n_tap {
-            // "Tap n untapped <permanents> you control": one decision each
-            // (a set: increasing slot order).
-            let t = cost.tap_untapped.as_ref().unwrap();
+            // "Tap n untapped <permanents> you control" ("tap X ..."): one
+            // decision each (a set: increasing slot order).
+            let tx;
+            let t = match (&cost.tap_untapped, &cost.tap_x) {
+                (Some(t), _) => t,
+                (None, Some(f)) => {
+                    tx = crate::db::SacCost { filter: f.clone(), n: 0, another: true };
+                    &tx
+                }
+                (None, None) => unreachable!("taps owed without a tap cost"),
+            };
             let floor = picked[n_gy..].last().map(|&c| self.perm_action(p, c));
             let cands: Vec<Opt> = self
                 .tap_candidates(p, card, t)
@@ -1002,13 +1068,25 @@ impl Game {
             self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
             return;
         }
+        if picked.len() < n_rc {
+            // "Remove a <k> counter from a <permanent> you control" (CR
+            // 118.3): the permanent.
+            let (f, k) = cost.remove_counter_from.as_ref().unwrap();
+            let opts: Vec<Opt> = self
+                .remove_counter_candidates(p, card, f, *k)
+                .into_iter()
+                .map(|c| Opt { action: self.perm_action(p, c), choice: Choice::Card(c) })
+                .collect();
+            self.ask(Task::PayCosts { id, picked }, p, DecisionKind::ChoosePermanent, opts);
+            return;
+        }
         if cost.crew > 0 && !crew_done {
             // Crew (CR 702.122a): untapped creatures other than the source,
             // one decision each in increasing slot order; PASS once their
             // total power is enough. A pick must leave the total reachable.
             let need = cost.crew as i64;
             let bonus = !cost.saddle && !self.is_spell_card(card);
-            let tapped_in: Vec<CardIdx> = picked[n_tap..].to_vec();
+            let tapped_in: Vec<CardIdx> = picked[n_rc..].to_vec();
             let have: i64 = tapped_in.iter().map(|&c| self.crew_power_of(c, bonus)).sum();
             let floor = tapped_in.last().map(|&c| self.perm_action(p, c));
             let cands: Vec<CardIdx> = self
@@ -1057,8 +1135,11 @@ impl Game {
             }
         }
         // (The taps of a "tap untapped permanents" cost, then crew's.)
-        for &c in &picked[n_gy..] {
+        for &c in picked[n_gy..n_tap].iter().chain(&picked[n_rc..]) {
             self.tap(c);
+        }
+        if let Some((_, k)) = cost.remove_counter_from {
+            self.remove_counters(picked[n_tap], k, 1);
         }
         // "The tapped creature" of an activated ability's "tap an untapped
         // creature you control" cost (station, CR 702.184a): the stack item

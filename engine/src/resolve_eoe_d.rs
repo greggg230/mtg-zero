@@ -91,19 +91,16 @@ impl Game {
                 }
                 Flow::Next
             }
-            EoeD::GrantDiesTriggerThisTurn { on, k } => {
-                let slot = self.db.def(f.source_def).delayed_base + k;
-                for c in self.objs_on(f, on) {
-                    let r = self.obj_ref(c);
-                    self.marks.push((r, Mark::DiesTriggerThisTurn { def: f.source_def, slot }));
-                }
-                Flow::Next
-            }
             EoeD::ReturnEventCardTapped => {
                 f.made = None;
                 if let Some(r) = f.ev.obj {
-                    let z = self.objs[r.idx.i()].zone;
-                    if self.live(r) && matches!(z, Zone::Exile | Zone::Graveyard) {
+                    let o = &self.objs[r.idx.i()];
+                    // The card where it went, or, for "when this dies"
+                    // (the event's object as it last existed), the card it
+                    // became in the graveyard (one move later; EoE W3).
+                    let here = self.live(r) && matches!(o.zone, Zone::Exile | Zone::Graveyard)
+                        || o.zone == Zone::Graveyard && o.inc == r.inc.wrapping_add(1);
+                    if here && !self.is_token(r.idx) {
                         let owner = self.objs[r.idx.i()].owner;
                         self.entering_tapped = true;
                         self.put_onto_battlefield(r.idx, owner);

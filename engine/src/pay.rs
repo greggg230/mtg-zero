@@ -242,6 +242,10 @@ pub(crate) struct Keep {
     /// The spell being cast, if this pays for one ("that spell can't be
     /// countered").
     pub spell: Option<CardIdx>,
+    /// The permanents `sac` reserves are to be tapped by the cost ("tap X
+    /// untapped artifacts you control", EoE W3): a mana source whose
+    /// activation taps or sacrifices one of them uses it up (CR 601.2g-h).
+    pub sac_taps: bool,
 }
 
 /// Paying a mana cost (ENGINE.md 6, 18). Stages: Phyrexian pips (how many
@@ -995,7 +999,7 @@ impl Game {
     /// a card in hand a later discard needs.
     fn reserved(&self, p: PlayerId, keep: &Keep, cl: &Class, s: &Src) -> bool {
         match &keep.sac {
-            Some((sc, card)) if cl.sac_self => {
+            Some((sc, card)) if cl.sac_self || keep.sac_taps && cl.res != 0 => {
                 let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(*card)) };
                 !(sc.another && s.card == *card) && self.card_matches(&sc.filter, s.card, &ctx)
             }
@@ -1848,6 +1852,15 @@ impl Game {
                 units.extend(std::iter::repeat_n(conv(1 << t), (spent[t] - made - art) as usize));
             }
             self.record_converge(pm, &units);
+        }
+        // "The amount of mana spent to cast this" (CR 601.2h; EoE W3): the
+        // payment's units (a creature tapped for convoke or an artifact for
+        // improvise spends none, 702.51a, 702.126a).
+        if let Some(card) = pm.keep.spell {
+            if self.def_of(card).w3.mana_spent {
+                let n = pm.chosen.iter().filter(|s| s.slot != IMPROVISE).count() + spent.iter().map(|&x| x as usize).sum::<usize>();
+                self.note_mana_spent(card, n);
+            }
         }
         // "That spell can't be countered" (Delighted Halfling): its mana
         // was spent on the spell (read before the sources are activated).
