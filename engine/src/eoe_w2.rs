@@ -283,3 +283,112 @@ impl Game {
         }
     }
 }
+
+/// The land types (CR 205.3i), for "its land types become ..." (CR 305.7).
+pub(crate) const LAND_TYPES: [&str; 18] = [
+    "Cave", "Cloud", "Desert", "Forest", "Gate", "Island", "Lair", "Locus", "Mine", "Mountain", "Plains", "Planet", "Power-Plant", "Sphere", "Swamp", "Tower", "Town", "Urza's",
+];
+
+/// The abilities of a nonbasic land that is a Mountain (CR 305.7): its rules
+/// text's are gone, and it has "{T}: Add {R}" (305.6).
+pub(crate) fn mountain_def() -> &'static CardDef {
+    use crate::db::{ActEffect, ActivatedDef, Cost, ManaAbility, ManaProd};
+    static M: std::sync::OnceLock<CardDef> = std::sync::OnceLock::new();
+    M.get_or_init(|| CardDef {
+        activated: vec![ActivatedDef {
+            cost: Cost { tap: true, ..Cost::default() },
+            effect: ActEffect::Mana(ManaAbility {
+                prod: ManaProd::One(1 << crate::mana::R),
+                damage_to_you: 0,
+                sac_if_no: None,
+                only: 0,
+                uncounterable: false,
+                haste: false,
+                opp_life: 0,
+            }),
+            sorcery: false,
+            instant_only: false,
+            exhaust: false,
+            only_if: None,
+            your_turn: false,
+            loyalty: None,
+            discounts: Vec::new(),
+            boast: false,
+            x: false,
+            special: None,
+        }],
+        ..CardDef::default()
+    })
+}
+
+impl Game {
+    /// A permanent says "nonbasic lands are Mountains" (CR 305.7; one that
+    /// lost its abilities doesn't).
+    pub(crate) fn moon_source(&self) -> bool {
+        self.battlefield.iter().any(|&x| self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains && !self.lost_abilities(x))
+    }
+
+    /// Is the nonbasic land `c` (a land by its card types and a copy's;
+    /// not basic) a Mountain because of such a permanent (CR 305.7, layer
+    /// 4: 613.1d)? Wherever it is (it is about to enter: CR 614.12).
+    pub(crate) fn moon_entering(&self, c: CardIdx) -> bool {
+        let d = self.def_of(c);
+        let types = d.types | self.exc(c).map_or(0, |e| e.types);
+        types & types::LAND != 0 && d.supertypes & crate::db::supertypes::BASIC == 0 && self.moon_source()
+    }
+
+    /// [`moon_entering`](Self::moon_entering) for a permanent on the
+    /// battlefield.
+    pub(crate) fn moon_on(&self, c: CardIdx) -> bool {
+        self.objs[c.i()].zone == crate::ids::Zone::Battlefield && self.moon_entering(c)
+    }
+}
+
+impl Game {
+    /// The definition whose activated abilities a mana source's slot names
+    /// (`pay::Src`): its own, or a Mountain's abilities while it is one
+    /// (`mountain_def`; ENGINE.md 99.12).
+    pub(crate) fn source_def(&self, c: CardIdx) -> &'static CardDef {
+        if self.db.moon && self.moon_on(c) {
+            mountain_def()
+        } else {
+            self.def_of(c)
+        }
+    }
+}
+
+impl Game {
+    /// The lands that entered the battlefield under `p`'s control this turn
+    /// (`Game::lands_entered`).
+    pub(crate) fn lands_entered_this_turn(&self, p: PlayerId) -> u8 {
+        if self.lands_entered.0 == self.turn.number {
+            self.lands_entered.1[p as usize]
+        } else {
+            0
+        }
+    }
+
+    /// Permanent `c` is entering the battlefield (CR 614.1c, 614.12): a
+    /// creature gets an additional +1/+1 counter per land that entered under
+    /// its controller's control this turn for each of that player's
+    /// permanents that says so (Bioengineered Future); then a land is
+    /// counted.
+    pub(crate) fn lands_entering(&mut self, c: CardIdx) {
+        let p = self.objs[c.i()].controller;
+        if self.is_creature(c) {
+            let n = self.lands_entered_this_turn(p);
+            let k = self.permanents_of(p).filter(|&x| x != c && self.abilities(x).etb_counter_per_land_entered).count();
+            if n > 0 && k > 0 {
+                self.add_counters(c, crate::db::Counter::P1P1, (n as usize * k) as crate::num::Count);
+            }
+        }
+        if self.is_type(c, types::LAND) {
+            let t = self.turn.number;
+            if self.lands_entered.0 != t {
+                self.lands_entered = (t, [0; 2]);
+            }
+            let x = &mut self.lands_entered.1[p as usize];
+            *x = x.saturating_add(1);
+        }
+    }
+}

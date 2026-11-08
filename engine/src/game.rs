@@ -684,6 +684,10 @@ pub struct Game {
     /// part of that player's `ManaPool::amt` (CR 106.6; ENGINE.md 99.12).
     /// Empty but in games with such mana; emptied with the pools.
     pub(crate) pool_restr: Vec<(PlayerId, u8, u8, u8)>,
+    /// The lands that entered the battlefield under each player's control
+    /// during turn `.0` (kept when `CardDb::watch_lands_entered`; ENGINE.md
+    /// 99.12).
+    pub(crate) lands_entered: (u32, [u8; 2]),
     /// Spells that left the stack while a triggered ability about them
     /// waited: their definition and item (CR 608.2h: "copy it").
     pub(crate) spell_lki: Vec<(ObjRef, DefId, StackItem)>,
@@ -1071,6 +1075,7 @@ impl Game {
             lki_damage: Vec::new(),
             lki_toughness: Vec::new(),
             pool_restr: Vec::new(),
+            lands_entered: (0, [0; 2]),
             spell_lki: Vec::new(),
             entering_copy: None,
             entering_times: 0,
@@ -1462,7 +1467,7 @@ impl Game {
         }
         // "You may have this enter as a copy of ..." (CR 707.5): the choice
         // comes first (`Task::EnterAsCopy`), then what it entered as enters.
-        let copy_choice = self.def_of(idx).enters_as_copy.is_some();
+        let copy_choice = self.def_of(idx).enters_as_copy.is_some() && !(self.db.moon && self.moon_entering(idx));
         let fx_tapped = std::mem::take(&mut self.entering_tapped);
         let fx_counters = std::mem::take(&mut self.entering_counters);
         let tapped = !copy_choice && self.enters_tapped(idx, controller);
@@ -1608,16 +1613,26 @@ impl Game {
         if tapped {
             self.objs[idx.i()].tapped = true;
         }
+        // "Each creature you control enters with an additional +1/+1 counter
+        // on it for each land that entered ... this turn"; this land counted
+        // after (ENGINE.md 99.12).
+        if self.db.watch_lands_entered {
+            self.lands_entering(idx);
+        }
+        // (A nonbasic land entering as a Mountain has none of its own
+        // abilities, these replacement effects among them: CR 305.7, 614.12;
+        // ENGINE.md 99.12.)
+        let own = !(self.db.moon && self.moon_entering(idx));
         // CR 122.6: "enters with counters".
-        for &(k, n) in &self.def_of(idx).enters_counters {
+        for &(k, n) in self.def_of(idx).enters_counters.iter().filter(|_| own) {
             self.add_counters(idx, k, n as crate::num::Count);
         }
-        if self.def_of(idx).enters_x_counters && x > 0 {
+        if own && self.def_of(idx).enters_x_counters && x > 0 {
             self.add_counters(idx, crate::db::Counter::P1P1, x as crate::num::Count);
         }
         // CR 702.44a-b: sunburst counters (none if it wasn't cast).
         let sun = std::mem::take(&mut self.entering_sunburst);
-        if let (Some(k), true) = (self.def_of(idx).sunburst, sun > 0) {
+        if let (Some(k), true) = (self.def_of(idx).sunburst.filter(|_| own), sun > 0) {
             let k = if self.is_creature(idx) { crate::db::Counter::P1P1 } else { k };
             self.add_counters(idx, k, sun as crate::num::Count);
         }
@@ -1625,7 +1640,7 @@ impl Game {
         // to pay the cost of the spell that became it (none if it wasn't
         // cast; Murktide Regent, ENGINE.md 54).
         let exiled = std::mem::take(&mut self.entering_exiled);
-        if exiled > 0 && self.def_of(idx).counters_per_exiled.is_some() {
+        if own && exiled > 0 && self.def_of(idx).counters_per_exiled.is_some() {
             self.add_counters(idx, crate::db::Counter::P1P1, exiled as crate::num::Count);
         }
         // CR 306.5b: a planeswalker enters with its printed loyalty.
@@ -1639,8 +1654,11 @@ impl Game {
         }
         // CR 702.145d, g: a daybound (nightbound) permanent makes it day
         // (night) if it is neither; at night a daybound one transforms.
-        if self.def_of(idx).daybound || self.def_of(idx).nightbound {
+        if own && (self.def_of(idx).daybound || self.def_of(idx).nightbound) {
             self.day_night_check();
+        }
+        if !own {
+            return;
         }
         if self.def_of(idx).shock_life > 0
             || self.def_of(idx).chooses_player
@@ -1812,6 +1830,11 @@ impl Game {
     pub(crate) fn abilities(&self, c: CardIdx) -> &'static CardDef {
         if self.lost_abilities(c) {
             return blank_def();
+        }
+        // A nonbasic land that is a Mountain (CR 305.7: its rules text's
+        // abilities replaced by "{T}: Add {R}"; ENGINE.md 99.12).
+        if self.db.moon && self.moon_on(c) {
+            return crate::eoe_w2::mountain_def();
         }
         self.db.def(self.objs[c.i()].def)
     }

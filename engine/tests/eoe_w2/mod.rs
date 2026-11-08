@@ -211,3 +211,7 @@ pub fn main1_of(p: PlayerId) -> impl Fn(&Game) -> bool {
 pub fn cost(s: &str) -> engine::mana::ManaCost {
     engine::mana::ManaCost::parse(s).unwrap_or_else(|| panic!("cost {s}"))
 }
+
+pub fn subtype(g: &Game, c: CardIdx, s: &str) -> bool {
+    db().subtype_id(s).is_some_and(|id| g.has_subtype(c, id))
+}

@@ -96,7 +96,7 @@ impl Game {
         let (bf, cmd) = if active { (self.battlefield.len(), self.command.len()) } else { (0, 0) };
         // (Indices over both lists and the loss flag read once: this is the
         // hottest loop of the engine.)
-        let loss = self.any_loss;
+        let loss = self.any_loss || (self.db.moon && self.moon_source());
         (0..bf + cmd)
             .map(move |i| if i < bf { self.battlefield[i] } else { self.command[i - bf] })
             .flat_map(move |s| {
@@ -264,6 +264,11 @@ impl Game {
     /// Does `c` have subtype `s` (layer 4: an effect that sets creature
     /// types replaces the printed ones, CR 205.1b; the latest wins)?
     pub fn has_subtype(&self, c: CardIdx, s: u16) -> bool {
+        // A nonbasic land that is a Mountain: its land type is Mountain only
+        // (CR 305.7; ENGINE.md 99.12).
+        if self.db.moon && self.db.land_subtypes.contains(&s) && self.moon_on(c) {
+            return Some(s) == self.db.mountain;
+        }
         let d = self.def_of(c);
         let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(s));
         // Reconfigure (CR 702.151b, 205.3d): attached, it isn't a creature,
@@ -355,6 +360,10 @@ impl Game {
         // Layer 1: a copy's "except it has <keyword>" (CR 707.9a).
         if let Some(e) = self.exc(c) {
             k.0 |= e.kws.0;
+        }
+        // (A nonbasic land that is a Mountain has none of its own, CR 305.7.)
+        if self.db.moon && self.moon_on(c) {
+            k = KwSet::default();
         }
         if self.printed_only(c) {
             return k;

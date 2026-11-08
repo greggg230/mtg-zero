@@ -303,14 +303,12 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
                 false
             }
         };
-        l.deny("CardPrinting.grants_etb_counter_per_land_entered_this_turn", grants_etb_counter_per_land_entered_this_turn);
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
         // "Enchant creature card in a graveyard" (Animate Dead): an Aura
         // spell's target; an Aura's other enchant types (on the battlefield)
         // below, with the card types (ENGINE.md 99.2).
         let aura_gy = *aura_enchant_type == enums::EnchantKind::CreatureCardInGraveyard;
-        l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
         l.deny("CardPrinting.grants_basic_land_type_to_all_lands", grants_basic_land_type_to_all_lands);
         l.deny("CardPrinting.all_permanents_gain_card_type", all_permanents_gain_card_type);
@@ -1719,6 +1717,14 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if (named_spell_tax > 0 || named_ability_tax > 0) && !*chooses_card_name_as_enters || *chooses_card_name_as_enters && ty & types::PERMANENT == 0 {
         l.unsupported("CardPrinting.named_spell_cost_increase(without a name chosen as it enters)");
     }
+    // "Nonbasic lands are Mountains": a static ability of a permanent
+    // (ENGINE.md 99.12).
+    if *nonbasic_lands_are_mountains && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.nonbasic_lands_are_mountains(not a permanent)");
+    }
+    if *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT == 0 {
+        l.unsupported("CardPrinting.grants_etb_counter_per_land_entered_this_turn(not a permanent)");
+    }
     if *grants_play_from_top_paying_life && !*grants_look_at_top_of_library || (*grants_look_at_top_of_library && ty & types::PERMANENT == 0) {
         l.unsupported("CardPrinting.grants_play_from_top_paying_life(without looking at the top card)");
     }
@@ -1759,6 +1765,8 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         }
     };
     let mut def = CardDef {
+        nonbasic_lands_are_mountains: *nonbasic_lands_are_mountains && ty & types::PERMANENT != 0,
+        etb_counter_per_land_entered: *grants_etb_counter_per_land_entered_this_turn && ty & types::PERMANENT != 0,
         counters_per_exiled,
         companion,
         look_top: *grants_look_at_top_of_library,

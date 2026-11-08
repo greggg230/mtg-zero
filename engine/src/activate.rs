@@ -1227,7 +1227,7 @@ impl Game {
     /// 602.2b), then choose the mana (CR 605.3b, 106.1b).
     pub(crate) fn mana_now(&mut self, src: Src) {
         let p = self.objs[src.card.i()].controller;
-        let ad = self.def_of(src.card).activated_def(src.slot);
+        let ad = self.source_def(src.card).activated_def(src.slot);
         // "{X}, {T}, ...: Add X mana" (CR 107.3, 602.2b: X is announced as
         // the ability is activated): as much as can be paid, not with the
         // source's own mana. Choice: `ChooseMode`, `NUMBER` + X.
@@ -1270,7 +1270,7 @@ impl Game {
     /// sacrifice (a decision), then {T}, life, the source's own costs.
     pub(crate) fn mana_now_costs(&mut self, src: Src, mut sac: Option<CardIdx>, x: u8) {
         let p = self.objs[src.card.i()].controller;
-        let ad = self.def_of(src.card).activated_def(src.slot);
+        let ad = self.source_def(src.card).activated_def(src.slot);
         if let Some(s) = &ad.cost.sacrifice {
             if sac.is_none() {
                 match self.answer.take() {
@@ -1501,6 +1501,11 @@ impl Game {
         });
         if forced {
             return true;
+        }
+        // (A nonbasic land entering as a Mountain: not its own, CR 305.7,
+        // 614.12; ENGINE.md 99.12.)
+        if self.db.moon && self.moon_entering(card) {
+            return false;
         }
         match &self.def_of(card).enters_tapped {
             crate::db::EntersTapped::No => false,

@@ -941,7 +941,7 @@ impl Game {
             match by {
                 Some((x, i)) => {
                     self.note(|g| format!("P{p} activates {} sacrificing {} for mana", g.name(x), g.name(c)));
-                    let ad = self.def_of(x).activated_def(crate::db::AbilitySlot::Activated(i));
+                    let ad = self.source_def(x).activated_def(crate::db::AbilitySlot::Activated(i));
                     if ad.cost.tap {
                         self.tap(x);
                     }

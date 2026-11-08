@@ -1708,6 +1708,13 @@ pub struct CardDef {
     /// "... stations permanents using its toughness rather than its power"
     /// (CR 702.184c; ENGINE.md 99.8).
     pub toughness_stations: bool,
+    /// "Nonbasic lands are Mountains" (CR 305.7, 613.1d: Magus of the Moon;
+    /// `Game::moon_on`, ENGINE.md 99.12).
+    pub nonbasic_lands_are_mountains: bool,
+    /// "Each creature you control enters with an additional +1/+1 counter on
+    /// it for each land that entered the battlefield under your control this
+    /// turn" (CR 614.1c; Bioengineered Future, ENGINE.md 99.12).
+    pub etb_counter_per_land_entered: bool,
 }
 
 /// Rules about casting spells a card adds while it is on the battlefield
@@ -1870,6 +1877,16 @@ pub struct CardDb {
     pub(crate) spend_kinds: u8,
     /// The interned "Eldrazi" subtype, if any card has it.
     pub(crate) eldrazi: Option<u16>,
+    /// A card of the table says "nonbasic lands are Mountains"
+    /// (`CardDef::nonbasic_lands_are_mountains`): the layers look for it.
+    pub(crate) moon: bool,
+    /// The interned land types (CR 205.3i) and "Mountain".
+    pub(crate) land_subtypes: Vec<u16>,
+    pub(crate) mountain: Option<u16>,
+    /// A card of the table counts the lands that entered under a player's
+    /// control this turn (`CardDef::etb_counter_per_land_entered`): the game
+    /// keeps the count (`Game::lands_entered`).
+    pub(crate) watch_lands_entered: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2052,6 +2069,10 @@ impl CardDb {
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.spend_kinds = crate::eoe_w2::spend_kinds(&db.defs);
         db.eldrazi = db.subtype_id("Eldrazi");
+        db.moon = db.defs.iter().any(|d| d.nonbasic_lands_are_mountains);
+        db.land_subtypes = crate::eoe_w2::LAND_TYPES.iter().filter_map(|n| db.subtype_id(n)).collect();
+        db.mountain = db.subtype_id("Mountain");
+        db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
         db
     }
 

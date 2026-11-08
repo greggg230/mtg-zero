@@ -156,6 +156,7 @@ pub fn fields() -> Vec<Field> {
         lki_damage: Derived "last known information (CR 608.2h)",
         lki_toughness: Derived "last known information (CR 608.2h)",
         pool_restr: Public "the part of a pool's mana with a spending restriction other than the Workshop's (CR 106.6; ENGINE.md 99.12)",
+        lands_entered: Public "the lands that entered the battlefield under each player's control this turn (Bioengineered Future; ENGINE.md 99.12)",
         spell_lki: Derived "last known information (CR 608.2h)",
         entering_copy: Derived "transient: set and cleared around one move",
         entering_times: Derived "transient: set and cleared around one move",
@@ -799,6 +800,15 @@ pub fn perturbations() -> Vec<Perturbation> {
             })?;
             a.g.pool_restr.push((p, t as u8, crate::db::SPEND_LAND_ABILITY, 1));
             Some(format!("P{p}: one mana of type {t}"))
+        }),
+        // (Draws nothing from the shared stream: the active player's count.)
+        p!("a land entered the battlefield this turn", "Game.lands_entered", |a, _| {
+            let (t, p) = (a.g.turn.number, a.g.turn.active as usize);
+            if a.g.lands_entered.0 != t {
+                a.g.lands_entered = (t, [0; 2]);
+            }
+            a.g.lands_entered.1[p] += 1;
+            Some(format!("P{p}: {}", a.g.lands_entered.1[p]))
         }),
         p!("void holds (a nonland permanent left the battlefield this turn)", "Game.void_turn", |a, _| {
             let t = a.g.turn.number;
@@ -1473,6 +1483,7 @@ pub fn limits() -> Vec<Limit> {
         l("more life gained this turn", Design, "GAINED_LIFE is whether a player gained life this turn (the layout's fact); how much is read by one card, Haliya, Guided by Light ('if you've gained 3 or more life this turn'; EoE lane D, ENGINE.md 99.5)"),
         l("a creature was cast for its warp cost", NextLayout, "whether a permanent entered as a spell cast for its warp cost (Mark::WarpCast) is game state the EoE cross-lane pass added after layout v5 froze (ENGINE.md 99.8), read by one card, Full Bore; the warp's delayed exile is encoded only as a count per player (g5::DELAYED), not by object: the next layout encodes it (a permanent flag)"),
         l("mana in a pool is restricted to activating abilities of lands", NextLayout, "a pool's mana with a spending restriction other than Mishra's Workshop's (g5::POOL_ART) is game state the EoE port added after layout v5 froze (Eldrazi Temple, Steelswarm Operator, Sunken Citadel, ...; ENGINE.md 99.12): the pool's amounts are encoded, the restriction is not; the next layout encodes it (per player, the restricted part of each type)"),
+        l("a land entered the battlefield this turn", NextLayout, "how many lands entered the battlefield under each player's control this turn (Game::lands_entered) is game state the EoE port added after layout v5 froze, read by one card, Bioengineered Future (ENGINE.md 99.12); LANDS_PLAYED counts lands played only: the next layout encodes it (per player, beside the turn's counts)"),
         l("a permanent entered this turn", Design, "NEW is 'under its controller's control since this turn' (CR 302.6); the turn it entered differs from it only after a control change, read by two cards"),
     ]
 }

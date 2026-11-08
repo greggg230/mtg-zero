@@ -218,3 +218,121 @@ fn cr_702_12_plaza_of_heroes_protects_a_legendary_creature() {
     assert_eq!(g.obj(plaza).zone, Zone::Exile);
     assert!(g.keywords_of(legend).has(Kw::Hexproof) && g.keywords_of(legend).has(Kw::Indestructible));
 }
+
+/// Magus of the Moon: "Nonbasic lands are Mountains." (CR 305.7, 613.1d:
+/// a nonbasic land loses its land types and the abilities of its rules
+/// text, and has "{T}: Add {R}"; basic lands are unaffected.)
+#[test]
+fn cr_305_7_magus_of_the_moon_makes_nonbasic_lands_mountains() {
+    let g = scen().battlefield(0, &["Breeding Pool", "Cascading Cataracts", "Island", "Island", "Island", "Island", "Island"]).at(Step::Main1, 0).start();
+    let pool = bf(&g, 0, "Breeding Pool");
+    let cat = bf(&g, 0, "Cascading Cataracts");
+    assert!(g.can_pay(0, &cost("{G}{W}{B}")), "without the Magus");
+    assert!(subtype(&g, pool, "Forest") && !subtype(&g, pool, "Mountain"));
+    let g = scen()
+        .battlefield(0, &["Breeding Pool", "Cascading Cataracts", "Island", "Island", "Island", "Island", "Island"])
+        .battlefield(1, &["Magus of the Moon"])
+        .at(Step::Main1, 0)
+        .start();
+    assert!(subtype(&g, pool, "Mountain") && !subtype(&g, pool, "Forest") && !subtype(&g, pool, "Island"), "its land types become Mountain");
+    assert!(g.is_type(pool, engine::db::types::LAND));
+    assert!(!g.keywords_of(cat).has(Kw::Indestructible), "the Cataracts lose indestructible");
+    assert!(g.can_pay(0, &cost("{R}{R}{U}{U}{U}{U}{U}")), "{{R}} from each nonbasic land; the Islands stay Islands");
+    assert!(!g.can_pay(0, &cost("{G}")), "no {{G}}: the Pool's and the Cataracts' abilities are gone");
+}
+
+/// A nonbasic land entering while it would be a Mountain has none of its
+/// own replacement or triggered abilities (CR 614.12: its characteristics as
+/// it would exist on the battlefield): Lotus Field enters untapped and its
+/// "sacrifice two lands" doesn't trigger; Breeding Pool asks for no life.
+#[test]
+fn cr_614_12_lands_enter_as_mountains_without_their_abilities() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island"])
+        .battlefield(1, &["Magus of the Moon"])
+        .hand(0, &["Lotus Field", "Breeding Pool"])
+        .at(Step::Main1, 0)
+        .start();
+    let field = g.card(0, "Lotus Field", Zone::Hand);
+    g.choose(Choice::Play(field));
+    settle(&mut g);
+    assert_eq!(g.obj(field).zone, Zone::Battlefield);
+    assert!(!g.obj(field).tapped, "no 'enters tapped'");
+    assert_eq!(g.lands_of(0).count(), 3, "no lands sacrificed");
+    assert!(!g.keywords_of(field).has(Kw::Hexproof));
+    let mut g = scen().battlefield(1, &["Magus of the Moon"]).hand(0, &["Breeding Pool"]).at(Step::Main1, 0).start();
+    let pool = g.card(0, "Breeding Pool", Zone::Hand);
+    g.choose(Choice::Play(pool));
+    assert!(at_priority(&g), "no 'you may pay 2 life': {:?}", g.kind());
+    assert!(!g.obj(pool).tapped && g.player(0).life == 20);
+}
+
+/// The Magus gone, the lands are themselves again (CR 611.3a, 613.1d).
+#[test]
+fn cr_611_3a_without_the_magus_the_lands_are_themselves() {
+    let mut g = scen()
+        .battlefield(0, &["Breeding Pool", "Mountain", "Mountain", "Mountain"])
+        .battlefield(1, &["Magus of the Moon"])
+        .hand(0, &["Bombard"])
+        .at(Step::Main1, 0)
+        .start();
+    let pool = bf(&g, 0, "Breeding Pool");
+    assert!(!g.can_pay(0, &cost("{G}")));
+    let magus = bf(&g, 1, "Magus of the Moon");
+    let bombard = g.card(0, "Bombard", Zone::Hand);
+    start_with(&mut g, Choice::Cast(bombard), |g| pick(g, &[g.tgt(magus)]));
+    settle(&mut g);
+    assert_eq!(g.obj(magus).zone, Zone::Graveyard);
+    assert!(subtype(&g, pool, "Forest"));
+    g.set_tapped(pool, false);
+    assert!(g.can_pay(0, &cost("{G}")), "the Pool makes {{G}} again");
+}
+
+/// Bioengineered Future: "When this enchantment enters, create a Lander
+/// token." and "Each creature you control enters with an additional +1/+1
+/// counter on it for each land that entered the battlefield under your
+/// control this turn" (CR 614.1c, 122.6; lands before the creature only).
+#[test]
+fn cr_614_1c_bioengineered_future_counts_the_lands_that_entered_this_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Bioengineered Future", "Forest", "Forest", "Forest"])
+        .hand(0, &["Test Bear", "Forest", "Test Bear"])
+        .at(Step::Main1, 0)
+        .start();
+    let bears: Vec<_> = g.player(0).hand.iter().copied().filter(|&c| g.name(c) == "Test Bear").collect();
+    // A creature before any land entered: no counter.
+    start_with(&mut g, Choice::Cast(bears[0]), |_| None);
+    settle(&mut g);
+    assert_eq!(g.counters_on(bears[0], Counter::P1P1), 0);
+    let forest = g.card(0, "Forest", Zone::Hand);
+    g.choose(Choice::Play(forest));
+    settle(&mut g);
+    start_with(&mut g, Choice::Cast(bears[1]), |_| None);
+    settle(&mut g);
+    assert_eq!(g.counters_on(bears[1], Counter::P1P1), 1, "one land entered this turn");
+    assert_eq!(g.counters_on(bears[0], Counter::P1P1), 0, "the earlier creature keeps none");
+    assert_eq!(g.power(bears[1]), 3);
+}
+
+/// The count is per turn and per player: the opponent's lands don't count,
+/// and it starts again each turn (the Future's Lander as it enters).
+#[test]
+fn cr_614_1c_bioengineered_future_counts_only_your_lands_this_turn() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Forest", "Forest", "Forest"])
+        .hand(0, &["Bioengineered Future", "Test Bear"])
+        .hand(1, &["Forest"])
+        .at(Step::Main1, 1)
+        .start();
+    let f1 = g.card(1, "Forest", Zone::Hand);
+    g.choose(Choice::Play(f1));
+    quiet_until(&mut g, main1_of(0));
+    let future = g.card(0, "Bioengineered Future", Zone::Hand);
+    start_with(&mut g, Choice::Cast(future), |_| None);
+    settle(&mut g);
+    assert_eq!(g.permanents_of(0).filter(|&c| g.name(c) == "Lander").count(), 1, "its Lander");
+    let bear = g.card(0, "Test Bear", Zone::Hand);
+    start_with(&mut g, Choice::Cast(bear), |_| None);
+    settle(&mut g);
+    assert_eq!(g.counters_on(bear, Counter::P1P1), 0, "no land entered under P0's control this turn");
+}

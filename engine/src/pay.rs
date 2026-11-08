@@ -1127,7 +1127,11 @@ impl Game {
         floor: usize,
     ) -> Option<u8> {
         let total: usize = groups.iter().map(|g| g.1 as usize).sum();
-        let need = pm.cost.total() as usize + marked.len();
+        // (The virtual pool may pay the mana costs of mana abilities among
+        // `rest` too, the most each card's ways need: Cascading Cataracts'
+        // {5}, ENGINE.md 99.12.)
+        let rest_needs: usize = rest.alts.iter().map(|ws| ws.iter().filter(|w| w.need != 0).map(|w| w.need_n as usize).max().unwrap_or(0)).sum();
+        let need = pm.cost.total() as usize + marked.len() + rest_needs;
         let top = total.min(need.saturating_sub(chosen.len()));
         // (Each spend tried is a node of the search: ENGINE.md 51.)
         let mut nodes = SEARCH_NODES;
@@ -1313,7 +1317,7 @@ impl Game {
     pub(crate) fn activate_mana_costs(&mut self, src: Src) {
         let c = src.card;
         let p = self.objs[c.i()].controller;
-        let ad = self.def_of(c).activated_def(src.slot);
+        let ad = self.source_def(c).activated_def(src.slot);
         let (cost, dmg) = (ad.cost.clone(), ad.mana().map_or(0, |m| m.damage_to_you));
         let dsrc = self.damage_source_of(c);
         self.note(|g| format!("P{p} activates a mana ability of {}", g.name(c)));
@@ -1920,7 +1924,7 @@ impl Game {
                 .chosen
                 .iter()
                 .chain(pm.multi.iter().map(|m| &m.0))
-                .any(|s| !special(s) && self.def_of(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
+                .any(|s| !special(s) && self.source_def(s.card).activated_def(s.slot).mana().is_some_and(|m| m.uncounterable));
             if uncounterable {
                 let r = self.obj_ref(card);
                 self.marks.push((r, crate::game::Mark::Uncounterable));
@@ -1942,7 +1946,7 @@ impl Game {
             if is_sac_slot(s.slot) {
                 return (false, true, false, true);
             }
-            let ad = self.def_of(s.card).activated_def(s.slot);
+            let ad = self.source_def(s.card).activated_def(s.slot);
             let dmg = ad.mana().map_or(0, |m| m.damage_to_you);
             let last = ad.mana().and_then(|m| m.sac_if_no).is_some_and(|k| self.counters_on(s.card, k) <= 1);
             (false, ad.cost.sac_self || last, dmg > 0, ad.cost.life == 0)
@@ -1961,7 +1965,7 @@ impl Game {
                 self.activate_sac_for(src);
             } else {
                 if let AbilitySlot::Activated(i) = src.slot {
-                    if self.def_of(src.card).activated_def(src.slot).exhaust {
+                    if self.source_def(src.card).activated_def(src.slot).exhaust {
                         let r = self.obj_ref(src.card);
                         self.marks.push((r, crate::game::Mark::Exhausted(i))); // CR 702.177a
                     }

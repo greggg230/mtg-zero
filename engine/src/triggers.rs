@@ -182,7 +182,7 @@ impl Game {
         // emblems (their abilities function in the command zone, 114.4).
         for &c in &self.battlefield {
             let o = &self.objs[c.i()];
-            if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) {
+            if self.db.def(o.def).trig_mask & bit != 0 && !self.lost_abilities(c) && !(self.db.moon && self.moon_on(c)) {
                 obs.push(Observer { r: ObjRef { idx: c, inc: o.inc }, def: o.def, controller: o.controller, spell: false, gy: false });
             }
         }
