@@ -357,8 +357,7 @@ fn cr_605_3a_gene_pollinator_taps_another_permanent_for_any_color() {
     assert!(g.can_pay(0, &cost("{W}{B}")), "each taps an Island");
 }
 
-/// In a payment: the permanent tapped is picked (an `ACTIVATE` id after its
-/// own abilities); a Pollinator cast this turn can't activate (summoning
+/// In a payment: the permanent tapped is picked (by its own id); a Pollinator cast this turn can't activate (summoning
 /// sickness, CR 302.6) but can be tapped for another's ability.
 #[test]
 fn cr_302_6_gene_pollinator_in_a_payment_and_summoning_sickness() {
@@ -368,8 +367,9 @@ fn cr_302_6_gene_pollinator_in_a_payment_and_summoning_sickness() {
     let new = g.card(0, "Gene Pollinator", Zone::Hand);
     g.choose(Choice::Cast(new));
     assert_eq!(g.kind(), Some(DecisionKind::PayMana), "{:?}", g.options_desc());
-    let pick = opts(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == island) && *c != act(island, 0)).expect("the Island as the Pollinator's tapped permanent");
-    g.choose(pick);
+    // (The Island by its own id: tapped for the Pollinator's ability.)
+    assert!(g.has_option(Choice::Card(island)), "{:?}", g.options_desc());
+    g.choose(Choice::Card(island));
     run_until(&mut g, at_priority, |_| None);
     settle(&mut g);
     assert_eq!(g.obj(new).zone, Zone::Battlefield);
@@ -477,4 +477,51 @@ fn cr_702_51a_a_pollinator_convoking_does_not_also_activate() {
         .start();
     let vote = g.card(0, "Vote Out", Zone::Hand);
     assert!(g.has_option(Choice::Cast(vote)), "with an Island, four");
+}
+
+/// A creature that can convoke and be tapped for a Pollinator's ability is
+/// one option (its own id); which it does is asked next (CR 702.51a,
+/// 602.2b; every source reachable).
+#[test]
+fn cr_702_51a_a_permanent_for_convoke_or_a_pollinator_is_asked_which() {
+    let mut g = scen()
+        .battlefield(0, &["Island", "Island", "Gene Pollinator", "Test Deathtouch", "Test Deathtouch"])
+        .hand(0, &["Vote Out"])
+        .at(Step::Main1, 0)
+        .start();
+    let dt = bf(&g, 0, "Test Deathtouch");
+    let vote = g.card(0, "Vote Out", Zone::Hand);
+    g.choose(Choice::Cast(vote));
+    run_until(&mut g, |g| g.kind() == Some(DecisionKind::PayMana), |_| None);
+    // (The Islands' own mana first: sources are picked in class order, each
+    // set reached once.)
+    let islands: Vec<_> = g.permanents_of(0).filter(|&c| g.name(c) == "Island").collect();
+    pay_with(&mut g, &[act(islands[0], 0), act(islands[1], 0)]);
+    assert!(g.has_option(Choice::Card(dt)), "{:?}", g.options_desc());
+    g.choose(Choice::Card(dt));
+    assert_eq!(g.kind(), Some(DecisionKind::ChooseMode), "convoke or the Pollinator's tap: {:?}", g.options_desc());
+    assert_eq!(opts(&g).len(), 2);
+}
+
+/// Under the Magus a land keeps the abilities an effect gave it (layer 6
+/// after layer 4, CR 613.1d-f, 305.7): Lavaclaw Reaches animated, then the
+/// Magus: a Mountain creature with "{X}: This creature gets +X/+0".
+#[test]
+fn cr_613_1f_a_mountain_keeps_an_ability_an_effect_gave_it() {
+    let mut g = scen()
+        .battlefield(0, &["Lavaclaw Reaches", "Swamp", "Mountain", "Mountain", "Island", "Island", "Island"])
+        .hand(0, &["Magus of the Moon"])
+        .at(Step::Main1, 0)
+        .start();
+    let lav = bf(&g, 0, "Lavaclaw Reaches");
+    let animate = opts(&g).into_iter().find(|c| matches!(c, Choice::Ability(x, _) if *x == lav)).expect("the animation");
+    start_with(&mut g, animate, |_| None);
+    settle(&mut g);
+    assert!(g.is_creature(lav));
+    let magus = g.card(0, "Magus of the Moon", Zone::Hand);
+    start_with(&mut g, Choice::Cast(magus), |_| None);
+    settle(&mut g);
+    assert_eq!(g.obj(magus).zone, Zone::Battlefield);
+    assert!(g.is_creature(lav) && subtype(&g, lav, "Mountain") && subtype(&g, lav, "Elemental"));
+    assert!(g.has_option(act(lav, 1)), "the granted pump: {:?}", g.options_desc());
 }

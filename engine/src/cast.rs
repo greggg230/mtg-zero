@@ -1977,6 +1977,11 @@ impl Game {
         match self.answer.take() {
             Some(Choice::Number(crate::eoe_c::FREE_FIRST_SPELL)) => {
                 // Without paying its mana cost (CR 118.9; ENGINE.md 99.4).
+                // (Still cast from the hand, for spending restrictions.)
+                if matches!(self.stack[pos].from, crate::game::CastFrom::Hand | crate::game::CastFrom::Miracle) {
+                    let r = self.obj_ref(card);
+                    self.marks.push((r, crate::game::Mark::FreeFromHand));
+                }
                 self.stack[pos].from = crate::eoe_c::FREE_CAST;
                 self.note(|_| "without paying its mana cost".to_string());
             }

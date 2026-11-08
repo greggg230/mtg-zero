@@ -18986,3 +18986,150 @@ No branch changes the action layout or the encoding: a card that can only be don
 change is left blocked and reported (the maintainer decides). New public state goes in the
 public-state gate's limits as before (a perturbation draws nothing from the shared stream).
 Builds use `CARGO_PROFILE_RELEASE_DEBUG=false` (E: is nearly full; no behaviour change).
+
+#### 99.12 W2: mana and lands (branch `eoe-w2-mana`, from `eoe-base` 3a8dfb6)
+
+**Why.** The W2 share of the set's last 62 cards (99.11-99.14): Blast Zone, Bioengineered Future,
+Cascading Cataracts, Contested War Zone, Crystal Quarry, Echoing Deeps, Eldrazi Temple, Famished
+Worldsire, Gene Pollinator, Magus of the Moon, Mm'menon, the Right Hand, Plaza of Heroes, Steelswarm
+Operator, The Eternity Elevator, Thespian's Stage; and every mana spending restriction (Sunken
+Citadel's and Power Depot's too, whose IR W1 fixes).
+
+**Spending restrictions (CR 106.6; `eoe_w2.rs`).** `ManaAbility::only` is now the set of purposes
+the mana may be spent on, any one of them (`eoe_w2::spendable`: no restriction, or a purpose in
+common with the payment's `Keep::allow`); for the cube's two one-purpose kinds this is the old rule.
+New purposes (`db.rs`): `SPEND_ARTIFACT_ABILITY`, `SPEND_ELDRAZI_SPELL`, `SPEND_ELDRAZI_ABILITY`,
+`SPEND_LAND_ABILITY`, `SPEND_OUTSIDE_HAND`; the IR's `artifact_activation`, `colorless_eldrazi` (two
+purposes), `land_activation` and `cast_from_outside_hand` lower to them (`legendary_permanent_ability`,
+`not_nonartifact_spell`, `colored_only` stay denied: no Oracle text of the table says them, 160).
+What a payment satisfies: casting (`Game::spend_allow_from`: artifact, legendary, colorless Eldrazi
+(CR 105.2c, 205.3j), cast from anywhere but the hand, by the cast's `CastFrom`), activating an ability
+(`Game::ability_allow`: of an artifact, land or colorless Eldrazi source, as the activation begins:
+the activation's payment, its X maximum, `cost_payable`, a mana ability's own cost with priority);
+"unless pays" and special actions none. Only purposes the table's mana has are worked out
+(`CardDb::spend_kinds`): the cube's payments are unchanged.
+
+*Restricted mana in the pool.* What a payment leaves of restricted mana, or a mana ability activated
+with priority adds, keeps its restriction: Mishra's Workshop's artifact-only {C} stays
+`ManaPool::art` (layout v5 encodes it), every other kind is `Game::pool_restr` (player, type,
+purposes, amount; a part of `ManaPool::amt`, emptied with the pools), and the payment model reads
+both as one list of kinds (`Game::pool_kinds`, `set_pool_kinds`): `vgroups` (spendable restricted
+mana is the `+16` kind, the rest held), `add_pool` (castability), `pick_multi` (`PayMana::extra_restr`
+replaces `extra_art`), `pool_rems` (`Rem::restr`: per spend the greatest restricted amounts, then
+`eoe_w2::kinds_left` splits them among the kinds, a kind whose purposes are all another's spent
+first; two kinds neither of which covers the other are the player's choice, `PayPool`) and
+`finish_payment` (converge's restricted units, the pool written back). The lowering no longer limits
+restricted productions to one mana or the Workshop's {C}s (only `{X}` mana and haste mana with a
+restriction are denied).
+
+*Found, left for the maintainer (changes cube games).* Mana a mana ability makes with priority (the
+source about to be lost, 86.1/86.2) went to the pool unrestricted: Mishra's Workshop's {C}{C}{C} or
+Delighted Halfling's mana floated in response could pay anything. Keeping the restriction changes 12
+of the 2,500 digest games, so `add_restricted_mana` keeps it only in tables whose mana has a purpose
+beyond the cube's two (the EoE table); the cube keeps the old behaviour (a known fault). Halfling's
+"can't be countered" rider is lost on floated mana either way (the pool has no such tag).
+
+*Not exact, open.* The mana cost of a mana ability activated within a payment (34.2's needs) is
+matched with the payment's units by `mana::fits`, which reads types and `MADE` only: restricted mana
+the payment may spend also pays such a need whatever the need's source is (Mishra's Workshop's {C}
+pays Chromatic Star's {1} while casting an artifact spell: a cube fault since 34), and restricted mana
+the payment may not spend is not offered for a need its restriction allows (Sunken Citadel's
+land-ability mana for Cascading Cataracts' {5} while casting a spell). Exact needs a restriction per
+unit and an allowance per need in the matching (the masks' eight bits are taken: types, `MADE`,
+`RESTRICTED`/`NOT_MADE`); not done.
+
+**Cards and features.**
+
+* Eldrazi Temple, Steelswarm Operator: the restrictions above (`cards_eoe_w2.rs`).
+* The Eternity Elevator: `ManaProd::SameTypeCounters` (X mana of one colour, X its charge counters;
+  its station tier was lane A's).
+* Cascading Cataracts, Crystal Quarry: a mana ability whose cost is {n} is n needs of the payment
+  (`Class::need_n`, `Way::need_n`; one mana as before). `most_spent_from` counts the needs of the
+  rest's ways in the virtual pool's spend (EoE fuzz seed 44: the pool's {C}{C} had to pay the
+  Cataracts' {5}; a one-mana need was undercounted the same way, never seen in the cube).
+* Blast Zone: "{X}{X}" (`Cost::x_times`), "put X charge counters on this land" (`Amount::X`), and
+  "destroy each nonland permanent with mana value equal to the number of charge counters on this
+  land" (`Filter::MvIsSourceCounters`, last known counters: it was sacrificed, CR 608.2h).
+* Magus of the Moon (CR 305.7, 613.1d): `CardDef::nonbasic_lands_are_mountains`; `Game::moon_on` (a
+  land by its card types, not basic, and a permanent with the ability that hasn't lost its
+  abilities; looked at only in games with such a card, `Game::moon_game`): `abilities()` is a Mountain's ({T}: Add {R}, `eoe_w2::mountain_def`), its keywords and
+  land types (CR 205.3i, `CardDb::land_subtypes`) replaced, no triggers, statics read through
+  `abilities()`; mana-source slots resolve through `Game::source_def`. A nonbasic land entering
+  while it would be a Mountain gets none of its own replacement effects (CR 614.12: enters tapped,
+  counters, as-enters choices, entering as a copy). Its abilities are a definition of the table's
+  (`CardDb::moon_base`, and per definition with latent abilities a variant keeping them,
+  `CardDb::moon_of`: an ability an effect gave it survives, layer 6 after layer 4; Lavaclaw Reaches
+  animated, then the Magus), also the definition its activations name (`begin_activate`); land types
+  set by effects with later timestamps apply after the Magus's (CR 613.7, `Game::moon_ts`). Open,
+  engine-wide (not the Magus's): a basic land type an effect gives a permanent doesn't give it that
+  type's mana ability (CR 305.6); Multiversal Passage's is its own production.
+* Bioengineered Future: `CardDef::etb_counter_per_land_entered`, `Game::lands_entered` (the lands
+  that entered under each player's control this turn, counted after the creature's counters).
+* Gene Pollinator ("{T}, Tap an untapped permanent you control"): a source on each untapped
+  permanent it may tap (`pay::POL_FOR`, picked by the permanent's own `MY_PERM` id; a permanent that
+  stands for several sources, improvise or convoke and a Pollinator's tap, is one option, and which
+  is asked next: `PayMana::card_slots`, `which`, `ChooseMode`), the activating Pollinator tapped too: `Class::share` = the Pollinators that can
+  activate, `Class::taps` the share a use takes (2 for a Pollinator that could activate, tapped for
+  another's; 1 for one tapped for improvise or convoke, `Game::pol_split`, in `improvise_classes` and
+  `convoke_classes` so castability counts it as the payment does: EoE fuzz seeds 6224 and 3118,
+  Vote Out with a Pollinator, four mana counted and three payable, ENGINE.md 49). Single sources with a
+  shared tap stay ways (the Lumberjack's were all several-mana); the sources on permanents with no
+  other way are fixed units as far as the shares go (`Cands::free_shared`), and with as many of them
+  as Pollinators the sources on permanents with another way are left out (never better): without
+  this every land had two ways and the feasibility search branched three ways per land (a 300-game
+  EoE fuzz ran 18 minutes before it was stopped). "Whenever you tap a creature for mana" (CR
+  605.1b) adds its mana to each source when the Pollinators are creatures (a several-mana source
+  then); Pollinators of which only some are creatures, with such a bonus, fail loudly (which one
+  activates would change the mana: open).
+* Famished Worldsire: devour land n (CR 702.82a, `CardDef::devour_land`, `Task::Devour`: a
+  `Sacrifice` decision per land in battlefield order, `PASS` stops; nothing happens until the choice
+  ends, then the lands go together and the counters are put on) and its trigger (look at the top X,
+  `PileDest::BattlefieldTapped` for any number of lands, shuffle).
+* Echoing Deeps: `optional_copy_land_from_graveyard` as an `EntersAsCopy` (any land card in either
+  graveyard, `ChooseGraveyardCard` with `PASS`; "except it's a Cave in addition", the flag's meaning)
+  with `EntersAsCopy::tapped` (copying, it enters tapped; declined, it enters as itself).
+* Contested War Zone (IR defect 161) and Plaza of Heroes (160): everything but the defect is in
+  (`EoeW2::EventObjControllerGainsSource`: the creature's controller now, or as it last existed,
+  `lki_toughness` kept for it, `CardDb::watch_lki_controller`; "attacking creatures get +1/+0" of every attacker, as the
+  class's docstring says, Cecil's trigger unchanged in two-player games), tested on corrected copies.
+
+**Shared files touched (additive).** `db.rs` (the `SPEND_*` purposes, `ManaProd::SameTypeCounters`,
+`Filter::MvIsSourceCounters`, `Cost::x_times`, `EntersAsCopy::tapped`, four `CardDef` fields, five
+`CardDb` fields), `game.rs` (`pool_restr`, `lands_entered`, `abilities()`, `entering()`'s own
+replacements, devour), `pay.rs` (the payment model above), `cast.rs`, `activate.rs`, `flow.rs`
+(`Task::Devour`, `ManaNowPick::only`), `program.rs` (`Ext::EoeW2`, `PileDest::BattlefieldTapped`),
+`resolve.rs`, `resolve_ext.rs`, `resolve_m7d.rs`, `layers.rs`, `triggers.rs`, `copies.rs`,
+`lower/{mod, activated, effect, effect_ext, effect_tail, printing}.rs`, `az/{decks, encode}.rs`
+(`Task::Devour` with the as-enters tasks), `public_state.rs` (two new public fields, each a
+next-layout limit drawing nothing from the shared stream), `testkit.rs` (`view_of`), `tests/az.rs`
+(the limits' allowlist), `tests/support.rs`.
+
+**Not done, and why.**
+
+* Mm'menon, the Right Hand: its restriction ("only to cast a spell from anywhere other than your
+  hand", `SPEND_OUTSIDE_HAND`, `spend_allow_from`) is in; left: the mana ability it grants to
+  artifacts (a source on each untapped artifact, as `POL_FOR`'s, with its own `ACTIVATE` id) and
+  "cast artifact spells from the top of your library" (a second top-of-library route for the mana
+  cost beside Bolas's Citadel's `CastFrom::LibraryTop`). Not started for time. (A spell cast
+  without paying its mana cost by "the first spell each turn" has `from` set to
+  `eoe_c::FREE_CAST` even from the hand, so its additional mana costs would count as cast from
+  outside the hand: to handle with that card.)
+* Thespian's Stage: "becomes a copy of target land, except it has this ability": a copy effect
+  that keeps one of the copying object's abilities; a permanent's abilities are one
+  `&'static CardDef` (`Game::abilities`), so the kept ability needs a merged definition per copied
+  land (none can be made during play). Not started.
+* Plaza of Heroes, Contested War Zone: IR defects 160, 161 (their features are in).
+* Sunken Citadel needs W1's IR (entry 50: "as it enters, choose a color"; two mana of that colour);
+  its restriction is `SPEND_LAND_ABILITY` (tested on a fixed-colour copy, "Test Citadel": the
+  pool keeps what a land's ability doesn't spend). Power Depot needs W1's IR (entries 40, 47: the
+  "{T}: Add {C}" ability, modular 1, and the restriction "artifact spells or abilities of
+  artifacts"): the schema's `SpendRestriction` has no such value; with one, its lowering is
+  `SPEND_ARTIFACT | SPEND_ARTIFACT_ABILITY` (one line in `lower/activated.rs`; two-purpose mana is
+  tested with Eldrazi Temple's).
+
+**Tests.** `tests/cards_eoe_w2.rs` (7: the restrictions), `tests/cards_eoe_w2_lands.rs` (20: the
+lands and the other cards), custom cards in `tests/eoe_w2/mod.rs` (Test Citadel, Test Workshop,
+Test War Zone, Test Plaza, ...). TESTS_PLACEHOLDER
+
+**Digests:** unchanged (`f6543eb2b1b8752f`): every new path is gated by the table or the game
+(`CardDb::spend_kinds`, `Game::moon_game`, `CardDb::watch_lands_entered`).

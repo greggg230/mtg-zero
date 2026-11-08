@@ -267,7 +267,23 @@ impl Game {
         // A nonbasic land that is a Mountain: its land type is Mountain only
         // (CR 305.7; ENGINE.md 99.12).
         if self.moon_game && self.db.land_subtypes.contains(&s) && self.moon_on(c) {
-            return Some(s) == self.db.mountain;
+            // (Then the land-type effects with later timestamps, CR 613.7.)
+            let (r, ts) = (self.obj_ref(c), self.moon_ts());
+            let mut has = Some(s) == self.db.mountain;
+            for e in self.effects.iter().filter(|e| e.on == Affected::Obj(r) && e.ts > ts) {
+                match &e.m {
+                    Mod::Types { subtypes, replace, .. } => {
+                        if *replace {
+                            has = subtypes.contains(&s);
+                        } else if subtypes.contains(&s) {
+                            has = true;
+                        }
+                    }
+                    Mod::BecomeTypes { subtypes, .. } => has = subtypes.contains(&s),
+                    _ => {}
+                }
+            }
+            return has;
         }
         let d = self.def_of(c);
         let mut printed = d.subtypes.contains(&s) || self.exc(c).is_some_and(|e| e.has_subtype(s));

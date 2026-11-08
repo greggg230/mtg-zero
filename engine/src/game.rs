@@ -885,6 +885,10 @@ pub enum Mark {
     /// It entered as a spell cast for its warp cost (CR 702.185a: "if that
     /// creature was cast for its warp cost"; ENGINE.md 99.8).
     WarpCast,
+    /// A spell cast from its caster's hand without paying its mana cost
+    /// (its `CastFrom` is then `eoe_c::FREE_CAST`): not cast from anywhere
+    /// other than the hand (CR 106.6; ENGINE.md 99.12).
+    FreeFromHand,
 }
 
 /// `Mark::ChosenName` of a name no card of the game has.
@@ -1847,7 +1851,7 @@ impl Game {
         // A nonbasic land that is a Mountain (CR 305.7: its rules text's
         // abilities replaced by "{T}: Add {R}"; ENGINE.md 99.12).
         if self.moon_game && self.moon_on(c) {
-            return crate::eoe_w2::mountain_def();
+            return self.db.def(self.moon_def(c));
         }
         self.db.def(self.objs[c.i()].def)
     }
@@ -1909,7 +1913,9 @@ impl Game {
                 let d = self.damage_source_of(idx);
                 self.lki_damage.push((old, d));
             }
-            if self.db.watch_toughness {
+            // (Its controller as it last existed too: "that creature's
+            // controller", ENGINE.md 99.12.)
+            if self.db.watch_toughness || self.db.watch_lki_controller {
                 let t = self.toughness(idx);
                 self.lki_toughness.push((old, t, self.objs[idx.i()].controller));
             }

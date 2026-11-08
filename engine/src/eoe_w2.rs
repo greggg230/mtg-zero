@@ -83,7 +83,9 @@ impl Game {
         if kinds & SPEND_ELDRAZI_SPELL != 0 && self.colorless_eldrazi(card) {
             a |= SPEND_ELDRAZI_SPELL;
         }
-        if kinds & SPEND_OUTSIDE_HAND != 0 && !matches!(from, CastFrom::Hand | CastFrom::Miracle) {
+        let from_hand = matches!(from, CastFrom::Hand | CastFrom::Miracle)
+            || (from == crate::eoe_c::FREE_CAST && self.marks.contains(&(self.obj_ref(card), crate::game::Mark::FreeFromHand)));
+        if kinds & SPEND_OUTSIDE_HAND != 0 && !from_hand {
             a |= SPEND_OUTSIDE_HAND;
         }
         a
@@ -243,6 +245,13 @@ pub enum EoeW2 {
     EventObjControllerGainsSource,
 }
 
+/// Does a card's program read a creature's last known controller
+/// (`EoeW2::EventObjControllerGainsSource`)?
+pub(crate) fn reads_lki_controller(d: &CardDef) -> bool {
+    let reads = |ab: &crate::db::AbilityDef| ab.program.iter().any(|op| matches!(op, crate::program::Op::Ext(crate::program::Ext::EoeW2(EoeW2::EventObjControllerGainsSource))));
+    d.triggers.iter().any(|t| reads(&t.ability))
+}
+
 impl EoeW2 {
     /// Does the op read its triggered ability's event?
     pub fn uses_event(&self) -> bool {
@@ -267,13 +276,12 @@ impl Game {
         match op {
             EoeW2::EventObjControllerGainsSource => {
                 // "That creature's controller": now if it is still on the
-                // battlefield, else as it last existed there (CR 608.2h): a
-                // creature that dealt combat damage to a player was
-                // attacking (CR 510.1a), so it was the active player's
-                // (506.4: a creature whose control changes leaves combat).
+                // battlefield, else as it last existed there (CR 608.2h,
+                // `lki_toughness`, kept for this: `CardDb::watch_lki_controller`).
                 if let Some(r) = f.ev.obj {
                     let live = self.live(r) && self.objs[r.idx.i()].zone == crate::ids::Zone::Battlefield;
-                    let p = if live { self.objs[r.idx.i()].controller } else { self.turn.active };
+                    let lki = self.lki_toughness.iter().rev().find(|x| x.0 == r).map(|x| x.2);
+                    let p = if live { self.objs[r.idx.i()].controller } else { lki.expect("its last known controller (kept for this ability)") };
                     if self.live(f.source) {
                         self.change_control(f.source.idx, p);
                     }
@@ -337,6 +345,24 @@ impl Game {
         types & types::LAND != 0 && d.supertypes & crate::db::supertypes::BASIC == 0 && self.moon_source()
     }
 
+    /// The definition of a Mountain's abilities for `c` (`CardDb::moon_of`:
+    /// its latent abilities kept).
+    pub(crate) fn moon_def(&self, c: CardIdx) -> crate::ids::DefId {
+        let d = self.objs[c.i()].def;
+        self.db.moon_of.iter().find(|x| x.0 == d).map_or(self.db.moon_base, |x| x.1)
+    }
+
+    /// The timestamp of the latest permanent saying "nonbasic lands are
+    /// Mountains" (CR 613.7: land types set by later effects apply after).
+    pub(crate) fn moon_ts(&self) -> u32 {
+        self.battlefield
+            .iter()
+            .filter(|&&x| self.db.def(self.objs[x.i()].def).nonbasic_lands_are_mountains && !self.lost_abilities(x))
+            .map(|&x| self.objs[x.i()].timestamp)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// [`moon_entering`](Self::moon_entering) for a permanent on the
     /// battlefield.
     pub(crate) fn moon_on(&self, c: CardIdx) -> bool {
@@ -350,7 +376,7 @@ impl Game {
     /// (`mountain_def`; ENGINE.md 99.12).
     pub(crate) fn source_def(&self, c: CardIdx) -> &'static CardDef {
         if self.moon_game && self.moon_on(c) {
-            mountain_def()
+            self.db.def(self.moon_def(c))
         } else {
             self.def_of(c)
         }
@@ -420,21 +446,54 @@ impl Game {
     /// per untapped permanent it may tap (CR 602.2b, 601.2g), the activating
     /// Pollinator tapped as well: `share` = how many can activate, a
     /// permanent that could activate itself taking two (`taps`). Its id
-    /// comes after the permanent's own abilities; none past the fourth (as
-    /// `SQ_FOR`'s).
-    pub(crate) fn pol_classes(&self, p: PlayerId, exclude: Option<CardIdx>, pol: &[(CardIdx, crate::mana::ManaMask, &crate::db::Filter)], out: &mut Vec<crate::pay::Class>) {
+    /// is the permanent's own (`MY_PERM`; which source asked when it stands
+    /// for several, `PayMana::which`).
+    /// With a "whenever you tap a creature for mana" bonus (CR 605.1b) and
+    /// creatures activating, each source makes that mana as well (a
+    /// several-mana source then, inserted at `n_multi`; the number inserted
+    /// returned).
+    pub(crate) fn pol_classes(
+        &self,
+        p: PlayerId,
+        exclude: Option<CardIdx>,
+        pol: &[(CardIdx, crate::mana::ManaMask, &crate::db::Filter)],
+        creature_bonus: [u8; 6],
+        n_multi: usize,
+        out: &mut Vec<crate::pay::Class>,
+    ) -> usize {
         use crate::pay::{Class, Src, Yield, POL_FOR, TAP};
         let (_, mask, filter) = pol[0];
+        // (The bonus: when every Pollinator that can activate is a creature,
+        // as the one activated then is; with some that are not, it depends on
+        // which activates: not modelled, a loud failure.)
+        let bonus = creature_bonus != [0; 6];
+        if bonus {
+            assert!(pol.iter().all(|x| self.is_creature(x.0)), "Pollinators of which some are creatures with a creature-mana bonus (ENGINE.md 99.12)");
+        }
+        let yld = if bonus {
+            let prods: Vec<[u8; 6]> = (0..6)
+                .filter(|&t| mask & (1 << t) != 0)
+                .map(|t| {
+                    let mut v = creature_bonus;
+                    v[t] += 1;
+                    v
+                })
+                .collect();
+            let mut units = vec![crate::mana::Unit::free(mask)];
+            for t in 0..6 {
+                units.extend(std::iter::repeat_n(crate::mana::Unit::free(1 << t), creature_bonus[t] as usize));
+            }
+            Yield::Multi { prods, units: Some(units) }
+        } else {
+            Yield::One(crate::mana::Unit::free(mask))
+        };
+        let mut inserted = 0;
         debug_assert!(pol.iter().all(|x| x.1 == mask && x.2 == filter), "one kind of Pollinator ability (CardDb::new checks)");
         let actors: Vec<CardIdx> = pol.iter().map(|x| x.0).collect();
         let k = actors.len().min(u8::MAX as usize) as u8;
         let ctx = crate::cast::Ctx { controller: p, source: None };
         for x in self.permanents_of(p) {
             if Some(x) == exclude || self.objs[x.i()].tapped || !self.card_matches(filter, x, &ctx) {
-                continue;
-            }
-            let slot_id = self.abilities(x).activated.len();
-            if slot_id >= 4 {
                 continue;
             }
             let taps = if actors.contains(&x) { 2 } else { 1 };
@@ -445,15 +504,18 @@ impl Game {
             let src = Src { card: x, slot: POL_FOR };
             match out.iter_mut().find(|cl| cl.def == def && cl.members[0].slot == POL_FOR && cl.taps == taps) {
                 Some(cl) => cl.members.push(src),
-                None => out.push(Class {
-                    res: TAP,
-                    share: k,
-                    taps,
-                    slot_id: slot_id as u8,
-                    ..Class::of(def, src, Yield::One(crate::mana::Unit::free(mask)))
-                }),
+                None => {
+                    let cl = Class { res: TAP, share: k, taps, ..Class::of(def, src, yld.clone()) };
+                    if bonus {
+                        out.insert(n_multi + inserted, cl);
+                        inserted += 1;
+                    } else {
+                        out.push(cl);
+                    }
+                }
             }
         }
+        inserted
     }
 
     /// A Pollinator that could activate, tapped for improvise or convoke,

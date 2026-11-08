@@ -44,7 +44,7 @@ pub(crate) const LJ_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 3);
 /// an untapped permanent you control: Add <mana>" (Gene Pollinator): a
 /// source on each permanent it may tap, the activating permanent tapped as
 /// well (`Class::share` of them, `Class::taps` each source takes; ENGINE.md
-/// 99.12). Its id: `ACTIVATE` after the permanent's own abilities.
+/// 99.12). Its id: the permanent's own (`MY_PERM`, `PayMana::card_slots`).
 pub(crate) const POL_FOR: AbilitySlot = AbilitySlot::Trigger(u8::MAX - 4);
 
 /// A source's use of its card (`Class::res`): tapped, sacrificed (or
@@ -328,6 +328,12 @@ pub(crate) struct PayMana {
     /// The spell has convoke (CR 702.51a): untapped creatures may pay for
     /// {1} or one mana of their colour each (`Game::convoke_classes`).
     pub convoke: bool,
+    /// The permanents offered by their own `MY_PERM` id (improvise, convoke,
+    /// another's tap: `TAP_FOR`, `POL_FOR`) and the sources each stands for;
+    /// a permanent picked that stands for several (`which`) is asked which
+    /// next (`ChooseMode`, `NUMBER` + k; ENGINE.md 99.12).
+    pub card_slots: Vec<(CardIdx, Vec<AbilitySlot>)>,
+    pub which: Option<CardIdx>,
 }
 
 impl PayMana {
@@ -356,6 +362,8 @@ impl PayMana {
             improvise: false,
             waterbend: false,
             convoke: false,
+            card_slots: Vec::new(),
+            which: None,
         }
     }
 
@@ -814,7 +822,8 @@ impl Game {
         }
         // The permanents a Pollinator's ability taps (`POL_FOR`).
         if !pol.is_empty() {
-            self.pol_classes(p, exclude, &pol, &mut out);
+            // (Several-mana ones among the several-mana classes.)
+            let _ = self.pol_classes(p, exclude, &pol, creature_bonus, n_multi, &mut out);
         }
         // Mana abilities of cards in hand (CR 605.3a: activated while
         // paying like any other; a Spirit Guide exiles itself). One mana
@@ -1621,17 +1630,36 @@ impl Game {
                 return;
             }
         }
+        // (Which source a permanent picked by its own id stands for, asked
+        // when it stands for several: ENGINE.md 99.12.)
+        let ask_which = |g: &mut Game, pm: Box<PayMana>, card: CardIdx| {
+            let n = pm.card_slots.iter().find(|(c, _)| *c == card).map_or(0, |(_, v)| v.len());
+            let opts = (0..n).map(|k| Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) }).collect();
+            g.ask(Task::PayMana(pm), payer, DecisionKind::ChooseMode, opts);
+        };
+        if let (Some(card), None) = (pm.which, &self.answer) {
+            return ask_which(self, pm, card);
+        }
         if let Some(ch) = self.answer.take() {
+            let slot_of = |pm: &PayMana, card: CardIdx, k: usize| pm.card_slots.iter().find(|(c, _)| *c == card).map(|(_, v)| v[k]).expect("a source the permanent stands for");
             let (card, slot) = match ch {
                 Choice::Ability(card, slot) => (card, slot),
-                // A permanent tapped for another's mana ability, or an
-                // artifact tapped for improvise.
+                // A permanent tapped for improvise or convoke, or for
+                // another's mana ability.
                 Choice::Card(card) => {
-                    let tap_for = Src { card, slot: TAP_FOR };
-                    (card, if classes.iter().any(|cl| cl.members.contains(&tap_for)) { TAP_FOR } else { IMPROVISE })
+                    if pm.card_slots.iter().any(|(c, v)| *c == card && v.len() > 1) {
+                        pm.which = Some(card);
+                        return ask_which(self, pm, card);
+                    }
+                    (card, slot_of(&pm, card, 0))
+                }
+                Choice::Number(k) if pm.which.is_some() => {
+                    let card = pm.which.take().expect("the permanent picked");
+                    (card, slot_of(&pm, card, k as usize))
                 }
                 other => unreachable!("pay answer {other:?}"),
             };
+            pm.card_slots.clear();
             let src = Src { card, slot };
             let ci = classes.iter().position(|cl| cl.members.contains(&src)).expect("source class");
             pm.min_class = ci as u8;
@@ -1690,6 +1718,7 @@ impl Game {
             v
         };
         let mut opts = Vec::new();
+        let mut card_slots: Vec<(CardIdx, Vec<AbilitySlot>)> = Vec::new();
         for (ci, cl) in classes.iter().enumerate().skip(pm.min_class as usize) {
             if !crate::eoe_w2::spendable(cl.only, pm.keep.allow) {
                 continue; // its mana can't be spent on this (CR 106.6)
@@ -1753,21 +1782,34 @@ impl Game {
                 })
             };
             if let Some(rep) = rep {
-                opts.push(if is_sac_slot(rep.slot) || rep.slot == POL_FOR {
+                // (One `MY_PERM` option a permanent; the sources it stands
+                // for in `card_slots`.)
+                if rep.slot == IMPROVISE || rep.slot == TAP_FOR || rep.slot == POL_FOR {
+                    match card_slots.iter_mut().find(|(c, _)| *c == rep.card) {
+                        Some((_, v)) => {
+                            v.push(rep.slot);
+                            continue;
+                        }
+                        None => card_slots.push((rep.card, vec![rep.slot])),
+                    }
+                }
+                opts.push(if is_sac_slot(rep.slot) {
                     // A granted ability or another's sacrificing it: after
                     // its own (`ACTIVATE` + `slot_id`; `sac_classes` checks
                     // there is room).
                     let k = cl.slot_id as u16;
                     Opt { action: act::ACTIVATE + (self.perm_action(payer, rep.card) - act::MY_PERM) * 4 + k, choice: Choice::Ability(rep.card, rep.slot) }
-                } else if rep.slot == IMPROVISE || rep.slot == TAP_FOR {
-                    // Improvise, or a permanent tapped for another's mana
-                    // ability: the permanent's own slot (`MY_PERM`).
+                } else if rep.slot == IMPROVISE || rep.slot == TAP_FOR || rep.slot == POL_FOR {
+                    // Improvise or convoke, or a permanent tapped for
+                    // another's mana ability: the permanent's own slot
+                    // (`MY_PERM`).
                     Opt { action: self.perm_action(payer, rep.card), choice: Choice::Card(rep.card) }
                 } else {
                     Opt { action: self.ability_action(payer, rep.card, rep.slot), choice: Choice::Ability(rep.card, rep.slot) }
                 });
             }
         }
+        pm.card_slots = card_slots;
         assert!(
             !opts.is_empty(),
             "PayMana: no way to pay {} for P{payer}: {pm:?} classes {classes:?} pool {:?}\n{}",

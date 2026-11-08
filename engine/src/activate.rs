@@ -339,7 +339,9 @@ impl Game {
     /// once (605.3); any other ability goes on the stack first (602.2a),
     /// then targets (601.2c), then the cost (601.2f-h).
     pub(crate) fn begin_activate(&mut self, p: PlayerId, card: CardIdx, slot: AbilitySlot) {
-        let def = self.objs[card.i()].def;
+        // (A nonbasic land that is a Mountain: its abilities' definition,
+        // ENGINE.md 99.12.)
+        let def = if self.moon_game && self.moon_on(card) { self.moon_def(card) } else { self.objs[card.i()].def };
         self.note(|g| format!("P{p} activates {} ({slot:?})", g.name(card)));
         if self.objs[card.i()].zone == Zone::Hand {
             self.reveal(card); // 602.2a: activated from a hidden zone

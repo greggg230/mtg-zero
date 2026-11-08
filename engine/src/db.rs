@@ -1887,6 +1887,13 @@ pub struct CardDb {
     /// A card of the table says "nonbasic lands are Mountains"
     /// (`CardDef::nonbasic_lands_are_mountains`): the layers look for it.
     pub(crate) moon: bool,
+    /// With `moon`: the abilities of a nonbasic land that is a Mountain
+    /// (CR 305.7: "{T}: Add {R}"), and for each definition with latent
+    /// activated abilities its own variant (the Mountain's ability, then
+    /// those latent abilities: an effect may have given them, layer 6 after
+    /// layer 4), as definitions (`Game::moon_def`; ENGINE.md 99.12).
+    pub(crate) moon_base: DefId,
+    pub(crate) moon_of: Vec<(DefId, DefId)>,
     /// The interned land types (CR 205.3i) and "Mountain".
     pub(crate) land_subtypes: Vec<u16>,
     pub(crate) mountain: Option<u16>,
@@ -1898,6 +1905,10 @@ pub struct CardDb {
     /// Add <mana>" (Gene Pollinator, `pay::POL_FOR`): improvise and convoke
     /// sources look for it (`Game::pol_split`).
     pub(crate) pollinator: bool,
+    /// A card of the table reads a creature's controller as it last existed
+    /// (`EoeW2::EventObjControllerGainsSource`): the game keeps it
+    /// (`Game::lki_toughness`; ENGINE.md 99.12).
+    pub(crate) watch_lki_controller: bool,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2081,9 +2092,32 @@ impl CardDb {
         db.spend_kinds = crate::eoe_w2::spend_kinds(&db.defs);
         db.eldrazi = db.subtype_id("Eldrazi");
         db.moon = db.defs.iter().any(|d| d.nonbasic_lands_are_mountains);
+        if db.moon {
+            let base = crate::eoe_w2::mountain_def().clone();
+            let n = db.defs.len();
+            db.moon_base = n as DefId;
+            let variants: Vec<(DefId, CardDef)> = db
+                .defs
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.latent > 0)
+                .map(|(i, d)| {
+                    let mut v = base.clone();
+                    v.activated.extend(d.activated[d.activated.len() - d.latent as usize..].iter().cloned());
+                    v.latent = d.latent;
+                    (i as DefId, v)
+                })
+                .collect();
+            db.defs.push(base);
+            for (i, v) in variants {
+                db.moon_of.push((i, db.defs.len() as DefId));
+                db.defs.push(v);
+            }
+        }
         db.land_subtypes = crate::eoe_w2::LAND_TYPES.iter().filter_map(|n| db.subtype_id(n)).collect();
         db.mountain = db.subtype_id("Mountain");
         db.watch_lands_entered = db.defs.iter().any(|d| d.etb_counter_per_land_entered);
+        db.watch_lki_controller = db.defs.iter().any(crate::eoe_w2::reads_lki_controller);
         db.pollinator = db.defs.iter().any(|d| d.activated.iter().any(|a| a.mana().is_some() && a.cost.tap && a.cost.tap_untapped.is_some()));
         db
     }
