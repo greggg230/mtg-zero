@@ -19167,7 +19167,13 @@ is renewed as it becomes attached, 613.7e). W4's tests pass, The Dominion Bracel
 ones too with the card's blocker lifted locally (left ignored: the card waits on the encoding).
 The public-state gate after the merges: 14 gaps for the next layout (`tests/az.rs`: W3's four, then
 W4's five, W5's one and W1's one). EoE support 295 / 320 (281 on eoe-base and this branch's 14),
-cube 546 / 546; W5's merge conflicted only on additive lines (a `Mark` each, the entering hooks). Verification: MERGE_RESULTS
+cube 546 / 546; W5's merge conflicted only on additive lines (a `Mark` each, the entering hooks).
+Verification of the combination (69083f9, the normal release profile): the full engine suite 1,962
+passed, 0 failed, 20 ignored (W4's four and W3's one Dominion Bracelet tests among them);
+behaviour digests unchanged (`f6543eb2b1b8752f`); `FUZZ_POOL=eoe FUZZ_GAMES=20000`: 20,000 games
+(wins 8,928 / 9,031, 2,041 draws, mean 40.1 turns, 500.4 decisions), all four fuzz tests passed
+(1,015 s); the default `FUZZ_GAMES=20000`: 20,000 games (9,967 / 9,994, 39 draws) and 1,000
+matches, passed (420 s).
 
 #### 99.14 W4: exile, graveyard, copies and control (branch `eoe-w4-exile`)
 
