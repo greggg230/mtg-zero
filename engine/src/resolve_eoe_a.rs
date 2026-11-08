@@ -5,7 +5,7 @@
 use crate::decision::{act, Choice, DecisionKind, Opt};
 use crate::flow::Task;
 use crate::game::{Game, Pos};
-use crate::ids::Zone;
+use crate::ids::{CardIdx, PlayerId, Zone};
 use crate::program::{EoeA, On};
 use crate::resolve::{Flow, Frame};
 
@@ -26,6 +26,27 @@ impl Game {
         }
     }
 
+    /// Could Aura `aura` (its controller `p`) enchant permanent `h` (CR
+    /// 303.4a, 702.5a): what its enchant ability allows (its spell's target
+    /// filter, "you" its controller), not itself, not protected from it
+    /// (702.16c)?
+    pub(crate) fn aura_enchants(&self, aura: CardIdx, p: PlayerId, h: CardIdx) -> bool {
+        let Some(req) = self.def_of(aura).spell.as_ref().and_then(|s| s.targets.first()) else { return false };
+        let ctx = crate::cast::Ctx { controller: p, source: Some(self.obj_ref(aura)) };
+        h != aura
+            && self.objs[h.i()].zone == Zone::Battlefield
+            && self.card_matches(&req.filter, h, &ctx)
+            && !self.protected_from(h, &self.damage_source_of(aura))
+    }
+
+    /// CR 704.5m for an Aura that enchants a permanent: attached to nothing,
+    /// to an illegal object, or itself a creature (303.4d), it is put into
+    /// its owner's graveyard.
+    pub(crate) fn bad_aura(&self, c: CardIdx) -> bool {
+        let Some(h) = self.objs[c.i()].attached else { return true };
+        !self.live(h) || self.is_creature(c) || !self.aura_enchants(c, self.objs[c.i()].controller, h.idx)
+    }
+
     pub(crate) fn exec_eoe_a(&mut self, f: &mut Frame, op: &EoeA) -> Flow {
         match op {
             EoeA::OwnerPutsTopOrBottom { tgt } => {
@@ -44,6 +65,16 @@ impl Game {
                         let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
                         self.ask(Task::Run(f.clone()), owner, DecisionKind::YesNo, opts);
                         return Flow::Suspend;
+                    }
+                }
+                Flow::Next
+            }
+            EoeA::DestroyEventObj => {
+                // "Destroy it": the event's object, if it is still that
+                // permanent (CR 701.8a).
+                if let Some(r) = f.ev.obj {
+                    if self.live(r) && self.objs[r.idx.i()].zone == Zone::Battlefield {
+                        self.destroy(r.idx);
                     }
                 }
                 Flow::Next

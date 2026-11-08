@@ -244,6 +244,9 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Nesting Grounds", "ir_defect(move a counter narrowed, docs/ir_defects.md 27)"),
     // Menace for "can't be blocked by more than one creature" (28).
     ("Meltstrider's Resolve", "ir_defect(menace for \"by more than one\", docs/ir_defects.md 28)"),
+    // An enchant ability narrowed to "creature" (29, 30).
+    ("Tractor Beam", "ir_defect(enchant creature or Spacecraft as creature, docs/ir_defects.md 29)"),
+    ("Moonlit Meditation", "ir_defect(enchant artifact or creature as creature, docs/ir_defects.md 30)"),
 
     // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
 

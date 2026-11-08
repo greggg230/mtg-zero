@@ -711,6 +711,7 @@ const SUPPORTED_EOE_A: &[&str] = &[
     "Atmospheric Greenhouse",
     "Beyond the Quiet",
     "Cerebral Download",
+    "Cryoshatter",
     "Debris Field Crusher",
     "Drill Too Deep",
     "Drix Fatemaker",

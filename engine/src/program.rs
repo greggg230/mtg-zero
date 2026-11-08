@@ -1099,6 +1099,7 @@ impl Op {
             Op::Ext(Ext::OfferPayOther { who: w, .. }) => who(w),
             Op::Ext(Ext::ExileTopWithPermission { who: w, .. }) => who(w),
             Op::Ext(Ext::Poison { who: w, n }) => who(w) || amt(n),
+            Op::Ext(Ext::EoeA(EoeA::DestroyEventObj)) => true,
             Op::Ext(Ext::ApplyPtPerCount { on, .. })
             | Op::Ext(Ext::TapOrUntap { on })
             | Op::Ext(Ext::CounterOrDoubleOnSecond { on }) => matches!(on, On::EventObj),
@@ -1220,6 +1221,10 @@ pub enum EoeA {
     /// permanent) puts it on top of or on the bottom of their library, their
     /// choice. Choice (the owner's): yes/no (`YES` = top).
     OwnerPutsTopOrBottom { tgt: u8 },
+    /// "Destroy it": destroy the object of the triggered ability's event, if
+    /// it is still that permanent (CR 701.8a; "when enchanted creature
+    /// becomes tapped or is dealt damage, destroy it").
+    DestroyEventObj,
     /// Remember how many cards the looked-at pile holds (`Frame::x`), for
     /// `CounterOnSourceUnlessPileShrank`.
     MarkPile,

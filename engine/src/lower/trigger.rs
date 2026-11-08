@@ -319,6 +319,9 @@ fn lower_trig_pred(l: &mut Lowerer, p: &cats::TriggerPredicate) -> Option<TrigPr
         P::IsSelf(nodes::IsSelf { subject }) => Some(TrigPred::IsSelf(slot(l, subject)?)),
         P::IsThisSpell(nodes::IsThisSpell {}) => Some(TrigPred::IsSelf(Slot::Spell)),
         P::IsFormerHost(nodes::IsFormerHost { subject }) => Some(TrigPred::FormerHost(slot(l, subject)?)),
+        // "Enchanted creature" / "equipped creature" as the subject: the
+        // permanent the source is attached to now (ENGINE.md 99.2).
+        P::IsHost(nodes::IsHost { subject }) => Some(TrigPred::IsHost(slot(l, subject)?)),
         // "Whenever you cast or copy": a copy of a spell counts too (CR
         // 707.10; `TrigPred::OrCopy`).
         P::CastOrCopy(nodes::CastOrCopy {}) => Some(TrigPred::OrCopy),

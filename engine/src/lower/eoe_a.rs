@@ -406,6 +406,11 @@ pub(crate) fn lower_effect_eoe_a(l: &mut Lowerer, b: &mut Builder, e: &cats::Eff
             }
             b.op(Op::Ext(Ext::PileRestBottomRandom));
         }
+        // "Destroy it" of "when enchanted creature becomes tapped or is dealt
+        // damage" (the trigger's event is the enchanted permanent's: `IsHost`).
+        E::DestroyEnchantedPermanent(nodes::DestroyEnchantedPermanent {}) => {
+            b.op(Op::Ext(Ext::EoeA(EoeA::DestroyEventObj)));
+        }
         _ => return false,
     }
     true
@@ -422,4 +427,42 @@ pub(crate) fn pt_formula_static(f: &cats::PTFormula) -> Option<StaticDef> {
         }
         _ => None,
     }
+}
+
+/// A battlefield Aura's enchant ability (CR 303.4a, 702.5a): "enchant
+/// creature [you control]", "enchant artifact [you control]" -> the filter its
+/// spell targets and that it may stay attached to (704.5m). None: not such an
+/// Aura (Animate Dead's "creature card in a graveyard" is `aura_gy`).
+pub(crate) fn aura_enchant(
+    l: &mut Lowerer,
+    card_types: u16,
+    is_aura: bool,
+    kind: &card_ir::enums::EnchantKind,
+    yours: bool,
+    aura_gy: bool,
+    has_spell_effect: bool,
+) -> Option<Filter> {
+    use card_ir::enums::EnchantKind as K;
+    if aura_gy {
+        l.deny("CardPrinting.aura_yours_only(creature card in a graveyard)", &yours);
+        return None;
+    }
+    if !is_aura || card_types & types::ENCHANTMENT == 0 {
+        l.deny_ne("CardPrinting.aura_enchant_type(not an Aura)", kind, &card_ir::generated::defaults::d_CardPrinting_aura_enchant_type());
+        l.deny("CardPrinting.aura_yours_only(not an Aura)", &yours);
+        return None;
+    }
+    if has_spell_effect {
+        l.unsupported("CardPrinting.spell_effect(an Aura)");
+        return None;
+    }
+    let base = match kind {
+        K::Creature => Filter::Type(types::CREATURE),
+        K::Artifact => Filter::Type(types::ARTIFACT),
+        K::Land | K::CreatureCardInGraveyard => {
+            l.unsupported(format!("CardPrinting.aura_enchant_type({kind:?})"));
+            return None;
+        }
+    };
+    Some(if yours { and(base, Filter::Controller(true)) } else { base })
 }

@@ -1371,7 +1371,7 @@ impl Game {
         // 39). (Its ability then returns that card, 603.4.)
         let mut attach = attach;
         if !cast && attach.is_none() && self.def_of(idx).aura_spell && !self.moving_face_down {
-            let cands = self.aura_candidates(idx);
+            let cands = self.aura_candidates(idx, controller);
             if cands.len() != 1 {
                 let tapped = std::mem::take(&mut self.entering_tapped);
                 self.clear_entering();
@@ -1517,9 +1517,13 @@ impl Game {
     }
 
     /// The legal objects for an Aura entering without being cast to
-    /// enchant (CR 303.4f): Animate Dead's "creature card in a graveyard".
-    pub(crate) fn aura_candidates(&self, aura: CardIdx) -> Vec<CardIdx> {
-        debug_assert!(self.def_of(aura).reanimates, "only Animate Dead");
+    /// enchant (CR 303.4f) under `p`'s control: Animate Dead's "creature card
+    /// in a graveyard", or the permanents its enchant ability allows
+    /// (`aura_enchants`, ENGINE.md 99.2).
+    pub(crate) fn aura_candidates(&self, aura: CardIdx, p: PlayerId) -> Vec<CardIdx> {
+        if !self.def_of(aura).reanimates {
+            return self.battlefield.iter().copied().filter(|&h| self.aura_enchants(aura, p, h)).collect();
+        }
         (0..2u8).flat_map(|p| self.graveyard_cards(p)).filter(|&c| c != aura && self.def_of(c).is(types::CREATURE)).collect()
     }
 
@@ -1534,12 +1538,18 @@ impl Game {
             }
             Some(other) => unreachable!("enchant choice {other:?}"),
             None => {
+                // (A permanent to enchant: by its slot, ENGINE.md 99.2.)
+                let gy = self.def_of(card).reanimates;
                 let opts: Vec<crate::decision::Opt> = self
-                    .aura_candidates(card)
+                    .aura_candidates(card, p)
                     .into_iter()
-                    .map(|c| crate::decision::Opt { action: self.graveyard_action(p, c), choice: Choice::Card(c) })
+                    .map(|c| crate::decision::Opt {
+                        action: if gy { self.graveyard_action(p, c) } else { self.perm_action(p, c) },
+                        choice: Choice::Card(c),
+                    })
                     .collect();
-                self.ask(Task::EnterAura { card, controller: p, tapped }, p, crate::decision::DecisionKind::ChooseGraveyardCard, opts);
+                let kind = if gy { crate::decision::DecisionKind::ChooseGraveyardCard } else { crate::decision::DecisionKind::ChoosePermanent };
+                self.ask(Task::EnterAura { card, controller: p, tapped }, p, kind, opts);
             }
         }
     }

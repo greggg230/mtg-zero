@@ -64,6 +64,8 @@ permission) and a consumer can go wrong with it.
 | 26 | The Eternity Elevator (ENGINE.md 99.2) | value made up | `power: 0, toughness: 0` for a card with no power/toughness box | no power or toughness (CR 722.1, 722.2c) | `cards/parser/spacecraft_builder.py` (the missing-P/T fallback, ~line 334) | blocked by entry 20 | confirmed |
 | 27 | Nesting Grounds (ENGINE.md 99.2) | effect narrowed | "Move a counter from target permanent you control onto a second target permanent" as `MovePlusOneCounterBetweenPermanentsYouControl {}` (the class moves a +1/+1 counter between two permanents you control) | any kind of counter (the player's choice), and a second target permanent anyone controls | `effects/generic/counters.py::MovePlusOneCounterBetweenPermanentsYouControl` (its docstring: "Simplification") | blocked (`lower::IR_DEFECTS`) | confirmed |
 | 28 | Meltstrider's Resolve (ENGINE.md 99.2) | keyword substituted | "Enchanted creature ... can't be blocked by more than one creature" as `equipment_bonuses: [0, 2, ["menace"]]` | a "can't be blocked by more than one creature" rule (menace is the opposite: by two or more only, CR 702.111b) | the Aura builder's bonus line (`cards/base.py::make_aura`, as entry 7) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 29 | Tractor Beam (ENGINE.md 99.2) | enchant narrowed | "Enchant creature or Spacecraft" as the default `aura_enchant_type: creature` | creature or Spacecraft (a Spacecraft below its threshold is a noncreature artifact) | the Aura builder's enchant line (`EnchantKind` has no "or Spacecraft") | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 30 | Moonlit Meditation (ENGINE.md 99.2) | enchant narrowed | "Enchant artifact or creature you control" as `aura_enchant_type: creature` (the default), `aura_yours_only` | artifact or creature you control | the Aura builder's enchant line (`EnchantKind` has no "artifact or creature") | blocked (`lower::IR_DEFECTS`) | confirmed |
 
 ## Confirmed defects
 
@@ -512,6 +514,30 @@ enchanted creature fights up to one target creature an opponent controls. / Ench
   keyword).
 * Fix: export the restriction (a "max blockers 1" field, as `min_blockers` exists).
 * Engine: blocked, `ir_defect(menace for "by more than one", docs/ir_defects.md 28)`.
+
+**29. Tractor Beam.** Oracle: "Enchant creature or Spacecraft / When this Aura enters, tap enchanted
+permanent. / You control enchanted permanent. / Enchanted permanent doesn't untap during its
+controller's untap step."
+
+* IR: no `aura_enchant_type` (the default `creature`).
+* Should be: "creature or Spacecraft": a Spacecraft is an artifact that is a creature only at its
+  threshold (CR 722.2b), so it may be enchanted (and stays enchanted) below it too (303.4c).
+* Source: the Aura builder's enchant line; `EnchantKind` (creature, artifact, land, creature card in a
+  graveyard) can't say "or Spacecraft".
+* Fix: an enchant filter (a predicate) instead of the enum, or an `or_spacecraft` flag.
+* Engine: blocked, `ir_defect(enchant creature or Spacecraft as creature, docs/ir_defects.md 29)`.
+
+**30. Moonlit Meditation.** Oracle: "Enchant artifact or creature you control / The first time you
+would create one or more tokens each turn, you may instead create that many tokens that are copies of
+enchanted permanent."
+
+* IR: no `aura_enchant_type` (the default `creature`) and `aura_yours_only: true`: "creature you
+  control".
+* Should be: "artifact or creature you control".
+* Source: as entry 29 (`EnchantKind` has no "artifact or creature").
+* Fix: as entry 29.
+* Engine: blocked, `ir_defect(enchant artifact or creature as creature, docs/ir_defects.md 30)` (a
+  cross-lane card, lanes A and D).
 
 ## Suspected defects (representational)
 

@@ -312,12 +312,9 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.enters_with_plus_one_counter_if_creature_died_this_turn", enters_with_plus_one_counter_if_creature_died_this_turn);
         l.deny("CardPrinting.enters_with_minus_one_counters_from_hand_cast", enters_with_minus_one_counters_from_hand_cast);
         // "Enchant creature card in a graveyard" (Animate Dead): an Aura
-        // spell's target; other enchant types are not built.
+        // spell's target; an Aura's other enchant types (on the battlefield)
+        // below, with the card types (ENGINE.md 99.2).
         let aura_gy = *aura_enchant_type == enums::EnchantKind::CreatureCardInGraveyard;
-        if !aura_gy {
-            l.deny_ne("CardPrinting.aura_enchant_type", aura_enchant_type, &generated::defaults::d_CardPrinting_aura_enchant_type());
-        }
-        l.deny("CardPrinting.aura_yours_only", aura_yours_only);
         l.deny("CardPrinting.restricts_noncreature_spells_to_one_per_turn", restricts_noncreature_spells_to_one_per_turn);
         l.deny("CardPrinting.nonbasic_lands_are_mountains", nonbasic_lands_are_mountains);
         l.deny("CardPrinting.grants_all_basic_land_types_to_lands_you_control", grants_all_basic_land_types_to_lands_you_control);
@@ -435,6 +432,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         (_, None) => {}
     }
     let subs: Vec<u16> = subtypes.iter().map(|s| l.subtype(s)).collect();
+    // An Aura that enchants a permanent (CR 303.4a, 702.5a): its enchant
+    // ability is its spell's target and what it may stay attached to.
+    let aura_bf = super::eoe_a::aura_enchant(
+        l,
+        ty,
+        subtypes.iter().any(|s| s == "Aura"),
+        aura_enchant_type,
+        *aura_yours_only,
+        aura_gy,
+        spell_effect.is_some(),
+    );
     // {X} in the card's own mana cost (CR 107.3): announced on casting.
     let x_pips = {
         let cats::ManaCost::ManaCost(m) = &**mana_cost;
@@ -893,6 +901,10 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
             let f = Filter::InGraveyard(Box::new(Filter::Type(types::CREATURE)));
             Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0 }], ..Default::default() })
         }
+        None if aura_bf.is_some() => {
+            let f = aura_bf.clone().unwrap();
+            Some(crate::db::AbilityDef { targets: vec![crate::db::TargetReq { filter: f, min: 1, max: 1, distinct: 0, pair: 0 }], ..Default::default() })
+        }
         _ if kicker.is_some() => kicker.clone(),
         _ if overloaded.is_some() => overloaded.clone(),
         Some(e) if is_spell_card => Some(lower_ability(l, e)),
@@ -1316,7 +1328,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         // (An Aura's "enchanted creature gets ...": the IR reuses the
         // Equipment field, docs/ir_defects.md 7; the Aura's attachment is
         // the same `attached`.)
-        if !subs.contains(&l.subtype("Equipment")) && !(subs.contains(&l.subtype("Aura")) && aura_gy) {
+        if !subs.contains(&l.subtype("Equipment")) && !(subs.contains(&l.subtype("Aura")) && (aura_gy || aura_bf.is_some())) {
             l.unsupported("CardPrinting.equipment_bonuses(not an Equipment)");
         }
         let mut mods = Vec::new();
@@ -1847,7 +1859,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         x_life: *additional_cost_pay_x_life,
         sunburst: sunburst_counter,
         enters_times_counters: *enters_with_counter_per_kick,
-        aura_spell: aura_gy,
+        aura_spell: aura_gy || aura_bf.is_some(),
         reanimates: l.reanimates,
         cleanup_sac,
         flash_permission,
