@@ -75,11 +75,9 @@ pub(crate) fn printing_w3(l: &mut Lowerer, def: &mut crate::db::CardDef, food_ty
             x: false,
             special: None,
         };
-        // (A latent ability of the card: the last ones, CardDef::latent.)
+        // (A latent ability of the card: the last ones, CardDef::latent;
+        // the card itself never activates it, so its place is no action.)
         let k = def.activated.len();
-        if k >= 4 {
-            l.unsupported("CardPrinting.grants_food_ability_to_your_artifacts(no ability slot left)");
-        }
         def.activated.push(ability);
         def.latent += 1;
         def.w3.grants_activated.push((yours, k as u8));

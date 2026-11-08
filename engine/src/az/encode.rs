@@ -1747,6 +1747,9 @@ impl Game {
             }
             Task::DeclareAttackers { next } => x[ctx::NEXT_ATTACKER] = *next as f32 / 32.0,
             Task::AttackTarget { card: c } => card = Some((self.objs[c.i()].def, None, None)),
+            // The permanent whose abilities past its slots are offered (EoE
+            // W3).
+            Task::ChooseAbility { card: c, .. } => card = Some((self.objs[c.i()].def, None, None)),
             // The card entering as a copy (by what it is), the copy whose
             // targets may change (its target position).
             Task::EnterAsCopy { card: c, .. } => card = Some((self.own_def(*c), None, None)),

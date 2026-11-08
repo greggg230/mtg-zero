@@ -627,6 +627,61 @@ impl Game {
         has || k < grants.len()
     }
 
+    /// The places of permanent `c`'s activated abilities: its card's own,
+    /// then those other permanents grant it.
+    pub(crate) fn ability_slots_total(&self, c: CardIdx) -> usize {
+        let own = self.db.def(self.objs[c.i()].def).activated.len();
+        if self.w3.seen & SEEN_W3_GRANT_ACT == 0 {
+            return own;
+        }
+        own + self.granted_activated(c).len()
+    }
+
+    /// Is `slot` of permanent `c` the page of its abilities past its slots
+    /// (the fourth, when it has more abilities than `ACTIVATE` slots)?
+    pub(crate) fn paged_slot(&self, c: CardIdx, slot: crate::db::AbilitySlot) -> bool {
+        let last = crate::activate::ACTIVATE_SLOTS - 1;
+        slot == crate::db::AbilitySlot::Activated(last as u8)
+            && self.objs[c.i()].zone == crate::ids::Zone::Battlefield
+            && self.ability_slots_total(c) > crate::activate::ACTIVATE_SLOTS
+    }
+
+    /// `p` chooses which activated ability of permanent `card` to activate,
+    /// among those it may activate now from place `from` on (CR 602.2,
+    /// 117.1b; `Task::ChooseAbility`): `NUMBER` + place - `from` for the
+    /// next 31, `NUMBER` + 31 for a page of the ones after. Re-entrant: the
+    /// options come from the game as it is.
+    pub(crate) fn choose_ability(&mut self, p: PlayerId, card: CardIdx, from: u8) {
+        use crate::decision::{act, Choice, DecisionKind, Opt};
+        let page = (act::NUMBER_N - 1) as usize;
+        match self.answer.take() {
+            Some(Choice::Number(k)) if k as usize == page => {
+                self.agenda.push(crate::flow::Task::ChooseAbility { p, card, from: from + page as u8 });
+                return;
+            }
+            Some(Choice::Number(k)) => {
+                self.begin_activate(p, card, crate::db::AbilitySlot::Activated(from + k));
+                return;
+            }
+            Some(other) => unreachable!("ability answer {other:?}"),
+            None => {}
+        }
+        let classes = self.mana_classes(p, None);
+        let sorcery_ok = self.turn.active == p && self.turn.step.is_main() && self.stack.is_empty();
+        let locks = self.activation_locks();
+        let live = self.permanent_activations(p, card, &classes, sorcery_ok, locks);
+        let mut opts: Vec<Opt> = Vec::new();
+        for &i in live.iter().filter(|&&i| i >= from) {
+            let k = (i - from) as usize;
+            if k < page {
+                opts.push(Opt { action: act::NUMBER + k as u16, choice: Choice::Number(k as u8) });
+            } else if !opts.iter().any(|o| o.choice == Choice::Number(page as u8)) {
+                opts.push(Opt { action: act::NUMBER + page as u16, choice: Choice::Number(page as u8) });
+            }
+        }
+        self.ask(crate::flow::Task::ChooseAbility { p, card, from }, p, DecisionKind::ChooseMode, opts);
+    }
+
     /// The definition and slot of activated ability `slot` of `card`: its own,
     /// or past them one another permanent grants it (`granted_activated`).
     pub(crate) fn activated_ref(&self, card: CardIdx, slot: crate::db::AbilitySlot) -> (crate::ids::DefId, crate::db::AbilitySlot) {

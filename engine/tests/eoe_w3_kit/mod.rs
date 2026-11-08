@@ -116,6 +116,15 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("W3 Wasp", "{1}", 1, 1, &["Insect"], json!({"triggered_abilities": [{"$t": "TriggeredAbility",
             "event": "enters", "predicate": {"$t": "IsSelf"}, "effect": {"$t": "ThenTargetLosesAbilitiesWhileSourceRemains",
             "inner": {"$t": "PumpTargetCreatureUntilEOT", "power_bonus": 1, "toughness_bonus": 0}}}]})),
+        // "{0}: You gain 1 life. {0}: You gain 2 life. {0}: You gain 3 life.
+        // {0}: You gain 4 life." (Four activated abilities: every action slot
+        // of a permanent.)
+        {
+            let abilities: Vec<Value> = (1..=4)
+                .map(|n| json!({"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost"}, "effect": {"$t": "GainLife", "amount": n}}))
+                .collect();
+            card("W3 Gadget", "{0}", &["Artifact"], &[], json!({ "activated_abilities": abilities }))
+        },
         // "Sacrifice this artifact: Add {C}." (No {T}.)
         card("W3 Nugget", "{0}", &["Artifact"], &[], json!({"activated_abilities": [{"$t": "ActivatedAbility",
             "cost": {"$t": "ActivationCost", "sacrifice_self": true}, "effect": {"$t": "AddManaToPool", "produces": [["C", 1]]}, "is_mana_ability": true}]})),

@@ -13,6 +13,10 @@ use crate::pay::{productions, Class, Keep, PayMana, Src};
 /// (a loop of optional actions, CR 732.2a; as `copies::MAY_COPY_CAP`).
 pub(crate) const ACTIVATION_CAP: u8 = 31;
 
+/// The `ACTIVATE` action slots of one permanent (`decision::act::ACTIVATE`:
+/// slot * 4 + i).
+pub(crate) const ACTIVATE_SLOTS: usize = 4;
+
 impl Game {
     /// Does condition `c` hold for player `p`?
     pub(crate) fn cond_holds(&self, c: &Cond, p: PlayerId) -> bool {
@@ -142,55 +146,22 @@ impl Game {
         // (The battlefield's activation locks, read once.)
         let locks = self.activation_locks();
         for c in self.permanents_of(p) {
-            let d = self.abilities(c);
-            for (i, ad) in d.activated.iter().enumerate() {
-                if ad.mana().is_some() && !self.mana_at_priority(c, ad) {
-                    continue; // paid with while paying a cost (ENGINE.md 18)
-                }
-                if d.latent > 0 && !self.has_activated(c, i) {
-                    continue; // a latent ability it hasn't gained
-                }
-                if ad.exhaust && self.exhausted(c, i as u8) {
-                    continue; // CR 702.177a: only once
-                }
-                if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
-                    continue; // a loop of optional actions (ENGINE.md 29)
-                }
-                let slot = AbilitySlot::Activated(i as u8);
-                if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+            let live = self.permanent_activations(p, c, classes, sorcery_ok, locks);
+            // A permanent with more activated abilities than its four
+            // `ACTIVATE` slots (its card's own and those other permanents
+            // grant it, EoE W3): the fourth slot opens a choice among the
+            // fourth and later ones (`Task::ChooseAbility`), so every one
+            // stays reachable.
+            let paged = self.ability_slots_total(c) > ACTIVATE_SLOTS;
+            for &i in &live {
+                if !paged || (i as usize) < ACTIVATE_SLOTS - 1 {
+                    let slot = AbilitySlot::Activated(i);
                     out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
                 }
             }
-            // Activated abilities other permanents grant it ("artifacts you
-            // control have '<ability>'", CR 613.1f; EoE W3): slots after its
-            // own (at most four per permanent in the action layout).
-            if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
-                // (After its card's own slots, whether or not it has them.)
-                let own = self.db.def(self.objs[c.i()].def).activated.len();
-                for (j, (gdef, k)) in self.granted_activated(c).into_iter().enumerate() {
-                    let i = own + j;
-                    if i >= 4 {
-                        break;
-                    }
-                    let ad = self.db.def(gdef).activated_def(AbilitySlot::Activated(k));
-                    if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
-                        continue;
-                    }
-                    let slot = AbilitySlot::Activated(i as u8);
-                    if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
-                        out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
-                    }
-                }
-            }
-            // A special action isn't an ability (CR 116.2b, 708.7): turning a
-            // face-down permanent face up survives "loses all abilities".
-            if self.lost_abilities(c) {
-                for (i, ad) in self.db.def(self.objs[c.i()].def).activated.iter().enumerate() {
-                    let slot = AbilitySlot::Activated(i as u8);
-                    if ad.special.is_some() && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
-                        out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
-                    }
-                }
+            if paged && live.iter().any(|&i| i as usize >= ACTIVATE_SLOTS - 1) {
+                let slot = AbilitySlot::Activated((ACTIVATE_SLOTS - 1) as u8);
+                out.push(Opt { action: self.ability_action(p, c, slot), choice: Choice::Ability(c, slot) });
             }
         }
         for &(a, c) in slots {
@@ -218,6 +189,58 @@ impl Game {
                 out.push(Opt { action, choice: Choice::Ability(c, AbilitySlot::Graveyard(0)) });
             }
         }
+    }
+
+    /// The activated abilities of permanent `c` that `p` may activate with
+    /// priority now (CR 602.2, 117.1b), by their place among its card's own
+    /// abilities and then those other permanents grant it (EoE W3; ascending):
+    /// mana abilities only where `mana_at_priority` says; a special action
+    /// (CR 116.2b, 708.7: turning a face-down permanent face up) survives
+    /// "loses all abilities".
+    pub(crate) fn permanent_activations(&self, p: PlayerId, c: CardIdx, classes: &[Class], sorcery_ok: bool, locks: u16) -> Vec<u8> {
+        let mut live = Vec::new();
+        let d = self.abilities(c);
+        for (i, ad) in d.activated.iter().enumerate() {
+            if ad.mana().is_some() && !self.mana_at_priority(c, ad) {
+                continue; // paid with while paying a cost (ENGINE.md 18)
+            }
+            if d.latent > 0 && !self.has_activated(c, i) {
+                continue; // a latent ability it hasn't gained
+            }
+            if ad.exhaust && self.exhausted(c, i as u8) {
+                continue; // CR 702.177a: only once
+            }
+            if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+                continue; // a loop of optional actions (ENGINE.md 29)
+            }
+            if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                live.push(i as u8);
+            }
+        }
+        if self.lost_abilities(c) {
+            for (i, ad) in self.db.def(self.objs[c.i()].def).activated.iter().enumerate() {
+                if ad.special.is_some() && self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                    live.push(i as u8);
+                }
+            }
+        }
+        // Activated abilities other permanents grant it ("artifacts you
+        // control have '<ability>'", CR 613.1f; EoE W3), after its card's own
+        // places whether or not it has them now.
+        if self.w3.seen & crate::eoe_w3::SEEN_W3_GRANT_ACT != 0 {
+            let own = self.db.def(self.objs[c.i()].def).activated.len();
+            for (j, (gdef, k)) in self.granted_activated(c).into_iter().enumerate() {
+                let i = own + j;
+                let ad = self.db.def(gdef).activated_def(AbilitySlot::Activated(k));
+                if !self.activations.is_empty() && self.activation_capped(c, i as u8) {
+                    continue;
+                }
+                if self.can_activate(p, c, ad, classes, sorcery_ok, locks) {
+                    live.push(i as u8);
+                }
+            }
+        }
+        live
     }
 
     /// The mana `p` pays to activate `ad` of `card` (CR 602.2b, 601.2f):

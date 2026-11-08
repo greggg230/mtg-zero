@@ -96,6 +96,11 @@ pub(crate) enum Task {
     /// Which face of a card to cast or play (CR 712.11b, 712.12, 715.3;
     /// `mask`: `decision::FACE_*` bits).
     ChooseFace { p: PlayerId, card: CardIdx, mask: u8 },
+    /// Which activated ability of permanent `card` `p` activates, among its
+    /// abilities from place `from` on (CR 602.2: one with more abilities
+    /// than its `ACTIVATE` slots; EoE W3). Choice: `ChooseMode`, `NUMBER` +
+    /// place - `from`; `NUMBER` + 31: the ones after (a further page).
+    ChooseAbility { p: PlayerId, card: CardIdx, from: u8 },
     /// CR 601.2a-b: which permission casts graveyard card `card` (face
     /// `face`; `cast::route`).
     ChooseRoute { p: PlayerId, card: CardIdx, face: Option<crate::ids::DefId> },
@@ -290,6 +295,7 @@ impl Game {
             Task::Escalate { id } => self.escalate(id),
             Task::AttackTarget { card } => self.choose_attack_target(card),
             Task::ChooseFace { p, card, mask } => self.choose_face(p, card, mask),
+            Task::ChooseAbility { p, card, from } => self.choose_ability(p, card, from),
             Task::ChooseRoute { p, card, face } => self.choose_route(p, card, face),
             Task::EnterAsCopy { card, note, since } => self.enter_as_copy(card, note, since),
             Task::CopyTargets { id, k, copy } => self.copy_targets(id, k, copy),
@@ -733,7 +739,13 @@ impl Game {
                 // ability leaves priority where it is).
                 self.turn.passes = 0;
                 self.agenda.push(Task::Priority);
-                self.begin_activate(p, c, slot);
+                // (The fourth slot of a permanent with more abilities than
+                // slots: which of the fourth and later ones, EoE W3.)
+                if self.paged_slot(c, slot) {
+                    self.agenda.push(Task::ChooseAbility { p, card: c, from: (crate::activate::ACTIVATE_SLOTS - 1) as u8 });
+                } else {
+                    self.begin_activate(p, c, slot);
+                }
             }
             Some(Choice::Companion) => {
                 // A special action (CR 116.2g); the player keeps priority

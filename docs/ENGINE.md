@@ -18995,7 +18995,7 @@ Raging Ravine, Ragost, Deft Gastronaut, Requiem Monolith, Robe of Stars, Rust Ha
 Starforge, Sunstar Chaplain, Swarmyard, Terminal Velocity. EoE support on this branch alone 258 ->
 272 / 320. No IR defect found (docs/ir_defects.md 170-179 stay free): each card's IR read against
 its Oracle text. No layout or encoding change; cube support 546 / 546 and the behaviour digests
-unchanged (`f6543eb2b1b8752f`). Tests: `engine/tests/cards_eoe_w3.rs` (42), card table
+unchanged (`f6543eb2b1b8752f`). Tests: `engine/tests/cards_eoe_w3.rs` (50), card table
 `tests/eoe_w3_kit` (the EoE table plus custom IR cards named "W3 ...", never in the fuzz or
 digest pools).
 
@@ -19005,12 +19005,15 @@ structs), the lowering `engine/src/lower/eoe_w3.rs` (a link in `lower_effect`'s 
 atoms; the printing flags; an intervening-if hoist). Ops are named after rules actions:
 
 * **Granted triggered abilities, generalised** (CR 613.1f). Lane D's `Mark::DiesTriggerThisTurn`
-  (99.5) becomes `Mark::Granted { def, slot, this_turn }`: any triggered ability an effect gives a
-  permanent, until end of turn (the cleanup step ends it, 514.2) or for as long as it is that
-  object (400.7). It is the permanent's own ability (its source and controller, 113.7-113.8),
-  seen by `Game::event` like a printed one (`Game::granted_observers`: a permanent on the
-  battlefield that hasn't lost its abilities, or, for a leave-the-battlefield event, one that
-  left earlier in the same move, 603.10a). `lower::eoe_w3::grant_triggered_ability` lowers the
+  (99.5) becomes `Mark::Granted { def, slot, this_turn, ts }`: any triggered ability an effect
+  gives a permanent, until end of turn (the cleanup step ends it, 514.2) or for as long as it is
+  that object (400.7). It is the permanent's own ability (its source and controller,
+  113.7-113.8), seen by `Game::event` like a printed one (`Game::granted_observers`: a permanent
+  on the battlefield, or, for a leave-the-battlefield event, one that left earlier in the same
+  move, 603.10a). The grant is a layer-6 effect with its own timestamp (613.1f, 613.7a): a "loses
+  all abilities" effect with a later timestamp removes it, one with an earlier timestamp doesn't
+  (613.7; the look-back of a leave trigger reads the loss as the permanent left,
+  `W3State::lki_loss`). `lower::eoe_w3::grant_triggered_ability` lowers the
   ability as a printed one into the card's delayed triggers (`W3::GrantTrigger`); Perigee
   Beckoner's grant goes through it (its "dies" event's object is the creature as it last
   existed, so `EoeD::ReturnEventCardTapped` now also finds the card it became one move later, as
@@ -19051,9 +19054,15 @@ atoms; the printing flags; an intervening-if hoist). Ops are named after rules a
   as it does a sacrifice's, `Keep::sac`, since a mana ability that sacrifices it comes first,
   601.2g-h: fuzz seed 2219, an Eldrazi Scion with the only counter sacrificed for the {2};
   Sunstar Chaplain), "tap X untapped artifacts you control" (`Cost::tap_x`; Secluded Starforge:
-  X announced, 107.3a / 601.2b, at most what can be tapped with the mana still payable,
-  `Game::tap_x_most`; the taps paid before the mana, each leaving the rest and the mana payable,
-  `Game::tap_x_ok`, as teamwork's, docs/shortcuts.md 99.13.2), "sacrifice a Food".
+  X announced, 107.3a / 601.2b; paid as the rules order it, the mana abilities first, 601.2g,
+  then the taps, 601.2h, chosen among the untapped artifacts left; the order of 601.2h's parts
+  among themselves changes nothing, nothing happening between them, and the player makes every
+  choice the rules give, which sources make the mana and which artifacts are tapped: the mana payment reserves X
+  of them, `Game::tap_x_reserve`, `Keep::sac` with `Keep::sac_taps`, so a source whose
+  activation taps or sacrifices one, its own {T} or sacrifice, another's "tap an untapped
+  artifact" or "sacrifice an artifact", uses it up while one that doesn't, Pentad Prism's
+  counters, stays free; X at most what the payment can leave, `Game::tap_x_most`), "sacrifice
+  a Food".
   `PumpTargetCreatureUntilEOT.power_bonus_from_x` (+X/+0, `Ext::ApplyPtX`).
 * **"Combat damage can't be prevented"** (CR 615.12, `W3Def::combat_unpreventable_all`, read
   where combat damage would be prevented) and **"creature spells you control can't be
@@ -19068,14 +19077,35 @@ atoms; the printing flags; an intervening-if hoist). Ops are named after rules a
   `Game::permission_ok` as the card would be played (601.2a, 305.1); the 19 construction sites
   take `PlayIf::Always`.
 * **Ragost.** "Artifacts you control are Foods in addition to their other types"
-  (`W3Def::grants_subtype`, read by `Game::has_subtype`; layer 4 from the card's definition,
-  613.6; docs/shortcuts.md 99.13.3) "and have '{2}, {T}, Sacrifice this artifact: You gain 3
-  life'" (the Food ability, 111.10b): a latent ability of the card (`W3Def::grants_activated`)
-  that each matching permanent has (`Game::granted_activated`, 613.1f), offered in the
-  `ACTIVATE` slots after its own (docs/shortcuts.md 99.13.1) and activated as the granting
-  definition's (`Game::activated_ref`). "At the beginning of each end step, if you gained life
+  (`W3Def::grants_subtype`, read by `Game::has_subtype`): a layer-4 effect with Ragost's
+  timestamp (613.7a), applied among the permanent's other type-changing effects in timestamp
+  order (613.7, `Game::subtype_with_grants`: an effect that sets its subtypes later removes Food,
+  an earlier one doesn't); whether it applies reads the permanent's card types after layer 4,
+  since it depends on any effect that makes the permanent stop or start being an artifact
+  (613.8a), which then applies first. "... and have '{2}, {T}, Sacrifice this artifact: You
+  gain 3 life'" (the Food ability, 111.10b): a latent ability of the card
+  (`W3Def::grants_activated`) that each matching permanent has (`Game::granted_activated`,
+  613.1f) unless a "loses all abilities" effect on it is later than Ragost's timestamp (613.7),
+  in the places after its card's own abilities and activated as the granting definition's
+  (`Game::activated_ref`). Every activated ability stays reachable (602.2, 117.1b): a permanent
+  has four `ACTIVATE` slots, and one with more abilities (its own and granted) keeps the first
+  three in theirs while the fourth slot opens a choice among the fourth and later ones
+  (`Task::ChooseAbility`, a `ChooseMode` decision: `NUMBER` + place - 3, `NUMBER` + 31 for a
+  further page), inside the existing action ranges (`Game::permanent_activations` lists what
+  may be activated, `Game::paged_slot` tells the page). Both parts are one ability:
+  having applied in layer 4, it goes on applying in layer 6 even if Ragost loses its abilities
+  (613.6), so both read Ragost's definition. "At the beginning of each end step, if you gained life
   this turn, untap Ragost": an intervening if (603.4,
   `lower::eoe_w3::hoist_intervening_if_w3`, around `UntapSelf`).
+
+**For the next layout** (the coordinator's additive version after the merges), besides the four
+gaps below: the page of abilities past a permanent's fourth slot works inside layout v5, but its
+`ChooseMode` options name places the network doesn't see (which ability `NUMBER` + k is, and a
+permanent's granted abilities, are not encoded); more `ACTIVATE` slots per permanent, or a range
+for granted abilities, plus the granted abilities in a permanent's encoding, would let the
+network read them. In the EoE table no permanent needs the page (one that can be an artifact has
+at most three abilities of its own, Blinkmoth Nexus, and the one grant is Ragost's, a legendary
+creature).
 
 **The public-state gate** (ENGINE.md 58). `W3State.phased` and `.indirect` are Public (in
 `testkit::view_of`), the rest Derived. Four perturbations, none drawing from the gate's random

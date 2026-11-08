@@ -1384,3 +1384,44 @@ fn secluded_starforge_any_artifact_left_untapped_may_pay_x_cr601_2h() {
     assert!(g.obj(mox).tapped && !g.obj(trinket).tapped);
     assert_eq!(g.power(bear), 3);
 }
+
+// ---- More activated abilities than action slots (CR 602.2) --------------------------
+
+/// A permanent with more activated abilities than its four `ACTIVATE` slots
+/// (four of its own and Ragost's Food ability): every one stays reachable
+/// (CR 602.2, 117.1b). The first three keep their slots; the fourth slot
+/// opens a choice among the fourth and later ones (`ChooseMode`, `NUMBER` +
+/// place - 3).
+#[test]
+fn every_activated_ability_is_reachable_past_the_fourth_slot_cr602_2() {
+    for pick in [0u8, 1] {
+        let mut g = scen()
+            .battlefield(0, &["Ragost, Deft Gastronaut", "W3 Gadget", "Plains", "Plains"])
+            .at(Step::Main1, 0)
+            .start();
+        let gadget = bf(&g, 0, "W3 Gadget");
+        for i in 0..4 {
+            assert!(g.has_option(act(gadget, i)), "slot {i}: {:?}", g.options_desc());
+        }
+        g.choose(act(gadget, 3));
+        g.drive_until(|g| g.kind() == Some(DecisionKind::ChooseMode));
+        let opts: Vec<Choice> = g.pending_decision().unwrap().options.iter().map(|o| o.choice).collect();
+        assert_eq!(opts, vec![Choice::Number(0), Choice::Number(1)], "its fourth ability and the Food ability");
+        g.choose(Choice::Number(pick));
+        pay(&mut g);
+        settle(&mut g);
+        if pick == 0 {
+            assert_eq!(g.life(0), 24, "its own fourth ability\n{}", log(&g));
+            assert_eq!(g.obj(gadget).zone, Zone::Battlefield);
+        } else {
+            assert_eq!(g.life(0), 23, "the Food ability\n{}", log(&g));
+            assert_eq!(g.obj(gadget).zone, Zone::Graveyard, "sacrificed");
+        }
+    }
+    // Without Ragost the four fit their slots: no choice.
+    let mut g = scen().battlefield(0, &["W3 Gadget"]).at(Step::Main1, 0).start();
+    let gadget = bf(&g, 0, "W3 Gadget");
+    g.choose(act(gadget, 3));
+    settle(&mut g);
+    assert_eq!(g.life(0), 24);
+}
