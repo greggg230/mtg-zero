@@ -672,9 +672,15 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
         E::Surveil(nodes::Surveil { amount, use_artifact_count }) => {
             // CR 701.42a: look at the top N, put any number into the
             // graveyard and the rest on top in any order.
-            l.deny("Surveil.use_artifact_count", use_artifact_count);
-            let n = l.int("Surveil.amount", *amount, 1, 20) as u8;
-            b.op(Op::LookTop { who: Who::You, n, reveal: false });
+            if *use_artifact_count {
+                // "Surveil X, where X is the number of artifacts you
+                // control" (counted as it resolves; ENGINE.md 99.2).
+                l.deny_ne("Surveil.amount(with use_artifact_count)", amount, &card_ir::generated::defaults::d_Surveil_amount());
+                b.op(Op::Ext(crate::program::Ext::LookTopN { who: Who::You, n: Amount::CountTypes(types::ARTIFACT) }));
+            } else {
+                let n = l.int("Surveil.amount", *amount, 1, 20) as u8;
+                b.op(Op::LookTop { who: Who::You, n, reveal: false });
+            }
             b.op(pile(PileDest::Graveyard, Filter::Any, 0, PILE_ANY));
             b.op(pile_rest(PileDest::Top));
         }

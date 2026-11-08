@@ -860,6 +860,8 @@ pub enum Ext {
     /// The creature the source reanimated (`Mark::Reanimated`, as the source
     /// last existed) is sacrificed by its controller.
     SacrificeReanimated,
+    /// Lane A of the Edge of Eternities port (ENGINE.md 99.2).
+    EoeA(EoeA),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1207,4 +1209,15 @@ impl Builder {
     pub fn finish(self) -> AbilityDef {
         AbilityDef { targets: self.targets, program: self.program, modes: None, divide: self.divide }
     }
+}
+
+/// The instructions of lane A of the Edge of Eternities port (ENGINE.md
+/// 99.2), inside `Ext::EoeA` (`resolve_eoe_a.rs`). Same rules as `Op`: named
+/// after rules actions, never cards.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum EoeA {
+    /// The owner of the first legal target of requirement `tgt` (a
+    /// permanent) puts it on top of or on the bottom of their library, their
+    /// choice. Choice (the owner's): yes/no (`YES` = top).
+    OwnerPutsTopOrBottom { tgt: u8 },
 }

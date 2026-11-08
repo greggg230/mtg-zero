@@ -56,6 +56,12 @@ permission) and a consumer can go wrong with it.
 | 18 | Wizard's Rockets | event widened | `event: leaves_battlefield` for "When this artifact is put into a graveyard from the battlefield" | `event: dies` (as entry 15) | `cards/parser/triggers.py` (the same phrase-table entry as entry 15) | fixed (8ea9fcca), supported | confirmed |
 | 19 | Gut, True Soul Zealot | qualifier widened | `SacrificeAPermanent { another: true, permanent_filter: ObjectOr(IsCreature, IsArtifact) }` for "sacrifice another creature or an artifact" | "another" on the creature only (an artifact may be Gut itself) | the "sacrifice another ..." phrase parser (`IfYouDo` / `MayDo`) | worked around (the label read) | confirmed |
 | 20 | Adagia, Windswept Bastion; Evendo, Waking Haven; Kavaron, Memorial World; Susur Secundi, Void Altar; Uthros, Titanic Godcore; The Eternity Elevator (Edge of Eternities, ENGINE.md 99) | ability dropped | the planets: a land with `enters_tapped` and `produces` only; The Eternity Elevator: no `station_threshold` / `stationed_*` | Station (CR 702.184) and each threshold ability ("12+ ..."), as the set's Spacecraft carry them | `cards/parser/land_builder.py` (planets) and the Spacecraft builder (`cards/parser/spacecraft_builder.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 21 | Dockworker Drone, Luxknight Breacher (and Blast Zone) (Edge of Eternities, ENGINE.md 99.2) | replacement as a trigger | "this creature enters with a +1/+1 counter on it [for each ...]" / "this land enters with a charge counter on it" as an `enters` triggered ability (`PutPlusOneCounterOnSelf`, `PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact`, `PutChargeCountersOnSelf`) | it enters with the counters (CR 614.1c, 122.6): `enters_with_named_counters`, and a per-permanent count the schema can't say yet | the creature parser's "enters with" lines (`cards/parser/creature_builder.py`, `cards/parser/effects.py`) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 22 | Haliya, Ascendant Cadet (ENGINE.md 99.2) | "one or more" as once per turn | "whenever one or more creatures you control with +1/+1 counters on them deal combat damage to a player" with `once_per_turn: true` | a trigger per combat damage event ("one or more": `OneOrMoreBatch`), no once-per-turn limit (as entry 16) | `cards/parser/triggers.py` (the "one or more creatures you control with +1/+1 counters on them ..." entry, ~line 1015) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 23 | Honored Knight-Captain, Rayblade Trooper; Cosmogrand Zenith, Knight Luminary (base list, lane B) (ENGINE.md 99.2) | colour dropped | the "1/1 white Human Soldier creature token" printing with no `color_indicator` (a colourless token) | `color_indicator: [W]` (as entry 12) | `cards/tokens.py` (`TOKEN_PRINTINGS["Human Soldier"]`, ~line 141) | blocked (`lower::IR_DEFECTS`, lane A's two; the base list's two for lane B) | confirmed |
+| 24 | Mechan Shieldmate (ENGINE.md 99.2) | permission as a characteristic | "this creature can attack as though it didn't have defender" as a static `RemoveKeyword(defender)` | a rule that lets it attack while it keeps defender (CR 702.3b) | `cards/parser/creature_builder.py` (~line 672), `cards/parser/printing_keywords.py` (~line 473) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 25 | Loading Zone (ENGINE.md 99.2) | scope dropped | "if one or more counters would be put on a creature, Spacecraft, or Planet you control, twice that many ... instead" as a `scope: self` `ReplacementEffect(would_place_counter, MultiplyCount(2))` with no recipient filter | the recipients: creatures, Spacecraft and Planets you control, every kind of counter | `cards/parser/enchantment_builder.py` (`_COUNTER_DOUBLER_LINE`, ~line 651; the Python engine hard-codes creatures and Spacecraft, +1/+1 counters only) | blocked (`lower::IR_DEFECTS`) | confirmed |
+| 26 | The Eternity Elevator (ENGINE.md 99.2) | value made up | `power: 0, toughness: 0` for a card with no power/toughness box | no power or toughness (CR 722.1, 722.2c) | `cards/parser/spacecraft_builder.py` (the missing-P/T fallback, ~line 334) | blocked by entry 20 | confirmed |
 
 ## Confirmed defects
 
@@ -381,6 +387,100 @@ Elevator is a Spacecraft with Station.
   Without the entry the five planets lowered as plain taplands and the support report counted them
   supported (98 cards instead of 93): a silent drop the report could not see. Found by checking
   every EoE card whose Oracle text has Station for a `station_threshold` in its IR.
+
+
+### L. Lane A of the Edge of Eternities port (ENGINE.md 99.2)
+
+Found by reading every lane A card's IR against its Oracle text while porting (2026-11-07, branch
+`eoe-a-station`).
+
+**21. Dockworker Drone, Luxknight Breacher (and Blast Zone).** Oracle: "This creature enters with a
++1/+1 counter on it. / When this creature dies, put its counters on target creature you control."
+(Dockworker Drone); "This creature enters with a +1/+1 counter on it for each other creature and/or
+artifact you control." (Luxknight Breacher); "This land enters with a charge counter on it." (Blast
+Zone).
+
+* IR: an `enters` triggered ability, `IsSelf`, with `PutPlusOneCounterOnSelf`,
+  `PutPlusOneCountersOnSelfPerOtherCreatureOrArtifact` and `PutChargeCountersOnSelf`.
+* Should be: a replacement effect, "enters with" (CR 614.1c, 122.6): the permanent is on the
+  battlefield with the counters from the start (no trigger to respond to; the count read as it
+  enters, before it is there: "each other creature" can't count it, and nothing sees a 1/1 Drone or
+  a counterless Blast Zone). `enters_with_named_counters: [["+1/+1", 1]]` / `[["charge", 1]]`; the
+  schema has no "for each <permanent> you control" count yet (Luxknight).
+* Source: the creature parser's "enters with" lines (`cards/parser/creature_builder.py`,
+  `cards/parser/effects.py`) and the land builder (Blast Zone).
+* Fix: lower "enters with N <kind> counter(s)" to `enters_with_named_counters`; add a count field for
+  "for each <filter> you control".
+* Engine: blocked, `ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)`
+  (`lower::IR_DEFECTS`).
+
+**22. Haliya, Ascendant Cadet.** Oracle: "Whenever Haliya enters or attacks, put a +1/+1 counter on
+target creature you control. / Whenever one or more creatures you control with +1/+1 counters on
+them deal combat damage to a player, draw a card."
+
+* IR: the second ability is a `deals_combat_damage` trigger over each creature with a counter, with
+  `once_per_turn: true` (the parser's marker for the Python engine's aggregated fire path).
+* Should be: once per combat damage event ("one or more", `OneOrMoreBatch`): a first-strike step and
+  the regular step are two events, an additional combat more (as entry 16, Forth Eorlingas!).
+* Source: `cards/parser/triggers.py`, the phrase-table entry "one or more creatures you control with
+  +1/+1 counters on them deal combat damage to a player" (~line 1015: "the 3-tuple value form threads
+  `once_per_turn=True` so the aggregated path can distinguish this shape").
+* Fix: export the batch predicate (as entry 16's fix) and no `once_per_turn`.
+* Engine: blocked, `ir_defect(one or more as once per turn, docs/ir_defects.md 22)`.
+
+**23. Honored Knight-Captain, Rayblade Trooper (and Cosmogrand Zenith, Knight Luminary).** Oracle:
+"When this creature enters, create a 1/1 white Human Soldier creature token." (Honored
+Knight-Captain; Rayblade Trooper: "Whenever a nontoken creature you control with a +1/+1 counter on
+it dies, create a 1/1 white Human Soldier creature token.")
+
+* IR: the token printing `Human Soldier` (`card_types: [Creature]`, 1/1, no mana cost) has no
+  `color_indicator`: a colourless token.
+* Should be: `color_indicator: [W]` (CR 111.4: the token's colour is the one the effect states).
+* Source: `cards/tokens.py`, `TOKEN_PRINTINGS["Human Soldier"]` (~line 141), built without a colour.
+* Fix: give the registry entry its colour (as entry 12's Boo).
+* Engine: Honored Knight-Captain and Rayblade Trooper blocked, `ir_defect(white token printed
+  colourless, docs/ir_defects.md 23)`. Cosmogrand Zenith and Knight Luminary have the same token and
+  are in `SUPPORTED_EOE_BASE` (lane B audits that list; lane A does not edit it).
+
+**24. Mechan Shieldmate.** Oracle: "Defender / As long as an artifact entered the battlefield under
+your control this turn, this creature can attack as though it didn't have defender."
+
+* IR: a self-scoped static with `condition: ControlledArtifactEnteredThisTurn` and the payload
+  `RemoveKeyword(defender)`.
+* Should be: a permission to attack (CR 702.3b: defender only stops attacking); the creature keeps
+  defender (what counts or grants defender still sees it).
+* Source: `cards/parser/creature_builder.py` (~line 672) and `cards/parser/printing_keywords.py`
+  (~line 473).
+* Fix: a "can attack as though it didn't have defender" flag (with its condition).
+* Engine: blocked, `ir_defect(attack permission as losing defender, docs/ir_defects.md 24)`.
+
+**25. Loading Zone.** Oracle: "If one or more counters would be put on a creature, Spacecraft, or
+Planet you control, twice that many of each of those kinds of counters are put on it instead. / Warp
+{G}"
+
+* IR: `StaticAbility { scope: self, replacement_effect: ReplacementEffect { event: would_place_counter,
+  transform: MultiplyCount(2) } }`: read as written, counters put on Loading Zone itself.
+* Should be: the recipients, creatures, Spacecraft and Planets you control, and every kind of
+  counter (CR 614.1a).
+* Source: `cards/parser/enchantment_builder.py`, `_COUNTER_DOUBLER_LINE` (~line 651); the Python
+  engine hard-codes creatures and Spacecraft and +1/+1 counters only
+  (`game.py::_counter_doubling_factor`).
+* Fix: export the recipient filter (and the kinds) with the replacement.
+* Engine: blocked, `ir_defect(counter doubler without its recipients, docs/ir_defects.md 25)`.
+
+**26. The Eternity Elevator.** Oracle: no power/toughness box ("{T}: Add {C}{C}{C}. / Station ... /
+20+ | {T}: Add X mana of any one color, where X is the number of charge counters on The Eternity
+Elevator.").
+
+* IR: `power: 0, toughness: 0`.
+* Should be: no power or toughness (CR 722.1: a station card "may have" a power/toughness box; this
+  one has none, so it never becomes a creature, 722.2a).
+* Source: `cards/parser/spacecraft_builder.py`, the missing-P/T fallback (~line 334: "the builder now
+  falls back to `power=0, toughness=0`").
+* Fix: leave power and toughness unset.
+* Engine: blocked by entry 20 (`lower::IR_DEFECTS` names a card once). Once entry 20 is fixed this
+  one matters: the engine reads a station card's power/toughness as the box of its
+  `station_threshold` striation (ENGINE.md 99.2), so a 0/0 would make it a 0/0 creature at 20+.
 
 ## Suspected defects (representational)
 

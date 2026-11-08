@@ -1,10 +1,13 @@
 //! Lane A of the Edge of Eternities port (ENGINE.md 99.2): station (CR
 //! 702.184, 722), counters, artifacts, Equipment and Auras, as the engine
-//! resolves them.
+//! resolves them: `Amount::TappedPower` and the `Ext::EoeA` instructions.
 
-use crate::game::Game;
+use crate::decision::{act, Choice, DecisionKind, Opt};
+use crate::flow::Task;
+use crate::game::{Game, Pos};
 use crate::ids::Zone;
-use crate::resolve::Frame;
+use crate::program::{EoeA, On};
+use crate::resolve::{Flow, Frame};
 
 impl Game {
     /// `Amount::TappedPower`: the power of the creature tapped to pay the
@@ -20,6 +23,31 @@ impl Game {
         match self.objs[r.idx.i()].lki_power {
             Some((inc, p)) if inc == r.inc => p,
             _ => 0,
+        }
+    }
+
+    pub(crate) fn exec_eoe_a(&mut self, f: &mut Frame, op: &EoeA) -> Flow {
+        match op {
+            EoeA::OwnerPutsTopOrBottom { tgt } => {
+                let Some(&c) = self.objs_on(f, &On::Target(*tgt)).first() else { return Flow::Next };
+                let owner = self.objs[c.i()].owner;
+                match self.answer.take() {
+                    Some(Choice::Yes) => {
+                        self.note(|g| format!("P{owner} puts {} on top of their library", g.name(c)));
+                        self.move_card(c, Zone::Library, Pos::Top);
+                    }
+                    Some(_) => {
+                        self.note(|g| format!("P{owner} puts {} on the bottom of their library", g.name(c)));
+                        self.move_card(c, Zone::Library, Pos::Bottom);
+                    }
+                    None => {
+                        let opts = vec![Opt { action: act::PASS, choice: Choice::Pass }, Opt { action: act::YES, choice: Choice::Yes }];
+                        self.ask(Task::Run(f.clone()), owner, DecisionKind::YesNo, opts);
+                        return Flow::Suspend;
+                    }
+                }
+                Flow::Next
+            }
         }
     }
 }

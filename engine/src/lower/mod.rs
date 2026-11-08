@@ -226,6 +226,19 @@ const IR_DEFECTS: &[(&str, &str)] = &[
     ("Uthros, Titanic Godcore", "ir_defect(station dropped, docs/ir_defects.md 20)"),
 
     // Lane A (ENGINE.md 99.2; docs/ir_defects.md 21-39).
+    // "Enters with" counters written as an enters trigger (21).
+    ("Blast Zone", "ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)"),
+    ("Dockworker Drone", "ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)"),
+    ("Luxknight Breacher", "ir_defect(enters-with counters as a trigger, docs/ir_defects.md 21)"),
+    // "One or more ... deal combat damage" as once per turn (22).
+    ("Haliya, Ascendant Cadet", "ir_defect(one or more as once per turn, docs/ir_defects.md 22)"),
+    // The white Human Soldier token printed colourless (23).
+    ("Honored Knight-Captain", "ir_defect(white token printed colourless, docs/ir_defects.md 23)"),
+    ("Rayblade Trooper", "ir_defect(white token printed colourless, docs/ir_defects.md 23)"),
+    // "Can attack as though it didn't have defender" as losing defender (24).
+    ("Mechan Shieldmate", "ir_defect(attack permission as losing defender, docs/ir_defects.md 24)"),
+    // The counter doubler's recipients dropped (25).
+    ("Loading Zone", "ir_defect(counter doubler without its recipients, docs/ir_defects.md 25)"),
 
     // Lane B (ENGINE.md 99.3; docs/ir_defects.md 40-59).
 

@@ -79,6 +79,18 @@ pub fn custom_cards() -> Vec<card_ir::Card> {
         creature("Lane A Giant", "{4}{G}", 5, 5, none.clone()),
         creature("Lane A Weakling", "{B}", -1, 3, none.clone()),
         card("Lane A Totem", "{1}", &["Enchantment"], &[], none.clone()),
+        card("Lane A Trinket", "{1}", &["Artifact"], &[], none.clone()),
+        creature("Lane A Robot", "{2}", 2, 2, json!({"card_types": ["Artifact", "Creature"], "subtypes": ["Robot"]})),
+        // "{1}, Sacrifice this creature: Search your library for an
+        // Equipment card, put it onto the battlefield, then shuffle."
+        creature(
+            "Lane A Quartermaster",
+            "{W}",
+            1,
+            1,
+            json!({"activated_abilities": [{"$t": "ActivatedAbility", "cost": {"$t": "ActivationCost", "mana": cost("{1}"), "mana_str": "{1}", "sacrifice_self": true},
+                "effect": {"$t": "SearchLibraryForEquipmentToBattlefield"}}]}),
+        ),
         // "{T}: Add {G}."
         creature(
             "Lane A Dork",
