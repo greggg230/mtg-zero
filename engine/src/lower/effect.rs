@@ -176,7 +176,9 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
         }
         E::CounterSpell(nodes::CounterSpell { spell_filter, unless_pays, only_if, destination, label, if_paid, if_mana_spent_below_mv }) => {
             let _ = label; // display text ("noncreature spell")
-            l.deny("CounterSpell.if_mana_spent_below_mv", if_mana_spent_below_mv);
+            if if_mana_spent_below_mv.is_some() && (!unless_pays.is_empty() || only_if.is_some()) {
+                l.unsupported("CounterSpell.if_mana_spent_below_mv(with unless_pays or only_if)");
+            }
             if if_paid.is_some() && unless_pays.is_empty() {
                 l.unsupported("CounterSpell.if_paid(without unless_pays)");
             }
@@ -200,7 +202,11 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
             };
             let tgt = spell_target(b, inner);
             let guard = only_if.map(|filter| b.op(Op::JumpUnlessTarget { tgt, filter, to: 0 }));
-            if unless_pays.is_empty() {
+            if let Some(e) = if_mana_spent_below_mv {
+                // "If the amount of mana spent to cast that spell was less
+                // than its mana value, <effect>" (EoE W6, ENGINE.md 99.16).
+                super::eoe_w6::counter_then_if_spent_below_mv(l, b, tgt, dest, e);
+            } else if unless_pays.is_empty() {
                 b.op(Op::Counter { tgt, dest });
             } else {
                 match ManaCost::parse(unless_pays) {

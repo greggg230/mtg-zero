@@ -177,6 +177,7 @@ pub fn fields() -> Vec<Field> {
         targeting: Derived "transient: the item whose targets are chosen (0 between tasks; ENGINE.md 58.1)",
         marks: Public "rare per-object facts (exhausted, a chosen colour, exerted, can't be countered, ...)",
         w3: Derived "EoE workstream W3's state: its fields are classified under W3State",
+        w6: Derived "EoE workstream W6's state: its fields are classified under W6State",
         known_pools: Derived "with hidden decks, the pool names each player knows of the other's: set by the match, fixed for the game",
         log: Derived "the human-readable log (tests and the viewer)",
     });
@@ -191,6 +192,12 @@ pub fn fields() -> Vec<Field> {
             entering_spent: Derived "transient: set and taken around one move",
             phased: Public "phased-out permanents (CR 702.26b): not encoded (a limit)",
             indirect: Public "which phased-out permanents phased out with what they are attached to (CR 702.26e)",
+        });
+    }
+    {
+        use crate::eoe_w6::W6State;
+        classify!(v, W6State {
+            seen: Derived "fast paths: rare rules some card of the game has (as Game.seen)",
         });
     }
     classify!(v, Player {

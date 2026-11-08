@@ -1857,7 +1857,7 @@ impl Game {
         // payment's units (a creature tapped for convoke or an artifact for
         // improvise spends none, 702.51a, 702.126a).
         if let Some(card) = pm.keep.spell {
-            if self.def_of(card).w3.mana_spent {
+            if self.def_of(card).w3.mana_spent || self.db.w6.mana_spent_all {
                 let n = pm.chosen.iter().filter(|s| s.slot != IMPROVISE).count() + spent.iter().map(|&x| x as usize).sum::<usize>();
                 self.note_mana_spent(card, n);
             }

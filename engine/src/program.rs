@@ -1001,6 +1001,8 @@ pub enum Ext {
     EoeW4(crate::eoe_w4::EoeW4),
     /// Edge of Eternities W1, the IR-fixed cards (ENGINE.md 99.11).
     EoeW1(crate::eoe_w1::EoeW1),
+    /// Edge of Eternities W6, the remaining cards (ENGINE.md 99.16).
+    EoeW6(crate::eoe_w6::W6),
 }
 
 /// What a delayed trigger is about ("that card", "that much").
@@ -1249,6 +1251,7 @@ impl Op {
             Op::Ext(Ext::EoeW3(x)) => x.uses_event(),
             Op::Ext(Ext::EoeW4(x)) => x.uses_event(),
             Op::Ext(Ext::EoeW1(x)) => x.uses_event(),
+            Op::Ext(Ext::EoeW6(x)) => x.uses_event(),
             Op::DealDamage { amount, .. } | Op::DamageAll { amount, .. } => amt(amount),
             Op::DamagePlayer { amount, who: w } => amt(amount) || who(w),
             Op::Draw { who: w, n } | Op::GainLife { who: w, n } | Op::LoseLife { who: w, n } | Op::DiscardRandom { who: w, n } => {
@@ -1284,6 +1287,7 @@ impl Op {
             Op::Ext(Ext::EoeW3(x)) => x.jump_target(),
             Op::Ext(Ext::EoeW4(x)) => x.jump_target(),
             Op::Ext(Ext::EoeW1(x)) => x.jump_target(),
+            Op::Ext(Ext::EoeW6(x)) => x.jump_target(),
             _ => None,
         }
     }

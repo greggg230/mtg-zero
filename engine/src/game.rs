@@ -774,6 +774,8 @@ pub struct Game {
     /// EoE workstream W3's state (ENGINE.md 99.13): phasing, granted
     /// triggered abilities, regeneration.
     pub(crate) w3: crate::eoe_w3::W3State,
+    /// EoE workstream W6's state (ENGINE.md 99.16).
+    pub(crate) w6: crate::eoe_w6::W6State,
     /// With hidden decks (`GameSpec::hidden_decks`, ENGINE.md 36.11): per
     /// player, the card names of their pool the other player knows (the pool
     /// but the first picks not seen in earlier games, and the basic lands),
@@ -1144,6 +1146,7 @@ impl Game {
             targeting: 0,
             marks: Vec::new(),
             w3: Default::default(),
+            w6: Default::default(),
             known_pools: [None, None],
             batching: false,
             ev_seq: 0,
@@ -1171,6 +1174,7 @@ impl Game {
         let seen = d.seen_bits() | d.back.map_or(0, |b| self.db.def(b).seen_bits());
         self.seen |= seen;
         self.w3.seen |= d.w3.seen | d.back.map_or(0, |b| self.db.def(b).w3.seen);
+        self.w6.seen |= d.w6.seen | d.back.map_or(0, |b| self.db.def(b).w6.seen);
         if d.miracle.is_some() {
             self.seen |= SEEN_MIRACLE_P0 << owner;
         }

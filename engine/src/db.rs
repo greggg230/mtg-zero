@@ -1786,6 +1786,8 @@ pub struct CardDef {
     pub toughness_stations: bool,
     /// The printing facts EoE workstream W3 adds (ENGINE.md 99.13).
     pub w3: crate::eoe_w3::W3Def,
+    /// The printing facts EoE workstream W6 adds (ENGINE.md 99.16).
+    pub w6: crate::eoe_w6::W6Def,
 }
 
 /// Rules about casting spells a card adds while it is on the battlefield
@@ -1974,6 +1976,8 @@ pub struct CardDb {
     /// (`CastingRules::hand_alt_grants`): castability looks for granters
     /// (ENGINE.md 99.15).
     pub(crate) hand_alt_grants: bool,
+    /// The table facts EoE workstream W6 adds (ENGINE.md 99.16).
+    pub(crate) w6: crate::eoe_w6::W6Db,
 }
 
 /// `CardDb::merged_cost`'s route for granted retrace (CR 702.81a).
@@ -2161,6 +2165,7 @@ impl CardDb {
         db.watch_damage = db.defs.iter().any(crate::resolve_eoe_d::reads_dealt_damage);
         db.watch_toughness = db.defs.iter().any(|d| d.toughness_assigns_damage || d.toughness_stations);
         db.hand_alt_grants = db.defs.iter().any(|d| !d.casting.hand_alt_grants.is_empty());
+        db.w6 = crate::eoe_w6::W6Db::of(&db.defs);
         db
     }
 
