@@ -827,17 +827,23 @@ const SUPPORTED_EOE_D: &[&str] = &[
 /// Cards that need features of two or more lanes, finished after the
 /// lanes merged (ENGINE.md 99.6, 99.8; tests in `tests/cards_eoe_cross*.rs`).
 const SUPPORTED_EOE_CROSS: &[&str] = &[
+    "Alpharael, Dreaming Acolyte",
+    "Atomic Microsizer",
     "Broodguard Elite",
     "Embrace Oblivion",
     "Hardlight Containment",
     "Hylderblade",
+    "Larval Scoutlander",
     "Mental Modulation",
     "Pinnacle Kill-Ship",
     "Reroute Systems",
+    "Seedship Impact",
     "Sledge-Class Seedship",
     "Sliver Overlord",
     "Specimen Freighter",
     "Starport Security",
+    "Survey Mechan",
+    "Terrapact Intimidator",
     "Thaumaton Torpedo",
 ];
 
