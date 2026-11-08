@@ -922,6 +922,7 @@ pub(crate) fn lower_effect(l: &mut Lowerer, b: &mut Builder, e: &cats::Effect) {
                 && !super::effect_tail2::lower_effect_tail2(l, b, other)
                 && !super::effect_tail3::lower_effect_tail3(l, b, other)
                 && !super::effect_m7d::lower_effect_m7d(l, b, other)
+                && !super::eoe_a::lower_effect_eoe_a(l, b, other)
             {
                 l.unsupported(format!("Effect:{}", other.tag()))
             }

@@ -96,6 +96,13 @@ pub enum Amount {
     /// k times [`CountTypes`](Amount::CountTypes) ("twice the number of
     /// lands you control").
     CountTypesTimes(u16, u8),
+    /// The power of the creature tapped to pay the activated ability's cost
+    /// (the stack item's first noted object): station's "a number of charge
+    /// counters equal to the tapped creature's power" (CR 702.184a), read as
+    /// the ability resolves, or as the creature last existed on the
+    /// battlefield if it left (608.2h; station's ruling). Its toughness
+    /// instead where a static ability says so (702.184c).
+    TappedPower,
 }
 
 /// The instructions M7d added (ENGINE.md 31), inside `Ext::M7d`. Same rules

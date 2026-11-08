@@ -136,9 +136,16 @@ impl Game {
         let active = self.n_static > 0 && self.objs[c.i()].zone == Zone::Battlefield;
         let d: &'static crate::db::CardDef = if active { self.abilities(c) } else { crate::game::blank_def() };
         let ctl = self.objs[c.i()].controller;
+        // (Only a static that changes types has its condition read: another
+        // one's may count permanents by type, this one among them, which
+        // asks for its types again; ENGINE.md 99.2.)
         d.statics
             .iter()
-            .filter(move |st| st.scope == Scope::This && st.cond.as_ref().is_none_or(|k| self.static_cond(c, k, ctl)))
+            .filter(move |st| {
+                st.scope == Scope::This
+                    && st.mods.iter().any(|m| matches!(m, Mod::Types { .. }))
+                    && st.cond.as_ref().is_none_or(|k| self.static_cond(c, k, ctl))
+            })
             .flat_map(|st| st.mods.iter())
             .filter(|m| matches!(m, Mod::Types { .. }))
     }

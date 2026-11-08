@@ -331,7 +331,9 @@ pub struct StackItem {
     /// Objects a triggered ability noted as it was put on the stack: the
     /// permanents the spell that triggered it targets (Dack Fayden's
     /// emblem, "gain control of those permanents", still so if that spell
-    /// is countered first).
+    /// is countered first). An activated ability's: the permanents tapped
+    /// for its "tap an untapped <permanent>" cost (station's tapped
+    /// creature, `Amount::TappedPower`).
     pub noted: Vec<ObjRef>,
     /// An ability's source's `Obj::flips` as the ability was put on the
     /// stack (CR 701.27f).

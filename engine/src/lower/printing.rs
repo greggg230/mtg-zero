@@ -270,8 +270,6 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.deny("CardPrinting.impending_cost_str", impending_cost_str);
         l.deny("CardPrinting.impending_count", impending_count);
         l.deny("CardPrinting.devour_land_multiplier", devour_land_multiplier);
-        l.deny("CardPrinting.station_threshold", station_threshold);
-        l.deny("CardPrinting.stationed_keywords", stationed_keywords);
         l.deny("CardPrinting.attached_grants_ward_cost", attached_grants_ward_cost);
         l.deny("CardPrinting.attached_grants_ward_str", attached_grants_ward_str);
         l.deny("CardPrinting.attached_prevents_untap", attached_prevents_untap);
@@ -464,6 +462,17 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     if is_creature && pw.is_none() {
         l.unsupported("CardPrinting.power(creature without P/T)");
     }
+    // Station (CR 702.184, 722; ENGINE.md 99.2): the station ability, and the
+    // static ability of the striation with the stationed keywords and the
+    // power/toughness box, which alone gives the card its P/T (722.2c).
+    let station = match station_threshold {
+        Some(n) => Some(super::eoe_a::station(l, ty, *n, stationed_keywords, pw.zip(tg))),
+        None => {
+            l.deny("CardPrinting.stationed_keywords(without station_threshold)", stationed_keywords);
+            None
+        }
+    };
+    let (pw, tg) = if station.is_some() { (None, None) } else { (pw, tg) };
 
     let mut kws = KwSet::default();
     let mut protection = Prot::default();
@@ -561,10 +570,15 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     );
     let mut activated: Vec<ActivatedDef> = Vec::new();
     for a in activated_abilities {
-        if let Some(ad) = lower_activated(l, a, From::Battlefield, walker) {
+        if let Some(ad) = super::eoe_a::lower_activated_tiered(l, a, walker) {
             activated.push(ad);
         }
     }
+    let (station_ability, station_static) = match station {
+        Some(st) => (Some(st.ability), st.statik),
+        None => (None, None),
+    };
+    activated.extend(station_ability);
     // Reconfigure (CR 702.151; Lion Sash): its two abilities are in the
     // IR's list; the cost agrees with them.
     let reconfigure = match reconfigure_cost.as_deref() {
@@ -1093,10 +1107,11 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
     let mut statics = Vec::new();
     let mut repl = super::statics::Repl::default();
     for s in static_abilities {
-        if let Some(st) = super::statics::lower_static(l, s, &mut repl) {
+        if let Some(st) = super::eoe_a::lower_static_tiered(l, s, &mut repl) {
             statics.push(st);
         }
     }
+    statics.extend(station_static);
     if let Some(w) = repl.grants_ward {
         keyword_triggers.push(super::effect_stack::ward_trigger(w, true));
     }
@@ -1125,7 +1140,7 @@ pub(crate) fn lower_printing(l: &mut Lowerer, p: &nodes::CardPrinting) -> CardDe
         l.unsupported("CardPrinting.watches_library_graveyard_exile(without its trigger)");
     }
     for t in triggered_abilities {
-        if let Some(td) = super::trigger::lower_trigger(l, t, ty) {
+        if let Some(td) = super::eoe_a::lower_trigger_tiered(l, t, ty) {
             triggers.push(td);
         }
     }

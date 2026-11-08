@@ -708,6 +708,16 @@ const SUPPORTED_EOE_BASE: &[&str] = &[
 ];
 /// Lane A: Station, spacecraft, counters, artifacts, Equipment and Auras.
 const SUPPORTED_EOE_A: &[&str] = &[
+    "Atmospheric Greenhouse",
+    "Debris Field Crusher",
+    "Extinguisher Battleship",
+    "Galvanizing Sawship",
+    "Lumen-Class Frigate",
+    "Rescue Skiff",
+    "Susurian Dirgecraft",
+    "Uthros Scanship",
+    "Wedgelight Rammer",
+    "Wurmwall Sweeper",
 ];
 /// Lane B: lands, mana abilities, Lander tokens (and the base list's audit).
 const SUPPORTED_EOE_B: &[&str] = &[
